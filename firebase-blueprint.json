@@ -1,0 +1,535 @@
+{
+  "entities": {
+    "Patient": {
+      "title": "Patient",
+      "description": "Master Patient Index (MPI) and Electronic Health Record profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "mrn": { "type": "string", "maxLength": 64 },
+        "fullName": { "type": "string", "maxLength": 128 },
+        "dateOfBirth": { "type": "string", "maxLength": 32 },
+        "age": { "type": "number" },
+        "gender": { "type": "string", "maxLength": 16 },
+        "bloodGroup": { "type": "string", "maxLength": 8 },
+        "contactNumber": { "type": "string", "maxLength": 32 },
+        "email": { "type": "string", "maxLength": 128 },
+        "address": { "type": "string", "maxLength": 256 },
+        "allergies": { "type": "array" },
+        "chronicConditions": { "type": "array" },
+        "activeBedId": { "type": "string", "maxLength": 128 },
+        "activeEncounterId": { "type": "string", "maxLength": 128 },
+        "registeredAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "mrn", "fullName", "registeredAt"]
+    },
+    "Bed": {
+      "title": "Bed",
+      "description": "Hospital Inpatient ward bed occupancy and telemetry status",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "bedNumber": { "type": "string", "maxLength": 32 },
+        "ward": { "type": "string", "maxLength": 64 },
+        "room": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "maxLength": 32 },
+        "patientId": { "type": "string", "maxLength": 128 },
+        "patientName": { "type": "string", "maxLength": 128 },
+        "admissionDate": { "type": "string", "maxLength": 64 },
+        "assignedDoctor": { "type": "string", "maxLength": 128 },
+        "assignedNurse": { "type": "string", "maxLength": 128 },
+        "vitalAlert": { "type": "boolean" },
+        "notes": { "type": "string", "maxLength": 512 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "bedNumber", "ward", "status"]
+    },
+    "BillingMismatch": {
+      "title": "BillingMismatch",
+      "description": "Clinical SOAP note unbilled item reconciliation record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "patientId": { "type": "string", "maxLength": 128 },
+        "patientName": { "type": "string", "maxLength": 128 },
+        "encounterId": { "type": "string", "maxLength": 128 },
+        "noteId": { "type": "string", "maxLength": 128 },
+        "date": { "type": "string", "maxLength": 64 },
+        "documentedItem": { "type": "string", "maxLength": 256 },
+        "category": { "type": "string", "maxLength": 64 },
+        "suggestedCptCode": { "type": "string", "maxLength": 64 },
+        "estimatedRecoverableRevenue": { "type": "number" },
+        "status": { "type": "string", "maxLength": 32 },
+        "evidenceSnippet": { "type": "string", "maxLength": 512 },
+        "confidenceScore": { "type": "number" },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "patientId", "documentedItem", "suggestedCptCode", "estimatedRecoverableRevenue", "status"]
+    },
+    "OpdToken": {
+      "title": "OpdToken",
+      "description": "Live Outpatient Department Queue token and consult state",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "tokenNumber": { "type": "string", "maxLength": 32 },
+        "patientId": { "type": "string", "maxLength": 128 },
+        "patientName": { "type": "string", "maxLength": 128 },
+        "mrn": { "type": "string", "maxLength": 64 },
+        "department": { "type": "string", "maxLength": 64 },
+        "assignedDoctor": { "type": "string", "maxLength": 128 },
+        "priority": { "type": "string", "maxLength": 32 },
+        "status": { "type": "string", "maxLength": 32 },
+        "arrivalTime": { "type": "string", "maxLength": 64 },
+        "chiefComplaint": { "type": "string", "maxLength": 256 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "tokenNumber", "patientId", "department", "status"]
+    },
+    "Staff": {
+      "title": "Staff",
+      "description": "Hospital medical personnel and active duty status",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "fullName": { "type": "string", "maxLength": 128 },
+        "role": { "type": "string", "maxLength": 64 },
+        "department": { "type": "string", "maxLength": 64 },
+        "shift": { "type": "string", "maxLength": 32 },
+        "phone": { "type": "string", "maxLength": 32 },
+        "status": { "type": "string", "maxLength": 32 },
+        "assignedPatientsCount": { "type": "number" },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "fullName", "role", "department", "status"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable HIPAA access log and edge audit trail",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "timestamp": { "type": "string", "maxLength": 64 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userName": { "type": "string", "maxLength": 128 },
+        "role": { "type": "string", "maxLength": 64 },
+        "action": { "type": "string", "maxLength": 64 },
+        "resource": { "type": "string", "maxLength": 256 },
+        "ipAddress": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "maxLength": 32 },
+        "details": { "type": "string", "maxLength": 512 }
+      },
+      "required": ["id", "timestamp", "userId", "action", "resource", "status"]
+    },
+    "Hl7Dispatch": {
+      "title": "Hl7Dispatch",
+      "description": "Interoperability message dispatch and parsing record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "timestamp": { "type": "string", "maxLength": 64 },
+        "type": { "type": "string", "maxLength": 32 },
+        "sendingApp": { "type": "string", "maxLength": 64 },
+        "receivingApp": { "type": "string", "maxLength": 64 },
+        "patientMrn": { "type": "string", "maxLength": 64 },
+        "patientName": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "maxLength": 32 },
+        "rawPayload": { "type": "string", "maxLength": 2048 },
+        "parsedSummary": { "type": "string", "maxLength": 512 }
+      },
+      "required": ["id", "timestamp", "type", "patientMrn", "status"]
+    },
+    "Tariff": {
+      "title": "Tariff",
+      "description": "Multi-tier pricing plan with overrides and copay caps",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "tenantId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 128 },
+        "planName": { "type": "string", "maxLength": 32 },
+        "payerCode": { "type": "string", "maxLength": 64 },
+        "description": { "type": "string", "maxLength": 512 },
+        "defaultDiscountPercent": { "type": "number" },
+        "copayPercent": { "type": "number" },
+        "maxCopayCap": { "type": "number" },
+        "priceOverrides": { "type": "object" },
+        "status": { "type": "string", "maxLength": 32 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "tenantId", "name", "planName", "defaultDiscountPercent", "copayPercent", "status"]
+    },
+    "Invoice": {
+      "title": "Invoice",
+      "description": "Patient encounter split-billing invoice and payment ledger",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "tenantId": { "type": "string", "maxLength": 128 },
+        "invoiceNumber": { "type": "string", "maxLength": 64 },
+        "patientId": { "type": "string", "maxLength": 128 },
+        "patientName": { "type": "string", "maxLength": 128 },
+        "mrn": { "type": "string", "maxLength": 64 },
+        "encounterId": { "type": "string", "maxLength": 128 },
+        "tariffId": { "type": "string", "maxLength": 128 },
+        "totalGross": { "type": "number" },
+        "totalDiscount": { "type": "number" },
+        "totalTax": { "type": "number" },
+        "totalCoverage": { "type": "number" },
+        "totalPatientDue": { "type": "number" },
+        "totalPaid": { "type": "number" },
+        "balanceDue": { "type": "number" },
+        "paymentStatus": { "type": "string", "maxLength": 32 },
+        "paymentMethod": { "type": "string", "maxLength": 32 },
+        "items": { "type": "array" },
+        "paymentHistory": { "type": "array" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "tenantId", "invoiceNumber", "patientId", "totalGross", "totalCoverage", "totalPatientDue", "paymentStatus"]
+    },
+    "Claim": {
+      "title": "Claim",
+      "description": "Insurance/Payer clearinghouse reimbursement claim and adjudication record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "tenantId": { "type": "string", "maxLength": 128 },
+        "claimNumber": { "type": "string", "maxLength": 64 },
+        "invoiceId": { "type": "string", "maxLength": 128 },
+        "patientId": { "type": "string", "maxLength": 128 },
+        "patientName": { "type": "string", "maxLength": 128 },
+        "mrn": { "type": "string", "maxLength": 64 },
+        "encounterId": { "type": "string", "maxLength": 128 },
+        "insuranceProviderId": { "type": "string", "maxLength": 128 },
+        "insuranceProviderName": { "type": "string", "maxLength": 128 },
+        "policyNumber": { "type": "string", "maxLength": 64 },
+        "approvalCode": { "type": "string", "maxLength": 64 },
+        "totalClaimAmount": { "type": "number" },
+        "approvedAmount": { "type": "number" },
+        "claimStatus": { "type": "string", "maxLength": 32 },
+        "lineItems": { "type": "array" },
+        "submissionDate": { "type": "string", "maxLength": 64 },
+        "adjudicationDate": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "tenantId", "claimNumber", "invoiceId", "totalClaimAmount", "claimStatus"]
+    },
+    "Tenant": {
+      "title": "Tenant",
+      "description": "Multi-tenant hospital organization metadata and isolated configuration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 128 },
+        "facilityCode": { "type": "string", "maxLength": 32 },
+        "brandColor": { "type": "string", "maxLength": 32 },
+        "secondaryColor": { "type": "string", "maxLength": 32 },
+        "activeStatus": { "type": "string", "maxLength": 32 },
+        "region": { "type": "string", "maxLength": 64 },
+        "tier": { "type": "string", "maxLength": 32 },
+        "address": { "type": "object" },
+        "contactEmail": { "type": "string", "maxLength": 128 },
+        "contactPhone": { "type": "string", "maxLength": 32 },
+        "licenseNumber": { "type": "string", "maxLength": 64 },
+        "settings": { "type": "object" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "name", "facilityCode", "activeStatus", "createdAt"]
+    },
+    "TenantUser": {
+      "title": "TenantUser",
+      "description": "Tenant-scoped user identity, assigned clinical roles, departments, and credentials",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "tenantId": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 128 },
+        "displayName": { "type": "string", "maxLength": 128 },
+        "role": { "type": "string", "maxLength": 32 },
+        "department": { "type": "string", "maxLength": 64 },
+        "licenseId": { "type": "string", "maxLength": 64 },
+        "assignedWards": { "type": "array" },
+        "status": { "type": "string", "maxLength": 32 },
+        "lastLoginAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["userId", "tenantId", "email", "displayName", "role", "status", "createdAt"]
+    },
+    "ClinicalEncounter": {
+      "title": "ClinicalEncounter",
+      "description": "Patient encounter orchestrator, care team assignment, and workflow plan",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "tenantId": { "type": "string", "maxLength": 128 },
+        "patientId": { "type": "string", "maxLength": 128 },
+        "patientMrn": { "type": "string", "maxLength": 64 },
+        "encounterType": { "type": "string", "maxLength": 32 },
+        "department": { "type": "string", "maxLength": 64 },
+        "priority": { "type": "string", "maxLength": 32 },
+        "chiefComplaint": { "type": "string", "maxLength": 256 },
+        "careTeam": { "type": "object" },
+        "workflowDefinitionId": { "type": "string", "maxLength": 128 },
+        "workflowVersion": { "type": "string", "maxLength": 32 },
+        "slaConfig": { "type": "object" },
+        "plannedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "tenantId", "patientId", "patientMrn", "encounterType", "department", "plannedAt"]
+    },
+    "WorkflowSnapshot": {
+      "title": "WorkflowSnapshot",
+      "description": "Real-time state snapshot of clinical workflow execution, current stage, and SLAs",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "tenantId": { "type": "string", "maxLength": 128 },
+        "encounterId": { "type": "string", "maxLength": 128 },
+        "patientId": { "type": "string", "maxLength": 128 },
+        "patientMrn": { "type": "string", "maxLength": 64 },
+        "workflowDefinitionId": { "type": "string", "maxLength": 128 },
+        "workflowVersion": { "type": "string", "maxLength": 32 },
+        "currentStage": { "type": "string", "maxLength": 64 },
+        "currentStageStatus": { "type": "string", "maxLength": 32 },
+        "currentStageStartedAt": { "type": "string", "maxLength": 64 },
+        "completedStages": { "type": "array" },
+        "totalDwellMinutes": { "type": "number" },
+        "slaBreached": { "type": "boolean" },
+        "careTeam": { "type": "object" },
+        "transitionHistory": { "type": "array" },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "tenantId", "encounterId", "patientId", "currentStage", "currentStageStatus", "updatedAt"]
+    },
+    "WorkflowStage": {
+      "title": "WorkflowStage",
+      "description": "Discrete clinical care stage runtime record with role audit and data payload",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "stageType": { "type": "string", "maxLength": 64 },
+        "sequenceOrder": { "type": "number" },
+        "status": { "type": "string", "maxLength": 32 },
+        "startedAt": { "type": "string", "maxLength": 64 },
+        "completedAt": { "type": "string", "maxLength": 64 },
+        "durationSeconds": { "type": "number" },
+        "slaTargetMinutes": { "type": "number" },
+        "slaExceeded": { "type": "boolean" },
+        "performedByUserId": { "type": "string", "maxLength": 128 },
+        "performedByUserName": { "type": "string", "maxLength": 128 },
+        "stageData": { "type": "object" },
+        "notes": { "type": "string", "maxLength": 512 }
+      },
+      "required": ["id", "stageType", "status", "startedAt"]
+    },
+    "OutboxEvent": {
+      "title": "OutboxEvent",
+      "description": "Transactional outbox event for asynchronous HL7/FHIR messaging and analytics",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "tenantId": { "type": "string", "maxLength": 128 },
+        "destinationQueue": { "type": "string", "maxLength": 64 },
+        "eventType": { "type": "string", "maxLength": 64 },
+        "aggregateType": { "type": "string", "maxLength": 64 },
+        "aggregateId": { "type": "string", "maxLength": 128 },
+        "payload": { "type": "object" },
+        "status": { "type": "string", "maxLength": 32 },
+        "retryCount": { "type": "number" },
+        "maxRetries": { "type": "number" },
+        "scheduledFor": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "tenantId", "destinationQueue", "eventType", "aggregateType", "aggregateId", "status", "createdAt"]
+    },
+    "TimelineEvent": {
+      "title": "TimelineEvent",
+      "description": "Patient longitudinal journey timeline projection milestone",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "timestamp": { "type": "string", "maxLength": 64 },
+        "category": { "type": "string", "maxLength": 32 },
+        "title": { "type": "string", "maxLength": 128 },
+        "summary": { "type": "string", "maxLength": 512 },
+        "severity": { "type": "string", "maxLength": 32 },
+        "stage": { "type": "string", "maxLength": 64 },
+        "authorName": { "type": "string", "maxLength": 128 },
+        "authorRole": { "type": "string", "maxLength": 64 },
+        "dataPayload": { "type": "object" },
+        "rawEventId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "timestamp", "category", "title", "severity", "authorName"]
+    },
+    "MpiRegistryRecord": {
+      "title": "MpiRegistryRecord",
+      "description": "Deterministic index key for Master Patient Index lookup",
+      "type": "object",
+      "properties": {
+        "mpiKey": { "type": "string", "maxLength": 128 },
+        "patientId": { "type": "string", "maxLength": 128 },
+        "mrn": { "type": "string", "maxLength": 64 },
+        "fullName": { "type": "string", "maxLength": 128 },
+        "dateOfBirth": { "type": "string", "maxLength": 32 },
+        "soundexLastName": { "type": "string", "maxLength": 16 },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["mpiKey", "patientId", "mrn", "fullName", "dateOfBirth", "createdAt"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User authentication profile and role assignment",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 128 },
+        "role": { "type": "string", "maxLength": 64 },
+        "tenantId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["uid", "email", "role", "tenantId"]
+    },
+    "Session": {
+      "title": "Session",
+      "description": "Authenticated clinical session with TTL and inactivity bounds",
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "tenantId": { "type": "string", "maxLength": 128 },
+        "deviceId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "maxLength": 32 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "lastSeenAt": { "type": "string", "maxLength": 64 },
+        "authenticatedAt": { "type": "string", "maxLength": 64 },
+        "lastActivityAt": { "type": "string", "maxLength": 64 },
+        "expiresAt": { "type": "string", "maxLength": 64 },
+        "ipHash": { "type": "string", "maxLength": 128 },
+        "userAgentHash": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["sessionId", "userId", "tenantId", "status", "createdAt", "expiresAt"]
+    },
+    "Device": {
+      "title": "Device",
+      "description": "Registered hospital workstation terminal record",
+      "type": "object",
+      "properties": {
+        "deviceId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "tenantId": { "type": "string", "maxLength": 128 },
+        "deviceType": { "type": "string", "maxLength": 32 },
+        "platform": { "type": "string", "maxLength": 64 },
+        "appVersion": { "type": "string", "maxLength": 32 },
+        "firstSeenAt": { "type": "string", "maxLength": 64 },
+        "lastSeenAt": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "maxLength": 32 }
+      },
+      "required": ["deviceId", "userId", "tenantId", "status", "firstSeenAt"]
+    }
+  },
+  "firestore": {
+    "/user_profiles/{userId}": {
+      "schema": "UserProfile",
+      "description": "Global user authentication profiles and assigned role"
+    },
+    "/tenants/{tenantId}/sessions/{sessionId}": {
+      "schema": "Session",
+      "description": "Active clinical workstation authentication session"
+    },
+    "/tenants/{tenantId}/devices/{deviceId}": {
+      "schema": "Device",
+      "description": "Registered hospital workstation device record"
+    },
+    "/patients/{patientId}": {
+      "schema": "Patient",
+      "description": "EHR Master Patient Index records"
+    },
+    "/beds/{bedId}": {
+      "schema": "Bed",
+      "description": "Inpatient ward bed census and allocations"
+    },
+    "/billingMismatches/{mismatchId}": {
+      "schema": "BillingMismatch",
+      "description": "SOAP note unbilled charges and audit findings"
+    },
+    "/opdQueue/{tokenId}": {
+      "schema": "OpdToken",
+      "description": "Outpatient clinic tokens and consultation status"
+    },
+    "/staff/{staffId}": {
+      "schema": "Staff",
+      "description": "Clinical staff roster and shifts"
+    },
+    "/auditLogs/{logId}": {
+      "schema": "AuditLog",
+      "description": "HIPAA compliance immutable security audit ledger"
+    },
+    "/hl7Messages/{messageId}": {
+      "schema": "Hl7Dispatch",
+      "description": "HL7 v2 & FHIR socket exchange telemetry"
+    },
+    "/tenants/{tenantId}/tariffs/{tariffId}": {
+      "schema": "Tariff",
+      "description": "Multi-tier tariff schedules and overrides"
+    },
+    "/tenants/{tenantId}/invoices/{invoiceId}": {
+      "schema": "Invoice",
+      "description": "Tenant point-of-care patient invoices"
+    },
+    "/tenants/{tenantId}/claims/{claimId}": {
+      "schema": "Claim",
+      "description": "Tenant payer claims and adjudication workbench"
+    },
+    "/tenants/{tenantId}": {
+      "schema": "Tenant",
+      "description": "Multi-tenant hospital configuration document"
+    },
+    "/tenants/{tenantId}/users/{userId}": {
+      "schema": "TenantUser",
+      "description": "Tenant user authorization record and clinical role assignment"
+    },
+    "/tenants/{tenantId}/patients/{patientId}": {
+      "schema": "Patient",
+      "description": "Tenant-scoped Master Patient Index profiles"
+    },
+    "/tenants/{tenantId}/mpi_registry/{mpiKey}": {
+      "schema": "MpiRegistryRecord",
+      "description": "Tenant-scoped deterministic MPI lookup keys"
+    },
+    "/tenants/{tenantId}/encounters/{encounterId}": {
+      "schema": "ClinicalEncounter",
+      "description": "Tenant-scoped clinical encounters and orchestration"
+    },
+    "/tenants/{tenantId}/encounters/{encounterId}/workflow_snapshots/{snapshotId}": {
+      "schema": "WorkflowSnapshot",
+      "description": "Encounter runtime workflow execution snapshots"
+    },
+    "/tenants/{tenantId}/encounters/{encounterId}/stages/{stageId}": {
+      "schema": "WorkflowStage",
+      "description": "Encounter discrete workflow stages and runtime data"
+    },
+    "/tenants/{tenantId}/patients/{patientId}/timeline/{eventId}": {
+      "schema": "TimelineEvent",
+      "description": "Patient chronological clinical care timeline milestones"
+    },
+    "/tenants/{tenantId}/outbox/{eventId}": {
+      "schema": "OutboxEvent",
+      "description": "Transactional outbox events for messaging brokers"
+    },
+    "/tenants/{tenantId}/audit_logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Tenant-scoped immutable HIPAA security audit ledger"
+    },
+    "/tenants/{tenantId}/opd_queue/{tokenId}": {
+      "schema": "OpdToken",
+      "description": "Tenant-scoped OPD clinic queue tokens"
+    }
+  }
+}

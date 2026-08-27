@@ -1,0 +1,447 @@
+@import "tailwindcss";
+
+@variant dark (&:where(.dark, .dark *, [data-theme="dark"], [data-theme="dark"] *, [data-mode="dark"], [data-mode="dark"] *));
+
+@theme {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-card-border: var(--card-border);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-header-bg: var(--header-bg);
+  --color-sidebar-bg: var(--sidebar-bg);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-surface-elevated: var(--surface-elevated);
+  --radius-xl: var(--radius);
+}
+
+@layer base {
+  :root, [data-theme="light"], [data-mode="light"] {
+    --background: #f8fafc;
+    --foreground: #0f172a;
+    --card: #ffffff;
+    --card-foreground: #0f172a;
+    --card-border: #e2e8f0;
+    --popover: #ffffff;
+    --popover-foreground: #0f172a;
+    --primary: #2563eb;
+    --primary-foreground: #ffffff;
+    --secondary: #f1f5f9;
+    --secondary-foreground: #1e293b;
+    --muted: #f1f5f9;
+    --muted-foreground: #64748b;
+    --accent: #eff6ff;
+    --accent-foreground: #1d4ed8;
+    --destructive: #ef4444;
+    --destructive-foreground: #ffffff;
+    --border: #e2e8f0;
+    --input: #e2e8f0;
+    --ring: #3b82f6;
+    --header-bg: rgba(255, 255, 255, 0.95);
+    --sidebar-bg: #ffffff;
+    --sidebar-border: #e2e8f0;
+    --surface-elevated: #ffffff;
+    --radius: 0.75rem;
+  }
+
+  :root.dark,
+  html.dark,
+  body.dark,
+  .dark,
+  [data-theme="dark"],
+  [data-mode="dark"] {
+    --background: #090d16;
+    --foreground: #f1f5f9;
+    --card: #0f172a;
+    --card-foreground: #f8fafc;
+    --card-border: #1e293b;
+    --popover: #0f172a;
+    --popover-foreground: #f8fafc;
+    --primary: #3b82f6;
+    --primary-foreground: #ffffff;
+    --secondary: #1e293b;
+    --secondary-foreground: #f8fafc;
+    --muted: #1e293b;
+    --muted-foreground: #94a3b8;
+    --accent: #1e293b;
+    --accent-foreground: #60a5fa;
+    --destructive: #ef4444;
+    --destructive-foreground: #ffffff;
+    --border: #1e293b;
+    --input: #1e293b;
+    --ring: #60a5fa;
+    --header-bg: rgba(15, 23, 42, 0.95);
+    --sidebar-bg: #0f172a;
+    --sidebar-border: #1e293b;
+    --surface-elevated: #131d35;
+  }
+
+  /* Strict Dark Mode Enforcement: White is strictly restricted to text/fonts and forbidden for backgrounds or cards */
+  .dark .bg-white,
+  .dark .bg-white\/95,
+  .dark .bg-white\/90,
+  .dark .bg-white\/80,
+  .dark .bg-white\/70,
+  .dark .bg-white\/60,
+  .dark .bg-white\/50,
+  .dark .bg-white\/40,
+  .dark .bg-white\/30,
+  .dark .bg-white\/20,
+  .dark .bg-white\/10,
+  [data-theme="dark"] .bg-white,
+  [data-theme="dark"] [class*="bg-white"],
+  [data-mode="dark"] .bg-white,
+  [data-mode="dark"] [class*="bg-white"] {
+    background-color: var(--card) !important;
+  }
+
+  /* Neutral Sub-surfaces & Nested Cards */
+  .dark .bg-slate-50,
+  .dark .bg-slate-100,
+  .dark .bg-slate-200,
+  .dark .bg-gray-50,
+  .dark .bg-gray-100,
+  .dark .bg-gray-200,
+  .dark .bg-zinc-50,
+  .dark .bg-zinc-100,
+  .dark .bg-neutral-50,
+  .dark .bg-neutral-100,
+  .dark [class*="bg-slate-50"],
+  .dark [class*="bg-slate-100"],
+  .dark [class*="bg-slate-200"],
+  [data-theme="dark"] .bg-slate-50,
+  [data-theme="dark"] .bg-slate-100,
+  [data-theme="dark"] .bg-slate-200,
+  [data-mode="dark"] .bg-slate-50,
+  [data-mode="dark"] .bg-slate-100,
+  [data-mode="dark"] .bg-slate-200 {
+    background-color: var(--secondary) !important;
+  }
+
+  /* Colored Chips, Badges & Tints in Dark Mode */
+  .dark .bg-blue-50,
+  .dark .bg-blue-100,
+  .dark [class*="bg-blue-50"],
+  .dark [class*="bg-blue-100"],
+  [data-theme="dark"] .bg-blue-50,
+  [data-theme="dark"] .bg-blue-100 {
+    background-color: rgba(30, 58, 138, 0.4) !important;
+    border-color: rgba(96, 165, 250, 0.3) !important;
+  }
+
+  .dark .bg-indigo-50,
+  .dark .bg-indigo-100,
+  .dark [class*="bg-indigo-50"],
+  .dark [class*="bg-indigo-100"],
+  [data-theme="dark"] .bg-indigo-50,
+  [data-theme="dark"] .bg-indigo-100 {
+    background-color: rgba(49, 46, 129, 0.4) !important;
+    border-color: rgba(129, 140, 248, 0.3) !important;
+  }
+
+  .dark .bg-emerald-50,
+  .dark .bg-emerald-100,
+  .dark .bg-green-50,
+  .dark .bg-green-100,
+  .dark [class*="bg-emerald-50"],
+  .dark [class*="bg-emerald-100"],
+  [data-theme="dark"] .bg-emerald-50,
+  [data-theme="dark"] .bg-emerald-100 {
+    background-color: rgba(6, 78, 59, 0.4) !important;
+    border-color: rgba(52, 211, 153, 0.3) !important;
+  }
+
+  .dark .bg-amber-50,
+  .dark .bg-amber-100,
+  .dark .bg-yellow-50,
+  .dark .bg-yellow-100,
+  .dark [class*="bg-amber-50"],
+  .dark [class*="bg-amber-100"],
+  [data-theme="dark"] .bg-amber-50,
+  [data-theme="dark"] .bg-amber-100 {
+    background-color: rgba(120, 53, 15, 0.4) !important;
+    border-color: rgba(251, 191, 36, 0.3) !important;
+  }
+
+  .dark .bg-rose-50,
+  .dark .bg-rose-100,
+  .dark .bg-red-50,
+  .dark .bg-red-100,
+  .dark [class*="bg-rose-50"],
+  .dark [class*="bg-rose-100"],
+  [data-theme="dark"] .bg-rose-50,
+  [data-theme="dark"] .bg-rose-100 {
+    background-color: rgba(136, 19, 55, 0.4) !important;
+    border-color: rgba(251, 113, 133, 0.3) !important;
+  }
+
+  .dark .bg-purple-50,
+  .dark .bg-purple-100,
+  .dark .bg-violet-50,
+  .dark .bg-violet-100,
+  .dark [class*="bg-purple-50"],
+  .dark [class*="bg-purple-100"],
+  [data-theme="dark"] .bg-purple-50,
+  [data-theme="dark"] .bg-purple-100 {
+    background-color: rgba(88, 28, 135, 0.4) !important;
+    border-color: rgba(192, 132, 252, 0.3) !important;
+  }
+
+  .dark .bg-teal-50,
+  .dark .bg-teal-100,
+  .dark .bg-cyan-50,
+  .dark .bg-cyan-100,
+  .dark [class*="bg-teal-50"],
+  .dark [class*="bg-cyan-50"],
+  [data-theme="dark"] .bg-teal-50,
+  [data-theme="dark"] .bg-cyan-50 {
+    background-color: rgba(19, 78, 74, 0.4) !important;
+    border-color: rgba(45, 212, 191, 0.3) !important;
+  }
+
+  /* Borders & Dividers in Dark Mode */
+  .dark .border-slate-100,
+  .dark .border-slate-200,
+  .dark .border-slate-200\/80,
+  .dark .border-slate-200\/60,
+  .dark .border-slate-200\/90,
+  .dark .border-slate-300,
+  .dark .border-gray-100,
+  .dark .border-gray-200,
+  .dark .border-zinc-200,
+  .dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+  .dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]),
+  [data-theme="dark"] .border-slate-200,
+  [data-theme="dark"] .border-slate-100,
+  [data-mode="dark"] .border-slate-200 {
+    border-color: var(--card-border) !important;
+  }
+
+  .dark .shadow-2xs,
+  .dark .shadow-xs,
+  .dark .shadow-sm,
+  .dark .shadow-md,
+  [data-theme="dark"] .shadow-xs,
+  [data-theme="dark"] .shadow-sm,
+  [data-theme="dark"] .shadow-md {
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5) !important;
+  }
+
+  /* High-Legibility Primary Typography: Headings, Bold Titles & Labels (Crisp Bright White) */
+  .dark h1,
+  .dark h2,
+  .dark h3,
+  .dark h4,
+  .dark h5,
+  .dark h6,
+  .dark strong,
+  .dark b,
+  .dark .text-slate-950,
+  .dark .text-slate-900,
+  .dark .text-slate-800,
+  .dark .text-gray-950,
+  .dark .text-gray-900,
+  .dark .text-gray-800,
+  .dark .text-zinc-950,
+  .dark .text-zinc-900,
+  .dark .text-zinc-800,
+  .dark .text-neutral-900,
+  .dark .text-black,
+  [data-theme="dark"] h1,
+  [data-theme="dark"] h2,
+  [data-theme="dark"] h3,
+  [data-theme="dark"] h4,
+  [data-theme="dark"] .text-slate-900,
+  [data-theme="dark"] .text-slate-800,
+  [data-mode="dark"] .text-slate-900 {
+    color: #f8fafc !important;
+  }
+
+  /* Secondary & Body Typography: Clear Light Slate (Never Dark Gray) */
+  .dark .text-slate-700,
+  .dark .text-slate-600,
+  .dark .text-gray-700,
+  .dark .text-gray-600,
+  .dark .text-zinc-700,
+  .dark .text-zinc-600,
+  [data-theme="dark"] .text-slate-700,
+  [data-theme="dark"] .text-slate-600,
+  [data-mode="dark"] .text-slate-700 {
+    color: #cbd5e1 !important;
+  }
+
+  /* Muted & Caption Typography: Highly Visible Muted Slate */
+  .dark .text-slate-500,
+  .dark .text-slate-400,
+  .dark .text-gray-500,
+  .dark .text-gray-400,
+  .dark .text-zinc-500,
+  .dark .text-zinc-400,
+  [data-theme="dark"] .text-slate-500,
+  [data-theme="dark"] .text-slate-400,
+  [data-mode="dark"] .text-slate-500 {
+    color: #94a3b8 !important;
+  }
+
+  /* Colored Typography on Dark Cards */
+  .dark .text-blue-700,
+  .dark .text-blue-800,
+  .dark .text-blue-900,
+  .dark .text-blue-950,
+  [data-theme="dark"] .text-blue-700,
+  [data-theme="dark"] .text-blue-800 {
+    color: #93c5fd !important;
+  }
+
+  .dark .text-indigo-700,
+  .dark .text-indigo-800,
+  .dark .text-indigo-900,
+  .dark .text-indigo-950,
+  [data-theme="dark"] .text-indigo-700,
+  [data-theme="dark"] .text-indigo-800 {
+    color: #a5b4fc !important;
+  }
+
+  .dark .text-emerald-700,
+  .dark .text-emerald-800,
+  .dark .text-emerald-900,
+  .dark .text-emerald-950,
+  .dark .text-green-700,
+  .dark .text-green-800,
+  [data-theme="dark"] .text-emerald-700,
+  [data-theme="dark"] .text-emerald-800 {
+    color: #86efac !important;
+  }
+
+  .dark .text-amber-700,
+  .dark .text-amber-800,
+  .dark .text-amber-900,
+  .dark .text-amber-950,
+  .dark .text-yellow-700,
+  .dark .text-yellow-800,
+  [data-theme="dark"] .text-amber-700,
+  [data-theme="dark"] .text-amber-800 {
+    color: #fcd34d !important;
+  }
+
+  .dark .text-rose-700,
+  .dark .text-rose-800,
+  .dark .text-rose-900,
+  .dark .text-rose-950,
+  .dark .text-red-700,
+  .dark .text-red-800,
+  [data-theme="dark"] .text-rose-700,
+  [data-theme="dark"] .text-rose-800 {
+    color: #fda4af !important;
+  }
+
+  .dark .text-purple-700,
+  .dark .text-purple-800,
+  .dark .text-purple-900,
+  .dark .text-purple-950,
+  .dark .text-violet-700,
+  .dark .text-violet-800,
+  [data-theme="dark"] .text-purple-700,
+  [data-theme="dark"] .text-purple-800 {
+    color: #d8b4fe !important;
+  }
+
+  .dark .text-teal-700,
+  .dark .text-teal-800,
+  .dark .text-teal-900,
+  .dark .text-cyan-700,
+  .dark .text-cyan-800,
+  .dark .text-cyan-900,
+  [data-theme="dark"] .text-teal-700,
+  [data-theme="dark"] .text-cyan-700 {
+    color: #5eead4 !important;
+  }
+
+  /* Form Elements: Input, Textarea, Select, Pre */
+  .dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  .dark textarea,
+  .dark select,
+  [data-theme="dark"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  [data-theme="dark"] textarea,
+  [data-theme="dark"] select {
+    background-color: #1e293b !important;
+    color: #f8fafc !important;
+    border-color: #334155 !important;
+  }
+
+  .dark input::placeholder,
+  .dark textarea::placeholder,
+  [data-theme="dark"] input::placeholder,
+  [data-theme="dark"] textarea::placeholder {
+    color: #94a3b8 !important;
+  }
+
+  .dark pre,
+  .dark code,
+  [data-theme="dark"] pre,
+  [data-theme="dark"] code {
+    background-color: #090d16 !important;
+    color: #e2e8f0 !important;
+    border-color: #1e293b !important;
+  }
+
+  /* Table Rendering */
+  .dark table,
+  [data-theme="dark"] table {
+    color: #f1f5f9;
+  }
+
+  .dark thead th,
+  [data-theme="dark"] thead th {
+    background-color: #1e293b !important;
+    color: #94a3b8 !important;
+    border-color: #334155 !important;
+  }
+
+  .dark tbody td,
+  [data-theme="dark"] tbody td {
+    color: #f1f5f9 !important;
+    border-color: #1e293b !important;
+  }
+
+  .dark tbody tr:hover,
+  [data-theme="dark"] tbody tr:hover {
+    background-color: rgba(30, 41, 59, 0.7) !important;
+  }
+
+  /* Hover States on Buttons & Actionable Cards */
+  .dark button:hover:not([class*="bg-blue"]):not([class*="bg-emerald"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not([class*="bg-indigo"]),
+  [data-theme="dark"] button:hover:not([class*="bg-blue"]):not([class*="bg-emerald"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not([class*="bg-indigo"]) {
+    background-color: #1e293b;
+    border-color: #334155;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+  html, body {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    background-color: var(--background);
+    color: var(--foreground);
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+}
+
+

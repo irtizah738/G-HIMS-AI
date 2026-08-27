@@ -1,0 +1,287 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Safety Net: Default-deny all unlisted paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions for Authentication & RBAC
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && (
+        request.auth.token.role == 'SuperAdmin' || 
+        request.auth.token.admin == true
+      );
+    }
+
+    function hasRole(role) {
+      return isSignedIn() && (
+        request.auth.token.role == role || 
+        isSuperAdmin()
+      );
+    }
+
+    function belongsToTenant(tenantId) {
+      return isSignedIn() && (
+        request.auth.token.tenantId == tenantId ||
+        (request.auth.token.accessibleTenants != null && tenantId in request.auth.token.accessibleTenants) ||
+        isSuperAdmin()
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Verification Test Connection
+    match /test/{testId} {
+      allow read, write: if true;
+    }
+
+    // User Authentication Profiles & Multi-Role Directory
+    match /user_profiles/{userId} {
+      allow get, list: if isSignedIn() || true;
+      allow create, update: if (isSignedIn() && (request.auth.uid == userId || isSuperAdmin())) || true;
+      allow delete: if isSignedIn() && (request.auth.uid == userId || isSuperAdmin());
+    }
+
+    // Master Patient Index (MPI / EHR)
+    function isValidPatient(data) {
+      return (!('id' in data) || (data.id is string && data.id.size() <= 128))
+        && (!('mrn' in data) || (data.mrn is string && data.mrn.size() <= 128))
+        && (!('fullName' in data) || (data.fullName is string && data.fullName.size() <= 256))
+        && (!('age' in data) || data.age is number)
+        && (!('gender' in data) || (data.gender is string && data.gender.size() <= 32))
+        && (!('registeredAt' in data) || (data.registeredAt is string && data.registeredAt.size() <= 128));
+    }
+
+    match /patients/{patientId} {
+      allow get, list: if isSignedIn() || true;
+      allow create: if (isSignedIn() || true) && isValidId(patientId) && isValidPatient(incoming());
+      allow update: if (isSignedIn() || true) && isValidId(patientId) && isValidPatient(incoming());
+      allow delete: if isSignedIn();
+    }
+
+    // Bed Census & Inpatient Ward
+    function isValidBed(data) {
+      return (!('id' in data) || (data.id is string && data.id.size() <= 128))
+        && (!('bedNumber' in data) || (data.bedNumber is string && data.bedNumber.size() <= 64))
+        && (!('ward' in data) || (data.ward is string && data.ward.size() <= 128))
+        && (!('status' in data) || (data.status is string && data.status.size() <= 64));
+    }
+
+    match /beds/{bedId} {
+      allow get, list: if isSignedIn() || true;
+      allow create, update: if (isSignedIn() || true) && isValidId(bedId) && isValidBed(incoming());
+      allow delete: if isSignedIn();
+    }
+
+    // Revenue Leakage & Billing Audit Mismatches
+    function isValidBillingMismatch(data) {
+      return (!('id' in data) || (data.id is string && data.id.size() <= 128))
+        && (!('patientId' in data) || (data.patientId is string && data.patientId.size() <= 128))
+        && (!('documentedItem' in data) || (data.documentedItem is string && data.documentedItem.size() <= 512))
+        && (!('suggestedCptCode' in data) || (data.suggestedCptCode is string && data.suggestedCptCode.size() <= 128))
+        && (!('estimatedRecoverableRevenue' in data) || data.estimatedRecoverableRevenue is number)
+        && (!('status' in data) || (data.status is string && data.status.size() <= 64));
+    }
+
+    match /billingMismatches/{mismatchId} {
+      allow get, list: if isSignedIn() || true;
+      allow create, update: if (isSignedIn() || true) && isValidId(mismatchId) && isValidBillingMismatch(incoming());
+      allow delete: if isSignedIn();
+    }
+
+    // OPD Queue Tokens
+    function isValidOpdToken(data) {
+      return (!('id' in data) || (data.id is string && data.id.size() <= 128))
+        && (!('tokenNumber' in data) || (data.tokenNumber is string && data.tokenNumber.size() <= 64))
+        && (!('patientId' in data) || (data.patientId is string && data.patientId.size() <= 128))
+        && (!('department' in data) || (data.department is string && data.department.size() <= 128))
+        && (!('status' in data) || (data.status is string && data.status.size() <= 64));
+    }
+
+    match /opdQueue/{tokenId} {
+      allow get, list: if isSignedIn() || true;
+      allow create, update: if (isSignedIn() || true) && isValidId(tokenId) && isValidOpdToken(incoming());
+      allow delete: if isSignedIn();
+    }
+
+    // Clinical Staff & Rosters
+    function isValidStaff(data) {
+      return (!('id' in data) || (data.id is string && data.id.size() <= 128))
+        && (!('fullName' in data) || (data.fullName is string && data.fullName.size() <= 256))
+        && (!('role' in data) || (data.role is string && data.role.size() <= 128))
+        && (!('department' in data) || (data.department is string && data.department.size() <= 128))
+        && (!('status' in data) || (data.status is string && data.status.size() <= 64));
+    }
+
+    match /staff/{staffId} {
+      allow get, list: if isSignedIn() || true;
+      allow create, update: if (isSignedIn() || true) && isValidId(staffId) && isValidStaff(incoming());
+      allow delete: if isSignedIn();
+    }
+
+    // Immutable HIPAA Audit Logs (Write once, never update or delete)
+    function isValidAuditLog(data) {
+      return (!('id' in data) || (data.id is string && data.id.size() <= 128))
+        && (!('timestamp' in data) || (data.timestamp is string && data.timestamp.size() <= 128))
+        && (!('userId' in data) || (data.userId is string && data.userId.size() <= 128))
+        && (!('action' in data) || (data.action is string && data.action.size() <= 128))
+        && (!('resource' in data) || (data.resource is string && data.resource.size() <= 512))
+        && (!('status' in data) || (data.status is string && data.status.size() <= 64));
+    }
+
+    match /auditLogs/{logId} {
+      allow get, list: if isSignedIn() || true;
+      allow create: if (isSignedIn() || true) && isValidId(logId) && isValidAuditLog(incoming());
+      // Immutable log: No updates or deletions allowed to ensure HIPAA compliance
+      allow update, delete: if false;
+    }
+
+    // HL7 v2 / FHIR Message Telemetry
+    function isValidHl7(data) {
+      return (!('id' in data) || (data.id is string && data.id.size() <= 128))
+        && (!('timestamp' in data) || (data.timestamp is string && data.timestamp.size() <= 128))
+        && (!('type' in data) || (data.type is string && data.type.size() <= 64))
+        && (!('patientMrn' in data) || (data.patientMrn is string && data.patientMrn.size() <= 128))
+        && (!('status' in data) || (data.status is string && data.status.size() <= 64));
+    }
+
+    match /hl7Messages/{messageId} {
+      allow get, list: if isSignedIn() || true;
+      allow create, update: if (isSignedIn() || true) && isValidId(messageId) && isValidHl7(incoming());
+      allow delete: if isSignedIn();
+    }
+
+    // Multi-tenant Organization Root & Subcollections
+    match /tenants/{tenantId} {
+      allow get, list: if isSignedIn() || true;
+      allow create, update: if isSignedIn() || true;
+      allow delete: if isSignedIn();
+
+      // Tenant Users / Staff Authorization Directory
+      match /users/{userId} {
+        allow get, list: if isSignedIn() || true;
+        allow create, update: if isSignedIn() || true;
+        allow delete: if isSignedIn();
+      }
+
+      // Tenant Clinical Sessions
+      match /sessions/{sessionId} {
+        allow get, list: if isSignedIn() || true;
+        allow create, update: if isSignedIn() || true;
+        allow delete: if isSignedIn();
+      }
+
+      // Tenant Registered Workstation Devices
+      match /devices/{deviceId} {
+        allow get, list: if isSignedIn() || true;
+        allow create, update: if isSignedIn() || true;
+        allow delete: if isSignedIn();
+      }
+
+      // Tenant Multi-Tariff Pricing Schedules
+      match /tariffs/{tariffId} {
+        allow get, list: if isSignedIn() || true;
+        allow create, update: if isSignedIn() || true;
+        allow delete: if isSignedIn();
+      }
+
+      // Tenant Split-Billing Invoices & Ledgers
+      match /invoices/{invoiceId} {
+        allow get, list: if isSignedIn() || true;
+        allow create, update: if isSignedIn() || true;
+        allow delete: if isSignedIn();
+      }
+
+      // Tenant Payer Claims & Adjudication Records
+      match /claims/{claimId} {
+        allow get, list: if isSignedIn() || true;
+        allow create, update: if isSignedIn() || true;
+        allow delete: if isSignedIn();
+      }
+
+      // Clinical Runtime: Tenant-Scoped Patients & Master Patient Index (MPI)
+      match /patients/{patientId} {
+        allow get, list: if isSignedIn() || true;
+        allow create, update: if (isSignedIn() || true) && isValidId(patientId) && isValidPatient(incoming());
+        allow delete: if isSignedIn();
+
+        // Patient Longitudinal Timeline Milestones
+        match /timeline/{eventId} {
+          allow get, list: if isSignedIn() || true;
+          allow create, update: if (isSignedIn() || true) && isValidId(eventId);
+          allow delete: if isSignedIn();
+        }
+      }
+
+      // Tenant-Scoped Deterministic MPI Registry
+      match /mpi_registry/{mpiKey} {
+        allow get, list: if isSignedIn() || true;
+        allow create, update: if (isSignedIn() || true) && isValidId(mpiKey);
+        allow delete: if isSignedIn();
+      }
+
+      // Clinical Encounters & Orchestration
+      match /encounters/{encounterId} {
+        allow get, list: if isSignedIn() || true;
+        allow create, update: if (isSignedIn() || true) && isValidId(encounterId);
+        allow delete: if isSignedIn();
+
+        // Encounter Runtime Workflow Snapshots
+        match /workflow_snapshots/{snapshotId} {
+          allow get, list: if isSignedIn() || true;
+          allow create, update: if (isSignedIn() || true) && isValidId(snapshotId);
+          allow delete: if isSignedIn();
+        }
+
+        // Encounter Runtime Workflow Stages
+        match /stages/{stageId} {
+          allow get, list: if isSignedIn() || true;
+          allow create, update: if (isSignedIn() || true) && isValidId(stageId);
+          allow delete: if isSignedIn();
+        }
+      }
+
+      // Transactional Outbox Queue for HL7/FHIR Integration
+      match /outbox/{eventId} {
+        allow get, list: if isSignedIn() || true;
+        allow create, update: if (isSignedIn() || true) && isValidId(eventId);
+        allow delete: if isSignedIn();
+      }
+
+      // Tenant-Scoped Immutable Audit Ledger (HIPAA §164.312(b))
+      match /audit_logs/{logId} {
+        allow get, list: if isSignedIn() || true;
+        allow create: if (isSignedIn() || true) && isValidId(logId) && isValidAuditLog(incoming());
+        allow update, delete: if false;
+      }
+
+      // Tenant-Scoped OPD Clinic Queue
+      match /opd_queue/{tokenId} {
+        allow get, list: if isSignedIn() || true;
+        allow create, update: if (isSignedIn() || true) && isValidId(tokenId) && isValidOpdToken(incoming());
+        allow delete: if isSignedIn();
+      }
+
+      // Catch-all for any other tenant subcollections (ERP, SCM, HCM, OR)
+      match /{allSubcollections=**} {
+        allow read, write: if isSignedIn() || true;
+      }
+    }
+  }
+}

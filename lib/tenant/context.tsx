@@ -1,0 +1,290 @@
+'use client';
+
+import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react';
+import { Tenant, TenantContextType, UserRole } from '@/types/tenant';
+import { useAuth } from '@/lib/firebase/auth-context';
+import { auth, db } from '@/lib/firebase/client';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+
+export const DEFAULT_TENANTS: Tenant[] = [
+  {
+    id: 'government-gynae-hospital',
+    name: 'Government Gynae Hospital',
+    facilityCode: 'GGH-01',
+    brandColor: '#ec4899',
+    secondaryColor: '#db2777',
+    activeStatus: 'active',
+    region: 'asia-south1',
+    tier: 'enterprise',
+    address: {
+      street: '108 Maternity Care Boulevard',
+      city: 'Capital District',
+      state: 'CD',
+      zipCode: '500001',
+      country: 'India',
+    },
+    contactEmail: 'admin@govtgynae.health',
+    contactPhone: '+91 (040) 2473-9000',
+    licenseNumber: 'GOVT-GYN-99104',
+    settings: {
+      emergencyBypassEnabled: true,
+      requireMfa: false,
+      hipaaAuditRetentionDays: 2555,
+      defaultTimezone: 'Asia/Kolkata',
+    },
+    createdAt: '2024-01-01T00:00:00.000Z',
+    updatedAt: '2026-08-14T00:00:00.000Z',
+  },
+  {
+    id: 'grace-valley-general',
+    name: 'Grace Valley General',
+    facilityCode: 'GVGH-02',
+    brandColor: '#0284c7',
+    secondaryColor: '#0369a1',
+    activeStatus: 'active',
+    region: 'us-east1',
+    tier: 'enterprise',
+    address: {
+      street: '3400 Valley Parkway, Suite 100',
+      city: 'Grace Valley',
+      state: 'VA',
+      zipCode: '22030',
+      country: 'USA',
+    },
+    contactEmail: 'info@gracevalley.health',
+    contactPhone: '+1 (555) 349-8800',
+    licenseNumber: 'VA-GEN-HOSP-4421',
+    settings: {
+      emergencyBypassEnabled: true,
+      requireMfa: false,
+      hipaaAuditRetentionDays: 2555,
+      defaultTimezone: 'America/New_York',
+    },
+    createdAt: '2024-03-01T00:00:00.000Z',
+    updatedAt: '2026-08-14T00:00:00.000Z',
+  },
+  {
+    id: 'central-metro-hospital',
+    name: 'Central Metro General Hospital',
+    facilityCode: 'CMGH-01',
+    brandColor: '#2563eb',
+    secondaryColor: '#1d4ed8',
+    activeStatus: 'active',
+    region: 'asia-east1',
+    tier: 'enterprise',
+    address: {
+      street: '742 Healthcare Ave, Metro Center',
+      city: 'Metropolis',
+      state: 'Metro',
+      zipCode: '10001',
+      country: 'USA',
+    },
+    contactEmail: 'admin@centralmetro.health',
+    contactPhone: '+1 (555) 839-4400',
+    licenseNumber: 'HOSP-MED-99420-A',
+    settings: {
+      emergencyBypassEnabled: true,
+      requireMfa: false,
+      hipaaAuditRetentionDays: 2555,
+      defaultTimezone: 'America/New_York',
+    },
+    createdAt: '2024-01-01T00:00:00.000Z',
+    updatedAt: '2026-08-14T00:00:00.000Z',
+  },
+  {
+    id: 'st-jude-trauma-center',
+    name: 'St. Jude Academic Trauma Center',
+    facilityCode: 'SJTC-04',
+    brandColor: '#dc2626',
+    secondaryColor: '#b91c1c',
+    activeStatus: 'active',
+    region: 'us-east1',
+    tier: 'enterprise',
+    address: {
+      street: '120 Emergency Blvd, East Wing',
+      city: 'St. Jude City',
+      state: 'ST',
+      zipCode: '38105',
+      country: 'USA',
+    },
+    contactEmail: 'trauma-ops@stjude-trauma.health',
+    contactPhone: '+1 (555) 911-2000',
+    licenseNumber: 'TRAUMA-LVL1-00812',
+    settings: {
+      emergencyBypassEnabled: true,
+      requireMfa: true,
+      hipaaAuditRetentionDays: 3650,
+      defaultTimezone: 'America/Chicago',
+    },
+    createdAt: '2024-06-15T00:00:00.000Z',
+    updatedAt: '2026-08-14T00:00:00.000Z',
+  },
+  {
+    id: 'beacon-childrens-clinic',
+    name: 'Beacon Children’s & Specialty Clinic',
+    facilityCode: 'BCSC-09',
+    brandColor: '#059669',
+    secondaryColor: '#047857',
+    activeStatus: 'active',
+    region: 'asia-east1',
+    tier: 'professional',
+    address: {
+      street: '45 Sunshine Way, Pediatric Pavilion',
+      city: 'Beacon',
+      state: 'BC',
+      zipCode: '90210',
+      country: 'USA',
+    },
+    contactEmail: 'pediatrics@beaconclinic.health',
+    contactPhone: '+1 (555) 733-4271',
+    licenseNumber: 'PEDI-CLINIC-44129',
+    settings: {
+      emergencyBypassEnabled: false,
+      requireMfa: false,
+      hipaaAuditRetentionDays: 2555,
+      defaultTimezone: 'America/Los_Angeles',
+    },
+    createdAt: '2025-02-01T00:00:00.000Z',
+    updatedAt: '2026-08-14T00:00:00.000Z',
+  },
+];
+
+const TenantContext = createContext<TenantContextType>({
+  currentTenant: DEFAULT_TENANTS[0],
+  tenantId: DEFAULT_TENANTS[0].id,
+  role: 'doctor',
+  userTenants: DEFAULT_TENANTS,
+  isLoading: false,
+  error: null,
+  switchTenant: async () => {},
+});
+
+interface TenantProviderProps {
+  children: React.ReactNode;
+  initialTenantId?: string;
+}
+
+export function TenantProvider({ children, initialTenantId }: TenantProviderProps) {
+  const { user } = useAuth();
+  const [tenantId, setTenantId] = useState<string>(
+    initialTenantId || 'central-metro-hospital'
+  );
+  const [userTenants, setUserTenants] = useState<Tenant[]>(DEFAULT_TENANTS);
+  const [role, setRole] = useState<UserRole>('doctor');
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Synchronize initial prop changes
+  useEffect(() => {
+    if (initialTenantId) {
+      setTenantId(initialTenantId);
+    }
+  }, [initialTenantId]);
+
+  // Find or construct current tenant profile
+  const currentTenant = useMemo(() => {
+    const found = userTenants.find((t) => t.id === tenantId);
+    if (found) return found;
+
+    // Fallback dynamic tenant object for custom tenant routes
+    return {
+      id: tenantId,
+      name: tenantId.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+      facilityCode: tenantId.substring(0, 4).toUpperCase(),
+      brandColor: '#2563eb',
+      secondaryColor: '#1d4ed8',
+      activeStatus: 'active' as const,
+      region: 'asia-east1',
+      tier: 'enterprise' as const,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  }, [tenantId, userTenants]);
+
+  // Load / Claim Tenant from Backend
+  const refreshTenantClaims = useCallback(async (targetTenantId: string) => {
+    if (!user) return;
+    try {
+      setIsLoading(true);
+      setError(null);
+      const token = await user.getIdToken();
+
+      const res = await fetch('/api/auth/tenant-claim', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ tenantId: targetTenantId }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        console.warn('Tenant claim API notice:', errorData);
+      } else {
+        const data = await res.json();
+        if (data.role) {
+          setRole(data.role as UserRole);
+        }
+        // Force refresh ID token to get updated claims
+        await user.getIdToken(true);
+      }
+    } catch (err: any) {
+      console.warn('Tenant claims refresh notice:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [user]);
+
+  // Switch Active Tenant
+  const switchTenant = useCallback(async (newTenantId: string) => {
+    setTenantId(newTenantId);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('ghims_active_tenant_id', newTenantId);
+      // Set tenant cookie for SSR/Middleware isolation
+      document.cookie = `ghims_tenant_id=${newTenantId}; path=/; max-age=31536000; SameSite=Lax`;
+    }
+    await refreshTenantClaims(newTenantId);
+  }, [refreshTenantClaims]);
+
+  // Initialize from storage / cookie
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('ghims_active_tenant_id');
+      if (stored && !initialTenantId) {
+        setTenantId(stored);
+      }
+    }
+  }, [initialTenantId]);
+
+  // Trigger claim when user or tenant changes
+  useEffect(() => {
+    if (user && tenantId) {
+      refreshTenantClaims(tenantId);
+    }
+  }, [user, tenantId, refreshTenantClaims]);
+
+  return (
+    <TenantContext.Provider
+      value={{
+        currentTenant,
+        tenantId,
+        role,
+        userTenants,
+        isLoading,
+        error,
+        switchTenant,
+      }}
+    >
+      {children}
+    </TenantContext.Provider>
+  );
+}
+
+export function useTenant() {
+  const context = useContext(TenantContext);
+  if (!context) {
+    throw new Error('useTenant must be used within a TenantProvider');
+  }
+  return context;
+}

@@ -4,6 +4,7 @@ import { getAuth } from 'firebase-admin/auth';
 import firebaseConfig from '@/firebase-applet-config.json';
 
 let adminApp: admin.app.App | null = null;
+let adminFirestoreInstance: admin.firestore.Firestore | null = null;
 
 /**
  * Format and sanitize PEM private keys for OpenSSL 3 / Node.js crypto decoder compatibility.
@@ -104,16 +105,39 @@ export function getAdminAuth(): admin.auth.Auth | null {
 }
 
 export function getAdminFirestore(): admin.firestore.Firestore | null {
+  if (adminFirestoreInstance) {
+    return adminFirestoreInstance;
+  }
   const app = getAdminApp();
   if (!app) return null;
   try {
     const dbId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
+    let fs: admin.firestore.Firestore;
     if (dbId && dbId !== '(default)') {
-      return getFirestore(app, dbId);
+      fs = getFirestore(app, dbId);
+    } else {
+      fs = admin.firestore(app);
     }
-    return admin.firestore(app);
+    try {
+      fs.settings({ ignoreUndefinedProperties: true });
+    } catch {
+      // Settings can only be set once
+    }
+    adminFirestoreInstance = fs;
+    return adminFirestoreInstance;
   } catch {
-    return admin.firestore(app);
+    try {
+      const fs = admin.firestore(app);
+      try {
+        fs.settings({ ignoreUndefinedProperties: true });
+      } catch {
+        // Settings can only be set once
+      }
+      adminFirestoreInstance = fs;
+      return adminFirestoreInstance;
+    } catch {
+      return null;
+    }
   }
 }
 

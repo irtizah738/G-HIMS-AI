@@ -1,16 +1,8 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { app, db, auth } from '@/lib/firebase/client';
 import firebaseConfig from '@/firebase-applet-config.json';
+import { doc, getDoc } from 'firebase/firestore';
 
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-
-/* CRITICAL: Multi-tenant and default database support */
-const customDbId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
-export const db = customDbId && customDbId !== '(default)'
-  ? getFirestore(app, customDbId)
-  : getFirestore(app);
-export const auth = getAuth(app);
+export { app, db, auth };
 
 /**
  * Utility to strip undefined properties recursively from objects before writing to Firestore.
@@ -35,11 +27,11 @@ export function cleanFirestoreData<T>(obj: T): T {
   return result as T;
 }
 
-// Connectivity check test
+// Graceful connectivity test helper
 export async function testConnection() {
   if (typeof window === 'undefined') return;
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    await getDoc(doc(db, 'test', 'connection'));
   } catch (error) {
     if (error instanceof Error) {
       if (
@@ -47,16 +39,12 @@ export async function testConnection() {
         error.message.includes('unavailable') ||
         (error as any).code === 'unavailable'
       ) {
-        // Expected behavior during initial cold start or offline sandbox mode; client operates in offline mode.
+        // Expected behavior in offline / sandbox mode
         return;
       }
       console.warn('Firestore connection check:', error.message);
     }
   }
-}
-
-if (typeof window !== 'undefined') {
-  testConnection().catch(() => {});
 }
 
 export default app;

@@ -29,7 +29,7 @@ export async function logAuthEvent(params: RecordAuthAuditParams): Promise<AuthA
   const eventId = `audit_${Date.now().toString(36)}_${crypto.randomBytes(6).toString('hex')}`;
 
   // Sanitize metadata
-  const sanitizedMeta = { ...params.metadata };
+  const sanitizedMeta = { ...(params.metadata || {}) };
   delete sanitizedMeta.password;
   delete sanitizedMeta.token;
   delete sanitizedMeta.idToken;
@@ -37,17 +37,17 @@ export async function logAuthEvent(params: RecordAuthAuditParams): Promise<AuthA
   const auditRecord: AuthAuditEvent = {
     id: eventId,
     eventType: params.eventType,
-    userId: params.userId,
-    userEmail: params.userEmail,
+    userId: params.userId ?? null,
+    userEmail: params.userEmail ?? null,
     tenantId: params.tenantId || 'central-metro-hospital',
-    sessionId: params.sessionId,
-    deviceId: params.deviceId,
+    sessionId: params.sessionId ?? null,
+    deviceId: params.deviceId ?? null,
     requestId: params.requestId || `req_${Date.now().toString(36)}`,
     correlationId: params.correlationId || `corr_${Date.now().toString(36)}`,
     timestamp: now,
-    ipHash: hashString(params.ip),
-    userAgentHash: hashString(params.userAgent),
-    reason: params.reason,
+    ipHash: params.ip ? hashString(params.ip) : null,
+    userAgentHash: params.userAgent ? hashString(params.userAgent) : null,
+    reason: params.reason ?? null,
     metadata: sanitizedMeta,
   };
 
@@ -74,7 +74,10 @@ export async function logAuthEvent(params: RecordAuthAuditParams): Promise<AuthA
 
     await batch.commit();
   } catch (err) {
-    console.warn('Audit log write notice:', err);
+    // Keep audit service resilient if offline or during provisioning
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn('Audit log write notice:', err instanceof Error ? err.message : String(err));
+    }
   }
 
   return auditRecord;

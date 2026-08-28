@@ -104,17 +104,17 @@ export type AuthAuditEventType =
 export interface AuthAuditEvent {
   id: string;
   eventType: AuthAuditEventType;
-  userId?: string;
-  userEmail?: string;
+  userId?: string | null;
+  userEmail?: string | null;
   tenantId?: string;
-  sessionId?: string;
-  deviceId?: string;
+  sessionId?: string | null;
+  deviceId?: string | null;
   requestId?: string;
   correlationId?: string;
   timestamp: string;
-  ipHash?: string;
-  userAgentHash?: string;
-  reason?: string;
+  ipHash?: string | null;
+  userAgentHash?: string | null;
+  reason?: string | null;
   metadata?: Record<string, unknown>;
 }
 
@@ -135,6 +135,7 @@ export interface AuthorizationContext {
 
 export interface LoginResponsePayload {
   authenticated: boolean;
+  customToken?: string;
   user: {
     uid: string;
     displayName?: string;

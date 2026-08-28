@@ -187,12 +187,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [applyLoginPayload]);
 
+  const userRef = useRef<AuthenticatedUser | null>(null);
+  userRef.current = user;
+
   useEffect(() => {
     refreshAuth();
 
     // Listen to Firebase ID token updates
     const unsubscribe = AuthClient.subscribeToAuthState((firebaseUser) => {
-      if (!firebaseUser && user) {
+      if (!firebaseUser && userRef.current) {
         setUser(null);
         setSession(null);
         setActiveTenant(null);
@@ -204,7 +207,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => unsubscribe();
-  }, [refreshAuth, user]);
+  }, [refreshAuth]);
 
   // Sign In Action
   const signIn = useCallback(

@@ -4,7 +4,9 @@
  */
 
 import {
+  signInWithCustomToken,
   signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
   sendPasswordResetEmail,
   onIdTokenChanged,
@@ -32,7 +34,7 @@ export interface SignInOptions {
 
 export class AuthClient {
   /**
-   * Primary Sign In: Authenticates against Firebase Auth, then establishes server-authoritative session
+   * Primary Sign In: Authenticates against Authoritative Backend, establishes session, and signs into Firebase Client SDK
    */
   public static async signIn(
     email: string,
@@ -40,25 +42,19 @@ export class AuthClient {
     options?: SignInOptions
   ): Promise<LoginResponsePayload> {
     try {
-      // 1. Firebase Authentication credential verification
-      const userCredential = await signInWithEmailAndPassword(auth, email.trim(), pass);
-      const firebaseUser = userCredential.user;
-
-      // 2. Fetch freshly minted ID token
-      const idToken = await firebaseUser.getIdToken(true);
-
-      // 3. Collect device metadata
+      const cleanEmail = email.trim();
       const deviceMeta = generateDeviceMetadata();
 
-      // 4. Authoritative backend session establishment
-      const response = await fetch('/api/auth/session', {
+      // 1. Authoritative Backend Authentication & Identity Synchronization
+      const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${idToken}`,
         },
         body: JSON.stringify({
-          tenantId: options?.tenantId,
+          email: cleanEmail,
+          password: pass,
+          tenantId: options?.tenantId || 'central-metro-hospital',
           device: deviceMeta,
           rememberDevice: options?.rememberDevice ?? true,
         }),
@@ -67,11 +63,9 @@ export class AuthClient {
       const data = await response.json();
 
       if (!response.ok) {
-        // Sign out of Firebase if server-side authorization fails
-        await firebaseSignOut(auth).catch(() => {});
         throw new AuthError({
-          code: data.code || 'AUTHORIZATION_REQUIRED',
-          message: data.error || 'Server authorization failed',
+          code: data.code || 'INVALID_CREDENTIALS',
+          message: data.error || 'Authentication failed',
           statusCode: response.status,
           userMessage: data.userMessage || data.error,
         });
@@ -79,11 +73,20 @@ export class AuthClient {
 
       const loginPayload: LoginResponsePayload = data;
 
-      // 5. Build and cache authenticated session locally for offline resilience
+      // 2. Client SDK Synchronization with Custom Token (if provided)
+      if (loginPayload.customToken) {
+        try {
+          await signInWithCustomToken(auth, loginPayload.customToken);
+        } catch (customTokenErr) {
+          console.warn('Notice: Firebase Client Custom Token sync notice:', customTokenErr);
+        }
+      }
+
+      // 3. Build and cache authenticated session locally for offline resilience
       const authUser: AuthenticatedUser = {
-        uid: firebaseUser.uid,
-        email: firebaseUser.email || email,
-        displayName: firebaseUser.displayName || loginPayload.user.displayName,
+        uid: loginPayload.user.uid,
+        email: loginPayload.user.email,
+        displayName: loginPayload.user.displayName,
         tenantId: loginPayload.tenant.tenantId,
         roles: loginPayload.authorization.roles,
         permissions: loginPayload.authorization.permissions,
@@ -98,7 +101,7 @@ export class AuthClient {
 
       const sessionRecord: UserSessionRecord = {
         sessionId: loginPayload.session.sessionId,
-        userId: firebaseUser.uid,
+        userId: loginPayload.user.uid,
         tenantId: loginPayload.tenant.tenantId,
         deviceId: deviceMeta.deviceId,
         status: 'ACTIVE',

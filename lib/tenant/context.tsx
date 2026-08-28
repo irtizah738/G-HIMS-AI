@@ -202,12 +202,16 @@ export function TenantProvider({ children, initialTenantId }: TenantProviderProp
   }, [tenantId, userTenants]);
 
   // Load / Claim Tenant from Backend
+  const claimedKeyRef = React.useRef<string>('');
+  const userUid = user?.uid;
+
   const refreshTenantClaims = useCallback(async (targetTenantId: string) => {
     if (!user) return;
     try {
       setIsLoading(true);
       setError(null);
-      const token = await user.getIdToken();
+      const token = await user.getIdToken().catch(() => '');
+      if (!token) return;
 
       const res = await fetch('/api/auth/tenant-claim', {
         method: 'POST',
@@ -226,8 +230,6 @@ export function TenantProvider({ children, initialTenantId }: TenantProviderProp
         if (data.role) {
           setRole(data.role as UserRole);
         }
-        // Force refresh ID token to get updated claims
-        await user.getIdToken(true);
       }
     } catch (err: any) {
       console.warn('Tenant claims refresh notice:', err);
@@ -257,12 +259,16 @@ export function TenantProvider({ children, initialTenantId }: TenantProviderProp
     }
   }, [initialTenantId]);
 
-  // Trigger claim when user or tenant changes
+  // Trigger claim when user UID or tenant changes
   useEffect(() => {
-    if (user && tenantId) {
-      refreshTenantClaims(tenantId);
+    if (userUid && tenantId) {
+      const claimKey = `${userUid}:${tenantId}`;
+      if (claimedKeyRef.current !== claimKey) {
+        claimedKeyRef.current = claimKey;
+        refreshTenantClaims(tenantId);
+      }
     }
-  }, [user, tenantId, refreshTenantClaims]);
+  }, [userUid, tenantId, refreshTenantClaims]);
 
   return (
     <TenantContext.Provider

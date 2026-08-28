@@ -25,11 +25,11 @@ import { ModuleReadinessMatrixView } from '@/components/views/module-readiness-m
 import { GoogleSheetsView } from '@/components/views/google-sheets-view';
 import { DiseaseCentricIntakeView } from '@/components/views/disease-centric-intake-view';
 import { AiCopilotDrawer } from '@/components/ai/ai-copilot-drawer';
+import { FloatingCopilotBot } from '@/components/ai/floating-copilot-bot';
 import { CollapsibleSidebar } from '@/components/navigation/collapsible-sidebar';
 import { SyncStatusIndicator } from '@/components/navigation/sync-status-indicator';
 import { CommandPalette } from '@/components/navigation/command-palette';
-import { QuickAccessToolbar } from '@/components/quick-access-toolbar';
-import { ThemeToggle } from '@/components/theme/theme-toggle';
+import { HeaderProfileMenu } from '@/components/auth/header-profile-menu';
 import {
   BedDouble,
   Users,
@@ -99,31 +99,31 @@ export function TenantDashboard() {
   return (
     <div className="min-h-screen bg-slate-100/60 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors">
       {/* Top Main Navigation Bar */}
-      <header className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 sticky top-0 z-30 shadow-xs transition-colors">
-        <div className="w-full px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2 sm:gap-4">
+      <header className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 sticky top-0 z-30 shadow-xs transition-colors">
+        <div className="w-full px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3">
           {/* Left Brand and Mobile Toggle */}
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             {/* Mobile / Tablet Hamburger Drawer Button */}
             <button
               id="btn-mobile-sidebar-toggle"
               onClick={() => setSidebarMobileOpen(!sidebarMobileOpen)}
-              className="lg:hidden min-w-[40px] min-h-[40px] p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 transition-colors flex items-center justify-center cursor-pointer"
+              className="lg:hidden w-9 h-9 p-0 rounded-xl text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 transition-colors flex items-center justify-center cursor-pointer"
               title="Toggle Navigation Menu"
               aria-label="Toggle Navigation Menu"
             >
-              <Menu className="w-5 h-5" />
+              <Menu className="w-4 h-4" />
             </button>
 
             {/* Logo and Brand */}
             <div
               onClick={() => setActiveTab('command')}
-              className="flex items-center gap-2 sm:gap-2.5 cursor-pointer select-none"
+              className="flex items-center gap-2.5 cursor-pointer select-none group"
             >
-              <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold shadow-2xs shrink-0">
+              <div className="w-8 h-8 rounded-xl bg-blue-600 group-hover:bg-blue-500 text-white flex items-center justify-center font-bold shadow-xs transition-colors shrink-0">
                 <HeartPulse className="w-4 h-4" />
               </div>
               <div className="flex items-center gap-2">
-                <span className="font-bold text-slate-900 dark:text-slate-100 text-sm leading-none">G-HIMS</span>
+                <span className="font-extrabold text-slate-900 dark:text-slate-100 text-sm tracking-tight">G-HIMS</span>
                 <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium hidden sm:inline border-l border-slate-200 dark:border-slate-700 pl-2">
                   Metropolitan Health
                 </span>
@@ -132,29 +132,29 @@ export function TenantDashboard() {
           </div>
 
           {/* Center Universal Search Bar - Tablet & Desktop */}
-          <div className="flex-1 max-w-md mx-2 lg:mx-4 hidden md:block">
+          <div className="flex-1 max-w-md mx-2 lg:mx-6 hidden md:block">
             <button
               id="btn-global-command-search"
               onClick={() => setCommandPaletteOpen(true)}
-              className="w-full h-9 px-3 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200/80 dark:hover:bg-slate-750 text-slate-500 dark:text-slate-400 border border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between text-xs transition-colors cursor-pointer"
+              className="w-full h-9 px-3 rounded-xl bg-slate-100/90 dark:bg-slate-800/90 hover:bg-slate-200/70 dark:hover:bg-slate-750 text-slate-500 dark:text-slate-400 border border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between text-xs transition-all cursor-pointer shadow-2xs group"
             >
               <span className="flex items-center gap-2">
-                <Search className="w-3.5 h-3.5 text-slate-400" />
+                <Search className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-500 transition-colors" />
                 <span className="truncate">Search commands, patients, modules...</span>
               </span>
-              <kbd className="hidden lg:inline-block px-1.5 py-0.5 rounded bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-[10px] font-mono text-slate-400">
+              <kbd className="hidden lg:inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-[10px] font-mono text-slate-400">
                 ⌘K
               </kbd>
             </button>
           </div>
 
-          {/* Right Action Tools: Theme, Sync, Auth & AI Copilot */}
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* Right Action Tools: Sync Status & Sign In / Profile Menu */}
+          <div className="flex items-center gap-2 shrink-0">
             {/* Mobile Search Button */}
             <button
               id="btn-mobile-command-search"
               onClick={() => setCommandPaletteOpen(true)}
-              className="md:hidden min-w-[36px] min-h-[36px] p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 transition-colors flex items-center justify-center cursor-pointer"
+              className="md:hidden w-9 h-9 p-0 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 transition-colors flex items-center justify-center cursor-pointer"
               title="Search (⌘K)"
               aria-label="Search commands and patients"
             >
@@ -164,60 +164,8 @@ export function TenantDashboard() {
             {/* Global Dual-Engine Sync Status */}
             <SyncStatusIndicator />
 
-            {/* Theme Toggle */}
-            <ThemeToggle variant="button" />
-
-            {/* Firebase Auth / Staff Login */}
-            {user ? (
-              <div className="flex items-center gap-1.5 sm:gap-2 bg-slate-50 dark:bg-slate-800 border border-slate-200/90 dark:border-slate-700 rounded-lg px-2 sm:px-2.5 py-1 text-xs h-9">
-                {user.photoURL ? (
-                  <Image
-                    src={user.photoURL}
-                    alt={user.displayName || 'User'}
-                    width={18}
-                    height={18}
-                    referrerPolicy="no-referrer"
-                    className="w-5 h-5 rounded-full object-cover shrink-0"
-                  />
-                ) : (
-                  <div className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
-                    {(user.displayName || user.email || 'U').charAt(0).toUpperCase()}
-                  </div>
-                )}
-                <span className="hidden md:inline font-semibold text-slate-800 dark:text-slate-200 text-xs max-w-[90px] truncate">
-                  {user.displayName || user.email?.split('@')[0]}
-                </span>
-                <button
-                  id="btn-firebase-signout"
-                  onClick={() => signOut()}
-                  className="text-[11px] text-slate-400 hover:text-rose-600 font-medium ml-0.5 sm:ml-1 transition-colors cursor-pointer"
-                  title="Sign out"
-                >
-                  Logout
-                </button>
-              </div>
-            ) : (
-              <Link
-                href="/login"
-                id="btn-staff-login-portal"
-                className="h-9 px-2.5 sm:px-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
-                title="Staff Login Portal"
-              >
-                <KeyRound className="w-3.5 h-3.5" />
-                <span className="hidden xs:inline sm:inline">Login</span>
-              </Link>
-            )}
-
-            {/* AI Copilot Button */}
-            <button
-              id="btn-toggle-ai-copilot"
-              onClick={() => setCopilotOpen(!copilotOpen)}
-              className="h-9 px-2.5 sm:px-3 rounded-lg bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white font-semibold text-xs flex items-center gap-1.5 border border-slate-700 dark:border-slate-700 transition-colors cursor-pointer shrink-0 shadow-2xs"
-              title="Toggle AI Copilot (⌘J)"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden sm:inline">AI Copilot</span>
-            </button>
+            {/* Unified Staff Profile & Sign In Dropdown Menu */}
+            <HeaderProfileMenu tenantId="central-metro-hospital" />
           </div>
         </div>
       </header>
@@ -262,9 +210,6 @@ export function TenantDashboard() {
         </main>
       </div>
 
-      {/* Floating Quick Action Toolbar & Modals */}
-      <QuickAccessToolbar />
-
       {/* Universal Command Palette (⌘K) */}
       <CommandPalette
         isOpen={commandPaletteOpen}
@@ -273,6 +218,12 @@ export function TenantDashboard() {
 
       {/* AI Clinical Copilot & Scribe Drawer */}
       <AiCopilotDrawer />
+
+      {/* Floating Bottom-Right AI Copilot Bot Trigger */}
+      <FloatingCopilotBot
+        isOpen={copilotOpen}
+        onToggle={() => setCopilotOpen(!copilotOpen)}
+      />
     </div>
   );
 }

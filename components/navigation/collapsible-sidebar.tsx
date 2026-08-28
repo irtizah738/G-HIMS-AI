@@ -1,7 +1,12 @@
 'use client';
 
 import React, { useState } from 'react';
+import Image from 'next/image';
 import { useHospital } from '@/lib/context/hospital-context';
+import { useAuth } from '@/lib/firebase/auth-context';
+import { useTenant } from '@/lib/tenant/context';
+import { useRBAC } from '@/lib/auth/rbac-context';
+import { ThemeToggle } from '@/components/theme/theme-toggle';
 import { useRouter } from 'next/navigation';
 import {
   TrendingUp,
@@ -38,6 +43,7 @@ import {
   Banknote,
   GitFork,
   FileSpreadsheet,
+  User,
 } from 'lucide-react';
 
 interface CollapsibleSidebarProps {
@@ -54,7 +60,21 @@ export function CollapsibleSidebar({
   setMobileOpen,
 }: CollapsibleSidebarProps) {
   const { activeTab, setActiveTab, stats, mismatches, patients, beds, opdQueue } = useHospital();
+  const { user } = useAuth();
+  const { role: tenantRole } = useTenant();
+
+  let rbac: ReturnType<typeof useRBAC> | null = null;
+  try {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    rbac = useRBAC();
+  } catch {
+    rbac = null;
+  }
+
   const [searchTerm, setSearchTerm] = useState('');
+
+  const displayName = user?.displayName || user?.email?.split('@')[0] || 'Dr. Sarah Jenkins';
+  const designation = rbac?.roleDefinition?.displayName || tenantRole || 'Lead Physician (Cardiology)';
 
   const pendingLeakageCount = mismatches.filter((m) => m.status === 'pending_review').length;
   const occupiedBedsCount = beds.filter((b) => b.status === 'occupied').length;
@@ -313,7 +333,7 @@ export function CollapsibleSidebar({
         </div>
 
         {/* Scrollable Navigation List */}
-        <div className="flex-1 overflow-y-auto px-2 py-3 space-y-4 custom-scrollbar pb-12 lg:pb-4">
+        <div className="flex-1 overflow-y-auto px-2 py-3 space-y-4 custom-scrollbar">
           {filteredSections.map((section, idx) => (
             <div key={section.title || idx} className="space-y-1">
               {!isCollapsed && (
@@ -368,6 +388,76 @@ export function CollapsibleSidebar({
               </div>
             </div>
           ))}
+        </div>
+
+        {/* User Name, Designation & Day/Night Mode Switcher Footer */}
+        <div className="border-t border-slate-200/80 dark:border-slate-800 p-2 bg-slate-50/90 dark:bg-slate-900/90 backdrop-blur-xs mt-auto shrink-0">
+          {!isCollapsed ? (
+            <div className="flex items-center justify-between gap-2 p-1.5 rounded-xl bg-white dark:bg-slate-850 border border-slate-200/80 dark:border-slate-750 shadow-2xs">
+              {/* User Avatar + Name + Designation */}
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <div className="relative shrink-0">
+                  {user?.photoURL ? (
+                    <Image
+                      src={user.photoURL}
+                      alt={displayName}
+                      width={30}
+                      height={30}
+                      referrerPolicy="no-referrer"
+                      className="w-7 h-7 rounded-full object-cover border border-slate-300 dark:border-slate-600 shadow-2xs"
+                    />
+                  ) : (
+                    <div className="w-7 h-7 rounded-full bg-linear-to-tr from-blue-600 to-indigo-600 text-white font-bold text-[11px] flex items-center justify-center shadow-2xs">
+                      {displayName.charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                </div>
+
+                <div className="min-w-0 flex-1 text-left">
+                  <p className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate leading-tight">
+                    {displayName}
+                  </p>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate capitalize leading-tight mt-0.5">
+                    {designation}
+                  </p>
+                </div>
+              </div>
+
+              {/* Day / Night Mode Button next to User */}
+              <div className="shrink-0 pl-1 border-l border-slate-100 dark:border-slate-800">
+                <ThemeToggle variant="button" />
+              </div>
+            </div>
+          ) : (
+            /* Collapsed State: Stacked Avatar & Theme Toggle */
+            <div className="flex flex-col items-center gap-2 p-0.5">
+              <div className="relative group cursor-pointer" title={`${displayName} (${designation})`}>
+                {user?.photoURL ? (
+                  <Image
+                    src={user.photoURL}
+                    alt={displayName}
+                    width={28}
+                    height={28}
+                    referrerPolicy="no-referrer"
+                    className="w-7 h-7 rounded-full object-cover border border-slate-300 dark:border-slate-600 shadow-2xs"
+                  />
+                ) : (
+                  <div className="w-7 h-7 rounded-full bg-linear-to-tr from-blue-600 to-indigo-600 text-white font-bold text-[11px] flex items-center justify-center shadow-2xs">
+                    {displayName.charAt(0).toUpperCase()}
+                  </div>
+                )}
+
+                {/* Floating Tooltip on Hover */}
+                <div className="absolute left-full ml-2 px-2.5 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-800 text-white text-xs font-semibold whitespace-nowrap shadow-xl border border-slate-700 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+                  <p className="font-bold">{displayName}</p>
+                  <p className="text-[10px] text-slate-400 font-normal">{designation}</p>
+                </div>
+              </div>
+
+              {/* Theme Toggle Button */}
+              <ThemeToggle variant="button" />
+            </div>
+          )}
         </div>
       </aside>
     </>

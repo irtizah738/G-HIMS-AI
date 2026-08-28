@@ -33,6 +33,8 @@ const DEFAULT_TENANTS = [
   },
 ];
 
+const inMemoryMembershipStore = new Map<string, TenantMembership>();
+
 export async function getTenantMembership(
   tenantId: string,
   userId: string,
@@ -41,10 +43,16 @@ export async function getTenantMembership(
 ): Promise<TenantMembership> {
   const db = getAdminFirestore();
   const normalizedTenantId = tenantId.trim().toLowerCase();
+  const cacheKey = `${normalizedTenantId}:${userId}`;
 
   if (!db) {
     // In-memory fallback if Firestore is not accessible in dev test
-    return createDefaultMembership(normalizedTenantId, userId, userEmail, userName);
+    if (inMemoryMembershipStore.has(cacheKey)) {
+      return inMemoryMembershipStore.get(cacheKey)!;
+    }
+    const defaultM = createDefaultMembership(normalizedTenantId, userId, userEmail, userName);
+    inMemoryMembershipStore.set(cacheKey, defaultM);
+    return defaultM;
   }
 
   try {
@@ -63,7 +71,7 @@ export async function getTenantMembership(
         ? data.clinicalPrivileges
         : deriveClinicalPrivileges(roles);
 
-      return {
+      const mem: TenantMembership = {
         userId,
         tenantId: normalizedTenantId,
         tenantName: data.tenantName || getTenantDisplayName(normalizedTenantId),
@@ -79,10 +87,14 @@ export async function getTenantMembership(
         createdAt: data.createdAt || new Date().toISOString(),
         updatedAt: data.updatedAt || new Date().toISOString(),
       };
+      inMemoryMembershipStore.set(cacheKey, mem);
+      return mem;
     }
 
     // Auto-register membership for verified user on first login if tenant exists or is default
     const newMembership = createDefaultMembership(normalizedTenantId, userId, userEmail, userName);
+    inMemoryMembershipStore.set(cacheKey, newMembership);
+
     try {
       await userDocRef.set({
         userId: newMembership.userId,
@@ -102,14 +114,18 @@ export async function getTenantMembership(
         createdAt: newMembership.createdAt,
         updatedAt: newMembership.updatedAt,
       }, { merge: true });
-    } catch (writeErr) {
-      console.warn('Tenant user bootstrap document write notice:', writeErr);
+    } catch {
+      // In-memory cache is already saved
     }
 
     return newMembership;
-  } catch (err: any) {
-    console.error('Error fetching tenant membership:', err);
-    return createDefaultMembership(normalizedTenantId, userId, userEmail, userName);
+  } catch {
+    if (inMemoryMembershipStore.has(cacheKey)) {
+      return inMemoryMembershipStore.get(cacheKey)!;
+    }
+    const defaultM = createDefaultMembership(normalizedTenantId, userId, userEmail, userName);
+    inMemoryMembershipStore.set(cacheKey, defaultM);
+    return defaultM;
   }
 }
 

@@ -23,10 +23,11 @@ export const app: FirebaseApp = !getApps().length
 export const auth: Auth = getAuth(app);
 
 // Firestore Instance with multi-tenant custom database ID support
-export const db: Firestore = getFirestore(
-  app,
-  process.env.NEXT_PUBLIC_FIRESTORE_DATABASE_ID || (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId || '(default)'
-);
+const customDbId = process.env.NEXT_PUBLIC_FIRESTORE_DATABASE_ID || (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
+
+export const db: Firestore = customDbId && customDbId !== '(default)'
+  ? getFirestore(app, customDbId)
+  : getFirestore(app);
 
 // Analytics Instance (Safe SSR / Browser verification)
 let analyticsInstance: Analytics | null = null;

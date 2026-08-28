@@ -11,6 +11,9 @@ import crypto from 'crypto';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 Hours TTL
 const INACTIVITY_LIMIT_MS = 60 * 60 * 1000; // 1 Hour Inactivity Limit
 
+// In-memory fallback session store for container sandboxes and disconnected states
+const inMemorySessionStore = new Map<string, UserSessionRecord>();
+
 export function hashString(value?: string): string {
   if (!value) return '';
   return crypto.createHash('sha256').update(value).digest('hex').substring(0, 32);
@@ -45,6 +48,9 @@ export async function createSession(params: CreateSessionParams): Promise<UserSe
     userAgentHash: hashString(params.userAgent),
   };
 
+  // Cache in-memory
+  inMemorySessionStore.set(`${params.tenantId}:${sessionId}`, sessionRecord);
+
   if (db) {
     try {
       await db
@@ -53,8 +59,8 @@ export async function createSession(params: CreateSessionParams): Promise<UserSe
         .collection('sessions')
         .doc(sessionId)
         .set(sessionRecord);
-    } catch (err) {
-      console.warn('Session Firestore persistence notice:', err);
+    } catch {
+      // Graceful fallback to memory store
     }
   }
 
@@ -66,21 +72,13 @@ export async function validateSession(
   sessionId: string,
   userId: string
 ): Promise<UserSessionRecord> {
+  const cacheKey = `${tenantId}:${sessionId}`;
+  const cached = inMemorySessionStore.get(cacheKey);
   const db = getAdminFirestore();
 
   if (!db) {
-    // Development in-memory fallback
-    return {
-      sessionId,
-      userId,
-      tenantId,
-      status: 'ACTIVE',
-      createdAt: new Date().toISOString(),
-      lastSeenAt: new Date().toISOString(),
-      authenticatedAt: new Date().toISOString(),
-      lastActivityAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + SESSION_TTL_MS).toISOString(),
-    };
+    if (cached) return cached;
+    return createSession({ userId, tenantId });
   }
 
   try {
@@ -88,7 +86,7 @@ export async function validateSession(
     const docSnap = await sessionDocRef.get();
 
     if (!docSnap.exists) {
-      // Create session if valid user token matches
+      if (cached) return cached;
       return createSession({ userId, tenantId });
     }
 
@@ -141,9 +139,11 @@ export async function validateSession(
       lastActivityAt: new Date().toISOString(),
     }).catch(() => {});
 
+    inMemorySessionStore.set(cacheKey, sessionData);
     return sessionData;
   } catch (err: any) {
     if (err instanceof AuthError) throw err;
+    if (cached) return cached;
     return createSession({ userId, tenantId });
   }
 }

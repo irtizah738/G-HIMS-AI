@@ -52,18 +52,21 @@ export function SyncStatusIndicator() {
       <button
         id="btn-global-sync-status"
         onClick={() => setIsOpen(!isOpen)}
-        className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer select-none shadow-2xs ${
+        className={`h-9 flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 rounded-xl border text-xs font-semibold transition-all cursor-pointer select-none shadow-2xs ${
           syncState === 'connected'
             ? 'bg-emerald-50/80 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border-emerald-200/90 dark:border-emerald-800'
             : syncState === 'syncing'
             ? 'bg-blue-50/80 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-950/60 text-blue-800 dark:text-blue-300 border-blue-200/90 dark:border-blue-800 animate-pulse'
             : 'bg-amber-50/90 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-950/60 text-amber-900 dark:text-amber-300 border-amber-200/90 dark:border-amber-800'
         }`}
-        title="Dual-Engine Sync Architecture Status"
+        title="Dual-Engine Sync Architecture Status (Click to inspect)"
       >
-        <span className="relative flex h-2.5 w-2.5 items-center justify-center">
+        <span className="relative flex h-2 w-2 items-center justify-center shrink-0">
           {syncState === 'connected' && (
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            <>
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </>
           )}
           {syncState === 'syncing' && (
             <RefreshCw className="w-2.5 h-2.5 text-blue-600 dark:text-blue-400 animate-spin" />
@@ -73,18 +76,14 @@ export function SyncStatusIndicator() {
           )}
         </span>
 
-        <span className="hidden sm:inline">
-          {syncState === 'connected' && 'Dual Edge: Connected'}
-          {syncState === 'syncing' && 'Syncing Vector Clocks...'}
-          {syncState === 'offline' && `Offline Edge (${pendingCount} Queued)`}
-        </span>
-        <span className="sm:hidden font-mono">
-          {syncState === 'connected' && 'Online'}
-          {syncState === 'syncing' && 'Syncing'}
-          {syncState === 'offline' && `Off (${pendingCount})`}
+        {/* Clean, short label */}
+        <span className="hidden sm:inline font-medium">
+          {syncState === 'connected' && 'Live Edge'}
+          {syncState === 'syncing' && 'Syncing...'}
+          {syncState === 'offline' && (pendingCount > 0 ? `Offline (${pendingCount})` : 'Offline')}
         </span>
 
-        <ChevronDown className="w-3 h-3 opacity-60 ml-0.5" />
+        <ChevronDown className="w-3 h-3 opacity-60 shrink-0 ml-0.5" />
       </button>
 
       {/* Dropdown Flyout */}

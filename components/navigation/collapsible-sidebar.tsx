@@ -1,11 +1,13 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import Image from 'next/image';
 import { useHospital } from '@/lib/context/hospital-context';
-import { useAuth } from '@/lib/firebase/auth-context';
+import { useAuth as useFirebaseAuth } from '@/lib/firebase/auth-context';
+import { useAuth as useEnterpriseAuth } from '@/lib/auth/auth-context';
 import { useTenant } from '@/lib/tenant/context';
 import { useRBAC } from '@/lib/auth/rbac-context';
+import { normalizeRole } from '@/lib/auth/rbac';
 import { ThemeToggle } from '@/components/theme/theme-toggle';
 import { useRouter } from 'next/navigation';
 import {
@@ -44,7 +46,10 @@ import {
   GitFork,
   FileSpreadsheet,
   User,
+  Settings,
+  UserCheck,
 } from 'lucide-react';
+import { RbacRoleSwitcherModal } from '@/components/auth/rbac-role-switcher';
 
 interface CollapsibleSidebarProps {
   isCollapsed: boolean;
@@ -60,8 +65,17 @@ export function CollapsibleSidebar({
   setMobileOpen,
 }: CollapsibleSidebarProps) {
   const { activeTab, setActiveTab, stats, mismatches, patients, beds, opdQueue } = useHospital();
-  const { user } = useAuth();
+  const { user: firebaseUser } = useFirebaseAuth();
   const { role: tenantRole } = useTenant();
+  const [roleSwitcherOpen, setRoleSwitcherOpen] = useState(false);
+
+  let enterpriseAuth: ReturnType<typeof useEnterpriseAuth> | null = null;
+  try {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    enterpriseAuth = useEnterpriseAuth();
+  } catch {
+    enterpriseAuth = null;
+  }
 
   let rbac: ReturnType<typeof useRBAC> | null = null;
   try {
@@ -73,8 +87,63 @@ export function CollapsibleSidebar({
 
   const [searchTerm, setSearchTerm] = useState('');
 
-  const displayName = user?.displayName || user?.email?.split('@')[0] || 'Dr. Sarah Jenkins';
-  const designation = rbac?.roleDefinition?.displayName || tenantRole || 'Lead Physician (Cardiology)';
+  // Unified identity resolution adhering strictly to G-HIMS authentication and RBAC protocol
+  const activeUser = useMemo(() => {
+    // 1. If user explicitly signed in with Firebase (Google SSO)
+    if (firebaseUser) {
+      return {
+        displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Medical Staff',
+        email: firebaseUser.email || 'user@centralmetro.health',
+        photoURL: firebaseUser.photoURL,
+        role: rbac?.roleDefinition?.displayName || tenantRole || 'Doctor',
+        designation: rbac?.demoPersona?.title || 'Cardiology & Intensive Care',
+      };
+    }
+
+    // 2. If enterprise authenticated staff is logged in
+    if (enterpriseAuth?.user) {
+      if (rbac?.demoPersona && rbac.currentRole !== normalizeRole(enterpriseAuth.roles?.[0])) {
+        return {
+          displayName: rbac.demoPersona.name,
+          email: rbac.demoPersona.email,
+          photoURL: null,
+          role: rbac.roleDefinition.displayName,
+          designation: rbac.demoPersona.title,
+        };
+      }
+
+      return {
+        displayName: enterpriseAuth.user.displayName || 'Dr. Sarah Jenkins, MD',
+        email: enterpriseAuth.user.email,
+        photoURL: null,
+        role: rbac?.roleDefinition?.displayName || enterpriseAuth.roles?.[0] || 'Doctor',
+        designation: rbac?.demoPersona?.title || 'Cardiology & Intensive Care',
+      };
+    }
+
+    // 3. Fallback to active RBAC simulation persona
+    if (rbac?.demoPersona) {
+      return {
+        displayName: rbac.demoPersona.name,
+        email: rbac.demoPersona.email,
+        photoURL: null,
+        role: rbac.roleDefinition.displayName,
+        designation: rbac.demoPersona.title,
+      };
+    }
+
+    // 4. Default baseline clinician persona
+    return {
+      displayName: 'Dr. Sarah Jenkins, MD',
+      email: 's.jenkins@centralmetro.health',
+      photoURL: null,
+      role: 'Doctor',
+      designation: 'Lead Attending Cardiologist',
+    };
+  }, [firebaseUser, enterpriseAuth?.user, enterpriseAuth?.roles, rbac?.demoPersona, rbac?.roleDefinition, rbac?.currentRole, tenantRole]);
+
+  const displayName = activeUser.displayName;
+  const designation = activeUser.designation || rbac?.roleDefinition?.displayName || tenantRole || 'Lead Attending Cardiologist';
 
   const pendingLeakageCount = mismatches.filter((m) => m.status === 'pending_review').length;
   const occupiedBedsCount = beds.filter((b) => b.status === 'occupied').length;
@@ -225,6 +294,51 @@ export function CollapsibleSidebar({
         },
       ],
     },
+    {
+      title: 'System & Governance',
+      items: [
+        {
+          id: 'settings',
+          name: 'Enterprise Settings & Config',
+          shortName: 'Settings',
+          icon: Settings,
+        },
+      ],
+    },
+  ];
+
+  const isPatientRole = rbac?.currentRole === 'patient';
+
+  const patientSections = [
+    {
+      title: 'Patient Healthcare Portal',
+      items: [
+        {
+          id: 'patient-portal',
+          name: 'My Health Record & Portal',
+          shortName: 'My Health',
+          icon: User,
+        },
+        {
+          id: 'telehealth',
+          name: 'Telehealth Consultations',
+          shortName: 'Telehealth',
+          icon: Video,
+        },
+        {
+          id: 'opd',
+          name: 'Appointments & Consultations',
+          shortName: 'Appointments',
+          icon: Stethoscope,
+        },
+        {
+          id: 'billing',
+          name: 'Invoices & Co-Pays',
+          shortName: 'My Invoices',
+          icon: DollarSign,
+        },
+      ],
+    },
   ];
 
   const router = useRouter();
@@ -238,14 +352,25 @@ export function CollapsibleSidebar({
     if (mobileOpen) setMobileOpen(false);
   };
 
-  const filteredSections = navigationSections.map((section) => ({
-    ...section,
-    items: section.items.filter(
-      (item) =>
-        item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.shortName.toLowerCase().includes(searchTerm.toLowerCase())
-    ),
-  })).filter((section) => section.items.length > 0);
+  const activeSections = isPatientRole ? patientSections : navigationSections;
+
+  const filteredSections = activeSections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => {
+        // RBAC Authorization Gate
+        const allowedByRbac = rbac ? rbac.canAccessModule(item.id) : true;
+        if (!allowedByRbac) return false;
+
+        // Search text filter
+        if (!searchTerm) return true;
+        return (
+          item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          item.shortName.toLowerCase().includes(searchTerm.toLowerCase())
+        );
+      }),
+    }))
+    .filter((section) => section.items.length > 0);
 
   return (
     <>
@@ -394,12 +519,17 @@ export function CollapsibleSidebar({
         <div className="border-t border-slate-200/80 dark:border-slate-800 p-2 bg-slate-50/90 dark:bg-slate-900/90 backdrop-blur-xs mt-auto shrink-0">
           {!isCollapsed ? (
             <div className="flex items-center justify-between gap-2 p-1.5 rounded-xl bg-white dark:bg-slate-850 border border-slate-200/80 dark:border-slate-750 shadow-2xs">
-              {/* User Avatar + Name + Designation */}
-              <div className="flex items-center gap-2 min-w-0 flex-1">
+              {/* User Avatar + Name + Designation (Click to switch demo role) */}
+              <div
+                id="btn-sidebar-user-role-badge"
+                onClick={() => setRoleSwitcherOpen(true)}
+                className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer group hover:bg-slate-50 dark:hover:bg-slate-800 p-1 rounded-lg transition-colors"
+                title="Click to Switch Demo Role / Persona"
+              >
                 <div className="relative shrink-0">
-                  {user?.photoURL ? (
+                  {activeUser.photoURL ? (
                     <Image
-                      src={user.photoURL}
+                      src={activeUser.photoURL}
                       alt={displayName}
                       width={30}
                       height={30}
@@ -411,30 +541,70 @@ export function CollapsibleSidebar({
                       {displayName.charAt(0).toUpperCase()}
                     </div>
                   )}
+                  <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-slate-900" />
                 </div>
 
                 <div className="min-w-0 flex-1 text-left">
-                  <p className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate leading-tight">
-                    {displayName}
-                  </p>
+                  <div className="flex items-center gap-1">
+                    <p className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate leading-tight group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                      {displayName}
+                    </p>
+                    <UserCheck className="w-3 h-3 text-slate-400 group-hover:text-blue-500 shrink-0" />
+                  </div>
                   <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate capitalize leading-tight mt-0.5">
                     {designation}
                   </p>
                 </div>
               </div>
 
-              {/* Day / Night Mode Button next to User */}
-              <div className="shrink-0 pl-1 border-l border-slate-100 dark:border-slate-800">
+              {/* Settings & Day / Night Mode Buttons */}
+              <div className="shrink-0 flex items-center gap-1 pl-1 border-l border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  id="btn-sidebar-footer-settings"
+                  onClick={() => {
+                    setActiveTab('settings');
+                    if (mobileOpen) setMobileOpen(false);
+                  }}
+                  className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
+                    activeTab === 'settings'
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                  title="Enterprise Settings"
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                </button>
                 <ThemeToggle variant="button" />
               </div>
             </div>
           ) : (
-            /* Collapsed State: Stacked Avatar & Theme Toggle */
+            /* Collapsed State: Stacked Avatar & Settings & Theme Toggle */
             <div className="flex flex-col items-center gap-2 p-0.5">
-              <div className="relative group cursor-pointer" title={`${displayName} (${designation})`}>
-                {user?.photoURL ? (
+              <button
+                type="button"
+                id="btn-sidebar-collapsed-settings"
+                onClick={() => {
+                  setActiveTab('settings');
+                  if (mobileOpen) setMobileOpen(false);
+                }}
+                className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
+                  activeTab === 'settings'
+                    ? 'bg-blue-600 text-white border-blue-600'
+                    : 'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+                title="Enterprise Settings"
+              >
+                <Settings className="w-3.5 h-3.5" />
+              </button>
+              <div
+                onClick={() => setRoleSwitcherOpen(true)}
+                className="relative group cursor-pointer"
+                title={`Active: ${displayName} (${designation}) - Click to Switch Role`}
+              >
+                {activeUser.photoURL ? (
                   <Image
-                    src={user.photoURL}
+                    src={activeUser.photoURL}
                     alt={displayName}
                     width={28}
                     height={28}
@@ -450,7 +620,7 @@ export function CollapsibleSidebar({
                 {/* Floating Tooltip on Hover */}
                 <div className="absolute left-full ml-2 px-2.5 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-800 text-white text-xs font-semibold whitespace-nowrap shadow-xl border border-slate-700 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
                   <p className="font-bold">{displayName}</p>
-                  <p className="text-[10px] text-slate-400 font-normal">{designation}</p>
+                  <p className="text-[10px] text-slate-400 font-normal">{designation} • Click to switch</p>
                 </div>
               </div>
 
@@ -460,6 +630,12 @@ export function CollapsibleSidebar({
           )}
         </div>
       </aside>
+
+      {/* RBAC Role Switcher Modal */}
+      <RbacRoleSwitcherModal
+        isOpen={roleSwitcherOpen}
+        onClose={() => setRoleSwitcherOpen(false)}
+      />
     </>
   );
 }

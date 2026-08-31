@@ -38,6 +38,7 @@ import {
   FileSpreadsheet,
   GitFork,
   HeartPulse,
+  Settings,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -56,9 +57,12 @@ interface ModuleItem {
 }
 
 import { useRouter } from 'next/navigation';
+import { useRBAC } from '@/lib/auth/rbac-context';
+import { Lock, Unlock } from 'lucide-react';
 
 export function AllModulesDirectory() {
   const { setActiveTab, stats, mismatches, beds, staff, patients } = useHospital();
+  const { currentRole, canAccessModule, roleDefinition } = useRBAC();
   const router = useRouter();
   const [searchFilter, setSearchFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('All');
@@ -405,6 +409,17 @@ export function AllModulesDirectory() {
       primaryMetricLabel: 'Batch Export',
       directHref: '/metro-health/billing/claims',
     },
+    {
+      id: 'settings',
+      name: 'Enterprise Settings, Security & Governance',
+      category: 'Strategy & Governance',
+      badge: 'HIPAA §164.312',
+      description: 'Clinician profiles, workstation timeouts, emergency break-glass overrides, FHIR R4 interoperability keys, and alert channels.',
+      icon: Settings,
+      accentColor: 'text-slate-700 bg-slate-100 border-slate-300 dark:text-slate-200 dark:bg-slate-800 dark:border-slate-700',
+      primaryMetric: '6 Domains',
+      primaryMetricLabel: 'Security & Config',
+    },
   ];
 
   const categories = [
@@ -480,6 +495,8 @@ export function AllModulesDirectory() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {filteredModules.map((m) => {
           const Icon = m.icon;
+          const isAllowed = canAccessModule(m.id);
+
           return (
             <div
               key={m.id}
@@ -490,7 +507,11 @@ export function AllModulesDirectory() {
                   setActiveTab(m.id);
                 }
               }}
-              className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs hover:shadow-md hover:border-blue-400 dark:hover:border-blue-600 transition-all cursor-pointer flex flex-col justify-between group space-y-4"
+              className={`bg-white dark:bg-slate-900 p-5 rounded-2xl border ${
+                isAllowed
+                  ? 'border-slate-200/80 dark:border-slate-800 hover:border-blue-400 dark:hover:border-blue-600'
+                  : 'border-amber-200/60 dark:border-amber-900/40 opacity-75 hover:opacity-100 hover:border-amber-400'
+              } shadow-xs hover:shadow-md transition-all cursor-pointer flex flex-col justify-between group space-y-4`}
             >
               <div className="space-y-3">
                 <div className="flex items-start justify-between">
@@ -498,14 +519,20 @@ export function AllModulesDirectory() {
                     <Icon className="w-5 h-5" />
                   </div>
                   <div className="flex items-center gap-1.5">
+                    {isAllowed ? (
+                      <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 flex items-center gap-1">
+                        <Unlock className="w-2.5 h-2.5" /> Authorized
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 flex items-center gap-1">
+                        <Lock className="w-2.5 h-2.5" /> Restricted ({roleDefinition.displayName})
+                      </span>
+                    )}
                     {m.isAiEnhanced && (
                       <span className="px-2 py-0.5 rounded text-[9px] font-black bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/60 dark:to-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 flex items-center gap-1">
                         <Sparkles className="w-2.5 h-2.5 text-amber-500" /> AI-Ready
                       </span>
                     )}
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                      {m.badge}
-                    </span>
                   </div>
                 </div>
 
@@ -528,8 +555,10 @@ export function AllModulesDirectory() {
                   <span className="text-xs font-black text-slate-800 dark:text-slate-200">{m.primaryMetric}</span>
                 </div>
 
-                <div className="flex items-center gap-1 text-xs font-bold text-blue-600 dark:text-blue-400 group-hover:translate-x-0.5 transition-transform">
-                  Launch Module <ArrowRight className="w-3.5 h-3.5" />
+                <div className={`flex items-center gap-1 text-xs font-bold ${
+                  isAllowed ? 'text-blue-600 dark:text-blue-400' : 'text-amber-600 dark:text-amber-400'
+                } group-hover:translate-x-0.5 transition-transform`}>
+                  {isAllowed ? 'Launch Module' : 'Gate Required'} <ArrowRight className="w-3.5 h-3.5" />
                 </div>
               </div>
             </div>

@@ -35,7 +35,12 @@ import {
   CornerDownLeft,
   X,
   FileSpreadsheet,
+  Settings,
+  User,
+  UserCheck,
 } from 'lucide-react';
+import { useRBAC } from '@/lib/auth/rbac-context';
+import { RoleId } from '@/types/rbac';
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -54,13 +59,24 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
     mismatches,
   } = useHospital();
   const { theme, setTheme } = useTheme();
+  const { currentRole, setRole, canAccessModule, activePatientId, roleDefinition, allRoles } = useRBAC();
   const [search, setSearch] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Navigation options
-  const navigationItems = useMemo(
+  // Raw Navigation options
+  const allNavigationItems = useMemo(
     () => [
+      {
+        id: 'patient-portal',
+        title: 'My Patient Health Record, Lab Reports & Prescriptions',
+        category: 'Patient Services',
+        icon: User,
+        action: () => {
+          setActiveTab('patient-portal');
+          onClose();
+        },
+      },
       {
         id: 'command',
         title: 'Hospital Management & Executive KPI',
@@ -251,13 +267,28 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
           onClose();
         },
       },
+      {
+        id: 'settings',
+        title: 'Enterprise Settings, HIPAA Security, Profile & API Integrations',
+        category: 'Human Capital & Governance',
+        icon: Settings,
+        action: () => {
+          setActiveTab('settings');
+          onClose();
+        },
+      },
     ],
     [setActiveTab, onClose]
   );
 
-  // Quick Action options
-  const actionItems = useMemo(
-    () => [
+  // Filter navigation items strictly by RBAC policy
+  const navigationItems = useMemo(() => {
+    return allNavigationItems.filter((item) => canAccessModule(item.id));
+  }, [allNavigationItems, canAccessModule]);
+
+  // Quick Action options filtered by role capability
+  const actionItems = useMemo(() => {
+    const actions = [
       {
         id: 'act-ai-copilot',
         title: 'Toggle AI Clinical Copilot & Ambient Scribe',
@@ -278,7 +309,11 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
           onClose();
         },
       },
-      {
+    ];
+
+    // Staff/Admin only actions
+    if (currentRole !== 'patient') {
+      actions.push({
         id: 'act-toggle-network',
         title: `Toggle Network Mode (Currently: ${networkMode === 'online' ? 'Online Cloud' : 'Offline Edge'})`,
         category: 'Quick Actions',
@@ -287,8 +322,11 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
           setNetworkMode(networkMode === 'online' ? 'offline' : 'online');
           onClose();
         },
-      },
-      {
+      });
+    }
+
+    if (['administrator', 'billing_clerk'].includes(currentRole)) {
+      actions.push({
         id: 'act-view-mismatches',
         title: `Audit ${mismatches.filter((m) => m.status === 'pending_review').length} Pending Revenue Leakages`,
         category: 'Quick Actions',
@@ -297,31 +335,74 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
           setActiveTab('billing');
           onClose();
         },
-      },
-    ],
-    [copilotOpen, setCopilotOpen, theme, setTheme, networkMode, setNetworkMode, mismatches, setActiveTab, onClose]
-  );
+      });
+    }
 
-  // Patients fast list
-  const patientItems = useMemo(
-    () =>
-      patients.map((p) => ({
-        id: `patient-${p.id}`,
-        title: `${p.fullName} — MRN: ${p.mrn} (${p.age}y ${p.gender}, Bed: ${p.activeBedId || 'Outpatient'})`,
-        category: 'Patients (MPI)',
-        icon: Users,
-        action: () => {
+    return actions;
+  }, [copilotOpen, setCopilotOpen, theme, setTheme, currentRole, networkMode, setNetworkMode, mismatches, setActiveTab, onClose]);
+
+  // Role switching command items for easy simulation
+  const roleSwitchItems = useMemo(() => {
+    return allRoles.map((r) => ({
+      id: `role-switch-${r}`,
+      title: `Switch Session Role to: ${r.charAt(0).toUpperCase() + r.slice(1).replace('_', ' ')}`,
+      category: 'Role Switcher (RBAC Evaluation)',
+      icon: UserCheck,
+      action: () => {
+        setRole(r);
+        if (r === 'patient') {
+          setActiveTab('patient-portal');
+        } else if (r === 'receptionist') {
           setActiveTab('patients');
-          onClose();
+        } else if (r === 'billing_clerk') {
+          setActiveTab('billing');
+        } else if (r === 'nurse') {
+          setActiveTab('beds');
+        } else if (r === 'doctor') {
+          setActiveTab('opd');
+        }
+        onClose();
+      },
+    }));
+  }, [allRoles, setRole, setActiveTab, onClose]);
+
+  // Patients fast list (ABAC filtered for patient role)
+  const patientItems = useMemo(() => {
+    if (currentRole === 'patient') {
+      // In patient mode, ONLY their own record is queryable
+      const ownPatient = patients.find((p) => p.id === (activePatientId || 'p-1001')) || patients[0];
+      if (!ownPatient) return [];
+      return [
+        {
+          id: `patient-${ownPatient.id}`,
+          title: `My Record: ${ownPatient.fullName} — MRN: ${ownPatient.mrn} (${ownPatient.age}y ${ownPatient.gender})`,
+          category: 'My Verified Patient Chart (ABAC)',
+          icon: User,
+          action: () => {
+            setActiveTab('patient-portal');
+            onClose();
+          },
         },
-      })),
-    [patients, setActiveTab, onClose]
-  );
+      ];
+    }
+
+    // Clinical & Admin staff see full MPI
+    return patients.map((p) => ({
+      id: `patient-${p.id}`,
+      title: `${p.fullName} — MRN: ${p.mrn} (${p.age}y ${p.gender}, Bed: ${p.activeBedId || 'Outpatient'})`,
+      category: 'Patients (MPI Directory)',
+      icon: Users,
+      action: () => {
+        setActiveTab('patients');
+        onClose();
+      },
+    }));
+  }, [patients, currentRole, activePatientId, setActiveTab, onClose]);
 
   // Combine and filter
   const allItems = useMemo(() => {
-    return [...actionItems, ...navigationItems, ...patientItems];
-  }, [actionItems, navigationItems, patientItems]);
+    return [...actionItems, ...navigationItems, ...patientItems, ...roleSwitchItems];
+  }, [actionItems, navigationItems, patientItems, roleSwitchItems]);
 
   const filteredItems = useMemo(() => {
     if (!search.trim()) return allItems.slice(0, 14);

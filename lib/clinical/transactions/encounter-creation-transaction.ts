@@ -145,6 +145,7 @@ export class EncounterCreationTransaction {
     } catch (error) {
       console.error('[EncounterCreationTransaction] Batch execution error:', error);
       handleFirestoreError(error, OperationType.WRITE, `tenants/${tenantId}/encounters`);
+      throw error;
     }
   }
 }

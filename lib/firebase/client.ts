@@ -1,8 +1,17 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth } from 'firebase/auth';
-import { getFirestore, Firestore } from 'firebase/firestore';
+import { getFirestore, Firestore, setLogLevel } from 'firebase/firestore';
 import { getAnalytics, isSupported, Analytics } from 'firebase/analytics';
 import firebaseConfig from '@/firebase-applet-config.json';
+
+// Configure Firestore log level to avoid unhandled connection retry logs in development/offline modes
+if (typeof window !== 'undefined') {
+  try {
+    setLogLevel('error');
+  } catch {
+    // Ignore if already set or unsupported
+  }
+}
 
 const clientCredentials = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || firebaseConfig.apiKey,

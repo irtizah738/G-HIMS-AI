@@ -31,9 +31,11 @@ import {
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { PatientConsultantRoutingModal, ConsultantDoctor } from '@/components/clinical/patient-consultant-routing-modal';
+import { useRBAC } from '@/lib/auth/rbac-context';
 
 export function PatientMpiView() {
   const { patients, selectedPatientId, setSelectedPatientId, registerNewPatient, addClinicalNote, addVitals, beds } = useHospital();
+  const { currentRole, hasPermission, activePatientId, roleDefinition } = useRBAC();
   
   const [searchFilter, setSearchFilter] = useState('');
   const [showNewPatientModal, setShowNewPatientModal] = useState(false);
@@ -66,7 +68,12 @@ export function PatientMpiView() {
   const [newAllergies, setNewAllergies] = useState('None');
   const [newConditions, setNewConditions] = useState('None');
 
-  const filteredPatients = patients.filter((p) => {
+  // ABAC patient dataset gating: If user is 'patient', ONLY show their own record
+  const scopedPatients = currentRole === 'patient'
+    ? patients.filter((p) => p.id === (activePatientId || 'p-1001'))
+    : patients;
+
+  const filteredPatients = scopedPatients.filter((p) => {
     const q = searchFilter.toLowerCase();
     return (
       p.fullName.toLowerCase().includes(q) ||
@@ -76,7 +83,7 @@ export function PatientMpiView() {
     );
   });
 
-  const currentPatient = patients.find((p) => p.id === selectedPatientId) || patients[0];
+  const currentPatient = scopedPatients.find((p) => p.id === selectedPatientId) || scopedPatients[0] || patients[0];
   const activeEncounter = currentPatient?.encounters?.[0];
   const assignedBed = beds.find((b) => b.id === currentPatient?.activeBedId);
 

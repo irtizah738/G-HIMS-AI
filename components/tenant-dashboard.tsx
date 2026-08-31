@@ -24,6 +24,11 @@ import { AllModulesDirectory } from '@/components/views/all-modules-directory';
 import { ModuleReadinessMatrixView } from '@/components/views/module-readiness-matrix-view';
 import { GoogleSheetsView } from '@/components/views/google-sheets-view';
 import { DiseaseCentricIntakeView } from '@/components/views/disease-centric-intake-view';
+import { SettingsView } from '@/components/views/settings-view';
+import { PatientPortalView } from '@/components/views/patient-portal-view';
+import { RbacModuleGate } from '@/components/auth/rbac-gate';
+import { RbacRoleSwitcherModal } from '@/components/auth/rbac-role-switcher';
+import { useRBAC } from '@/lib/auth/rbac-context';
 import { AiCopilotDrawer } from '@/components/ai/ai-copilot-drawer';
 import { FloatingCopilotBot } from '@/components/ai/floating-copilot-bot';
 import { CollapsibleSidebar } from '@/components/navigation/collapsible-sidebar';
@@ -60,15 +65,19 @@ import {
   Menu,
   Command,
   Radio,
+  UserCheck,
+  ShieldCheck,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 
 export function TenantDashboard() {
   const { activeTab, setActiveTab, stats, mismatches, copilotOpen, setCopilotOpen, networkMode, patients } = useHospital();
   const { user, signInWithGoogle, signOut, loading: authLoading } = useAuth();
+  const { currentRole, roleDefinition, canAccessModule, setRole } = useRBAC();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [sidebarMobileOpen, setSidebarMobileOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [roleSwitcherOpen, setRoleSwitcherOpen] = useState(false);
 
   // Global Keyboard Shortcuts (Cmd/Ctrl + K, Cmd/Ctrl + J, Cmd/Ctrl + B)
   useEffect(() => {
@@ -148,8 +157,20 @@ export function TenantDashboard() {
             </button>
           </div>
 
-          {/* Right Action Tools: Sync Status & Sign In / Profile Menu */}
+          {/* Right Action Tools: Role Switcher, Sync Status & Sign In / Profile Menu */}
           <div className="flex items-center gap-2 shrink-0">
+            {/* Active Persona / Role Switcher Pill */}
+            <button
+              id="btn-header-active-role-switcher"
+              onClick={() => setRoleSwitcherOpen(true)}
+              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-750 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-bold transition-all cursor-pointer shadow-2xs group"
+              title="Click to Switch Active Role / Persona"
+            >
+              <span className={`w-2 h-2 rounded-full ${roleDefinition.badgeBg.includes('blue') ? 'bg-blue-500' : roleDefinition.badgeBg.includes('teal') ? 'bg-teal-500' : roleDefinition.badgeBg.includes('emerald') ? 'bg-emerald-500' : roleDefinition.badgeBg.includes('indigo') ? 'bg-indigo-500' : 'bg-purple-500'}`} />
+              <span className="truncate max-w-[110px]">{roleDefinition.displayName}</span>
+              <UserCheck className="w-3 h-3 text-slate-400 group-hover:text-blue-500 shrink-0" />
+            </button>
+
             {/* Mobile Search Button */}
             <button
               id="btn-mobile-command-search"
@@ -187,25 +208,107 @@ export function TenantDashboard() {
           } p-3 sm:p-5 lg:p-8 pb-28`}
         >
           <div className="max-w-7xl mx-auto w-full">
-            {activeTab === 'directory' && <AllModulesDirectory />}
-            {activeTab === 'matrix' && <ModuleReadinessMatrixView />}
-            {activeTab === 'workflow-runtime' && <WorkflowRuntimeView />}
-            {activeTab === 'disease-intake' && <DiseaseCentricIntakeView />}
-            {activeTab === 'command' && <CommandHubView />}
-            {activeTab === 'billing' && <BillingErpView />}
-            {activeTab === 'claims' && <ClaimsPreAuthView />}
-            {activeTab === 'opd' && <OpdEncountersView />}
-            {activeTab === 'emergency' && <EmergencyTriageView />}
-            {activeTab === 'beds' && <BedOccupancyView />}
-            {activeTab === 'surgery' && <SurgeryTheaterView />}
-            {activeTab === 'ancillary' && <AncillaryServicesView />}
-            {activeTab === 'bloodbank' && <BloodBankView />}
-            {activeTab === 'telehealth' && <TelehealthView />}
-            {activeTab === 'interop' && <OrdersInteropView />}
-            {activeTab === 'sheets' && <GoogleSheetsView />}
-            {activeTab === 'audit' && <AuditLedgerView />}
-            {activeTab === 'patients' && <PatientMpiView />}
-            {activeTab === 'staff' && <StaffView />}
+            {activeTab === 'patient-portal' && <PatientPortalView />}
+            {activeTab === 'directory' && (
+              <RbacModuleGate moduleId="directory" moduleName="All Modules Directory">
+                <AllModulesDirectory />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'matrix' && (
+              <RbacModuleGate moduleId="matrix" moduleName="Module Readiness Matrix">
+                <ModuleReadinessMatrixView />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'workflow-runtime' && (
+              <RbacModuleGate moduleId="workflow-runtime" moduleName="Clinical Workflow Runtime">
+                <WorkflowRuntimeView />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'disease-intake' && (
+              <RbacModuleGate moduleId="disease-intake" moduleName="Disease Intake Protocols">
+                <DiseaseCentricIntakeView />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'command' && (
+              <RbacModuleGate moduleId="command" moduleName="Executive Command Hub">
+                <CommandHubView />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'billing' && (
+              <RbacModuleGate moduleId="billing" moduleName="Revenue Leakage & ERP Billing">
+                <BillingErpView />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'claims' && (
+              <RbacModuleGate moduleId="claims" moduleName="Claims & Pre-Authorization">
+                <ClaimsPreAuthView />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'opd' && (
+              <RbacModuleGate moduleId="opd" moduleName="OPD Encounters & Consultations">
+                <OpdEncountersView />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'emergency' && (
+              <RbacModuleGate moduleId="emergency" moduleName="Emergency & Trauma (ER)">
+                <EmergencyTriageView />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'beds' && (
+              <RbacModuleGate moduleId="beds" moduleName="Inpatient Bed Occupancy">
+                <BedOccupancyView />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'surgery' && (
+              <RbacModuleGate moduleId="surgery" moduleName="Operating Theater (OT)">
+                <SurgeryTheaterView />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'ancillary' && (
+              <RbacModuleGate moduleId="ancillary" moduleName="LIS Lab & Ancillary Services">
+                <AncillaryServicesView />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'bloodbank' && (
+              <RbacModuleGate moduleId="bloodbank" moduleName="Blood Bank & Transfusion">
+                <BloodBankView />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'telehealth' && (
+              <RbacModuleGate moduleId="telehealth" moduleName="Telehealth & Virtual Care">
+                <TelehealthView />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'interop' && (
+              <RbacModuleGate moduleId="interop" moduleName="HL7 & FHIR R4 Interop Hub">
+                <OrdersInteropView />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'sheets' && (
+              <RbacModuleGate moduleId="sheets" moduleName="Google Sheets Hub">
+                <GoogleSheetsView />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'audit' && (
+              <RbacModuleGate moduleId="audit" moduleName="Audit Ledger & Edge Outbox">
+                <AuditLedgerView />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'patients' && (
+              <RbacModuleGate moduleId="patients" moduleName="Patient Master Index (MPI)">
+                <PatientMpiView />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'staff' && (
+              <RbacModuleGate moduleId="staff" moduleName="Staff Directory & Rosters">
+                <StaffView />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'settings' && (
+              <RbacModuleGate moduleId="settings" moduleName="Enterprise Settings">
+                <SettingsView />
+              </RbacModuleGate>
+            )}
           </div>
         </main>
       </div>
@@ -214,6 +317,12 @@ export function TenantDashboard() {
       <CommandPalette
         isOpen={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
+      />
+
+      {/* RBAC Role Switcher Modal */}
+      <RbacRoleSwitcherModal
+        isOpen={roleSwitcherOpen}
+        onClose={() => setRoleSwitcherOpen(false)}
       />
 
       {/* AI Clinical Copilot & Scribe Drawer */}

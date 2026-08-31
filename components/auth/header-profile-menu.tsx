@@ -1,33 +1,25 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { useAuth } from '@/lib/firebase/auth-context';
+import { useAuth as useFirebaseAuth } from '@/lib/firebase/auth-context';
+import { useAuth as useEnterpriseAuth } from '@/lib/auth/auth-context';
 import { useTenant } from '@/lib/tenant/context';
 import { useRBAC } from '@/lib/auth/rbac-context';
-import { RoleId } from '@/types/rbac';
-import { ROLE_DEFINITIONS } from '@/lib/auth/rbac';
+import { normalizeRole } from '@/lib/auth/rbac';
 import {
   ShieldCheck,
-  Stethoscope,
-  HeartPulse,
-  ClipboardList,
-  DollarSign,
   User,
   ChevronDown,
   LogOut,
-  Layers,
-  FileText,
-  KeyRound,
-  Check,
   Building2,
   Lock,
-  Sparkles,
   LogIn,
   AlertTriangle,
   ArrowRight,
+  Settings,
 } from 'lucide-react';
 
 interface HeaderProfileMenuProps {
@@ -35,7 +27,16 @@ interface HeaderProfileMenuProps {
 }
 
 export function HeaderProfileMenu({ tenantId }: HeaderProfileMenuProps) {
-  const { user, signOut, signInWithGoogle } = useAuth();
+  const { user: firebaseUser, signOut: firebaseSignOut, signInWithGoogle } = useFirebaseAuth();
+  
+  let enterpriseAuth: ReturnType<typeof useEnterpriseAuth> | null = null;
+  try {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    enterpriseAuth = useEnterpriseAuth();
+  } catch {
+    enterpriseAuth = null;
+  }
+
   const { tenantId: contextTenantId, currentTenant, role: tenantRole } = useTenant();
   
   // RBAC context (may be available depending on tree location)
@@ -52,6 +53,35 @@ export function HeaderProfileMenu({ tenantId }: HeaderProfileMenuProps) {
   const router = useRouter();
 
   const activeTenantId = tenantId || contextTenantId || 'central-metro-hospital';
+
+  // Active identity resolution
+  const activeUser = firebaseUser
+    ? {
+        displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Dr. Sarah Jenkins, MD',
+        email: firebaseUser.email || 's.jenkins@centralmetro.health',
+        photoURL: firebaseUser.photoURL,
+        isFirebase: true,
+      }
+    : enterpriseAuth?.user
+    ? {
+        displayName: enterpriseAuth.user.displayName || enterpriseAuth.user.email?.split('@')[0] || 'Dr. Sarah Jenkins, MD',
+        email: enterpriseAuth.user.email,
+        photoURL: null,
+        isFirebase: false,
+      }
+    : rbac?.demoPersona
+    ? {
+        displayName: rbac.demoPersona.name,
+        email: rbac.demoPersona.email,
+        photoURL: null,
+        isFirebase: false,
+      }
+    : {
+        displayName: 'Dr. Sarah Jenkins, MD',
+        email: 's.jenkins@centralmetro.health',
+        photoURL: null,
+        isFirebase: false,
+      };
 
   // Close dropdown on outside click or ESC key
   useEffect(() => {
@@ -75,16 +105,6 @@ export function HeaderProfileMenu({ tenantId }: HeaderProfileMenuProps) {
     };
   }, [isOpen]);
 
-  const getRoleIcon = (roleName?: string, className = 'w-3.5 h-3.5') => {
-    const r = (roleName || '').toLowerCase();
-    if (r.includes('admin')) return <ShieldCheck className={className} />;
-    if (r.includes('doc') || r.includes('physician')) return <Stethoscope className={className} />;
-    if (r.includes('nurse')) return <HeartPulse className={className} />;
-    if (r.includes('recept') || r.includes('front')) return <ClipboardList className={className} />;
-    if (r.includes('bill') || r.includes('finance')) return <DollarSign className={className} />;
-    return <User className={className} />;
-  };
-
   const getRoleBadgeStyle = (r?: string) => {
     const roleStr = (r || '').toLowerCase();
     if (roleStr.includes('admin')) {
@@ -102,18 +122,22 @@ export function HeaderProfileMenu({ tenantId }: HeaderProfileMenuProps) {
     return 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700';
   };
 
-  const displayRole = rbac?.roleDefinition?.displayName || tenantRole || 'Clinician';
-  const roleId = rbac?.currentRole;
-
-  const handleRoleSelect = (newRoleId: RoleId) => {
-    if (rbac?.setRole) {
-      rbac.setRole(newRoleId);
-    }
-  };
+  const displayRole = rbac?.roleDefinition?.displayName || rbac?.demoPersona?.title || tenantRole || 'Lead Attending Cardiologist';
 
   const handleSignOut = async () => {
     setIsOpen(false);
-    await signOut();
+    try {
+      await firebaseSignOut();
+    } catch (e) {
+      console.warn('Firebase signout:', e);
+    }
+    try {
+      if (enterpriseAuth?.signOut) {
+        await enterpriseAuth.signOut();
+      }
+    } catch (e) {
+      console.warn('Enterprise signout:', e);
+    }
     router.push('/login');
   };
 
@@ -126,176 +150,8 @@ export function HeaderProfileMenu({ tenantId }: HeaderProfileMenuProps) {
     }
   };
 
-  // -------------------------------------------------------------
-  // SIGNED-OUT STATE: "Sign In" Button with Interactive Dropdown
-  // -------------------------------------------------------------
-  if (!user) {
-    return (
-      <div className="relative" ref={menuRef} id="header-signin-dropdown-container">
-        <button
-          id="btn-header-signin-dropdown"
-          type="button"
-          onClick={() => setIsOpen(!isOpen)}
-          className={`h-9 pl-3 pr-2.5 rounded-xl text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs hover:shadow-xs transition-all cursor-pointer select-none ${
-            isOpen
-              ? 'bg-blue-700 ring-2 ring-blue-400/40'
-              : 'bg-blue-600 hover:bg-blue-500'
-          }`}
-          title="Sign In to Clinical Portal"
-          aria-expanded={isOpen}
-        >
-          <KeyRound className="w-3.5 h-3.5" />
-          <span>Sign In</span>
-          <ChevronDown
-            className={`w-3.5 h-3.5 opacity-80 transition-transform duration-200 ${
-              isOpen ? 'rotate-180' : ''
-            }`}
-          />
-        </button>
-
-        {/* Dropdown Menu for Sign In */}
-        {isOpen && (
-          <>
-            <div
-              className="fixed inset-0 z-40 bg-transparent"
-              onClick={() => setIsOpen(false)}
-            />
-            <div className="absolute right-0 mt-2 w-80 rounded-2xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200/90 dark:border-slate-800 p-3 z-50 animate-in fade-in zoom-in-95 duration-150 space-y-3">
-              {/* Header Info */}
-              <div className="px-2 pt-1 pb-2 border-b border-slate-100 dark:border-slate-800">
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-xs shadow-2xs">
-                    <LogIn className="w-3.5 h-3.5" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100">
-                      G-HIMS Access Portal
-                    </h4>
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                      Secure HIPAA & Zero-Trust Clinical Login
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Primary Actions */}
-              <div className="space-y-1.5">
-                {/* Regular Portal Login */}
-                <Link
-                  href="/login"
-                  id="link-signin-full-portal"
-                  onClick={() => setIsOpen(false)}
-                  className="w-full flex items-center justify-between p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 dark:hover:bg-blue-900/60 border border-blue-200/80 dark:border-blue-800 text-blue-900 dark:text-blue-200 transition-colors group cursor-pointer"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <KeyRound className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-                    <div className="text-left">
-                      <div className="text-xs font-bold">Sign In with Credentials</div>
-                      <div className="text-[10px] text-blue-700/80 dark:text-blue-300/80 font-normal">
-                        Password + MFA + Tenant Claims
-                      </div>
-                    </div>
-                  </div>
-                  <ArrowRight className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 group-hover:translate-x-0.5 transition-transform" />
-                </Link>
-
-                {/* Google SSO */}
-                <button
-                  type="button"
-                  id="btn-signin-google-sso"
-                  onClick={handleGoogleSignIn}
-                  className="w-full flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200/80 dark:border-slate-700 text-slate-800 dark:text-slate-200 transition-colors cursor-pointer"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-4 h-4 rounded-full bg-white flex items-center justify-center text-[10px] font-bold text-red-500 shadow-2xs shrink-0">
-                      G
-                    </div>
-                    <div className="text-left">
-                      <div className="text-xs font-bold">Continue with Google SSO</div>
-                      <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                        Enterprise Identity Provider
-                      </div>
-                    </div>
-                  </div>
-                  <Check className="w-3.5 h-3.5 text-slate-400" />
-                </button>
-              </div>
-
-              {/* Quick Simulation Roles */}
-              {rbac && (
-                <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-800">
-                  <div className="flex items-center justify-between px-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                    <span>Demo Role Simulation</span>
-                    <span className="text-[9px] text-indigo-600 dark:text-indigo-400 font-bold">Instant</span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {(['doctor', 'nurse', 'administrator', 'billing_clerk'] as RoleId[]).map((rKey) => {
-                      const isSelected = roleId === rKey;
-                      const rDef = ROLE_DEFINITIONS[rKey];
-                      return (
-                        <button
-                          key={rKey}
-                          type="button"
-                          onClick={() => {
-                            handleRoleSelect(rKey);
-                            setIsOpen(false);
-                          }}
-                          className={`px-2 py-1.5 rounded-lg text-[11px] font-bold flex items-center justify-between border transition-all cursor-pointer ${
-                            isSelected
-                              ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-900 dark:text-blue-300 border-blue-300 dark:border-blue-800 shadow-2xs'
-                              : 'bg-white dark:bg-slate-850 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-750'
-                          }`}
-                        >
-                          <span className="flex items-center gap-1.5 truncate">
-                            {getRoleIcon(rKey, 'w-3 h-3 text-slate-500 dark:text-slate-400')}
-                            <span className="truncate">{rDef?.displayName || rKey}</span>
-                          </span>
-                          {isSelected && <Check className="w-3 h-3 text-blue-600 dark:text-blue-400 shrink-0 ml-1" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Emergency & Tenant Switcher Footer */}
-              <div className="space-y-1 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
-                <Link
-                  href="/login?mode=breakglass"
-                  onClick={() => setIsOpen(false)}
-                  className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-rose-700 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
-                    <span className="font-semibold text-xs">Emergency Break-Glass Access</span>
-                  </div>
-                  <span className="text-[10px] font-mono">§164.312(a)</span>
-                </Link>
-
-                <Link
-                  href="/tenant-selection"
-                  onClick={() => setIsOpen(false)}
-                  className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    <Building2 className="w-3.5 h-3.5 text-slate-400" />
-                    <span className="font-medium text-xs">Select Hospital Facility</span>
-                  </div>
-                  <span className="text-[10px] font-mono">Multi-Tenant</span>
-                </Link>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-    );
-  }
-
-  // -------------------------------------------------------------
-  // SIGNED-IN STATE: Comprehensive Profile, Role Switcher & Security
-  // -------------------------------------------------------------
-  const displayName = user.displayName || user.email?.split('@')[0] || 'Staff Member';
-  const displayEmail = user.email || 'authenticated.session@ghims.internal';
+  const displayName = activeUser.displayName;
+  const displayEmail = activeUser.email;
 
   return (
     <div className="relative" ref={menuRef} id="header-profile-menu-container">
@@ -314,9 +170,9 @@ export function HeaderProfileMenu({ tenantId }: HeaderProfileMenuProps) {
       >
         {/* Avatar */}
         <div className="relative shrink-0">
-          {user.photoURL ? (
+          {activeUser.photoURL ? (
             <Image
-              src={user.photoURL}
+              src={activeUser.photoURL}
               alt={displayName}
               width={24}
               height={24}
@@ -324,7 +180,7 @@ export function HeaderProfileMenu({ tenantId }: HeaderProfileMenuProps) {
               className="w-6 h-6 rounded-full object-cover border border-slate-300 dark:border-slate-600 shadow-2xs"
             />
           ) : (
-            <div className="w-6 h-6 rounded-full bg-linear-to-tr from-blue-600 to-indigo-600 text-white text-[10px] font-bold flex items-center justify-center shadow-2xs">
+            <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white text-[10px] font-bold flex items-center justify-center shadow-2xs">
               {displayName.charAt(0).toUpperCase()}
             </div>
           )}
@@ -334,10 +190,10 @@ export function HeaderProfileMenu({ tenantId }: HeaderProfileMenuProps) {
 
         {/* User & Role Info (Desktop & Tablet) */}
         <div className="hidden md:flex flex-col text-left leading-none pr-0.5">
-          <span className="font-bold text-slate-900 dark:text-slate-100 text-xs truncate max-w-[100px]">
+          <span className="font-bold text-slate-900 dark:text-slate-100 text-xs truncate max-w-[110px]">
             {displayName}
           </span>
-          <span className="text-[10px] text-slate-500 dark:text-slate-400 capitalize mt-0.5">
+          <span className="text-[10px] text-slate-500 dark:text-slate-400 capitalize mt-0.5 truncate max-w-[110px]">
             {displayRole}
           </span>
         </div>
@@ -359,9 +215,9 @@ export function HeaderProfileMenu({ tenantId }: HeaderProfileMenuProps) {
           <div className="absolute right-0 mt-2 w-80 rounded-2xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200/90 dark:border-slate-800 p-3 z-50 animate-in fade-in zoom-in-95 duration-150 space-y-3">
             {/* User Identity Header Card */}
             <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-850/80 border border-slate-100 dark:border-slate-800 flex items-center gap-3">
-              {user.photoURL ? (
+              {activeUser.photoURL ? (
                 <Image
-                  src={user.photoURL}
+                  src={activeUser.photoURL}
                   alt={displayName}
                   width={40}
                   height={40}
@@ -369,7 +225,7 @@ export function HeaderProfileMenu({ tenantId }: HeaderProfileMenuProps) {
                   className="w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700 shadow-2xs"
                 />
               ) : (
-                <div className="w-10 h-10 rounded-full bg-linear-to-tr from-blue-600 to-indigo-600 text-white font-bold text-sm flex items-center justify-center shadow-2xs shrink-0">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white font-bold text-sm flex items-center justify-center shadow-2xs shrink-0">
                   {displayName.charAt(0).toUpperCase()}
                 </div>
               )}
@@ -396,52 +252,40 @@ export function HeaderProfileMenu({ tenantId }: HeaderProfileMenuProps) {
               </div>
             </div>
 
-            {/* Quick RBAC Role Switcher (If available) */}
-            {rbac && (
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between px-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                  <span>Switch Simulation Role</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsOpen(false);
-                      rbac?.setIsRbacModalOpen(true);
-                    }}
-                    className="text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 font-bold cursor-pointer"
-                  >
-                    <Layers className="w-3 h-3" />
-                    <span>Matrix</span>
-                  </button>
+            {/* Google SSO / Workspace Link */}
+            {!firebaseUser && (
+              <button
+                type="button"
+                onClick={handleGoogleSignIn}
+                className="w-full flex items-center justify-between p-2 rounded-xl bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200/80 dark:border-slate-700 text-slate-800 dark:text-slate-200 transition-colors cursor-pointer text-xs"
+              >
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 rounded-full bg-white flex items-center justify-center text-[9px] font-bold text-red-500 shadow-2xs shrink-0">
+                    G
+                  </div>
+                  <div className="text-left">
+                    <span className="font-bold text-[11px] block">Connect Google SSO</span>
+                    <span className="text-[9px] text-slate-400">Sheets & Drive Sync</span>
+                  </div>
                 </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {(['doctor', 'nurse', 'administrator', 'billing_clerk'] as RoleId[]).map((rKey) => {
-                    const isSelected = roleId === rKey;
-                    const rDef = ROLE_DEFINITIONS[rKey];
-                    return (
-                      <button
-                        key={rKey}
-                        type="button"
-                        onClick={() => handleRoleSelect(rKey)}
-                        className={`px-2 py-1.5 rounded-lg text-[11px] font-bold flex items-center justify-between border transition-all cursor-pointer ${
-                          isSelected
-                            ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-900 dark:text-blue-300 border-blue-300 dark:border-blue-800 shadow-2xs'
-                            : 'bg-white dark:bg-slate-850 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-750'
-                        }`}
-                      >
-                        <span className="flex items-center gap-1.5 truncate">
-                          {getRoleIcon(rKey, 'w-3 h-3 text-slate-500 dark:text-slate-400')}
-                          <span className="truncate">{rDef?.displayName || rKey}</span>
-                        </span>
-                        {isSelected && <Check className="w-3 h-3 text-blue-600 dark:text-blue-400 shrink-0 ml-1" />}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+                <ArrowRight className="w-3 h-3 text-slate-400" />
+              </button>
             )}
 
             {/* Quick Links & Security Hub */}
             <div className="space-y-1 pt-1 border-t border-slate-100 dark:border-slate-800 text-xs">
+              <Link
+                href={`/${activeTenantId}/settings`}
+                onClick={() => setIsOpen(false)}
+                className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  <Settings className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                  <span className="font-semibold text-xs">Enterprise Settings</span>
+                </div>
+                <span className="text-[10px] text-slate-400 font-mono">Config</span>
+              </Link>
+
               <Link
                 href={`/${activeTenantId}/admin/audit-logs`}
                 onClick={() => setIsOpen(false)}

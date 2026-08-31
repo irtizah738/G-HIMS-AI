@@ -27,9 +27,10 @@ export interface FirestoreErrorInfo {
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
+  const errMsg = error instanceof Error ? error.message : String(error);
   const currentAuthUser = auth ? auth.currentUser : null;
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errMsg,
     authInfo: {
       userId: currentAuthUser?.uid ?? null,
       email: currentAuthUser?.email ?? null,

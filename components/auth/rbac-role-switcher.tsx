@@ -1,170 +1,178 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React from 'react';
 import { useRBAC } from '@/lib/auth/rbac-context';
+import { useHospital } from '@/lib/context/hospital-context';
 import { RoleId } from '@/types/rbac';
 import { ROLE_DEFINITIONS, DEMO_PERSONAS } from '@/lib/auth/rbac';
-import { 
-  ShieldCheck, 
-  Stethoscope, 
-  HeartPulse, 
-  ClipboardList, 
-  DollarSign, 
-  User, 
-  ChevronDown, 
-  Sparkles, 
-  Check, 
-  ShieldAlert, 
-  Layers
+import {
+  ShieldCheck,
+  Stethoscope,
+  HeartPulse,
+  ClipboardList,
+  DollarSign,
+  User,
+  CheckCircle2,
+  Lock,
+  Sparkles,
+  X,
+  ArrowRight,
 } from 'lucide-react';
 
-export function RbacRoleSwitcher() {
-  const { currentRole, setRole, setIsRbacModalOpen, demoPersona, roleDefinition } = useRBAC();
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+interface RbacRoleSwitcherModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
 
-  // Close dropdown on outside click
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setDropdownOpen(false);
-      }
+export function RbacRoleSwitcherModal({ isOpen, onClose }: RbacRoleSwitcherModalProps) {
+  const { currentRole, setRole, allRoles } = useRBAC();
+  const { setActiveTab } = useHospital();
+
+  if (!isOpen) return null;
+
+  const handleSelectRole = (role: RoleId) => {
+    setRole(role);
+    if (role === 'patient') {
+      setActiveTab('patient-portal');
+    } else if (role === 'receptionist') {
+      setActiveTab('patients');
+    } else if (role === 'billing_clerk') {
+      setActiveTab('billing');
+    } else if (role === 'nurse') {
+      setActiveTab('beds');
+    } else if (role === 'doctor') {
+      setActiveTab('opd');
+    } else if (role === 'administrator') {
+      setActiveTab('command');
     }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+    onClose();
+  };
 
-  const getRoleIcon = (roleId: RoleId, className = 'w-3.5 h-3.5') => {
+  const getRoleIcon = (roleId: RoleId) => {
     switch (roleId) {
-      case 'administrator': return <ShieldCheck className={className} />;
-      case 'doctor': return <Stethoscope className={className} />;
-      case 'nurse': return <HeartPulse className={className} />;
-      case 'receptionist': return <ClipboardList className={className} />;
-      case 'billing_clerk': return <DollarSign className={className} />;
-      case 'patient': return <User className={className} />;
-      default: return <User className={className} />;
+      case 'administrator':
+        return ShieldCheck;
+      case 'doctor':
+        return Stethoscope;
+      case 'nurse':
+        return HeartPulse;
+      case 'receptionist':
+        return ClipboardList;
+      case 'billing_clerk':
+        return DollarSign;
+      case 'patient':
+        return User;
+      default:
+        return User;
     }
   };
-
-  const handleRoleSelect = (roleId: RoleId) => {
-    setRole(roleId);
-    setDropdownOpen(false);
-  };
-
-  const rolesList: RoleId[] = [
-    'administrator',
-    'doctor',
-    'nurse',
-    'receptionist',
-    'billing_clerk',
-    'patient',
-  ];
 
   return (
-    <div className="relative" ref={dropdownRef}>
-      <div className="flex items-center gap-1">
-        {/* Active Role Selector Pill */}
-        <button
-          id="btn-rbac-role-selector"
-          onClick={() => setDropdownOpen(!dropdownOpen)}
-          className={`h-9 px-2.5 sm:px-3 rounded-lg border flex items-center gap-1.5 sm:gap-2 text-xs font-semibold transition-all cursor-pointer select-none ${roleDefinition.badgeBg} ${roleDefinition.badgeBorder} ${roleDefinition.badgeColor} hover:brightness-95`}
-          title={`Active RBAC Role: ${roleDefinition.displayName} (${demoPersona.name})`}
-        >
-          <div className="shrink-0">
-            {getRoleIcon(currentRole, 'w-3.5 h-3.5')}
-          </div>
-          <div className="flex flex-col text-left leading-tight hidden xs:block sm:block">
-            <span className="font-bold tracking-tight">{roleDefinition.displayName}</span>
-            <span className="text-[10px] opacity-75 font-normal truncate max-w-[110px] hidden md:inline">
-              {demoPersona.name.split(' ')[0]}
-            </span>
-          </div>
-          <ChevronDown className={`w-3 h-3 transition-transform opacity-70 ${dropdownOpen ? 'rotate-180' : ''}`} />
-        </button>
-
-        {/* Inspect Permissions Matrix Button */}
-        <button
-          id="btn-open-rbac-matrix-modal"
-          onClick={() => setIsRbacModalOpen(true)}
-          className="h-9 px-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700 text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer"
-          title="View Hospital RBAC Permissions Matrix"
-        >
-          <Layers className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-          <span className="hidden xl:inline text-[11px] font-semibold">RBAC Matrix</span>
-        </button>
-      </div>
-
-      {/* Role Dropdown Menu */}
-      {dropdownOpen && (
-        <div className="absolute right-0 mt-2 w-72 sm:w-80 rounded-2xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 py-2 z-50 animate-in fade-in zoom-in-95 duration-150">
-          <div className="px-3.5 py-2 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-            <div>
-              <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-                <ShieldAlert className="w-3.5 h-3.5 text-blue-600" /> Role-Based Access Control
-              </h4>
-              <p className="text-[10px] text-slate-500 dark:text-slate-400">Switch persona to test permissions live</p>
+    <div
+      id="modal-rbac-switcher-backdrop"
+      className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+      onClick={onClose}
+    >
+      <div
+        id="modal-rbac-switcher-container"
+        className="w-full max-w-3xl bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-6 max-h-[85vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
+                G-HIMS Security & Governance
+              </span>
             </div>
-            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-semibold">
-              6 Roles
-            </span>
+            <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight mt-1">
+              Active Role & Access Control Switcher
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              Select an enterprise persona to evaluate real-time RBAC navigation filtering, command palette scoping, and ABAC privacy policies.
+            </p>
           </div>
 
-          <div className="p-1.5 space-y-1 max-h-[380px] overflow-y-auto">
-            {rolesList.map((roleId) => {
-              const def = ROLE_DEFINITIONS[roleId];
-              const persona = DEMO_PERSONAS[roleId];
-              const isSelected = currentRole === roleId;
-
-              return (
-                <button
-                  key={roleId}
-                  id={`btn-select-role-${roleId}`}
-                  onClick={() => handleRoleSelect(roleId)}
-                  className={`w-full text-left p-2.5 rounded-xl flex items-start gap-3 transition-all cursor-pointer ${
-                    isSelected
-                      ? 'bg-blue-50/90 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800'
-                      : 'hover:bg-slate-50 dark:hover:bg-slate-800/70 border border-transparent'
-                  }`}
-                >
-                  <div className={`w-8 h-8 rounded-lg ${def.badgeBg} ${def.badgeColor} flex items-center justify-center shrink-0 mt-0.5 border ${def.badgeBorder}`}>
-                    {getRoleIcon(roleId, 'w-4 h-4')}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-xs text-slate-900 dark:text-slate-100">
-                        {def.displayName}
-                      </span>
-                      {isSelected && (
-                        <span className="flex items-center gap-1 text-[10px] font-bold text-blue-600 dark:text-blue-400 bg-blue-100/60 dark:bg-blue-900/50 px-1.5 py-0.2 rounded">
-                          <Check className="w-3 h-3" /> Active
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate">
-                      {persona.name}
-                    </p>
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400 line-clamp-1 mt-0.5">
-                      {def.summary}
-                    </p>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="px-3 pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-            <button
-              onClick={() => {
-                setDropdownOpen(false);
-                setIsRbacModalOpen(true);
-              }}
-              className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
-            >
-              <Layers className="w-3 h-3" /> View Comprehensive RBAC Matrix
-            </button>
-          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
-      )}
+
+        {/* Roles Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+          {allRoles.map((roleId) => {
+            const roleDef = ROLE_DEFINITIONS[roleId];
+            const persona = DEMO_PERSONAS[roleId];
+            const isSelected = currentRole === roleId;
+            const Icon = getRoleIcon(roleId);
+
+            return (
+              <button
+                key={roleId}
+                id={`btn-switch-role-${roleId}`}
+                onClick={() => handleSelectRole(roleId)}
+                className={`w-full text-left p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between space-y-3 ${
+                  isSelected
+                    ? 'bg-blue-50/70 dark:bg-blue-950/40 border-blue-500 ring-2 ring-blue-500/20 shadow-md'
+                    : 'bg-slate-50/50 dark:bg-slate-850/50 hover:bg-slate-100 dark:hover:bg-slate-800 border-slate-200 dark:border-slate-800'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-white shadow-xs shrink-0 ${persona.avatarBg}`}
+                    >
+                      <Icon className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-bold text-xs sm:text-sm text-slate-900 dark:text-slate-100">
+                          {roleDef.displayName}
+                        </h4>
+                        {isSelected && (
+                          <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-blue-600 text-white">
+                            Active
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium block">
+                        {persona.name}
+                      </span>
+                    </div>
+                  </div>
+
+                  {isSelected ? (
+                    <CheckCircle2 className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0" />
+                  ) : (
+                    <ArrowRight className="w-4 h-4 text-slate-400 shrink-0" />
+                  )}
+                </div>
+
+                <p className="text-[11px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-relaxed">
+                  {roleDef.summary}
+                </p>
+
+                <div className="pt-2 border-t border-slate-200/60 dark:border-slate-800/80 flex items-center justify-between text-[10px] text-slate-400 font-mono">
+                  <span>{roleDef.accessibleModules.length} Modules Allowed</span>
+                  <span className="truncate max-w-[140px]">{persona.email}</span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Footer Note */}
+        <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 flex items-center gap-2.5 text-[11px] text-slate-500 dark:text-slate-400">
+          <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0" />
+          <span>
+            Every role switch recomputes client-side module trees and applies zero-trust API credential gating to all clinical and ERP workflows.
+          </span>
+        </div>
+      </div>
     </div>
   );
 }

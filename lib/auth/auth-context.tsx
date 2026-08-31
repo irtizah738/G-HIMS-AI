@@ -155,6 +155,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setAccountStatus(payload.authorization.accountStatus);
     setError(null);
     setIsLocked(false);
+
+    if (typeof window !== 'undefined' && payload.authorization.roles?.[0]) {
+      const cleanRole = payload.authorization.roles[0].toLowerCase().trim().replace(/\s+/g, '_');
+      localStorage.setItem('ghims_active_rbac_role', cleanRole);
+    }
   }, []);
 
   // Session Restoration & Initial Auth Lifecycle

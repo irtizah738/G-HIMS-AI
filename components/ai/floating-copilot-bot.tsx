@@ -24,8 +24,8 @@ export function FloatingCopilotBot({
         onClick={onToggle}
         className={`group relative flex items-center gap-2 px-3 py-1.5 sm:px-3 sm:py-2 rounded-xl shadow-lg transition-all duration-200 cursor-pointer select-none active:scale-95 ${
           isOpen
-            ? 'bg-slate-900 text-white ring-2 ring-indigo-500 shadow-indigo-500/20'
-            : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/20 hover:shadow-indigo-600/30 hover:-translate-y-0.5'
+            ? 'bg-slate-900 text-white ring-2 ring-blue-500 shadow-blue-500/20'
+            : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-600/20 hover:shadow-blue-600/30 hover:-translate-y-0.5'
         }`}
         title={title}
         aria-label="Toggle Clinical AI Copilot"

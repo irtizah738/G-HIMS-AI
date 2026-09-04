@@ -506,12 +506,10 @@ export function SpecialtyClinicalEnrichmentPipeline() {
                     <span className="font-black text-rose-600 dark:text-rose-400">{encounter.nursingTriage.painScale} / 10 (Moderate)</span>
                   </div>
                   <div className="flex items-center justify-between text-xs">
-                    <span className="font-semibold text-slate-600 dark:text-slate-400">AVPU Consciousness:</span>
-                    <span className="font-bold text-emerald-600 dark:text-emerald-400">{encounter.nursingTriage.consciousnessAvpu}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-semibold text-slate-600 dark:text-slate-400">Glasgow Coma Scale:</span>
-                    <span className="font-bold text-slate-800 dark:text-slate-200">GCS {encounter.nursingTriage.glasgowComaScale} / 15</span>
+                    <span className="font-semibold text-slate-600 dark:text-slate-400">GCS Scale (Glasgow Coma Scale):</span>
+                    <span className="font-bold text-slate-900 dark:text-slate-100 bg-blue-50 dark:bg-blue-950 px-2 py-0.5 rounded border border-blue-200 dark:border-blue-800">
+                      GCS {encounter.nursingTriage.glasgowComaScale} / 15 ({encounter.nursingTriage.consciousnessAvpu})
+                    </span>
                   </div>
                 </div>
               </div>

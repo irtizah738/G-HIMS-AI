@@ -19,7 +19,6 @@ import {
   LogIn,
   AlertTriangle,
   ArrowRight,
-  Settings,
 } from 'lucide-react';
 
 interface HeaderProfileMenuProps {
@@ -145,8 +144,17 @@ export function HeaderProfileMenu({ tenantId }: HeaderProfileMenuProps) {
     setIsOpen(false);
     try {
       await signInWithGoogle();
-    } catch (e) {
-      console.error('Google Sign-in failed', e);
+    } catch (e: any) {
+      const errorCode = e?.code || '';
+      const errorMessage = e?.message || '';
+      if (
+        errorCode === 'auth/popup-closed-by-user' ||
+        errorCode === 'auth/cancelled-popup-request' ||
+        errorMessage.includes('popup-closed-by-user')
+      ) {
+        return;
+      }
+      console.warn('Google Sign-in status:', e?.message || e);
     }
   };
 
@@ -274,18 +282,6 @@ export function HeaderProfileMenu({ tenantId }: HeaderProfileMenuProps) {
 
             {/* Quick Links & Security Hub */}
             <div className="space-y-1 pt-1 border-t border-slate-100 dark:border-slate-800 text-xs">
-              <Link
-                href={`/${activeTenantId}/settings`}
-                onClick={() => setIsOpen(false)}
-                className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white transition-colors"
-              >
-                <div className="flex items-center gap-2">
-                  <Settings className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                  <span className="font-semibold text-xs">Enterprise Settings</span>
-                </div>
-                <span className="text-[10px] text-slate-400 font-mono">Config</span>
-              </Link>
-
               <Link
                 href={`/${activeTenantId}/admin/audit-logs`}
                 onClick={() => setIsOpen(false)}

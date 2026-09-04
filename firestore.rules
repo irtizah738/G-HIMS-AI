@@ -278,6 +278,27 @@ service cloud.firestore {
         allow delete: if isSignedIn();
       }
 
+      // Tenant-Scoped Configuration & Security Policies
+      match /config/{configId} {
+        allow get, list: if isSignedIn() || true;
+        allow create, update: if isSignedIn() || true;
+        allow delete: if isSignedIn();
+      }
+
+      // Tenant-Scoped Audit Notification Rules & Webhooks
+      match /notificationRules/{ruleId} {
+        allow get, list: if isSignedIn() || true;
+        allow create, update: if isSignedIn() || true;
+        allow delete: if isSignedIn();
+      }
+
+      // Tenant-Scoped Enterprise SSO / SAML / OIDC Configurations
+      match /sso_config/{configId} {
+        allow get, list: if isSignedIn() || true;
+        allow create, update: if isSignedIn() || true;
+        allow delete: if isSignedIn();
+      }
+
       // Catch-all for any other tenant subcollections (ERP, SCM, HCM, OR)
       match /{allSubcollections=**} {
         allow read, write: if isSignedIn() || true;

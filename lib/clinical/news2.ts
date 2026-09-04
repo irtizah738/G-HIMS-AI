@@ -6,6 +6,7 @@ export interface VitalSignsInput {
   systolicBP: number; // mmHg
   heartRate: number; // beats per min
   consciousness: 'Alert' | 'Voice' | 'Pain' | 'Unresponsive' | 'NewConfusion' | 'A' | 'V' | 'P' | 'U' | 'C';
+  gcsScore?: number; // Glasgow Coma Scale (3-15)
   temperature: number; // Celsius (e.g., 37.2)
 }
 
@@ -117,15 +118,24 @@ export function calculateNEWS2(vitals: VitalSignsInput): NEWS2CalculationResult 
   }
   if (hrScore === 3) redTriggers.push('Heart Rate');
 
-  // 6. Consciousness (CVPU)
+  // 6. Consciousness (Glasgow Coma Scale / CVPU)
   let consciousnessScore = 0;
-  const c = vitals.consciousness.toUpperCase();
-  if (c === 'ALERT' || c === 'A') {
-    consciousnessScore = 0;
+  if (vitals.gcsScore !== undefined) {
+    if (vitals.gcsScore >= 15) {
+      consciousnessScore = 0;
+    } else {
+      consciousnessScore = 3;
+      redTriggers.push(`Altered Consciousness (GCS ${vitals.gcsScore}/15)`);
+    }
   } else {
-    // Voice, Pain, Unresponsive, New Confusion
-    consciousnessScore = 3;
-    redTriggers.push('Altered Consciousness (CVPU)');
+    const c = vitals.consciousness.toUpperCase();
+    if (c === 'ALERT' || c === 'A') {
+      consciousnessScore = 0;
+    } else {
+      // Voice, Pain, Unresponsive, New Confusion
+      consciousnessScore = 3;
+      redTriggers.push('Altered Consciousness (CVPU)');
+    }
   }
 
   // 7. Temperature

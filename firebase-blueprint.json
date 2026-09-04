@@ -432,6 +432,84 @@
         "status": { "type": "string", "maxLength": 32 }
       },
       "required": ["deviceId", "userId", "tenantId", "status", "firstSeenAt"]
+    },
+    "SecurityPolicyConfig": {
+      "title": "SecurityPolicyConfig",
+      "description": "Tenant password complexity rules, session timeout limits, and MFA enforcement policies",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "tenantId": { "type": "string", "maxLength": 128 },
+        "minPasswordLength": { "type": "number" },
+        "requireUppercase": { "type": "boolean" },
+        "requireLowercase": { "type": "boolean" },
+        "requireNumbers": { "type": "boolean" },
+        "requireSymbols": { "type": "boolean" },
+        "maxPasswordAgeDays": { "type": "number" },
+        "preventReuseCount": { "type": "number" },
+        "maxFailedAttempts": { "type": "number" },
+        "lockoutDurationMinutes": { "type": "number" },
+        "idleTimeoutMinutes": { "type": "number" },
+        "absoluteSessionTimeoutHours": { "type": "number" },
+        "maxConcurrentSessions": { "type": "number" },
+        "rememberDeviceDays": { "type": "number" },
+        "mfaEnforcementLevel": { "type": "string", "maxLength": 64 },
+        "allowedMfaMethods": { "type": "array" },
+        "mfaGracePeriodDays": { "type": "number" },
+        "allowRememberMfaDevice": { "type": "boolean" },
+        "rememberMfaDays": { "type": "number" },
+        "enforceIpWhitelist": { "type": "boolean" },
+        "ipWhitelist": { "type": "array" },
+        "breakGlassMode": { "type": "boolean" },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "updatedBy": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "tenantId", "minPasswordLength", "idleTimeoutMinutes", "mfaEnforcementLevel"]
+    },
+    "AuditNotificationRule": {
+      "title": "AuditNotificationRule",
+      "description": "Automated webhook and email alert rules triggered by audit log events",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "tenantId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 128 },
+        "enabled": { "type": "boolean" },
+        "triggerActions": { "type": "array" },
+        "minSeverity": { "type": "string", "maxLength": 32 },
+        "channel": { "type": "string", "maxLength": 32 },
+        "slackWebhookUrl": { "type": "string", "maxLength": 256 },
+        "slackChannel": { "type": "string", "maxLength": 64 },
+        "emailRecipients": { "type": "array" },
+        "throttleMinutes": { "type": "number" },
+        "triggerCount": { "type": "number" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "tenantId", "name", "enabled", "triggerActions", "channel"]
+    },
+    "SSOConfig": {
+      "title": "SSOConfig",
+      "description": "Enterprise Single Sign-On SAML 2.0 and OIDC federation configuration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "tenantId": { "type": "string", "maxLength": 128 },
+        "enabled": { "type": "boolean" },
+        "providerType": { "type": "string", "maxLength": 64 },
+        "metadataUrl": { "type": "string", "maxLength": 256 },
+        "clientId": { "type": "string", "maxLength": 128 },
+        "clientSecret": { "type": "string", "maxLength": 256 },
+        "entityId": { "type": "string", "maxLength": 256 },
+        "ssoUrl": { "type": "string", "maxLength": 256 },
+        "certificate": { "type": "string", "maxLength": 2048 },
+        "roleMappings": { "type": "object" },
+        "allowedEmailDomains": { "type": "array" },
+        "autoProvisionUsers": { "type": "boolean" },
+        "allowPasswordFallback": { "type": "boolean" },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "tenantId", "enabled", "providerType"]
     }
   },
   "firestore": {
@@ -530,6 +608,18 @@
     "/tenants/{tenantId}/opd_queue/{tokenId}": {
       "schema": "OpdToken",
       "description": "Tenant-scoped OPD clinic queue tokens"
+    },
+    "/tenants/{tenantId}/config/{configId}": {
+      "schema": "SecurityPolicyConfig",
+      "description": "Tenant security policy, password complexity, and session timeout configurations"
+    },
+    "/tenants/{tenantId}/notificationRules/{ruleId}": {
+      "schema": "AuditNotificationRule",
+      "description": "Tenant automated audit notification rules and webhooks"
+    },
+    "/tenants/{tenantId}/sso_config/{configId}": {
+      "schema": "SSOConfig",
+      "description": "Tenant enterprise single sign-on SAML/OIDC configurations"
     }
   }
 }

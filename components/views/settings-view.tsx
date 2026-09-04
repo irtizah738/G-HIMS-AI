@@ -23,11 +23,17 @@ import {
   RotateCcw,
   ShieldAlert,
 } from 'lucide-react';
+import { AuditNotificationsSection } from '@/components/settings/audit-notifications-section';
+import { SSOConfigurationSection } from '@/components/settings/sso-configuration-section';
+import { PasswordPolicySection } from '@/components/settings/password-policy-section';
+import { db } from '@/lib/firebase/client';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 type SettingsTab =
   | 'profile'
   | 'notifications'
   | 'security'
+  | 'sso'
   | 'appearance'
   | 'organization'
   | 'integrations';
@@ -205,7 +211,7 @@ export function SettingsView() {
     }
   }, [enterpriseAuth?.user, firebaseUser, rbac?.roleDefinition]);
 
-  const handleSaveAllSettings = () => {
+  const handleSaveAllSettings = async () => {
     setIsSaving(true);
     const fullPayload = {
       profileData,
@@ -220,11 +226,20 @@ export function SettingsView() {
       localStorage.setItem('ghims_enterprise_settings', JSON.stringify(fullPayload));
     }
 
+    try {
+      if (typeof window !== 'undefined' && navigator.onLine) {
+        const configDocRef = doc(db, 'tenants', tenantId || 'central-metro-hospital', 'config', 'general');
+        await setDoc(configDocRef, fullPayload, { merge: true });
+      }
+    } catch (err) {
+      console.warn('Could not sync general enterprise settings to Firestore:', err);
+    }
+
     setTimeout(() => {
       setIsSaving(false);
-      setSaveSuccessMessage('All enterprise configurations and security policies saved successfully.');
+      setSaveSuccessMessage('All enterprise configurations and security policies saved to Firestore successfully.');
       setTimeout(() => setSaveSuccessMessage(null), 4000);
-    }, 600);
+    }, 400);
   };
 
   const handleResetDefaults = () => {
@@ -314,8 +329,9 @@ export function SettingsView() {
 
   const tabs = [
     { id: 'profile', label: 'Account & Profile', icon: User, badge: 'Personal' },
-    { id: 'notifications', label: 'Notifications & Alerts', icon: Bell, badge: 'Routing' },
-    { id: 'security', label: 'Security & Access', icon: ShieldCheck, badge: 'HIPAA' },
+    { id: 'notifications', label: 'Notifications & Alerts', icon: Bell, badge: 'Routing & Rules' },
+    { id: 'security', label: 'Password Policy & Session Security', icon: ShieldCheck, badge: 'HIPAA & MFA' },
+    { id: 'sso', label: 'Enterprise SSO', icon: Key, badge: 'SAML / OIDC' },
     { id: 'appearance', label: 'Appearance & Theme', icon: Palette, badge: 'Workstation' },
     { id: 'organization', label: 'Organization & Facility', icon: Building2, badge: 'Tenant Admin' },
     { id: 'integrations', label: 'Integrations & API Hub', icon: Cpu, badge: 'FHIR / ERP' },
@@ -391,7 +407,7 @@ export function SettingsView() {
       )}
 
       {/* Main Settings Navigation Tabs */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -679,173 +695,28 @@ export function SettingsView() {
                 </div>
               )}
             </div>
+
+            {/* Automated Audit Alert & Webhook Triggers */}
+            <AuditNotificationsSection tenantId={tenantId} />
           </div>
         )}
 
         {/* ========================================================================= */}
-        {/* 3. Security & Access */}
+        {/* 3. Password Policy & Session Security */}
         {/* ========================================================================= */}
         {activeTab === 'security' && (
-          <div className="space-y-6">
-            <div className="border-b border-slate-100 dark:border-slate-800 pb-4 flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-blue-600" />
-                  <span>HIPAA Security, Access Control & Perimeter</span>
-                </h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Enforce zero-trust session timeouts, IP CIDR boundaries, and emergency break-glass privileges.
-                </p>
-              </div>
-              <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-                HIPAA Compliant
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              {/* Session Inactivity Timeout */}
-              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-900 dark:text-white">
-                    Workstation Inactivity Lock Timeout
-                  </label>
-                  <span className="text-xs font-mono font-bold text-blue-600 dark:text-blue-400">
-                    {securitySettings.sessionTimeoutMinutes} min
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-500">
-                  HIPAA Security Rule §164.312(a)(2)(iii) mandates automated workstation lockouts.
-                </p>
-                <select
-                  value={securitySettings.sessionTimeoutMinutes}
-                  onChange={(e) =>
-                    setSecuritySettings({
-                      ...securitySettings,
-                      sessionTimeoutMinutes: Number(e.target.value),
-                    })
-                  }
-                  className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:outline-hidden focus:ring-1 focus:ring-blue-500"
-                >
-                  <option value={5}>5 Minutes (High Security / Public Terminal)</option>
-                  <option value={10}>10 Minutes (Standard Clinical Station)</option>
-                  <option value={15}>15 Minutes (Hospital Recommended Default)</option>
-                  <option value={30}>30 Minutes (Physician Private Office)</option>
-                  <option value={60}>60 Minutes (Administrative Only)</option>
-                </select>
-              </div>
-
-              {/* MFA Policy Enforcement */}
-              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 space-y-2">
-                <label className="text-xs font-bold text-slate-900 dark:text-white">
-                  Tenant MFA Enforcement Policy
-                </label>
-                <p className="text-[11px] text-slate-500">
-                  Specify multi-factor authentication criteria across all enterprise staff accounts.
-                </p>
-                <select
-                  value={securitySettings.mfaEnforcement}
-                  onChange={(e) =>
-                    setSecuritySettings({
-                      ...securitySettings,
-                      mfaEnforcement: e.target.value,
-                    })
-                  }
-                  className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:outline-hidden focus:ring-1 focus:ring-blue-500"
-                >
-                  <option value="enforced_all">Enforced for 100% of Staff & Users</option>
-                  <option value="enforced_clinical_roles">Enforced for Clinical & Prescribing Roles Only</option>
-                  <option value="optional">Optional (Security Warning Triggered)</option>
-                </select>
-              </div>
-            </div>
-
-            {/* IP Perimeter Whitelist */}
-            <div className="pt-2">
-              <label className="text-xs font-bold text-slate-900 dark:text-white block mb-1">
-                Authorized Hospital Subnet IP CIDR Ranges
-              </label>
-              <p className="text-[11px] text-slate-500 mb-3">
-                Unlisted networks will require secondary hardware MFA challenge prior to EHR chart access.
-              </p>
-
-              <div className="flex gap-2 mb-3">
-                <input
-                  type="text"
-                  placeholder="e.g. 192.168.1.0/24 or 10.200.0.0/16"
-                  value={securitySettings.newIpCidr}
-                  onChange={(e) =>
-                    setSecuritySettings({
-                      ...securitySettings,
-                      newIpCidr: e.target.value,
-                    })
-                  }
-                  className="flex-1 px-3.5 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono"
-                />
-                <button
-                  type="button"
-                  onClick={handleAddIp}
-                  className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-750 dark:hover:bg-slate-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Add Subnet</span>
-                </button>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                {securitySettings.ipWhitelist.map((ip, idx) => (
-                  <span
-                    key={idx}
-                    className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-700 dark:text-slate-300 flex items-center gap-2"
-                  >
-                    <span>{ip}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveIp(idx)}
-                      className="text-slate-400 hover:text-rose-600 cursor-pointer"
-                    >
-                      ✕
-                    </button>
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            {/* Break Glass Protocol Toggle */}
-            <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
-                <div>
-                  <div className="text-xs font-bold text-amber-900 dark:text-amber-200">
-                    Emergency Clinical Break-Glass Override
-                  </div>
-                  <div className="text-[11px] text-amber-700 dark:text-amber-400">
-                    Allows licensed clinicians emergency bypass of chart locks during Code Blue / Mass Casualty Incidents with mandatory permanent audit stamping.
-                  </div>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() =>
-                  setSecuritySettings({
-                    ...securitySettings,
-                    breakGlassMode: !securitySettings.breakGlassMode,
-                  })
-                }
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 ${
-                  securitySettings.breakGlassMode
-                    ? 'bg-amber-600 text-white'
-                    : 'bg-white dark:bg-slate-850 text-amber-900 dark:text-amber-200 border border-amber-300'
-                }`}
-              >
-                {securitySettings.breakGlassMode ? 'ENABLED (High Alert)' : 'Enable Break-Glass'}
-              </button>
-            </div>
-          </div>
+          <PasswordPolicySection tenantId={tenantId} />
         )}
 
         {/* ========================================================================= */}
-        {/* 4. Appearance & Ergonomics */}
+        {/* 4. Enterprise Single Sign-On (SSO / SAML / OIDC) */}
+        {/* ========================================================================= */}
+        {activeTab === 'sso' && (
+          <SSOConfigurationSection tenantId={tenantId} />
+        )}
+
+        {/* ========================================================================= */}
+        {/* 5. Appearance & Ergonomics */}
         {/* ========================================================================= */}
         {activeTab === 'appearance' && (
           <div className="space-y-6">

@@ -26,6 +26,9 @@ import {
   Check,
   Trash2,
   FileSpreadsheet,
+  SlidersHorizontal,
+  Eye,
+  Zap,
 } from 'lucide-react';
 import {
   StaffMember,
@@ -35,6 +38,8 @@ import {
   ShiftStatus,
   StaffRole,
   ShiftValidationResult,
+  RestPeriodRuleConfig,
+  CredentialExpiryAlert,
 } from '@/types/hcm';
 import {
   subscribeToStaffMembers,
@@ -49,6 +54,8 @@ import {
 import {
   validateShiftAssignment,
   calculateShiftDurationHours,
+  evaluateRosterShiftConflicts,
+  DEFAULT_REST_PERIOD_RULE,
 } from '@/lib/hcm/roster-engine';
 
 export default function ClinicalRosterPage() {
@@ -76,6 +83,11 @@ export default function ClinicalRosterPage() {
 
   // Selected Shift Drawer
   const [selectedShift, setSelectedShift] = useState<RosterShift | null>(null);
+
+  // Rest-Period Rule Configuration State (11h Mandate)
+  const [restPeriodRule, setRestPeriodRule] = useState<RestPeriodRuleConfig>(DEFAULT_REST_PERIOD_RULE);
+  const [showRestPeriodModal, setShowRestPeriodModal] = useState(false);
+  const [showConflictAuditDrawer, setShowConflictAuditDrawer] = useState(false);
 
   // Selected Staff Validation Audit Drawer
   const [selectedStaffAudit, setSelectedStaffAudit] = useState<{
@@ -241,7 +253,7 @@ export default function ClinicalRosterPage() {
           shifts,
           credentials,
           staffMember,
-          { minRestHours: 11, maxWeeklyHours: 60 }
+          restPeriodRule
         );
 
         if (val.errors && val.errors.length > 0) {
@@ -303,7 +315,28 @@ export default function ClinicalRosterPage() {
     });
 
     return map;
-  }, [staff, shifts, credentials]);
+  }, [staff, shifts, credentials, restPeriodRule]);
+
+  // Computed Shift Conflicts across the entire roster
+  const activeConflictShifts = useMemo(() => {
+    return shifts
+      .map((s) => {
+        const member = staff.find((m) => m.id === s.staffId);
+        const evalResult = evaluateRosterShiftConflicts(
+          s,
+          shifts,
+          credentials,
+          member,
+          restPeriodRule
+        );
+        return { shift: s, staffMember: member, conflict: evalResult };
+      })
+      .filter((item) => item.conflict.hasConflict);
+  }, [shifts, staff, credentials, restPeriodRule]);
+
+  const restViolationCount = useMemo(() => {
+    return activeConflictShifts.filter((i) => i.conflict.isRestPeriodViolation || i.conflict.hasRestPeriodViolation).length;
+  }, [activeConflictShifts]);
 
   // Filtered Staff
   const filteredStaff = useMemo(() => {
@@ -601,6 +634,38 @@ export default function ClinicalRosterPage() {
 
         <div className="flex flex-wrap items-center gap-3">
           <button
+            id="open-rest-period-modal-btn"
+            onClick={() => setShowRestPeriodModal(true)}
+            className="flex items-center gap-2 px-3.5 py-2 text-sm font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg shadow-xs transition-colors"
+            title={`Configure Rest-Period Rule (Current: ${restPeriodRule.minRestHours}h mandatory gap)`}
+          >
+            <SlidersHorizontal className="h-4 w-4 text-slate-500" />
+            Rest Rule ({restPeriodRule.minRestHours}h)
+          </button>
+
+          <button
+            id="open-conflict-audit-btn"
+            onClick={() => setShowConflictAuditDrawer(true)}
+            className={`flex items-center gap-2 px-3.5 py-2 text-sm font-semibold rounded-lg shadow-xs transition-colors ${
+              activeConflictShifts.length > 0
+                ? 'bg-rose-50 text-rose-800 border border-rose-300 hover:bg-rose-100'
+                : 'bg-emerald-50 text-emerald-800 border border-emerald-300 hover:bg-emerald-100'
+            }`}
+          >
+            {activeConflictShifts.length > 0 ? (
+              <AlertTriangle className="h-4 w-4 text-rose-600 animate-pulse" />
+            ) : (
+              <ShieldCheck className="h-4 w-4 text-emerald-600" />
+            )}
+            Conflict Alerts
+            {activeConflictShifts.length > 0 && (
+              <span className="ml-1 px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-rose-600 text-white font-mono">
+                {activeConflictShifts.length}
+              </span>
+            )}
+          </button>
+
+          <button
             id="seed-roster-btn"
             onClick={handleSeedRoster}
             disabled={seeding}
@@ -786,6 +851,74 @@ export default function ClinicalRosterPage() {
         </div>
       </div>
 
+      {/* Rest-Period Rule & Conflict Notification Bar */}
+      <div
+        id="rest-period-compliance-bar"
+        className={`p-4 rounded-xl border flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs transition-colors ${
+          restViolationCount > 0
+            ? 'bg-amber-50/80 border-amber-300 text-amber-950'
+            : 'bg-slate-50 border-slate-200 text-slate-800'
+        }`}
+      >
+        <div className="flex items-center gap-3">
+          <div
+            className={`p-2 rounded-lg shrink-0 ${
+              restViolationCount > 0
+                ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+            }`}
+          >
+            {restViolationCount > 0 ? (
+              <AlertTriangle className="h-4 w-4 animate-pulse" />
+            ) : (
+              <ShieldCheck className="h-4 w-4" />
+            )}
+          </div>
+          <div>
+            <div className="font-bold text-sm flex items-center gap-2">
+              <span>Rest-Period Rule Engine: {restPeriodRule.minRestHours}h Mandatory Gap</span>
+              {restPeriodRule.enforceRestPeriodRule ? (
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                  {restPeriodRule.blockSchedulingOnViolation ? 'HARD ENFORCED' : 'SOFT ADVISORY'}
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-700">
+                  PAUSED
+                </span>
+              )}
+            </div>
+            <p className="text-slate-600 mt-0.5">
+              Flagging shifts scheduled with less than {restPeriodRule.minRestHours} hours between consecutive rotations.
+              {restViolationCount > 0 && (
+                <strong className="ml-1 text-amber-900 font-semibold">
+                  ({restViolationCount} rest gap violations currently pulsing in matrix)
+                </strong>
+              )}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            id="bar-open-rest-settings-btn"
+            onClick={() => setShowRestPeriodModal(true)}
+            className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 font-semibold rounded-lg text-slate-700 shadow-2xs cursor-pointer"
+          >
+            Configure Rule
+          </button>
+          {activeConflictShifts.length > 0 && (
+            <button
+              id="bar-audit-conflicts-btn"
+              onClick={() => setShowConflictAuditDrawer(true)}
+              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-lg shadow-2xs cursor-pointer flex items-center gap-1.5"
+            >
+              <Eye className="h-3.5 w-3.5" />
+              Audit {activeConflictShifts.length} Conflicts
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Weekly Shift Matrix Grid */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
@@ -909,50 +1042,110 @@ export default function ClinicalRosterPage() {
                             }`}
                           >
                             <div className="space-y-1.5 h-full">
-                              {dayShifts.map((shift) => (
-                                <div
-                                  key={shift.id}
-                                  id={`shift-card-${shift.id}`}
-                                  onClick={() => setSelectedShift(shift)}
-                                  className={`p-2 rounded-lg border text-left cursor-pointer transition-all shadow-2xs ${getShiftBadgeColor(
-                                    shift.shiftType
-                                  )}`}
-                                >
-                                  <div className="flex items-center justify-between gap-1">
-                                    <span className="font-bold text-[11px] uppercase tracking-tight">
-                                      {shift.shiftType}
-                                    </span>
-                                    <span className="text-[10px] font-mono font-medium">
-                                      {shift.totalHours}h
-                                    </span>
-                                  </div>
+                              {dayShifts.map((shift) => {
+                                const conflictEval = evaluateRosterShiftConflicts(
+                                  shift,
+                                  shifts,
+                                  credentials,
+                                  staffMember,
+                                  restPeriodRule
+                                );
 
-                                  <div className="text-[10px] font-medium text-slate-700 truncate mt-0.5">
-                                    {shift.wardName || shift.departmentName}
-                                  </div>
+                                // Determine pulse / shake styling
+                                let cardStyle = getShiftBadgeColor(shift.shiftType);
+                                let animClass = '';
 
-                                  <div className="text-[9px] font-mono text-slate-500 mt-0.5">
-                                    {shift.scheduledStartTime.split('T')[1]?.substring(0, 5)} -{' '}
-                                    {shift.scheduledEndTime.split('T')[1]?.substring(0, 5)}
-                                  </div>
+                                if (conflictEval.hasConflict) {
+                                  if (conflictEval.severity === 'critical') {
+                                    cardStyle =
+                                      'bg-rose-50/95 border-rose-400 text-rose-950 ring-2 ring-rose-500/40 shadow-xs';
+                                    animClass = 'animate-conflict-pulse animate-shake-subtle';
+                                  } else {
+                                    cardStyle =
+                                      'bg-amber-50/95 border-amber-400 text-amber-950 ring-2 ring-amber-500/30 shadow-xs';
+                                    animClass = 'animate-warning-pulse';
+                                  }
+                                }
 
-                                  {/* Conflict Warning Pill */}
-                                  {shift.conflictFlags && shift.conflictFlags.length > 0 && (
-                                    <div className="mt-1 flex items-center gap-1 text-[9px] text-amber-700 bg-amber-100/80 px-1 py-0.5 rounded font-medium">
-                                      <AlertTriangle className="h-2.5 w-2.5 shrink-0" />
-                                      <span className="truncate">Rest/OT Watch</span>
+                                return (
+                                  <div
+                                    key={shift.id}
+                                    id={`shift-card-${shift.id}`}
+                                    onClick={() => setSelectedShift(shift)}
+                                    className={`p-2 rounded-lg border text-left cursor-pointer transition-all shadow-2xs ${cardStyle} ${animClass}`}
+                                    title={
+                                      conflictEval.hasConflict
+                                        ? `⚠️ Conflict Flag:\n${conflictEval.reasons.join('\n')}`
+                                        : undefined
+                                    }
+                                  >
+                                    <div className="flex items-center justify-between gap-1">
+                                      <span className="font-bold text-[11px] uppercase tracking-tight">
+                                        {shift.shiftType}
+                                      </span>
+                                      <span className="text-[10px] font-mono font-medium">
+                                        {shift.totalHours}h
+                                      </span>
                                     </div>
-                                  )}
 
-                                  {/* Status indicator */}
-                                  {shift.status === 'in_progress' && (
-                                    <div className="mt-1 flex items-center gap-1 text-[9px] text-emerald-700 font-bold">
-                                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                      On Duty
+                                    <div className="text-[10px] font-medium text-slate-700 truncate mt-0.5">
+                                      {shift.wardName || shift.departmentName}
                                     </div>
-                                  )}
-                                </div>
-                              ))}
+
+                                    <div className="text-[9px] font-mono text-slate-500 mt-0.5">
+                                      {shift.scheduledStartTime.split('T')[1]?.substring(0, 5)} -{' '}
+                                      {shift.scheduledEndTime.split('T')[1]?.substring(0, 5)}
+                                    </div>
+
+                                    {/* Rest-Period Rule Violation Badge (< 11h gap) */}
+                                    {conflictEval.hasRestPeriodViolation && (
+                                      <div className="mt-1 flex items-center gap-1 text-[9px] text-rose-900 bg-rose-100/90 px-1 py-0.5 rounded font-bold border border-rose-300">
+                                        <AlertTriangle className="h-2.5 w-2.5 shrink-0 text-rose-600 animate-pulse" />
+                                        <span className="truncate">
+                                          Rest Violation ({conflictEval.restGapHours}h &lt; {restPeriodRule.minRestHours}h)
+                                        </span>
+                                      </div>
+                                    )}
+
+                                    {/* Expired Credential Badge */}
+                                    {conflictEval.hasExpiredCredential && (
+                                      <div className="mt-1 flex items-center gap-1 text-[9px] text-rose-900 bg-rose-100/90 px-1 py-0.5 rounded font-bold border border-rose-300">
+                                        <ShieldAlert className="h-2.5 w-2.5 shrink-0 text-rose-600" />
+                                        <span className="truncate">Expired License</span>
+                                      </div>
+                                    )}
+
+                                    {/* Overlapping Shift Badge */}
+                                    {conflictEval.hasOverlap && (
+                                      <div className="mt-1 flex items-center gap-1 text-[9px] text-rose-900 bg-rose-100/90 px-1 py-0.5 rounded font-bold border border-rose-300">
+                                        <AlertCircle className="h-2.5 w-2.5 shrink-0 text-rose-600" />
+                                        <span className="truncate">Shift Overlap</span>
+                                      </div>
+                                    )}
+
+                                    {/* Generic/Weekly Hour Conflict Badge */}
+                                    {!conflictEval.hasRestPeriodViolation &&
+                                      !conflictEval.hasExpiredCredential &&
+                                      !conflictEval.hasOverlap &&
+                                      conflictEval.hasConflict && (
+                                        <div className="mt-1 flex items-center gap-1 text-[9px] text-amber-800 bg-amber-100/80 px-1 py-0.5 rounded font-medium border border-amber-300">
+                                          <AlertTriangle className="h-2.5 w-2.5 shrink-0 text-amber-600" />
+                                          <span className="truncate">
+                                            {conflictEval.reasons[0] || 'Schedule Warning'}
+                                          </span>
+                                        </div>
+                                      )}
+
+                                    {/* Status indicator */}
+                                    {shift.status === 'in_progress' && (
+                                      <div className="mt-1 flex items-center gap-1 text-[9px] text-emerald-700 font-bold">
+                                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                        On Duty
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
 
                               {/* Empty slot quick schedule */}
                               {dayShifts.length === 0 && (
@@ -1661,6 +1854,320 @@ export default function ClinicalRosterPage() {
                 className="px-4 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg shadow-2xs"
               >
                 Dismiss Audit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rest-Period Rule Configuration Modal */}
+      {showRestPeriodModal && (
+        <div
+          id="rest-period-settings-modal"
+          className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-in fade-in duration-150"
+        >
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between p-5 border-b border-slate-200 bg-slate-50">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-indigo-50 text-indigo-700 rounded-xl border border-indigo-200">
+                  <SlidersHorizontal className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    Rest-Period Rule & Workload Policy
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Automated mandatory rest gap and fatigue mitigation parameters
+                  </p>
+                </div>
+              </div>
+              <button
+                id="close-rest-period-modal-btn"
+                onClick={() => setShowRestPeriodModal(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5 text-xs overflow-y-auto">
+              {/* Rest Hours Slider */}
+              <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-slate-800 text-sm">
+                    Mandatory Rest Period Between Shifts
+                  </label>
+                  <span className="px-2.5 py-1 rounded-lg bg-indigo-600 text-white font-mono font-bold text-sm">
+                    {restPeriodRule.minRestHours} Hours
+                  </span>
+                </div>
+                <p className="text-slate-600 text-xs leading-relaxed">
+                  Any consecutive shifts assigned to the same staff member with less than this interval will trigger an automated conflict flag with pulse/shake warnings in the matrix.
+                </p>
+                <div className="pt-2">
+                  <input
+                    id="rest-hours-slider"
+                    type="range"
+                    min="8"
+                    max="16"
+                    step="0.5"
+                    value={restPeriodRule.minRestHours}
+                    onChange={(e) =>
+                      setRestPeriodRule((prev) => ({
+                        ...prev,
+                        minRestHours: parseFloat(e.target.value),
+                      }))
+                    }
+                    className="w-full accent-indigo-600 cursor-pointer"
+                  />
+                  <div className="flex justify-between text-[11px] text-slate-400 font-mono mt-1">
+                    <span>8h (Minimum)</span>
+                    <span className="font-bold text-indigo-700">11h (Hospital Mandate)</span>
+                    <span>16h (Maximum)</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Max Weekly Hours */}
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-slate-800 text-xs">
+                    Maximum Weekly Clinical Workload
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      id="max-weekly-hours-input"
+                      type="number"
+                      min="30"
+                      max="80"
+                      value={restPeriodRule.maxWeeklyHours}
+                      onChange={(e) =>
+                        setRestPeriodRule((prev) => ({
+                          ...prev,
+                          maxWeeklyHours: parseInt(e.target.value) || 60,
+                        }))
+                      }
+                      className="w-16 px-2 py-1 text-center font-mono font-bold text-slate-800 bg-white border border-slate-300 rounded-lg text-xs"
+                    />
+                    <span className="text-slate-500 font-medium">Hours / Week</span>
+                  </div>
+                </div>
+                <p className="text-slate-500 text-[11px]">
+                  Schedules exceeding this cap will trigger overtime and fatigue warnings.
+                </p>
+              </div>
+
+              {/* Toggles */}
+              <div className="space-y-3">
+                <label className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-100/70 transition-colors">
+                  <div>
+                    <div className="font-bold text-slate-800">
+                      Enable Rest-Period Rule Evaluation
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      Active real-time checking of consecutive shift intervals
+                    </div>
+                  </div>
+                  <input
+                    id="toggle-rest-rule"
+                    type="checkbox"
+                    checked={restPeriodRule.enforceRestPeriodRule}
+                    onChange={(e) =>
+                      setRestPeriodRule((prev) => ({
+                        ...prev,
+                        enforceRestPeriodRule: e.target.checked,
+                      }))
+                    }
+                    className="h-4 w-4 accent-indigo-600 rounded cursor-pointer"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-100/70 transition-colors">
+                  <div>
+                    <div className="font-bold text-slate-800">
+                      Strict Scheduling Block (Hard Lock)
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      Disallow saving new shifts that violate the minimum rest threshold
+                    </div>
+                  </div>
+                  <input
+                    id="toggle-hard-block"
+                    type="checkbox"
+                    checked={restPeriodRule.blockSchedulingOnViolation}
+                    onChange={(e) =>
+                      setRestPeriodRule((prev) => ({
+                        ...prev,
+                        blockSchedulingOnViolation: e.target.checked,
+                      }))
+                    }
+                    className="h-4 w-4 accent-indigo-600 rounded cursor-pointer"
+                  />
+                </label>
+              </div>
+
+              {/* Reset to standard 11-hour mandate */}
+              <div className="pt-2 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setRestPeriodRule(DEFAULT_REST_PERIOD_RULE)}
+                  className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold"
+                >
+                  Reset to 11-Hour Standard Mandate
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
+              <span className="text-[11px] text-slate-500">
+                Matrix will re-evaluate all shift cards immediately
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowRestPeriodModal(false)}
+                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-xs text-xs cursor-pointer"
+              >
+                Apply & Save Rule
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Conflict Audit & Rest-Period Violations Drawer */}
+      {showConflictAuditDrawer && (
+        <div
+          id="conflict-audit-drawer"
+          className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-in fade-in duration-150"
+        >
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="flex items-center justify-between p-5 border-b border-slate-200 bg-rose-50/80">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-rose-100 text-rose-800 rounded-xl border border-rose-200">
+                  <AlertTriangle className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    Active Roster Conflict & Rest Violation Audit
+                  </h3>
+                  <p className="text-xs text-slate-600">
+                    Shifts currently pulsing in the matrix with validation or rest gap warnings
+                  </p>
+                </div>
+              </div>
+              <button
+                id="close-conflict-drawer-btn"
+                onClick={() => setShowConflictAuditDrawer(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-rose-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto space-y-4 flex-1 text-xs">
+              {activeConflictShifts.length === 0 ? (
+                <div className="text-center py-12 text-slate-500 space-y-2">
+                  <CheckCircle2 className="h-10 w-10 text-emerald-500 mx-auto" />
+                  <p className="font-semibold text-slate-800">Zero Schedule Conflicts</p>
+                  <p className="text-xs text-slate-500">
+                    All scheduled shifts fully comply with the {restPeriodRule.minRestHours}-hour rest rule, licensing requirements, and workload caps.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between text-xs text-slate-500">
+                    <span>
+                      Detected Conflicts:{' '}
+                      <strong className="text-rose-700 font-bold">{activeConflictShifts.length} Shift Cards</strong>
+                    </span>
+                    <span className="font-mono text-[11px] text-slate-400">
+                      Rest Gap Mandate: {restPeriodRule.minRestHours}h
+                    </span>
+                  </div>
+
+                  {activeConflictShifts.map(({ shift, staffMember, conflict }) => (
+                    <div
+                      key={`conflict-item-${shift.id}`}
+                      className={`p-4 rounded-xl border transition-all ${
+                        conflict.severity === 'critical'
+                          ? 'bg-rose-50/80 border-rose-300 ring-1 ring-rose-400/30'
+                          : 'bg-amber-50/80 border-amber-300 ring-1 ring-amber-400/30'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-slate-900 text-sm">
+                              {staffMember?.fullName || 'Unassigned Staff'}
+                            </span>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-white border font-mono">
+                              {shift.shiftType} • {shift.totalHours}h
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                conflict.severity === 'critical'
+                                  ? 'bg-rose-200 text-rose-900'
+                                  : 'bg-amber-200 text-amber-900'
+                              }`}
+                            >
+                              {conflict.severity}
+                            </span>
+                          </div>
+
+                          <div className="text-slate-600 text-xs mt-1">
+                            <strong>Ward:</strong> {shift.wardName || shift.departmentName} •{' '}
+                            <strong>Time:</strong> {shift.scheduledStartTime.replace('T', ' ')} -{' '}
+                            {shift.scheduledEndTime.replace('T', ' ')}
+                          </div>
+                        </div>
+
+                        <button
+                          id={`select-conflict-shift-${shift.id}`}
+                          onClick={() => {
+                            setSelectedShift(shift);
+                            setShowConflictAuditDrawer(false);
+                          }}
+                          className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 rounded-lg text-xs font-semibold shadow-2xs cursor-pointer shrink-0"
+                        >
+                          View Shift Details
+                        </button>
+                      </div>
+
+                      {/* Conflict Reasons */}
+                      <div className="mt-3 pt-3 border-t border-slate-200/80 space-y-1.5">
+                        {conflict.reasons.map((reason, rIdx) => (
+                          <div
+                            key={`reason-${rIdx}`}
+                            className="flex items-center gap-2 text-xs font-semibold text-rose-900"
+                          >
+                            <AlertTriangle className="h-3.5 w-3.5 text-rose-600 shrink-0" />
+                            <span>{reason}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between text-xs">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowConflictAuditDrawer(false);
+                  setShowRestPeriodModal(true);
+                }}
+                className="text-indigo-600 hover:text-indigo-800 font-semibold"
+              >
+                Adjust Rest Rule Settings
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowConflictAuditDrawer(false)}
+                className="px-4 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg shadow-2xs"
+              >
+                Close Audit
               </button>
             </div>
           </div>

@@ -41,6 +41,7 @@ interface AuthContextType {
   isOffline: boolean;
   accessibleTenants: TenantSelectionItem[];
   signIn: (email: string, pass: string, options?: SignInOptions) => Promise<LoginResponsePayload>;
+  signInSSO: (email: string, tenantId?: string) => Promise<LoginResponsePayload>;
   signOut: () => Promise<void>;
   switchTenant: (tenantId: string) => Promise<void>;
   sendPasswordReset: (email: string) => Promise<{ success: boolean; message: string }>;
@@ -243,6 +244,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [applyLoginPayload]
   );
 
+  // Enterprise Single Sign-On (SSO) Action
+  const signInSSO = useCallback(
+    async (email: string, tenantId: string = 'central-metro-hospital'): Promise<LoginResponsePayload> => {
+      setLoading(true);
+      setLoadingStatus('AUTHENTICATING');
+      setError(null);
+
+      try {
+        const payload = await AuthClient.signInSSO(email, tenantId);
+        applyLoginPayload(payload);
+
+        const tenants = await AuthClient.getAccessibleTenants();
+        setAccessibleTenants(tenants);
+
+        setLoadingStatus('READY');
+        return payload;
+      } catch (err: any) {
+        const userMsg = err?.userMessage || err?.message || 'Enterprise SSO Authentication failed';
+        setError(userMsg);
+        setLoadingStatus('ERROR');
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [applyLoginPayload]
+  );
+
   // Sign Out Action
   const signOut = useCallback(async () => {
     setLoading(true);
@@ -360,6 +389,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isOffline,
       accessibleTenants,
       signIn,
+      signInSSO,
       signOut,
       switchTenant,
       sendPasswordReset,
@@ -386,6 +416,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isOffline,
       accessibleTenants,
       signIn,
+      signInSSO,
       signOut,
       switchTenant,
       sendPasswordReset,

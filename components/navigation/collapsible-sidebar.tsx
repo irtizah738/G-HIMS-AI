@@ -281,6 +281,20 @@ export function CollapsibleSidebar({
           directHref: '/metro-health/erp/chart-of-accounts',
         },
         {
+          id: 'hcm',
+          name: 'Hospital Workforce & HR OS',
+          shortName: 'Workforce HR',
+          icon: UserCheck,
+          directHref: '/metro-health/hcm',
+        },
+        {
+          id: 'resources',
+          name: 'Resource & Capacity OS',
+          shortName: 'Resources & OT',
+          icon: Boxes,
+          directHref: '/metro-health/hcm/resources',
+        },
+        {
           id: 'staff',
           name: 'Staff Rosters & Credentials',
           shortName: 'Staff Rosters',

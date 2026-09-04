@@ -28,7 +28,11 @@ export interface VitalsMeasurement {
   temperatureCelsius: number; // °C
   spo2Percent: number; // %
   onSupplementalOxygen: boolean;
-  consciousnessAvpu: 'ALERT' | 'VOICE' | 'PAIN' | 'UNRESPONSIVE';
+  gcsScore?: number; // Glasgow Coma Scale (3 - 15)
+  gcsEye?: number; // Eye opening (1 - 4)
+  gcsVerbal?: number; // Verbal response (1 - 5)
+  gcsMotor?: number; // Motor response (1 - 6)
+  consciousnessAvpu: 'ALERT' | 'VOICE' | 'PAIN' | 'UNRESPONSIVE'; // Derived / Synced for NEWS2
   news2Score: number;
   triageCategory: 'RED_IMMEDIATE' | 'ORANGE_VERY_URGENT' | 'YELLOW_URGENT' | 'GREEN_STANDARD' | 'BLUE_NON_URGENT';
   measuredAt: number;

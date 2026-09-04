@@ -26,6 +26,8 @@ import { GoogleSheetsView } from '@/components/views/google-sheets-view';
 import { DiseaseCentricIntakeView } from '@/components/views/disease-centric-intake-view';
 import { SettingsView } from '@/components/views/settings-view';
 import { PatientPortalView } from '@/components/views/patient-portal-view';
+import { HrManagementView } from '@/components/views/hr-management-view';
+import { ResourceCapacityView } from '@/components/views/resource-capacity-view';
 import { RbacModuleGate } from '@/components/auth/rbac-gate';
 import { RbacRoleSwitcherModal } from '@/components/auth/rbac-role-switcher';
 import { useRBAC } from '@/lib/auth/rbac-context';
@@ -65,7 +67,6 @@ import {
   Menu,
   Command,
   Radio,
-  UserCheck,
   ShieldCheck,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
@@ -157,20 +158,8 @@ export function TenantDashboard() {
             </button>
           </div>
 
-          {/* Right Action Tools: Role Switcher, Sync Status & Sign In / Profile Menu */}
+          {/* Right Action Tools: Sync Status & Sign In / Profile Menu */}
           <div className="flex items-center gap-2 shrink-0">
-            {/* Active Persona / Role Switcher Pill */}
-            <button
-              id="btn-header-active-role-switcher"
-              onClick={() => setRoleSwitcherOpen(true)}
-              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-750 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-bold transition-all cursor-pointer shadow-2xs group"
-              title="Click to Switch Active Role / Persona"
-            >
-              <span className={`w-2 h-2 rounded-full ${roleDefinition.badgeBg.includes('blue') ? 'bg-blue-500' : roleDefinition.badgeBg.includes('teal') ? 'bg-teal-500' : roleDefinition.badgeBg.includes('emerald') ? 'bg-emerald-500' : roleDefinition.badgeBg.includes('indigo') ? 'bg-indigo-500' : 'bg-purple-500'}`} />
-              <span className="truncate max-w-[110px]">{roleDefinition.displayName}</span>
-              <UserCheck className="w-3 h-3 text-slate-400 group-hover:text-blue-500 shrink-0" />
-            </button>
-
             {/* Mobile Search Button */}
             <button
               id="btn-mobile-command-search"
@@ -302,6 +291,16 @@ export function TenantDashboard() {
             {activeTab === 'staff' && (
               <RbacModuleGate moduleId="staff" moduleName="Staff Directory & Rosters">
                 <StaffView />
+              </RbacModuleGate>
+            )}
+            {(activeTab === 'hcm' || activeTab === 'workforce') && (
+              <RbacModuleGate moduleId="staff" moduleName="Hospital Workforce & HR Operating System">
+                <HrManagementView />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'resources' && (
+              <RbacModuleGate moduleId="beds" moduleName="Hospital Resource & Capacity Operating System">
+                <ResourceCapacityView />
               </RbacModuleGate>
             )}
             {activeTab === 'settings' && (

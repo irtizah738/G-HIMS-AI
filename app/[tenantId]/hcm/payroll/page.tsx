@@ -38,6 +38,8 @@ import {
   subscribeToRosterShifts,
   generatePayrollRun,
 } from '@/lib/firebase/services/hcm';
+import { StatutoryTaxComplianceReportModal } from '@/components/hcm/StatutoryTaxComplianceReportModal';
+import { OvertimeBudgetVarianceChart } from '@/components/hcm/OvertimeBudgetVarianceChart';
 
 export default function HealthcarePayrollPage() {
   const params = useParams();
@@ -53,6 +55,8 @@ export default function HealthcarePayrollPage() {
   const [selectedPeriodId, setSelectedPeriodId] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPayslip, setSelectedPayslip] = useState<Payslip | null>(null);
+  const [showTaxComplianceModal, setShowTaxComplianceModal] = useState(false);
+  const [showOvertimeAnalytics, setShowOvertimeAnalytics] = useState(true);
 
   // Run Payroll Modal
   const [showRunModal, setShowRunModal] = useState(false);
@@ -97,19 +101,44 @@ export default function HealthcarePayrollPage() {
     let totalNet = 0;
     let totalOvertimePay = 0;
     let totalHours = 0;
+    let totalTaxDeductions = 0;
+    let totalSocialSecurity = 0;
+    let totalMedicare = 0;
 
     payslips.forEach((p) => {
-      totalGross += Number(p.grossPay) || 0;
+      const gross = Number(p.grossPay) || 0;
+      totalGross += gross;
       totalNet += Number(p.netPay) || 0;
       totalOvertimePay += Number(p.overtimePay) || 0;
       totalHours += (Number(p.regularHours) || 0) + (Number(p.overtimeHours) || 0);
+
+      const taxD =
+        Number(p.taxDeduction ?? p.statutoryDeductions?.taxWithholding) ||
+        Math.round(gross * 0.145 * 100) / 100;
+      const ss =
+        Number(p.statutoryDeductions?.socialSecurity) ||
+        Math.round(gross * 0.062 * 100) / 100;
+      const med =
+        Number(p.statutoryDeductions?.medicare) ||
+        Math.round(gross * 0.0145 * 100) / 100;
+
+      totalTaxDeductions += taxD;
+      totalSocialSecurity += ss;
+      totalMedicare += med;
     });
+
+    const totalStatutoryWithholdings =
+      Math.round((totalTaxDeductions + totalSocialSecurity + totalMedicare) * 100) / 100;
 
     return {
       totalGross: Math.round(totalGross * 100) / 100,
       totalNet: Math.round(totalNet * 100) / 100,
       totalOvertimePay: Math.round(totalOvertimePay * 100) / 100,
       totalHours: Math.round(totalHours),
+      totalTaxDeductions: Math.round(totalTaxDeductions * 100) / 100,
+      totalSocialSecurity: Math.round(totalSocialSecurity * 100) / 100,
+      totalMedicare: Math.round(totalMedicare * 100) / 100,
+      totalStatutoryWithholdings,
       totalRuns: periods.length,
     };
   }, [payslips, periods]);
@@ -179,14 +208,39 @@ export default function HealthcarePayrollPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            id="open-tax-compliance-modal-btn"
+            onClick={() => setShowTaxComplianceModal(true)}
+            className="flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg shadow-xs transition-colors cursor-pointer"
+          >
+            <FileSpreadsheet className="h-4 w-4 text-blue-600" />
+            <span>Statutory Tax Compliance</span>
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800">
+              IRS 941 & SUTA
+            </span>
+          </button>
+
+          <button
+            id="toggle-overtime-trends-btn"
+            onClick={() => setShowOvertimeAnalytics((prev) => !prev)}
+            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-lg shadow-xs transition-colors cursor-pointer ${
+              showOvertimeAnalytics
+                ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200'
+            }`}
+          >
+            <TrendingUp className="h-4 w-4 text-amber-600" />
+            <span>{showOvertimeAnalytics ? 'Hide Overtime Trends' : 'Overtime Budget Trends'}</span>
+          </button>
+
           <button
             id="open-run-payroll-modal-btn"
             onClick={() => {
               setPayrollError(null);
               setShowRunModal(true);
             }}
-            className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition-colors"
+            className="flex items-center gap-2 px-5 py-2.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition-colors cursor-pointer"
           >
             <Play className="h-4 w-4 fill-current" />
             Run Payroll Batch
@@ -210,57 +264,84 @@ export default function HealthcarePayrollPage() {
         </div>
       )}
 
-      {/* Financial KPIs */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Financial KPIs - 5 Column Responsive Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
         {/* Total Gross Payroll */}
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
-            <span>Gross Hospital Wages</span>
+            <span>Gross Wages</span>
             <DollarSign className="h-4 w-4 text-emerald-500" />
           </div>
-          <div className="text-2xl font-bold text-slate-900 font-mono">
+          <div className="text-xl font-bold text-slate-900 font-mono">
             ${aggregates.totalGross.toLocaleString('en-US', { minimumFractionDigits: 2 })}
           </div>
-          <div className="text-xs text-slate-500 mt-1">Total clinical & admin compensation</div>
+          <div className="text-[11px] text-slate-500 mt-1">Total clinical & admin compensation</div>
         </div>
 
         {/* Total Net Payout */}
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
-            <span>Net Disbursed Funds</span>
+            <span>Net Disbursed</span>
             <Receipt className="h-4 w-4 text-indigo-500" />
           </div>
-          <div className="text-2xl font-bold text-indigo-700 font-mono">
+          <div className="text-xl font-bold text-indigo-700 font-mono">
             ${aggregates.totalNet.toLocaleString('en-US', { minimumFractionDigits: 2 })}
           </div>
-          <div className="text-xs text-slate-500 mt-1">Post statutory withholdings</div>
+          <div className="text-[11px] text-slate-500 mt-1">Post statutory withholdings</div>
         </div>
 
         {/* Overtime & Shift Differentials */}
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
-            <span>Overtime & Premium Pay</span>
+            <span>Overtime Pay</span>
             <TrendingUp className="h-4 w-4 text-amber-500" />
           </div>
-          <div className="text-2xl font-bold text-amber-600 font-mono">
+          <div className="text-xl font-bold text-amber-600 font-mono">
             ${aggregates.totalOvertimePay.toLocaleString('en-US', { minimumFractionDigits: 2 })}
           </div>
-          <div className="text-xs text-slate-500 mt-1">Night differential & 1.5x/2.0x rates</div>
+          <div className="text-[11px] text-slate-500 mt-1">Differential & 1.5x/2.0x rates</div>
+        </div>
+
+        {/* Statutory Tax & Deductions */}
+        <div
+          onClick={() => setShowTaxComplianceModal(true)}
+          className="bg-white hover:bg-blue-50/40 p-4 rounded-xl border border-slate-200 hover:border-blue-300 shadow-xs transition-colors cursor-pointer group"
+        >
+          <div className="flex items-center justify-between text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+            <span className="group-hover:text-blue-600">Statutory Taxes</span>
+            <FileSpreadsheet className="h-4 w-4 text-blue-500" />
+          </div>
+          <div className="text-xl font-bold text-blue-700 font-mono">
+            ${aggregates.totalStatutoryWithholdings.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+          </div>
+          <div className="text-[11px] text-blue-600 font-medium mt-1 flex items-center gap-1">
+            <span>IRS 941 & SUTA Filing</span>
+            <ArrowUpRight className="w-3 h-3" />
+          </div>
         </div>
 
         {/* Total Processed Shifts / Batches */}
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
-            <span>Total Payroll Runs</span>
-            <FileSpreadsheet className="h-4 w-4 text-blue-500" />
+            <span>Settlement Runs</span>
+            <ShieldCheck className="h-4 w-4 text-purple-500" />
           </div>
-          <div className="text-2xl font-bold text-blue-700 font-mono">
+          <div className="text-xl font-bold text-purple-700 font-mono">
             {aggregates.totalRuns}{' '}
-            <span className="text-xs font-normal text-slate-500">Batches final</span>
+            <span className="text-xs font-normal text-slate-500">Cycles final</span>
           </div>
-          <div className="text-xs text-slate-500 mt-1">Synchronized with GL accounts</div>
+          <div className="text-[11px] text-slate-500 mt-1">GL double-entry balanced</div>
         </div>
       </div>
+
+      {/* Overtime Pay Trends & Clinical Unit Variances */}
+      {showOvertimeAnalytics && (
+        <div className="transition-all">
+          <OvertimeBudgetVarianceChart
+            onNotifyLead={(msg) => setSuccessMessage(msg)}
+          />
+        </div>
+      )}
 
       {/* Historical Payroll Batches Ribbon */}
       <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-3">
@@ -713,6 +794,15 @@ export default function HealthcarePayrollPage() {
           </div>
         </div>
       )}
+
+      {/* Statutory Tax & Deduction Compliance Report Modal */}
+      <StatutoryTaxComplianceReportModal
+        isOpen={showTaxComplianceModal}
+        onClose={() => setShowTaxComplianceModal(false)}
+        periods={periods}
+        payslips={payslips}
+        tenantId={tenantId}
+      />
     </div>
   );
 }

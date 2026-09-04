@@ -5,14 +5,6 @@ const nextConfig: NextConfig = {
     'firebase-admin',
     '@google-cloud/firestore',
     '@grpc/grpc-js',
-    'firebase',
-    '@firebase/app',
-    '@firebase/auth',
-    '@firebase/firestore',
-    '@firebase/analytics',
-    '@firebase/util',
-    '@firebase/component',
-    '@firebase/logger',
   ],
   images: {
     remotePatterns: [

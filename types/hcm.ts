@@ -194,3 +194,39 @@ export interface ShiftValidationResult {
   warnings: string[];
   blockReasons: string[];
 }
+
+export interface RestPeriodRuleConfig {
+  enabled: boolean;
+  minRestHours: number; // e.g. 11 hours standard hospital safety policy
+  flagSeverity: 'critical' | 'warning'; // critical blocks scheduling, warning adds alert
+  enforceAcrossConsecutiveDays: boolean;
+  allowSupervisorOverride: boolean;
+  maxWeeklyHours?: number;
+  enforceRestPeriodRule?: boolean;
+  blockSchedulingOnViolation?: boolean;
+}
+
+export interface CredentialExpiryAlert {
+  id: string;
+  tenantId: string;
+  credentialId: string;
+  credentialTitle: string;
+  licenseNumber: string;
+  staffId: string;
+  staffName: string;
+  staffRole: StaffRole;
+  departmentName: string;
+  expirationDate: string; // YYYY-MM-DD
+  daysUntilExpiration: number; // e.g. 45 days
+  urgency?: 'critical' | 'high' | 'moderate';
+  thresholdDays: number; // 60 days
+  recipientRole: string; // 'Credentialing Director'
+  recipientEmail: string; // 'credentialing.director@metrohealth.org'
+  status: 'QUEUED' | 'SENT' | 'DELIVERED' | 'ACKNOWLEDGED' | 'queued' | 'sent' | 'delivered' | 'acknowledged';
+  emailSubject: string;
+  emailBodyHtml: string;
+  triggeredAt: string;
+  sentAt?: string;
+  acknowledgedAt?: string;
+  acknowledgedBy?: string;
+}

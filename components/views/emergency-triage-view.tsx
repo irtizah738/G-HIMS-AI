@@ -21,9 +21,13 @@ import {
   Sparkles,
   UserCheck,
   Send,
+  Building2,
+  ExternalLink,
+  ArrowUpRight,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { PatientConsultantRoutingModal, ConsultantDoctor } from '@/components/clinical/patient-consultant-routing-modal';
+import { ERQuickTransferModal, TransferRequestData } from '@/components/clinical/er-quick-transfer-modal';
 
 interface EmergencyCase {
   id: string;
@@ -37,9 +41,17 @@ interface EmergencyCase {
   assignedBay: string;
   attendingPhysician: string;
   vitals: { hr: number; bp: string; spo2: number; gcs: number };
-  status: 'triage' | 'resuscitation' | 'stabilized' | 'admitted_icu' | 'discharged';
+  status: 'triage' | 'resuscitation' | 'stabilized' | 'admitted_icu' | 'discharged' | 'transferred';
   ambulanceInbound?: { etaMinutes: number; paramedicUnit: string; mechanism: string };
   codeAlert?: 'STEMI' | 'STROKE' | 'TRAUMA_ALPHA' | 'CODE_BLUE' | null;
+  transferInfo?: {
+    type: 'EXTERNAL_HOSPITAL' | 'INTERNAL_UNIT';
+    destination: string;
+    receivingDoctor: string;
+    transportUnit: string;
+    dispatchedAt: string;
+    dispatchId: string;
+  };
 }
 
 export function EmergencyTriageView() {
@@ -134,6 +146,11 @@ export function EmergencyTriageView() {
   const [isRoutingModalOpen, setIsRoutingModalOpen] = useState(false);
   const [routingPatientData, setRoutingPatientData] = useState<any>(null);
 
+  // Quick Transfer State
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+  const [transferPatientData, setTransferPatientData] = useState<EmergencyCase | null>(null);
+  const [transferToast, setTransferToast] = useState<{ id: string; message: string; dest: string } | null>(null);
+
   const selectedCase = emergencyCases.find((c) => c.id === selectedCaseId) || emergencyCases[0];
 
   const handleOpenRouting = (c: EmergencyCase) => {
@@ -146,6 +163,40 @@ export function EmergencyTriageView() {
       currentAttending: c.attendingPhysician,
     });
     setIsRoutingModalOpen(true);
+  };
+
+  const handleOpenQuickTransfer = (c: EmergencyCase) => {
+    setTransferPatientData(c);
+    setIsTransferModalOpen(true);
+  };
+
+  const handleTransferComplete = (transferData: TransferRequestData, summary: any) => {
+    setEmergencyCases((prev) =>
+      prev.map((c) => {
+        if (c.id === summary.patient.id || c.mrn === summary.patient.mrn) {
+          return {
+            ...c,
+            status: 'transferred',
+            transferInfo: {
+              type: transferData.transferType,
+              destination: transferData.destinationFacility,
+              receivingDoctor: transferData.receivingDoctor,
+              transportUnit: transferData.transportUnitId,
+              dispatchedAt: summary.dispatchedAt,
+              dispatchId: summary.dispatchId,
+            },
+          };
+        }
+        return c;
+      })
+    );
+
+    setTransferToast({
+      id: summary.dispatchId,
+      message: `Emergency Transfer dispatched for ${summary.patient.patientName}!`,
+      dest: `${transferData.destinationFacility} (${transferData.transportUnitId})`,
+    });
+    setTimeout(() => setTransferToast(null), 8000);
   };
 
   const handleConsultantRouted = (consultant: ConsultantDoctor, details: any) => {
@@ -189,6 +240,32 @@ export function EmergencyTriageView() {
 
   return (
     <div className="space-y-6 pb-12">
+      {/* Transfer Dispatch Toast Notification */}
+      {transferToast && (
+        <div className="p-4 bg-emerald-600 text-white rounded-2xl shadow-xl flex items-center justify-between animate-fadeIn">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center">
+              <Ambulance className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <div className="font-extrabold text-sm flex items-center gap-2">
+                <span>{transferToast.message}</span>
+                <span className="font-mono text-[10px] bg-black/20 px-2 py-0.5 rounded">Ref: {transferToast.id}</span>
+              </div>
+              <p className="text-xs text-emerald-100 font-medium mt-0.5">
+                Destination: {transferToast.dest} • Emergency Telemetry & SBAR Handover Active
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setTransferToast(null)}
+            className="px-3 py-1 bg-white/20 hover:bg-white/30 rounded-lg text-xs font-bold"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Code Broadcast Alert Banner */}
       {activeCodeBroadcast && (
         <div className="p-4 bg-rose-600 text-white rounded-2xl shadow-xl border-2 border-rose-300 flex items-center justify-between animate-bounce">
@@ -222,12 +299,21 @@ export function EmergencyTriageView() {
             <h1 className="text-lg font-bold text-slate-900 dark:text-slate-100">Emergency Department & Trauma Resuscitation Center</h1>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Emergency Severity Index (ESI) Triage, Rapid Ambulance Telemetry & Hospital-wide Code Broadcasts
+            Emergency Severity Index (ESI) Triage, Rapid Ambulance Telemetry & Quick Inter-Hospital / Inter-Unit Transfer Protocol
           </p>
         </div>
 
-        {/* Code Activation Buttons */}
+        {/* Code Activation & Quick Transfer Buttons */}
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => handleOpenQuickTransfer(selectedCase)}
+            className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer active:scale-98"
+            title="Quick Transfer Patient to Tertiary Hospital or Internal Critical Unit"
+          >
+            <Ambulance className="w-3.5 h-3.5" />
+            <span>Quick Transfer (Hosp / Unit)</span>
+          </button>
           <button
             type="button"
             onClick={() => handleBroadcastCode('CODE STEMI (Cath Lab Alert)')}
@@ -325,6 +411,25 @@ export function EmergencyTriageView() {
                         &ldquo;{c.chiefComplaint}&rdquo;
                       </p>
 
+                      {c.status === 'transferred' && c.transferInfo && (
+                        <div className="p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs flex items-center justify-between text-emerald-900 dark:text-emerald-200">
+                          <div className="flex items-center gap-2">
+                            <Ambulance className="w-4 h-4 text-emerald-600 dark:text-emerald-400 animate-pulse shrink-0" />
+                            <div>
+                              <span className="font-extrabold text-[11px] uppercase tracking-wider block">
+                                {c.transferInfo.type === 'EXTERNAL_HOSPITAL' ? 'External Transfer En Route' : 'Internal Unit Escalation'}
+                              </span>
+                              <span className="text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+                                To: {c.transferInfo.destination} • Unit: {c.transferInfo.transportUnit}
+                              </span>
+                            </div>
+                          </div>
+                          <span className="font-mono text-[10px] bg-white dark:bg-slate-900 border border-emerald-300 dark:border-emerald-700 px-2 py-0.5 rounded text-emerald-800 dark:text-emerald-300">
+                            {c.transferInfo.dispatchId}
+                          </span>
+                        </div>
+                      )}
+
                       <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/60 dark:border-slate-800/60 mt-1">
                         <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600 dark:text-slate-400">
                           <span>Bay: <strong className="text-slate-900 dark:text-slate-200">{c.assignedBay}</strong></span>
@@ -332,17 +437,31 @@ export function EmergencyTriageView() {
                           <span className="text-slate-400 dark:text-slate-500">Arrived: {c.arrivalTime}</span>
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenRouting(c);
-                          }}
-                          className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer shrink-0"
-                        >
-                          <UserCheck className="w-3.5 h-3.5" />
-                          <span>Route to Consultant</span>
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenQuickTransfer(c);
+                            }}
+                            className="px-2.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition-all cursor-pointer shrink-0"
+                            title="Quick Transfer Patient to Tertiary Center or Internal Critical Unit"
+                          >
+                            <Ambulance className="w-3.5 h-3.5" />
+                            <span>Quick Transfer</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenRouting(c);
+                            }}
+                            className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer shrink-0"
+                          >
+                            <UserCheck className="w-3.5 h-3.5" />
+                            <span>Route to Consultant</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -415,6 +534,19 @@ export function EmergencyTriageView() {
             <div className="grid grid-cols-1 gap-2">
               <button
                 type="button"
+                onClick={() => handleOpenQuickTransfer(selectedCase)}
+                className="w-full text-left p-3 rounded-xl bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 text-white font-bold flex items-center justify-between shadow-xs cursor-pointer transition-all active:scale-98"
+              >
+                <div className="flex items-center gap-2">
+                  <Ambulance className="w-4 h-4 text-amber-200" />
+                  <span>Quick Transfer (Hospital / Unit)</span>
+                </div>
+                <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded text-white font-black">
+                  STAT TRANSFER
+                </span>
+              </button>
+              <button
+                type="button"
                 onClick={() => handleOpenRouting(selectedCase)}
                 className="w-full text-left p-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold flex items-center justify-between shadow-xs cursor-pointer transition-all active:scale-98"
               >
@@ -444,11 +576,11 @@ export function EmergencyTriageView() {
               </button>
               <button
                 type="button"
-                onClick={() => alert(`ICU Bed Bedside Transfer initiated for ${selectedCase.patientName}`)}
+                onClick={() => handleOpenQuickTransfer(selectedCase)}
                 className="w-full text-left p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-750 border border-slate-200 dark:border-slate-700 font-medium text-slate-800 dark:text-slate-200 flex items-center justify-between cursor-pointer transition-colors"
               >
-                <span>Direct Transfer to Intensive Care Unit (ICU)</span>
-                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">Bed Admit</span>
+                <span>Direct Transfer to Intensive Care Unit (ICU) / Unit Escalation</span>
+                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">Bed Admit / ICU</span>
               </button>
             </div>
           </div>
@@ -467,6 +599,28 @@ export function EmergencyTriageView() {
           triageCategory={routingPatientData.triageCategory}
           currentAttending={routingPatientData.currentAttending}
           onRoutedSuccess={handleConsultantRouted}
+        />
+      )}
+
+      {/* ER Quick Transfer Modal */}
+      {transferPatientData && (
+        <ERQuickTransferModal
+          isOpen={isTransferModalOpen}
+          onClose={() => setIsTransferModalOpen(false)}
+          patient={{
+            id: transferPatientData.id,
+            patientName: transferPatientData.patientName,
+            mrn: transferPatientData.mrn,
+            age: transferPatientData.age,
+            gender: transferPatientData.gender,
+            chiefComplaint: transferPatientData.chiefComplaint,
+            esiLevel: transferPatientData.esiLevel,
+            assignedBay: transferPatientData.assignedBay,
+            attendingPhysician: transferPatientData.attendingPhysician,
+            vitals: transferPatientData.vitals,
+            codeAlert: transferPatientData.codeAlert,
+          }}
+          onTransferComplete={handleTransferComplete}
         />
       )}
     </div>

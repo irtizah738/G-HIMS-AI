@@ -121,6 +121,72 @@ export class AuthClient {
   }
 
   /**
+   * Enterprise Single Sign-On (SSO / SAML / OIDC) Sign In
+   */
+  public static async signInSSO(
+    email: string,
+    tenantId: string = 'central-metro-hospital'
+  ): Promise<LoginResponsePayload> {
+    try {
+      const cleanEmail = email.trim();
+      const response = await fetch('/api/auth/sso/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail, tenantId }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new AuthError({
+          code: 'SSO_AUTH_FAILED',
+          message: data.error || 'Enterprise SSO authentication failed',
+          statusCode: response.status,
+          userMessage: data.error || 'Failed to authenticate via hospital Identity Provider',
+        });
+      }
+
+      const loginPayload: LoginResponsePayload = data;
+      const deviceMeta = generateDeviceMetadata();
+
+      const authUser: AuthenticatedUser = {
+        uid: loginPayload.user.uid,
+        email: loginPayload.user.email,
+        displayName: loginPayload.user.displayName,
+        tenantId: loginPayload.tenant.tenantId,
+        roles: loginPayload.authorization.roles,
+        permissions: loginPayload.authorization.permissions,
+        departmentIds: loginPayload.authorization.departmentIds,
+        facilityIds: loginPayload.authorization.facilityIds,
+        accountStatus: loginPayload.authorization.accountStatus,
+        clinicalPrivileges: loginPayload.authorization.clinicalPrivileges,
+        sessionId: loginPayload.session.sessionId,
+        deviceId: deviceMeta.deviceId,
+        lastAuthenticatedAt: new Date().toISOString(),
+      };
+
+      const sessionRecord: UserSessionRecord = {
+        sessionId: loginPayload.session.sessionId,
+        userId: loginPayload.user.uid,
+        tenantId: loginPayload.tenant.tenantId,
+        deviceId: deviceMeta.deviceId,
+        status: 'ACTIVE',
+        createdAt: new Date().toISOString(),
+        lastSeenAt: new Date().toISOString(),
+        authenticatedAt: new Date().toISOString(),
+        lastActivityAt: new Date().toISOString(),
+        expiresAt: loginPayload.session.expiresAt,
+      };
+
+      await saveCachedAuthSession(authUser, sessionRecord);
+
+      return loginPayload;
+    } catch (err) {
+      throw mapAuthError(err);
+    }
+  }
+
+  /**
    * Validate or Restore current session from server or offline cache
    */
   public static async validateCurrentSession(): Promise<LoginResponsePayload | null> {

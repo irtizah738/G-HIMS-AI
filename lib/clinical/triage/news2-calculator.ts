@@ -9,8 +9,26 @@ export interface News2Input {
   onSupplementalOxygen: boolean;
   systolicBp: number; // mmHg
   heartRate: number; // bpm
-  consciousness: 'ALERT' | 'VOICE' | 'PAIN' | 'UNRESPONSIVE';
+  consciousness?: 'ALERT' | 'VOICE' | 'PAIN' | 'UNRESPONSIVE';
+  gcsScore?: number; // Glasgow Coma Scale (3-15)
   temperature: number; // °C
+}
+
+export function gcsToAvpu(gcs: number): 'ALERT' | 'VOICE' | 'PAIN' | 'UNRESPONSIVE' {
+  if (gcs >= 15) return 'ALERT';
+  if (gcs >= 12) return 'VOICE';
+  if (gcs >= 8) return 'PAIN';
+  return 'UNRESPONSIVE';
+}
+
+export function avpuToGcs(avpu: 'ALERT' | 'VOICE' | 'PAIN' | 'UNRESPONSIVE'): number {
+  switch (avpu) {
+    case 'ALERT': return 15;
+    case 'VOICE': return 13;
+    case 'PAIN': return 9;
+    case 'UNRESPONSIVE': return 3;
+    default: return 15;
+  }
 }
 
 export interface News2Result {
@@ -72,8 +90,13 @@ export function calculateNews2Score(input: News2Input): News2Result {
   else if (input.heartRate >= 111 && input.heartRate <= 130) subScores.heartRate = 2;
   else if (input.heartRate >= 131) subScores.heartRate = 3;
 
-  // 6. Consciousness (AVPU)
-  subScores.consciousness = input.consciousness === 'ALERT' ? 0 : 3;
+  // 6. Consciousness (Glasgow Coma Scale / AVPU)
+  // In NEWS2: Alert (GCS 15) = 0, Any Acute Confusion or altered consciousness (GCS < 15 or V/P/U) = 3
+  if (input.gcsScore !== undefined) {
+    subScores.consciousness = input.gcsScore >= 15 ? 0 : 3;
+  } else {
+    subScores.consciousness = input.consciousness === 'ALERT' ? 0 : 3;
+  }
 
   // 7. Temperature
   if (input.temperature <= 35.0) subScores.temperature = 3;

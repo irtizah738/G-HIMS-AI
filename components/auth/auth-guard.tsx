@@ -1,9 +1,11 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth/auth-context';
-import { ShieldAlert, Lock, AlertCircle, RefreshCw, LogOut } from 'lucide-react';
+import { getSSOConfiguration } from '@/lib/auth/sso-service';
+import { SSOConfiguration } from '@/lib/auth/sso-types';
+import { ShieldAlert, Lock, AlertCircle, RefreshCw, LogOut, Key, ArrowRight, ShieldCheck } from 'lucide-react';
 import { SessionLockModal } from './session-lock-modal';
 
 interface AuthGuardProps {
@@ -39,7 +41,42 @@ export function AuthGuard({
     switchTenant,
     signOut,
     refreshAuth,
+    signInSSO,
   } = useAuth();
+
+  const [ssoConfig, setSsoConfig] = useState<SSOConfiguration | null>(null);
+  const [ssoAuthenticating, setSsoAuthenticating] = useState(false);
+  const [ssoError, setSsoError] = useState<string | null>(null);
+
+  // Check for active SSO config on tenant
+  useEffect(() => {
+    let isMounted = true;
+    if (!user) {
+      getSSOConfiguration(activeTenant?.tenantId || 'central-metro-hospital')
+        .then((cfg) => {
+          if (isMounted && cfg && cfg.enabled) {
+            setSsoConfig(cfg);
+          }
+        })
+        .catch(() => {});
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [user, activeTenant]);
+
+  const handleQuickSSOBypass = async (email?: string) => {
+    setSsoAuthenticating(true);
+    setSsoError(null);
+    try {
+      const targetEmail = email || 'doctor.sarah@centralmetro.health';
+      await signInSSO(targetEmail, activeTenant?.tenantId || 'central-metro-hospital');
+    } catch (err: any) {
+      setSsoError(err?.message || 'SSO Identity Provider authentication failed');
+    } finally {
+      setSsoAuthenticating(false);
+    }
+  };
 
   if (loading && loadingStatus === 'RESTORING_SESSION') {
     return (
@@ -59,7 +96,7 @@ export function AuthGuard({
     );
   }
 
-  // Not Authenticated State
+  // Not Authenticated State with SSO Bypass Support
   if (!user) {
     if (fallback) return <>{fallback}</>;
     return (
@@ -73,15 +110,52 @@ export function AuthGuard({
               Authentication Required
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-              You must sign in to the G-HIMS enterprise portal with verified hospital credentials to access this clinical module.
+              Sign in to the G-HIMS enterprise operating system with verified hospital credentials to access this clinical module.
             </p>
           </div>
-          <Link
-            href="/login"
-            className="block w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-sm font-semibold shadow-lg shadow-blue-500/25 transition text-center"
-          >
-            Go to Secure Login Portal
-          </Link>
+
+          {/* SSO Bypass Detection Banner */}
+          {ssoConfig && ssoConfig.enabled && (
+            <div className="p-4 rounded-xl bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 text-left space-y-3">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-blue-600" />
+                <span className="text-xs font-bold text-slate-900 dark:text-white">
+                  Enterprise SSO Federation Active
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                Hospital federated identity detected via <strong>{ssoConfig.providerType}</strong>. You can bypass traditional password login.
+              </p>
+              <button
+                type="button"
+                onClick={() => handleQuickSSOBypass()}
+                disabled={ssoAuthenticating}
+                className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-xs font-bold shadow-xs transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {ssoAuthenticating ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Key className="w-4 h-4" />
+                )}
+                <span>{ssoAuthenticating ? 'Exchanging SAML Assertion...' : 'Instant SSO Clinical Login (Bypass)'}</span>
+              </button>
+            </div>
+          )}
+
+          {ssoError && (
+            <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/50 border border-red-200 text-red-700 dark:text-red-400 text-xs font-medium">
+              {ssoError}
+            </div>
+          )}
+
+          <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+            <Link
+              href="/login"
+              className="block w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white text-xs font-semibold transition text-center"
+            >
+              Go to Standard Password Login Portal
+            </Link>
+          </div>
         </div>
       </div>
     );
@@ -103,7 +177,7 @@ export function AuthGuard({
           </div>
           <button
             onClick={() => signOut()}
-            className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 flex items-center justify-center gap-2 border border-slate-700"
+            className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 flex items-center justify-center gap-2 border border-slate-700 cursor-pointer"
           >
             <LogOut className="w-4 h-4" /> Sign Out
           </button>
@@ -128,13 +202,13 @@ export function AuthGuard({
           <div className="flex gap-3">
             <button
               onClick={() => refreshAuth()}
-              className="flex-1 py-2.5 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-xs font-semibold text-white flex items-center justify-center gap-2"
+              className="flex-1 py-2.5 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-xs font-semibold text-white flex items-center justify-center gap-2 cursor-pointer"
             >
               <RefreshCw className="w-4 h-4" /> Check Status
             </button>
             <button
               onClick={() => signOut()}
-              className="flex-1 py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 flex items-center justify-center gap-2 border border-slate-700"
+              className="flex-1 py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 flex items-center justify-center gap-2 border border-slate-700 cursor-pointer"
             >
               <LogOut className="w-4 h-4" /> Sign Out
             </button>
@@ -159,7 +233,7 @@ export function AuthGuard({
           </div>
           <button
             onClick={() => signOut()}
-            className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 flex items-center justify-center gap-2 border border-slate-700"
+            className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 flex items-center justify-center gap-2 border border-slate-700 cursor-pointer"
           >
             <LogOut className="w-4 h-4" /> Return to Login
           </button>

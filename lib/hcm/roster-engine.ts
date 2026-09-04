@@ -5,7 +5,19 @@ import {
   OvertimeRule,
   ShiftValidationResult,
   StatutoryDeductionBreakdown,
+  RestPeriodRuleConfig,
 } from '@/types/hcm';
+
+export const DEFAULT_REST_PERIOD_RULE: RestPeriodRuleConfig = {
+  enabled: true,
+  enforceRestPeriodRule: true,
+  blockSchedulingOnViolation: true,
+  minRestHours: 11, // Standard Hospital Safety Protocol (11-hour mandatory gap between consecutive shifts)
+  maxWeeklyHours: 60,
+  flagSeverity: 'critical',
+  enforceAcrossConsecutiveDays: true,
+  allowSupervisorOverride: true,
+};
 
 export const DEFAULT_OVERTIME_RULE: OvertimeRule = {
   id: 'rule-standard-hospital',
@@ -63,9 +75,12 @@ export function validateShiftAssignment(
   options?: {
     minRestHours?: number; // Hospital safety standard: 11 hours
     maxWeeklyHours?: number; // Clinical exhaustion cap: 60 hours
+    restPeriodRule?: RestPeriodRuleConfig;
   }
 ): ShiftValidationResult {
-  const minRestHours = options?.minRestHours ?? 11;
+  const restConfig = options?.restPeriodRule ?? DEFAULT_REST_PERIOD_RULE;
+  const minRestHours = options?.minRestHours ?? restConfig.minRestHours ?? 11;
+  const isRestRuleEnabled = restConfig.enabled !== false;
   const maxWeeklyHours = options?.maxWeeklyHours ?? 60;
 
   const errors: string[] = [];
@@ -124,7 +139,7 @@ export function validateShiftAssignment(
     }
   }
 
-  // 3. Check Overlapping Shifts & Rest Period for this staff member
+  // 3. Check Overlapping Shifts & Consecutive Rest Period Rule (11h gap) for this staff member
   const otherShifts = existingShifts.filter(
     (s) =>
       s.staffId === candidateShift.staffId &&
@@ -145,22 +160,30 @@ export function validateShiftAssignment(
     }
 
     // Check Minimum Rest Period (Previous shift -> candidate shift)
-    if (sEnd <= candidateStart) {
+    if (isRestRuleEnabled && sEnd <= candidateStart) {
       const restHours = (candidateStart - sEnd) / (1000 * 60 * 60);
       if (restHours < minRestHours) {
-        warnings.push(
-          `Rest period violation: Only ${restHours.toFixed(1)}h rest after shift ${shift.shiftNumber} (minimum recommended: ${minRestHours}h).`
-        );
+        const violationMsg = `Rest-Period Rule Violation: Only ${restHours.toFixed(1)}h rest gap after shift ${shift.shiftNumber || shift.shiftType} (minimum mandatory: ${minRestHours}h). Fatigue safety risk.`;
+        if (restConfig.flagSeverity === 'critical') {
+          blockReasons.push(violationMsg);
+          errors.push(violationMsg);
+        } else {
+          warnings.push(violationMsg);
+        }
       }
     }
 
     // Check Minimum Rest Period (Candidate shift -> Next shift)
-    if (candidateEnd <= sStart) {
+    if (isRestRuleEnabled && candidateEnd <= sStart) {
       const restHours = (sStart - candidateEnd) / (1000 * 60 * 60);
       if (restHours < minRestHours) {
-        warnings.push(
-          `Rest period violation: Only ${restHours.toFixed(1)}h rest before upcoming shift ${shift.shiftNumber} (minimum recommended: ${minRestHours}h).`
-        );
+        const violationMsg = `Rest-Period Rule Violation: Only ${restHours.toFixed(1)}h rest gap before shift ${shift.shiftNumber || shift.shiftType} (minimum mandatory: ${minRestHours}h). Fatigue safety risk.`;
+        if (restConfig.flagSeverity === 'critical') {
+          blockReasons.push(violationMsg);
+          errors.push(violationMsg);
+        } else {
+          warnings.push(violationMsg);
+        }
       }
     }
   }
@@ -196,6 +219,142 @@ export function validateShiftAssignment(
     errors,
     warnings,
     blockReasons,
+  };
+}
+
+/**
+ * Checks a specific roster shift in the matrix for conflict flags,
+ * including the 11h Rest-Period Rule, overlapping shifts, and expired credentials.
+ */
+export function evaluateRosterShiftConflicts(
+  shift: RosterShift,
+  allShifts: RosterShift[],
+  credentials: ClinicalCredential[],
+  staffMember?: StaffMember,
+  restPeriodRule: RestPeriodRuleConfig = DEFAULT_REST_PERIOD_RULE
+): {
+  hasConflict: boolean;
+  hasCriticalError: boolean;
+  hasWarning: boolean;
+  isRestPeriodViolation: boolean;
+  hasRestPeriodViolation: boolean;
+  hasExpiredCredential: boolean;
+  hasOverlap: boolean;
+  restGapHours?: number;
+  conflictDetails: string[];
+  reasons: string[];
+  severity: 'none' | 'warning' | 'critical';
+} {
+  const conflictDetails: string[] = [];
+  let isRestPeriodViolation = false;
+  let hasExpiredCredential = false;
+  let hasOverlap = false;
+  let minGapFound: number | undefined = undefined;
+  let hasCriticalError = false;
+  let hasWarning = false;
+
+  const shiftStart = new Date(shift.scheduledStartTime).getTime();
+  const shiftEnd = new Date(shift.scheduledEndTime).getTime();
+  const shiftDate = shift.date || shift.scheduledStartTime.split('T')[0];
+
+  // 1. Credentials Check
+  const staffCreds = credentials.filter((c) => c.staffId === shift.staffId);
+  for (const cred of staffCreds) {
+    if (cred.verificationStatus === 'expired' || (cred.expirationDate && cred.expirationDate <= shiftDate)) {
+      hasCriticalError = true;
+      hasExpiredCredential = true;
+      conflictDetails.push(`Expired License: ${cred.title} (${cred.licenseNumber}) expired ${cred.expirationDate}`);
+    }
+  }
+
+  // 2. Overlap & Rest-Period Gap Check with other shifts of same staff member
+  const otherStaffShifts = allShifts.filter(
+    (s) => s.staffId === shift.staffId && s.id !== shift.id && s.status !== 'swapped' && s.status !== 'absent'
+  );
+
+  const minRestHours = restPeriodRule.minRestHours ?? 11;
+  const isRestEnabled = restPeriodRule.enabled !== false;
+
+  for (const other of otherStaffShifts) {
+    const oStart = new Date(other.scheduledStartTime).getTime();
+    const oEnd = new Date(other.scheduledEndTime).getTime();
+
+    // Overlap
+    if (shiftStart < oEnd && shiftEnd > oStart) {
+      hasCriticalError = true;
+      hasOverlap = true;
+      conflictDetails.push(`Direct Shift Overlap with ${other.shiftType} shift (${other.scheduledStartTime.split('T')[1]?.substring(0, 5)} - ${other.scheduledEndTime.split('T')[1]?.substring(0, 5)})`);
+    }
+
+    // Preceding shift -> this shift
+    if (isRestEnabled && oEnd <= shiftStart) {
+      const gapHours = (shiftStart - oEnd) / (1000 * 60 * 60);
+      if (gapHours < minRestHours) {
+        isRestPeriodViolation = true;
+        minGapFound = minGapFound !== undefined ? Math.min(minGapFound, gapHours) : gapHours;
+        const msg = `Rest-Period Violation: Only ${gapHours.toFixed(1)}h rest gap after previous ${other.shiftType} shift (mandatory: ${minRestHours}h)`;
+        if (restPeriodRule.flagSeverity === 'critical') {
+          hasCriticalError = true;
+        } else {
+          hasWarning = true;
+        }
+        conflictDetails.push(msg);
+      }
+    }
+
+    // This shift -> succeeding shift
+    if (isRestEnabled && shiftEnd <= oStart) {
+      const gapHours = (oStart - shiftEnd) / (1000 * 60 * 60);
+      if (gapHours < minRestHours) {
+        isRestPeriodViolation = true;
+        minGapFound = minGapFound !== undefined ? Math.min(minGapFound, gapHours) : gapHours;
+        const msg = `Rest-Period Violation: Only ${gapHours.toFixed(1)}h rest gap before next ${other.shiftType} shift (mandatory: ${minRestHours}h)`;
+        if (restPeriodRule.flagSeverity === 'critical') {
+          hasCriticalError = true;
+        } else {
+          hasWarning = true;
+        }
+        conflictDetails.push(msg);
+      }
+    }
+  }
+
+  // Also include any static conflictFlags already recorded on shift
+  if (shift.conflictFlags && shift.conflictFlags.length > 0) {
+    shift.conflictFlags.forEach((cf) => {
+      if (!conflictDetails.includes(cf)) {
+        conflictDetails.push(cf);
+        if (cf.toLowerCase().includes('rest') || cf.toLowerCase().includes('violation')) {
+          isRestPeriodViolation = true;
+        }
+        if (cf.toLowerCase().includes('overlap')) {
+          hasOverlap = true;
+        }
+        if (cf.toLowerCase().includes('credential') || cf.toLowerCase().includes('license') || cf.toLowerCase().includes('expired')) {
+          hasExpiredCredential = true;
+        }
+        hasWarning = true;
+      }
+    });
+  }
+
+  const hasConflict = hasCriticalError || hasWarning || conflictDetails.length > 0;
+  const severity = hasCriticalError ? 'critical' : hasWarning ? 'warning' : 'none';
+
+  const uniqueDetails = Array.from(new Set(conflictDetails));
+
+  return {
+    hasConflict,
+    hasCriticalError,
+    hasWarning,
+    isRestPeriodViolation,
+    hasRestPeriodViolation: isRestPeriodViolation,
+    hasExpiredCredential,
+    hasOverlap,
+    restGapHours: minGapFound,
+    conflictDetails: uniqueDetails,
+    reasons: uniqueDetails,
+    severity,
   };
 }
 

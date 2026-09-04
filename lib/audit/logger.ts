@@ -1,5 +1,6 @@
 import { db, auth } from '@/lib/firebase/client';
 import { doc, setDoc, getDocs, collection, query, orderBy, limit, where } from 'firebase/firestore';
+import { dispatchAuditAlerts } from '@/lib/notifications/notification-service';
 
 export type AuditAction =
   | 'READ'
@@ -230,6 +231,11 @@ export async function logAuditEvent(input: AuditEventInput): Promise<AuditLogEnt
       // Sibling collection mirror for root compliance scanner
       const rootAuditRef = doc(db, 'auditLogs', id);
       await setDoc(rootAuditRef, entry).catch(() => {});
+
+      // Dispatch automated notifications (Slack/Email) if configured for actions like DELETE, OFFLINE_SYNC_OVERRIDE
+      dispatchAuditAlerts(entry).catch((err) => {
+        console.warn('Audit notification dispatch non-blocking error:', err);
+      });
     } catch (err) {
       console.warn('Audit log write fail-safe caught:', err);
     }

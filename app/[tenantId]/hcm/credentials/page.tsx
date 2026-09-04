@@ -23,12 +23,19 @@ import {
   Calendar,
   Layers,
   Sparkles,
+  Mail,
+  Bell,
+  Send,
+  Inbox,
+  Eye,
+  Check,
 } from 'lucide-react';
 import {
   ClinicalCredential,
   StaffMember,
   CredentialVerificationStatus,
   StaffRole,
+  CredentialExpiryAlert,
 } from '@/types/hcm';
 import {
   subscribeToStaffCredentials,
@@ -37,6 +44,9 @@ import {
   updateStaffCredentials,
   verifyCredential,
   seedInitialCredentials,
+  subscribeToCredentialExpiryAlerts,
+  trigger60DayCredentialExpiryScan,
+  acknowledgeCredentialAlert,
 } from '@/lib/firebase/services/hcm';
 
 export default function ClinicalCredentialsPage() {
@@ -71,6 +81,14 @@ export default function ClinicalCredentialsPage() {
   // Verification action
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
 
+  // 60-Day Automated Credential Expiry Notification System
+  const [alerts, setAlerts] = useState<CredentialExpiryAlert[]>([]);
+  const [scanning, setScanning] = useState(false);
+  const [scanReport, setScanReport] = useState<{ count: number; alertIds: string[]; triggeredAt: string } | null>(null);
+  const [showNotificationsDrawer, setShowNotificationsDrawer] = useState(false);
+  const [selectedAlertForEmail, setSelectedAlertForEmail] = useState<CredentialExpiryAlert | null>(null);
+  const [acknowledgingAlertId, setAcknowledgingAlertId] = useState<string | null>(null);
+
   useEffect(() => {
     setLoading(true);
     const unsubStaff = subscribeToStaffMembers(tenantId, setStaff);
@@ -78,12 +96,44 @@ export default function ClinicalCredentialsPage() {
       setCredentials(data);
       setLoading(false);
     });
+    const unsubAlerts = subscribeToCredentialExpiryAlerts(tenantId, (data) => {
+      setAlerts(data);
+    });
 
     return () => {
       unsubStaff();
       unsubCreds();
+      unsubAlerts();
     };
   }, [tenantId]);
+
+  const handleTrigger60DayScan = async () => {
+    setScanning(true);
+    try {
+      const result = await trigger60DayCredentialExpiryScan(tenantId);
+      setScanReport({
+        count: result.alertsGenerated,
+        alertIds: result.alerts.map((a) => a.id),
+        triggeredAt: new Date().toLocaleTimeString(),
+      });
+      setShowNotificationsDrawer(true);
+    } catch (err) {
+      console.error('Failed to run 60-day expiry scan:', err);
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const handleAcknowledgeAlert = async (alertId: string) => {
+    setAcknowledgingAlertId(alertId);
+    try {
+      await acknowledgeCredentialAlert(tenantId, alertId, 'Dr. Marcus Vance (Credentialing Director)');
+    } catch (err) {
+      console.error('Failed to acknowledge alert:', err);
+    } finally {
+      setAcknowledgingAlertId(null);
+    }
+  };
 
   useEffect(() => {
     if (staff.length > 0 && !staffId) {
@@ -251,7 +301,32 @@ export default function ClinicalCredentialsPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            id="run-60day-scan-btn"
+            onClick={handleTrigger60DayScan}
+            disabled={scanning}
+            className="flex items-center gap-2 px-3.5 py-2 text-sm font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg shadow-xs transition-colors disabled:opacity-50"
+            title="Scan all clinical credentials expiring in ≤60 days and dispatch automated email notices to the Credentialing Director"
+          >
+            <RefreshCw className={`h-4 w-4 text-emerald-600 ${scanning ? 'animate-spin' : ''}`} />
+            {scanning ? 'Scanning Expiries...' : 'Run 60-Day Expiry Scan'}
+          </button>
+
+          <button
+            id="open-director-alerts-btn"
+            onClick={() => setShowNotificationsDrawer(true)}
+            className="relative flex items-center gap-2 px-4 py-2 text-sm font-semibold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg shadow-xs transition-colors"
+          >
+            <Bell className="h-4 w-4 text-amber-700" />
+            Director Alerts
+            {alerts.length > 0 && (
+              <span className="ml-1 px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-600 text-white font-mono">
+                {alerts.length}
+              </span>
+            )}
+          </button>
+
           <button
             id="open-add-credential-modal-btn"
             onClick={() => {
@@ -767,6 +842,331 @@ export default function ClinicalCredentialsPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 60-Day Credential Expiry Director Notification Center Drawer */}
+      {showNotificationsDrawer && (
+        <div
+          id="director-alerts-drawer"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4 animate-in fade-in duration-150"
+        >
+          <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between p-5 border-b border-slate-200 bg-amber-50/70">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-amber-100 text-amber-800 rounded-xl border border-amber-200">
+                  <Mail className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    Credentialing Director Email Dispatcher (60-Day Mandate)
+                  </h3>
+                  <p className="text-xs text-slate-600">
+                    Automated alert pipeline triggering 60 days before clinical credential expiration
+                  </p>
+                </div>
+              </div>
+              <button
+                id="close-director-alerts-drawer-btn"
+                onClick={() => setShowNotificationsDrawer(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-amber-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Recipient & Policy Info Banner */}
+            <div className="bg-slate-50 p-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <div>
+                <span className="text-slate-500 font-medium">Notification Recipient:</span>{' '}
+                <strong className="text-slate-800 font-mono">
+                  director.credentialing@metrohealth.org
+                </strong>{' '}
+                <span className="text-slate-400">(Director of Credentialing & Medical Staff Office)</span>
+              </div>
+              <button
+                id="rescan-60day-btn"
+                onClick={handleTrigger60DayScan}
+                disabled={scanning}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold cursor-pointer shadow-xs disabled:opacity-50"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${scanning ? 'animate-spin' : ''}`} />
+                {scanning ? 'Scanning...' : 'Scan Now'}
+              </button>
+            </div>
+
+            {/* Body Alert List */}
+            <div className="p-6 overflow-y-auto space-y-4 flex-1">
+              {alerts.length === 0 ? (
+                <div className="text-center py-12 text-slate-500 space-y-2">
+                  <CheckCircle2 className="h-10 w-10 text-emerald-500 mx-auto" />
+                  <p className="font-semibold text-slate-800">All Credentials In Compliance</p>
+                  <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                    No active licenses or board certifications expiring within the next 60 days were found.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between text-xs text-slate-500">
+                    <span>
+                      Active Alert Records:{' '}
+                      <strong className="text-slate-900">{alerts.length} Dispatched</strong>
+                    </span>
+                    <span className="font-mono text-[11px] text-amber-700">
+                      Auto-Triggers @ 60 Days
+                    </span>
+                  </div>
+
+                  {alerts.map((alert) => {
+                    const urgency =
+                      alert.urgency ||
+                      (alert.daysUntilExpiration <= 0
+                        ? 'critical'
+                        : alert.daysUntilExpiration <= 30
+                        ? 'high'
+                        : 'moderate');
+
+                    return (
+                      <div
+                        key={alert.id}
+                        id={`alert-card-${alert.id}`}
+                        className={`p-4 rounded-xl border transition-all ${
+                          urgency === 'critical'
+                            ? 'bg-rose-50/70 border-rose-200'
+                            : urgency === 'high'
+                            ? 'bg-amber-50/70 border-amber-200'
+                            : 'bg-slate-50 border-slate-200'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-bold text-sm text-slate-900">
+                                {alert.staffName}
+                              </h4>
+                              <span
+                                className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                                  urgency === 'critical'
+                                    ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                                    : 'bg-amber-100 text-amber-800 border border-amber-200'
+                                }`}
+                              >
+                                {urgency}
+                              </span>
+                              <span className="text-[11px] font-mono text-slate-500">
+                                {alert.staffRole.toUpperCase()} • {alert.departmentName}
+                              </span>
+                            </div>
+
+                            <div className="text-xs font-semibold text-slate-800 mt-1">
+                              {alert.credentialTitle}
+                            </div>
+
+                            <div className="text-[11px] font-mono text-slate-600 mt-0.5">
+                              License #{alert.licenseNumber} • Expiration Date:{' '}
+                              <strong className="text-rose-700">{alert.expirationDate}</strong> (
+                              <span className="font-bold">
+                                {alert.daysUntilExpiration <= 0
+                                  ? 'EXPIRED'
+                                  : `${alert.daysUntilExpiration} days remaining`}
+                              </span>
+                              )
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col items-end gap-2 shrink-0">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                String(alert.status).toLowerCase() === 'acknowledged'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-blue-100 text-blue-800'
+                              }`}
+                            >
+                              {String(alert.status).toUpperCase()}
+                            </span>
+                            <button
+                              id={`preview-email-btn-${alert.id}`}
+                              onClick={() => setSelectedAlertForEmail(alert)}
+                              className="flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-white px-2.5 py-1 rounded-lg border border-indigo-200 hover:bg-indigo-50 shadow-2xs"
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                              Email Body
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 pt-3 border-t border-slate-200/80 flex items-center justify-between text-xs">
+                          <div className="text-slate-500 text-[11px]">
+                            Triggered on {alert.triggeredAt ? new Date(alert.triggeredAt).toLocaleString() : 'Automated Scan'}
+                          </div>
+
+                          {String(alert.status).toLowerCase() !== 'acknowledged' ? (
+                            <button
+                              id={`ack-alert-btn-${alert.id}`}
+                              onClick={() => handleAcknowledgeAlert(alert.id)}
+                              disabled={acknowledgingAlertId === alert.id}
+                              className="flex items-center gap-1.5 px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-semibold shadow-2xs disabled:opacity-50"
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              {acknowledgingAlertId === alert.id
+                                ? 'Acknowledging...'
+                                : 'Acknowledge Notice'}
+                            </button>
+                          ) : (
+                            <span className="text-[11px] text-emerald-700 font-semibold flex items-center gap-1">
+                              <Check className="h-3.5 w-3.5" />
+                              Acknowledged by {alert.acknowledgedBy || 'Director'}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between text-xs">
+              <span className="text-slate-500">
+                G-HIMS Master Safety Standard §95 — 60-Day Automated Compliance Watch
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowNotificationsDrawer(false)}
+                className="px-4 py-1.5 font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg shadow-2xs"
+              >
+                Close Center
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Simulated Email Preview Modal */}
+      {selectedAlertForEmail && (
+        <div
+          id="email-preview-modal"
+          className="fixed inset-0 z-60 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in zoom-in-95 duration-150"
+        >
+          <div className="bg-white w-full max-w-xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col">
+            {/* Email Header */}
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Mail className="h-5 w-5 text-amber-400" />
+                <span className="font-bold text-sm">Automated Email Notification Preview</span>
+              </div>
+              <button
+                onClick={() => setSelectedAlertForEmail(null)}
+                className="p-1 text-slate-400 hover:text-white rounded-lg"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Simulated Email Envelope */}
+            <div className="p-4 bg-slate-50 border-b border-slate-200 space-y-1.5 text-xs">
+              <div className="flex">
+                <span className="text-slate-400 w-16 font-medium">To:</span>
+                <span className="text-slate-800 font-mono font-semibold">
+                  {selectedAlertForEmail.recipientEmail} (Credentialing Director)
+                </span>
+              </div>
+              <div className="flex">
+                <span className="text-slate-400 w-16 font-medium">From:</span>
+                <span className="text-slate-800 font-mono">
+                  compliance-alerts@metrohealth.ghims.org (G-HIMS Safety Bot)
+                </span>
+              </div>
+              <div className="flex">
+                <span className="text-slate-400 w-16 font-medium">Subject:</span>
+                <span className="text-slate-900 font-bold">
+                  {selectedAlertForEmail.emailSubject}
+                </span>
+              </div>
+            </div>
+
+            {/* Simulated Email Content Body */}
+            <div className="p-6 text-xs text-slate-800 space-y-4 overflow-y-auto max-h-[50vh]">
+              <div className="p-3 bg-amber-50 rounded-lg border border-amber-200 text-amber-900">
+                <strong>Attention: Credentialing Director</strong>
+                <p className="mt-1">
+                  This is an automated 60-day advance compliance notification. A clinical practitioner in your organization has a mandatory credential that will expire in{' '}
+                  <span className="font-bold text-rose-700">
+                    {selectedAlertForEmail.daysUntilExpiration} days
+                  </span>.
+                </p>
+              </div>
+
+              <div className="space-y-2 border p-3 rounded-lg bg-slate-50">
+                <div className="font-bold text-slate-900 text-sm">Practitioner Dossier</div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <span className="text-slate-500">Clinician:</span>{' '}
+                    <strong>{selectedAlertForEmail.staffName}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Role:</span>{' '}
+                    <strong className="capitalize">{selectedAlertForEmail.staffRole}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Department:</span>{' '}
+                    <strong>{selectedAlertForEmail.departmentName}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Credential:</span>{' '}
+                    <strong>{selectedAlertForEmail.credentialTitle}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">License Number:</span>{' '}
+                    <strong className="font-mono">{selectedAlertForEmail.licenseNumber}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Expiration Date:</span>{' '}
+                    <strong className="text-rose-700">{selectedAlertForEmail.expirationDate}</strong>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-900 space-y-1">
+                <div className="font-bold flex items-center gap-1.5">
+                  <ShieldAlert className="h-4 w-4 text-rose-600" />
+                  Automated Practice & Roster Lock Warning
+                </div>
+                <p>
+                  Per hospital protocol, if this license is not renewed and verified by{' '}
+                  <strong>{selectedAlertForEmail.expirationDate}</strong>, the practitioner will be automatically locked out from clinical shift rostering and electronic prescription authorization.
+                </p>
+              </div>
+            </div>
+
+            {/* Email Footer Action */}
+            <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
+              <span className="text-[11px] text-slate-500">
+                Message ID: <code className="font-mono">{selectedAlertForEmail.id}</code>
+              </span>
+              <div className="flex items-center gap-2">
+                {String(selectedAlertForEmail.status).toLowerCase() !== 'acknowledged' && (
+                  <button
+                    onClick={() => {
+                      handleAcknowledgeAlert(selectedAlertForEmail.id);
+                      setSelectedAlertForEmail(null);
+                    }}
+                    className="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-lg text-xs shadow-2xs cursor-pointer"
+                  >
+                    Acknowledge Notice
+                  </button>
+                )}
+                <button
+                  onClick={() => setSelectedAlertForEmail(null)}
+                  className="px-4 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 font-semibold rounded-lg text-xs cursor-pointer"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

@@ -22,7 +22,9 @@ export type AuthErrorCode =
   | 'PASSWORD_RESET_FAILED'
   | 'TOKEN_EXPIRED'
   | 'INTERNAL_AUTH_ERROR'
-  | 'BREAK_GLASS_REASON_REQUIRED';
+  | 'BREAK_GLASS_REASON_REQUIRED'
+  | 'SSO_AUTH_FAILED'
+  | 'SSO_CONFIG_ERROR';
 
 export interface AuthErrorOptions {
   code: AuthErrorCode;
@@ -86,6 +88,10 @@ export function getDefaultUserMessage(code: AuthErrorCode): string {
       return 'Security token expired. Refreshing authorization context...';
     case 'BREAK_GLASS_REASON_REQUIRED':
       return 'Emergency Break-Glass access elevation requires a clinical justification reason.';
+    case 'SSO_AUTH_FAILED':
+      return 'Enterprise SSO authentication failed. Please verify your hospital federated credentials.';
+    case 'SSO_CONFIG_ERROR':
+      return 'Hospital SSO provider configuration is invalid or currently offline.';
     default:
       return 'An authentication error occurred. Please verify your connection or contact IT support.';
   }

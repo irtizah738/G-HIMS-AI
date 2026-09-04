@@ -78,7 +78,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setAccessToken(token);
       setUser(result.user);
       return token;
-    } catch (error) {
+    } catch (error: any) {
+      const errorCode = error?.code || '';
+      const errorMessage = error?.message || '';
+      
+      // User closed the popup or cancelled authentication - handle cleanly without logging fatal error
+      if (
+        errorCode === 'auth/popup-closed-by-user' ||
+        errorCode === 'auth/cancelled-popup-request' ||
+        errorCode === 'auth/user-cancelled' ||
+        errorMessage.includes('popup-closed-by-user') ||
+        errorMessage.includes('cancelled-popup-request')
+      ) {
+        console.info('Google Sign In popup closed or cancelled by user.');
+        return null;
+      }
+
+      if (errorCode === 'auth/popup-blocked') {
+        console.warn('Google Sign In popup was blocked by the browser.');
+        return null;
+      }
+
       console.error('Google Sign In / Scope Error:', error);
       throw error;
     }

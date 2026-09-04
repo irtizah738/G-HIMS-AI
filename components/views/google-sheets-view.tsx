@@ -70,6 +70,14 @@ export function GoogleSheetsView() {
   const [executingAction, setExecutingAction] = useState(false);
   const [actionSuccessMessage, setActionSuccessMessage] = useState<{ title: string; url?: string } | null>(null);
 
+  const handleConnectGoogle = async () => {
+    try {
+      await signInWithGoogle();
+    } catch (err: any) {
+      console.warn('Google connection status:', err?.message || err);
+    }
+  };
+
   // Handle spreadsheet selection
   const handleSelectSheet = React.useCallback(async (sheetId: string) => {
     if (!accessToken || !sheetId) return;
@@ -316,7 +324,7 @@ export function GoogleSheetsView() {
             {!accessToken ? (
               <button
                 type="button"
-                onClick={signInWithGoogle}
+                onClick={handleConnectGoogle}
                 className="inline-flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-white hover:bg-slate-50 text-slate-900 font-semibold text-sm shadow-md transition-all hover:scale-[1.02] active:scale-[0.98]"
               >
                 <svg className="w-4 h-4" viewBox="0 0 48 48">
@@ -434,7 +442,7 @@ export function GoogleSheetsView() {
           </div>
           <button
             type="button"
-            onClick={signInWithGoogle}
+            onClick={handleConnectGoogle}
             className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs shadow-xs transition-colors shrink-0 flex items-center justify-center gap-2"
           >
             Authorize Google Sheets

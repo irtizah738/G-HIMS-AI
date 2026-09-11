@@ -162,6 +162,7 @@ export interface Payslip {
   payrollPeriodId?: string;
   periodName: string;
   staffId: string;
+  employeeId?: string;
   staffName: string;
   staffRole: StaffRole;
   department: string;

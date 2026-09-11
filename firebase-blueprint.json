@@ -510,9 +510,46 @@
         "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "tenantId", "enabled", "providerType"]
+    },
+    "Vendor": {
+      "title": "Vendor",
+      "description": "Hospital medical supplier and pharmaceutical vendor administrative record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "tenantId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 256 },
+        "legalBusinessName": { "type": "string", "maxLength": 256 },
+        "taxId": { "type": "string", "maxLength": 64 },
+        "paymentTerms": { "type": "string", "maxLength": 64 },
+        "performanceScore": { "type": "number" },
+        "reliabilityRating": { "type": "number" },
+        "contractNumbers": { "type": "array" },
+        "contactPerson": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 128 },
+        "phone": { "type": "string", "maxLength": 64 },
+        "category": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "maxLength": 32 },
+        "leadTimeDays": { "type": "number" },
+        "address": { "type": "object" },
+        "bankAccountDetails": { "type": "object" },
+        "certifications": { "type": "array" },
+        "notes": { "type": "string", "maxLength": 512 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "name", "taxId", "paymentTerms", "contactPerson", "email", "phone"]
     }
   },
   "firestore": {
+    "/vendors/{vendorId}": {
+      "schema": "Vendor",
+      "description": "Hospital medical suppliers and vendor directory"
+    },
+    "/tenants/{tenantId}/vendors/{vendorId}": {
+      "schema": "Vendor",
+      "description": "Tenant-scoped hospital vendor directory"
+    },
     "/user_profiles/{userId}": {
       "schema": "UserProfile",
       "description": "Global user authentication profiles and assigned role"

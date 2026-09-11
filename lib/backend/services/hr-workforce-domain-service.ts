@@ -172,6 +172,87 @@ export class HrWorkforceDomainService {
     };
   }
 
+  public static async transferEmployee(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: {
+      employeeId: string;
+      toDepartmentId: string;
+      toDepartmentName: string;
+      toPositionId: string;
+      toPositionTitle: string;
+      reason: string;
+      effectiveDate: string;
+    }
+  ): Promise<CommandResult<EmployeeMaster>> {
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: ['HR_ADMIN', 'SYSTEM_ADMIN', 'MEDICAL_DIRECTOR', 'HOSPITAL_EXECUTIVE'],
+    });
+
+    if (!auth.authorized) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: auth.code || 'UNAUTHORIZED', message: auth.reason || 'HR Admin authority required.' },
+      };
+    }
+
+    const employee = this.employees.get(payload.employeeId);
+    if (!employee) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: 'EMPLOYEE_NOT_FOUND', message: `Employee ${payload.employeeId} does not exist.` },
+      };
+    }
+
+    const previousDept = { id: employee.primaryDepartmentId, name: employee.primaryDepartmentName };
+    const previousPosition = { id: employee.positionId, title: employee.positionTitle };
+
+    employee.primaryDepartmentId = payload.toDepartmentId;
+    employee.primaryDepartmentName = payload.toDepartmentName;
+    if (!employee.departmentIds.includes(payload.toDepartmentId)) {
+      employee.departmentIds.push(payload.toDepartmentId);
+    }
+    employee.positionId = payload.toPositionId;
+    employee.positionTitle = payload.toPositionTitle;
+    employee.updatedAt = new Date().toISOString();
+
+    this.employees.set(payload.employeeId, employee);
+
+    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
+      entityType: 'EMPLOYEE_MASTER',
+      entityId: payload.employeeId,
+      eventType: 'EMPLOYEE_TRANSFERRED',
+      domainState: employee,
+      eventPayload: {
+        employeeId: payload.employeeId,
+        previousDept,
+        newDept: { id: payload.toDepartmentId, name: payload.toDepartmentName },
+        previousPosition,
+        newPosition: { id: payload.toPositionId, title: payload.toPositionTitle },
+        reason: payload.reason,
+        effectiveDate: payload.effectiveDate,
+      },
+      auditReason: `Employee ${employee.employeeNumber} transferred from ${previousDept.name} to ${payload.toDepartmentName}: ${payload.reason}`,
+      outboxTopic: 'g-hims-workforce-events',
+    });
+
+    return {
+      success: true,
+      commandId,
+      idempotencyKey,
+      entityId: payload.employeeId,
+      eventId: tx.event.eventId,
+      auditId: tx.audit.auditId,
+      outboxId: tx.outbox.outboxId,
+      data: employee,
+    };
+  }
+
   // ============================================================================
   // 2. CREDENTIALS & CLINICAL PRIVILEGES (With Auto-Lockout)
   // ============================================================================
@@ -972,27 +1053,290 @@ export class HrWorkforceDomainService {
     this.leaveBalances.set(employeeId, defaultBalances);
   }
 
+  public static ensureInitialized(): void {
+    if (this.employees.size > 0) return;
+
+    const now = new Date().toISOString();
+    const today = now.split('T')[0];
+
+    const sampleEmployees: EmployeeMaster[] = [
+      {
+        employeeId: 'emp_001',
+        employeeNumber: 'EMP-2026-0814',
+        tenantId: 'tenant_default',
+        facilityIds: ['fac_central'],
+        primaryFacilityId: 'fac_central',
+        departmentIds: ['dept_cardiology', 'dept_general_medicine'],
+        primaryDepartmentId: 'dept_cardiology',
+        primaryDepartmentName: 'Cardiology',
+        positionId: 'pos_attending_cardio',
+        positionTitle: 'Attending Cardiologist',
+        employmentType: 'FULL_TIME',
+        employmentStatus: 'ACTIVE',
+        hireDate: '2021-03-15',
+        personalInfo: {
+          legalFirstName: 'Sarah',
+          legalLastName: 'Jenkins',
+          dateOfBirth: '1984-06-12',
+          gender: 'FEMALE',
+          contactEmail: 's.jenkins@centralmetro.health',
+          contactPhone: '+1-555-019-2831',
+          emergencyContact: { name: 'Mark Jenkins', relationship: 'Spouse', phone: '+1-555-019-2832' },
+          residentialAddress: { street: '42 Medical Center Blvd', city: 'Metro City', state: 'NY', postalCode: '10001', country: 'USA' },
+        },
+        compensation: { baseSalary: 32000000, currency: 'USD', paySchedule: 'MONTHLY' },
+        schemaVersion: 1,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        employeeId: 'emp_002',
+        employeeNumber: 'EMP-2026-0922',
+        tenantId: 'tenant_default',
+        facilityIds: ['fac_central'],
+        primaryFacilityId: 'fac_central',
+        departmentIds: ['dept_surgery', 'dept_orthopedics'],
+        primaryDepartmentId: 'dept_surgery',
+        primaryDepartmentName: 'Surgical Theaters',
+        positionId: 'pos_chief_surgeon',
+        positionTitle: 'Chief Orthopedic Surgeon',
+        employmentType: 'FULL_TIME',
+        employmentStatus: 'ACTIVE',
+        hireDate: '2018-09-01',
+        personalInfo: {
+          legalFirstName: 'Robert',
+          legalLastName: 'Hayes',
+          dateOfBirth: '1976-11-23',
+          gender: 'MALE',
+          contactEmail: 'r.hayes@centralmetro.health',
+          contactPhone: '+1-555-018-4920',
+          emergencyContact: { name: 'Claire Hayes', relationship: 'Spouse', phone: '+1-555-018-4921' },
+          residentialAddress: { street: '18 Highland Park', city: 'Metro City', state: 'NY', postalCode: '10002', country: 'USA' },
+        },
+        compensation: { baseSalary: 45000000, currency: 'USD', paySchedule: 'MONTHLY' },
+        schemaVersion: 1,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        employeeId: 'emp_003',
+        employeeNumber: 'EMP-2026-1105',
+        tenantId: 'tenant_default',
+        facilityIds: ['fac_central'],
+        primaryFacilityId: 'fac_central',
+        departmentIds: ['dept_icu'],
+        primaryDepartmentId: 'dept_icu',
+        primaryDepartmentName: 'Intensive Care Unit (ICU)',
+        positionId: 'pos_charge_nurse',
+        positionTitle: 'ICU Charge Nurse',
+        employmentType: 'FULL_TIME',
+        employmentStatus: 'ACTIVE',
+        hireDate: '2022-01-10',
+        personalInfo: {
+          legalFirstName: 'Elena',
+          legalLastName: 'Rostova',
+          dateOfBirth: '1990-04-18',
+          gender: 'FEMALE',
+          contactEmail: 'e.rostova@centralmetro.health',
+          contactPhone: '+1-555-017-3819',
+          emergencyContact: { name: 'Anna Rostova', relationship: 'Sister', phone: '+1-555-017-3820' },
+          residentialAddress: { street: '74 Elmwood Avenue', city: 'Metro City', state: 'NY', postalCode: '10003', country: 'USA' },
+        },
+        compensation: { baseSalary: 11500000, currency: 'USD', paySchedule: 'MONTHLY' },
+        schemaVersion: 1,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+
+    sampleEmployees.forEach((emp) => {
+      this.employees.set(emp.employeeId, emp);
+      this.seedDefaultLeaveBalances(emp.employeeId);
+    });
+
+    // Sample Credentials
+    const sampleCreds: EmployeeCredential[] = [
+      {
+        credentialId: 'crd_001',
+        employeeId: 'emp_001',
+        employeeName: 'Dr. Sarah Jenkins',
+        credentialType: 'MEDICAL_LICENSE',
+        title: 'State Medical Board License - Physician & Surgeon',
+        issuingAuthority: 'New York State Medical Board',
+        credentialNumber: 'MED-NY-849204',
+        issueDate: '2020-01-15',
+        expiryDate: '2028-01-15',
+        verificationStatus: 'VERIFIED',
+        verifiedByActorId: 'usr_medical_director',
+        verifiedByName: 'Dr. Arthur Campbell, MD (Medical Director)',
+        verifiedAt: '2020-01-20T00:00:00Z',
+        isMandatoryForPractice: true,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        credentialId: 'crd_002',
+        employeeId: 'emp_002',
+        employeeName: 'Dr. Robert Hayes',
+        credentialType: 'SPECIALTY_BOARD',
+        title: 'American Board of Orthopaedic Surgery (ABOS) Diplomate',
+        issuingAuthority: 'American Board of Orthopaedic Surgery',
+        credentialNumber: 'ABOS-73921',
+        issueDate: '2019-06-10',
+        expiryDate: '2029-06-10',
+        verificationStatus: 'VERIFIED',
+        verifiedByActorId: 'usr_medical_director',
+        verifiedByName: 'Dr. Arthur Campbell, MD (Medical Director)',
+        verifiedAt: '2019-06-15T00:00:00Z',
+        isMandatoryForPractice: true,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        credentialId: 'crd_003',
+        employeeId: 'emp_003',
+        employeeName: 'Elena Rostova',
+        credentialType: 'BLS_ACLS',
+        title: 'Advanced Cardiovascular Life Support (ACLS)',
+        issuingAuthority: 'American Heart Association',
+        credentialNumber: 'AHA-ACLS-99120',
+        issueDate: '2024-02-01',
+        expiryDate: '2026-02-01',
+        verificationStatus: 'VERIFIED',
+        isMandatoryForPractice: true,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+
+    sampleCreds.forEach((c) => this.credentials.set(c.credentialId, c));
+
+    // Sample Privileges
+    const samplePrivs: ClinicalPrivilege[] = [
+      {
+        privilegeId: 'prv_001',
+        employeeId: 'emp_001',
+        employeeName: 'Dr. Sarah Jenkins',
+        privilegeType: 'CONSULT_OPD',
+        specialty: 'Cardiology',
+        facilityId: 'fac_central',
+        facilityName: 'Central Metro Hospital',
+        departmentId: 'dept_cardiology',
+        departmentName: 'Cardiology',
+        status: 'GRANTED',
+        effectiveFrom: '2021-03-15',
+        effectiveUntil: '2028-03-15',
+        grantedByActorId: 'usr_medical_director',
+        grantedByName: 'Medical Board Committee',
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        privilegeId: 'prv_002',
+        employeeId: 'emp_001',
+        employeeName: 'Dr. Sarah Jenkins',
+        privilegeType: 'PRESCRIBE_MEDICATION',
+        specialty: 'Cardiology',
+        facilityId: 'fac_central',
+        facilityName: 'Central Metro Hospital',
+        departmentId: 'dept_cardiology',
+        departmentName: 'Cardiology',
+        status: 'GRANTED',
+        effectiveFrom: '2021-03-15',
+        effectiveUntil: '2028-03-15',
+        grantedByActorId: 'usr_medical_director',
+        grantedByName: 'Medical Board Committee',
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        privilegeId: 'prv_003',
+        employeeId: 'emp_002',
+        employeeName: 'Dr. Robert Hayes',
+        privilegeType: 'PERFORM_GENERAL_SURGERY',
+        specialty: 'Orthopedic Surgery',
+        facilityId: 'fac_central',
+        facilityName: 'Central Metro Hospital',
+        departmentId: 'dept_surgery',
+        departmentName: 'Surgical Theaters',
+        status: 'GRANTED',
+        effectiveFrom: '2018-09-01',
+        effectiveUntil: '2028-09-01',
+        grantedByActorId: 'usr_medical_director',
+        grantedByName: 'Medical Board Committee',
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+
+    samplePrivs.forEach((p) => this.privileges.set(p.privilegeId, p));
+
+    // Sample Shifts
+    const sampleShift: RosterShiftEntry = {
+      rosterId: 'rst_sample_01',
+      tenantId: 'tenant_default',
+      facilityId: 'fac_central',
+      facilityName: 'Central Metro Hospital',
+      departmentId: 'dept_cardiology',
+      departmentName: 'Cardiology',
+      employeeId: 'emp_001',
+      employeeName: 'Dr. Sarah Jenkins',
+      positionTitle: 'Attending Cardiologist',
+      date: today,
+      shiftId: 'sft_morning_01',
+      shiftName: 'Cardiology Morning Clinic',
+      startTime: `${today}T08:00:00Z`,
+      endTime: `${today}T16:00:00Z`,
+      durationHours: 8,
+      status: 'PUBLISHED',
+      isOvertime: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.shifts.set(sampleShift.rosterId, sampleShift);
+  }
+
+  public static resetForTesting(): void {
+    this.employees.clear();
+    this.credentials.clear();
+    this.privileges.clear();
+    this.shifts.clear();
+    this.attendanceRecords.clear();
+    this.leaveRequests.clear();
+    this.leaveBalances.clear();
+    this.compensationRecords.clear();
+    this.performanceReviews.clear();
+    this.disciplinaryRecords.clear();
+    this.trainingRecords.clear();
+  }
+
   public static getEmployees(): EmployeeMaster[] {
+    this.ensureInitialized();
     return Array.from(this.employees.values());
   }
 
   public static getCredentials(): EmployeeCredential[] {
+    this.ensureInitialized();
     return Array.from(this.credentials.values());
   }
 
   public static getPrivileges(): ClinicalPrivilege[] {
+    this.ensureInitialized();
     return Array.from(this.privileges.values());
   }
 
   public static getShifts(): RosterShiftEntry[] {
+    this.ensureInitialized();
     return Array.from(this.shifts.values());
   }
 
   public static getAttendanceRecords(): AttendanceRecord[] {
+    this.ensureInitialized();
     return Array.from(this.attendanceRecords.values());
   }
 
   public static getLeaveRequests(): LeaveRequest[] {
+    this.ensureInitialized();
     return Array.from(this.leaveRequests.values());
   }
 }

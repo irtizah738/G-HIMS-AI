@@ -271,7 +271,6 @@ export function CollapsibleSidebar({
           name: 'Supply Chain & Inventory',
           shortName: 'Supply Chain',
           icon: ShoppingCart,
-          directHref: '/metro-health/scm/purchase-orders',
         },
         {
           id: 'erp-coa',
@@ -571,24 +570,8 @@ export function CollapsibleSidebar({
                 </div>
               </div>
 
-              {/* Settings & Day / Night Mode Buttons */}
-              <div className="shrink-0 flex items-center gap-1 pl-1 border-l border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  id="btn-sidebar-footer-settings"
-                  onClick={() => {
-                    setActiveTab('settings');
-                    if (mobileOpen) setMobileOpen(false);
-                  }}
-                  className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
-                    activeTab === 'settings'
-                      ? 'bg-blue-600 text-white border-blue-600'
-                      : 'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
-                  }`}
-                  title="Enterprise Settings"
-                >
-                  <Settings className="w-3.5 h-3.5" />
-                </button>
+              {/* Day / Night Mode Button */}
+              <div className="shrink-0 flex items-center pl-1 border-l border-slate-100 dark:border-slate-800">
                 <ThemeToggle variant="button" />
               </div>
             </div>

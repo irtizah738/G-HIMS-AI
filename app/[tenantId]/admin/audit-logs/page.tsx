@@ -207,10 +207,13 @@ export default function TenantAuditLogsPage() {
   const [activeLogModal, setActiveLogModal] = useState<AuditLogEntry | null>(null);
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
 
-  // Auto-Refresh polling state (60s timer)
-  const [isAutoRefresh, setIsAutoRefresh] = useState<boolean>(false);
+  // Auto-Refresh polling state (60s timer - automatically enabled)
+  const [isAutoRefresh, setIsAutoRefresh] = useState<boolean>(true);
   const [refreshCountdown, setRefreshCountdown] = useState<number>(60);
   const [isSilentRefreshing, setIsSilentRefreshing] = useState<boolean>(false);
+
+  // Dedicated filter toggle to instantly hide all SUCCESS logs and show only SECURITY_ALERT and WARNING entries
+  const [onlyAlertsAndWarnings, setOnlyAlertsAndWarnings] = useState<boolean>(false);
 
   // Heatmap window filter
   const [activeHeatmapFilter, setActiveHeatmapFilter] = useState<{ dayIndex: number; hour: number } | null>(null);
@@ -397,7 +400,15 @@ export default function TenantAuditLogsPage() {
         log.hash.toLowerCase().includes(searchQuery.toLowerCase());
 
       const matchesAction = selectedAction === 'ALL' || log.action === selectedAction;
-      const matchesStatus = selectedStatus === 'ALL' || log.status === selectedStatus;
+      
+      // Dedicated filter toggle: instantly hides all SUCCESS logs, showing only SECURITY_ALERT and WARNING entries
+      let matchesStatus = true;
+      if (onlyAlertsAndWarnings) {
+        matchesStatus = log.status === 'SECURITY_ALERT' || log.status === 'WARNING';
+      } else {
+        matchesStatus = selectedStatus === 'ALL' || log.status === selectedStatus;
+      }
+      if (!matchesStatus) return false;
 
       const matchesRoles =
         selectedRoles.length === 0 ||
@@ -424,7 +435,7 @@ export default function TenantAuditLogsPage() {
 
       return matchesSearch && matchesAction && matchesStatus && matchesRoles;
     });
-  }, [logs, searchQuery, selectedAction, selectedStatus, selectedRoles, activeHeatmapFilter]);
+  }, [logs, searchQuery, selectedAction, selectedStatus, selectedRoles, activeHeatmapFilter, onlyAlertsAndWarnings]);
 
   // 7-Day Trend calculations for other KPI Sparklines
   const sevenDayTrends = useMemo(() => {
@@ -685,21 +696,59 @@ export default function TenantAuditLogsPage() {
     document.body.removeChild(link);
   };
 
-  // Export JSON
-  const handleExportJSON = (recordsToExport = filteredLogs, filenameSuffix = '') => {
-    const target = recordsToExport.length > 0 ? recordsToExport : filteredLogs;
-    const jsonContent =
-      'data:text/json;charset=utf-8,' +
-      encodeURIComponent(JSON.stringify(target, null, 2));
+  // Generate a clean, filesystem-safe timestamp: YYYYMMDD_HHmmss
+  const getTimestampForFilename = () => {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  };
+
+  // Dedicated Batch JSON Export functionality: packages selected audit entries into a single downloadable file with a timestamped filename
+  const handleBatchJsonExport = (recordsToExport?: AuditLogEntry[]) => {
+    const target = (recordsToExport && recordsToExport.length > 0)
+      ? recordsToExport
+      : (selectedLogsList.length > 0 ? selectedLogsList : filteredLogs);
+
+    const timestamp = getTimestampForFilename();
+    const isSelectionBatch = (recordsToExport && recordsToExport.length > 0) || selectedLogsList.length > 0;
+    const filename = `audit_logs_batch_${tenantId}_${timestamp}.json`;
+
+    const packageData = {
+      batchMetadata: {
+        exportType: 'BATCH_JSON_EXPORT',
+        tenantId,
+        exportedAt: new Date().toISOString(),
+        totalSelected: target.length,
+        isSelectiveBatch: isSelectionBatch,
+        systemAuditEngine: 'G-HIMS Immutable Event Ledger v2.4',
+        chainIntegrityStatus: verificationResult?.isValid ? 'VERIFIED_VALID' : 'UNVERIFIED_OR_MISMATCH_DETECTED',
+        filterSnapshot: {
+          onlyAlertsAndWarningsActive: onlyAlertsAndWarnings,
+          selectedStatus,
+          selectedAction,
+          selectedRoles,
+          searchQuery: searchQuery || undefined,
+        },
+      },
+      auditLogs: target,
+    };
+
+    const blob = new Blob([JSON.stringify(packageData, null, 2)], {
+      type: 'application/json;charset=utf-8',
+    });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.setAttribute('href', jsonContent);
-    link.setAttribute(
-      'download',
-      `HIPAA_Audit_Chain_${tenantId}${filenameSuffix ? `_${filenameSuffix}` : ''}.json`
-    );
+    link.href = url;
+    link.download = filename;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // Export JSON (delegates to timestamped JSON package)
+  const handleExportJSON = (recordsToExport = filteredLogs, _filenameSuffix = '') => {
+    handleBatchJsonExport(recordsToExport);
   };
 
   // Generate & Download Branded PDF Report
@@ -816,11 +865,12 @@ export default function TenantAuditLogsPage() {
 
           <button
             type="button"
-            onClick={() => handleExportJSON(filteredLogs)}
+            onClick={() => handleBatchJsonExport(selectedLogIds.length > 0 ? selectedLogsList : filteredLogs)}
             className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200"
+            title="Batch JSON Export: Package selected entries or full filtered audit sequence into a timestamped JSON file"
           >
-            <FileCode className="w-3.5 h-3.5" />
-            <span>JSON Ledger</span>
+            <FileCode className="w-3.5 h-3.5 text-purple-600" />
+            <span>{selectedLogIds.length > 0 ? `Batch JSON Export (${selectedLogIds.length})` : 'Batch JSON Export'}</span>
           </button>
         </div>
       </div>
@@ -1351,7 +1401,13 @@ export default function TenantAuditLogsPage() {
             <select
               value={selectedStatus}
               onChange={(e) => setSelectedStatus(e.target.value)}
-              className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 cursor-pointer hover:bg-slate-100 transition-colors"
+              disabled={onlyAlertsAndWarnings}
+              className={`px-3 py-2 border rounded-xl text-xs font-medium cursor-pointer transition-colors ${
+                onlyAlertsAndWarnings
+                  ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
+                  : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+              }`}
+              title={onlyAlertsAndWarnings ? 'Status select is bypassed when Alerts & Warnings filter is active' : 'Filter by event status'}
             >
               <option value="ALL">All Statuses</option>
               <option value="SUCCESS">SUCCESS</option>
@@ -1359,6 +1415,26 @@ export default function TenantAuditLogsPage() {
               <option value="SECURITY_ALERT">SECURITY_ALERT</option>
               <option value="CONFLICT_RESOLVED">CONFLICT_RESOLVED</option>
             </select>
+
+            {/* Dedicated Filter Toggle to Hide SUCCESS & Show Only SECURITY_ALERT and WARNING */}
+            <button
+              type="button"
+              id="filter-toggle-alerts-warnings"
+              onClick={() => setOnlyAlertsAndWarnings((prev) => !prev)}
+              className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border shadow-2xs ${
+                onlyAlertsAndWarnings
+                  ? 'bg-rose-50 border-rose-300 text-rose-700 ring-2 ring-rose-200'
+                  : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
+              }`}
+              title="Dedicated Filter: Instantly hides all SUCCESS logs, showing only SECURITY_ALERT and WARNING entries"
+              aria-pressed={onlyAlertsAndWarnings}
+            >
+              <AlertTriangle className={`w-3.5 h-3.5 ${onlyAlertsAndWarnings ? 'text-rose-600' : 'text-amber-500'}`} />
+              <span>{onlyAlertsAndWarnings ? 'Only Alerts & Warnings (Active)' : 'Hide SUCCESS (Alerts & Warnings)'}</span>
+              {onlyAlertsAndWarnings && (
+                <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse ml-0.5" />
+              )}
+            </button>
 
             {/* Download PDF Report Quick Button */}
             <button
@@ -1387,11 +1463,28 @@ export default function TenantAuditLogsPage() {
         {(selectedRoles.length > 0 ||
           selectedAction !== 'ALL' ||
           selectedStatus !== 'ALL' ||
+          onlyAlertsAndWarnings ||
           searchQuery.trim() !== '') && (
           <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100 text-xs">
             <span className="text-[11px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1">
               <SlidersHorizontal className="w-3 h-3" /> Active Filters:
             </span>
+
+            {/* Dedicated Alerts & Warnings Only Chip */}
+            {onlyAlertsAndWarnings && (
+              <span className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-[11px] font-bold">
+                <AlertTriangle className="w-3 h-3 text-rose-600" />
+                <span>SUCCESS Hidden (Alerts &amp; Warnings Only)</span>
+                <button
+                  type="button"
+                  onClick={() => setOnlyAlertsAndWarnings(false)}
+                  className="p-0.5 hover:bg-rose-200/60 rounded-full text-rose-700 transition-colors cursor-pointer"
+                  title="Remove alerts & warnings filter"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
 
             {/* Role Filter Chips */}
             {selectedRoles.map((roleId) => {
@@ -1471,6 +1564,7 @@ export default function TenantAuditLogsPage() {
                 setSelectedRoles([]);
                 setSelectedAction('ALL');
                 setSelectedStatus('ALL');
+                setOnlyAlertsAndWarnings(false);
                 setSearchQuery('');
               }}
               className="text-[11px] text-rose-600 hover:text-rose-700 font-bold hover:underline ml-1 cursor-pointer"
@@ -1546,12 +1640,17 @@ export default function TenantAuditLogsPage() {
                   const isConflict =
                     log.status === 'CONFLICT_RESOLVED' || log.action === 'OFFLINE_SYNC_OVERRIDE';
                   const logVerification = logVerificationMap[log.id] || (verificationResult?.isValid ? 'VERIFIED' : 'MISMATCH');
+                  const isMismatch = logVerification === 'MISMATCH';
 
                   return (
                     <tr
                       key={log.id}
                       className={`transition-colors ${
-                        isSelected
+                        isMismatch
+                          ? isSelected
+                            ? 'bg-rose-100/90 hover:bg-rose-100 ring-2 ring-rose-400 border-l-4 border-l-rose-600'
+                            : 'bg-rose-50/90 hover:bg-rose-100/80 border-l-4 border-l-rose-500'
+                          : isSelected
                           ? 'bg-blue-50/60'
                           : isAlert
                           ? 'bg-rose-50/30 hover:bg-rose-50/50'
@@ -1743,11 +1842,12 @@ export default function TenantAuditLogsPage() {
 
             <button
               type="button"
-              onClick={() => handleExportJSON(selectedLogsList, `Selected_${selectedLogIds.length}`)}
-              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-700"
+              onClick={() => handleBatchJsonExport(selectedLogsList)}
+              className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+              title="Batch JSON Export: Package all selected audit log entries into a single downloadable file with a timestamped filename"
             >
-              <FileCode className="w-3.5 h-3.5" />
-              <span>Export JSON</span>
+              <FileCode className="w-3.5 h-3.5 text-purple-200" />
+              <span>Batch JSON Export ({selectedLogIds.length})</span>
             </button>
 
             <button

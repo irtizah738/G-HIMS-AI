@@ -336,3 +336,125 @@ export function generateDeficitPurchaseOrderDraft(
     notes: `Autonomous PO draft generated for ${criticalAlerts.length} high-priority clinical stock deficits.`,
   };
 }
+
+export interface AutomatedParNotification {
+  id: string;
+  locationId: string;
+  locationName: string;
+  department: string;
+  itemId: string;
+  itemName: string;
+  currentQuantity: number;
+  minQuantity: number;
+  reorderPoint: number;
+  shortfall: number;
+  urgency: 'CRITICAL' | 'WARNING';
+  message: string;
+  timestamp: string;
+}
+
+export interface AutomatedParCheckResult {
+  timestamp: string;
+  totalLocationsChecked: number;
+  totalItemsChecked: number;
+  flaggedItems: PARAlert[];
+  criticalItems: PARAlert[];
+  warningItems: PARAlert[];
+  belowMinCount: number;
+  totalShortfallUnits: number;
+  totalDeficitCost: number;
+  notifications: AutomatedParNotification[];
+}
+
+/**
+ * Automated check against all location-based PAR items:
+ * Flags items falling below their 'minQuantity' reorder point,
+ * computes deficits, and compiles visual notifications.
+ */
+export function runAutomatedParCheck(locations: PARLocation[]): AutomatedParCheckResult {
+  const timestamp = new Date().toISOString();
+  const flaggedItems: PARAlert[] = [];
+  const criticalItems: PARAlert[] = [];
+  const warningItems: PARAlert[] = [];
+  let totalItemsChecked = 0;
+  let totalShortfallUnits = 0;
+  let totalDeficitCost = 0;
+
+  for (const loc of locations) {
+    for (const item of loc.items) {
+      totalItemsChecked++;
+      const currentQty = Number(item.currentQuantity) || 0;
+      const minQty = Number(item.minQuantity) || 0;
+      const reorderPt = Number(item.reorderPoint) || minQty;
+
+      // Check if item falls strictly below minQuantity or reorder threshold
+      const isBelowMin = currentQty < minQty;
+      const isAtOrBelowReorder = currentQty <= reorderPt;
+
+      if (isBelowMin || isAtOrBelowReorder) {
+        const shortfall = Math.max(0, minQty - currentQty);
+        const unitCost = Number(item.unitCost) || 0;
+        const deficitCost = Math.round(shortfall * unitCost * 100) / 100;
+        totalShortfallUnits += shortfall;
+        totalDeficitCost += deficitCost;
+
+        const isCritical = isBelowMin || (!!item.criticalItem && isAtOrBelowReorder);
+        const alert: PARAlert = {
+          locationId: loc.id,
+          locationName: loc.name,
+          department: loc.department,
+          itemId: item.itemId,
+          itemName: item.itemName,
+          sku: item.sku,
+          currentQuantity: currentQty,
+          minQuantity: minQty,
+          maxQuantity: Number(item.maxQuantity) || minQty * 2,
+          reorderPoint: reorderPt,
+          deficit: shortfall,
+          status: isCritical ? 'critical' : 'warning',
+          suggestedReorderQuantity: Math.max(shortfall * 2, calculateReorderQuantity(item)),
+          unitCost,
+          estimatedReplenishmentCost: deficitCost,
+          criticalItem: !!item.criticalItem,
+        };
+
+        flaggedItems.push(alert);
+        if (isCritical) {
+          criticalItems.push(alert);
+        } else {
+          warningItems.push(alert);
+        }
+      }
+    }
+  }
+
+  // Generate structured notification items
+  const notifications: AutomatedParNotification[] = flaggedItems.map((alert) => ({
+    id: `notif-${alert.locationId}-${alert.itemId}-${Date.now()}`,
+    locationId: alert.locationId,
+    locationName: alert.locationName,
+    department: alert.department,
+    itemId: alert.itemId,
+    itemName: alert.itemName,
+    currentQuantity: alert.currentQuantity,
+    minQuantity: alert.minQuantity,
+    reorderPoint: alert.reorderPoint,
+    shortfall: alert.deficit,
+    urgency: alert.status === 'critical' ? 'CRITICAL' : 'WARNING',
+    message: `PAR Deficit Alert: ${alert.itemName} at ${alert.locationName} is ${alert.currentQuantity} units (Min threshold: ${alert.minQuantity}, Deficit: ${alert.deficit} units).`,
+    timestamp,
+  }));
+
+  return {
+    timestamp,
+    totalLocationsChecked: locations.length,
+    totalItemsChecked,
+    flaggedItems,
+    criticalItems,
+    warningItems,
+    belowMinCount: flaggedItems.length,
+    totalShortfallUnits,
+    totalDeficitCost: Math.round(totalDeficitCost * 100) / 100,
+    notifications,
+  };
+}

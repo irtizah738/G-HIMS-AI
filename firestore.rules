@@ -167,6 +167,21 @@ service cloud.firestore {
       allow delete: if isSignedIn();
     }
 
+    // Hospital Vendor Master Directory
+    function isValidVendor(data) {
+      return (!('id' in data) || (data.id is string && data.id.size() <= 128))
+        && (!('name' in data) || (data.name is string && data.name.size() <= 256))
+        && (!('taxId' in data) || (data.taxId is string && data.taxId.size() <= 64))
+        && (!('paymentTerms' in data) || (data.paymentTerms is string && data.paymentTerms.size() <= 64))
+        && (!('contactPerson' in data) || (data.contactPerson is string && data.contactPerson.size() <= 128));
+    }
+
+    match /vendors/{vendorId} {
+      allow get, list: if isSignedIn() || true;
+      allow create, update: if (isSignedIn() || true) && isValidId(vendorId) && isValidVendor(incoming());
+      allow delete: if isSignedIn();
+    }
+
     // Multi-tenant Organization Root & Subcollections
     match /tenants/{tenantId} {
       allow get, list: if isSignedIn() || true;

@@ -38,6 +38,7 @@ import {
   Settings,
   User,
   UserCheck,
+  ShoppingCart,
 } from 'lucide-react';
 import { useRBAC } from '@/lib/auth/rbac-context';
 import { RoleId } from '@/types/rbac';
@@ -224,6 +225,16 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         icon: FileCheck,
         action: () => {
           setActiveTab('claims');
+          onClose();
+        },
+      },
+      {
+        id: 'scm-pos',
+        title: 'Supply Chain, Procurement & Inventory OS (FEFO / UDI / Recalls)',
+        category: 'Enterprise & Finance',
+        icon: ShoppingCart,
+        action: () => {
+          setActiveTab('scm-pos');
           onClose();
         },
       },

@@ -222,8 +222,10 @@ export interface AuditLogEntry {
   action: string;
   resource: string;
   ipAddress: string;
-  status: 'SUCCESS' | 'WARNING' | 'DENIED';
+  status: 'SUCCESS' | 'WARNING' | 'DENIED' | 'SECURITY_ALERT' | 'INFO' | 'ERROR';
   details: string;
+  hash?: string;
+  previousHash?: string;
 }
 
 export interface HospitalStats {

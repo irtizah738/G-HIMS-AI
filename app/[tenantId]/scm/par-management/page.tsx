@@ -15,11 +15,15 @@ import {
   createStockTransfer,
   subscribeToParLocations,
   subscribeToStockTransfers,
+  recordParBreachNotifications,
 } from '@/lib/firebase/services/supply-chain';
 import {
   evaluateParLevels,
   generateAutomatedRequisitions,
   determineItemHealthStatus,
+  runAutomatedParCheck,
+  AutomatedParCheckResult,
+  AutomatedParNotification,
 } from '@/lib/supply-chain/par-replenishment';
 import { formatCurrency } from '@/lib/utils';
 import {
@@ -47,6 +51,9 @@ import {
   TrendingDown,
   Warehouse,
   Flame,
+  Bell,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 
 interface PageProps {
@@ -77,6 +84,15 @@ export default function PARManagementPage({ params }: PageProps) {
   const [isProcessingTransfer, setIsProcessingTransfer] = useState(false);
   const [quickEditQty, setQuickEditQty] = useState<{ [key: string]: number }>({});
   const [showAutoRequisitionBanner, setShowAutoRequisitionBanner] = useState(true);
+
+  // Automated PAR Health & Min-Quantity Breach Detection State
+  const [isScanningPar, setIsScanningPar] = useState(false);
+  const [lastCheckTimestamp, setLastCheckTimestamp] = useState<string | null>(null);
+  const [activeBreachNotifications, setActiveBreachNotifications] = useState<AutomatedParNotification[]>([]);
+  const [isNotificationDrawerOpen, setIsNotificationDrawerOpen] = useState(false);
+  const [activeToasts, setActiveToasts] = useState<AutomatedParNotification[]>([]);
+  const [filterBelowMinOnly, setFilterBelowMinOnly] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(true);
 
   // Live Subscription
   useEffect(() => {
@@ -119,6 +135,59 @@ export default function PARManagementPage({ params }: PageProps) {
   const parEvaluation = useMemo(() => {
     return evaluateParLevels(locations);
   }, [locations]);
+
+  // Run Automated Check against all location-based PAR items to flag below-min reorder points
+  const autoCheckResult = useMemo<AutomatedParCheckResult>(() => {
+    return runAutomatedParCheck(locations);
+  }, [locations]);
+
+  // Audio synthesizer chime for clinical PAR breaches
+  const playBreachChime = () => {
+    if (!soundEnabled || typeof window === 'undefined') return;
+    try {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.18, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.35);
+    } catch {
+      // Ignore audio restriction fallback
+    }
+  };
+
+  // Explicit Automated Check trigger: flags below-min items, plays chime, records notifications
+  const handleTriggerAutomatedCheck = async () => {
+    setIsScanningPar(true);
+    const result = runAutomatedParCheck(locations);
+    setActiveBreachNotifications(result.notifications);
+    setLastCheckTimestamp(new Date().toLocaleTimeString());
+
+    if (result.belowMinCount > 0) {
+      playBreachChime();
+      setActiveToasts(result.notifications.slice(0, 3));
+      setTimeout(() => {
+        setActiveToasts([]);
+      }, 6500);
+      try {
+        await recordParBreachNotifications(tenantId, result.notifications);
+      } catch (e) {
+        console.warn('Failed to persist automated PAR breach notifications:', e);
+      }
+    }
+
+    setTimeout(() => {
+      setIsScanningPar(false);
+    }, 600);
+  };
 
   // Central warehouse location for source inventory checks
   const centralWarehouse = useMemo(() => {
@@ -258,22 +327,56 @@ export default function PARManagementPage({ params }: PageProps) {
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            id="btn-sound-toggle"
+            onClick={() => setSoundEnabled(!soundEnabled)}
+            className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl transition-colors cursor-pointer"
+            title={soundEnabled ? 'Mute alert sounds' : 'Enable alert sounds'}
+          >
+            {soundEnabled ? <Volume2 className="w-4 h-4 text-indigo-600" /> : <VolumeX className="w-4 h-4 text-slate-400" />}
+          </button>
+
+          <button
+            id="btn-notifications-drawer-open"
+            onClick={() => setIsNotificationDrawerOpen(true)}
+            className="relative px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 flex items-center gap-2 cursor-pointer transition-all shadow-2xs"
+          >
+            <Bell className="w-4 h-4 text-rose-600" />
+            <span>Breach Alerts</span>
+            {autoCheckResult.belowMinCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-rose-600 text-white animate-pulse">
+                {autoCheckResult.belowMinCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            id="btn-run-automated-par-check"
+            onClick={handleTriggerAutomatedCheck}
+            disabled={isScanningPar}
+            className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-2 transition-all cursor-pointer hover:shadow-md disabled:opacity-75"
+          >
+            <RefreshCw className={`w-4 h-4 text-amber-300 ${isScanningPar ? 'animate-spin' : ''}`} />
+            <span>{isScanningPar ? 'Scanning Location Stocks...' : 'Run Automated PAR Check'}</span>
+          </button>
+
           <button
             id="btn-run-auto-replenishment"
             onClick={handleRunAutoReplenishment}
             className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-2 transition-all cursor-pointer hover:shadow-md"
           >
             <Sparkles className="w-4 h-4 text-amber-300" />
-            <span>Run PAR Replenishment Engine</span>
+            <span>Auto-Replenish Wards</span>
           </button>
+
           <button
             id="btn-manual-transfer-open"
             onClick={() => openTransferModal()}
             className="px-4 py-2.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-xl shadow-2xs flex items-center gap-2 cursor-pointer"
           >
             <ArrowRightLeft className="w-4 h-4 text-blue-600" />
-            <span>Dispatch Stock Transfer</span>
+            <span>Transfer Stock</span>
           </button>
         </div>
       </div>
@@ -451,6 +554,54 @@ export default function PARManagementPage({ params }: PageProps) {
         </div>
       )}
 
+      {/* Automated Stock Deficit Alert Banner */}
+      {autoCheckResult.belowMinCount > 0 && (
+        <div className="bg-gradient-to-r from-rose-600 via-rose-700 to-red-800 text-white p-4 sm:p-5 rounded-2xl shadow-md border border-rose-500/60 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="flex items-start gap-3.5">
+            <div className="p-2.5 rounded-xl bg-white/10 text-white shrink-0">
+              <Flame className="w-5 h-5 text-amber-300 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-black text-sm uppercase tracking-wider bg-white/20 px-2 py-0.5 rounded text-[10px]">
+                  Autonomous Check Active
+                </span>
+                <span className="text-xs text-rose-100 font-mono">
+                  {lastCheckTimestamp ? `Last check: ${lastCheckTimestamp}` : 'Continuous Floor Monitoring'}
+                </span>
+              </div>
+              <h4 className="font-extrabold text-base text-white mt-1">
+                {autoCheckResult.belowMinCount} Location Items Falling Below 'minQuantity' Reorder Point
+              </h4>
+              <p className="text-xs text-rose-100/90 mt-0.5">
+                Total Deficit: <span className="font-bold text-white">{autoCheckResult.totalShortfallUnits} units</span> | Estimated Replenishment Value:{' '}
+                <span className="font-bold text-white">${autoCheckResult.totalDeficitCost.toLocaleString()}</span>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0 w-full md:w-auto">
+            <button
+              onClick={() => setFilterBelowMinOnly(!filterBelowMinOnly)}
+              className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer shadow-xs ${
+                filterBelowMinOnly
+                  ? 'bg-white text-rose-700'
+                  : 'bg-white/20 hover:bg-white/30 text-white border border-white/30'
+              }`}
+            >
+              {filterBelowMinOnly ? 'Show All SKUs' : `Filter Below Min (${autoCheckResult.belowMinCount})`}
+            </button>
+            <button
+              onClick={() => setIsNotificationDrawerOpen(true)}
+              className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white text-rose-900 hover:bg-rose-50 transition-all cursor-pointer shadow-xs flex items-center gap-1.5"
+            >
+              <Bell className="w-3.5 h-3.5 text-rose-700" />
+              <span>Breach Alerts Feed</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Ward Location Selector & Filter */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
         <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
@@ -487,15 +638,29 @@ export default function PARManagementPage({ params }: PageProps) {
           })}
         </div>
 
-        <div className="relative w-full sm:w-64">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Search SKU or item name..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 placeholder:text-slate-400 focus:bg-white focus:outline-hidden"
-          />
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <button
+            onClick={() => setFilterBelowMinOnly(!filterBelowMinOnly)}
+            className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer shrink-0 flex items-center gap-1.5 border ${
+              filterBelowMinOnly
+                ? 'bg-rose-600 text-white border-rose-600 shadow-2xs'
+                : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+            }`}
+          >
+            <AlertTriangle className="w-3.5 h-3.5" />
+            <span>Below Min ({autoCheckResult.belowMinCount})</span>
+          </button>
+
+          <div className="relative w-full sm:w-60">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search SKU or item name..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 placeholder:text-slate-400 focus:bg-white focus:outline-hidden"
+            />
+          </div>
         </div>
       </div>
 
@@ -503,10 +668,16 @@ export default function PARManagementPage({ params }: PageProps) {
       <div className="space-y-6">
         {displayedLocations.map((loc) => {
           const evalResult = parEvaluation.evaluations.find((e) => e.locationId === loc.id);
-          const filteredItems = loc.items.filter((i) =>
-            i.itemName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            i.sku.toLowerCase().includes(searchQuery.toLowerCase())
-          );
+          const filteredItems = loc.items.filter((i) => {
+            const matchesSearch =
+              i.itemName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+              i.sku.toLowerCase().includes(searchQuery.toLowerCase());
+            if (!matchesSearch) return false;
+            if (filterBelowMinOnly) {
+              return i.currentQuantity < i.minQuantity;
+            }
+            return true;
+          });
 
           return (
             <div
@@ -581,19 +752,37 @@ export default function PARManagementPage({ params }: PageProps) {
                         item.reorderPoint
                       );
 
+                      const isBelowMin = item.currentQuantity < item.minQuantity;
+                      const shortfall = Math.max(0, item.minQuantity - item.currentQuantity);
+                      const isNearReorder = !isBelowMin && item.currentQuantity <= item.reorderPoint;
+
                       const pct = Math.min(
                         100,
                         Math.round((item.currentQuantity / item.maxQuantity) * 100)
                       );
 
                       return (
-                        <tr key={item.itemId} className="hover:bg-slate-50/70 transition-colors">
+                        <tr
+                          key={item.itemId}
+                          className={`transition-colors ${
+                            isBelowMin
+                              ? 'bg-rose-50/90 dark:bg-rose-950/25 border-l-4 border-l-rose-600 font-semibold'
+                              : isNearReorder
+                              ? 'bg-amber-50/60 dark:bg-amber-950/15 border-l-4 border-l-amber-500'
+                              : 'hover:bg-slate-50/70'
+                          }`}
+                        >
                           <td className="py-3 px-4">
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="font-extrabold text-slate-900">{item.itemName}</span>
                               {item.criticalItem && (
                                 <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-rose-100 text-rose-700">
                                   CRITICAL
+                                </span>
+                              )}
+                              {isBelowMin && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-rose-600 text-white shadow-2xs animate-pulse">
+                                  <AlertTriangle className="w-2.5 h-2.5 text-amber-200" /> BELOW MIN PAR
                                 </span>
                               )}
                             </div>
@@ -610,7 +799,9 @@ export default function PARManagementPage({ params }: PageProps) {
                           <td className="py-3 px-3 text-center">
                             <span
                               className={`text-sm font-black ${
-                                status === 'critical'
+                                isBelowMin
+                                  ? 'text-rose-700 bg-rose-100 px-2 py-0.5 rounded-lg inline-block'
+                                  : status === 'critical'
                                   ? 'text-rose-600 bg-rose-50 px-2 py-0.5 rounded-lg'
                                   : status === 'warning'
                                   ? 'text-amber-600'
@@ -619,6 +810,11 @@ export default function PARManagementPage({ params }: PageProps) {
                             >
                               {item.currentQuantity}
                             </span>
+                            {isBelowMin && (
+                              <div className="text-[10px] font-extrabold text-rose-700 bg-rose-200/70 px-1.5 py-0.2 rounded mt-0.5">
+                                Deficit: -{shortfall}
+                              </div>
+                            )}
                           </td>
                           <td className="py-3 px-3 text-center font-bold text-slate-600">
                             {item.maxQuantity}
@@ -627,7 +823,7 @@ export default function PARManagementPage({ params }: PageProps) {
                             <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                               <div
                                 className={`h-full rounded-full transition-all duration-300 ${
-                                  status === 'critical'
+                                  isBelowMin || status === 'critical'
                                     ? 'bg-rose-500'
                                     : status === 'warning'
                                     ? 'bg-amber-500'
@@ -643,29 +839,46 @@ export default function PARManagementPage({ params }: PageProps) {
                             </div>
                           </td>
                           <td className="py-3 px-3 text-center">
-                            {status === 'critical' && (
+                            {isBelowMin ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black bg-rose-600 text-white shadow-2xs animate-pulse">
+                                <AlertTriangle className="w-3 h-3 text-amber-200" /> Below Min
+                              </span>
+                            ) : status === 'critical' ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-50 text-rose-700 border border-rose-200">
                                 <AlertTriangle className="w-3 h-3" /> Critical
                               </span>
-                            )}
-                            {status === 'warning' && (
+                            ) : status === 'warning' ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-50 text-amber-700 border border-amber-200">
                                 <AlertTriangle className="w-3 h-3" /> Reorder
                               </span>
-                            )}
-                            {status === 'optimal' && (
+                            ) : status === 'optimal' ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
                                 <CheckCircle2 className="w-3 h-3" /> Optimal
                               </span>
-                            )}
-                            {status === 'overstocked' && (
+                            ) : (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
                                 Overstocked
                               </span>
                             )}
                           </td>
                           <td className="py-3 px-4 text-right">
-                            <div className="flex items-center justify-end gap-1">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {isBelowMin && (
+                                <button
+                                  onClick={() =>
+                                    handleAdjustQuantity(
+                                      loc.id,
+                                      item.itemId,
+                                      Math.max(1, item.maxQuantity - item.currentQuantity)
+                                    )
+                                  }
+                                  className="px-2 py-1 rounded bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-black cursor-pointer shadow-2xs transition-colors flex items-center gap-1 whitespace-nowrap"
+                                  title="Replenish item to maximum target PAR level"
+                                >
+                                  <Sparkles className="w-2.5 h-2.5 text-amber-200" />
+                                  <span>Top-Up</span>
+                                </button>
+                              )}
                               <button
                                 onClick={() => handleAdjustQuantity(loc.id, item.itemId, -1)}
                                 className="p-1 rounded bg-slate-100 hover:bg-rose-100 hover:text-rose-700 text-slate-600 transition-colors cursor-pointer"
@@ -826,6 +1039,161 @@ export default function PARManagementPage({ params }: PageProps) {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ==================================================================== */}
+      {/* BREACH NOTIFICATIONS DRAWER / MODAL */}
+      {/* ==================================================================== */}
+      {isNotificationDrawerOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-end p-0 sm:p-4">
+          <div className="bg-white w-full sm:max-w-xl h-full sm:h-auto sm:max-h-[90vh] sm:rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col">
+            <div className="p-5 border-b border-slate-200 bg-rose-50/70 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-rose-600 text-white">
+                  <Bell className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-900 text-base">
+                    Automated PAR Breach Notifications
+                  </h3>
+                  <p className="text-xs text-rose-700 font-medium">
+                    {autoCheckResult.notifications.length} Floor SKUs Currently Below Min Reorder Point
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsNotificationDrawerOpen(false)}
+                className="p-1.5 rounded-lg hover:bg-rose-100 text-slate-500 hover:text-slate-700 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 overflow-y-auto flex-1 space-y-3 divide-y divide-slate-100">
+              {autoCheckResult.notifications.length === 0 ? (
+                <div className="text-center py-12">
+                  <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto mb-2" />
+                  <p className="text-sm font-bold text-slate-800">All PAR Locations Healthy</p>
+                  <p className="text-xs text-slate-400">No items are currently below minimum reorder points.</p>
+                </div>
+              ) : (
+                autoCheckResult.notifications.map((notif, idx) => (
+                  <div key={idx} className="pt-3 first:pt-0 flex flex-col gap-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${
+                              notif.severity === 'CRITICAL'
+                                ? 'bg-rose-600 text-white'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}
+                          >
+                            {notif.severity}
+                          </span>
+                          <span className="font-extrabold text-slate-900 text-xs">
+                            {notif.itemName}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5">
+                          Location: <span className="font-bold text-slate-700">{notif.locationName}</span>
+                        </div>
+                      </div>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        {new Date(notif.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+
+                    <p className="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-200/60 font-medium">
+                      {notif.message}
+                    </p>
+
+                    <div className="flex items-center justify-between text-xs pt-1">
+                      <div className="flex items-center gap-2 text-[11px]">
+                        <span className="font-bold text-rose-600">
+                          Current: {notif.currentQuantity} (Min: {notif.minQuantity})
+                        </span>
+                        <span className="text-slate-300">•</span>
+                        <span className="font-extrabold text-slate-700">
+                          Deficit: -{notif.shortfallUnits} units
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const loc = locations.find((l) => l.id === notif.locationId);
+                          const it = loc?.items.find((i) => i.itemId === notif.itemId);
+                          if (it) {
+                            handleAdjustQuantity(notif.locationId, notif.itemId, Math.max(1, it.maxQuantity - it.currentQuantity));
+                          }
+                        }}
+                        className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                      >
+                        <Sparkles className="w-3 h-3 text-amber-200" />
+                        <span>Top-Up Item</span>
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={handleTriggerAutomatedCheck}
+                className="px-3.5 py-2 text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded-xl hover:bg-slate-100 flex items-center gap-1.5 cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Re-Scan Wards</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsNotificationDrawerOpen(false)}
+                className="px-4 py-2 bg-slate-900 text-white font-bold text-xs rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                Close Drawer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================================================================== */}
+      {/* FLOATING TOAST NOTIFICATION STACK */}
+      {/* ==================================================================== */}
+      {activeToasts.length > 0 && (
+        <div className="fixed bottom-5 right-5 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
+          {activeToasts.map((toast, idx) => (
+            <div
+              key={idx}
+              className="bg-slate-900 text-white p-3.5 rounded-xl shadow-2xl border border-rose-500/40 pointer-events-auto flex items-start gap-3 animate-in fade-in slide-in-from-bottom-3 duration-300"
+            >
+              <div className="p-1.5 rounded-lg bg-rose-600 text-white shrink-0 mt-0.5">
+                <AlertTriangle className="w-4 h-4 text-amber-200" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-rose-400">
+                    PAR Reorder Alert
+                  </span>
+                  <span className="text-[9px] text-slate-400 font-mono">Just Now</span>
+                </div>
+                <div className="text-xs font-extrabold text-white truncate mt-0.5">
+                  {toast.itemName} ({toast.locationName})
+                </div>
+                <p className="text-[11px] text-slate-300 mt-0.5 line-clamp-2">
+                  Stock at {toast.currentQuantity} is below min {toast.minQuantity}. Shortfall: {toast.shortfallUnits} units.
+                </p>
+              </div>
+              <button
+                onClick={() => setActiveToasts((prev) => prev.filter((_, i) => i !== idx))}
+                className="text-slate-400 hover:text-white p-1"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
         </div>
       )}
     </div>

@@ -8,75 +8,269 @@ import { EncounterDomainService } from '../services/encounter-domain-service';
 import { ClinicalOrderDomainService } from '../services/clinical-order-domain-service';
 import { FinancialLedgerDomainService } from '../services/financial-ledger-domain-service';
 import { HcmPrivilegeDomainService } from '../services/hcm-privilege-domain-service';
+import { HrWorkforceDomainService } from '../services/hr-workforce-domain-service';
+import { ResourceCapacityDomainService } from '../services/resource-capacity-domain-service';
+import { IdempotencyService } from '../idempotency/idempotency-service';
 
 export class CommandBus {
   /**
    * Routes and executes a domain command through the authoritative backend pipeline.
+   * Enforces zero-duplicate idempotency checking, state-machine validation, and audit recording.
    */
   public static async dispatch(
     context: CommandContext,
     command: BaseCommand
   ): Promise<CommandResult> {
     try {
+      // 1. Zero-Duplicate Idempotency Check
+      const idempotencyCheck = IdempotencyService.checkIdempotency(
+        context.tenantId,
+        command.idempotencyKey,
+        command.commandType,
+        command.payload
+      );
+
+      if (idempotencyCheck.status === 'CACHED' && idempotencyCheck.record?.result) {
+        return {
+          ...idempotencyCheck.record.result,
+          replayedFromCache: true,
+        };
+      }
+
+      if (idempotencyCheck.status === 'CONFLICT') {
+        return {
+          success: false,
+          commandId: command.commandId,
+          idempotencyKey: command.idempotencyKey,
+          error: {
+            code: 'IDEMPOTENCY_KEY_CONFLICT',
+            message: `Idempotency key '${command.idempotencyKey}' was previously used with a different command payload.`,
+          },
+        };
+      }
+
+      let result: CommandResult;
+
       switch (command.commandType) {
         // --- Clinical Domain ---
         case 'CreateEncounterCommand':
-          return await EncounterDomainService.createEncounter(
+          result = await EncounterDomainService.createEncounter(
             context,
             command.commandId,
             command.idempotencyKey,
             command.payload as any
           );
+          break;
 
         case 'AdvanceStageCommand':
-          return await EncounterDomainService.advanceStage(
+          result = await EncounterDomainService.advanceStage(
             context,
             command.commandId,
             command.idempotencyKey,
             command.payload as any
           );
+          break;
 
         case 'PlaceDiagnosticOrderCommand':
-          return await ClinicalOrderDomainService.placeDiagnosticOrder(
+          result = await ClinicalOrderDomainService.placeDiagnosticOrder(
             context,
             command.commandId,
             command.idempotencyKey,
             command.payload as any
           );
+          break;
 
         case 'PrescribeMedicationCommand':
-          return await ClinicalOrderDomainService.prescribeMedication(
+          result = await ClinicalOrderDomainService.prescribeMedication(
             context,
             command.commandId,
             command.idempotencyKey,
             command.payload as any
           );
+          break;
 
         // --- Finance Domain ---
         case 'PostJournalCommand':
-          return await FinancialLedgerDomainService.postUniversalJournal(
+          result = await FinancialLedgerDomainService.postUniversalJournal(
             context,
             command.commandId,
             command.idempotencyKey,
             command.payload as any
           );
+          break;
 
-        // --- HCM Domain ---
-        case 'VerifyCredentialCommand':
-          return await HcmPrivilegeDomainService.verifyCredential(
+        // --- HCM / HR Domain ---
+        case 'CreateEmployeeCommand':
+          result = await HrWorkforceDomainService.createEmployee(
             context,
             command.commandId,
             command.idempotencyKey,
             command.payload as any
           );
+          break;
+
+        case 'UpdateEmployeeStatusCommand':
+          result = await HrWorkforceDomainService.updateEmployeeStatus(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'TransferEmployeeCommand':
+          result = await HrWorkforceDomainService.transferEmployee(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'SubmitCredentialCommand':
+          result = await HrWorkforceDomainService.submitCredential(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'VerifyCredentialCommand':
+          result = await HrWorkforceDomainService.verifyCredential(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
 
         case 'GrantClinicalPrivilegeCommand':
-          return await HcmPrivilegeDomainService.grantClinicalPrivilege(
+          result = await HrWorkforceDomainService.grantClinicalPrivilege(
             context,
             command.commandId,
             command.idempotencyKey,
             command.payload as any
           );
+          break;
+
+        case 'AssignShiftCommand':
+          result = await HrWorkforceDomainService.assignShift(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecordClockInCommand':
+          result = await HrWorkforceDomainService.recordClockIn(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecordClockOutCommand':
+          result = await HrWorkforceDomainService.recordClockOut(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'CorrectAttendanceTimeCommand':
+          result = await HrWorkforceDomainService.correctAttendanceTime(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'SubmitLeaveRequestCommand':
+          result = await HrWorkforceDomainService.submitLeaveRequest(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ApproveLeaveRequestCommand':
+          result = await HrWorkforceDomainService.approveLeaveRequest(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        // --- Resource Management Domain ---
+        case 'RegisterResourceCommand':
+          result = await ResourceCapacityDomainService.registerResource(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RegisterRoomCommand':
+          result = await ResourceCapacityDomainService.registerRoom(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ReserveResourceCommand':
+          result = await ResourceCapacityDomainService.reserveResource(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'TransferResourceCommand':
+          result = await ResourceCapacityDomainService.transferResource(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'CreateMaintenanceWorkOrderCommand':
+          result = await ResourceCapacityDomainService.createWorkOrder(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'CompleteMaintenanceWorkOrderCommand':
+          result = await ResourceCapacityDomainService.completeWorkOrder(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecordCalibrationCommand':
+          result = await ResourceCapacityDomainService.recordCalibration(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
 
         default:
           return {
@@ -89,6 +283,17 @@ export class CommandBus {
             },
           };
       }
+
+      // Record successful or failed execution in Idempotency cache
+      IdempotencyService.recordExecution(
+        context.tenantId,
+        command.idempotencyKey,
+        command.commandType,
+        command.payload,
+        result
+      );
+
+      return result;
     } catch (err) {
       return {
         success: false,

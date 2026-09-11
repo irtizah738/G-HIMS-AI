@@ -28,6 +28,7 @@ import { SettingsView } from '@/components/views/settings-view';
 import { PatientPortalView } from '@/components/views/patient-portal-view';
 import { HrManagementView } from '@/components/views/hr-management-view';
 import { ResourceCapacityView } from '@/components/views/resource-capacity-view';
+import { SupplyChainScmView } from '@/components/views/supply-chain-scm-view';
 import { RbacModuleGate } from '@/components/auth/rbac-gate';
 import { RbacRoleSwitcherModal } from '@/components/auth/rbac-role-switcher';
 import { useRBAC } from '@/lib/auth/rbac-context';
@@ -301,6 +302,11 @@ export function TenantDashboard() {
             {activeTab === 'resources' && (
               <RbacModuleGate moduleId="beds" moduleName="Hospital Resource & Capacity Operating System">
                 <ResourceCapacityView />
+              </RbacModuleGate>
+            )}
+            {(activeTab === 'scm' || activeTab === 'scm-pos' || activeTab === 'supply-chain') && (
+              <RbacModuleGate moduleId="scm-pos" moduleName="Supply Chain & Inventory Management">
+                <SupplyChainScmView tenantId="metro-health" />
               </RbacModuleGate>
             )}
             {activeTab === 'settings' && (

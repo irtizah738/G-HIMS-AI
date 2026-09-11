@@ -97,7 +97,7 @@ export function TabletLeadDashboard({
     const sixtyDaysLater = new Date();
     sixtyDaysLater.setDate(now.getDate() + 60);
     const expiringSoon = deptCreds.filter((c) => {
-      const exp = new Date(c.expirationDate);
+      const exp = new Date(c.expiryDate);
       return exp > now && exp <= sixtyDaysLater;
     }).length;
 
@@ -361,7 +361,7 @@ export function TabletLeadDashboard({
               const empCreds = credentials.filter((c) => c.employeeId === emp.employeeId);
               const allVerified = empCreds.length > 0 && empCreds.every((c) => c.verificationStatus === 'VERIFIED');
               const hasExpiring = empCreds.some((c) => {
-                const exp = new Date(c.expirationDate);
+                const exp = new Date(c.expiryDate);
                 const limit = new Date();
                 limit.setDate(limit.getDate() + 60);
                 return exp <= limit;

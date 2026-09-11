@@ -273,6 +273,88 @@ export class ResourceCapacityDomainService {
     };
   }
 
+  public static async transferResource(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: {
+      resourceId: string;
+      toDepartmentId: string;
+      toDepartmentName: string;
+      toFacilityId: string;
+      toFacilityName: string;
+      toLocation: { building: string; floor: string; roomNumber: string };
+      custodianName?: string;
+      reason: string;
+    }
+  ): Promise<CommandResult<ResourceMaster>> {
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: ['FACILITIES_ADMIN', 'BIOMEDICAL_ENGINEER', 'SYSTEM_ADMIN', 'HOSPITAL_EXECUTIVE'],
+    });
+
+    if (!auth.authorized) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: auth.code || 'UNAUTHORIZED', message: auth.reason || 'Facilities/Biomedical authorization required.' },
+      };
+    }
+
+    const resource = this.resources.get(payload.resourceId);
+    if (!resource) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: 'RESOURCE_NOT_FOUND', message: `Resource ${payload.resourceId} does not exist.` },
+      };
+    }
+
+    const previousLocation = { ...resource.location };
+    const previousDept = { id: resource.departmentId, name: resource.departmentName };
+
+    resource.departmentId = payload.toDepartmentId;
+    resource.departmentName = payload.toDepartmentName;
+    resource.facilityId = payload.toFacilityId;
+    resource.facilityName = payload.toFacilityName;
+    resource.location = payload.toLocation;
+    if (payload.custodianName) {
+      resource.currentCustodianName = payload.custodianName;
+    }
+    resource.updatedAt = new Date().toISOString();
+
+    this.resources.set(payload.resourceId, resource);
+
+    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
+      entityType: 'RESOURCE_MASTER',
+      entityId: payload.resourceId,
+      eventType: 'RESOURCE_TRANSFERRED',
+      domainState: resource,
+      eventPayload: {
+        resourceId: payload.resourceId,
+        previousDept,
+        newDept: { id: payload.toDepartmentId, name: payload.toDepartmentName },
+        previousLocation,
+        newLocation: payload.toLocation,
+        reason: payload.reason,
+      },
+      auditReason: `Resource ${resource.name} (${resource.resourceNumber}) transferred to ${payload.toDepartmentName}: ${payload.reason}`,
+      outboxTopic: 'g-hims-facility-events',
+    });
+
+    return {
+      success: true,
+      commandId,
+      idempotencyKey,
+      entityId: payload.resourceId,
+      eventId: tx.event.eventId,
+      auditId: tx.audit.auditId,
+      outboxId: tx.outbox.outboxId,
+      data: resource,
+    };
+  }
+
   // ============================================================================
   // 4. MAINTENANCE & WORK ORDERS
   // ============================================================================
@@ -545,23 +627,207 @@ export class ResourceCapacityDomainService {
     };
   }
 
+  public static ensureInitialized(): void {
+    if (this.resources.size > 0) return;
+
+    const now = new Date().toISOString();
+    const today = now.split('T')[0];
+
+    const sampleResources: ResourceMaster[] = [
+      {
+        resourceId: 'res_001',
+        resourceNumber: 'RES-MED-4029',
+        resourceType: 'MEDICAL_DEVICE',
+        name: 'GE Healthcare Aisys CS2 Anesthesia Delivery Workstation',
+        facilityId: 'fac_central',
+        facilityName: 'Central Metro Hospital',
+        departmentId: 'dept_surgery',
+        departmentName: 'Surgical Theaters',
+        ownerDepartmentId: 'dept_surgery',
+        location: { building: 'Surgical Pavilion', floor: 'Floor 3', roomNumber: 'OR-01' },
+        status: 'AVAILABLE',
+        manufacturer: 'GE Healthcare',
+        model: 'Aisys CS2',
+        serialNumber: 'GE-ANE-98412',
+        assetTagNumber: 'TAG-84920',
+        calibrationRequired: true,
+        calibrationStatus: 'VALID',
+        lastCalibrationDate: '2025-11-10',
+        nextCalibrationDate: '2026-11-10',
+        calibrationCertificateNumber: 'CAL-2025-9941',
+        currentCustodianName: 'Dr. Elena Rostova (Chief Surgeon)',
+        acquisitionDate: '2023-05-15',
+        lifecycleState: 'IN_SERVICE',
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        resourceId: 'res_002',
+        resourceNumber: 'RES-SUR-8102',
+        resourceType: 'SURGICAL_EQUIPMENT',
+        name: 'Stryker 1688 AIM 4K Endoscopy Tower System',
+        facilityId: 'fac_central',
+        facilityName: 'Central Metro Hospital',
+        departmentId: 'dept_surgery',
+        departmentName: 'Surgical Theaters',
+        ownerDepartmentId: 'dept_surgery',
+        location: { building: 'Surgical Pavilion', floor: 'Floor 3', roomNumber: 'OR-02' },
+        status: 'AVAILABLE',
+        manufacturer: 'Stryker',
+        model: '1688 AIM 4K',
+        serialNumber: 'STR-END-10492',
+        assetTagNumber: 'TAG-91024',
+        calibrationRequired: true,
+        calibrationStatus: 'VALID',
+        lastCalibrationDate: '2026-01-15',
+        nextCalibrationDate: '2027-01-15',
+        calibrationCertificateNumber: 'CAL-2026-1049',
+        currentCustodianName: 'Dr. Robert Hayes (Head of Surgery)',
+        acquisitionDate: '2024-02-10',
+        lifecycleState: 'IN_SERVICE',
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        resourceId: 'res_003',
+        resourceNumber: 'RES-VEN-2910',
+        resourceType: 'MEDICAL_DEVICE',
+        name: 'Hamilton-G5 Intensive Care Mechanical Ventilator',
+        facilityId: 'fac_central',
+        facilityName: 'Central Metro Hospital',
+        departmentId: 'dept_icu',
+        departmentName: 'Intensive Care Unit (ICU)',
+        ownerDepartmentId: 'dept_icu',
+        location: { building: 'Critical Care Pavilion', floor: 'Floor 2', roomNumber: 'ICU-Bed 02' },
+        status: 'MAINTENANCE',
+        manufacturer: 'Hamilton Medical',
+        model: 'G5',
+        serialNumber: 'HAM-VEN-59201',
+        assetTagNumber: 'TAG-39201',
+        calibrationRequired: true,
+        calibrationStatus: 'CALIBRATION_REQUIRED',
+        lastCalibrationDate: '2025-01-10',
+        nextCalibrationDate: '2026-01-10',
+        calibrationCertificateNumber: 'CAL-2025-0192',
+        currentCustodianName: 'Nurse Elena Rostova (Charge Nurse)',
+        acquisitionDate: '2022-08-20',
+        lifecycleState: 'UNDER_REPAIR',
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+
+    sampleResources.forEach((r) => this.resources.set(r.resourceId, r));
+
+    const sampleRooms: HospitalRoom[] = [
+      {
+        roomId: 'rm_001',
+        roomNumber: 'OR-01',
+        facilityId: 'fac_central',
+        facilityName: 'Central Metro Hospital',
+        departmentId: 'dept_surgery',
+        departmentName: 'Surgical Theaters',
+        building: 'Surgical Pavilion',
+        floor: 'Floor 3',
+        roomType: 'operating_room',
+        capacity: 1,
+        currentOccupancy: 0,
+        status: 'AVAILABLE',
+        features: ['HEPA Filtration', 'Positive Pressure', 'Medical Gases', 'Anesthesia Pendants'],
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        roomId: 'rm_002',
+        roomNumber: 'OR-02',
+        facilityId: 'fac_central',
+        facilityName: 'Central Metro Hospital',
+        departmentId: 'dept_surgery',
+        departmentName: 'Surgical Theaters',
+        building: 'Surgical Pavilion',
+        floor: 'Floor 3',
+        roomType: 'operating_room',
+        capacity: 1,
+        currentOccupancy: 0,
+        status: 'AVAILABLE',
+        features: ['HEPA Filtration', 'Positive Pressure', 'Laparoscopy Pendants'],
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        roomId: 'rm_003',
+        roomNumber: 'ICU-01',
+        facilityId: 'fac_central',
+        facilityName: 'Central Metro Hospital',
+        departmentId: 'dept_icu',
+        departmentName: 'Intensive Care Unit (ICU)',
+        building: 'Critical Care Pavilion',
+        floor: 'Floor 2',
+        roomType: 'icu',
+        capacity: 1,
+        currentOccupancy: 0,
+        status: 'AVAILABLE',
+        features: ['Negative Pressure Isolation', 'Dual Ventilator Outlets', 'Central Telemetry'],
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+
+    sampleRooms.forEach((rm) => this.rooms.set(rm.roomId, rm));
+
+    const sampleReservation: ResourceReservation = {
+      reservationId: 'resv_sample_01',
+      resourceId: 'res_001',
+      resourceName: 'GE Healthcare Aisys CS2 Anesthesia Delivery Workstation',
+      resourceType: 'SURGICAL_EQUIPMENT',
+      facilityId: 'fac_central',
+      departmentId: 'dept_surgery',
+      startTime: `${today}T14:00:00Z`,
+      endTime: `${today}T18:00:00Z`,
+      purpose: 'SURGICAL_PROCEDURE',
+      patientId: 'pat_1029',
+      patientName: 'Jane Doe',
+      requesterActorId: 'usr_clinician_01',
+      requesterName: 'Dr. Sarah Jenkins',
+      priority: 'ROUTINE',
+      status: 'APPROVED',
+      notes: 'Elective Coronary Artery Bypass Graft (CABG)',
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.reservations.set(sampleReservation.reservationId, sampleReservation);
+  }
+
+  public static resetForTesting(): void {
+    this.resources.clear();
+    this.rooms.clear();
+    this.reservations.clear();
+    this.workOrders.clear();
+    this.calibrations.clear();
+  }
+
   public static getResources(): ResourceMaster[] {
+    this.ensureInitialized();
     return Array.from(this.resources.values());
   }
 
   public static getRooms(): HospitalRoom[] {
+    this.ensureInitialized();
     return Array.from(this.rooms.values());
   }
 
   public static getWorkOrders(): MaintenanceWorkOrder[] {
+    this.ensureInitialized();
     return Array.from(this.workOrders.values());
   }
 
   public static getCalibrations(): CalibrationRecord[] {
+    this.ensureInitialized();
     return Array.from(this.calibrations.values());
   }
 
   public static getReservations(): ResourceReservation[] {
+    this.ensureInitialized();
     return Array.from(this.reservations.values());
   }
 }

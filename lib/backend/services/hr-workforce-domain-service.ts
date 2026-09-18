@@ -323,7 +323,7 @@ export class HrWorkforceDomainService {
         success: false,
         commandId,
         idempotencyKey,
-        error: { code: 'UNAUTHORIZED', message: 'Medical Director authority required to verify credentials.' },
+        error: { code: auth.code || 'UNAUTHORIZED', message: auth.reason || 'Medical Director authority required to verify credentials.' },
       };
     }
 

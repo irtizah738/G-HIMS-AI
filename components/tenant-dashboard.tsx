@@ -5,30 +5,53 @@ import Link from 'next/link';
 import { useHospital } from '@/lib/context/hospital-context';
 import { useAuth } from '@/lib/firebase/auth-context';
 import Image from 'next/image';
+import dynamic from 'next/dynamic';
 import { CommandHubView } from '@/components/views/command-hub-view';
-import { BillingErpView } from '@/components/views/billing-erp-view';
-import { OpdEncountersView } from '@/components/views/opd-encounters-view';
-import { BedOccupancyView } from '@/components/views/bed-occupancy-view';
-import { AncillaryServicesView } from '@/components/views/ancillary-services-view';
-import { OrdersInteropView } from '@/components/views/orders-interop-view';
-import { AuditLedgerView } from '@/components/views/audit-ledger-view';
-import { PatientMpiView } from '@/components/views/patient-mpi-view';
-import { StaffView } from '@/components/views/staff-view';
-import { EmergencyTriageView } from '@/components/views/emergency-triage-view';
-import { SurgeryTheaterView } from '@/components/views/surgery-theater-view';
-import { BloodBankView } from '@/components/views/blood-bank-view';
-import { TelehealthView } from '@/components/views/telehealth-view';
-import { ClaimsPreAuthView } from '@/components/views/claims-preauth-view';
-import { WorkflowRuntimeView } from '@/components/views/workflow-runtime-view';
-import { AllModulesDirectory } from '@/components/views/all-modules-directory';
-import { ModuleReadinessMatrixView } from '@/components/views/module-readiness-matrix-view';
-import { GoogleSheetsView } from '@/components/views/google-sheets-view';
-import { DiseaseCentricIntakeView } from '@/components/views/disease-centric-intake-view';
-import { SettingsView } from '@/components/views/settings-view';
-import { PatientPortalView } from '@/components/views/patient-portal-view';
-import { HrManagementView } from '@/components/views/hr-management-view';
-import { ResourceCapacityView } from '@/components/views/resource-capacity-view';
-import { SupplyChainScmView } from '@/components/views/supply-chain-scm-view';
+
+// Sleek loading skeleton for deferred views
+const ViewSkeleton = () => (
+  <div className="w-full min-h-[480px] p-6 bg-white/60 dark:bg-slate-900/60 backdrop-blur-md rounded-2xl border border-slate-200/80 dark:border-slate-800 animate-pulse flex flex-col gap-5 shadow-xs">
+    <div className="flex items-center justify-between">
+      <div className="space-y-2 w-1/3">
+        <div className="h-7 bg-slate-200 dark:bg-slate-800 rounded-lg w-3/4"></div>
+        <div className="h-4 bg-slate-100 dark:bg-slate-800/60 rounded w-1/2"></div>
+      </div>
+      <div className="h-10 w-28 bg-slate-200 dark:bg-slate-800 rounded-xl"></div>
+    </div>
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
+      <div className="h-24 bg-slate-100 dark:bg-slate-800/50 rounded-xl"></div>
+      <div className="h-24 bg-slate-100 dark:bg-slate-800/50 rounded-xl"></div>
+      <div className="h-24 bg-slate-100 dark:bg-slate-800/50 rounded-xl"></div>
+      <div className="h-24 bg-slate-100 dark:bg-slate-800/50 rounded-xl"></div>
+    </div>
+    <div className="h-72 bg-slate-100 dark:bg-slate-800/40 rounded-xl mt-2"></div>
+  </div>
+);
+
+// Dynamic module code-splitting to prevent massive initial bundle timeout
+const BillingErpView = dynamic(() => import('@/components/views/billing-erp-view').then(m => m.BillingErpView), { loading: ViewSkeleton, ssr: false });
+const OpdEncountersView = dynamic(() => import('@/components/views/opd-encounters-view').then(m => m.OpdEncountersView), { loading: ViewSkeleton, ssr: false });
+const BedOccupancyView = dynamic(() => import('@/components/views/bed-occupancy-view').then(m => m.BedOccupancyView), { loading: ViewSkeleton, ssr: false });
+const AncillaryServicesView = dynamic(() => import('@/components/views/ancillary-services-view').then(m => m.AncillaryServicesView), { loading: ViewSkeleton, ssr: false });
+const OrdersInteropView = dynamic(() => import('@/components/views/orders-interop-view').then(m => m.OrdersInteropView), { loading: ViewSkeleton, ssr: false });
+const AuditLedgerView = dynamic(() => import('@/components/views/audit-ledger-view').then(m => m.AuditLedgerView), { loading: ViewSkeleton, ssr: false });
+const PatientMpiView = dynamic(() => import('@/components/views/patient-mpi-view').then(m => m.PatientMpiView), { loading: ViewSkeleton, ssr: false });
+const StaffView = dynamic(() => import('@/components/views/staff-view').then(m => m.StaffView), { loading: ViewSkeleton, ssr: false });
+const EmergencyTriageView = dynamic(() => import('@/components/views/emergency-triage-view').then(m => m.EmergencyTriageView), { loading: ViewSkeleton, ssr: false });
+const SurgeryTheaterView = dynamic(() => import('@/components/views/surgery-theater-view').then(m => m.SurgeryTheaterView), { loading: ViewSkeleton, ssr: false });
+const BloodBankView = dynamic(() => import('@/components/views/blood-bank-view').then(m => m.BloodBankView), { loading: ViewSkeleton, ssr: false });
+const TelehealthView = dynamic(() => import('@/components/views/telehealth-view').then(m => m.TelehealthView), { loading: ViewSkeleton, ssr: false });
+const ClaimsPreAuthView = dynamic(() => import('@/components/views/claims-preauth-view').then(m => m.ClaimsPreAuthView), { loading: ViewSkeleton, ssr: false });
+const WorkflowRuntimeView = dynamic(() => import('@/components/views/workflow-runtime-view').then(m => m.WorkflowRuntimeView), { loading: ViewSkeleton, ssr: false });
+const AllModulesDirectory = dynamic(() => import('@/components/views/all-modules-directory').then(m => m.AllModulesDirectory), { loading: ViewSkeleton, ssr: false });
+const ModuleReadinessMatrixView = dynamic(() => import('@/components/views/module-readiness-matrix-view').then(m => m.ModuleReadinessMatrixView), { loading: ViewSkeleton, ssr: false });
+const GoogleSheetsView = dynamic(() => import('@/components/views/google-sheets-view').then(m => m.GoogleSheetsView), { loading: ViewSkeleton, ssr: false });
+const DiseaseCentricIntakeView = dynamic(() => import('@/components/views/disease-centric-intake-view').then(m => m.DiseaseCentricIntakeView), { loading: ViewSkeleton, ssr: false });
+const SettingsView = dynamic(() => import('@/components/views/settings-view').then(m => m.SettingsView), { loading: ViewSkeleton, ssr: false });
+const PatientPortalView = dynamic(() => import('@/components/views/patient-portal-view').then(m => m.PatientPortalView), { loading: ViewSkeleton, ssr: false });
+const HrManagementView = dynamic(() => import('@/components/views/hr-management-view').then(m => m.HrManagementView), { loading: ViewSkeleton, ssr: false });
+const ResourceCapacityView = dynamic(() => import('@/components/views/resource-capacity-view').then(m => m.ResourceCapacityView), { loading: ViewSkeleton, ssr: false });
+const SupplyChainScmView = dynamic(() => import('@/components/views/supply-chain-scm-view').then(m => m.SupplyChainScmView), { loading: ViewSkeleton, ssr: false });
 import { RbacModuleGate } from '@/components/auth/rbac-gate';
 import { RbacRoleSwitcherModal } from '@/components/auth/rbac-role-switcher';
 import { useRBAC } from '@/lib/auth/rbac-context';

@@ -100,7 +100,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
       },
       {
         id: 'directory',
-        title: 'All Modules Directory & Subsystems',
+        title: 'All 52 Domains Directory & Architecture Launchpad (52 Enterprise Subsystems)',
         category: 'Executive & Strategy',
         icon: LayoutGrid,
         action: () => {

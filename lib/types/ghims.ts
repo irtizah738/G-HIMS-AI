@@ -14,6 +14,7 @@ export interface Bed {
   expectedDischarge?: string;
   assignedNurse?: string;
   assignedDoctor?: string;
+  attendingDoctor?: string;
   vitalAlert?: boolean;
   notes?: string;
 }
@@ -286,3 +287,80 @@ export interface ExecutiveThesisModel {
     }[];
   };
 }
+
+export interface TelehealthVitals {
+  bp: string;
+  hr: number;
+  spo2: number;
+  temp: number;
+  glucose?: number;
+  respiratoryRate?: number;
+  rhythm?: string;
+  connectedDevice?: string;
+  lastSync?: string;
+}
+
+export interface TelehealthTranscriptEntry {
+  id: string;
+  timestamp: string;
+  speaker: 'DOCTOR' | 'PATIENT' | 'SYSTEM';
+  text: string;
+}
+
+export interface TelehealthSoapNote {
+  subjective: string;
+  objective: string;
+  assessment: string;
+  plan: string;
+  icd10Codes?: { code: string; description: string; confidence?: number }[];
+  cptCodes?: { code: string; description: string; fee?: number }[];
+  signedAt?: string;
+  signedBy?: string;
+  clinicianNpi?: string;
+}
+
+export interface TelehealthPrescription {
+  id: string;
+  medication: string;
+  dosage: string;
+  frequency: string;
+  duration: string;
+  instructions: string;
+  prescribedAt: string;
+  pharmacyName: string;
+  pharmacyNpi: string;
+  status: 'DRAFT' | 'TRANSMITTED' | 'DISPENSED';
+  transactionRef?: string;
+}
+
+export interface TelehealthSession {
+  id: string;
+  tenantId?: string;
+  encounterId: string;
+  patientId: string;
+  patientName: string;
+  patientMrn: string;
+  age: number;
+  gender: string;
+  scheduledTime: string;
+  status: 'WAITING_ROOM' | 'IN_CONSULTATION' | 'DOCUMENTING' | 'COMPLETED' | 'CANCELLED';
+  type: 'Telehealth Consultation' | 'Remote Post-Op Follow-up' | 'RPM Chronic Care Review' | 'Urgent Tele-Triage';
+  attendingPhysician: string;
+  clinicianNpi: string;
+  specialty: string;
+  chiefComplaint: string;
+  roomToken: string;
+  connectionQuality: 'EXCELLENT' | 'GOOD' | 'DEGRADED';
+  callDurationSeconds: number;
+  vitals: TelehealthVitals;
+  transcription: TelehealthTranscriptEntry[];
+  soapNote: TelehealthSoapNote;
+  prescriptions: TelehealthPrescription[];
+  isAudioMuted: boolean;
+  isVideoMuted: boolean;
+  isRecording: boolean;
+  patientInvitedEmail?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+

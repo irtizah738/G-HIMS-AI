@@ -161,9 +161,16 @@ export function CollapsibleSidebar({
         },
         {
           id: 'directory',
-          name: 'All Subsystems Directory',
-          shortName: 'Directory',
+          name: 'All 52 Domains Directory',
+          shortName: '52 Domains',
           icon: LayoutGrid,
+          badge: '52',
+        },
+        {
+          id: 'matrix',
+          name: 'Architecture & Audit Matrix',
+          shortName: 'Matrix',
+          icon: ShieldCheck,
         },
       ],
     },
@@ -509,8 +516,19 @@ export function CollapsibleSidebar({
                       />
 
                       {!isCollapsed && (
-                        <div className="flex-1 flex items-center text-left truncate">
+                        <div className="flex-1 flex items-center justify-between text-left truncate gap-1.5">
                           <span className="text-xs truncate">{item.name}</span>
+                          {(item as { badge?: string }).badge && (
+                            <span
+                              className={`px-1.5 py-0.5 rounded-full text-[10px] font-black shrink-0 ${
+                                isActive
+                                  ? 'bg-white/20 text-white'
+                                  : 'bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/80'
+                              }`}
+                            >
+                              {(item as { badge?: string }).badge}
+                            </span>
+                          )}
                         </div>
                       )}
 

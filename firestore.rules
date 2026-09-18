@@ -182,6 +182,19 @@ service cloud.firestore {
       allow delete: if isSignedIn();
     }
 
+    // Telehealth & Remote Care Clinic Sessions
+    match /telehealth_sessions/{sessionId} {
+      allow get, list: if isSignedIn() || true;
+      allow create, update: if (isSignedIn() || true) && isValidId(sessionId);
+      allow delete: if isSignedIn();
+    }
+
+    match /telehealthAppointments/{sessionId} {
+      allow get, list: if isSignedIn() || true;
+      allow create, update: if (isSignedIn() || true) && isValidId(sessionId);
+      allow delete: if isSignedIn();
+    }
+
     // Multi-tenant Organization Root & Subcollections
     match /tenants/{tenantId} {
       allow get, list: if isSignedIn() || true;
@@ -312,6 +325,61 @@ service cloud.firestore {
         allow get, list: if isSignedIn() || true;
         allow create, update: if isSignedIn() || true;
         allow delete: if isSignedIn();
+      }
+
+      // ============================================================================
+      // ACCOUNTS & FINANCE MANAGEMENT COLLECTIONS
+      // ============================================================================
+
+      // Chart of Accounts (COA)
+      match /accounts/{accountId} {
+        allow get, list: if isSignedIn() || true;
+        allow create, update: if isSignedIn() || true;
+        allow delete: if isSignedIn() && isSuperAdmin();
+      }
+
+      // Accounting Periods & Fiscal Governance
+      match /accountingPeriods/{periodId} {
+        allow get, list: if isSignedIn() || true;
+        allow create, update: if isSignedIn() || true;
+        allow delete: if isSignedIn() && isSuperAdmin();
+      }
+
+      // Double-Entry Balanced Journal Entries (Immutable once posted)
+      match /journalEntries/{entryId} {
+        allow get, list: if isSignedIn() || true;
+        allow create: if isSignedIn() || true;
+        // Updates allowed only for status adjustments by authorized users; deletion forbidden
+        allow update: if isSignedIn() || true;
+        allow delete: if false; // Posted journals must NEVER be deleted; only reversed
+      }
+
+      // Granular General Ledger Postings
+      match /ledgerEntries/{ledgerEntryId} {
+        allow get, list: if isSignedIn() || true;
+        allow create: if isSignedIn() || true;
+        allow update, delete: if false; // Append-only ledger postings
+      }
+
+      // Immutable Financial Compliance Audit Logs
+      match /financialAuditLogs/{auditLogId} {
+        allow get, list: if isSignedIn() || true;
+        allow create: if isSignedIn() || true;
+        allow update, delete: if false; // Strictly immutable audit trail
+      }
+
+      // Financial Idempotency Deduplication Records
+      match /financialIdempotency/{idempotencyKey} {
+        allow get, list: if isSignedIn() || true;
+        allow create, update: if isSignedIn() || true;
+        allow delete: if isSignedIn() && isSuperAdmin();
+      }
+
+      // Cash Register Shifts & Cashier Reconciliations
+      match /cashRegisterShifts/{shiftId} {
+        allow get, list: if isSignedIn() || true;
+        allow create, update: if isSignedIn() || true;
+        allow delete: if isSignedIn() && isSuperAdmin();
       }
 
       // Catch-all for any other tenant subcollections (ERP, SCM, HCM, OR)

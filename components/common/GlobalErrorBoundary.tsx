@@ -28,6 +28,20 @@ export class GlobalErrorBoundary extends Component<Props, State> {
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('Uncaught error in application boundary:', error, errorInfo);
     this.setState({ errorInfo });
+
+    // Handle chunk loading timeout or stale deployment chunks gracefully
+    if (typeof window !== 'undefined' && error?.message) {
+      const isChunkError = /Loading chunk .* failed/i.test(error.message) || /failed to fetch dynamically imported module/i.test(error.message);
+      if (isChunkError) {
+        const hasAutoReloaded = sessionStorage.getItem('ghims_chunk_retry');
+        if (!hasAutoReloaded) {
+          sessionStorage.setItem('ghims_chunk_retry', 'true');
+          setTimeout(() => {
+            window.location.reload();
+          }, 300);
+        }
+      }
+    }
   }
 
   private handleReset = () => {

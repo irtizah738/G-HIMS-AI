@@ -34,6 +34,8 @@ import {
 } from 'lucide-react';
 import { useHospital } from '@/lib/context/hospital-context';
 import { clinicalAudioAlerts } from '@/lib/clinical/audio-alerts';
+import { formatCurrency } from '@/lib/utils';
+import { InpatientDischargeModal, DischargeCompletedSummary } from '@/components/clinical/inpatient-discharge-modal';
 
 interface ActivityLogItem {
   id: string;
@@ -65,6 +67,8 @@ export function BedOccupancyView() {
   const [admitNurse, setAdmitNurse] = useState('Nurse Clara Oswald');
   const [showActivityDrawer, setShowActivityDrawer] = useState(false);
   const [soundMuted, setSoundMuted] = useState(false);
+  const [showDischargeModal, setShowDischargeModal] = useState(false);
+  const [dischargeBedTarget, setDischargeBedTarget] = useState<Bed | null>(null);
 
   const doctorsList = useMemo(() => staff.filter((s) => s.role === 'Physician' || s.role === 'Surgeon'), [staff]);
   const nursesList = useMemo(() => staff.filter((s) => s.role === 'Nurse'), [staff]);
@@ -300,6 +304,23 @@ export function BedOccupancyView() {
         type: 'DISCHARGE',
         title: `Discharged from Bed ${bedNumber}`,
         description: `Bed ${bedNumber} status shifted to 'cleaning'.`,
+        severity: 'NORMAL',
+      },
+      ...prev,
+    ]);
+  };
+
+  const handleDischargeComplete = (summary: DischargeCompletedSummary) => {
+    dischargePatientFromBed(summary.bedId);
+    clinicalAudioAlerts.playSuccessChime();
+
+    setActivityLogs((prev) => [
+      {
+        id: `log-${Date.now()}`,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        type: 'DISCHARGE',
+        title: `Clinical Discharge & Gate Pass: Bed ${summary.bedNumber}`,
+        description: `Issued pass ${summary.dischargeId} for ${summary.patientName}. Condition: ${summary.condition}. Billed: ${formatCurrency(summary.totalCharges)}. Follow-up: ${summary.followUpDate}.`,
         severity: 'NORMAL',
       },
       ...prev,
@@ -639,11 +660,12 @@ export function BedOccupancyView() {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleDischarge(bed.id, bed.bedNumber);
+                      setDischargeBedTarget(bed);
+                      setShowDischargeModal(true);
                     }}
-                    className="w-full py-1.5 px-2 text-xs font-bold text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 rounded-xl flex items-center justify-center gap-1.5 transition-colors"
+                    className="w-full py-1.5 px-2 text-xs font-bold text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                   >
-                    <LogOut className="w-3.5 h-3.5" /> Discharge & Clean
+                    <LogOut className="w-3.5 h-3.5" /> Discharge, Med Rec & Clearance
                   </button>
                 ) : bed.status === 'available' ? (
                   <button
@@ -943,6 +965,31 @@ export function BedOccupancyView() {
             </form>
           </div>
         </div>
+      )}
+      {/* Inpatient Clinical Discharge & Med Reconciliation Modal */}
+      {showDischargeModal && dischargeBedTarget && (
+        <InpatientDischargeModal
+          isOpen={showDischargeModal}
+          onClose={() => {
+            setShowDischargeModal(false);
+            setDischargeBedTarget(null);
+          }}
+          patientData={{
+            bedId: dischargeBedTarget.id,
+            bedNumber: dischargeBedTarget.bedNumber,
+            wardName: dischargeBedTarget.ward,
+            patientId: dischargeBedTarget.patientId || 'p-unknown',
+            patientName: dischargeBedTarget.patientName || 'Inpatient',
+            patientMRN: `GH-2026-${(dischargeBedTarget.patientId || '1000').replace(/\D/g, '') || '4412'}`,
+            patientAge: 48,
+            patientGender: 'Female',
+            admissionDate: dischargeBedTarget.admissionDate || new Date(Date.now() - 4 * 86400000).toISOString(),
+            primaryDiagnosis: 'Post-operative recovery / Inpatient clinical care',
+            attendingDoctor: dischargeBedTarget.attendingDoctor || 'Dr. Fatima Zahra',
+            assignedNurse: dischargeBedTarget.assignedNurse || 'Nurse Clara Oswald',
+          }}
+          onDischargeComplete={handleDischargeComplete}
+        />
       )}
     </div>
   );

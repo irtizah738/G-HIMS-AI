@@ -9,10 +9,21 @@ export class IdempotencyService {
   private static localMemoryCache = new Map<string, IdempotencyRecord>();
 
   /**
-   * Computes a deterministic SHA-256 hash representation of a command payload.
+   * Computes a deterministic hash representation of a command payload.
    */
   public static computeHash(commandType: string, payload: unknown): string {
-    const raw = JSON.stringify({ commandType, payload }, Object.keys(payload as object || {}).sort());
+    const canonicalStringify = (val: unknown): string => {
+      if (val === null || typeof val !== 'object') {
+        return JSON.stringify(val);
+      }
+      if (Array.isArray(val)) {
+        return '[' + val.map(canonicalStringify).join(',') + ']';
+      }
+      const keys = Object.keys(val as Record<string, unknown>).sort();
+      return '{' + keys.map((k) => JSON.stringify(k) + ':' + canonicalStringify((val as Record<string, unknown>)[k])).join(',') + '}';
+    };
+
+    const raw = canonicalStringify({ commandType, payload });
     let hash = 0;
     for (let i = 0; i < raw.length; i++) {
       const char = raw.charCodeAt(i);

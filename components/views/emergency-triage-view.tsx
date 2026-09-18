@@ -28,6 +28,7 @@ import {
 import { formatCurrency } from '@/lib/utils';
 import { PatientConsultantRoutingModal, ConsultantDoctor } from '@/components/clinical/patient-consultant-routing-modal';
 import { ERQuickTransferModal, TransferRequestData } from '@/components/clinical/er-quick-transfer-modal';
+import { EMSTelemetryIngestionModal, InboundTelemetryData } from '@/components/clinical/ems-telemetry-ingestion-modal';
 
 interface EmergencyCase {
   id: string;
@@ -120,24 +121,64 @@ export function EmergencyTriageView() {
     },
   ]);
 
-  const [inboundAmbulances, setInboundAmbulances] = useState([
+  const [inboundAmbulances, setInboundAmbulances] = useState<InboundTelemetryData[]>([
     {
       id: 'amb-11',
-      unit: 'Paramedic Medic-04 (Advanced Life Support)',
-      eta: '4 mins',
-      chiefComplaint: 'Pediatric Status Epilepticus (age 5)',
-      crewLeader: 'Capt. R. Wilson',
-      vitals: 'SpO2 88%, Active Seizure >15m',
+      unit: 'Paramedic Medic-04 (ALS Tier 1)',
+      patientName: 'Leo Sterling',
+      age: 5,
+      gender: 'Male',
+      etaSeconds: 240,
+      chiefComplaint: 'Pediatric Status Epilepticus (unresponsive seizure >15m)',
+      crewLeader: 'Capt. R. Wilson, NRP',
+      vitals: { hr: 148, bp: '82/50', spo2: 88, gcs: 7, etco2: 48, tempC: 39.4 },
+      ecgFinding: 'Sinus Tachycardia / Hypermetabolic Rate',
+      ecgStatus: 'SINUS_TACH',
+      radioChannel: 'HEAR Ch-04 (Hospital Emergency Access Radio)',
       preparedBay: 'Pediatric Resus Bay P1',
+      codeAlert: 'CODE_BLUE',
+      mechanism: 'Febrile convulsion escalated to refractory generalized tonic-clonic seizure',
+      intercomLog: [
+        {
+          sender: 'Medic-04 Paramedic',
+          time: '11:02',
+          message: 'Base Hospital, this is Medic-04. 5yo male in active seizure >15m. Midazolam 5mg IM administered. SpO2 88% on NRB.',
+        },
+        {
+          sender: 'ER Attending (Dr. Jenkins)',
+          time: '11:03',
+          message: 'Copy Medic-04. Prepare IV access; Resus Bay P1 staged with pediatric RSI kit & Levetiracetam infusion.',
+        },
+      ],
     },
     {
       id: 'amb-12',
-      unit: 'Rescue 1122 Trauma Response',
-      eta: '11 mins',
-      chiefComplaint: 'Industrial fall from height (4m), suspected pelvic disruption',
-      crewLeader: 'Paramedic H. Tariq',
-      vitals: 'HR 134, BP 90/58',
-      preparedBay: 'Trauma Bay 03',
+      unit: 'Rescue 1122 Trauma Intercept',
+      patientName: 'Marcus Vance',
+      age: 49,
+      gender: 'Male',
+      etaSeconds: 580,
+      chiefComplaint: 'High-speed motor vehicle collision, steering wheel chest impact',
+      crewLeader: 'Paramedic H. Tariq, CCEMT-P',
+      vitals: { hr: 122, bp: '88/54', spo2: 93, gcs: 13, etco2: 38, tempC: 36.5 },
+      ecgFinding: 'Marked ST Elevation Lead II, III, aVF (Impending Cardiogenic Shock)',
+      ecgStatus: 'STEMI',
+      radioChannel: 'Med-Net VHF Channel 8',
+      preparedBay: 'Trauma Bay 01',
+      codeAlert: 'STEMI',
+      mechanism: 'Rollover MVC, driver unrestrained, prolonged extrication with bilateral flail chest',
+      intercomLog: [
+        {
+          sender: 'Rescue 1122 CCEMT-P',
+          time: '11:10',
+          message: 'Hospital Base, Rescue 1122 inbound with 49M severe blunt thoracic trauma. 12-lead shows acute inferior STEMI. Hypotensive 88/54.',
+        },
+        {
+          sender: 'ER Attending (Dr. Jenkins)',
+          time: '11:11',
+          message: 'Understood. Cath Lab and Trauma Team Alpha alerted. Activate Massive Transfusion Protocol pack 1.',
+        },
+      ],
     },
   ]);
 
@@ -146,12 +187,47 @@ export function EmergencyTriageView() {
   const [isRoutingModalOpen, setIsRoutingModalOpen] = useState(false);
   const [routingPatientData, setRoutingPatientData] = useState<any>(null);
 
+  // Telemetry Modal State
+  const [selectedTelemetry, setSelectedTelemetry] = useState<InboundTelemetryData | null>(null);
+
   // Quick Transfer State
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [transferPatientData, setTransferPatientData] = useState<EmergencyCase | null>(null);
   const [transferToast, setTransferToast] = useState<{ id: string; message: string; dest: string } | null>(null);
 
   const selectedCase = emergencyCases.find((c) => c.id === selectedCaseId) || emergencyCases[0];
+
+  const handleDirectTelemetryIntake = (tel: InboundTelemetryData) => {
+    const newCase: EmergencyCase = {
+      id: `er-${Date.now().toString().slice(-4)}`,
+      patientName: tel.patientName,
+      age: tel.age,
+      gender: tel.gender,
+      mrn: `GH-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+      esiLevel: tel.codeAlert ? 1 : 2,
+      chiefComplaint: tel.chiefComplaint,
+      arrivalTime: 'Just Arrived via EMS',
+      assignedBay: tel.preparedBay,
+      attendingPhysician: 'Dr. Sarah Jenkins',
+      vitals: {
+        hr: tel.vitals.hr,
+        bp: tel.vitals.bp,
+        spo2: tel.vitals.spo2,
+        gcs: tel.vitals.gcs,
+      },
+      status: 'resuscitation',
+      codeAlert: tel.codeAlert || null,
+    };
+
+    setEmergencyCases((prev) => [newCase, ...prev]);
+    setInboundAmbulances((prev) => prev.filter((a) => a.id !== tel.id));
+    setSelectedCaseId(newCase.id);
+
+    if (tel.codeAlert) {
+      setActiveCodeBroadcast(`CODE ${tel.codeAlert}: Ingested patient ${tel.patientName} into ${tel.preparedBay}. Resuscitation protocol initiated.`);
+      setTimeout(() => setActiveCodeBroadcast(null), 10000);
+    }
+  };
 
   const handleOpenRouting = (c: EmergencyCase) => {
     setRoutingPatientData({
@@ -506,23 +582,60 @@ export function EmergencyTriageView() {
             </div>
 
             <div className="space-y-3">
-              {inboundAmbulances.map((amb) => (
-                <div key={amb.id} className="p-3 bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/50 rounded-xl space-y-2 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-amber-950 dark:text-amber-200">{amb.unit}</span>
-                    <span className="px-2 py-0.5 bg-amber-500 text-white font-extrabold rounded text-[10px]">
-                      ETA {amb.eta}
-                    </span>
-                  </div>
-
-                  <p className="text-slate-800 dark:text-slate-200 font-semibold">{amb.chiefComplaint}</p>
-                  <div className="text-[11px] text-slate-600 dark:text-slate-400">
-                    <div>Crew: {amb.crewLeader}</div>
-                    <div className="text-rose-700 dark:text-rose-400 font-mono font-bold">Field Vitals: {amb.vitals}</div>
-                    <div className="text-blue-700 dark:text-blue-400 font-bold mt-1">Staged at: {amb.preparedBay}</div>
-                  </div>
+              {inboundAmbulances.length === 0 ? (
+                <div className="p-4 bg-slate-50 dark:bg-slate-850 rounded-xl border border-slate-200 dark:border-slate-800 text-center text-slate-500 text-xs">
+                  No incoming EMS units in transit. All resuscitation bays clear.
                 </div>
-              ))}
+              ) : (
+                inboundAmbulances.map((amb) => (
+                  <div
+                    key={amb.id}
+                    className="p-3.5 bg-amber-50/60 dark:bg-amber-950/25 border border-amber-300 dark:border-amber-800/60 rounded-xl space-y-2.5 text-xs shadow-xs"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-amber-950 dark:text-amber-200 flex items-center gap-1.5">
+                        <Ambulance className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
+                        {amb.unit}
+                      </span>
+                      <span className="px-2 py-0.5 bg-amber-500 text-slate-950 font-black rounded text-[10px]">
+                        ETA ~{Math.ceil(amb.etaSeconds / 60)} mins
+                      </span>
+                    </div>
+
+                    <div>
+                      <p className="text-slate-900 dark:text-slate-100 font-bold">
+                        {amb.patientName} ({amb.age}y, {amb.gender})
+                      </p>
+                      <p className="text-slate-700 dark:text-slate-300 text-[11px] italic mt-0.5">
+                        &ldquo;{amb.chiefComplaint}&rdquo;
+                      </p>
+                    </div>
+
+                    <div className="p-2 bg-white dark:bg-slate-900 rounded-lg border border-amber-200 dark:border-amber-900 text-[11px] space-y-1">
+                      <div className="flex items-center justify-between font-mono">
+                        <span className="text-rose-600 font-bold">HR {amb.vitals.hr} bpm</span>
+                        <span className="text-slate-700 dark:text-slate-300">BP {amb.vitals.bp}</span>
+                        <span className="text-cyan-600 font-bold">SpO2 {amb.vitals.spo2}%</span>
+                      </div>
+                      <div className="text-[10px] text-amber-800 dark:text-amber-400 font-medium">
+                        ECG: {amb.ecgFinding}
+                      </div>
+                      <div className="text-[10px] text-indigo-700 dark:text-indigo-400 font-semibold">
+                        Staged at: {amb.preparedBay}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTelemetry(amb)}
+                      className="w-full py-2 px-3 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold flex items-center justify-center gap-1.5 shadow-2xs transition-all cursor-pointer"
+                    >
+                      <Radio className="w-3.5 h-3.5" />
+                      <span>Live 12-Lead Telemetry & Radio Intercom</span>
+                    </button>
+                  </div>
+                ))
+              )}
             </div>
           </div>
 
@@ -621,6 +734,16 @@ export function EmergencyTriageView() {
             codeAlert: transferPatientData.codeAlert,
           }}
           onTransferComplete={handleTransferComplete}
+        />
+      )}
+
+      {/* EMS Telemetry & ECG Bridge Modal */}
+      {selectedTelemetry && (
+        <EMSTelemetryIngestionModal
+          isOpen={!!selectedTelemetry}
+          telemetry={selectedTelemetry}
+          onClose={() => setSelectedTelemetry(null)}
+          onDirectIntake={handleDirectTelemetryIntake}
         />
       )}
     </div>

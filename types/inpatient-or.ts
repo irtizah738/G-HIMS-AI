@@ -349,3 +349,37 @@ export type ORCase = SurgicalCase;
 export type ORSuite = ORRoom;
 export type SurgicalStage = SurgicalCaseStatus | 'pre_op_holding' | 'anesthesia_induction' | 'incision_active' | 'pacu_recovery' | 'completed' | 'turnaround';
 
+export interface AldreteScoreRecord {
+  activity: number; // 0: unable to move, 1: moves 2 extremities, 2: moves 4 extremities
+  respiration: number; // 0: apneic, 1: dyspnea/shallow, 2: deep breaths/coughs
+  circulation: number; // 0: BP +/- 50% baseline, 1: BP +/- 20-49%, 2: BP +/- 20%
+  consciousness: number; // 0: unresponsive, 1: arousable to voice, 2: fully awake
+  o2Saturation: number; // 0: <90% on O2, 1: >90% on O2, 2: >92% on room air
+  totalScore: number; // 0-10
+}
+
+export interface PACUHandoff {
+  id: string;
+  caseId: string;
+  tenantId: string;
+  patientId: string;
+  patientName: string;
+  patientMRN: string;
+  procedureName: string;
+  orRoomName: string;
+  pacuBedId: string;
+  pacuBedNumber: string;
+  pacuWardName: string;
+  surgeonSignoff: string;
+  anesthetistSignoff: string;
+  nurseSignoff: string;
+  aldreteScore: AldreteScoreRecord;
+  bloodLossMl: number;
+  fluidsGivenMl: number;
+  postOpOrders: string[];
+  recoveryNotes: string;
+  airwayStatus: string;
+  transferredAt: string;
+  status: 'active_recovery' | 'discharged_to_ward' | 'escalated_to_icu';
+}
+

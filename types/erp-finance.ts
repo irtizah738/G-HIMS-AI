@@ -169,3 +169,142 @@ export interface DepreciationRunLog {
   tenantId: string;
   createdAt: string;
 }
+
+// ============================================================================
+// FISCAL GOVERNANCE & GENERAL LEDGER EXTENSIONS
+// ============================================================================
+
+export type AccountingPeriodStatus = 'open' | 'soft_close' | 'closed' | 'locked';
+
+export interface AccountingPeriod {
+  id: string;
+  tenantId: string;
+  periodName: string; // e.g., 'January 2026'
+  fiscalYear: number; // e.g., 2026
+  periodNumber: number; // 1 to 12
+  startDate: string; // YYYY-MM-DD
+  endDate: string; // YYYY-MM-DD
+  status: AccountingPeriodStatus;
+  closedAt?: string;
+  closedBy?: string;
+  lockedAt?: string;
+  lockedBy?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LedgerEntry {
+  id: string;
+  tenantId: string;
+  journalEntryId: string;
+  entryNumber: string;
+  accountCode: string;
+  accountName: string;
+  postingDate: string;
+  debit: number;
+  credit: number;
+  runningBalance: number;
+  department?: string;
+  costCenterId?: string;
+  sourceModule: string;
+  referenceNumber?: string;
+  postedBy: string;
+  createdAt: string;
+}
+
+export interface FinancialAuditLog {
+  id: string;
+  tenantId: string;
+  timestamp: string;
+  userId: string;
+  userName: string;
+  userRole: string;
+  action: 'create_journal' | 'reverse_journal' | 'close_period' | 'lock_period' | 'create_account' | 'reconcile_shift' | 'approve_refund' | 'write_off';
+  resourceType: 'journal_entry' | 'account' | 'accounting_period' | 'cash_shift' | 'invoice';
+  resourceId: string;
+  previousState?: Record<string, unknown>;
+  newState?: Record<string, unknown>;
+  hash: string;
+  previousHash?: string;
+  ipAddress?: string;
+  auditNote: string;
+}
+
+export interface FinancialIdempotencyRecord {
+  id: string;
+  tenantId: string;
+  idempotencyKey: string;
+  commandName: string;
+  requestHash: string;
+  status: 'processing' | 'completed' | 'failed';
+  responsePayload?: Record<string, unknown>;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface CashRegisterShift {
+  id: string;
+  tenantId: string;
+  cashierId: string;
+  cashierName: string;
+  registerId: string;
+  shiftStart: string;
+  shiftEnd?: string;
+  openingBalance: number;
+  closingBalance?: number;
+  cashCollected: number;
+  cardCollected: number;
+  systemExpectedCash: number;
+  variance: number;
+  status: 'open' | 'reconciled' | 'discrepancy' | 'closed';
+  reconciledBy?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BankReconciliation {
+  id: string;
+  tenantId: string;
+  bankAccountId: string;
+  bankAccountName: string;
+  statementDate: string;
+  statementBalance: number;
+  glBalance: number;
+  unreconciledDeposits: number;
+  unreconciledWithdrawals: number;
+  adjustedBankBalance: number;
+  adjustedGlBalance: number;
+  variance: number;
+  status: 'draft' | 'balanced' | 'approved';
+  reconciledBy: string;
+  reconciledAt: string;
+  notes?: string;
+}
+
+export interface CostCenter {
+  id: string;
+  tenantId: string;
+  code: string; // e.g. 'CC-ICU-101'
+  name: string;
+  department: string;
+  managerName: string;
+  annualBudget: number;
+  ytdActual: number;
+  ytdCommitted: number;
+  isActive: boolean;
+}
+
+export interface FinancialAnomaly {
+  id: string;
+  tenantId: string;
+  type: 'unbalanced_voucher' | 'duplicate_payment' | 'period_lock_violation' | 'unusual_variance' | 'revenue_leakage';
+  severity: 'critical' | 'warning' | 'info';
+  title: string;
+  description: string;
+  detectedAt: string;
+  status: 'open' | 'investigating' | 'resolved';
+  impactAmount: number;
+}
+

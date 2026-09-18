@@ -1,6 +1,6 @@
 import { app, db, auth } from '@/lib/firebase/client';
 import firebaseConfig from '@/firebase-applet-config.json';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDocFromServer } from 'firebase/firestore';
 
 export { app, db, auth };
 
@@ -27,23 +27,37 @@ export function cleanFirestoreData<T>(obj: T): T {
   return result as T;
 }
 
-// Graceful connectivity test helper
-export async function testConnection() {
+// Connectivity test helper adhering strictly to firebase-skill validation requirement
+export async function testConnection(maxRetries = 3, delayMs = 600) {
   if (typeof window === 'undefined') return;
-  try {
-    await getDoc(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error) {
-      if (
-        error.message.includes('the client is offline') ||
-        error.message.includes('unavailable') ||
-        (error as any).code === 'unavailable'
-      ) {
-        // Expected behavior in offline / sandbox mode
-        return;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await getDocFromServer(doc(db, 'test', 'connection'));
+      return; // Connected successfully
+    } catch (error) {
+      const isOffline = error instanceof Error && error.message.includes('the client is offline');
+      if (isOffline) {
+        if (attempt < maxRetries) {
+          await new Promise((res) => setTimeout(res, delayMs * attempt));
+          continue;
+        }
+        console.error('Please check your Firebase configuration.');
+      } else {
+        // Other errors (e.g. non-blocking or already handled)
+        break;
       }
-      console.warn('Firestore connection check:', error.message);
     }
+  }
+}
+
+// Initial boot connection test - schedule after microtask so network stack finishes initializing
+if (typeof window !== 'undefined') {
+  if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', () => {
+      setTimeout(() => { testConnection(); }, 300);
+    });
+  } else {
+    setTimeout(() => { testConnection(); }, 300);
   }
 }
 

@@ -21,6 +21,7 @@ import {
   StaffMember,
   AuditLogEntry,
   Hl7Message,
+  TelehealthSession,
 } from '@/lib/types/ghims';
 
 // Subscriptions
@@ -164,6 +165,34 @@ export function subscribeToAuditLogs(callback: (logs: AuditLogEntry[]) => void) 
   }
 }
 
+export function subscribeToTelehealthSessions(callback: (sessions: TelehealthSession[]) => void) {
+  const path = 'telehealth_sessions';
+  try {
+    const q = query(collection(db, path));
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const items = snapshot.docs.map((d) => d.data() as TelehealthSession);
+          callback(items);
+        }
+      },
+      (error) => {
+        if (error?.code === 'unavailable' || error?.message?.includes('offline') || error?.message?.includes('unavailable')) {
+          console.warn(`Firestore subscription [${path}] offline mode:`, error.message);
+          return;
+        }
+        handleFirestoreError(error, OperationType.GET, path);
+      }
+    );
+  } catch (error) {
+    if ((error as any)?.code === 'unavailable' || (error as any)?.message?.includes('offline')) {
+      return () => {};
+    }
+    handleFirestoreError(error, OperationType.GET, path);
+  }
+}
+
 // Mutations
 export async function syncPatientToFirestore(patient: Patient): Promise<void> {
   const path = `patients/${patient.id}`;
@@ -216,6 +245,24 @@ export async function syncHl7ToFirestore(message: Hl7Message): Promise<void> {
     await setDoc(doc(db, 'hl7Messages', message.id), cleanFirestoreData(message), { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function syncTelehealthSessionToFirestore(session: TelehealthSession): Promise<void> {
+  const path = `telehealth_sessions/${session.id}`;
+  try {
+    await setDoc(doc(db, 'telehealth_sessions', session.id), cleanFirestoreData(session), { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteTelehealthSessionFromFirestore(sessionId: string): Promise<void> {
+  const path = `telehealth_sessions/${sessionId}`;
+  try {
+    await deleteDoc(doc(db, 'telehealth_sessions', sessionId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
 

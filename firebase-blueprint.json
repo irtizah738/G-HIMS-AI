@@ -539,6 +539,146 @@
         "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "name", "taxId", "paymentTerms", "contactPerson", "email", "phone"]
+    },
+    "Account": {
+      "title": "Account",
+      "description": "Hospital Chart of Accounts general ledger master record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "tenantId": { "type": "string", "maxLength": 128 },
+        "accountCode": { "type": "string", "maxLength": 32 },
+        "accountName": { "type": "string", "maxLength": 256 },
+        "category": { "type": "string", "maxLength": 32 },
+        "subCategory": { "type": "string", "maxLength": 128 },
+        "normalBalance": { "type": "string", "maxLength": 16 },
+        "balance": { "type": "number" },
+        "currency": { "type": "string", "maxLength": 8 },
+        "description": { "type": "string", "maxLength": 512 },
+        "isActive": { "type": "boolean" },
+        "isSystemLocked": { "type": "boolean" },
+        "parentAccountCode": { "type": "string", "maxLength": 32 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "tenantId", "accountCode", "accountName", "category", "normalBalance", "balance"]
+    },
+    "JournalEntry": {
+      "title": "JournalEntry",
+      "description": "Double-entry balanced accounting journal voucher",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "tenantId": { "type": "string", "maxLength": 128 },
+        "entryNumber": { "type": "string", "maxLength": 64 },
+        "postingDate": { "type": "string", "maxLength": 32 },
+        "referenceNumber": { "type": "string", "maxLength": 128 },
+        "description": { "type": "string", "maxLength": 512 },
+        "sourceModule": { "type": "string", "maxLength": 64 },
+        "lines": { "type": "array" },
+        "totalDebits": { "type": "number" },
+        "totalCredits": { "type": "number" },
+        "status": { "type": "string", "maxLength": 32 },
+        "periodId": { "type": "string", "maxLength": 64 },
+        "idempotencyKey": { "type": "string", "maxLength": 128 },
+        "postedBy": { "type": "string", "maxLength": 128 },
+        "postedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "tenantId", "entryNumber", "postingDate", "description", "totalDebits", "totalCredits", "status", "postedBy"]
+    },
+    "LedgerEntry": {
+      "title": "LedgerEntry",
+      "description": "Granular general ledger posting record with running balance tracking",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "tenantId": { "type": "string", "maxLength": 128 },
+        "journalEntryId": { "type": "string", "maxLength": 128 },
+        "entryNumber": { "type": "string", "maxLength": 64 },
+        "accountCode": { "type": "string", "maxLength": 32 },
+        "accountName": { "type": "string", "maxLength": 256 },
+        "postingDate": { "type": "string", "maxLength": 32 },
+        "debit": { "type": "number" },
+        "credit": { "type": "number" },
+        "runningBalance": { "type": "number" },
+        "department": { "type": "string", "maxLength": 64 },
+        "costCenterId": { "type": "string", "maxLength": 64 },
+        "sourceModule": { "type": "string", "maxLength": 64 },
+        "referenceNumber": { "type": "string", "maxLength": 128 },
+        "postedBy": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "tenantId", "journalEntryId", "accountCode", "postingDate", "debit", "credit", "runningBalance"]
+    },
+    "AccountingPeriod": {
+      "title": "AccountingPeriod",
+      "description": "Fiscal year accounting calendar period controlling posting locks",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "tenantId": { "type": "string", "maxLength": 128 },
+        "periodName": { "type": "string", "maxLength": 64 },
+        "fiscalYear": { "type": "number" },
+        "periodNumber": { "type": "number" },
+        "startDate": { "type": "string", "maxLength": 32 },
+        "endDate": { "type": "string", "maxLength": 32 },
+        "status": { "type": "string", "maxLength": 32 },
+        "closedAt": { "type": "string", "maxLength": 64 },
+        "closedBy": { "type": "string", "maxLength": 128 },
+        "lockedAt": { "type": "string", "maxLength": 64 },
+        "lockedBy": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "tenantId", "periodName", "fiscalYear", "startDate", "endDate", "status"]
+    },
+    "FinancialAuditLog": {
+      "title": "FinancialAuditLog",
+      "description": "Immutable financial compliance audit ledger with SHA-256 cryptographic chain",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "tenantId": { "type": "string", "maxLength": 128 },
+        "timestamp": { "type": "string", "maxLength": 64 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userName": { "type": "string", "maxLength": 128 },
+        "userRole": { "type": "string", "maxLength": 64 },
+        "action": { "type": "string", "maxLength": 64 },
+        "resourceType": { "type": "string", "maxLength": 64 },
+        "resourceId": { "type": "string", "maxLength": 128 },
+        "previousState": { "type": "object" },
+        "newState": { "type": "object" },
+        "hash": { "type": "string", "maxLength": 128 },
+        "previousHash": { "type": "string", "maxLength": 128 },
+        "auditNote": { "type": "string", "maxLength": 512 }
+      },
+      "required": ["id", "tenantId", "timestamp", "userId", "action", "resourceType", "resourceId", "hash"]
+    },
+    "CashRegisterShift": {
+      "title": "CashRegisterShift",
+      "description": "Point-of-care hospital cashier shift and cash reconciliation session",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "tenantId": { "type": "string", "maxLength": 128 },
+        "cashierId": { "type": "string", "maxLength": 128 },
+        "cashierName": { "type": "string", "maxLength": 128 },
+        "registerId": { "type": "string", "maxLength": 64 },
+        "shiftStart": { "type": "string", "maxLength": 64 },
+        "shiftEnd": { "type": "string", "maxLength": 64 },
+        "openingBalance": { "type": "number" },
+        "closingBalance": { "type": "number" },
+        "cashCollected": { "type": "number" },
+        "cardCollected": { "type": "number" },
+        "systemExpectedCash": { "type": "number" },
+        "variance": { "type": "number" },
+        "status": { "type": "string", "maxLength": 32 },
+        "reconciledBy": { "type": "string", "maxLength": 128 },
+        "notes": { "type": "string", "maxLength": 512 }
+      },
+      "required": ["id", "tenantId", "cashierId", "registerId", "shiftStart", "openingBalance", "status"]
     }
   },
   "firestore": {
@@ -657,6 +797,30 @@
     "/tenants/{tenantId}/sso_config/{configId}": {
       "schema": "SSOConfig",
       "description": "Tenant enterprise single sign-on SAML/OIDC configurations"
+    },
+    "/tenants/{tenantId}/accounts/{accountId}": {
+      "schema": "Account",
+      "description": "Tenant Chart of Accounts general ledger master records"
+    },
+    "/tenants/{tenantId}/journalEntries/{entryId}": {
+      "schema": "JournalEntry",
+      "description": "Tenant balanced double-entry journal vouchers"
+    },
+    "/tenants/{tenantId}/ledgerEntries/{ledgerEntryId}": {
+      "schema": "LedgerEntry",
+      "description": "Tenant granular general ledger posting entries with running balances"
+    },
+    "/tenants/{tenantId}/accountingPeriods/{periodId}": {
+      "schema": "AccountingPeriod",
+      "description": "Tenant fiscal accounting periods and lock states"
+    },
+    "/tenants/{tenantId}/financialAuditLogs/{auditLogId}": {
+      "schema": "FinancialAuditLog",
+      "description": "Tenant immutable financial compliance audit logs"
+    },
+    "/tenants/{tenantId}/cashRegisterShifts/{shiftId}": {
+      "schema": "CashRegisterShift",
+      "description": "Tenant point-of-care cashier shift reconciliations"
     }
   }
 }

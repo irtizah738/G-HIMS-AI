@@ -571,7 +571,7 @@ export default function PARManagementPage({ params }: PageProps) {
                 </span>
               </div>
               <h4 className="font-extrabold text-base text-white mt-1">
-                {autoCheckResult.belowMinCount} Location Items Falling Below 'minQuantity' Reorder Point
+                {autoCheckResult.belowMinCount} Location Items Falling Below &apos;minQuantity&apos; Reorder Point
               </h4>
               <p className="text-xs text-rose-100/90 mt-0.5">
                 Total Deficit: <span className="font-bold text-white">{autoCheckResult.totalShortfallUnits} units</span> | Estimated Replenishment Value:{' '}
@@ -1085,12 +1085,12 @@ export default function PARManagementPage({ params }: PageProps) {
                         <div className="flex items-center gap-2">
                           <span
                             className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${
-                              notif.severity === 'CRITICAL'
+                              notif.urgency === 'CRITICAL'
                                 ? 'bg-rose-600 text-white'
                                 : 'bg-amber-100 text-amber-800'
                             }`}
                           >
-                            {notif.severity}
+                            {notif.urgency}
                           </span>
                           <span className="font-extrabold text-slate-900 text-xs">
                             {notif.itemName}
@@ -1116,7 +1116,7 @@ export default function PARManagementPage({ params }: PageProps) {
                         </span>
                         <span className="text-slate-300">•</span>
                         <span className="font-extrabold text-slate-700">
-                          Deficit: -{notif.shortfallUnits} units
+                          Deficit: -{notif.shortfall} units
                         </span>
                       </div>
                       <button
@@ -1183,7 +1183,7 @@ export default function PARManagementPage({ params }: PageProps) {
                   {toast.itemName} ({toast.locationName})
                 </div>
                 <p className="text-[11px] text-slate-300 mt-0.5 line-clamp-2">
-                  Stock at {toast.currentQuantity} is below min {toast.minQuantity}. Shortfall: {toast.shortfallUnits} units.
+                  Stock at {toast.currentQuantity} is below min {toast.minQuantity}. Shortfall: {toast.shortfall} units.
                 </p>
               </div>
               <button

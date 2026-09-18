@@ -38,6 +38,7 @@ import {
   ScmDomainEventType,
 } from '@/types/scm-domain';
 import { calculateDerivedBalance, traceRecallImpact } from '@/lib/supply-chain/scm-engine';
+import { POApprovalSignature } from '@/types/supply-chain';
 
 // ============================================================================
 // 1. ITEM MASTER

@@ -22,6 +22,8 @@ import {
   SterilizationCycle,
   StockTransferRequest,
   SCMDashboardStats,
+  ApproverRole,
+  POApprovalSignature,
 } from '@/types/supply-chain';
 
 // ============================================================================
@@ -2211,10 +2213,13 @@ export async function recordParBreachNotifications(
     currentQuantity: number;
     minQuantity: number;
     reorderPoint: number;
-    deficitQuantity: number;
-    criticalItem: boolean;
-    urgency: 'CRITICAL' | 'HIGH' | 'MEDIUM';
+    deficitQuantity?: number;
+    shortfall?: number;
+    criticalItem?: boolean;
+    urgency: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'WARNING';
     message: string;
+    department?: string;
+    timestamp?: string;
   }>
 ): Promise<void> {
   try {

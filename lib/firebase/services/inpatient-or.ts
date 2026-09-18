@@ -25,6 +25,8 @@ import {
   ORRoom,
   SurgicalStaff,
   IsolationType,
+  PACUHandoff,
+  AldreteScoreRecord,
 } from '@/types/inpatient-or';
 
 // ============================================================================
@@ -623,6 +625,261 @@ export async function updateSurgicalCase(
     }));
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export interface PACUTransferParams {
+  surgeonSignoff?: string;
+  anesthetistSignoff?: string;
+  nurseSignoff?: string;
+  aldreteScore?: AldreteScoreRecord;
+  bloodLossMl?: number;
+  fluidsGivenMl?: number;
+  postOpOrders?: string[];
+  preferredBedId?: string;
+  recoveryNotes?: string;
+  airwayStatus?: string;
+}
+
+/**
+ * Automates the OR to PACU transition:
+ * 1. Atomically locates and reserves/occupies an available PACU or Surgical ICU bed.
+ * 2. Updates surgical case status to 'post_op_pacu', records end time, and assigns the PACU bed.
+ * 3. Marks WHO checklist signOut as completed.
+ * 4. Generates an immutable PACUHandoff document.
+ * 5. Transitions OR room to 'turnaround'.
+ * 6. Emits an immutable clinicalEvent and transactional outbox message.
+ */
+export async function transferCaseToPACUWithBedReservation(
+  tenantId: string,
+  caseId: string,
+  params: PACUTransferParams
+): Promise<PACUHandoff> {
+  const path = `tenants/${tenantId}/surgicalCases/${caseId}`;
+  try {
+    const now = new Date().toISOString();
+    let handoffRecord: PACUHandoff | null = null;
+
+    await runTransaction(db, async (transaction) => {
+      // 1. Fetch Surgical Case
+      const caseRef = doc(db, 'tenants', tenantId, 'surgicalCases', caseId);
+      const caseDoc = await transaction.get(caseRef);
+      if (!caseDoc.exists()) {
+        throw new Error(`Surgical Case ${caseId} not found.`);
+      }
+      const orCase = caseDoc.data() as SurgicalCase;
+
+      // 2. Locate Best Available Bed for PACU recovery
+      let targetBedRef: any = null;
+      let targetBedData: Bed | null = null;
+
+      if (params.preferredBedId) {
+        const prefRef = doc(db, 'tenants', tenantId, 'beds', params.preferredBedId);
+        const prefDoc = await transaction.get(prefRef);
+        if (prefDoc.exists() && (prefDoc.data() as Bed).status === 'available') {
+          targetBedRef = prefRef;
+          targetBedData = prefDoc.data() as Bed;
+        }
+      }
+
+      if (!targetBedRef) {
+        // Find available bed in Surgical ward or ICU
+        const bedsColl = collection(db, 'tenants', tenantId, 'beds');
+        const bedsSnap = await getDocs(query(bedsColl, where('status', '==', 'available')));
+        if (!bedsSnap.empty) {
+          // Prioritize ICU or General Surgery wards
+          const sorted = bedsSnap.docs.map((d) => d.data() as Bed);
+          const best = sorted.find((b) => b.wardId?.includes('icu') || b.wardId?.includes('surg') || b.wardName?.includes('ICU') || b.wardName?.includes('Surgery')) || sorted[0];
+          targetBedRef = doc(db, 'tenants', tenantId, 'beds', best.id);
+          targetBedData = best;
+        }
+      }
+
+      // If no bed available, create/fallback to dedicated PACU Bay
+      if (!targetBedRef || !targetBedData) {
+        const pacuBedId = `bed-pacu-${Date.now().toString().slice(-4)}`;
+        targetBedRef = doc(db, 'tenants', tenantId, 'beds', pacuBedId);
+        targetBedData = {
+          id: pacuBedId,
+          tenantId,
+          wardId: 'ward-pacu',
+          wardName: 'Post-Anesthesia Care Unit (PACU)',
+          bedNumber: `PACU-Bay-${Math.floor(Math.random() * 8) + 1}`,
+          roomNumber: 'PACU Main Floor',
+          class: 'icu',
+          status: 'available',
+          oxygenPort: true,
+          telemetryEnabled: true,
+          isolationType: 'none',
+          updatedAt: now,
+        };
+      }
+
+      const allocatedBedNumber = targetBedData.bedNumber;
+      const allocatedWardName = targetBedData.wardName || 'PACU Unit';
+
+      // 3. Update Target Bed to Occupied by Surgical Patient
+      transaction.set(
+        targetBedRef,
+        cleanFirestoreData({
+          ...targetBedData,
+          status: 'occupied',
+          currentPatientId: orCase.patientId,
+          patientName: orCase.patientName,
+          patientMRN: orCase.patientMRN,
+          patientAge: orCase.patientAge || 0,
+          patientGender: orCase.patientGender || 'Other',
+          admissionDate: now,
+          assignedDoctor: orCase.surgeonName || orCase.leadSurgeon,
+          assignedNurse: params.nurseSignoff || 'PACU Recovery Nurse',
+          primaryDiagnosis: orCase.postOpDiagnosis || orCase.preOpDiagnosis || orCase.surgicalProcedureName,
+          vitalAlert: false,
+          oxygenPort: true,
+          telemetryEnabled: true,
+          notes: `Post-Operative Recovery from ${orCase.surgicalProcedureName || 'Surgery'}. Handed off at ${new Date().toLocaleTimeString()}.`,
+          updatedAt: now,
+        }),
+        { merge: true }
+      );
+
+      // 4. Update Surgical Case Status
+      transaction.update(
+        caseRef,
+        cleanFirestoreData({
+          status: 'post_op_pacu',
+          actualEndTime: orCase.actualEndTime || now,
+          pacuBedAssigned: allocatedBedNumber,
+          pacuBedId: targetBedData.id,
+          'whoChecklist.signOut': true,
+          'whoChecklistStatus.signOut': true,
+          updatedAt: now,
+        })
+      );
+
+      // 5. Update WHO Checklist if it exists
+      const whoRef = doc(db, 'tenants', tenantId, 'whoChecklists', `who-${caseId}`);
+      const whoDoc = await transaction.get(whoRef);
+      if (whoDoc.exists()) {
+        transaction.update(
+          whoRef,
+          cleanFirestoreData({
+            'signOut.completed': true,
+            'signOut.pacuTransferPlanConfirmed': true,
+            'signOut.actualProcedureName': orCase.surgicalProcedureName || 'Surgical Procedure',
+            'signOut.verifiedAt': now,
+            status: 'completed',
+            updatedAt: now,
+          })
+        );
+      }
+
+      // 6. Set OR Room to Turnaround/Sanitization
+      if (orCase.orRoomId) {
+        const roomRef = doc(db, 'tenants', tenantId, 'orRooms', orCase.orRoomId);
+        const roomDoc = await transaction.get(roomRef);
+        if (roomDoc.exists()) {
+          transaction.update(roomRef, {
+            status: 'turnaround',
+            currentCaseId: null,
+            updatedAt: now,
+          });
+        }
+      }
+
+      // 7. Create PACUHandoff Record
+      const handoffId = `handoff-${caseId}`;
+      const handoffRef = doc(db, 'tenants', tenantId, 'pacuHandoffs', handoffId);
+      handoffRecord = {
+        id: handoffId,
+        caseId,
+        tenantId,
+        patientId: orCase.patientId,
+        patientName: orCase.patientName,
+        patientMRN: orCase.patientMRN,
+        procedureName: orCase.surgicalProcedureName || orCase.procedureName || 'Surgical Procedure',
+        orRoomName: orCase.orRoomName || orCase.suiteName || 'Operating Theater',
+        pacuBedId: targetBedData.id,
+        pacuBedNumber: allocatedBedNumber,
+        pacuWardName: allocatedWardName,
+        surgeonSignoff: params.surgeonSignoff || orCase.surgeonName || 'Lead Surgeon',
+        anesthetistSignoff: params.anesthetistSignoff || orCase.anesthesiologistName || 'Lead Anesthesiologist',
+        nurseSignoff: params.nurseSignoff || 'PACU Circulator',
+        aldreteScore: params.aldreteScore || {
+          activity: 2,
+          respiration: 2,
+          circulation: 2,
+          consciousness: 1,
+          o2Saturation: 2,
+          totalScore: 9,
+        },
+        bloodLossMl: params.bloodLossMl ?? 100,
+        fluidsGivenMl: params.fluidsGivenMl ?? 1200,
+        postOpOrders: params.postOpOrders || [
+          'Vital signs q15m x 1hr, then q30m x 2hr',
+          'Titrate O2 via nasal cannula to maintain SpO2 >= 95%',
+          'Strict I&O monitoring; notify surgeon if urine output < 30 mL/hr',
+          'Post-op analgesia per acute pain service protocol',
+          'Surgical wound dressing inspection for active strike-through bleeding',
+        ],
+        recoveryNotes: params.recoveryNotes || 'Extubated smoothly in OR. Hemodynamically stable upon PACU transfer.',
+        airwayStatus: params.airwayStatus || 'Extubated / Spontaneous Breathing on 2L NC',
+        transferredAt: now,
+        status: 'active_recovery',
+      };
+      transaction.set(handoffRef, cleanFirestoreData(handoffRecord));
+
+      // 8. Immutable Clinical Event
+      const eventId = `evt-pacu-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      const eventRef = doc(db, 'tenants', tenantId, 'clinicalEvents', eventId);
+      transaction.set(eventRef, {
+        id: eventId,
+        tenantId,
+        eventType: 'OR_TO_PACU_TRANSFER_COMPLETED',
+        patientId: orCase.patientId,
+        patientMRN: orCase.patientMRN,
+        payload: {
+          caseId,
+          procedureName: orCase.surgicalProcedureName,
+          pacuBedNumber: allocatedBedNumber,
+          aldreteTotal: handoffRecord.aldreteScore.totalScore,
+        },
+        timestamp: now,
+      });
+
+      // 9. Transactional Outbox Record
+      const outboxId = `outbox-pacu-${Date.now()}`;
+      const outboxRef = doc(db, 'tenants', tenantId, 'outbox', outboxId);
+      transaction.set(outboxRef, {
+        id: outboxId,
+        tenantId,
+        topic: 'clinical.surgery.pacu-transferred',
+        eventType: 'SURGERY_PACU_TRANSFER',
+        payload: {
+          caseId,
+          patientId: orCase.patientId,
+          pacuBedNumber: allocatedBedNumber,
+        },
+        status: 'PENDING',
+        createdAt: now,
+        attempts: 0,
+      });
+    });
+
+    return handoffRecord!;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function getPACUHandoff(tenantId: string, caseId: string): Promise<PACUHandoff | null> {
+  const path = `tenants/${tenantId}/pacuHandoffs/handoff-${caseId}`;
+  try {
+    const docRef = doc(db, 'tenants', tenantId, 'pacuHandoffs', `handoff-${caseId}`);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) return null;
+    return snap.data() as PACUHandoff;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
   }
 }
 

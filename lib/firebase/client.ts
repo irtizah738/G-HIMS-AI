@@ -1,13 +1,13 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth } from 'firebase/auth';
-import { getFirestore, Firestore, setLogLevel } from 'firebase/firestore';
+import { initializeFirestore, getFirestore, Firestore, setLogLevel } from 'firebase/firestore';
 import { getAnalytics, isSupported, Analytics } from 'firebase/analytics';
 import firebaseConfig from '@/firebase-applet-config.json';
 
 // Configure Firestore log level to avoid unhandled connection retry logs in development/offline modes
 if (typeof window !== 'undefined') {
   try {
-    setLogLevel('error');
+    setLogLevel('silent');
   } catch {
     // Ignore if already set or unsupported
   }
@@ -31,12 +31,23 @@ export const app: FirebaseApp = !getApps().length
 // Authentication Instance
 export const auth: Auth = getAuth(app);
 
-// Firestore Instance with multi-tenant custom database ID support
+// Firestore Instance with multi-tenant custom database ID support and forced long polling for preview sandbox stability
 const customDbId = process.env.NEXT_PUBLIC_FIRESTORE_DATABASE_ID || (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
 
-export const db: Firestore = customDbId && customDbId !== '(default)'
-  ? getFirestore(app, customDbId)
-  : getFirestore(app);
+export const db: Firestore = (() => {
+  const dbId = customDbId && customDbId !== '(default)' ? customDbId : undefined;
+  try {
+    return initializeFirestore(
+      app,
+      {
+        experimentalForceLongPolling: true,
+      },
+      dbId
+    );
+  } catch {
+    return dbId ? getFirestore(app, dbId) : getFirestore(app);
+  }
+})();
 
 // Analytics Instance (Safe SSR / Browser verification)
 let analyticsInstance: Analytics | null = null;

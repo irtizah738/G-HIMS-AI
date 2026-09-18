@@ -47,12 +47,12 @@ export class ResourceCapacityDomainService {
         success: false,
         commandId,
         idempotencyKey,
-        error: { code: 'UNAUTHORIZED', message: auth.reason || 'Facilities / Biomedical authorization required.' },
+        error: { code: auth.code || 'UNAUTHORIZED', message: auth.reason || 'Facilities / Biomedical authorization required.' },
       };
     }
 
     const resourceId = `res_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const resourceNumber = `RES-${payload.resourceType.substring(0, 3)}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const resourceNumber = (payload as any).resourceNumber || `RES-${payload.resourceType.substring(0, 3)}-${Math.floor(1000 + Math.random() * 9000)}`;
     const now = new Date().toISOString();
 
     const resource: ResourceMaster = {

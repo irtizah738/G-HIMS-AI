@@ -131,10 +131,17 @@ export function subscribeToInvoices(tenantId: string, callback: (invoices: Invoi
         callback(items);
       },
       (error) => {
+        if (error?.code === 'unavailable' || error?.message?.includes('offline') || error?.message?.includes('unavailable')) {
+          console.warn(`Firestore subscription [${path}] operating in offline mode`);
+          return;
+        }
         handleFirestoreError(error, OperationType.GET, path);
       }
     );
   } catch (error) {
+    if ((error as any)?.code === 'unavailable' || (error as any)?.message?.includes('offline')) {
+      return () => {};
+    }
     handleFirestoreError(error, OperationType.GET, path);
   }
 }
@@ -457,10 +464,17 @@ export function subscribeToClaims(tenantId: string, callback: (claims: Claim[]) 
         callback(items);
       },
       (error) => {
+        if (error?.code === 'unavailable' || error?.message?.includes('offline') || error?.message?.includes('unavailable')) {
+          console.warn(`Firestore subscription [${path}] operating in offline mode`);
+          return;
+        }
         handleFirestoreError(error, OperationType.GET, path);
       }
     );
   } catch (error) {
+    if ((error as any)?.code === 'unavailable' || (error as any)?.message?.includes('offline')) {
+      return () => {};
+    }
     handleFirestoreError(error, OperationType.GET, path);
   }
 }

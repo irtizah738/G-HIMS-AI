@@ -1,13 +1,21 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useHospital } from '@/lib/context/hospital-context';
+import {
+  TelehealthSession,
+  TelehealthVitals,
+  TelehealthSoapNote,
+  TelehealthPrescription,
+  TelehealthTranscriptEntry,
+} from '@/lib/types/ghims';
 import {
   Video,
   Mic,
   MicOff,
   VideoOff,
   PhoneOff,
+  PhoneCall,
   Users,
   MessageSquare,
   FileText,
@@ -26,166 +34,147 @@ import {
   Stethoscope,
   Activity,
   Check,
+  Plus,
+  Search,
+  Wifi,
+  Radio,
+  FileCheck,
+  X,
 } from 'lucide-react';
 
-interface TelehealthAppointment {
-  id: string;
-  patientName: string;
-  patientMrn: string;
-  age: number;
-  gender: string;
-  timeSlot: string;
-  specialty: string;
-  physician: string;
-  status: 'in_call' | 'waiting' | 'completed';
-  chiefComplaint: string;
-  history: string;
-  vitals: {
-    bp: string;
-    hr: number;
-    spo2: number;
-  };
-}
-
-interface SoapNote {
-  subjective: string;
-  objective: string;
-  assessment: string;
-  plan: string;
-}
-
-interface EPrescriptionItem {
-  id: string;
-  medication: string;
-  dosage: string;
-  frequency: string;
-  duration: string;
-  instructions: string;
-}
-
 export function TelehealthView() {
-  const { patients } = useHospital();
-  const [inCall, setInCall] = useState(true);
-  const [micMuted, setMicMuted] = useState(false);
-  const [cameraOff, setCameraOff] = useState(false);
-  const [speakerMuted, setSpeakerMuted] = useState(false);
-  const [activeCallTimeSeconds, setActiveCallTimeSeconds] = useState(504); // 08:24
-  const [selectedTab, setSelectedTab] = useState<'soap' | 'rx' | 'vitals'>('soap');
+  const {
+    telehealthSessions,
+    patients,
+    createTelehealthSession,
+    updateTelehealthSession,
+    completeTelehealthSession,
+    networkMode,
+  } = useHospital();
 
-  const [appointments, setAppointments] = useState<TelehealthAppointment[]>([
-    {
-      id: 'tele-01',
-      patientName: 'Carlos Hernandez',
-      patientMrn: 'GH-2026-8902',
-      age: 58,
-      gender: 'Male',
-      timeSlot: '09:00 AM - 09:30 AM',
-      specialty: 'Cardiology Remote Consult',
-      physician: 'Dr. Sarah Jenkins, MD',
-      status: 'in_call',
-      chiefComplaint: 'Post-discharge hypertension review & medication titration',
-      history: 'Essential Hypertension (10 yrs), Hyperlipidemia. Discharged post-NSTEMI stent 3 weeks ago.',
-      vitals: {
-        bp: '136/86 mmHg',
-        hr: 74,
-        spo2: 98,
-      },
-    },
-    {
-      id: 'tele-02',
-      patientName: 'Amina Zahra',
-      patientMrn: 'GH-2026-5120',
-      age: 44,
+  const [activeSessionId, setActiveSessionId] = useState<string>(
+    telehealthSessions[0]?.id || 'th-101'
+  );
+
+  const fallbackSession = useMemo<TelehealthSession>(
+    () => ({
+      id: 'th-fallback',
+      encounterId: 'enc-th-0',
+      patientId: 'p-1001',
+      patientName: 'Elena Rostova',
+      patientMrn: 'MRN-99412',
+      age: 64,
       gender: 'Female',
-      timeSlot: '09:30 AM - 09:50 AM',
-      specialty: 'Endocrinology & Diabetes',
-      physician: 'Dr. Kamran Baig, MD',
-      status: 'waiting',
-      chiefComplaint: 'Continuous Glucose Monitor (CGM) sensor review & HbA1c titration',
-      history: 'Type 2 Diabetes Mellitus on Basal/Bolus insulin regimen, Dexcom G7 CGM user.',
-      vitals: {
-        bp: '124/78 mmHg',
-        hr: 78,
-        spo2: 99,
-      },
-    },
-    {
-      id: 'tele-03',
-      patientName: 'Liam O\'Connor',
-      patientMrn: 'GH-2026-6411',
-      age: 36,
-      gender: 'Male',
-      timeSlot: '10:00 AM - 10:20 AM',
-      specialty: 'Pulmonology Telehealth',
-      physician: 'Dr. Michael Chang, MD',
-      status: 'waiting',
-      chiefComplaint: 'Asthma exacerbation follow-up, inhaler technique validation',
-      history: 'Moderate Persistent Asthma, Allergic Rhinitis.',
-      vitals: {
-        bp: '118/74 mmHg',
-        hr: 82,
-        spo2: 97,
-      },
-    },
-  ]);
+      scheduledTime: 'Today, 14:00',
+      status: 'WAITING_ROOM',
+      type: 'Telehealth Consultation',
+      attendingPhysician: 'Dr. Sarah Jenkins',
+      clinicianNpi: '1487920134',
+      specialty: 'Cardiology & Preventive Medicine',
+      chiefComplaint: 'Post-discharge follow-up for blood pressure and palpitations',
+      roomToken: 'ROOM-ALPHA-892',
+      connectionQuality: 'EXCELLENT',
+      callDurationSeconds: 0,
+      vitals: { bp: '120/80', hr: 72, spo2: 99, temp: 36.6, rhythm: 'Normal Sinus Rhythm' },
+      transcription: [],
+      soapNote: { subjective: '', objective: '', assessment: '', plan: '', icd10Codes: [], cptCodes: [] },
+      prescriptions: [],
+      isAudioMuted: false,
+      isVideoMuted: false,
+      isRecording: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }),
+    []
+  );
 
-  const [activeApptId, setActiveApptId] = useState('tele-01');
-  const activeAppt = appointments.find((a) => a.id === activeApptId) || appointments[0];
+  const activeSession: TelehealthSession = useMemo(() => {
+    return (
+      telehealthSessions.find((s) => s.id === activeSessionId) ||
+      telehealthSessions[0] ||
+      fallbackSession
+    );
+  }, [telehealthSessions, activeSessionId, fallbackSession]);
 
-  const [liveTranscription, setLiveTranscription] = useState<Array<{ sender: string; text: string; time: string }>>([
-    { sender: 'Dr. Jenkins', text: 'Good morning Mr. Hernandez. How has your blood pressure been tracking this week?', time: '09:01' },
-    { sender: 'Carlos Hernandez', text: 'Good morning Doctor. It has been hovering around 135 over 85, but I felt a bit dizzy yesterday morning after taking the lisinopril.', time: '09:02' },
-    { sender: 'Dr. Jenkins', text: 'Understood. Let us review your dosage and check if we need to adjust your water intake and hydration routine.', time: '09:03' },
-    { sender: 'Carlos Hernandez', text: 'My home Omron monitor showed 136/86 this morning right before we connected. Pulse was 74.', time: '09:05' },
-    { sender: 'Dr. Jenkins', text: 'That pulse rate is excellent. I am going to keep you on Lisinopril 10mg once daily in the morning, but make sure to take it after breakfast with full hydration.', time: '09:07' },
-  ]);
+  // Call Controls State
+  const [inCall, setInCall] = useState<boolean>(activeSession.status === 'IN_CONSULTATION');
+  const [micMuted, setMicMuted] = useState<boolean>(activeSession.isAudioMuted || false);
+  const [cameraOff, setCameraOff] = useState<boolean>(activeSession.isVideoMuted || false);
+  const [speakerMuted, setSpeakerMuted] = useState<boolean>(false);
+  const [isRecording, setIsRecording] = useState<boolean>(activeSession.isRecording || false);
+  const [activeCallTimeSeconds, setActiveCallTimeSeconds] = useState<number>(activeSession.callDurationSeconds || 0);
 
+  // Tab & Filters State
+  const [selectedTab, setSelectedTab] = useState<'soap' | 'rx' | 'vitals'>('soap');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'WAITING_ROOM' | 'IN_CONSULTATION' | 'DOCUMENTING' | 'COMPLETED'>('ALL');
+  const [searchFilter, setSearchFilter] = useState<string>('');
+
+  // Chat / Live Transcription Input State
   const [chatMessage, setChatMessage] = useState('');
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // AI SOAP State
   const [isAiGeneratingSoap, setIsAiGeneratingSoap] = useState(false);
-  const [soapGenerated, setSoapGenerated] = useState(true);
+  const [soapSavedSuccess, setSoapSavedSuccess] = useState(false);
+  const [soapSubjective, setSoapSubjective] = useState('');
+  const [soapObjective, setSoapObjective] = useState('');
+  const [soapAssessment, setSoapAssessment] = useState('');
+  const [soapPlan, setSoapPlan] = useState('');
+  const [icd10Codes, setIcd10Codes] = useState<Array<{ code: string; description: string }>>([]);
+  const [cptCodes, setCptCodes] = useState<Array<{ code: string; description: string; fee?: number }>>([]);
 
-  const [soapNote, setSoapNote] = useState<SoapNote>({
-    subjective: '58 y/o male presenting via encrypted telehealth for follow-up of essential hypertension and post-stent recovery. Patient reports mild dizziness post-dosing yesterday, otherwise asymptomatic. Home BP logs: 136/86 mmHg, HR 74 bpm. Denies chest pain, orthopnea, or lower extremity edema.',
-    objective: 'Appears comfortable via high-definition video. Telemetry vitals verified: BP 136/86 mmHg, HR 74 bpm regular, SpO2 98% on room air. Speech clear, no respiratory distress during conversation.',
-    assessment: '1. Primary Hypertension, controlled with current ACE-inhibitor regimen (ICD-10: I10).\n2. Status post-coronary intervention (I25.10) - stable hemodynamic profile.',
-    plan: '1. Continue Lisinopril 10mg PO Daily with food/water.\n2. Maintain daily morning and evening BP log; threshold alert if systolic >150 or <100 mmHg.\n3. Virtual follow-up in 6 weeks or sooner if orthostatic dizziness recurs.',
-  });
-
-  const [prescriptions, setPrescriptions] = useState<EPrescriptionItem[]>([
-    {
-      id: 'rx-1',
-      medication: 'Lisinopril Tablets USP',
-      dosage: '10 mg',
-      frequency: 'Once Daily (Morning)',
-      duration: '90 Days (Refills: 3)',
-      instructions: 'Take 1 tablet by mouth daily after breakfast with a full glass of water.',
-    },
-    {
-      id: 'rx-2',
-      medication: 'Atorvastatin Calcium',
-      dosage: '40 mg',
-      frequency: 'Once Daily (Bedtime)',
-      duration: '90 Days (Refills: 3)',
-      instructions: 'Take 1 tablet by mouth at bedtime.',
-    },
-  ]);
-
+  // Prescription State
   const [newMed, setNewMed] = useState('');
   const [newDose, setNewDose] = useState('');
-  const [newFreq, setNewFreq] = useState('');
-  const [newDuration, setNewDuration] = useState('');
+  const [newFreq, setNewFreq] = useState('Once Daily (QAM)');
+  const [newDuration, setNewDuration] = useState('30 Days');
   const [newInstructions, setNewInstructions] = useState('');
   const [showAddRx, setShowAddRx] = useState(false);
   const [eRxSubmitted, setERxSubmitted] = useState(false);
+
+  // Schedule Appointment Modal State
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [schedPatientId, setSchedPatientId] = useState(patients[0]?.id || 'p-1001');
+  const [schedType, setSchedType] = useState<TelehealthSession['type']>('Telehealth Consultation');
+  const [schedTime, setSchedTime] = useState('Today, 16:00');
+  const [schedPhysician, setSchedPhysician] = useState('Dr. Sarah Jenkins');
+  const [schedComplaint, setSchedComplaint] = useState('');
+
+  // Keep local SOAP fields synced when active session changes
+  useEffect(() => {
+    if (activeSession) {
+      setSoapSubjective(activeSession.soapNote?.subjective || '');
+      setSoapObjective(activeSession.soapNote?.objective || '');
+      setSoapAssessment(activeSession.soapNote?.assessment || '');
+      setSoapPlan(activeSession.soapNote?.plan || '');
+      setIcd10Codes(activeSession.soapNote?.icd10Codes || []);
+      setCptCodes(activeSession.soapNote?.cptCodes || [
+        { code: '99214', description: 'Office/telehealth outpatient visit moderate complexity', fee: 165 },
+      ]);
+      setInCall(activeSession.status === 'IN_CONSULTATION');
+      setActiveCallTimeSeconds(activeSession.callDurationSeconds || 0);
+      setMicMuted(activeSession.isAudioMuted || false);
+      setCameraOff(activeSession.isVideoMuted || false);
+      setIsRecording(activeSession.isRecording || false);
+      setSoapSavedSuccess(activeSession.status === 'COMPLETED');
+    }
+  }, [activeSessionId, activeSession]);
 
   // Call timer simulation
   useEffect(() => {
     if (!inCall) return;
     const interval = setInterval(() => {
-      setActiveCallTimeSeconds((prev) => prev + 1);
+      setActiveCallTimeSeconds((prev) => {
+        const updated = prev + 1;
+        // Periodically update call duration
+        if (updated % 15 === 0) {
+          updateTelehealthSession(activeSession.id, { callDurationSeconds: updated }).catch(() => {});
+        }
+        return updated;
+      });
     }, 1000);
     return () => clearInterval(interval);
-  }, [inCall]);
+  }, [inCall, activeSession?.id, updateTelehealthSession]);
 
   const formatTimer = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -193,148 +182,407 @@ export function TelehealthView() {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const handleSendMessage = (e: React.FormEvent) => {
+  // Filtered appointments
+  const filteredSessions = telehealthSessions.filter((s) => {
+    const matchesStatus = statusFilter === 'ALL' || s.status === statusFilter;
+    const matchesSearch =
+      searchFilter.trim() === '' ||
+      s.patientName.toLowerCase().includes(searchFilter.toLowerCase()) ||
+      s.patientMrn.toLowerCase().includes(searchFilter.toLowerCase()) ||
+      s.chiefComplaint.toLowerCase().includes(searchFilter.toLowerCase()) ||
+      s.specialty.toLowerCase().includes(searchFilter.toLowerCase());
+    return matchesStatus && matchesSearch;
+  });
+
+  const handleSelectSession = (session: TelehealthSession) => {
+    setActiveSessionId(session.id);
+    if (session.status === 'WAITING_ROOM') {
+      // Connect to session
+      updateTelehealthSession(session.id, {
+        status: 'IN_CONSULTATION',
+        transcription: [
+          ...session.transcription,
+          {
+            id: `tr-${Date.now()}`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            speaker: 'SYSTEM',
+            text: `Clinician joined video room. End-to-end encrypted session active.`,
+          },
+        ],
+      }).catch(() => {});
+      setInCall(true);
+    }
+  };
+
+  const handleToggleCall = async () => {
+    if (inCall) {
+      // End call -> transition to DOCUMENTING
+      setInCall(false);
+      await updateTelehealthSession(activeSession.id, {
+        status: 'DOCUMENTING',
+        callDurationSeconds: activeCallTimeSeconds,
+        transcription: [
+          ...activeSession.transcription,
+          {
+            id: `tr-${Date.now()}`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            speaker: 'SYSTEM',
+            text: `Video call ended by clinician. Call duration: ${formatTimer(activeCallTimeSeconds)}. Documenting encounter notes.`,
+          },
+        ],
+      });
+    } else {
+      // Reconnect
+      setInCall(true);
+      await updateTelehealthSession(activeSession.id, {
+        status: 'IN_CONSULTATION',
+      });
+    }
+  };
+
+  const handleToggleMute = async () => {
+    const next = !micMuted;
+    setMicMuted(next);
+    await updateTelehealthSession(activeSession.id, { isAudioMuted: next });
+  };
+
+  const handleToggleCamera = async () => {
+    const next = !cameraOff;
+    setCameraOff(next);
+    await updateTelehealthSession(activeSession.id, { isVideoMuted: next });
+  };
+
+  const handleToggleRecording = async () => {
+    const next = !isRecording;
+    setIsRecording(next);
+    await updateTelehealthSession(activeSession.id, { isRecording: next });
+  };
+
+  const handleSendTranscriptMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatMessage.trim()) return;
-    const now = new Date();
-    const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-    setLiveTranscription((prev) => [
-      ...prev,
-      { sender: 'Dr. Jenkins', text: chatMessage.trim(), time: timeStr },
-    ]);
+
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const newEntry: TelehealthTranscriptEntry = {
+      id: `tr-${Date.now()}`,
+      timestamp: timeStr,
+      speaker: 'DOCTOR',
+      text: chatMessage.trim(),
+    };
+
+    const updatedTranscription = [...activeSession.transcription, newEntry];
     setChatMessage('');
+
+    await updateTelehealthSession(activeSession.id, {
+      transcription: updatedTranscription,
+    });
   };
 
-  const handleSynthesizeSoap = () => {
+  // AI Speech-to-SOAP generation
+  const handleSynthesizeSoap = async () => {
     setIsAiGeneratingSoap(true);
-    setTimeout(() => {
+    try {
+      const transcriptText = activeSession.transcription
+        .map((t) => `${t.speaker}: ${t.text}`)
+        .join('\n');
+
+      const response = await fetch('/api/ai/soap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          patientId: activeSession.patientId,
+          chiefComplaint: activeSession.chiefComplaint,
+          vitals: activeSession.vitals,
+          doctorNotes: transcriptText || 'Patient in virtual consultation.',
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.subjective) setSoapSubjective(data.subjective);
+        if (data.objective) setSoapObjective(data.objective);
+        if (data.assessment) setSoapAssessment(data.assessment);
+        if (data.plan) setSoapPlan(data.plan);
+        if (data.suggestedBillingCodes) {
+          setCptCodes(
+            data.suggestedBillingCodes.map((c: any) => ({
+              code: c.code,
+              description: c.description,
+              fee: c.fee || 145,
+            }))
+          );
+        }
+      } else {
+        // Fallback intelligent draft if endpoint is offline
+        generateFallbackSoap();
+      }
+    } catch {
+      generateFallbackSoap();
+    } finally {
       setIsAiGeneratingSoap(false);
-      setSoapGenerated(true);
-    }, 1200);
+    }
   };
 
-  const handleAddPrescription = (e: React.FormEvent) => {
+  const generateFallbackSoap = () => {
+    const pName = activeSession.patientName;
+    const bp = activeSession.vitals.bp || '120/80';
+    const hr = activeSession.vitals.hr || 72;
+    const spo2 = activeSession.vitals.spo2 || 99;
+
+    setSoapSubjective(
+      `${activeSession.age} y/o ${activeSession.gender} presenting via encrypted telehealth consult for ${activeSession.chiefComplaint.toLowerCase()}. Patient reports stable adherence to home regimen without acute distress or dyspnea.`
+    );
+    setSoapObjective(
+      `Video consult visual assessment: Alert, oriented x 4, conversational without tachypnea. Connected biometric telemetry (${activeSession.vitals.connectedDevice || 'BLE Hub'}): BP ${bp} mmHg, HR ${hr} bpm, SpO2 ${spo2}%. Rhythm: ${activeSession.vitals.rhythm || 'Normal Sinus'}.`
+    );
+    setSoapAssessment(
+      `1. Follow-up: ${activeSession.chiefComplaint} (ICD-10: Z09, I10).\n2. Remote biometric telemetry monitoring confirms stable hemodynamic status.`
+    );
+    setSoapPlan(
+      `1. Continue current medication regimen.\n2. Maintain daily remote telemetry monitoring.\n3. Virtual follow-up in 4 weeks or return to clinic if symptoms worsen.`
+    );
+    setIcd10Codes([
+      { code: 'I10', description: 'Essential (primary) hypertension' },
+      { code: 'Z09', description: 'Encounter for follow-up examination after treatment' },
+    ]);
+    setCptCodes([
+      { code: '99214', description: 'Telehealth outpatient visit moderate complexity', fee: 165 },
+      { code: '99457', description: 'Remote physiologic monitoring treatment mgmt 20 min', fee: 110 },
+    ]);
+  };
+
+  // Sign & commit SOAP note to Patient EHR
+  const handleSignAndCommitSoap = async () => {
+    const updatedNote: TelehealthSoapNote = {
+      subjective: soapSubjective,
+      objective: soapObjective,
+      assessment: soapAssessment,
+      plan: soapPlan,
+      icd10Codes,
+      cptCodes,
+    };
+
+    await completeTelehealthSession(activeSession.id, updatedNote, activeSession.prescriptions);
+    setSoapSavedSuccess(true);
+    setTimeout(() => setSoapSavedSuccess(false), 6000);
+  };
+
+  // Electronic Prescribing (E-Rx)
+  const handleAddPrescription = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMed.trim() || !newDose.trim()) return;
-    const item: EPrescriptionItem = {
+
+    const newRxItem: TelehealthPrescription = {
       id: `rx-${Date.now()}`,
       medication: newMed.trim(),
       dosage: newDose.trim(),
-      frequency: newFreq.trim() || 'Once Daily',
+      frequency: newFreq.trim() || 'Once Daily (QAM)',
       duration: newDuration.trim() || '30 Days',
       instructions: newInstructions.trim() || 'Take as directed by physician.',
+      prescribedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+      pharmacyName: 'CVS Pharmacy #4912 (Main Street)',
+      pharmacyNpi: '1093821742',
+      status: 'PENDING_TRANSMISSION',
     };
-    setPrescriptions((prev) => [...prev, item]);
+
+    const updatedPrescriptions = [...activeSession.prescriptions, newRxItem];
+    await updateTelehealthSession(activeSession.id, {
+      prescriptions: updatedPrescriptions,
+    });
+
     setNewMed('');
     setNewDose('');
-    setNewFreq('');
-    setNewDuration('');
     setNewInstructions('');
     setShowAddRx(false);
   };
 
-  const handleTransmitERx = () => {
+  const handleTransmitERx = async () => {
+    const transmitted = activeSession.prescriptions.map((p) => ({
+      ...p,
+      status: 'TRANSMITTED' as const,
+      transactionRef: `NCPDP-SCRIPT-${Math.floor(100000 + Math.random() * 900000)}`,
+    }));
+
+    await updateTelehealthSession(activeSession.id, {
+      prescriptions: transmitted,
+    });
+
     setERxSubmitted(true);
-    setTimeout(() => setERxSubmitted(false), 4000);
+    setTimeout(() => setERxSubmitted(false), 5000);
   };
 
-  const handleSelectAppointment = (appt: TelehealthAppointment) => {
-    setActiveApptId(appt.id);
-    if (appt.status === 'waiting') {
-      setAppointments((prev) =>
-        prev.map((a) => (a.id === appt.id ? { ...a, status: 'in_call' } : a))
-      );
-      setInCall(true);
-      setActiveCallTimeSeconds(0);
-    }
+  // Handle scheduling new appointment
+  const handleCreateAppointment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!schedComplaint.trim()) return;
+
+    const newSession = await createTelehealthSession({
+      patientId: schedPatientId,
+      type: schedType,
+      scheduledTime: schedTime,
+      chiefComplaint: schedComplaint,
+      attendingPhysician: schedPhysician,
+    });
+
+    setShowScheduleModal(false);
+    setActiveSessionId(newSession.id);
+    setSchedComplaint('');
   };
 
   return (
     <div className="space-y-6 pb-12">
       {/* Header */}
-      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
             <span className="w-8 h-8 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center font-bold">
               <Video className="w-4 h-4" />
             </span>
             <h1 className="text-lg font-bold text-slate-900">Telehealth & Remote Care Clinic</h1>
+            <span className="px-2 py-0.5 bg-teal-100 text-teal-800 rounded-md text-[10px] font-mono font-bold">
+              v3.2 Production
+            </span>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            WebRTC Encrypted Virtual Consultations, Live AI Ambient Speech-to-SOAP, Surescripts E-Prescribing & Remote Vitals
+            WebRTC Encrypted Virtual Encounters, Ambient Speech-to-SOAP Scribe, Surescripts E-Rx & Real-Time Bio-Telemetry
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="px-3 py-1 bg-emerald-50 text-emerald-700 font-bold text-xs rounded-lg border border-emerald-200 flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            WebRTC Stream: AES-256 (HIPAA Compliant)
+            WebRTC: AES-256 (HIPAA Certified)
           </span>
           <span className="px-3 py-1 bg-blue-50 text-blue-700 font-bold text-xs rounded-lg border border-blue-200">
-            Surescripts E-Rx Gateway Online
+            Surescripts E-Rx Online
           </span>
+          <button
+            onClick={() => setShowScheduleModal(true)}
+            className="px-3 py-1.5 bg-teal-600 hover:bg-teal-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" /> Book Virtual Visit
+          </button>
         </div>
       </div>
 
-      {/* Main Studio */}
+      {/* Main Studio Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left: Video Studio & Ambient Transcriber (7 Cols) */}
+        {/* Left Column: Video Studio & Ambient Transcriber (7 Cols) */}
         <div className="lg:col-span-7 space-y-4">
-          <div className="bg-slate-950 rounded-2xl overflow-hidden shadow-lg border border-slate-800 flex flex-col h-[440px] relative">
+          <div className="bg-slate-950 rounded-2xl overflow-hidden shadow-lg border border-slate-800 flex flex-col h-[460px] relative">
             {/* Top Call Overlay */}
-            <div className="p-4 bg-gradient-to-b from-black/80 to-transparent absolute top-0 left-0 right-0 z-10 flex items-center justify-between text-white">
+            <div className="p-4 bg-gradient-to-b from-black/90 to-transparent absolute top-0 left-0 right-0 z-10 flex items-center justify-between text-white">
               <div className="flex items-center gap-2">
-                <span className={`w-2.5 h-2.5 rounded-full ${inCall ? 'bg-emerald-500 animate-ping' : 'bg-rose-500'}`} />
-                <span className="text-xs font-bold">{activeAppt.patientName}</span>
+                <span
+                  className={`w-2.5 h-2.5 rounded-full ${
+                    inCall ? 'bg-emerald-500 animate-ping' : 'bg-amber-500'
+                  }`}
+                />
+                <span className="text-xs font-bold">{activeSession.patientName}</span>
+                <span className="text-[10px] text-slate-400">({activeSession.patientMrn})</span>
                 <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded font-mono font-bold">
-                  {formatTimer(activeCallTimeSeconds)} / 30:00
+                  {formatTimer(activeCallTimeSeconds)}
                 </span>
+                {isRecording && (
+                  <span className="px-2 py-0.5 bg-rose-600/90 text-white font-mono text-[9px] rounded flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" /> REC
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-[11px] text-teal-300 font-mono bg-teal-950/80 px-2.5 py-0.5 rounded-md border border-teal-800">
-                  {activeAppt.specialty}
+                  {activeSession.roomToken}
                 </span>
               </div>
             </div>
 
             {/* Video Canvas Simulation */}
-            <div className="flex-1 flex items-center justify-center relative bg-gradient-to-b from-slate-900 to-slate-950">
+            <div className="flex-1 flex items-center justify-center relative bg-gradient-to-b from-slate-900 via-slate-950 to-black">
               {inCall ? (
-                <div className="text-center space-y-3">
+                <div className="text-center space-y-3 px-4">
                   <div className="w-24 h-24 rounded-full bg-teal-600/30 border-2 border-teal-400 text-teal-200 mx-auto flex items-center justify-center font-black text-2xl shadow-inner">
-                    {activeAppt.patientName.split(' ').map((n) => n[0]).join('')}
+                    {activeSession.patientName
+                      .split(' ')
+                      .map((n) => n[0])
+                      .join('')}
                   </div>
                   <div className="text-slate-200">
-                    <h3 className="font-bold text-sm">{activeAppt.patientName}</h3>
-                    <p className="text-xs text-emerald-400 flex items-center justify-center gap-1">
+                    <h3 className="font-bold text-sm flex items-center justify-center gap-2">
+                      {activeSession.patientName}
+                      <span className="text-xs font-normal text-slate-400">
+                        ({activeSession.age}y, {activeSession.gender})
+                      </span>
+                    </h3>
+                    <p className="text-xs text-emerald-400 flex items-center justify-center gap-1.5 mt-0.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                      1080p HD Video & Full-Duplex Audio Active
+                      1080p HD Encrypted WebRTC Stream • Full-Duplex
                     </p>
                   </div>
 
-                  {/* Real-time Vitals Overlay */}
-                  <div className="inline-flex items-center gap-3 bg-slate-900/90 border border-slate-700/80 px-3 py-1.5 rounded-xl text-[11px] text-slate-300 font-mono">
-                    <span>BP: <strong className="text-white">{activeAppt.vitals.bp}</strong></span>
+                  {/* Real-Time Bio-Telemetry Overlay */}
+                  <div className="inline-flex items-center gap-3 bg-slate-900/90 border border-slate-700/80 px-3 py-1.5 rounded-xl text-[11px] text-slate-300 font-mono flex-wrap justify-center">
+                    <span>
+                      BP: <strong className="text-white">{activeSession.vitals.bp}</strong>
+                    </span>
                     <span>•</span>
-                    <span>HR: <strong className="text-white">{activeAppt.vitals.hr} bpm</strong></span>
+                    <span>
+                      HR: <strong className="text-white">{activeSession.vitals.hr} bpm</strong>
+                    </span>
                     <span>•</span>
-                    <span>SpO2: <strong className="text-emerald-400">{activeAppt.vitals.spo2}%</strong></span>
+                    <span>
+                      SpO2:{' '}
+                      <strong className="text-emerald-400">{activeSession.vitals.spo2}%</strong>
+                    </span>
+                    {activeSession.vitals.glucose && (
+                      <>
+                        <span>•</span>
+                        <span>
+                          Glucose:{' '}
+                          <strong className="text-amber-400">
+                            {activeSession.vitals.glucose} mg/dL
+                          </strong>
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
               ) : (
-                <div className="text-center space-y-2 text-slate-400">
-                  <PhoneOff className="w-10 h-10 mx-auto text-slate-600" />
-                  <p className="text-sm font-bold text-slate-300">Call Ended</p>
-                  <p className="text-xs">Finalize clinical SOAP note and e-prescription below</p>
-                  <button
-                    onClick={() => {
-                      setInCall(true);
-                      setActiveCallTimeSeconds(0);
-                    }}
-                    className="mt-2 px-3.5 py-1.5 bg-teal-600 hover:bg-teal-500 text-white rounded-lg text-xs font-bold"
-                  >
-                    Reconnect Call
-                  </button>
+                <div className="text-center space-y-2 text-slate-400 px-4">
+                  {activeSession.status === 'COMPLETED' ? (
+                    <>
+                      <FileCheck className="w-12 h-12 mx-auto text-emerald-500" />
+                      <p className="text-sm font-bold text-emerald-300">Encounter Completed & Signed</p>
+                      <p className="text-xs text-slate-400">
+                        SOAP note and e-prescriptions permanently archived to Master Patient Index.
+                      </p>
+                    </>
+                  ) : activeSession.status === 'WAITING_ROOM' ? (
+                    <>
+                      <Users className="w-12 h-12 mx-auto text-amber-400 animate-pulse" />
+                      <p className="text-sm font-bold text-slate-200">Patient in Waiting Room</p>
+                      <p className="text-xs text-slate-400">
+                        {activeSession.patientName} is ready to connect. BLE vitals telemetry synced.
+                      </p>
+                      <button
+                        onClick={handleToggleCall}
+                        className="mt-3 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 mx-auto shadow-md cursor-pointer transition-colors"
+                      >
+                        <PhoneCall className="w-3.5 h-3.5" /> Connect Video Call
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <PhoneOff className="w-10 h-10 mx-auto text-slate-600" />
+                      <p className="text-sm font-bold text-slate-300">Consultation Paused / Documenting</p>
+                      <p className="text-xs">Finalize clinical SOAP note and e-prescriptions below</p>
+                      <button
+                        onClick={handleToggleCall}
+                        className="mt-3 px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 mx-auto cursor-pointer"
+                      >
+                        <PhoneCall className="w-3.5 h-3.5" /> Reconnect Video Stream
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -348,7 +596,9 @@ export function TelehealthView() {
                       SJ
                     </div>
                   )}
-                  <span className="font-semibold text-[10px] text-slate-300">{activeAppt.physician}</span>
+                  <span className="font-semibold text-[10px] text-slate-300">
+                    {activeSession.attendingPhysician}
+                  </span>
                 </div>
               )}
             </div>
@@ -357,7 +607,7 @@ export function TelehealthView() {
             <div className="p-3 bg-slate-900 border-t border-slate-800 flex items-center justify-between px-6 z-10">
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setMicMuted(!micMuted)}
+                  onClick={handleToggleMute}
                   className={`p-2.5 rounded-xl text-white cursor-pointer transition-all ${
                     micMuted ? 'bg-rose-600' : 'bg-slate-800 hover:bg-slate-700'
                   }`}
@@ -367,7 +617,7 @@ export function TelehealthView() {
                 </button>
 
                 <button
-                  onClick={() => setCameraOff(!cameraOff)}
+                  onClick={handleToggleCamera}
                   className={`p-2.5 rounded-xl text-white cursor-pointer transition-all ${
                     cameraOff ? 'bg-rose-600' : 'bg-slate-800 hover:bg-slate-700'
                   }`}
@@ -379,226 +629,292 @@ export function TelehealthView() {
                 <button
                   onClick={() => setSpeakerMuted(!speakerMuted)}
                   className={`p-2.5 rounded-xl text-white cursor-pointer transition-all ${
-                    speakerMuted ? 'bg-rose-600' : 'bg-slate-800 hover:bg-slate-700'
+                    speakerMuted ? 'bg-amber-600' : 'bg-slate-800 hover:bg-slate-700'
                   }`}
-                  title={speakerMuted ? 'Unmute Speaker' : 'Mute Speaker'}
+                  title={speakerMuted ? 'Unmute Audio' : 'Mute Audio'}
                 >
                   {speakerMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
                 </button>
+
+                <button
+                  onClick={handleToggleRecording}
+                  className={`p-2.5 rounded-xl text-white cursor-pointer transition-all ${
+                    isRecording ? 'bg-rose-600' : 'bg-slate-800 hover:bg-slate-700'
+                  }`}
+                  title={isRecording ? 'Stop Recording' : 'Start HIPAA Cloud Recording'}
+                >
+                  <Radio className="w-4 h-4" />
+                </button>
               </div>
 
-              <div className="flex items-center gap-2">
-                {inCall ? (
-                  <button
-                    onClick={() => setInCall(false)}
-                    className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-md"
-                  >
-                    <PhoneOff className="w-4 h-4" /> End Call
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => {
-                      setInCall(true);
-                      setActiveCallTimeSeconds(0);
-                    }}
-                    className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-md"
-                  >
-                    <Video className="w-4 h-4" /> Start Call
-                  </button>
-                )}
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleToggleCall}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 text-white cursor-pointer transition-colors ${
+                    inCall ? 'bg-rose-600 hover:bg-rose-500' : 'bg-emerald-600 hover:bg-emerald-500'
+                  }`}
+                >
+                  {inCall ? (
+                    <>
+                      <PhoneOff className="w-3.5 h-3.5" /> End Call
+                    </>
+                  ) : (
+                    <>
+                      <PhoneCall className="w-3.5 h-3.5" /> Connect Call
+                    </>
+                  )}
+                </button>
               </div>
             </div>
           </div>
 
-          {/* Real-Time Ambient Transcription */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-3">
+          {/* Live Ambient Speech & Clinical Dialogue Stream */}
+          <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm space-y-3">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
               <div className="flex items-center gap-2">
-                <span className="w-6 h-6 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center">
-                  <Sparkles className="w-3.5 h-3.5" />
-                </span>
-                <h3 className="text-xs font-bold text-slate-900">
-                  Ambient Clinical Speech Stream (Real-Time Whisper Extraction)
+                <Sparkles className="w-4 h-4 text-teal-600" />
+                <h3 className="text-xs font-bold text-slate-800">
+                  Ambient Clinical Dialogue & Speech Transcription
                 </h3>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Live Listening
-                </span>
-                <button
-                  onClick={handleSynthesizeSoap}
-                  disabled={isAiGeneratingSoap}
-                  className="px-2.5 py-1 bg-gradient-to-r from-teal-600 to-indigo-600 hover:from-teal-500 hover:to-indigo-500 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 shadow-xs cursor-pointer disabled:opacity-50"
-                >
-                  <Sparkles className="w-3 h-3 text-amber-300" />
-                  {isAiGeneratingSoap ? 'Synthesizing...' : 'Regenerate SOAP'}
-                </button>
-              </div>
+              <span className="text-[10px] text-teal-700 font-semibold bg-teal-50 px-2 py-0.5 rounded-full border border-teal-100">
+                Live Speech Engine Listening
+              </span>
             </div>
 
-            <div className="max-h-48 overflow-y-auto space-y-2 text-xs font-mono bg-slate-50 p-3.5 rounded-xl border border-slate-200">
-              {liveTranscription.map((item, idx) => (
-                <div key={idx} className="flex items-start gap-2">
-                  <span className="text-[10px] text-slate-400 font-semibold">{item.time}</span>
-                  <span
-                    className={`font-bold ${
-                      item.sender.includes('Dr.') ? 'text-teal-700' : 'text-slate-800'
+            <div className="h-44 overflow-y-auto space-y-2.5 pr-2 text-xs font-sans">
+              {activeSession.transcription.length === 0 ? (
+                <div className="h-full flex items-center justify-center text-slate-400 text-xs italic">
+                  Dialogue transcript will appear here as speech audio streams.
+                </div>
+              ) : (
+                activeSession.transcription.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className={`p-2.5 rounded-xl border text-xs ${
+                      entry.speaker === 'DOCTOR'
+                        ? 'bg-indigo-50/70 border-indigo-100 ml-6 text-indigo-950'
+                        : entry.speaker === 'PATIENT'
+                        ? 'bg-slate-50 border-slate-200 mr-6 text-slate-900'
+                        : 'bg-emerald-50/50 border-emerald-100 text-emerald-900 font-mono text-[11px]'
                     }`}
                   >
-                    {item.sender}:
-                  </span>
-                  <p className="text-slate-700 leading-relaxed flex-1">{item.text}</p>
-                </div>
-              ))}
+                    <div className="flex items-center justify-between font-bold text-[10px] mb-1">
+                      <span className="uppercase text-slate-500">
+                        {entry.speaker === 'DOCTOR'
+                          ? activeSession.attendingPhysician
+                          : entry.speaker === 'PATIENT'
+                          ? activeSession.patientName
+                          : 'SYSTEM GATEWAY'}
+                      </span>
+                      <span className="text-slate-400 font-normal">{entry.timestamp}</span>
+                    </div>
+                    <p className="leading-relaxed">{entry.text}</p>
+                  </div>
+                ))
+              )}
+              <div ref={chatEndRef} />
             </div>
 
-            <form onSubmit={handleSendMessage} className="flex items-center gap-2 pt-1">
+            {/* Clinician Speech / Dictation Input Form */}
+            <form onSubmit={handleSendTranscriptMessage} className="flex gap-2 pt-1">
               <input
                 type="text"
                 value={chatMessage}
                 onChange={(e) => setChatMessage(e.target.value)}
-                placeholder="Type doctor statement or clinical question into speech buffer..."
-                className="flex-1 text-xs border border-slate-200 rounded-xl px-3.5 py-2 bg-slate-50 focus:bg-white focus:ring-1 focus:ring-teal-500"
+                placeholder="Dictate clinician statement or inject dialogue into transcript..."
+                className="flex-1 text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 focus:bg-white transition-all"
               />
               <button
                 type="submit"
-                className="px-3.5 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
+                className="px-3.5 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-sm cursor-pointer"
               >
-                <Send className="w-3.5 h-3.5" /> Inject
+                <Send className="w-3.5 h-3.5" /> Record
               </button>
             </form>
           </div>
         </div>
 
-        {/* Right: Clinical EHR Integration Workbench (5 Cols) */}
+        {/* Right Column: Clinical Documentation, SOAP & E-Prescribing (5 Cols) */}
         <div className="lg:col-span-5 space-y-4">
-          {/* Waiting Room Selector */}
+          {/* Patient Header Card */}
           <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm space-y-3">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-              <h3 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                <Users className="w-3.5 h-3.5 text-teal-600" />
-                Virtual Clinic Roster ({appointments.length})
-              </h3>
-              <span className="text-[10px] font-bold text-slate-500">Click to Switch Patient</span>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-teal-100 text-teal-800 font-extrabold flex items-center justify-center text-sm">
+                  {activeSession.patientName
+                    .split(' ')
+                    .map((n) => n[0])
+                    .join('')}
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900">{activeSession.patientName}</h3>
+                  <p className="text-[11px] text-slate-500">
+                    {activeSession.patientMrn} • {activeSession.age}yo {activeSession.gender}
+                  </p>
+                </div>
+              </div>
+              <span
+                className={`px-2.5 py-1 text-[10px] font-bold rounded-lg border ${
+                  activeSession.status === 'COMPLETED'
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : activeSession.status === 'IN_CONSULTATION'
+                    ? 'bg-teal-50 text-teal-700 border-teal-200'
+                    : activeSession.status === 'WAITING_ROOM'
+                    ? 'bg-amber-50 text-amber-700 border-amber-200'
+                    : 'bg-slate-100 text-slate-700 border-slate-200'
+                }`}
+              >
+                {activeSession.status.replace('_', ' ')}
+              </span>
             </div>
 
-            <div className="space-y-2">
-              {appointments.map((appt) => (
-                <div
-                  key={appt.id}
-                  onClick={() => handleSelectAppointment(appt)}
-                  className={`p-3 rounded-xl border text-xs cursor-pointer transition-all ${
-                    activeApptId === appt.id
-                      ? 'bg-teal-50/60 border-teal-300 ring-2 ring-teal-500/20'
-                      : 'bg-slate-50 hover:bg-slate-100/70 border-slate-200'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-slate-900">{appt.patientName}</span>
-                    <span
-                      className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${
-                        appt.status === 'in_call'
-                          ? 'bg-teal-600 text-white animate-pulse'
-                          : 'bg-amber-100 text-amber-800'
-                      }`}
-                    >
-                      {appt.status === 'in_call' ? 'CONNECTED' : 'WAITING'}
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-slate-500 flex items-center justify-between pt-1">
-                    <span>{appt.patientMrn} • {appt.age}y {appt.gender}</span>
-                    <span className="font-mono">{appt.timeSlot}</span>
-                  </div>
-                </div>
-              ))}
+            <div className="p-2.5 bg-slate-50 rounded-xl text-xs border border-slate-100 space-y-1">
+              <div className="text-[11px] text-slate-600">
+                <strong className="text-slate-800">Chief Complaint:</strong> {activeSession.chiefComplaint}
+              </div>
+              <div className="text-[10px] text-slate-400 font-mono">
+                Attending: {activeSession.attendingPhysician} (NPI: {activeSession.clinicianNpi})
+              </div>
             </div>
           </div>
 
-          {/* Clinical Tab Panel */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => setSelectedTab('soap')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    selectedTab === 'soap'
-                      ? 'bg-teal-600 text-white'
-                      : 'text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  AI SOAP Note
-                </button>
-                <button
-                  onClick={() => setSelectedTab('rx')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    selectedTab === 'rx'
-                      ? 'bg-teal-600 text-white'
-                      : 'text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  E-Prescribing ({prescriptions.length})
-                </button>
-                <button
-                  onClick={() => setSelectedTab('vitals')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    selectedTab === 'vitals'
-                      ? 'bg-teal-600 text-white'
-                      : 'text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  Remote Vitals
-                </button>
-              </div>
+          {/* Tab Navigation */}
+          <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm space-y-4">
+            <div className="flex border-b border-slate-200">
+              <button
+                onClick={() => setSelectedTab('soap')}
+                className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
+                  selectedTab === 'soap'
+                    ? 'border-teal-600 text-teal-700'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5" /> SOAP Clinical Note
+              </button>
+              <button
+                onClick={() => setSelectedTab('rx')}
+                className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
+                  selectedTab === 'rx'
+                    ? 'border-teal-600 text-teal-700'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Pill className="w-3.5 h-3.5" /> Surescripts E-Rx ({activeSession.prescriptions.length})
+              </button>
+              <button
+                onClick={() => setSelectedTab('vitals')}
+                className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
+                  selectedTab === 'vitals'
+                    ? 'border-teal-600 text-teal-700'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Activity className="w-3.5 h-3.5" /> Remote Vitals & RPM
+              </button>
             </div>
 
-            {/* Tab 1: AI SOAP Note */}
+            {/* Tab 1: Clinical SOAP Note */}
             {selectedTab === 'soap' && (
-              <div className="space-y-3 text-xs">
-                <div>
-                  <label className="font-bold text-slate-700 block mb-1">Subjective (S)</label>
-                  <textarea
-                    rows={3}
-                    value={soapNote.subjective}
-                    onChange={(e) => setSoapNote({ ...soapNote, subjective: e.target.value })}
-                    className="w-full text-xs font-mono border border-slate-200 rounded-xl p-2.5 bg-slate-50 focus:bg-white focus:ring-1 focus:ring-teal-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="font-bold text-slate-700 block mb-1">Objective (O)</label>
-                  <textarea
-                    rows={2}
-                    value={soapNote.objective}
-                    onChange={(e) => setSoapNote({ ...soapNote, objective: e.target.value })}
-                    className="w-full text-xs font-mono border border-slate-200 rounded-xl p-2.5 bg-slate-50 focus:bg-white focus:ring-1 focus:ring-teal-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="font-bold text-slate-700 block mb-1">Assessment (A)</label>
-                  <textarea
-                    rows={2}
-                    value={soapNote.assessment}
-                    onChange={(e) => setSoapNote({ ...soapNote, assessment: e.target.value })}
-                    className="w-full text-xs font-mono border border-slate-200 rounded-xl p-2.5 bg-slate-50 focus:bg-white focus:ring-1 focus:ring-teal-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="font-bold text-slate-700 block mb-1">Plan & Rx (P)</label>
-                  <textarea
-                    rows={3}
-                    value={soapNote.plan}
-                    onChange={(e) => setSoapNote({ ...soapNote, plan: e.target.value })}
-                    className="w-full text-xs font-mono border border-slate-200 rounded-xl p-2.5 bg-slate-50 focus:bg-white focus:ring-1 focus:ring-teal-500"
-                  />
-                </div>
-
-                <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              <div className="space-y-3.5 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-800 flex items-center gap-1">
+                    Ambient Speech-to-SOAP Scribe
+                  </span>
                   <button
-                    onClick={() => alert(`SOAP note for ${activeAppt.patientName} (${activeAppt.patientMrn}) permanently signed and archived into Master Patient Index EHR.`)}
-                    className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                    onClick={handleSynthesizeSoap}
+                    disabled={isAiGeneratingSoap}
+                    className="px-2.5 py-1 bg-gradient-to-r from-teal-600 to-indigo-600 hover:from-teal-500 hover:to-indigo-500 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 shadow-xs cursor-pointer disabled:opacity-50"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    {isAiGeneratingSoap ? 'Synthesizing...' : 'Synthesize SOAP with AI'}
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-0.5">
+                      Subjective (Chief Complaint & Patient History)
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={soapSubjective}
+                      onChange={(e) => setSoapSubjective(e.target.value)}
+                      className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-teal-500"
+                      placeholder="Patient statements, symptom trajectory, home glucose/BP logs..."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-0.5">
+                      Objective (Video Physical & Bio-Telemetry)
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={soapObjective}
+                      onChange={(e) => setSoapObjective(e.target.value)}
+                      className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-teal-500"
+                      placeholder="Clinical visual inspection, synchronized remote vitals..."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-0.5">
+                      Assessment & ICD-10 Diagnoses
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={soapAssessment}
+                      onChange={(e) => setSoapAssessment(e.target.value)}
+                      className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-teal-500"
+                      placeholder="Clinical evaluation and diagnosis..."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-0.5">
+                      Plan & Treatment Orders
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={soapPlan}
+                      onChange={(e) => setSoapPlan(e.target.value)}
+                      className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-teal-500"
+                      placeholder="Medication titration, diagnostic tests, remote follow-up schedule..."
+                    />
+                  </div>
+                </div>
+
+                {/* CPT Codes for Revenue Integrity */}
+                {cptCodes.length > 0 && (
+                  <div className="p-2.5 bg-indigo-50/60 rounded-xl border border-indigo-100 space-y-1">
+                    <span className="text-[10px] font-bold text-indigo-900 uppercase">
+                      Revenue Integrity Auto-Captured CPT Billing Codes
+                    </span>
+                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                      {cptCodes.map((c, i) => (
+                        <span
+                          key={i}
+                          className="px-2 py-0.5 bg-white border border-indigo-200 text-indigo-800 rounded text-[10px] font-mono font-bold"
+                        >
+                          {c.code} (${c.fee || 125})
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {soapSavedSuccess && (
+                  <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl flex items-center gap-2 text-emerald-900 text-xs font-bold animate-fade-in">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    SOAP note permanently signed and committed to Master Patient Index EHR. CPT codes queued for Revenue Integrity billing audit.
+                  </div>
+                )}
+
+                <div className="pt-2 border-t border-slate-100 flex justify-end">
+                  <button
+                    onClick={handleSignAndCommitSoap}
+                    className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer transition-colors"
                   >
                     <Save className="w-3.5 h-3.5" /> Sign & Post to Patient EHR
                   </button>
@@ -610,7 +926,9 @@ export function TelehealthView() {
             {selectedTab === 'rx' && (
               <div className="space-y-4 text-xs">
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-slate-800">Prescription Order Set</span>
+                  <span className="font-bold text-slate-800">
+                    Surescripts Certified E-Prescribing Orders
+                  </span>
                   <button
                     onClick={() => setShowAddRx(!showAddRx)}
                     className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-[11px] font-bold cursor-pointer"
@@ -620,7 +938,10 @@ export function TelehealthView() {
                 </div>
 
                 {showAddRx && (
-                  <form onSubmit={handleAddPrescription} className="p-3 bg-teal-50/50 rounded-xl border border-teal-200 space-y-2">
+                  <form
+                    onSubmit={handleAddPrescription}
+                    className="p-3 bg-teal-50/50 rounded-xl border border-teal-200 space-y-2"
+                  >
                     <h4 className="font-bold text-teal-950 text-xs">New Electronic Prescription</h4>
                     <div className="grid grid-cols-2 gap-2">
                       <input
@@ -633,7 +954,7 @@ export function TelehealthView() {
                       />
                       <input
                         type="text"
-                        placeholder="Strength (e.g. 10 mg)"
+                        placeholder="Strength / Dose (e.g. 10 mg)"
                         value={newDose}
                         onChange={(e) => setNewDose(e.target.value)}
                         className="text-xs p-2 bg-white border border-slate-200 rounded-lg"
@@ -650,7 +971,7 @@ export function TelehealthView() {
                       />
                       <input
                         type="text"
-                        placeholder="Duration (e.g. 90 Days)"
+                        placeholder="Duration (e.g. 30 Days)"
                         value={newDuration}
                         onChange={(e) => setNewDuration(e.target.value)}
                         className="text-xs p-2 bg-white border border-slate-200 rounded-lg"
@@ -658,7 +979,7 @@ export function TelehealthView() {
                     </div>
                     <input
                       type="text"
-                      placeholder="Patient Sig / Instructions"
+                      placeholder="Sig / Patient Instructions"
                       value={newInstructions}
                       onChange={(e) => setNewInstructions(e.target.value)}
                       className="w-full text-xs p-2 bg-white border border-slate-200 rounded-lg"
@@ -666,80 +987,117 @@ export function TelehealthView() {
                     <div className="flex justify-end gap-2 pt-1">
                       <button
                         type="submit"
-                        className="px-3 py-1.5 bg-teal-600 hover:bg-teal-500 text-white rounded-lg text-xs font-bold"
+                        className="px-3 py-1.5 bg-teal-600 hover:bg-teal-500 text-white rounded-lg text-xs font-bold cursor-pointer"
                       >
-                        Save Prescription
+                        Add to Order Set
                       </button>
                     </div>
                   </form>
                 )}
 
                 <div className="space-y-2">
-                  {prescriptions.map((rx) => (
-                    <div key={rx.id} className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-slate-900">{rx.medication}</span>
-                        <span className="px-2 py-0.5 bg-teal-100 text-teal-800 font-bold rounded text-[10px]">
-                          {rx.dosage}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-600">{rx.instructions}</p>
-                      <div className="text-[10px] text-slate-400 font-mono">
-                        {rx.frequency} • Duration: {rx.duration}
-                      </div>
+                  {activeSession.prescriptions.length === 0 ? (
+                    <div className="text-center py-6 text-slate-400 italic">
+                      No prescriptions added yet for this virtual encounter.
                     </div>
-                  ))}
+                  ) : (
+                    activeSession.prescriptions.map((rx) => (
+                      <div
+                        key={rx.id}
+                        className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-slate-900">{rx.medication}</span>
+                          <span className="px-2 py-0.5 bg-teal-100 text-teal-800 font-bold rounded text-[10px]">
+                            {rx.dosage}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-600">{rx.instructions}</p>
+                        <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pt-1">
+                          <span>
+                            {rx.frequency} • {rx.duration}
+                          </span>
+                          <span
+                            className={`font-bold ${
+                              rx.status === 'TRANSMITTED'
+                                ? 'text-emerald-600'
+                                : 'text-amber-600'
+                            }`}
+                          >
+                            {rx.status || 'PENDING'}
+                          </span>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
 
                 {eRxSubmitted && (
                   <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl flex items-center gap-2 text-emerald-800 text-xs font-bold">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    Prescriptions successfully routed via Surescripts to CVS Pharmacy #4021.
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    Prescriptions successfully routed via Surescripts NCPDP network to CVS Pharmacy #4912.
                   </div>
                 )}
 
-                <div className="pt-2 border-t border-slate-100 flex justify-end">
-                  <button
-                    onClick={handleTransmitERx}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
-                  >
-                    <Send className="w-3.5 h-3.5" /> Transmit Electronic E-Rx to Pharmacy
-                  </button>
-                </div>
+                {activeSession.prescriptions.length > 0 && (
+                  <div className="pt-2 border-t border-slate-100 flex justify-end">
+                    <button
+                      onClick={handleTransmitERx}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                    >
+                      <Send className="w-3.5 h-3.5" /> Transmit Electronic E-Rx to Pharmacy
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
             {/* Tab 3: Remote Vitals & Bio-Telemetry */}
             {selectedTab === 'vitals' && (
-              <div className="space-y-3 text-xs">
+              <div className="space-y-3.5 text-xs">
                 <div className="grid grid-cols-3 gap-2 text-center">
                   <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                    <span className="text-[10px] text-slate-500 uppercase font-bold block">Blood Pressure</span>
-                    <span className="text-base font-black text-slate-900 mt-0.5 block">{activeAppt.vitals.bp}</span>
-                    <span className="text-[10px] text-emerald-600 font-bold">Within Target</span>
+                    <span className="text-[10px] text-slate-500 uppercase font-bold block">
+                      Blood Pressure
+                    </span>
+                    <span className="text-base font-black text-slate-900 mt-0.5 block">
+                      {activeSession.vitals.bp}
+                    </span>
+                    <span className="text-[10px] text-emerald-600 font-bold">In Target</span>
                   </div>
                   <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                    <span className="text-[10px] text-slate-500 uppercase font-bold block">Heart Rate</span>
-                    <span className="text-base font-black text-slate-900 mt-0.5 block">{activeAppt.vitals.hr} bpm</span>
-                    <span className="text-[10px] text-slate-500">Normal Sinus</span>
+                    <span className="text-[10px] text-slate-500 uppercase font-bold block">
+                      Heart Rate
+                    </span>
+                    <span className="text-base font-black text-slate-900 mt-0.5 block">
+                      {activeSession.vitals.hr} bpm
+                    </span>
+                    <span className="text-[10px] text-slate-500">
+                      {activeSession.vitals.rhythm || 'Normal Sinus'}
+                    </span>
                   </div>
                   <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                    <span className="text-[10px] text-slate-500 uppercase font-bold block">SpO2 Oxygen</span>
-                    <span className="text-base font-black text-emerald-600 mt-0.5 block">{activeAppt.vitals.spo2}%</span>
+                    <span className="text-[10px] text-slate-500 uppercase font-bold block">
+                      SpO2 Oxygen
+                    </span>
+                    <span className="text-base font-black text-emerald-600 mt-0.5 block">
+                      {activeSession.vitals.spo2}%
+                    </span>
                     <span className="text-[10px] text-emerald-700">Room Air</span>
                   </div>
                 </div>
 
-                <div className="p-3.5 bg-teal-50/50 rounded-xl border border-teal-100 space-y-1.5">
+                <div className="p-3.5 bg-teal-50/60 rounded-xl border border-teal-100 space-y-1.5">
                   <h4 className="font-bold text-teal-950 text-xs flex items-center gap-1.5">
                     <Activity className="w-3.5 h-3.5 text-teal-600" />
-                    Patient Connected Device Profile
+                    Patient Connected Remote Monitoring Profile
                   </h4>
-                  <p className="text-slate-600 text-[11px]">
-                    Device: <strong>Omron Evolv Wireless Blood Pressure Monitor (BLE Sync)</strong>
+                  <p className="text-slate-700 text-[11px]">
+                    Telemetry Gateway:{' '}
+                    <strong>{activeSession.vitals.connectedDevice || 'Withings BPM Core BLE v5.2'}</strong>
                   </p>
                   <p className="text-slate-500 text-[10px]">
-                    Last automated synchronization: 14 minutes ago. 7-day adherence rate: 94.2%.
+                    Last automated synchronization: {activeSession.vitals.lastSync || '3 min ago'}. 7-day adherence rate: 96.4%.
                   </p>
                 </div>
               </div>
@@ -747,6 +1105,186 @@ export function TelehealthView() {
           </div>
         </div>
       </div>
+
+      {/* Appointment Queue & Clinic Schedule */}
+      <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-teal-600" />
+            <h3 className="font-bold text-slate-900 text-sm">Virtual Clinic Appointments & Queue</h3>
+            <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded text-xs font-bold">
+              {filteredSessions.length} total
+            </span>
+          </div>
+
+          {/* Status filter tabs */}
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs overflow-x-auto">
+            {(['ALL', 'WAITING_ROOM', 'IN_CONSULTATION', 'DOCUMENTING', 'COMPLETED'] as const).map(
+              (st) => (
+                <button
+                  key={st}
+                  onClick={() => setStatusFilter(st)}
+                  className={`px-2.5 py-1 rounded-lg font-bold text-[11px] whitespace-nowrap transition-colors cursor-pointer ${
+                    statusFilter === st
+                      ? 'bg-white text-teal-800 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  {st.replace('_', ' ')}
+                </button>
+              )
+            )}
+          </div>
+        </div>
+
+        {/* Appointment Cards Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {filteredSessions.map((s) => (
+            <div
+              key={s.id}
+              onClick={() => handleSelectSession(s)}
+              className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
+                activeSession.id === s.id
+                  ? 'border-teal-500 bg-teal-50/30 ring-1 ring-teal-500 shadow-xs'
+                  : 'border-slate-200 hover:border-slate-300 bg-white'
+              }`}
+            >
+              <div className="flex items-start justify-between">
+                <div>
+                  <h4 className="font-bold text-xs text-slate-900">{s.patientName}</h4>
+                  <span className="text-[10px] text-slate-400 font-mono">{s.patientMrn}</span>
+                </div>
+                <span
+                  className={`px-2 py-0.5 text-[9px] font-bold rounded-md uppercase border ${
+                    s.status === 'IN_CONSULTATION'
+                      ? 'bg-emerald-100 text-emerald-800 border-emerald-200 animate-pulse'
+                      : s.status === 'WAITING_ROOM'
+                      ? 'bg-amber-100 text-amber-800 border-amber-200'
+                      : s.status === 'COMPLETED'
+                      ? 'bg-slate-100 text-slate-600 border-slate-200'
+                      : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                  }`}
+                >
+                  {s.status.replace('_', ' ')}
+                </span>
+              </div>
+
+              <p className="text-[11px] text-slate-600 mt-2 line-clamp-2">{s.chiefComplaint}</p>
+
+              <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-500">
+                <span className="flex items-center gap-1 font-mono">
+                  <Clock className="w-3 h-3 text-slate-400" /> {s.scheduledTime}
+                </span>
+                <span className="font-semibold text-teal-700">{s.specialty}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Schedule Appointment Modal */}
+      {showScheduleModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl border border-slate-200 space-y-4 animate-scale-up">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+                <Video className="w-4 h-4 text-teal-600" />
+                Schedule New Virtual Consultation
+              </h3>
+              <button
+                onClick={() => setShowScheduleModal(false)}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateAppointment} className="space-y-3 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Select Patient</label>
+                <select
+                  value={schedPatientId}
+                  onChange={(e) => setSchedPatientId(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs"
+                  required
+                >
+                  {patients.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.fullName} ({p.mrn}) — {p.age}y {p.gender}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Consultation Type</label>
+                <select
+                  value={schedType}
+                  onChange={(e) => setSchedType(e.target.value as any)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs"
+                >
+                  <option value="Telehealth Consultation">Telehealth Consultation</option>
+                  <option value="RPM Chronic Care Review">RPM Chronic Care Review</option>
+                  <option value="Remote Post-Op Follow-up">Remote Post-Op Follow-up</option>
+                  <option value="Urgent Care Triage">Urgent Care Triage</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Date & Time Slot</label>
+                  <input
+                    type="text"
+                    value={schedTime}
+                    onChange={(e) => setSchedTime(e.target.value)}
+                    className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs"
+                    placeholder="Today, 16:30"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Attending Physician</label>
+                  <input
+                    type="text"
+                    value={schedPhysician}
+                    onChange={(e) => setSchedPhysician(e.target.value)}
+                    className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Chief Complaint & Clinical Intent</label>
+                <textarea
+                  rows={3}
+                  value={schedComplaint}
+                  onChange={(e) => setSchedComplaint(e.target.value)}
+                  placeholder="Reason for remote consult (e.g. episodic arrhythmia, wound evaluation, glycemic titration)..."
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs"
+                  required
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowScheduleModal(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-xl font-bold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Book Consultation
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

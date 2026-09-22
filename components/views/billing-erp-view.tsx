@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useHospital } from '@/lib/context/hospital-context';
 import {
@@ -26,9 +26,21 @@ import { formatCurrency } from '@/lib/utils';
 import { BillingAuditMismatch } from '@/lib/types/ghims';
 
 export function BillingErpView() {
-  const { mismatches, reconcileMismatch, dismissMismatch, patients, stats } = useHospital();
+  const { mismatches, reconcileMismatch, dismissMismatch, patients, stats, selectedPatientId: globalPatientId, setSelectedPatientId: setGlobalPatientId } = useHospital();
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
-  const [selectedPatientId, setSelectedPatientId] = useState<string>('p-1001');
+  const [localPatientId, setLocalPatientId] = useState<string>(globalPatientId || 'p-1001');
+
+  useEffect(() => {
+    if (globalPatientId) {
+      setLocalPatientId(globalPatientId);
+    }
+  }, [globalPatientId]);
+
+  const selectedPatientId = localPatientId;
+  const setSelectedPatientId = (id: string) => {
+    setLocalPatientId(id);
+    setGlobalPatientId(id);
+  };
   const [activeTab, setActiveTab] = useState<'validator' | 'invoices' | 'performance_share'>('validator');
 
   const filteredMismatches = mismatches.filter((m) => {

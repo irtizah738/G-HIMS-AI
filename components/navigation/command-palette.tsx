@@ -39,6 +39,8 @@ import {
   User,
   UserCheck,
   ShoppingCart,
+  BarChart3,
+  Shield,
 } from 'lucide-react';
 import { useRBAC } from '@/lib/auth/rbac-context';
 import { RoleId } from '@/types/rbac';
@@ -85,6 +87,26 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         icon: TrendingUp,
         action: () => {
           setActiveTab('command');
+          onClose();
+        },
+      },
+      {
+        id: 'reporting',
+        title: 'Advanced Reporting & Analytics (KPIs, Readmission, LOS, Revenue, Bed Occupancy, PDF/CSV Export)',
+        category: 'Executive & Strategy',
+        icon: BarChart3,
+        action: () => {
+          setActiveTab('reporting');
+          onClose();
+        },
+      },
+      {
+        id: 'rbac',
+        title: 'RBAC Access Control & Permission Matrix (Role-Based Least Privilege & PHI Policy)',
+        category: 'Security & Governance',
+        icon: Shield,
+        action: () => {
+          setActiveTab('rbac');
           onClose();
         },
       },

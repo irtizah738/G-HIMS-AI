@@ -1306,7 +1306,9 @@ export function AllModulesDirectory() {
                             <div className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
                               <span>{domain.name}</span>
                               {domain.isAiEnhanced && (
-                                <Sparkles className="w-3 h-3 text-amber-500" title="AI Enhanced" />
+                                <span title="AI Enhanced">
+                                  <Sparkles className="w-3 h-3 text-amber-500" />
+                                </span>
                               )}
                             </div>
                             <div className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1 max-w-md">

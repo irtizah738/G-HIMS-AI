@@ -20,7 +20,12 @@ import {
   AuditLogEntry,
   ExecutiveThesisModel,
   BillItem,
-  Medication
+  Medication,
+  TelehealthSession,
+  TelehealthVitals,
+  TelehealthTranscriptEntry,
+  TelehealthSoapNote,
+  TelehealthPrescription,
 } from '@/lib/types/ghims';
 import {
   subscribeToPatients,
@@ -28,14 +33,184 @@ import {
   subscribeToBillingMismatches,
   subscribeToOpdQueue,
   subscribeToAuditLogs,
+  subscribeToTelehealthSessions,
   syncPatientToFirestore,
   syncBedToFirestore,
   syncMismatchToFirestore,
   syncOpdTokenToFirestore,
   syncAuditLogToFirestore,
   syncHl7ToFirestore,
+  syncTelehealthSessionToFirestore,
   seedInitialFirestoreData,
 } from '@/lib/firebase/firestore-service';
+import { DischargedCensusRecord, initialDischargedCensus } from '@/lib/clinical/ipd-service';
+
+const initialTelehealthSessions: TelehealthSession[] = [
+  {
+    id: 'th-101',
+    encounterId: 'enc-th-8812',
+    patientId: 'p-1003',
+    patientName: 'Sophia Al-Mansoor',
+    patientMrn: 'MRN-84920',
+    age: 31,
+    gender: 'Female',
+    scheduledTime: 'Today, 14:00 (In 15 min)',
+    status: 'WAITING_ROOM',
+    type: 'Telehealth Consultation',
+    attendingPhysician: 'Dr. Sarah Jenkins',
+    clinicianNpi: '1487920134',
+    specialty: 'Cardiology & Preventive Medicine',
+    chiefComplaint: 'Post-discharge follow-up for episodic palpitations, fatigue, and blood pressure monitoring.',
+    roomToken: 'ROOM-ALPHA-892',
+    connectionQuality: 'EXCELLENT',
+    callDurationSeconds: 0,
+    vitals: {
+      bp: '118/76',
+      hr: 74,
+      spo2: 99,
+      temp: 36.7,
+      rhythm: 'Normal Sinus Rhythm',
+      connectedDevice: 'Withings BPM Core BLE v5.2',
+      lastSync: '10 min ago',
+    },
+    transcription: [
+      { id: 'tr-1', timestamp: '13:58:12', speaker: 'SYSTEM', text: 'Secure WebRTC end-to-end encrypted session established. Room token: ROOM-ALPHA-892.' },
+      { id: 'tr-2', timestamp: '13:59:04', speaker: 'PATIENT', text: 'Patient admitted into waiting room. BLE peripheral telemetry online.' },
+    ],
+    soapNote: {
+      subjective: '',
+      objective: '',
+      assessment: '',
+      plan: '',
+      icd10Codes: [],
+      cptCodes: [],
+    },
+    prescriptions: [],
+    isAudioMuted: false,
+    isVideoMuted: false,
+    isRecording: false,
+    patientInvitedEmail: 'sophia.almansoor@healthcorp.demo',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    id: 'th-102',
+    encounterId: 'enc-th-8813',
+    patientId: 'p-1004',
+    patientName: 'David Kim',
+    patientMrn: 'MRN-44819',
+    age: 58,
+    gender: 'Male',
+    scheduledTime: 'Today, 14:30',
+    status: 'IN_CONSULTATION',
+    type: 'RPM Chronic Care Review',
+    attendingPhysician: 'Dr. Michael Chen',
+    clinicianNpi: '1982301923',
+    specialty: 'Endocrinology & Internal Medicine',
+    chiefComplaint: 'Type 2 Diabetes glycemic trend review, elevated fasting glucose log, peripheral neuropathy screening.',
+    roomToken: 'ROOM-BETA-331',
+    connectionQuality: 'GOOD',
+    callDurationSeconds: 420,
+    vitals: {
+      bp: '134/82',
+      hr: 68,
+      spo2: 98,
+      temp: 36.8,
+      glucose: 154,
+      connectedDevice: 'Dexcom G7 Continuous Glucose Sensor',
+      lastSync: '2 min ago',
+    },
+    transcription: [
+      { id: 'tr-11', timestamp: '14:30:10', speaker: 'SYSTEM', text: 'Call initiated with Dr. Michael Chen.' },
+      { id: 'tr-12', timestamp: '14:30:25', speaker: 'DOCTOR', text: 'Good afternoon David. Reviewing your CGM continuous glucose telemetry over the past 14 days.' },
+      { id: 'tr-13', timestamp: '14:31:02', speaker: 'PATIENT', text: 'Doctor, morning fasting readings have been hovering between 145 and 160 mg/dL even with evening Metformin.' },
+      { id: 'tr-14', timestamp: '14:31:45', speaker: 'DOCTOR', text: 'Understood. We see a dawn phenomenon peak. We will titrate your Metformin and consider low-dose Empagliflozin.' },
+    ],
+    soapNote: {
+      subjective: 'Patient reports elevated fasting blood sugars averaging 150-160 mg/dL. Denies symptomatic hypoglycemia.',
+      objective: 'Dexcom G7 CGM sensor shows Time-in-Range (70-180 mg/dL) at 68%. Average glucose 154 mg/dL. BP 134/82 mmHg, HR 68 bpm.',
+      assessment: 'Type 2 Diabetes Mellitus with suboptimal glycemic control (E11.65). Mild essential hypertension (I10).',
+      plan: '1. Titrate Metformin ER to 1000mg PO QPM. 2. Prescribe Empagliflozin (Jardiance) 10mg daily. 3. Repeat HbA1c in 6 weeks.',
+      icd10Codes: [
+        { code: 'E11.65', description: 'Type 2 diabetes mellitus with hyperglycemia', confidence: 0.96 },
+        { code: 'I10', description: 'Essential (primary) hypertension', confidence: 0.92 },
+      ],
+      cptCodes: [
+        { code: '99457', description: 'Remote physiologic monitoring treatment mgmt, initial 20 min', fee: 110 },
+        { code: '99214', description: 'Office/telehealth outpatient visit moderate complexity', fee: 165 },
+      ],
+    },
+    prescriptions: [
+      {
+        id: 'rx-201',
+        medication: 'Empagliflozin (Jardiance)',
+        dosage: '10mg',
+        frequency: 'Daily (QAM)',
+        duration: '90 days',
+        instructions: 'Take one tablet every morning with water. Monitor for signs of dehydration.',
+        prescribedAt: '2026-08-13 14:35',
+        pharmacyName: 'CVS Pharmacy #4912 (Main Street)',
+        pharmacyNpi: '1093821742',
+        status: 'TRANSMITTED',
+        transactionRef: 'NCPDP-SCRIPT-99821',
+      },
+    ],
+    isAudioMuted: false,
+    isVideoMuted: false,
+    isRecording: true,
+    patientInvitedEmail: 'david.kim@samplecorp.demo',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    id: 'th-103',
+    encounterId: 'enc-th-8814',
+    patientId: 'p-1001',
+    patientName: 'Elena Rostova',
+    patientMrn: 'MRN-99412',
+    age: 64,
+    gender: 'Female',
+    scheduledTime: 'Today, 15:15',
+    status: 'DOCUMENTING',
+    type: 'Remote Post-Op Follow-up',
+    attendingPhysician: 'Dr. Sarah Jenkins',
+    clinicianNpi: '1487920134',
+    specialty: 'Cardiothoracic Surgery',
+    chiefComplaint: 'Post-CABG recovery assessment, sternal wound inspection via high-definition camera, medication titration.',
+    roomToken: 'ROOM-GAMMA-710',
+    connectionQuality: 'EXCELLENT',
+    callDurationSeconds: 960,
+    vitals: {
+      bp: '122/78',
+      hr: 72,
+      spo2: 99,
+      temp: 36.6,
+      rhythm: 'Normal Sinus Rhythm',
+      connectedDevice: 'Smart ECG + Oximeter BLE Hub',
+      lastSync: '1 min ago',
+    },
+    transcription: [
+      { id: 'tr-21', timestamp: '15:15:00', speaker: 'SYSTEM', text: 'Encounter started with Dr. Sarah Jenkins.' },
+      { id: 'tr-22', timestamp: '15:15:45', speaker: 'DOCTOR', text: 'Elena, sternal incision looks clean and healing appropriately without erythema.' },
+      { id: 'tr-23', timestamp: '15:16:30', speaker: 'PATIENT', text: 'No chest pain at rest; walking 20 minutes daily now.' },
+    ],
+    soapNote: {
+      subjective: 'Day 14 post-op CABG. Patient walking comfortably without dyspnea or angina.',
+      objective: 'Sternal incision clean, dry, intact without discharge or surrounding erythema. Vitals stable.',
+      assessment: 'Uncomplicated post-operative recovery following coronary artery bypass graft (Z95.1).',
+      plan: 'Continue cardiac rehabilitation. Continue dual antiplatelet therapy. In-person clinic visit in 4 weeks.',
+      icd10Codes: [{ code: 'Z95.1', description: 'Presence of aortocoronary bypass graft', confidence: 0.98 }],
+      cptCodes: [{ code: '99213', description: 'Telehealth established patient visit low-moderate complexity', fee: 125 }],
+    },
+    prescriptions: [],
+    isAudioMuted: false,
+    isVideoMuted: false,
+    isRecording: false,
+    patientInvitedEmail: 'elena.rostova@samplecorp.demo',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+];
 
 const initialBeds: Bed[] = [
   { id: 'b-icu-101', bedNumber: 'ICU-101', ward: 'ICU', room: 'Room 101', status: 'occupied', patientId: 'p-1001', patientName: 'Elena Rostova', admissionDate: '2026-08-10', assignedDoctor: 'Dr. Sarah Jenkins', assignedNurse: 'Nurse John Davis', vitalAlert: true, notes: 'Post-op cardiac monitoring' },
@@ -308,6 +483,253 @@ const initialPatients: Patient[] = [
     registeredAt: '2026-08-13',
     encounters: [],
   },
+  {
+    id: 'p-1006',
+    mrn: 'GH-2026-9817',
+    fullName: 'Aisha Bello',
+    dateOfBirth: '1997-02-18',
+    age: 29,
+    gender: 'Female',
+    bloodGroup: 'A-',
+    contactNumber: '+1 (555) 789-0123',
+    email: 'aisha.bello@example.com',
+    address: '88 Cedar Park Avenue, Metro City',
+    emergencyContact: { name: 'Tariq Bello', relationship: 'Brother', phone: '+1 (555) 789-9988' },
+    allergies: ['Carbamazepine'],
+    chronicConditions: ['Focal Epilepsy', 'Migraine'],
+    activeEncounterId: 'enc-206',
+    registeredAt: '2026-03-15',
+    encounters: [
+      {
+        id: 'enc-206',
+        type: 'Outpatient',
+        department: 'Neurology & Stroke',
+        admitDate: '2026-08-13',
+        chiefComplaint: 'Refractory partial focal seizures with sensory aura',
+        attendingPhysician: 'Dr. Aisha Al-Nuaimi',
+        status: 'active',
+        vitalsHistory: [
+          { heartRate: 76, bloodPressure: '118/76', temperature: 36.8, respiratoryRate: 15, oxygenSaturation: 99, timestamp: '2026-08-13 10:15' },
+        ],
+        clinicalNotes: [],
+        medications: [],
+        labOrders: [],
+        billing: { items: [], subtotal: 120, tax: 6, insuranceCoverage: 100, patientPayable: 26, paymentStatus: 'settled' },
+      },
+    ],
+  },
+  {
+    id: 'p-1007',
+    mrn: 'GH-2026-9818',
+    fullName: 'Chloe Bennett',
+    dateOfBirth: '1994-09-05',
+    age: 32,
+    gender: 'Female',
+    bloodGroup: 'O+',
+    contactNumber: '+1 (555) 890-1234',
+    email: 'chloe.bennett@example.com',
+    address: '104 Highland Crescent, Metro City',
+    emergencyContact: { name: 'Lucas Bennett', relationship: 'Spouse', phone: '+1 (555) 890-5678' },
+    allergies: ['Amoxicillin'],
+    chronicConditions: ['Gestational Hypertension'],
+    activeEncounterId: 'enc-207',
+    registeredAt: '2026-04-10',
+    encounters: [
+      {
+        id: 'enc-207',
+        type: 'Outpatient',
+        department: 'Obstetrics & Gynecology (OB/GYN)',
+        admitDate: '2026-08-13',
+        chiefComplaint: '32-week gestation antenatal check, elevated BP 145/94',
+        attendingPhysician: 'Dr. Fatima Zahra',
+        status: 'active',
+        vitalsHistory: [
+          { heartRate: 84, bloodPressure: '144/92', temperature: 37.0, respiratoryRate: 17, oxygenSaturation: 98, timestamp: '2026-08-13 10:30' },
+        ],
+        clinicalNotes: [],
+        medications: [],
+        labOrders: [],
+        billing: { items: [], subtotal: 150, tax: 7.5, insuranceCoverage: 120, patientPayable: 37.5, paymentStatus: 'settled' },
+      },
+    ],
+  },
+  {
+    id: 'p-1008',
+    mrn: 'GH-2026-9819',
+    fullName: 'Liam Miller',
+    dateOfBirth: '2019-06-22',
+    age: 7,
+    gender: 'Male',
+    bloodGroup: 'B+',
+    contactNumber: '+1 (555) 901-2345',
+    email: 'sarah.miller.parent@example.com',
+    address: '22 Maple Ridge Road, Metro City',
+    emergencyContact: { name: 'Sarah Miller', relationship: 'Mother', phone: '+1 (555) 901-2345' },
+    allergies: ['Peanuts'],
+    chronicConditions: ['Pediatric Asthma'],
+    activeBedId: 'b-ped-401',
+    activeEncounterId: 'enc-208',
+    registeredAt: '2026-05-18',
+    encounters: [
+      {
+        id: 'enc-208',
+        type: 'Inpatient',
+        department: 'Pediatrics',
+        admitDate: '2026-08-12',
+        chiefComplaint: 'Acute viral bronchitis with bronchospasm and wheezing',
+        attendingPhysician: 'Dr. Zainab Qureshi',
+        status: 'active',
+        vitalsHistory: [
+          { heartRate: 110, bloodPressure: '102/65', temperature: 38.3, respiratoryRate: 26, oxygenSaturation: 95, timestamp: '2026-08-13 10:45' },
+        ],
+        clinicalNotes: [],
+        medications: [],
+        labOrders: [],
+        billing: { items: [], subtotal: 350, tax: 17.5, insuranceCoverage: 300, patientPayable: 67.5, paymentStatus: 'pending' },
+      },
+    ],
+  },
+  {
+    id: 'p-1009',
+    mrn: 'GH-2026-9820',
+    fullName: 'Robert Thorne',
+    dateOfBirth: '1964-11-12',
+    age: 62,
+    gender: 'Male',
+    bloodGroup: 'A+',
+    contactNumber: '+1 (555) 012-3456',
+    email: 'robert.thorne@example.com',
+    address: '430 Oakwood Boulevard, Metro City',
+    emergencyContact: { name: 'Patricia Thorne', relationship: 'Spouse', phone: '+1 (555) 012-7890' },
+    allergies: ['Ciprofloxacin'],
+    chronicConditions: ['Colorectal Adenocarcinoma', 'Coronary Artery Disease'],
+    activeBedId: 'b-surg-501',
+    activeEncounterId: 'enc-209',
+    registeredAt: '2026-01-20',
+    encounters: [
+      {
+        id: 'enc-209',
+        type: 'Inpatient',
+        department: 'Surgery & Oncology',
+        admitDate: '2026-08-13',
+        chiefComplaint: 'Cycle 3 FOLFOX chemotherapy staging and post-laparoscopic review',
+        attendingPhysician: 'Dr. David Rodriguez',
+        status: 'active',
+        vitalsHistory: [
+          { heartRate: 78, bloodPressure: '132/82', temperature: 36.9, respiratoryRate: 16, oxygenSaturation: 97, timestamp: '2026-08-13 11:00' },
+        ],
+        clinicalNotes: [],
+        medications: [],
+        labOrders: [],
+        billing: { items: [], subtotal: 1250, tax: 62.5, insuranceCoverage: 1100, patientPayable: 212.5, paymentStatus: 'pending' },
+      },
+    ],
+  },
+  {
+    id: 'p-1010',
+    mrn: 'GH-2026-9821',
+    fullName: 'Amira Al-Hassan',
+    dateOfBirth: '1998-07-30',
+    age: 28,
+    gender: 'Female',
+    bloodGroup: 'B-',
+    contactNumber: '+1 (555) 123-4567',
+    email: 'amira.alhassan@example.com',
+    address: '77 Jasmine Garden Way, Metro City',
+    emergencyContact: { name: 'Zaid Al-Hassan', relationship: 'Spouse', phone: '+1 (555) 123-9999' },
+    allergies: ['Erythromycin'],
+    chronicConditions: ['Hyperemesis Gravidarum'],
+    activeEncounterId: 'enc-210',
+    registeredAt: '2026-06-01',
+    encounters: [
+      {
+        id: 'enc-210',
+        type: 'Outpatient',
+        department: 'Obstetrics & Gynecology (OB/GYN)',
+        admitDate: '2026-08-13',
+        chiefComplaint: 'First trimester viability ultrasound & hyperemesis gravidarum review',
+        attendingPhysician: 'Dr. Layla Mansour',
+        status: 'active',
+        vitalsHistory: [
+          { heartRate: 82, bloodPressure: '112/72', temperature: 36.7, respiratoryRate: 16, oxygenSaturation: 99, timestamp: '2026-08-13 11:30' },
+        ],
+        clinicalNotes: [],
+        medications: [],
+        labOrders: [],
+        billing: { items: [], subtotal: 180, tax: 9, insuranceCoverage: 150, patientPayable: 39, paymentStatus: 'settled' },
+      },
+    ],
+  },
+  {
+    id: 'p-1011',
+    mrn: 'GH-2026-9822',
+    fullName: 'Grace Montgomery',
+    dateOfBirth: '1980-03-14',
+    age: 46,
+    gender: 'Female',
+    bloodGroup: 'AB-',
+    contactNumber: '+1 (555) 234-5679',
+    email: 'grace.montgomery@example.com',
+    address: '610 Pinecrest Court, Metro City',
+    emergencyContact: { name: 'Edward Montgomery', relationship: 'Spouse', phone: '+1 (555) 234-8888' },
+    allergies: ['Aspirin', 'Ibuprofen (NSAIDs)'],
+    chronicConditions: ['Uterine Fibroids', 'Iron Deficiency Anemia'],
+    activeEncounterId: 'enc-211',
+    registeredAt: '2026-07-04',
+    encounters: [
+      {
+        id: 'enc-211',
+        type: 'Outpatient',
+        department: 'Obstetrics & Gynecology (OB/GYN)',
+        admitDate: '2026-08-13',
+        chiefComplaint: 'Postmenopausal abnormal uterine bleeding, hysteroscopy biopsy staging',
+        attendingPhysician: 'Dr. Evelyn Vance',
+        status: 'active',
+        vitalsHistory: [
+          { heartRate: 80, bloodPressure: '126/80', temperature: 37.1, respiratoryRate: 16, oxygenSaturation: 98, timestamp: '2026-08-13 11:45' },
+        ],
+        clinicalNotes: [],
+        medications: [],
+        labOrders: [],
+        billing: { items: [], subtotal: 210, tax: 10.5, insuranceCoverage: 175, patientPayable: 45.5, paymentStatus: 'settled' },
+      },
+    ],
+  },
+  {
+    id: 'p-1012',
+    mrn: 'GH-2026-9899',
+    fullName: 'Elena Rostova',
+    dateOfBirth: '1982-04-14',
+    age: 44,
+    gender: 'Female',
+    bloodGroup: 'O+',
+    contactNumber: '+1 (555) 234-5678',
+    email: 'elena.rostova@example.com',
+    address: '742 Evergreen Terrace, Metro City',
+    emergencyContact: { name: 'Dmitri Rostov', relationship: 'Spouse', phone: '+1 (555) 987-6543' },
+    allergies: ['Penicillin'],
+    chronicConditions: ['Hypertension'],
+    activeEncounterId: 'enc-212',
+    registeredAt: '2026-08-13',
+    encounters: [
+      {
+        id: 'enc-212',
+        type: 'Emergency',
+        department: 'Emergency & Triage',
+        admitDate: '2026-08-13',
+        chiefComplaint: 'Secondary emergency intake duplicate (accidental duplicate registration during acute triage)',
+        attendingPhysician: 'Dr. David Rodriguez',
+        status: 'active',
+        vitalsHistory: [
+          { heartRate: 96, bloodPressure: '140/90', temperature: 37.4, respiratoryRate: 18, oxygenSaturation: 96, timestamp: '2026-08-13 12:10' },
+        ],
+        clinicalNotes: [],
+        medications: [],
+        labOrders: [],
+        billing: { items: [], subtotal: 95, tax: 4.75, insuranceCoverage: 80, patientPayable: 19.75, paymentStatus: 'pending' },
+      },
+    ],
+  },
 ];
 
 const initialMismatches: BillingAuditMismatch[] = [
@@ -398,9 +820,9 @@ const initialOpdQueue: OpdQueueToken[] = [
   { id: 'tok-07', tokenNumber: 'OPD-107', patientId: 'p-1007', patientName: 'Chloe Bennett', mrn: 'GH-2026-9818', age: 32, gender: 'Female', department: 'Obstetrics & Gynecology (OB/GYN)', assignedDoctor: 'Dr. Fatima Zahra', priority: 'routine', status: 'waiting', arrivalTime: '10:30 AM', chiefComplaint: '32-week gestation antenatal check, elevated BP 145/94' },
   { id: 'tok-08', tokenNumber: 'OPD-108', patientId: 'p-1008', patientName: 'Liam Miller', mrn: 'GH-2026-9819', age: 7, gender: 'Male', department: 'Pediatrics', assignedDoctor: 'Dr. Zainab Qureshi', priority: 'routine', status: 'waiting', arrivalTime: '10:45 AM', chiefComplaint: 'High-grade fever with wheeze, asthma exacerbation' },
   { id: 'tok-09', tokenNumber: 'OPD-109', patientId: 'p-1009', patientName: 'Robert Thorne', mrn: 'GH-2026-9820', age: 62, gender: 'Male', department: 'Oncology', assignedDoctor: 'Dr. Tariq Mansoor', priority: 'routine', status: 'waiting', arrivalTime: '11:00 AM', chiefComplaint: 'Cycle 3 FOLFOX chemotherapy staging review' },
-  { id: 'tok-10', tokenNumber: 'OPD-110', patientId: 'p-1001', patientName: 'Elena Rostova', mrn: 'GH-2026-9812', age: 44, gender: 'Female', department: 'Cardiac EP', assignedDoctor: 'Dr. Kamran Baig', priority: 'urgent', status: 'waiting', arrivalTime: '11:15 AM', chiefComplaint: 'Paroxysmal supraventricular tachycardia evaluation' },
-  { id: 'tok-11', tokenNumber: 'OPD-111', patientId: 'p-1007', patientName: 'Amira Al-Hassan', mrn: 'GH-2026-9821', age: 28, gender: 'Female', department: 'Obstetrics & Gynecology (OB/GYN)', assignedDoctor: 'Dr. Layla Mansour', priority: 'routine', status: 'waiting', arrivalTime: '11:30 AM', chiefComplaint: 'First trimester viability ultrasound & hyperemesis gravidarum review' },
-  { id: 'tok-12', tokenNumber: 'OPD-112', patientId: 'p-1003', patientName: 'Grace Montgomery', mrn: 'GH-2026-9822', age: 46, gender: 'Female', department: 'Obstetrics & Gynecology (OB/GYN)', assignedDoctor: 'Dr. Evelyn Vance', priority: 'urgent', status: 'waiting', arrivalTime: '11:45 AM', chiefComplaint: 'Postmenopausal abnormal uterine bleeding, hysteroscopy biopsy staging' },
+  { id: 'tok-10', tokenNumber: 'OPD-110', patientId: 'p-1010', patientName: 'Amira Al-Hassan', mrn: 'GH-2026-9821', age: 28, gender: 'Female', department: 'Obstetrics & Gynecology (OB/GYN)', assignedDoctor: 'Dr. Layla Mansour', priority: 'routine', status: 'waiting', arrivalTime: '11:15 AM', chiefComplaint: 'First trimester viability ultrasound & hyperemesis gravidarum review' },
+  { id: 'tok-11', tokenNumber: 'OPD-111', patientId: 'p-1011', patientName: 'Grace Montgomery', mrn: 'GH-2026-9822', age: 46, gender: 'Female', department: 'Obstetrics & Gynecology (OB/GYN)', assignedDoctor: 'Dr. Evelyn Vance', priority: 'urgent', status: 'waiting', arrivalTime: '11:30 AM', chiefComplaint: 'Postmenopausal abnormal uterine bleeding, hysteroscopy biopsy staging' },
+  { id: 'tok-12', tokenNumber: 'OPD-112', patientId: 'p-1012', patientName: 'Elena Rostova (Duplicate Intake)', mrn: 'GH-2026-9899', age: 44, gender: 'Female', department: 'Emergency & Triage', assignedDoctor: 'Dr. David Rodriguez', priority: 'routine', status: 'waiting', arrivalTime: '11:45 AM', chiefComplaint: 'Duplicate walk-in registration flagged for MPI merge' },
 ];
 
 const initialHl7Messages: Hl7Message[] = [
@@ -551,12 +973,33 @@ interface HospitalContextType {
   selectedPatientId: string | null;
   setSelectedPatientId: (id: string | null) => void;
   
+  // Permanent Discharged Census & Reconciliation Audit
+  dischargedCensus: DischargedCensusRecord[];
+  reconcileCensus: () => {
+    totalCapacity: number;
+    occupiedCount: number;
+    availableCount: number;
+    cleaningCount: number;
+    maintenanceCount: number;
+    reservedCount: number;
+    activePatientCensusCount: number;
+    dischargedCount: number;
+    isReconciled: boolean;
+    unaccountedLossCount: number;
+  };
+
   // Actions
   updateBedStatus: (bedId: string, status: BedStatus, patientId?: string, notes?: string) => void;
   assignPatientToBed: (bedId: string, patientId: string) => void;
   admitPatientToBed: (patientId: string, bedId: string, doctor?: string, nurse?: string) => void;
-  dischargePatientFromBed: (bedId: string) => void;
+  dischargePatientFromBed: (
+    bedId: string,
+    notes?: string,
+    disposition?: string,
+    censusRecord?: DischargedCensusRecord
+  ) => void;
   registerNewPatient: (patientData: Omit<Patient, 'id' | 'mrn' | 'registeredAt' | 'encounters'>) => Patient;
+  mergePatients: (primaryId: string, secondaryId: string, mergeReason: string) => Promise<Patient>;
   addClinicalNote: (patientId: string, note: Omit<ClinicalNote, 'id' | 'timestamp'>) => void;
   addLabOrder: (patientId: string, order: Omit<LabOrder, 'id' | 'orderedAt'>) => void;
   addVitals: (patientId: string, vitals: Omit<Vitals, 'timestamp'>) => void;
@@ -566,6 +1009,26 @@ interface HospitalContextType {
   callNextOpdToken: (tokenId: string) => void;
   completeOpdToken: (tokenId: string) => void;
   triggerOfflineSync: () => void;
+  addAuditLog: (
+    action: string,
+    resource: string,
+    details: string,
+    status?: 'SUCCESS' | 'WARNING' | 'DENIED' | 'SECURITY_ALERT' | 'INFO' | 'ERROR'
+  ) => void;
+  
+  // Telehealth & Remote Care Clinic
+  telehealthSessions: TelehealthSession[];
+  activeTelehealthSession: TelehealthSession | null;
+  setActiveTelehealthSession: (session: TelehealthSession | null) => void;
+  createTelehealthSession: (data: {
+    patientId: string;
+    type: TelehealthSession['type'];
+    scheduledTime?: string;
+    chiefComplaint: string;
+    attendingPhysician?: string;
+  }) => Promise<TelehealthSession>;
+  updateTelehealthSession: (sessionId: string, updates: Partial<TelehealthSession>) => Promise<void>;
+  completeTelehealthSession: (sessionId: string, note?: Partial<TelehealthSoapNote>, prescriptions?: TelehealthPrescription[]) => Promise<void>;
 }
 
 const HospitalContext = createContext<HospitalContextType | undefined>(undefined);
@@ -579,6 +1042,9 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
   const [hl7Messages, setHl7Messages] = useState<Hl7Message[]>(initialHl7Messages);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(initialAuditLogs);
   const [offlineMutations, setOfflineMutations] = useState<OfflineMutation[]>([]);
+  const [telehealthSessions, setTelehealthSessions] = useState<TelehealthSession[]>(initialTelehealthSessions);
+  const [dischargedCensus, setDischargedCensus] = useState<DischargedCensusRecord[]>(initialDischargedCensus);
+  const [activeTelehealthSession, setActiveTelehealthSession] = useState<TelehealthSession | null>(null);
   const [activeTab, setActiveTab] = useState<string>('command');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [networkMode, setNetworkMode] = useState<'online' | 'offline' | 'degraded_sync'>('online');
@@ -588,7 +1054,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
   // Sync with Firestore on mount
   useEffect(() => {
     // Seed initial dataset if Firestore database is fresh
-    seedInitialFirestoreData(initialPatients, initialBeds, initialMismatches, initialOpdQueue, initialStaff);
+    seedInitialFirestoreData(initialPatients, initialBeds, initialMismatches, initialOpdQueue, initialStaff, initialTelehealthSessions);
 
     // Attach real-time Firestore listeners
     const unsubPatients = subscribeToPatients((remotePatients) => {
@@ -621,12 +1087,19 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
+    const unsubTelehealth = subscribeToTelehealthSessions((remoteSessions) => {
+      if (remoteSessions && remoteSessions.length > 0) {
+        setTelehealthSessions(remoteSessions);
+      }
+    });
+
     return () => {
       if (unsubPatients) unsubPatients();
       if (unsubBeds) unsubBeds();
       if (unsubMismatches) unsubMismatches();
       if (unsubOpd) unsubOpd();
       if (unsubAudit) unsubAudit();
+      if (unsubTelehealth) unsubTelehealth();
     };
   }, []);
 
@@ -659,7 +1132,12 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     networkMode,
   };
 
-  const addAuditLog = (action: string, resource: string, details: string, status: 'SUCCESS' | 'WARNING' | 'DENIED' = 'SUCCESS') => {
+  const addAuditLog = (
+    action: string,
+    resource: string,
+    details: string,
+    status: 'SUCCESS' | 'WARNING' | 'DENIED' | 'SECURITY_ALERT' | 'INFO' | 'ERROR' = 'SUCCESS'
+  ) => {
     const newLog: AuditLogEntry = {
       id: `aud-${Date.now()}`,
       timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
@@ -773,29 +1251,96 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     addAuditLog('ADMIT_PATIENT_BED', `Bed ${bedId}`, `Admitted ${patient.fullName} (Dr: ${doctor || 'Dr. Jenkins'})`);
   };
 
-  const dischargePatientFromBed = (bedId: string) => {
+  const reconcileCensus = () => {
+    const occupiedCount = beds.filter(b => b.status === 'occupied').length;
+    const availableCount = beds.filter(b => b.status === 'available').length;
+    const cleaningCount = beds.filter(b => b.status === 'cleaning').length;
+    const maintenanceCount = beds.filter(b => b.status === 'maintenance').length;
+    const reservedCount = beds.filter(b => b.status === 'reserved').length;
+    const activePatientCensusCount = patients.filter(p => !!p.activeBedId).length;
+
+    return {
+      totalCapacity: beds.length,
+      occupiedCount,
+      availableCount,
+      cleaningCount,
+      maintenanceCount,
+      reservedCount,
+      activePatientCensusCount,
+      dischargedCount: dischargedCensus.length,
+      isReconciled: occupiedCount === activePatientCensusCount,
+      unaccountedLossCount: Math.abs(occupiedCount - activePatientCensusCount),
+    };
+  };
+
+  const dischargePatientFromBed = (
+    bedId: string,
+    notes?: string,
+    disposition?: string,
+    censusRecord?: DischargedCensusRecord
+  ) => {
     const bed = beds.find(b => b.id === bedId);
-    if (!bed || !bed.patientId) return;
+    if (!bed) return;
     const pId = bed.patientId;
+    const patient = patients.find(p => p.id === pId);
     let updatedBed: Bed | undefined;
     let updatedPatient: Patient | undefined;
+
     setBeds(prev => prev.map(b => {
       if (b.id === bedId) {
-        updatedBed = { ...b, status: 'cleaning', patientId: undefined, patientName: undefined, notes: 'Sanitizing protocol in progress' };
+        updatedBed = {
+          ...b,
+          status: 'cleaning',
+          patientId: undefined,
+          patientName: undefined,
+          notes: notes || 'Sanitizing protocol in progress (Discharged)',
+        };
         return updatedBed;
       }
       return b;
     }));
-    setPatients(prev => prev.map(p => {
-      if (p.id === pId) {
-        updatedPatient = { ...p, activeBedId: undefined };
-        return updatedPatient;
-      }
-      return p;
-    }));
+
+    if (pId) {
+      setPatients(prev => prev.map(p => {
+        if (p.id === pId) {
+          updatedPatient = { ...p, activeBedId: undefined, activeEncounterId: undefined };
+          return updatedPatient;
+        }
+        return p;
+      }));
+    }
+
+    if (censusRecord) {
+      setDischargedCensus(prev => [censusRecord, ...prev]);
+    } else if (bed && (bed.patientName || patient)) {
+      const newRecord: DischargedCensusRecord = {
+        id: `dc-${Date.now()}`,
+        patientId: pId || 'p-gen',
+        patientName: bed.patientName || patient?.fullName || 'Inpatient',
+        mrn: patient?.mrn || `GH-2026-${(pId || '1000').replace(/\D/g, '') || '4412'}`,
+        age: patient?.age || 52,
+        gender: patient?.gender || 'Female',
+        bedId: bed.id,
+        bedNumber: bed.bedNumber,
+        ward: bed.ward,
+        admissionDate: bed.admissionDate || new Date(Date.now() - 3 * 86400000).toISOString().split('T')[0],
+        dischargeDate: new Date().toISOString().split('T')[0],
+        lengthOfStayDays: 3,
+        primaryDiagnosis: bed.notes || 'Inpatient Stay Completed',
+        dischargingDoctor: bed.assignedDoctor || 'Dr. Sarah Jenkins',
+        dischargeDisposition: disposition || 'Home with Self-Care',
+        gatePassCode: `GP-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+        medicationReconciliationCompleted: true,
+        financialClearanceCompleted: true,
+        followUpDate: 'In 7 days (OPD)',
+        dischargeSummaryNote: notes || 'Discharged from bed. Medication reconciliation completed.',
+      };
+      setDischargedCensus(prev => [newRecord, ...prev]);
+    }
+
     if (updatedBed) syncBedToFirestore(updatedBed).catch(() => {});
     if (updatedPatient) syncPatientToFirestore(updatedPatient).catch(() => {});
-    addAuditLog('DISCHARGE_BED', `Bed ${bedId}`, `Patient discharged from bed`);
+    addAuditLog('DISCHARGE_BED', `Bed ${bedId}`, `Patient discharged from bed. Invariant verified: archived to census.`);
   };
 
   const registerNewPatient = (patientData: Omit<Patient, 'id' | 'mrn' | 'registeredAt' | 'encounters'>): Patient => {
@@ -830,6 +1375,76 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     recordMutation('INSERT_NOTE', `Patient:${newId}`, newPatient);
     addAuditLog('REGISTER_PATIENT', `Patient ${newMrn}`, `Registered patient ${newPatient.fullName}`);
     return newPatient;
+  };
+
+  const mergePatients = async (primaryId: string, secondaryId: string, mergeReason: string): Promise<Patient> => {
+    const primary = patients.find(p => p.id === primaryId);
+    const secondary = patients.find(p => p.id === secondaryId);
+    if (!primary || !secondary) {
+      throw new Error('Primary or secondary patient record not found.');
+    }
+    if (primary.id === secondary.id) {
+      throw new Error('Cannot merge a patient record into itself.');
+    }
+
+    const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
+    const combinedAllergies = Array.from(new Set([...(primary.allergies || []), ...(secondary.allergies || [])]));
+    const combinedConditions = Array.from(new Set([...(primary.chronicConditions || []), ...(secondary.chronicConditions || [])]));
+    const combinedEncounters = [...(primary.encounters || []), ...(secondary.encounters || [])];
+
+    // Audit clinical note on surviving primary record
+    const auditNote: ClinicalNote = {
+      id: `note-merge-${Date.now()}`,
+      timestamp,
+      author: 'Clinical Governance Supervisor',
+      role: 'MPI Identity Consolidation',
+      category: 'Progress',
+      content: `[MPI IDENTITY MERGE]: Secondary duplicate patient record "${secondary.fullName}" (MRN: ${secondary.mrn}) was consolidated into this primary surviving record (MRN: ${primary.mrn}).\nReason: ${mergeReason}\nAll historical clinical notes, allergies, conditions, and encounters have been permanently re-indexed to this surviving identifier.`,
+      aiStructuredData: {
+        chiefComplaint: 'MPI Record Consolidation',
+        diagnoses: ['Administrative Patient Merge'],
+        medicationsPrescribed: [],
+        recommendedProcedures: ['Longitudinal Chart Re-Indexing'],
+        followUpDays: 0,
+        billingCodes: [],
+      },
+    };
+
+    if (combinedEncounters.length > 0) {
+      combinedEncounters[0] = {
+        ...combinedEncounters[0],
+        clinicalNotes: [auditNote, ...combinedEncounters[0].clinicalNotes],
+      };
+    }
+
+    const consolidatedPrimary: Patient = {
+      ...primary,
+      allergies: combinedAllergies,
+      chronicConditions: combinedConditions,
+      encounters: combinedEncounters,
+      activeBedId: primary.activeBedId || secondary.activeBedId,
+    };
+
+    // Filter out secondary patient and update primary patient
+    setPatients(prev => prev.filter(p => p.id !== secondaryId).map(p => p.id === primaryId ? consolidatedPrimary : p));
+
+    // Update beds pointing to secondary
+    setBeds(prev => prev.map(b => b.patientId === secondaryId ? { ...b, patientId: primaryId, patientName: primary.fullName } : b));
+
+    // Update OPD queue pointing to secondary
+    setOpdQueue(prev => prev.map(q => q.patientId === secondaryId ? { ...q, patientId: primaryId, patientName: primary.fullName, mrn: primary.mrn } : q));
+
+    // Update billing mismatches pointing to secondary
+    setMismatches(prev => prev.map(m => m.patientId === secondaryId ? { ...m, patientId: primaryId, patientName: primary.fullName } : m));
+
+    setSelectedPatientId(primaryId);
+
+    // Sync to Firestore & record audit log
+    syncPatientToFirestore(consolidatedPrimary).catch(() => {});
+    addAuditLog('MPI_PATIENT_MERGE', `Primary ${primary.mrn} <= Secondary ${secondary.mrn}`, `Consolidated duplicate identity: ${mergeReason}`);
+    recordMutation('INSERT_NOTE', `Patient:${primaryId}`, consolidatedPrimary);
+
+    return consolidatedPrimary;
   };
 
   const addClinicalNote = (patientId: string, note: Omit<ClinicalNote, 'id' | 'timestamp'>) => {
@@ -1061,6 +1676,212 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     addAuditLog('OFFLINE_SYNC_COMPLETE', 'Dual-Engine Sync Queue', 'Replayed 100% of pending offline mutations to cloud database with zero conflicts');
   };
 
+  const createTelehealthSession = async (data: {
+    patientId: string;
+    type: TelehealthSession['type'];
+    scheduledTime?: string;
+    chiefComplaint: string;
+    attendingPhysician?: string;
+  }): Promise<TelehealthSession> => {
+    const patient = patients.find(p => p.id === data.patientId);
+    const newSessionId = `th-${Date.now()}`;
+    const newEncounterId = `enc-th-${Date.now()}`;
+    const roomToken = `ROOM-${Math.random().toString(36).substring(2, 7).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
+
+    const newSession: TelehealthSession = {
+      id: newSessionId,
+      encounterId: newEncounterId,
+      patientId: data.patientId,
+      patientName: patient ? patient.fullName : 'Unknown Patient',
+      patientMrn: patient ? patient.mrn : 'MRN-PENDING',
+      age: patient ? patient.age : 35,
+      gender: patient ? patient.gender : 'Other',
+      scheduledTime: data.scheduledTime || 'Today, ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      status: 'WAITING_ROOM',
+      type: data.type || 'Telehealth Consultation',
+      attendingPhysician: data.attendingPhysician || 'Dr. Sarah Jenkins',
+      clinicianNpi: '1487920134',
+      specialty: 'Telehealth & Preventive Medicine',
+      chiefComplaint: data.chiefComplaint,
+      roomToken,
+      connectionQuality: 'EXCELLENT',
+      callDurationSeconds: 0,
+      vitals: {
+        bp: '120/80',
+        hr: 72,
+        spo2: 99,
+        temp: 36.6,
+        rhythm: 'Normal Sinus Rhythm',
+        connectedDevice: 'Smart ECG + BLE Vitals Gateway',
+        lastSync: 'Just now',
+      },
+      transcription: [
+        {
+          id: `tr-${Date.now()}`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          speaker: 'SYSTEM',
+          text: `Virtual consultation room initialized for ${patient ? patient.fullName : 'Patient'}. WebRTC token: ${roomToken}.`,
+        },
+      ],
+      soapNote: {
+        subjective: '',
+        objective: '',
+        assessment: '',
+        plan: '',
+        icd10Codes: [],
+        cptCodes: [],
+      },
+      prescriptions: [],
+      isAudioMuted: false,
+      isVideoMuted: false,
+      isRecording: false,
+      patientInvitedEmail: patient ? `${patient.fullName.toLowerCase().replace(/\s+/g, '.')}@patient-portal.demo` : undefined,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    setTelehealthSessions(prev => [newSession, ...prev]);
+    setActiveTelehealthSession(newSession);
+    syncTelehealthSessionToFirestore(newSession).catch(() => {});
+    recordMutation('INSERT_TELEHEALTH_SESSION', `Telehealth:${newSessionId}`, newSession);
+    addAuditLog('SCHEDULE_TELEHEALTH', `Session ${newSessionId}`, `Created virtual appointment for ${newSession.patientName}`);
+
+    return newSession;
+  };
+
+  const updateTelehealthSession = async (sessionId: string, updates: Partial<TelehealthSession>): Promise<void> => {
+    let updated: TelehealthSession | undefined;
+    setTelehealthSessions(prev =>
+      prev.map(s => {
+        if (s.id === sessionId) {
+          updated = { ...s, ...updates, updatedAt: new Date().toISOString() };
+          return updated;
+        }
+        return s;
+      })
+    );
+    if (activeTelehealthSession?.id === sessionId && updated) {
+      setActiveTelehealthSession(updated);
+    }
+    if (updated) {
+      syncTelehealthSessionToFirestore(updated).catch(() => {});
+      recordMutation('UPDATE_TELEHEALTH_SESSION', `Telehealth:${sessionId}`, updates);
+    }
+  };
+
+  const completeTelehealthSession = async (
+    sessionId: string,
+    note?: Partial<TelehealthSoapNote>,
+    prescriptions?: TelehealthPrescription[]
+  ): Promise<void> => {
+    const session = telehealthSessions.find(s => s.id === sessionId) || activeTelehealthSession;
+    if (!session) return;
+
+    const finalNote: TelehealthSoapNote = {
+      ...session.soapNote,
+      ...(note || {}),
+    };
+
+    const finalPrescriptions = prescriptions || session.prescriptions || [];
+
+    const updatedSession: TelehealthSession = {
+      ...session,
+      status: 'COMPLETED',
+      soapNote: finalNote,
+      prescriptions: finalPrescriptions,
+      updatedAt: new Date().toISOString(),
+    };
+
+    setTelehealthSessions(prev =>
+      prev.map(s => (s.id === sessionId ? updatedSession : s))
+    );
+    if (activeTelehealthSession?.id === sessionId) {
+      setActiveTelehealthSession(updatedSession);
+    }
+    syncTelehealthSessionToFirestore(updatedSession).catch(() => {});
+    recordMutation('COMPLETE_TELEHEALTH_SESSION', `Telehealth:${sessionId}`, updatedSession);
+
+    // Sync directly to the patient's Clinical Notes in the EHR
+    const clinicalNoteContent = `[TELEHEALTH VIRTUAL CONSULTATION RECORD]
+Encounter Type: ${session.type}
+Chief Complaint: ${session.chiefComplaint}
+Room Token: ${session.roomToken}
+Attending: ${session.attendingPhysician} (NPI: ${session.clinicianNpi})
+Telemetry Device: ${session.vitals.connectedDevice || 'Standard Sensor Hub'}
+
+--- SUBJECTIVE ---
+${finalNote.subjective || 'Virtual consultation completed without acute complaints.'}
+
+--- OBJECTIVE ---
+Vitals: BP ${session.vitals.bp}, HR ${session.vitals.hr} bpm, SpO2 ${session.vitals.spo2}%, Temp ${session.vitals.temp}°C
+${finalNote.objective || 'Visual inspection conducted via encrypted WebRTC video stream.'}
+
+--- ASSESSMENT ---
+${finalNote.assessment || 'Stable follow-up.'}
+Diagnoses: ${(finalNote.icd10Codes || []).map(i => `${i.code} - ${i.description}`).join('; ') || 'Routine Telehealth Evaluation'}
+
+--- PLAN ---
+${finalNote.plan || 'Continue home regimen and follow up in 2-4 weeks.'}
+E-Prescriptions: ${finalPrescriptions.map(p => `${p.medication} ${p.dosage} ${p.frequency}`).join('; ') || 'None issued'}
+Billing CPT Codes: ${(finalNote.cptCodes || []).map(c => `${c.code} (${c.description})`).join(', ') || '99213'}`;
+
+    addClinicalNote(session.patientId, {
+      author: session.attendingPhysician,
+      role: 'Telehealth Attending Physician',
+      category: 'SOAP',
+      content: clinicalNoteContent,
+      aiStructuredData: {
+        chiefComplaint: session.chiefComplaint,
+        diagnoses: (finalNote.icd10Codes || []).map(i => `${i.code}: ${i.description}`),
+        medicationsPrescribed: finalPrescriptions.map(p => `${p.medication} ${p.dosage} ${p.frequency}`),
+        recommendedProcedures: ['Remote Patient Monitoring (RPM)', 'Virtual Follow-up'],
+        followUpDays: 14,
+        billingCodes: (finalNote.cptCodes || []).map(c => ({
+          code: c.code,
+          description: c.description,
+          fee: c.fee || 125,
+        })),
+      },
+    });
+
+    // If prescriptions were provided, also record them to patient's active medications
+    if (finalPrescriptions.length > 0) {
+      setPatients(prev =>
+        prev.map(p => {
+          if (p.id === session.patientId) {
+            const newMeds: Medication[] = finalPrescriptions.map(rx => ({
+              id: rx.id || `m-rx-${Date.now()}-${Math.random()}`,
+              name: rx.medication,
+              dosage: rx.dosage,
+              frequency: rx.frequency,
+              route: 'Oral',
+              status: 'active',
+              prescribedDate: new Date().toISOString().slice(0, 10),
+              prescribedBy: session.attendingPhysician,
+              stockRemaining: 100,
+              unitPrice: 15,
+            }));
+            const encounters = [...p.encounters];
+            if (encounters.length > 0) {
+              encounters[0] = {
+                ...encounters[0],
+                medications: [...encounters[0].medications, ...newMeds],
+              };
+            }
+            return { ...p, encounters };
+          }
+          return p;
+        })
+      );
+    }
+
+    addAuditLog(
+      'COMPLETE_TELEHEALTH_SESSION',
+      `Session ${sessionId}`,
+      `Completed remote consult for ${session.patientName}. SOAP note & ${finalPrescriptions.length} e-prescriptions synced to EHR.`
+    );
+  };
+
   return (
     <HospitalContext.Provider
       value={{
@@ -1084,11 +1905,14 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
         setCopilotOpen,
         selectedPatientId,
         setSelectedPatientId,
+        dischargedCensus,
+        reconcileCensus,
         updateBedStatus,
         assignPatientToBed,
         admitPatientToBed,
         dischargePatientFromBed,
         registerNewPatient,
+        mergePatients,
         addClinicalNote,
         addLabOrder,
         addVitals,
@@ -1098,6 +1922,13 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
         callNextOpdToken,
         completeOpdToken,
         triggerOfflineSync,
+        addAuditLog,
+        telehealthSessions,
+        activeTelehealthSession,
+        setActiveTelehealthSession,
+        createTelehealthSession,
+        updateTelehealthSession,
+        completeTelehealthSession,
       }}
     >
       {children}

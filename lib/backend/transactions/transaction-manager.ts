@@ -38,10 +38,119 @@ function generateUuid(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 }
 
+export interface AtomicMutationParams {
+  tenantId: string;
+  actorId: string;
+  actorRole: string;
+  aggregateType: string;
+  aggregateId: string;
+  eventType: string;
+  eventPayload: Record<string, unknown>;
+  auditAction?: string;
+  auditResourceType?: string;
+  auditResourceId?: string;
+  auditReason?: string;
+  auditMetadata?: Record<string, unknown>;
+  outboxTopic?: string;
+  idempotencyKey?: string;
+  commandId?: string;
+  correlationId?: string;
+  stateWrite?: () => Promise<void> | void;
+}
+
+export interface AtomicMutationResult {
+  success: boolean;
+  eventId: string;
+  auditId: string;
+  outboxId: string;
+  committedAt: number;
+}
+
 export class TransactionManager {
   private static inMemoryEventStore: DomainEventEnvelope[] = [];
   private static inMemoryAuditStore: AuditRecord[] = [];
   private static inMemoryOutboxStore: OutboxRecord[] = [];
+
+  /**
+   * Executes atomic mutation with state write, event logging, audit record and transactional outbox.
+   */
+  public static async executeAtomicMutation(
+    params: AtomicMutationParams
+  ): Promise<AtomicMutationResult> {
+    const timestamp = Date.now();
+    const eventId = generateUuid('evt');
+    const auditId = generateUuid('aud');
+    const outboxId = generateUuid('obx');
+    const correlationId = params.correlationId || generateUuid('corr');
+    const commandId = params.commandId || generateUuid('cmd');
+    const idempotencyKey = params.idempotencyKey || generateUuid('idemp');
+
+    if (params.stateWrite) {
+      await params.stateWrite();
+    }
+
+    const event: DomainEventEnvelope = {
+      eventId,
+      tenantId: params.tenantId,
+      aggregateType: params.aggregateType,
+      aggregateId: params.aggregateId,
+      eventType: params.eventType,
+      eventVersion: 1,
+      payload: params.eventPayload,
+      actorId: params.actorId,
+      actorRole: params.actorRole,
+      occurredAt: timestamp,
+      recordedAt: timestamp,
+      correlationId,
+      commandId,
+      idempotencyKey,
+      source: 'web',
+      schemaVersion: 1,
+    };
+
+    const audit: AuditRecord = {
+      auditId,
+      tenantId: params.tenantId,
+      actorId: params.actorId,
+      actorRole: params.actorRole,
+      action: params.auditAction || params.eventType,
+      resourceType: params.auditResourceType || params.aggregateType,
+      resourceId: params.auditResourceId || params.aggregateId,
+      commandId,
+      eventId,
+      correlationId,
+      occurredAt: timestamp,
+      recordedAt: timestamp,
+      reason: params.auditReason || `Executed ${params.eventType}`,
+      metadata: params.auditMetadata || {},
+    };
+
+    const outbox: OutboxRecord = {
+      outboxId,
+      tenantId: params.tenantId,
+      eventId,
+      eventType: params.eventType,
+      topic: params.outboxTopic || 'g-hims-domain-events',
+      payload: params.eventPayload,
+      status: 'PENDING',
+      attempts: 0,
+      maxAttempts: 5,
+      nextAttemptAt: timestamp,
+      createdAt: timestamp,
+    };
+
+    this.inMemoryEventStore.push(event);
+    this.inMemoryAuditStore.push(audit);
+    this.inMemoryOutboxStore.push(outbox);
+
+    return {
+      success: true,
+      eventId,
+      auditId,
+      outboxId,
+      committedAt: timestamp,
+    };
+  }
 
   /**
    * Executes atomic multi-document commit in accordance with G-HIMS Master Specification.

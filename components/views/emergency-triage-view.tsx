@@ -29,6 +29,9 @@ import { formatCurrency } from '@/lib/utils';
 import { PatientConsultantRoutingModal, ConsultantDoctor } from '@/components/clinical/patient-consultant-routing-modal';
 import { ERQuickTransferModal, TransferRequestData } from '@/components/clinical/er-quick-transfer-modal';
 import { EMSTelemetryIngestionModal, InboundTelemetryData } from '@/components/clinical/ems-telemetry-ingestion-modal';
+import { EDEmergencyEngineModal } from '@/components/clinical/er-emergency-care-engine-modal';
+import { INITIAL_ED_OPTIMIZED_CASES } from '@/lib/clinical/emergency-service';
+import { EDOptimizedCase } from '@/lib/types/emergency';
 
 interface EmergencyCase {
   id: string;
@@ -194,6 +197,89 @@ export function EmergencyTriageView() {
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [transferPatientData, setTransferPatientData] = useState<EmergencyCase | null>(null);
   const [transferToast, setTransferToast] = useState<{ id: string; message: string; dest: string } | null>(null);
+
+  // ED Care Engine State (Refinement 13)
+  const [isEmergencyEngineOpen, setIsEmergencyEngineOpen] = useState(false);
+  const [optimizedCases, setOptimizedCases] = useState<EDOptimizedCase[]>(INITIAL_ED_OPTIMIZED_CASES);
+  const [activeEngineCase, setActiveEngineCase] = useState<EDOptimizedCase>(INITIAL_ED_OPTIMIZED_CASES[0]);
+
+  const handleOpenEmergencyEngine = (c?: EmergencyCase) => {
+    if (c) {
+      const match = optimizedCases.find((opt) => opt.mrn === c.mrn);
+      if (match) {
+        setActiveEngineCase(match);
+      } else {
+        // Build dynamic optimized case
+        const dynamicCase: EDOptimizedCase = {
+          id: `opt-${c.id}`,
+          mrn: c.mrn,
+          patientName: c.patientName,
+          age: c.age,
+          gender: c.gender,
+          arrivalTime: c.arrivalTime,
+          arrivalMode: 'EMS_AMBULANCE',
+          chiefComplaint: c.chiefComplaint,
+          esiLevel: c.esiLevel,
+          assignedBay: c.assignedBay,
+          attendingPhysician: c.attendingPhysician,
+          primaryNurse: 'Nurse John Davis, RN',
+          currentStage: 'TREATMENT',
+          stageStatuses: {
+            ARRIVAL: 'COMPLETED',
+            TRIAGE: 'COMPLETED',
+            ACUITY: 'COMPLETED',
+            VITALS: 'COMPLETED',
+            SBAR: 'COMPLETED',
+            ORDERS: 'COMPLETED',
+            DIAGNOSTICS: 'COMPLETED',
+            TREATMENT: 'IN_PROGRESS',
+            REASSESSMENT: 'PENDING',
+            DISPOSITION: 'PENDING',
+          },
+          vitals: {
+            hr: c.vitals.hr,
+            bp: c.vitals.bp,
+            spo2: c.vitals.spo2,
+            rr: 20,
+            tempC: 37.0,
+            gcs: c.vitals.gcs,
+            shockIndex: +(c.vitals.hr / (parseInt(c.vitals.bp) || 100)).toFixed(2),
+            mewsScore: 4,
+          },
+          criticalAlerts: {
+            stemiAlert: c.codeAlert === 'STEMI',
+            strokeAlert: c.codeAlert === 'STROKE',
+            traumaAlphaAlert: c.codeAlert === 'TRAUMA_ALPHA',
+            sepsisAlert: false,
+            codeBlueActive: c.codeAlert === 'CODE_BLUE',
+          },
+          breakGlassActive: false,
+          emergencyBillingBypassed: false,
+          resuscitationInitiated: c.status === 'resuscitation',
+          sbar: {
+            situation: `${c.age} ${c.gender} presenting with ${c.chiefComplaint}.`,
+            background: 'Triaged at Emergency Department.',
+            assessment: `Acuity ESI-${c.esiLevel}. Vital parameters: HR ${c.vitals.hr}, BP ${c.vitals.bp}.`,
+            recommendation: 'Immediate stabilization and specialist evaluation.',
+          },
+          statOrders: [],
+          diagnostics: [],
+          treatments: [],
+          reassessments: [],
+        };
+        setOptimizedCases((prev) => [dynamicCase, ...prev]);
+        setActiveEngineCase(dynamicCase);
+      }
+    } else {
+      setActiveEngineCase(optimizedCases[0]);
+    }
+    setIsEmergencyEngineOpen(true);
+  };
+
+  const handleUpdateOptimizedCase = (updated: EDOptimizedCase) => {
+    setOptimizedCases((prev) => prev.map((oc) => (oc.id === updated.id ? updated : oc)));
+    setActiveEngineCase(updated);
+  };
 
   const selectedCase = emergencyCases.find((c) => c.id === selectedCaseId) || emergencyCases[0];
 
@@ -381,6 +467,15 @@ export function EmergencyTriageView() {
 
         {/* Code Activation & Quick Transfer Buttons */}
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => handleOpenEmergencyEngine(selectedCase)}
+            className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-rose-600 via-pink-600 to-indigo-600 hover:from-rose-500 hover:to-indigo-500 text-white font-black text-xs flex items-center gap-1.5 shadow-md shadow-rose-600/30 transition-all cursor-pointer active:scale-98 animate-pulse"
+            title="Launch 10-Stage High-Velocity Emergency Engine with Overrides & SBAR"
+          >
+            <Zap className="w-3.5 h-3.5" />
+            <span>STAT Care Engine (10-Stage)</span>
+          </button>
           <button
             type="button"
             onClick={() => handleOpenQuickTransfer(selectedCase)}

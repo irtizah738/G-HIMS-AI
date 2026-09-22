@@ -676,9 +676,14 @@ export async function transferCaseToPACUWithBedReservation(
       if (params.preferredBedId) {
         const prefRef = doc(db, 'tenants', tenantId, 'beds', params.preferredBedId);
         const prefDoc = await transaction.get(prefRef);
-        if (prefDoc.exists() && (prefDoc.data() as Bed).status === 'available') {
-          targetBedRef = prefRef;
-          targetBedData = prefDoc.data() as Bed;
+        if (prefDoc.exists()) {
+          const bedData = prefDoc.data() as Bed;
+          if (bedData.status === 'available') {
+            targetBedRef = prefRef;
+            targetBedData = bedData;
+          } else {
+            throw new Error(`PACU BED CONFLICT: Bed ${bedData.bedNumber} is already ${bedData.status}. Simultaneous reservation blocked.`);
+          }
         }
       }
 
@@ -690,8 +695,14 @@ export async function transferCaseToPACUWithBedReservation(
           // Prioritize ICU or General Surgery wards
           const sorted = bedsSnap.docs.map((d) => d.data() as Bed);
           const best = sorted.find((b) => b.wardId?.includes('icu') || b.wardId?.includes('surg') || b.wardName?.includes('ICU') || b.wardName?.includes('Surgery')) || sorted[0];
-          targetBedRef = doc(db, 'tenants', tenantId, 'beds', best.id);
-          targetBedData = best;
+          
+          // Re-verify the bed atomically inside the transaction
+          const liveBedRef = doc(db, 'tenants', tenantId, 'beds', best.id);
+          const liveBedDoc = await transaction.get(liveBedRef);
+          if (liveBedDoc.exists() && (liveBedDoc.data() as Bed).status === 'available') {
+            targetBedRef = liveBedRef;
+            targetBedData = liveBedDoc.data() as Bed;
+          }
         }
       }
 

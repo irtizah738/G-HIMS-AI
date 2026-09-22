@@ -9,8 +9,10 @@ import { useAuth as useEnterpriseAuth } from '@/lib/auth/auth-context';
 interface RbacContextType {
   currentRole: RoleId;
   setRole: (role: RoleId) => void;
+  switchRole: (role: RoleId) => void;
   roleDefinition: RoleDefinition;
   demoPersona: typeof DEMO_PERSONAS[RoleId];
+  activeUser: typeof DEMO_PERSONAS[RoleId];
   allRoles: RoleId[];
   hasPermission: (resource: ResourceId, action: ActionId, targetPatientId?: string) => boolean;
   canAccessModule: (moduleId: string) => boolean;
@@ -119,8 +121,10 @@ export function RbacProvider({ children }: { children: React.ReactNode }) {
       value={{
         currentRole,
         setRole,
+        switchRole: setRole,
         roleDefinition,
         demoPersona,
+        activeUser: demoPersona,
         allRoles,
         hasPermission,
         canAccessModule,

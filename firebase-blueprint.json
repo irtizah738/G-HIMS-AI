@@ -679,9 +679,42 @@
         "notes": { "type": "string", "maxLength": 512 }
       },
       "required": ["id", "tenantId", "cashierId", "registerId", "shiftStart", "openingBalance", "status"]
+    },
+    "TelehealthSession": {
+      "title": "TelehealthSession",
+      "description": "Real-time virtual consultation and remote clinic session",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "tenantId": { "type": "string", "maxLength": 128 },
+        "encounterId": { "type": "string", "maxLength": 128 },
+        "patientId": { "type": "string", "maxLength": 128 },
+        "patientName": { "type": "string", "maxLength": 128 },
+        "patientMrn": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "maxLength": 32 },
+        "type": { "type": "string", "maxLength": 64 },
+        "attendingPhysician": { "type": "string", "maxLength": 128 },
+        "clinicianNpi": { "type": "string", "maxLength": 32 },
+        "specialty": { "type": "string", "maxLength": 64 },
+        "chiefComplaint": { "type": "string", "maxLength": 512 },
+        "roomToken": { "type": "string", "maxLength": 128 },
+        "connectionQuality": { "type": "string", "maxLength": 32 },
+        "callDurationSeconds": { "type": "number" },
+        "vitals": { "type": "object" },
+        "transcription": { "type": "array" },
+        "soapNote": { "type": "object" },
+        "prescriptions": { "type": "array" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "encounterId", "patientId", "patientName", "status", "roomToken"]
     }
   },
   "firestore": {
+    "/telehealth_sessions/{sessionId}": {
+      "schema": "TelehealthSession",
+      "description": "Live and archived telehealth remote clinical sessions"
+    },
     "/vendors/{vendorId}": {
       "schema": "Vendor",
       "description": "Hospital medical suppliers and vendor directory"

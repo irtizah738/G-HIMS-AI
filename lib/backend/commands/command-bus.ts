@@ -10,6 +10,7 @@ import { FinancialLedgerDomainService } from '../services/financial-ledger-domai
 import { HcmPrivilegeDomainService } from '../services/hcm-privilege-domain-service';
 import { HrWorkforceDomainService } from '../services/hr-workforce-domain-service';
 import { ResourceCapacityDomainService } from '../services/resource-capacity-domain-service';
+import { PatientIdentityDomainService } from '../services/patient-identity-domain-service';
 import { IdempotencyService } from '../idempotency/idempotency-service';
 
 export class CommandBus {
@@ -82,6 +83,34 @@ export class CommandBus {
 
         case 'PrescribeMedicationCommand':
           result = await ClinicalOrderDomainService.prescribeMedication(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        // --- Patient Identity & Safety Domain ---
+        case 'RegisterPatientCommand':
+          result = await PatientIdentityDomainService.registerPatient(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'MergePatientCommand':
+          result = await PatientIdentityDomainService.mergePatients(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ConfirmPatientIdentityCommand':
+          result = await PatientIdentityDomainService.confirmPatientIdentity(
             context,
             command.commandId,
             command.idempotencyKey,

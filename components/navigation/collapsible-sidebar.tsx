@@ -48,6 +48,8 @@ import {
   User,
   Settings,
   UserCheck,
+  BarChart3,
+  Shield,
 } from 'lucide-react';
 import { RbacRoleSwitcherModal } from '@/components/auth/rbac-role-switcher';
 
@@ -167,6 +169,19 @@ export function CollapsibleSidebar({
           badge: '52',
         },
         {
+          id: 'reporting',
+          name: 'Advanced Reporting & Analytics',
+          shortName: 'KPI Analytics',
+          icon: BarChart3,
+          badge: 'KPIs',
+        },
+        {
+          id: 'rbac',
+          name: 'RBAC Security Matrix',
+          shortName: 'RBAC Matrix',
+          icon: Shield,
+        },
+        {
           id: 'matrix',
           name: 'Architecture & Audit Matrix',
           shortName: 'Matrix',
@@ -200,14 +215,12 @@ export function CollapsibleSidebar({
           name: 'Operating Theaters (OT)',
           shortName: 'OT Suites',
           icon: Scissors,
-          directHref: '/metro-health/or/schedule',
         },
         {
           id: 'beds',
           name: 'Inpatient Bed Census',
           shortName: 'Bed Census',
           icon: BedDouble,
-          directHref: '/metro-health/inpatient/bed-board',
         },
         {
           id: 'disease-intake',
@@ -284,21 +297,18 @@ export function CollapsibleSidebar({
           name: 'Enterprise General Ledger',
           shortName: 'GL Accounts',
           icon: BookOpen,
-          directHref: '/metro-health/erp/chart-of-accounts',
         },
         {
           id: 'hcm',
           name: 'Hospital Workforce & HR OS',
           shortName: 'Workforce HR',
           icon: UserCheck,
-          directHref: '/metro-health/hcm',
         },
         {
           id: 'resources',
           name: 'Resource & Capacity OS',
           shortName: 'Resources & OT',
           icon: Boxes,
-          directHref: '/metro-health/hcm/resources',
         },
         {
           id: 'staff',
@@ -427,7 +437,7 @@ export function CollapsibleSidebar({
           <button
             type="button"
             onClick={() => setMobileOpen(false)}
-            className="min-w-[40px] min-h-[40px] p-2 rounded-xl text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors flex items-center justify-center cursor-pointer"
+            className="min-w-[44px] min-h-[44px] p-2 rounded-xl text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors flex items-center justify-center cursor-pointer"
             title="Close Menu"
             aria-label="Close Menu"
           >

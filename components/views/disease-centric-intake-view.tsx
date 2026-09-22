@@ -52,8 +52,21 @@ import {
 } from 'lucide-react';
 
 export function DiseaseCentricIntakeView() {
-  const { patients, addClinicalNote } = useHospital();
-  const [activePatientId, setActivePatientId] = useState<string>('p-1001');
+  const { patients, addClinicalNote, selectedPatientId, setSelectedPatientId } = useHospital();
+  const [localPatientId, setLocalPatientId] = useState<string>(selectedPatientId || 'p-1001');
+
+  // Synchronize with global hospital context patient
+  useEffect(() => {
+    if (selectedPatientId) {
+      setLocalPatientId(selectedPatientId);
+    }
+  }, [selectedPatientId]);
+
+  const activePatientId = localPatientId;
+  const setActivePatientId = (id: string) => {
+    setLocalPatientId(id);
+    setSelectedPatientId(id);
+  };
 
   // Selected Template
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('cardiac');

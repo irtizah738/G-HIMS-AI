@@ -207,7 +207,18 @@ export interface FhirResource {
 export interface OfflineMutation {
   id: string;
   timestamp: string;
-  actionType: 'INSERT_NOTE' | 'RECONCILE_BILL' | 'UPDATE_VITALS' | 'ORDER_LAB' | 'ALLOCATE_BED';
+  actionType:
+    | 'INSERT_NOTE'
+    | 'RECONCILE_BILL'
+    | 'UPDATE_VITALS'
+    | 'ORDER_LAB'
+    | 'ALLOCATE_BED'
+    | 'INSERT_TELEHEALTH_SESSION'
+    | 'UPDATE_TELEHEALTH_SESSION'
+    | 'COMPLETE_TELEHEALTH_SESSION'
+    | 'RECORD_DISPENSE'
+    | 'DISCHARGE_PATIENT'
+    | 'REGISTER_PATIENT';
   entity: string;
   payload: Record<string, any>;
   syncStatus: 'synced' | 'pending' | 'conflict_resolved';
@@ -329,7 +340,7 @@ export interface TelehealthPrescription {
   prescribedAt: string;
   pharmacyName: string;
   pharmacyNpi: string;
-  status: 'DRAFT' | 'TRANSMITTED' | 'DISPENSED';
+  status: 'DRAFT' | 'PENDING_TRANSMISSION' | 'TRANSMITTED' | 'DISPENSED';
   transactionRef?: string;
 }
 

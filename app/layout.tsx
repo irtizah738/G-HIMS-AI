@@ -6,8 +6,9 @@ import { SystemInitializer } from '@/components/common/SystemInitializer';
 import { AppProviders } from '@/components/providers/app-providers';
 
 export const metadata: Metadata = {
-  title: 'G-HIMS OS | Generative Healthcare Information Management System',
-  description: 'Hospital Management, Bed Occupancy, Billing, Staff Schedules, LIS, EHR & AI Copilot',
+  title: 'G-HIMS OS | Hospital Information System',
+  description:
+    'Programmable Healthcare + Enterprise Operating System unifying clinical EMR workflows, protocol engines, immutable event store, SAP-style double-entry ERP General Ledger, HCM clinical privileges, diagnostic LIS/RIS, offline-first runtime, and ambient AI intelligence.',
 };
 
 export default function RootLayout({

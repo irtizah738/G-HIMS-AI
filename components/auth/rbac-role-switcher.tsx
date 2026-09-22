@@ -36,7 +36,7 @@ export function RbacRoleSwitcherModal({ isOpen, onClose }: RbacRoleSwitcherModal
       setActiveTab('patient-portal');
     } else if (role === 'receptionist') {
       setActiveTab('patients');
-    } else if (role === 'billing_clerk') {
+    } else if (role === 'billing_clerk' || role === 'billing_staff') {
       setActiveTab('billing');
     } else if (role === 'nurse') {
       setActiveTab('beds');
@@ -59,6 +59,7 @@ export function RbacRoleSwitcherModal({ isOpen, onClose }: RbacRoleSwitcherModal
       case 'receptionist':
         return ClipboardList;
       case 'billing_clerk':
+      case 'billing_staff':
         return DollarSign;
       case 'patient':
         return User;

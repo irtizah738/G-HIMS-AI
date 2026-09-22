@@ -272,7 +272,8 @@ export async function seedInitialFirestoreData(
   initialBeds: Bed[],
   initialMismatches: BillingAuditMismatch[],
   initialTokens: OpdQueueToken[],
-  initialStaff: StaffMember[]
+  initialStaff: StaffMember[],
+  initialTelehealth?: TelehealthSession[]
 ) {
   try {
     const patientsSnap = await getDocs(collection(db, 'patients'));
@@ -292,6 +293,15 @@ export async function seedInitialFirestoreData(
       }
       for (const s of initialStaff) {
         await setDoc(doc(db, 'staff', s.id), cleanFirestoreData(s));
+      }
+    }
+
+    if (initialTelehealth && initialTelehealth.length > 0) {
+      const thSnap = await getDocs(collection(db, 'telehealth_sessions'));
+      if (thSnap.empty) {
+        for (const th of initialTelehealth) {
+          await setDoc(doc(db, 'telehealth_sessions', th.id), cleanFirestoreData(th));
+        }
       }
     }
   } catch (error) {

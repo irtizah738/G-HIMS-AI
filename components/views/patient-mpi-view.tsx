@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useHospital } from '@/lib/context/hospital-context';
 import { Patient, Encounter, Vitals, ClinicalNote } from '@/lib/types/ghims';
@@ -28,19 +28,25 @@ import {
   ShieldCheck,
   Send,
   UserCheck,
+  GitMerge,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { PatientConsultantRoutingModal, ConsultantDoctor } from '@/components/clinical/patient-consultant-routing-modal';
+import { PatientMergeModal } from '@/components/mpi/patient-merge-modal';
 import { useRBAC } from '@/lib/auth/rbac-context';
 
 export function PatientMpiView() {
-  const { patients, selectedPatientId, setSelectedPatientId, registerNewPatient, addClinicalNote, addVitals, beds } = useHospital();
+  const { patients, selectedPatientId, setSelectedPatientId, registerNewPatient, mergePatients, addClinicalNote, addVitals, beds } = useHospital();
   const { currentRole, hasPermission, activePatientId, roleDefinition } = useRBAC();
   
   const [searchFilter, setSearchFilter] = useState('');
   const [showNewPatientModal, setShowNewPatientModal] = useState(false);
   const [showWristbandModal, setShowWristbandModal] = useState(false);
   const [showRoutingModal, setShowRoutingModal] = useState(false);
+  const [showMergeModal, setShowMergeModal] = useState(false);
+  const [mergeCandidateSecondaryId, setMergeCandidateSecondaryId] = useState<string | undefined>(undefined);
+  const [duplicateWarningPatient, setDuplicateWarningPatient] = useState<Patient | null>(null);
+  const [overrideDuplicateRegistration, setOverrideDuplicateRegistration] = useState(false);
   const [activeTabSub, setActiveTabSub] = useState<'clinical' | 'vitals' | 'labs' | 'billing'>('clinical');
 
   // AI note parsing state
@@ -73,6 +79,49 @@ export function PatientMpiView() {
     ? patients.filter((p) => p.id === (activePatientId || 'p-1001'))
     : patients;
 
+  // RULE 10: Patient Identity Safety — Automated MPI Duplicate Pair Detection
+  const detectedDuplicatePairs = useMemo(() => {
+    const pairs: Array<{ primary: Patient; duplicate: Patient; matchReason: string }> = [];
+    const checked = new Set<string>();
+
+    for (let i = 0; i < scopedPatients.length; i++) {
+      for (let j = i + 1; j < scopedPatients.length; j++) {
+        const p1 = scopedPatients[i];
+        const p2 = scopedPatients[j];
+        const key = [p1.id, p2.id].sort().join(':');
+        if (checked.has(key)) continue;
+
+        const n1 = (p1.fullName || '').trim().toLowerCase();
+        const n2 = (p2.fullName || '').trim().toLowerCase();
+        const phone1 = (p1.contactNumber || '').replace(/\D/g, '');
+        const phone2 = (p2.contactNumber || '').replace(/\D/g, '');
+
+        let reason = '';
+        if (n1 === n2 && p1.dateOfBirth === p2.dateOfBirth) {
+          reason = `Identical Name ("${p1.fullName}") & Date of Birth (${p1.dateOfBirth})`;
+        } else if (phone1.length >= 7 && phone1 === phone2 && n1 === n2) {
+          reason = `Identical Name & Contact Number (${p1.contactNumber})`;
+        } else if (n1 === n2) {
+          reason = `Identical Full Name ("${p1.fullName}")`;
+        } else if (phone1.length >= 7 && phone1 === phone2) {
+          reason = `Matching Contact Number (${p1.contactNumber})`;
+        }
+
+        if (reason) {
+          checked.add(key);
+          const p1EncCount = p1.encounters?.length || 0;
+          const p2EncCount = p2.encounters?.length || 0;
+          if (p2EncCount > p1EncCount) {
+            pairs.push({ primary: p2, duplicate: p1, matchReason: reason });
+          } else {
+            pairs.push({ primary: p1, duplicate: p2, matchReason: reason });
+          }
+        }
+      }
+    }
+    return pairs;
+  }, [scopedPatients]);
+
   const filteredPatients = scopedPatients.filter((p) => {
     const q = searchFilter.toLowerCase();
     return (
@@ -91,6 +140,24 @@ export function PatientMpiView() {
     e.preventDefault();
     if (!newFullName) return;
 
+    // RULE 10: Patient Identity Safety — Check for duplicates (same name & DOB or phone)
+    if (!overrideDuplicateRegistration) {
+      const normalizedName = newFullName.trim().toLowerCase();
+      const normalizedPhone = newPhone.replace(/\D/g, '');
+      const duplicate = patients.find((p) => {
+        const pName = (p.fullName || (p as any).name || '').toLowerCase();
+        const pPhone = (p.contactNumber || '').replace(/\D/g, '');
+        const nameMatch = pName === normalizedName && p.dateOfBirth === newDob;
+        const phoneMatch = normalizedPhone.length >= 7 && pPhone === normalizedPhone;
+        return nameMatch || phoneMatch;
+      });
+
+      if (duplicate) {
+        setDuplicateWarningPatient(duplicate);
+        return;
+      }
+    }
+
     const created = registerNewPatient({
       fullName: newFullName,
       dateOfBirth: newDob,
@@ -108,6 +175,15 @@ export function PatientMpiView() {
     setSelectedPatientId(created.id);
     setShowNewPatientModal(false);
     setNewFullName('');
+    setDuplicateWarningPatient(null);
+    setOverrideDuplicateRegistration(false);
+  };
+
+  const handleExecuteMerge = async (primaryId: string, secondaryId: string, mergeReason: string) => {
+    await mergePatients(primaryId, secondaryId, mergeReason);
+    setSelectedPatientId(primaryId);
+    setShowMergeModal(false);
+    setMergeCandidateSecondaryId(undefined);
   };
 
   const handleAddVitals = (e: React.FormEvent) => {
@@ -179,6 +255,72 @@ export function PatientMpiView() {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      {/* Duplicate Resolution Center Banner */}
+      {detectedDuplicatePairs.length > 0 && (
+        <div className="lg:col-span-12 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800/80 rounded-2xl p-4 shadow-xs">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-amber-100 dark:bg-amber-900/60 text-amber-700 dark:text-amber-300 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-amber-900 dark:text-amber-200">
+                    MPI Identity Verification: {detectedDuplicatePairs.length} Potential Duplicate Record {detectedDuplicatePairs.length === 1 ? 'Pair' : 'Pairs'} Detected
+                  </h3>
+                  <span className="px-2 py-0.5 text-[10px] font-extrabold uppercase rounded-full bg-amber-200/80 dark:bg-amber-800/80 text-amber-900 dark:text-amber-100">
+                    Action Required
+                  </span>
+                </div>
+                <p className="text-xs text-amber-800/80 dark:text-amber-300/80 mt-0.5">
+                  G-HIMS Identity Safety Engine flagged matching demographic fingerprints. Consolidate longitudinal encounters, notes, and allergies to prevent fragmented clinical charts.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2.5">
+            {detectedDuplicatePairs.map((pair) => (
+              <div
+                key={`${pair.primary.id}-${pair.duplicate.id}`}
+                className="bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/50 rounded-xl p-3 flex items-center justify-between gap-3 shadow-xs"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                      {pair.primary.fullName}
+                    </span>
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                      {pair.primary.mrn}
+                    </span>
+                    <span className="text-slate-400 text-xs">↔</span>
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200 font-bold">
+                      {pair.duplicate.mrn}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-1">
+                    Match: {pair.matchReason}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  id={`btn-merge-pair-${pair.duplicate.id}`}
+                  onClick={() => {
+                    setSelectedPatientId(pair.primary.id);
+                    setMergeCandidateSecondaryId(pair.duplicate.id);
+                    setShowMergeModal(true);
+                  }}
+                  className="shrink-0 px-3 py-1.5 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                >
+                  <GitMerge className="w-3.5 h-3.5" /> Merge Records
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Patient Directory Sidebar (Left 4 cols) */}
       <div className="lg:col-span-4 bg-white rounded-xl border border-slate-200/80 shadow-sm flex flex-col h-[calc(100vh-140px)] min-h-[500px]">
         <div className="p-4 border-b border-slate-100 space-y-3">
@@ -226,7 +368,16 @@ export function PatientMpiView() {
               >
                 <div className="flex items-start justify-between">
                   <div>
-                    <p className="text-xs font-bold text-slate-900">{patient.fullName}</p>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className="text-xs font-bold text-slate-900">{patient.fullName}</p>
+                      {detectedDuplicatePairs.some(
+                        (pair) => pair.primary.id === patient.id || pair.duplicate.id === patient.id
+                      ) && (
+                        <span className="text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-300">
+                          Duplicate Alert
+                        </span>
+                      )}
+                    </div>
                     <p className="text-[11px] text-slate-500 font-mono mt-0.5">MRN: {patient.mrn}</p>
                   </div>
                   <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
@@ -290,6 +441,15 @@ export function PatientMpiView() {
                 </div>
 
                 <div className="flex items-center gap-2">
+                  <button
+                    id="btn-merge-duplicate-record"
+                    type="button"
+                    onClick={() => setShowMergeModal(true)}
+                    className="px-3 py-1.5 text-xs font-bold bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+                    title="Merge duplicate patient record"
+                  >
+                    <GitMerge className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" /> Merge Record
+                  </button>
                   <button
                     id="btn-route-specialist"
                     onClick={() => setShowRoutingModal(true)}
@@ -811,10 +971,57 @@ export function PatientMpiView() {
               <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <User className="w-4 h-4 text-blue-600" /> New MPI Patient Intake
               </h3>
-              <button type="button" onClick={() => setShowNewPatientModal(false)} className="text-slate-400 hover:text-slate-600 text-sm">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowNewPatientModal(false);
+                  setDuplicateWarningPatient(null);
+                  setOverrideDuplicateRegistration(false);
+                }}
+                className="text-slate-400 hover:text-slate-600 text-sm"
+              >
                 &times;
               </button>
             </div>
+
+            {/* RULE 10: Patient Identity Safety Duplicate Detection Alert */}
+            {duplicateWarningPatient && (
+              <div className="bg-amber-50 dark:bg-amber-950/50 border-2 border-amber-400 rounded-xl p-3.5 space-y-2 text-xs text-amber-900 dark:text-amber-200 animate-in fade-in duration-150">
+                <div className="flex items-center gap-2 font-bold text-amber-800 dark:text-amber-300">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>POTENTIAL DUPLICATE PATIENT DETECTED IN MPI</span>
+                </div>
+                <p>
+                  A patient with matching demographics is already registered:
+                  <strong className="block text-slate-900 dark:text-slate-100 mt-1">
+                    {duplicateWarningPatient.fullName} • MRN: {duplicateWarningPatient.mrn} (DOB: {duplicateWarningPatient.dateOfBirth}, Phone: {duplicateWarningPatient.contactNumber})
+                  </strong>
+                </p>
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedPatientId(duplicateWarningPatient.id);
+                      setShowNewPatientModal(false);
+                      setDuplicateWarningPatient(null);
+                    }}
+                    className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold text-[11px] shadow-xs cursor-pointer"
+                  >
+                    Open Existing Patient Chart
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOverrideDuplicateRegistration(true);
+                      setDuplicateWarningPatient(null);
+                    }}
+                    className="px-3 py-1 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-slate-800 dark:text-slate-200 rounded-lg font-medium text-[11px] cursor-pointer"
+                  >
+                    Override (Different Individual)
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
               <div className="sm:col-span-2">
@@ -954,6 +1161,21 @@ export function PatientMpiView() {
           onRoutedSuccess={(consultant, details) => {
             setShowRoutingModal(false);
           }}
+        />
+      )}
+
+      {/* RULE 10: Patient Identity Safety — Record Merge Safety Console */}
+      {currentPatient && (
+        <PatientMergeModal
+          isOpen={showMergeModal}
+          onClose={() => {
+            setShowMergeModal(false);
+            setMergeCandidateSecondaryId(undefined);
+          }}
+          primaryPatient={currentPatient}
+          availablePatients={patients}
+          initialSecondaryId={mergeCandidateSecondaryId}
+          onExecuteMerge={handleExecuteMerge}
         />
       )}
     </div>

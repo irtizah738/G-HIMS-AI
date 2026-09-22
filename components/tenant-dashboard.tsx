@@ -52,6 +52,8 @@ const PatientPortalView = dynamic(() => import('@/components/views/patient-porta
 const HrManagementView = dynamic(() => import('@/components/views/hr-management-view').then(m => m.HrManagementView), { loading: ViewSkeleton, ssr: false });
 const ResourceCapacityView = dynamic(() => import('@/components/views/resource-capacity-view').then(m => m.ResourceCapacityView), { loading: ViewSkeleton, ssr: false });
 const SupplyChainScmView = dynamic(() => import('@/components/views/supply-chain-scm-view').then(m => m.SupplyChainScmView), { loading: ViewSkeleton, ssr: false });
+const ReportingAnalyticsView = dynamic(() => import('@/components/views/reporting-analytics-view').then(m => m.ReportingAnalyticsView), { loading: ViewSkeleton, ssr: false });
+const RbacManagementView = dynamic(() => import('@/components/views/rbac-management-view').then(m => m.RbacManagementView), { loading: ViewSkeleton, ssr: false });
 import { RbacModuleGate } from '@/components/auth/rbac-gate';
 import { RbacRoleSwitcherModal } from '@/components/auth/rbac-role-switcher';
 import { useRBAC } from '@/lib/auth/rbac-context';
@@ -61,6 +63,8 @@ import { CollapsibleSidebar } from '@/components/navigation/collapsible-sidebar'
 import { SyncStatusIndicator } from '@/components/navigation/sync-status-indicator';
 import { CommandPalette } from '@/components/navigation/command-palette';
 import { HeaderProfileMenu } from '@/components/auth/header-profile-menu';
+import { HospitalOperationalContextBar } from '@/components/navigation/hospital-operational-context-bar';
+import { useTenant } from '@/lib/tenant/context';
 import {
   BedDouble,
   Users,
@@ -96,6 +100,8 @@ import {
 import { formatCurrency } from '@/lib/utils';
 
 export function TenantDashboard() {
+  const { currentTenant } = useTenant();
+  const currentTenantId = currentTenant?.id || 'central-metro-hospital';
   const { activeTab, setActiveTab, stats, mismatches, copilotOpen, setCopilotOpen, networkMode, patients } = useHospital();
   const { user, signInWithGoogle, signOut, loading: authLoading } = useAuth();
   const { currentRole, roleDefinition, canAccessModule, setRole } = useRBAC();
@@ -199,7 +205,7 @@ export function TenantDashboard() {
             <SyncStatusIndicator />
 
             {/* Unified Staff Profile & Sign In Dropdown Menu */}
-            <HeaderProfileMenu tenantId="central-metro-hospital" />
+            <HeaderProfileMenu tenantId={currentTenantId} />
           </div>
         </div>
       </header>
@@ -215,12 +221,16 @@ export function TenantDashboard() {
         />
 
         {/* Content View with dynamic margin offset for persistent sidebar */}
-        <main
-          className={`flex-1 min-w-0 transition-all duration-300 ease-in-out ${
+        <div
+          className={`flex-1 min-w-0 flex flex-col transition-all duration-300 ease-in-out ${
             isSidebarCollapsed ? 'lg:ml-20' : 'lg:ml-64'
-          } p-3 sm:p-5 lg:p-8 pb-28`}
+          }`}
         >
-          <div className="max-w-7xl mx-auto w-full">
+          {/* Global Hospital Operational Context Bar (Facility, Unit, User, Role, Active Patient, Workflow) */}
+          <HospitalOperationalContextBar onOpenPatientSearch={() => setCommandPaletteOpen(true)} />
+
+          <main className="flex-1 min-w-0 p-3 sm:p-5 lg:p-8 pb-28">
+            <div className="max-w-7xl mx-auto w-full">
             {activeTab === 'patient-portal' && <PatientPortalView />}
             {activeTab === 'directory' && (
               <RbacModuleGate moduleId="directory" moduleName="All Modules Directory">
@@ -247,7 +257,7 @@ export function TenantDashboard() {
                 <CommandHubView />
               </RbacModuleGate>
             )}
-            {activeTab === 'billing' && (
+            {(activeTab === 'billing' || activeTab === 'erp-coa') && (
               <RbacModuleGate moduleId="billing" moduleName="Revenue Leakage & ERP Billing">
                 <BillingErpView />
               </RbacModuleGate>
@@ -329,7 +339,17 @@ export function TenantDashboard() {
             )}
             {(activeTab === 'scm' || activeTab === 'scm-pos' || activeTab === 'supply-chain') && (
               <RbacModuleGate moduleId="scm-pos" moduleName="Supply Chain & Inventory Management">
-                <SupplyChainScmView tenantId="metro-health" />
+                <SupplyChainScmView tenantId={currentTenantId} />
+              </RbacModuleGate>
+            )}
+            {(activeTab === 'reporting' || activeTab === 'analytics') && (
+              <RbacModuleGate moduleId="reporting" moduleName="Advanced Reporting & Analytics">
+                <ReportingAnalyticsView />
+              </RbacModuleGate>
+            )}
+            {(activeTab === 'rbac' || activeTab === 'roles' || activeTab === 'permissions') && (
+              <RbacModuleGate moduleId="rbac" moduleName="RBAC Management & Permission Matrix">
+                <RbacManagementView />
               </RbacModuleGate>
             )}
             {activeTab === 'settings' && (
@@ -339,6 +359,7 @@ export function TenantDashboard() {
             )}
           </div>
         </main>
+        </div>
       </div>
 
       {/* Universal Command Palette (⌘K) */}

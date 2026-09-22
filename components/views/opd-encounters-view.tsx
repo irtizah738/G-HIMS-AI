@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useHospital } from '@/lib/context/hospital-context';
 import {
   Users,
@@ -26,9 +26,12 @@ import { formatCurrency } from '@/lib/utils';
 import { OpdQueueToken } from '@/lib/types/ghims';
 import { OpdMasterWorkspace } from '@/components/opd/OpdMasterWorkspace';
 import { PatientConsultantRoutingModal, ConsultantDoctor } from '@/components/clinical/patient-consultant-routing-modal';
+import { StandardPatientBanner } from '@/components/clinical/standard-patient-banner';
+import { ConfirmPatientModal } from '@/components/clinical/confirm-patient-modal';
 
 export function OpdEncountersView() {
   const [viewMode, setViewMode] = useState<'master_suite' | 'consultation_desk'>('master_suite');
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const {
     opdQueue,
     callNextOpdToken,
@@ -37,9 +40,28 @@ export function OpdEncountersView() {
     addClinicalNote,
     addLabOrder,
     addVitals,
+    selectedPatientId,
+    setSelectedPatientId,
   } = useHospital();
 
   const [selectedTokenId, setSelectedTokenId] = useState<string>('tok-01');
+
+  // Auto-focus on matching OPD token if global selected patient matches
+  useEffect(() => {
+    if (selectedPatientId) {
+      const match = opdQueue.find((t) => t.patientId === selectedPatientId);
+      if (match) {
+        setSelectedTokenId(match.id);
+      }
+    }
+  }, [selectedPatientId, opdQueue]);
+
+  const handleSelectToken = (token: OpdQueueToken) => {
+    setSelectedTokenId(token.id);
+    if (token.patientId) {
+      setSelectedPatientId(token.patientId);
+    }
+  };
   const [isRoutingModalOpen, setIsRoutingModalOpen] = useState<boolean>(false);
   const [routingPatientData, setRoutingPatientData] = useState<any>(null);
   const [chiefComplaint, setChiefComplaint] = useState<string>('');
@@ -199,7 +221,7 @@ export function OpdEncountersView() {
               {opdQueue.map((token) => (
                 <div
                   key={token.id}
-                  onClick={() => setSelectedTokenId(token.id)}
+                  onClick={() => handleSelectToken(token)}
                   className={`p-3 rounded-xl border transition-all cursor-pointer ${
                     selectedTokenId === token.id
                       ? 'bg-blue-50/80 dark:bg-blue-950/30 border-blue-300 dark:border-blue-700 ring-2 ring-blue-500/20'
@@ -284,19 +306,28 @@ export function OpdEncountersView() {
 
         {/* Right: Active Consultation Suite */}
         <div className="lg:col-span-8 space-y-4">
+          {/* Standard Patient Safety Header Banner */}
+          {patient && (
+            <StandardPatientBanner
+              patient={patient}
+              encounterType="OPD"
+              encounterStage="CLINICAL_CONSULTATION"
+              encounterId={`OPD-${selectedToken?.tokenNumber}`}
+              attendingDoctor="Dr. Sarah Jenkins, MD (Cardiology)"
+              bedNumber="Consultation Bay 104"
+            />
+          )}
+
           <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-xs space-y-5 transition-colors">
-            {/* Consultation Header */}
+            {/* Consultation Header Controls */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800/80 pb-4">
               <div>
                 <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 block">
                   Active Consultation Room 104
                 </span>
-                <h2 className="text-base font-extrabold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                  {selectedToken?.patientName} ({selectedToken?.gender}, {selectedToken?.age}y)
-                  <span className="px-2 py-0.5 rounded text-xs font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                    {selectedToken?.mrn}
-                  </span>
-                </h2>
+                <h3 className="text-sm font-extrabold text-slate-800 dark:text-slate-200 mt-0.5">
+                  Chief Complaint: <span className="text-blue-600 dark:text-blue-400">{selectedToken?.chiefComplaint}</span>
+                </h3>
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
@@ -328,10 +359,11 @@ export function OpdEncountersView() {
                 </button>
                 <button
                   type="button"
-                  onClick={handleSaveConsultation}
+                  id="btn-save-consultation-gate"
+                  onClick={() => setIsConfirmModalOpen(true)}
                   className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
                 >
-                  <CheckCircle2 className="w-4 h-4" /> Save & Auto-Audit Bill
+                  <CheckCircle2 className="w-4 h-4" /> Finalize Consultation & Sign
                 </button>
               </div>
             </div>
@@ -466,6 +498,22 @@ export function OpdEncountersView() {
             setSuccessToast(`Patient ${routingPatientData.patientName} successfully routed to ${consultant.name} (${consultant.subSpecialty || consultant.department})`);
             setTimeout(() => setSuccessToast(null), 5000);
           }}
+        />
+      )}
+
+      {/* RULE 10: Explicit Clinical Safety Identity Confirmation Gate */}
+      {patient && (
+        <ConfirmPatientModal
+          isOpen={isConfirmModalOpen}
+          onClose={() => setIsConfirmModalOpen(false)}
+          onConfirm={() => {
+            setIsConfirmModalOpen(false);
+            handleSaveConsultation();
+          }}
+          patient={patient}
+          actionTitle="Finalize Clinical Consultation, Prescribe Rx & Capture CPT Charges"
+          actionDescription={`Signing outpatient evaluation for ${patient.fullName || (patient as any).name} (${patient.mrn}). Medications: Ticagrelor 90mg BID, Atorvastatin 80mg QHS. CPT: 99214, 93000.`}
+          actionRiskLevel="HIGH"
         />
       )}
     </div>

@@ -841,6 +841,16 @@ export function EmergencyTriageView() {
           onDirectIntake={handleDirectTelemetryIntake}
         />
       )}
+
+      {/* 10-Stage High-Velocity ED Emergency Engine Modal (Refinement 13) */}
+      {isEmergencyEngineOpen && (
+        <EDEmergencyEngineModal
+          isOpen={isEmergencyEngineOpen}
+          onClose={() => setIsEmergencyEngineOpen(false)}
+          edCase={activeEngineCase}
+          onUpdateCase={handleUpdateOptimizedCase}
+        />
+      )}
     </div>
   );
 }

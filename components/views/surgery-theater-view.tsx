@@ -27,6 +27,9 @@ import {
 } from 'lucide-react';
 import { AldreteScoreRecord, PACUHandoff } from '@/types/inpatient-or';
 import { transferCaseToPACUWithBedReservation } from '@/lib/firebase/services/inpatient-or';
+import { SurgicalChainModal } from '@/components/clinical/surgical-chain-modal';
+import { INITIAL_SURGICAL_CHAIN_CASES } from '@/lib/clinical/surgical-chain-data';
+import { SurgicalChainCase } from '@/lib/types/surgical-chain';
 
 interface SurgeryScheduleItem {
   id: string;
@@ -142,6 +145,22 @@ export function SurgeryTheaterView() {
   const [showPacuModal, setShowPacuModal] = useState<boolean>(false);
   const [isSubmittingPacu, setIsSubmittingPacu] = useState<boolean>(false);
   const [pacuSuccessToast, setPacuSuccessToast] = useState<string | null>(null);
+
+  // 17-Stage Zero-Tolerance Surgical Chain State (Refinement 14)
+  const [surgicalChainCases, setSurgicalChainCases] = useState<SurgicalChainCase[]>(INITIAL_SURGICAL_CHAIN_CASES);
+  const [activeChainCaseId, setActiveChainCaseId] = useState<string | null>(null);
+  const [isChainModalOpen, setIsChainModalOpen] = useState<boolean>(false);
+
+  const activeChainCase = surgicalChainCases.find((c) => c.id === (activeChainCaseId || selectedOtId)) || surgicalChainCases[0];
+
+  const handleOpenChainModal = (caseId: string) => {
+    setActiveChainCaseId(caseId);
+    setIsChainModalOpen(true);
+  };
+
+  const handleUpdateChainCase = (updated: SurgicalChainCase) => {
+    setSurgicalChainCases((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+  };
 
   // Aldrete Scoring State
   const [aldrete, setAldrete] = useState<AldreteScoreRecord>({
@@ -355,6 +374,15 @@ export function SurgeryTheaterView() {
         </div>
 
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            id="btn-open-surgical-chain-orchestrator"
+            onClick={() => handleOpenChainModal(selectedOtId)}
+            className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs flex items-center gap-2 shadow-md shadow-indigo-600/30 transition-all cursor-pointer"
+          >
+            <ShieldCheck className="w-4 h-4" />
+            <span>17-Stage Chain & Pre-check Invariants</span>
+          </button>
           <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">All Suites Active:</span>
           <span className="px-3 py-1 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-bold text-xs rounded-xl border border-emerald-200 dark:border-emerald-800">
             4 of 4 Theaters Running
@@ -824,6 +852,15 @@ export function SurgeryTheaterView() {
             </div>
           </div>
         </div>
+      )}
+      {/* 17-Stage End-to-End Surgical Chain & Pre-check Invariant Modal (Refinement 14) */}
+      {isChainModalOpen && activeChainCase && (
+        <SurgicalChainModal
+          isOpen={isChainModalOpen}
+          onClose={() => setIsChainModalOpen(false)}
+          caseItem={activeChainCase}
+          onUpdateCase={handleUpdateChainCase}
+        />
       )}
     </div>
   );

@@ -94,12 +94,7 @@ export async function POST(req: NextRequest) {
           status: 'ACTIVE',
         },
         outboxEventsCount: result.outboxEvent ? 1 : 0,
-        queueToken: {
-          tokenNumber: result.encounter.tokenNumber,
-          department: result.encounter.department,
-          patientMrn: result.patient.mrn,
-          patientName: result.patient.fullName,
-        },
+        queueToken: result.queueToken,
       },
     });
   } catch (error) {

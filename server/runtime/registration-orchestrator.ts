@@ -1,6 +1,6 @@
-import 'server-only';
 import crypto from 'node:crypto';
 import { getAdminFirestore } from '@/server/firebase/admin';
+import { IdempotencyService } from '@/lib/backend/idempotency/idempotency-service';
 import {
   patientDocPath,
   encounterDocPath,
@@ -18,8 +18,12 @@ import { OutboxEventRecord } from '@/types/clinical-event';
 import { OPD_WORKFLOW_DEFINITION } from '@/lib/workflow/opd-definition';
 import { compileWorkflow } from '@/lib/workflow/compiler';
 
+const REGISTRATION_COMMAND_TYPE = 'RegisterPatientAndEncounterCommand';
+
 export interface RegisterPatientEncounterParams {
   tenantId: string;
+  commandId: string;
+  idempotencyKey: string;
   patientId?: string;
   fullName: string;
   gender: 'male' | 'female' | 'other' | 'unknown';
@@ -61,14 +65,55 @@ function generateTokenNumber(): string {
   return `OPD-${crypto.randomInt(100, 1000)}`;
 }
 
+function registrationPayload(params: RegisterPatientEncounterParams): Record<string, unknown> {
+  return {
+    patientId: params.patientId,
+    fullName: params.fullName,
+    gender: params.gender,
+    dateOfBirth: params.dateOfBirth,
+    identifiers: params.identifiers,
+    contactPhone: params.contactPhone,
+    address: params.address,
+    encounterType: params.encounterType || 'OPD',
+    department: params.department || 'General Medicine',
+    priority: params.priority || 'ROUTINE',
+    chiefComplaint: params.chiefComplaint || '',
+    assignedDoctor: params.assignedDoctor || '',
+    bloodGroup: params.bloodGroup,
+    allergies: params.allergies || [],
+    chronicConditions: params.chronicConditions || [],
+  };
+}
+
 export async function registerPatientAndEncounter(
   params: RegisterPatientEncounterParams
 ): Promise<OrchestrationResult> {
   const db = getAdminFirestore();
   if (!db) throw new Error('TRANSACTION_STORE_UNAVAILABLE: Firebase Admin Firestore is required.');
 
-  const now = Date.now();
   const tenantId = params.tenantId.trim().toLowerCase();
+  const requestPayload = registrationPayload(params);
+  const requestHash = IdempotencyService.computeHash(REGISTRATION_COMMAND_TYPE, requestPayload);
+
+  const reservation = await IdempotencyService.acquireExecution(
+    tenantId,
+    params.idempotencyKey,
+    REGISTRATION_COMMAND_TYPE,
+    requestPayload,
+    params.commandId
+  );
+
+  if (reservation.status === 'CACHED' && reservation.record?.result?.data) {
+    return reservation.record.result.data as OrchestrationResult;
+  }
+  if (reservation.status === 'CONFLICT') {
+    throw new Error('IDEMPOTENCY_KEY_CONFLICT: registration key was reused with a different request.');
+  }
+  if (reservation.status === 'IN_PROGRESS') {
+    throw new Error('IDEMPOTENCY_IN_PROGRESS: registration request is already executing.');
+  }
+
+  const now = Date.now();
   const patientId = params.patientId || `pat_${crypto.randomUUID()}`;
   const encounterId = `enc_${crypto.randomUUID()}`;
   const mrn = generateMRN();
@@ -172,6 +217,15 @@ export async function registerPatientAndEncounter(
     details: `Registered patient ${params.fullName} (${mrn}) with encounter ${encounterId}`,
   };
 
+  const result: OrchestrationResult = {
+    success: true,
+    patient: patientRecord,
+    encounter: encounterRecord,
+    workflowSnapshot,
+    timelineEvent: timelineRecord,
+    outboxEvent: outboxRecord,
+  };
+
   await db.runTransaction(async (transaction) => {
     const patientRef = db.doc(patientDocPath(tenantId, patientId));
     const encounterRef = db.doc(encounterDocPath(tenantId, encounterId));
@@ -179,6 +233,45 @@ export async function registerPatientAndEncounter(
     const timelineRef = db.doc(timelineEventDocPath(tenantId, patientId, timelineEventId));
     const outboxRef = db.doc(outboxEventDocPath(tenantId, outboxRecord.id));
     const auditRef = db.doc(auditLogDocPath(tenantId, auditLogId));
+    const idempotencyRef = db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection('idempotency')
+      .doc(IdempotencyService.getDocumentId(params.idempotencyKey));
+
+    const primaryId = params.identifiers?.find((identifier) => identifier.type === 'CNIC') || params.identifiers?.[0];
+    const mpiKey = primaryId?.value
+      ? `${primaryId.type}_${primaryId.value}`.replace(/[^a-zA-Z0-9_]/g, '_')
+      : null;
+    const mpiRef = mpiKey ? db.doc(mpiRegistryDocPath(tenantId, mpiKey)) : null;
+
+    // Firestore requires transaction reads before writes.
+    const idempotencySnapshot = await transaction.get(idempotencyRef);
+    const mpiSnapshot = mpiRef ? await transaction.get(mpiRef) : null;
+
+    if (!idempotencySnapshot.exists) {
+      throw new Error('IDEMPOTENCY_RESERVATION_MISSING');
+    }
+
+    const idempotencyData = idempotencySnapshot.data() as {
+      status?: string;
+      commandId?: string;
+      requestHash?: string;
+      commandType?: string;
+    };
+
+    if (
+      idempotencyData.status !== 'PENDING' ||
+      idempotencyData.commandId !== params.commandId ||
+      idempotencyData.requestHash !== requestHash ||
+      idempotencyData.commandType !== REGISTRATION_COMMAND_TYPE
+    ) {
+      throw new Error('IDEMPOTENCY_RESERVATION_INVALID');
+    }
+
+    if (mpiSnapshot?.exists) {
+      throw new Error('MPI_IDENTITY_CONFLICT: primary patient identifier already exists.');
+    }
 
     transaction.create(patientRef, sanitizeForFirestore(patientRecord));
     transaction.create(encounterRef, sanitizeForFirestore(encounterRecord));
@@ -187,14 +280,7 @@ export async function registerPatientAndEncounter(
     transaction.create(outboxRef, sanitizeForFirestore(outboxRecord));
     transaction.create(auditRef, sanitizeForFirestore(auditLogEntry));
 
-    const primaryId = params.identifiers?.find((identifier) => identifier.type === 'CNIC') || params.identifiers?.[0];
-    if (primaryId?.value) {
-      const mpiKey = `${primaryId.type}_${primaryId.value}`.replace(/[^a-zA-Z0-9_]/g, '_');
-      const mpiRef = db.doc(mpiRegistryDocPath(tenantId, mpiKey));
-      const existing = await transaction.get(mpiRef);
-      if (existing.exists) {
-        throw new Error('MPI_IDENTITY_CONFLICT: primary patient identifier already exists.');
-      }
+    if (mpiRef && mpiKey) {
       transaction.create(mpiRef, sanitizeForFirestore({
         mpiKey,
         patientId,
@@ -204,14 +290,22 @@ export async function registerPatientAndEncounter(
         createdAt: new Date(now).toISOString(),
       }));
     }
+
+    transaction.set(idempotencyRef, sanitizeForFirestore({
+      ...idempotencyData,
+      status: 'COMPLETED',
+      result: {
+        success: true,
+        commandId: params.commandId,
+        idempotencyKey: params.idempotencyKey,
+        entityId: patientId,
+        data: result,
+      },
+      completedAt: Date.now(),
+      lastUpdatedAt: Date.now(),
+      leaseExpiresAt: null,
+    }), { merge: true });
   });
 
-  return {
-    success: true,
-    patient: patientRecord,
-    encounter: encounterRecord,
-    workflowSnapshot,
-    timelineEvent: timelineRecord,
-    outboxEvent: outboxRecord,
-  };
+  return result;
 }

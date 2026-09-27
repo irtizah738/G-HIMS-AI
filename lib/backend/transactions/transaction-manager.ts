@@ -344,6 +344,53 @@ export class TransactionManager {
       .filter((record) => record.nextAttemptAt <= Date.now());
   }
 
+  public static async claimOutbox(
+    tenantId: string,
+    outboxId: string
+  ): Promise<OutboxRecord | null> {
+    const db = getAdminFirestore();
+
+    if (!db) {
+      if (!canUseEphemeralPersistence()) return null;
+      const item = this.inMemoryOutboxStore.find((record) => record.outboxId === outboxId);
+      if (
+        !item ||
+        !['PENDING', 'FAILED'].includes(item.status) ||
+        item.nextAttemptAt > Date.now()
+      ) {
+        return null;
+      }
+
+      item.status = 'PROCESSING';
+      item.attempts += 1;
+      return { ...item };
+    }
+
+    const ref = db.collection('tenants').doc(tenantId).collection('outbox').doc(outboxId);
+
+    return db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists) return null;
+
+      const record = snapshot.data() as OutboxRecord;
+      if (
+        !['PENDING', 'FAILED'].includes(record.status) ||
+        record.nextAttemptAt > Date.now()
+      ) {
+        return null;
+      }
+
+      const claimed: OutboxRecord = {
+        ...record,
+        status: 'PROCESSING',
+        attempts: record.attempts + 1,
+      };
+
+      transaction.set(ref, sanitizeForFirestore(claimed), { merge: true });
+      return claimed;
+    });
+  }
+
   public static async updateOutbox(
     tenantId: string,
     outboxId: string,

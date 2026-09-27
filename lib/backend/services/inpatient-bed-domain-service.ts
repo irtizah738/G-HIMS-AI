@@ -6,7 +6,8 @@ import { AuthorizationPipeline } from '../auth/authorization-pipeline';
 import { TransactionManager } from '../transactions/transaction-manager';
 import { CommandContext, CommandResult } from '../types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
-import { Bed, BedStatus, Patient } from '@/lib/types/ghims';
+import { Bed, BedStatus } from '@/lib/types/ghims';
+import { PatientMPI } from '@/types/mpi';
 
 export interface AdmitPatientToBedPayload {
   bedId: string;
@@ -44,7 +45,7 @@ export class InpatientBedDomainService {
 
     const [bed, patient] = await Promise.all([
       DomainStateRepository.getById<Bed>(context.tenantId, 'beds', payload.bedId),
-      DomainStateRepository.getById<Patient>(context.tenantId, 'patients', payload.patientId),
+      DomainStateRepository.getById<PatientMPI>(context.tenantId, 'patients', payload.patientId),
     ]);
 
     if (!bed) return { success:false, commandId, idempotencyKey, error:{ code:'BED_NOT_FOUND', message:'Target bed does not exist.' } };
@@ -66,7 +67,7 @@ export class InpatientBedDomainService {
       assignedDoctor:payload.assignedDoctor || bed.assignedDoctor,
       assignedNurse:payload.assignedNurse || bed.assignedNurse,
     };
-    const patientState: Patient = { ...patient, activeBedId: payload.bedId };
+    const patientState: PatientMPI = { ...patient, activeBedId: payload.bedId };
 
     const tx = await TransactionManager.executeAtomicMutation({
       tenantId:context.tenantId,
@@ -151,7 +152,7 @@ export class InpatientBedDomainService {
       return { success:false, commandId, idempotencyKey, error:{ code:'BED_NOT_OCCUPIED', message:'Only an occupied bed can be discharged.' } };
     }
 
-    const patient = await DomainStateRepository.getById<Patient>(context.tenantId, 'patients', bed.patientId);
+    const patient = await DomainStateRepository.getById<PatientMPI>(context.tenantId, 'patients', bed.patientId);
     if (!patient) return { success:false, commandId, idempotencyKey, error:{ code:'PATIENT_NOT_FOUND', message:'Assigned patient record does not exist.' } };
     if (patient.activeBedId && patient.activeBedId !== payload.bedId) {
       return { success:false, commandId, idempotencyKey, error:{ code:'CENSUS_STATE_CONFLICT', message:'Patient active-bed state does not match the bed being discharged.' } };
@@ -164,7 +165,7 @@ export class InpatientBedDomainService {
       patientName:undefined,
       notes:payload.notes || 'Sanitizing protocol in progress (Discharged)',
     };
-    const patientState: Patient = { ...patient, activeBedId:undefined };
+    const patientState: PatientMPI = { ...patient, activeBedId:undefined };
 
     const tx = await TransactionManager.executeAtomicMutation({
       tenantId:context.tenantId,

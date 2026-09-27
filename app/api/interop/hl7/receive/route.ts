@@ -111,7 +111,10 @@ export async function POST(req: NextRequest) {
     batch.create(inboxRef, {
       messageControlId: oruData.messageControlId,
       tenantId,
-      messageType: parsedHL7.messageType,
+      messageType: [
+        parsedHL7.getFieldValue('MSH', 9, 0),
+        parsedHL7.getFieldValue('MSH', 9, 1),
+      ].filter(Boolean).join('^'),
       receivedAt: new Date().toISOString(),
       rawMessage: rawBody,
       status: matchedPatientId ? 'PROCESSED' : 'REQUIRES_RECONCILIATION',

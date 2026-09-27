@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start --port 3000",
     "lint": "tsc --noEmit",
-    "test": "bun test tests/"
+    "test": "bun test tests/",
+    "test:p0": "bun test tests/p0-trust-boundary.test.ts",
+    "validate:p0": "bun run test:p0 && npm run build"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

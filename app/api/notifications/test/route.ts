@@ -1,142 +1,42 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
+import { isDemoRuntime } from '@/lib/runtime/runtime-mode';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { tenantId, rule, sampleAction, sampleResource, sampleSeverity, details, userName, hash } = body;
+    const tenantId = String(body.tenantId || '').trim().toLowerCase();
+    if (!tenantId) return NextResponse.json({ error: 'tenantId is required' }, { status: 400 });
 
-    const action = sampleAction || 'DELETE';
-    const resource = sampleResource || 'patients/mrn_98412/encounters/enc_9921';
-    const severity = sampleSeverity || 'CRITICAL';
-    const channel = rule?.channel || 'slack';
-    const user = userName || 'Dr. Arthur Pendelton (Admin)';
-    const timestamp = new Date().toISOString();
+    const { context } = await deriveAuthoritativeContext(req, tenantId);
+    const isAdmin = context.roles.some((role) =>
+      ['SYSTEM_ADMIN', 'SUPER_ADMIN', 'ADMINISTRATOR', 'HOSPITAL_ADMIN'].includes(role)
+    );
 
-    const results: string[] = [];
-
-    // 1. Process Slack Webhook Dispatch
-    if (channel === 'slack' || channel === 'both') {
-      const webhookUrl = rule?.slackWebhookUrl;
-      const slackChannel = rule?.slackChannel || '#hipaa-security-alerts';
-
-      // Build Slack Block Kit formatted message
-      const slackPayload = {
-        channel: slackChannel,
-        username: 'G-HIMS Security Ledger Bot',
-        icon_emoji: ':hospital:',
-        attachments: [
-          {
-            color: severity === 'CRITICAL' ? '#dc2626' : severity === 'WARNING' ? '#d97706' : '#2563eb',
-            blocks: [
-              {
-                type: 'header',
-                text: {
-                  type: 'plain_text',
-                  text: `🚨 [G-HIMS AUDIT ALERT] Action: ${action}`,
-                  emoji: true,
-                },
-              },
-              {
-                type: 'section',
-                fields: [
-                  {
-                    type: 'mrkdwn',
-                    text: `*Facility Scope:*\n\`${tenantId || 'central-metro-hospital'}\``,
-                  },
-                  {
-                    type: 'mrkdwn',
-                    text: `*Severity:*\n*${severity}*`,
-                  },
-                  {
-                    type: 'mrkdwn',
-                    text: `*Resource:*\n\`${resource}\``,
-                  },
-                  {
-                    type: 'mrkdwn',
-                    text: `*Actor:*\n${user}`,
-                  },
-                ],
-              },
-              {
-                type: 'section',
-                text: {
-                  type: 'mrkdwn',
-                  text: `*Details:* ${details || `Audit event ${action} triggered on ${resource}`}\n*Cryptographic Hash:* \`${hash || 'sha256_mock_a8f9c1e4d2...'}\`\n*Timestamp:* \`${timestamp}\``,
-                },
-              },
-              {
-                type: 'context',
-                elements: [
-                  {
-                    type: 'mrkdwn',
-                    text: `HIPAA §164.312(b) Compliant Ledger Notification &bull; Rule: _${rule?.name || 'Automated Alert'}_`,
-                  },
-                ],
-              },
-            ],
-          },
-        ],
-      };
-
-      // If valid external webhook URL is supplied and not demo placeholder, attempt direct dispatch
-      if (
-        webhookUrl &&
-        webhookUrl.startsWith('https://hooks.slack.com/services/') &&
-        !webhookUrl.includes('XXXXXXXX') &&
-        !webhookUrl.includes('YYYYYYYY')
-      ) {
-        try {
-          const slackRes = await fetch(webhookUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(slackPayload),
-          });
-          if (slackRes.ok) {
-            results.push(`Slack message delivered to ${slackChannel} (HTTP 200)`);
-          } else {
-            results.push(`Slack webhook returned status ${slackRes.status}`);
-          }
-        } catch (e: any) {
-          results.push(`Slack delivery simulated: ${e?.message}`);
-        }
-      } else {
-        // Enterprise Simulated Dispatch
-        results.push(`Slack incoming webhook payload successfully validated & dispatched to ${slackChannel}`);
-      }
+    if (!isAdmin) {
+      return NextResponse.json({ error: 'Administrator role required.' }, { status: 403 });
     }
 
-    // 2. Process Email Dispatch
-    if (channel === 'email' || channel === 'both') {
-      const recipients = rule?.emailRecipients || ['ciso@centralmetro.health'];
-      const subject =
-        rule?.emailSubjectTemplate?.replace('{resource}', resource).replace('{action}', action) ||
-        `[G-HIMS ALERT] ${action} executed on ${resource}`;
-
-      results.push(`Email alert queued and dispatched to ${recipients.length} recipients (${recipients.join(', ')}) via SMTP Gateway`);
-    }
-
-    // 3. Process Custom Webhook
-    if (channel === 'webhook') {
-      results.push(`Custom webhook endpoint payload delivered to ${rule?.customWebhookUrl || 'ERP Webhook Bus'}`);
+    if (!isDemoRuntime()) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: 'NOTIFICATION_TEST_DISABLED',
+          error: 'Synthetic notification dispatch is disabled outside DEMO runtime.',
+        },
+        { status: 501 }
+      );
     }
 
     return NextResponse.json({
       success: true,
-      message: results.join('. '),
-      dispatchedAt: timestamp,
+      simulated: true,
       tenantId,
-      action,
-      resource,
-      channel,
+      message: 'Demo notification test completed. No external message was sent.',
+      dispatchedAt: new Date().toISOString(),
     });
-  } catch (error: any) {
-    console.error('Error in notification test endpoint:', error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: error?.message || 'Failed to process test notification',
-      },
-      { status: 500 }
-    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Notification test failed';
+    return NextResponse.json({ success: false, error: message }, { status: 403 });
   }
 }

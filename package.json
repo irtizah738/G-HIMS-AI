@@ -9,7 +9,8 @@
     "lint": "tsc --noEmit",
     "test": "bun test tests/",
     "test:p0": "bun test tests/p0-trust-boundary.test.ts",
-    "validate:p0": "bun run test:p0 && npm run build"
+    "validate:p0": "bun run test:p0 && bun run test:p0:rules && npm run build",
+    "test:p0:rules": "firebase emulators:exec --only firestore --project ghims-p0-ci \"bun test emulator-security/firestore-rules.test.ts\""
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

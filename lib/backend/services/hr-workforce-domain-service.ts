@@ -21,6 +21,7 @@ import {
   DisciplinaryRecord,
   EmployeeTrainingRecord,
 } from '@/types/hcm-advanced';
+import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 
 export class HrWorkforceDomainService {
   // In-memory CQRS cache stores for instant simulation and persistence sync
@@ -35,6 +36,118 @@ export class HrWorkforceDomainService {
   private static performanceReviews: Map<string, PerformanceReview> = new Map();
   private static disciplinaryRecords: Map<string, DisciplinaryRecord> = new Map();
   private static trainingRecords: Map<string, EmployeeTrainingRecord[]> = new Map();
+
+  private static async loadEmployee(
+    tenantId: string,
+    employeeId: string
+  ): Promise<EmployeeMaster | null> {
+    const cached = this.employees.get(employeeId);
+    if (cached) return cached;
+    const persisted = await DomainStateRepository.getById<EmployeeMaster>(
+      tenantId,
+      'employees',
+      employeeId
+    );
+    if (persisted) this.employees.set(employeeId, persisted);
+    return persisted;
+  }
+
+  private static async loadCredential(
+    tenantId: string,
+    credentialId: string
+  ): Promise<EmployeeCredential | null> {
+    const cached = this.credentials.get(credentialId);
+    if (cached) return cached;
+    const persisted = await DomainStateRepository.getById<EmployeeCredential>(
+      tenantId,
+      'clinicalCredentials',
+      credentialId
+    );
+    if (persisted) this.credentials.set(credentialId, persisted);
+    return persisted;
+  }
+
+  private static async loadAttendance(
+    tenantId: string,
+    attendanceId: string
+  ): Promise<AttendanceRecord | null> {
+    const cached = this.attendanceRecords.get(attendanceId);
+    if (cached) return cached;
+    const persisted = await DomainStateRepository.getById<AttendanceRecord>(
+      tenantId,
+      'attendanceRecords',
+      attendanceId
+    );
+    if (persisted) this.attendanceRecords.set(attendanceId, persisted);
+    return persisted;
+  }
+
+  private static async loadLeave(
+    tenantId: string,
+    leaveId: string
+  ): Promise<LeaveRequest | null> {
+    const cached = this.leaveRequests.get(leaveId);
+    if (cached) return cached;
+    const persisted = await DomainStateRepository.getById<LeaveRequest>(
+      tenantId,
+      'leaveRequests',
+      leaveId
+    );
+    if (persisted) this.leaveRequests.set(leaveId, persisted);
+    return persisted;
+  }
+
+  private static async hydrateClinicalEligibility(
+    tenantId: string,
+    employeeId: string
+  ): Promise<void> {
+    const [credentials, privileges] = await Promise.all([
+      DomainStateRepository.queryEqual<EmployeeCredential>(
+        tenantId,
+        'clinicalCredentials',
+        'employeeId',
+        employeeId
+      ),
+      DomainStateRepository.queryEqual<ClinicalPrivilege>(
+        tenantId,
+        'clinicalPrivileges',
+        'employeeId',
+        employeeId
+      ),
+    ]);
+
+    for (const credential of credentials) {
+      this.credentials.set(credential.credentialId, credential);
+    }
+    for (const privilege of privileges) {
+      this.privileges.set(privilege.privilegeId, privilege);
+    }
+  }
+
+  private static async loadShiftsForEmployee(
+    tenantId: string,
+    employeeId: string
+  ): Promise<RosterShiftEntry[]> {
+    const byId = new Map<string, RosterShiftEntry>();
+
+    for (const shift of this.shifts.values()) {
+      if (shift.employeeId === employeeId) byId.set(shift.rosterId, shift);
+    }
+
+    const persisted = await DomainStateRepository.queryEqual<RosterShiftEntry>(
+      tenantId,
+      'rosterAssignments',
+      'employeeId',
+      employeeId
+    );
+
+    for (const shift of persisted) {
+      this.shifts.set(shift.rosterId, shift);
+      byId.set(shift.rosterId, shift);
+    }
+
+    return Array.from(byId.values());
+  }
 
   // ============================================================================
   // 1. EMPLOYEE MASTER & LIFECYCLE
@@ -130,7 +243,7 @@ export class HrWorkforceDomainService {
       };
     }
 
-    const employee = this.employees.get(payload.employeeId);
+    const employee = await this.loadEmployee(context.tenantId, payload.employeeId);
     if (!employee) {
       return {
         success: false,
@@ -199,7 +312,7 @@ export class HrWorkforceDomainService {
       };
     }
 
-    const employee = this.employees.get(payload.employeeId);
+    const employee = await this.loadEmployee(context.tenantId, payload.employeeId);
     if (!employee) {
       return {
         success: false,
@@ -327,7 +440,7 @@ export class HrWorkforceDomainService {
       };
     }
 
-    const credential = this.credentials.get(payload.credentialId);
+    const credential = await this.loadCredential(context.tenantId, payload.credentialId);
     if (!credential) {
       return {
         success: false,
@@ -434,6 +547,7 @@ export class HrWorkforceDomainService {
     }
 
     // Verify practitioner has active medical license
+    await this.hydrateClinicalEligibility(context.tenantId, payload.employeeId);
     const eligibility = this.checkClinicalEligibility(payload.employeeId);
     if (!eligibility.isEligible) {
       return {
@@ -511,6 +625,7 @@ export class HrWorkforceDomainService {
     }
 
     // Check credential lockout for clinical shifts
+    await this.hydrateClinicalEligibility(context.tenantId, payload.employeeId);
     const eligibility = this.checkClinicalEligibility(payload.employeeId);
     if (!eligibility.isEligible) {
       return {
@@ -525,9 +640,10 @@ export class HrWorkforceDomainService {
     }
 
     // Fatigue compliance: Check for rest period violation (< 10 hours rest between consecutive shifts)
-    const existingEmployeeShifts = Array.from(this.shifts.values()).filter(
-      (s) => s.employeeId === payload.employeeId && s.status !== 'CANCELLED'
-    );
+    const existingEmployeeShifts = (await this.loadShiftsForEmployee(
+      context.tenantId,
+      payload.employeeId
+    )).filter((shift) => shift.status !== 'CANCELLED');
 
     const proposedStart = new Date(payload.startTime).getTime();
     const minRestMs = 10 * 60 * 60 * 1000; // 10 hours
@@ -723,7 +839,7 @@ export class HrWorkforceDomainService {
       attendanceId: string;
     }
   ): Promise<CommandResult<AttendanceRecord>> {
-    const attendance = this.attendanceRecords.get(payload.attendanceId);
+    const attendance = await this.loadAttendance(context.tenantId, payload.attendanceId);
     if (!attendance) {
       return {
         success: false,
@@ -798,7 +914,7 @@ export class HrWorkforceDomainService {
       };
     }
 
-    const record = this.attendanceRecords.get(payload.attendanceId);
+    const record = await this.loadAttendance(context.tenantId, payload.attendanceId);
     if (!record) {
       return {
         success: false,
@@ -948,7 +1064,7 @@ export class HrWorkforceDomainService {
       };
     }
 
-    const leave = this.leaveRequests.get(payload.leaveId);
+    const leave = await this.loadLeave(context.tenantId, payload.leaveId);
     if (!leave) {
       return {
         success: false,

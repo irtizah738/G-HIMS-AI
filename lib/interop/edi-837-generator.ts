@@ -196,7 +196,8 @@ export class Edi837Generator {
     });
 
     // Transaction Set Trailer
-    const segmentCount = segments.length + 1; // including SE
+    const stIndexForCount = segments.findIndex((segment) => segment.startsWith('ST*'));
+    const segmentCount = stIndexForCount >= 0 ? segments.length - stIndexForCount + 1 : 0; // ST through SE inclusive
     segments.push(`SE*${segmentCount}*${ctrlNum}~`);
 
     // Functional Group Trailer

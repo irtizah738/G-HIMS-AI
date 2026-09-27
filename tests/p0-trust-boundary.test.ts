@@ -26,20 +26,16 @@ describe('G-HIMS P0 Core Trust Boundary regression guards', () => {
   test('browser cannot directly write security/event authority collections', async () => {
     const rules = await source('firestore.rules');
 
-    for (const collection of [
-      'sessions',
-      'events',
-      'outbox',
-      'idempotency',
-      'financialIdempotency',
-      'sso_config',
+    for (const matcher of [
+      'match /sessions/{sessionId}',
+      'match /events/{id}',
+      'match /outbox/{id}',
+      'match /idempotency/{id}',
+      'match /financialIdempotency/{id}',
+      'match /sso_config/{id}',
     ]) {
-      expect(rules).toContain(`match /${collection}/{id}`);
+      expect(rules).toContain(matcher);
     }
-
-    expect(rules).toContain('match /sessions/{sessionId}');
-    expect(rules).toContain('match /outbox/{id}');
-    expect(rules).toContain('match /events/{id}');
   });
 
   test('server password login route cannot read or mutate passwords', async () => {

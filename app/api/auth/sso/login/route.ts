@@ -1,78 +1,58 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { SSOCallbackPayload } from '@/lib/auth/sso-types';
+import { isDemoRuntime } from '@/lib/runtime/runtime-mode';
 
+/**
+ * Enterprise SSO remains disabled until a real OIDC/SAML assertion verifier is configured.
+ * Synthetic SSO is permitted only in the isolated DEMO runtime.
+ */
 export async function POST(req: NextRequest) {
-  try {
-    const body: SSOCallbackPayload = await req.json();
-    const { tenantId, providerType, email, displayName, role, department } = body;
-
-    const userEmail = email || 'dr.jenkins@centralmetro.health';
-    const userName = displayName || 'Dr. Sarah Jenkins, MD';
-    const assignedRole = role || 'physician';
-    const assignedDept = department || 'Cardiology & Intensive Care';
-    const activeTenantId = tenantId || 'central-metro-hospital';
-
-    const userId = `sso_usr_${userEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
-    const sessionId = `sso_sess_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-
-    // Build standard G-HIMS Enterprise Login Payload
-    const loginPayload = {
-      authenticated: true,
-      authMethod: `SSO_${providerType || 'SAML_2_0'}`,
-      user: {
-        uid: userId,
-        email: userEmail,
-        displayName: userName,
-        photoURL: null,
-      },
-      tenant: {
-        tenantId: activeTenantId,
-        name:
-          activeTenantId === 'central-metro-hospital'
-            ? 'Central Metro General Hospital'
-            : activeTenantId === 'st-jude-childrens'
-            ? "St. Jude Specialist Children's Hospital"
-            : 'Metropolitan Academic Medical Center',
-        facilityCode: 'CMH-NYC-01',
-      },
-      authorization: {
-        roles: [assignedRole],
-        permissions: [
-          'read:patients',
-          'write:patients',
-          'read:encounters',
-          'write:encounters',
-          'read:orders',
-          'write:orders',
-          'read:triage',
-          'write:triage',
-          'read:clinical_protocols',
-        ],
-        departmentIds: [assignedDept],
-        facilityIds: ['CMH-NYC-01'],
-        accountStatus: 'ACTIVE',
-        clinicalPrivileges: [
-          'PRIV_INPATIENT_ADMIT',
-          'PRIV_EMERGENCY_TRIAGE',
-          'PRIV_MEDICATION_ORDER',
-          'PRIV_DIAGNOSTIC_INTERPRETATION',
-        ],
-      },
-      session: {
-        sessionId,
-        expiresAt: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString(), // 8 hours
-      },
-      customToken: null,
-    };
-
-    return NextResponse.json(loginPayload);
-  } catch (error: any) {
+  if (!isDemoRuntime()) {
     return NextResponse.json(
       {
         authenticated: false,
-        error: error?.message || 'SSO token exchange failed',
+        code: 'SSO_CONFIG_ERROR',
+        error: 'Enterprise SSO is not configured for this environment.',
       },
-      { status: 500 }
+      { status: 501 }
     );
   }
+
+  const body = await req.json().catch(() => ({}));
+  const email = String(body.email || 'demo.clinician@example.invalid').trim().toLowerCase();
+  const tenantId = String(body.tenantId || 'central-metro-hospital').trim().toLowerCase();
+
+  return NextResponse.json({
+    authenticated: true,
+    authMethod: 'DEMO_SSO',
+    user: {
+      uid: `demo_sso_${email.replace(/[^a-z0-9]/g, '_')}`,
+      email,
+      displayName: String(body.displayName || 'Demo Clinician'),
+    },
+    tenant: {
+      tenantId,
+      name: 'G-HIMS Demo Hospital',
+      facilityCode: 'DEMO',
+    },
+    authorization: {
+      roles: ['doctor'],
+      permissions: ['read:patients', 'read:encounters'],
+      departmentIds: ['demo_department'],
+      facilityIds: ['demo_facility'],
+      accountStatus: 'ACTIVE',
+      clinicalPrivileges: [],
+    },
+    session: {
+      sessionId: `demo_sess_${Date.now()}`,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    },
+    accessibleTenants: [
+      {
+        tenantId,
+        name: 'G-HIMS Demo Hospital',
+        facilityCode: 'DEMO',
+        roles: ['doctor'],
+      },
+    ],
+  });
 }

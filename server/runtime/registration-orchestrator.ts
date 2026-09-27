@@ -149,6 +149,8 @@ export async function registerPatientAndEncounter(
     updatedAt: now,
     createdById: params.actorId,
     version: 1,
+    status: 'ACTIVE',
+    activeEncounterId: encounterId,
   };
 
   const encounterRecord: EncounterRuntime = {

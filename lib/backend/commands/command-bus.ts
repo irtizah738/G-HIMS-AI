@@ -16,6 +16,7 @@ import { PatientIdentityDomainService } from '../services/patient-identity-domai
 import { PatientMergeDomainService } from '../services/patient-merge-domain-service';
 import { InpatientBedDomainService } from '../services/inpatient-bed-domain-service';
 import { TelehealthDomainService } from '../services/telehealth-domain-service';
+import { RevenueIntegrityDomainService } from '../services/revenue-integrity-domain-service';
 import { IdempotencyService } from '../idempotency/idempotency-service';
 
 export class CommandBus {
@@ -223,6 +224,24 @@ export class CommandBus {
         // --- Finance Domain ---
         case 'PostJournalCommand':
           result = await FinancialLedgerDomainService.postUniversalJournal(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ReconcileRevenueIntegrityFindingCommand':
+          result = await RevenueIntegrityDomainService.reconcile(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'DismissRevenueIntegrityFindingCommand':
+          result = await RevenueIntegrityDomainService.dismiss(
             context,
             command.commandId,
             command.idempotencyKey,

@@ -1,64 +1,74 @@
-# G-HIMS OS — REGULATORY & COMPLIANCE READINESS AUDIT
-**Document Classification:** Pre-Deployment Compliance Specification  
-**Assessment Standard:** Objective Distinction Between Architectural Capability vs. Institutional Legal Certification  
-**Authoritative Directive:** G-HIMS DOCTRINE §30 — "Do NOT claim HIPAA certification, HIPAA compliance, GDPR compliance, ISO 27001 certification, FDA approval, medical-device certification, or clinical validation unless actual external evidence exists. Explicitly distinguish ARCHITECTURALLY SUPPORTS from FORMALLY CERTIFIED / VALIDATED."
+# G-HIMS Compliance Readiness — Evidence Boundary
 
----
+## Important boundary
 
-## 1. Compliance Status Summary
+G-HIMS can implement technical controls that support regulatory and security objectives. This repository does **not** establish legal compliance, certification, regulatory clearance, or institutional approval.
 
-| Framework / Regulation | Architectural Capability | Formal Institutional Certification | Production Readiness Determination |
-| :--- | :---: | :---: | :--- |
-| **HIPAA Security Rule (45 CFR Part 164)** | **ARCHITECTURALLY SUPPORTS** | **NOT CERTIFIED** | Requires signed Business Associate Agreements (BAA) with cloud providers and institutional penetration audit. |
-| **HIPAA Privacy Rule & Minimum Necessary** | **ARCHITECTURALLY SUPPORTS** | **NOT CERTIFIED** | Granular RBAC/ABAC role filtering implemented; institutional privacy officer sign-off required. |
-| **HITECH Act Audit Logging (45 CFR § 164.312)** | **ARCHITECTURALLY SUPPORTS** | **NOT CERTIFIED** | Immutable append-only audit trail implemented with correlation IDs; external SIEM ingestion pending. |
-| **EU GDPR (Regulation 2016/679)** | **ARCHITECTURALLY SUPPORTS** | **NOT CERTIFIED** | Tenant-scoped data segregation implemented; Right to Erasure vs. Medical Record Retention reconciliation pending. |
-| **21 CFR Part 11 (Electronic Signatures & Records)** | **ARCHITECTURALLY SUPPORTS** | **NOT VALIDATED** | Dual-signature, immutable timestamps, and non-repudiation audit logging built; validation IQ/OQ/PQ needed. |
-| **FDA 510(k) / SaMD (Software as a Medical Device)** | **NOT CERTIFIED** | **NOT CERTIFIED** | Diagnostic decision support (AI/algorithmic interpretation) operates under Clinical Decision Support (CDS) exemption; not cleared as primary diagnostic tool. |
-| **ISO 13485 (Medical Devices QMS)** | **NOT IMPLEMENTED** | **NOT CERTIFIED** | Software engineering lifecycle documented; formal Quality Management System (QMS) audit pending. |
-| **ISO 27001 (Information Security Management)** | **ARCHITECTURALLY SUPPORTS** | **NOT CERTIFIED** | Zero-trust authentication and encryption in transit/rest present; requires third-party SOC2 / ISO audit. |
+Statements about HIPAA, GDPR, 21 CFR Part 11, ISO 27001, SOC 2, HITRUST, medical-device regulation, local health-data laws, or payer rules require deployment-specific legal, organizational and independent-assessment evidence.
 
----
+## Repository-supported control areas
 
-## 2. Detailed Regulatory Control Breakdown
+### Identity and authorization
+- Firebase identity is verified server-side for protected actions.
+- Tenant membership, session state, roles and clinical privileges are re-resolved from authoritative server data.
+- Sensitive command execution does not trust client-supplied actor/role/permission headers.
+- Revoked and expired sessions fail closed.
 
-### A. HIPAA Security & Privacy Rules
-- **Implemented Controls (Architectural):**
-  - Tenant isolation at `/tenants/{tenantId}/...` prevents multi-tenant data bleed.
-  - Granular role-based and clinical privilege-based authorization filters PHI access.
-  - TLS 1.3 enforced for all client-to-cloud communications; AES-256 server-side encryption at rest.
-  - Zero-trust server-side validation ignores untrusted client context.
-- **Missing Controls for Formal Certification:**
-  - Fully executed Google Cloud BAA (Business Associate Agreement) for production environment.
-  - Formal Third-Party SOC 2 Type II or HITRUST CSF assessment.
-  - Automated PHI access anomaly detection alerts integrated into hospital SOC.
-- **Evidence Required for Production Certification:**
-  - Third-party independent penetration test report with zero high-severity findings.
-  - Institutional disaster recovery dry run with recorded RPO (<1 hour) and RTO (<4 hours).
+### Data authority and auditability
+- Sensitive domain mutations use server-owned command/transaction paths.
+- Domain writes can produce immutable event, audit and outbox records within the transaction boundary.
+- Browser clients cannot directly write the protected event/audit/outbox/idempotency collections.
+- Client-originated audit activity is re-authenticated and persisted server-side.
+- The repository does not claim that every audit record participates in a global cryptographic hash chain.
 
-### B. 21 CFR Part 11 (Electronic Records & Signatures)
-- **Implemented Controls (Architectural):**
-  - Immutable domain events generated for all order signings, clinical stage advancements, and financial postings.
-  - Signer identity, user role, timestamp, and audit reason bound permanently to each transaction.
-  - No historical record mutation permitted; all corrections require compensating reversal transactions.
-- **Missing Controls for Formal Certification:**
-  - Formal Installation Qualification (IQ), Operational Qualification (OQ), and Performance Qualification (PQ) validation documentation.
-  - Dedicated hardware biometric re-authentication for high-potency narcotic orders.
-- **Evidence Required for Production Certification:**
-  - Validated CSV (Computer System Validation) package approved by Hospital QA / Regulatory Affairs.
+### AI governance
+- Clinical AI output is a draft requiring authorized human review.
+- Draft provenance records provider/model/purpose and input/output hashes.
+- AI activation is explicit; the presence of an API credential alone does not enable clinical generation.
+- AI output is not an autonomous diagnosis, prescription, order or claim-submission authority.
 
-### C. Clinical AI & Decision Support Governance
-- **Implemented Controls (Architectural):**
-  - **Human-in-the-Loop Mandate:** AI-generated medication suggestions or diagnostic differentials NEVER automatically become orders. They require human physician acceptance and signature.
-  - AI clinical output is isolated from primary domain mutations until a clinician issues a signed command.
-- **Regulatory Boundary:**
-  - The AI subsystem qualifies strictly as Non-Device Clinical Decision Support (Section 520(o)(1)(E) of the FD&C Act) when providing recommendations that the healthcare professional can independently review.
-  - G-HIMS MUST NOT be marketed or operated as an autonomous clinical diagnostic tool.
+### Integration governance
+- External integrations have explicit activation states.
+- DICOM/FHIR adapters do not silently fall back to fake production data.
+- Real device telemetry is blocked until the physical integration validation package is complete.
+- X12 output is structurally validated only; payer/clearinghouse conformance remains external.
 
----
+### Operational resilience
+- DEMO, STAGING and PRODUCTION project separation is enforced by runtime project contracts.
+- Backup/restore entrypoints require explicit project/environment targeting.
+- Disaster-recovery RPO/RTO values are engineering **targets** until measured in a timed recovery exercise.
+- Structured operational logs redact PHI-shaped and credential-shaped attributes.
 
-## 3. Mandatory Remediation Pathway Prior to Live Hospital Deployment
-1. **Execute Institutional BAA**: Obtain signed Cloud BAA before storing production PHI.
-2. **Third-Party Security Audit**: Commission an accredited cybersecurity firm to conduct black-box and grey-box penetration tests against all API routes.
-3. **Computerized Validation Package (CSV)**: Compile complete requirements traceability matrix (RTM) mapped to the 52 automated tests.
-4. **Institutional Review Board (IRB) Approval**: For clinical pilot studies, secure IRB authorization affirming human oversight across all automated workflow stages.
+## Controls that require external evidence
+
+Examples include:
+
+- cloud provider contractual terms and any required business-associate/data-processing agreements;
+- network/TLS configuration actually used by the deployed environment;
+- storage encryption and key-management configuration actually enabled in the cloud project;
+- vulnerability management, endpoint security and workforce security processes;
+- retention/deletion schedules approved by the hospital and jurisdiction;
+- independent penetration test results;
+- SIEM alerting, incident response and breach-notification procedures;
+- backup schedule execution, retention and successful restore exercises;
+- computerized system validation where applicable;
+- clinical safety review and medical-device/regulatory classification where applicable.
+
+## Evidence language
+
+Use:
+- “architecturally supports”
+- “implemented in repository”
+- “repository-tested”
+- “integration ready”
+- “simulation only”
+- “external validation required”
+
+Do not use without independent evidence:
+- “HIPAA compliant”
+- “certified”
+- “regulator approved”
+- “validated production system”
+- “guaranteed tamper-proof”
+- “verified RPO/RTO”
+- “safe for unrestricted clinical production”

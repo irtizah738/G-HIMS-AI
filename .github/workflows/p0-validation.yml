@@ -50,4 +50,4 @@ jobs:
         run: npm install --no-save --package-lock=false @firebase/rules-unit-testing@4.0.1 firebase-tools
 
       - name: Run Firestore Emulator penetration suite
-        run: npx firebase emulators:exec --project ghims-p0-ci --only firestore "bun test security-tests/firestore-rules.test.ts"
+        run: npx firebase emulators:exec --project ghims-p0-ci --only firestore "bun test emulator-security/firestore-rules.test.ts"

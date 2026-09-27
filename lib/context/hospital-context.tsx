@@ -34,16 +34,10 @@ import {
   subscribeToOpdQueue,
   subscribeToAuditLogs,
   subscribeToTelehealthSessions,
-  syncPatientToFirestore,
-  syncBedToFirestore,
-  syncMismatchToFirestore,
-  syncOpdTokenToFirestore,
-  syncAuditLogToFirestore,
-  syncHl7ToFirestore,
-  syncTelehealthSessionToFirestore,
 } from '@/lib/firebase/firestore-service';
 import { DischargedCensusRecord, initialDischargedCensus } from '@/lib/clinical/ipd-service';
 import { executeActiveTenantCommand, registerActiveTenantPatient } from '@/lib/api/command-client';
+import { syncEngine } from '@/lib/offline/sync-engine';
 
 const initialTelehealthSessions: TelehealthSession[] = [
   {
@@ -1150,7 +1144,6 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       details,
     };
     setAuditLogs(prev => [newLog, ...prev]);
-    syncAuditLogToFirestore(newLog).catch(() => {});
   };
 
   const recordMutation = (actionType: OfflineMutation['actionType'], entity: string, payload: Record<string, any>) => {
@@ -1604,7 +1597,6 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
 
     const reconciledItem: BillingAuditMismatch = { ...mismatch, status: 'reconciled' };
     setMismatches(prev => prev.map(m => m.id === mismatchId ? reconciledItem : m));
-    syncMismatchToFirestore(reconciledItem).catch(() => {});
 
     // Add as bill item to the patient encounter
     let updatedPatient: Patient | undefined;
@@ -1642,7 +1634,6 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       }
       return p;
     }));
-    if (updatedPatient) syncPatientToFirestore(updatedPatient).catch(() => {});
 
     recordMutation('RECONCILE_BILL', `Mismatch:${mismatchId}`, mismatch);
     addAuditLog('RECONCILE_LEAKAGE', `Encounter ${mismatch.encounterId}`, `Reconciled +$${mismatch.estimatedRecoverableRevenue} (${mismatch.suggestedCptCode}) into invoice`);
@@ -1651,9 +1642,6 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
   const dismissMismatch = (mismatchId: string) => {
     const dismissedItem = mismatches.find(m => m.id === mismatchId);
     setMismatches(prev => prev.map(m => m.id === mismatchId ? { ...m, status: 'dismissed' } : m));
-    if (dismissedItem) {
-      syncMismatchToFirestore({ ...dismissedItem, status: 'dismissed' }).catch(() => {});
-    }
     addAuditLog('DISMISS_MISMATCH', `Mismatch ${mismatchId}`, `Marked as not billable / clinical exception`);
   };
 
@@ -1665,7 +1653,6 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       status: 'dispatched',
     };
     setHl7Messages(prev => [newMsg, ...prev]);
-    syncHl7ToFirestore(newMsg).catch(() => {});
     addAuditLog('DISPATCH_HL7', msg.type, `Dispatched to ${msg.receivingApp} for MRN: ${msg.patientMrn}`);
   };
 
@@ -1711,9 +1698,28 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
   };
 
   const triggerOfflineSync = () => {
-    setOfflineMutations(prev => prev.map(m => ({ ...m, syncStatus: 'synced' })));
     setNetworkMode('online');
-    addAuditLog('OFFLINE_SYNC_COMPLETE', 'Dual-Engine Sync Queue', 'Replayed 100% of pending offline mutations to cloud database with zero conflicts');
+
+    if (!syncEngine) {
+      addAuditLog('OFFLINE_SYNC_ERROR', 'Command Sync Queue', 'Offline sync engine is unavailable in this runtime.', 'ERROR');
+      return;
+    }
+
+    void syncEngine.processSyncQueue().then(({ syncedCount, conflictCount }) => {
+      addAuditLog(
+        conflictCount > 0 ? 'OFFLINE_SYNC_REVIEW_REQUIRED' : 'OFFLINE_SYNC_COMPLETE',
+        'Command Sync Queue',
+        `Server replay completed: ${syncedCount} accepted, ${conflictCount} requiring review.`,
+        conflictCount > 0 ? 'WARNING' : 'SUCCESS'
+      );
+    }).catch((error) => {
+      addAuditLog(
+        'OFFLINE_SYNC_ERROR',
+        'Command Sync Queue',
+        error instanceof Error ? error.message : 'Offline sync failed.',
+        'ERROR'
+      );
+    });
   };
 
   const createTelehealthSession = async (data: {

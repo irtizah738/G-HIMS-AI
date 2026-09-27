@@ -46,6 +46,8 @@ export async function POST(req: NextRequest) {
 
     const normalizedParams: RegisterPatientEncounterParams = {
       tenantId: context.tenantId,
+      commandId: String(body.commandId || `cmd_${crypto.randomUUID()}`),
+      idempotencyKey: String(body.idempotencyKey || `idem_${crypto.randomUUID()}`),
       patientId: body.patientId,
       fullName,
       gender,

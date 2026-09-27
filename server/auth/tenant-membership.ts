@@ -42,6 +42,8 @@ function deriveClinicalPrivileges(roles: string[]): string[] {
     [
       'ORDER_MEDICATIONS',
       'ORDER_DIAGNOSTICS',
+      'ORDER_LAB',
+      'ORDER_RADIOLOGY',
       'ADMIT_INPATIENT',
       'DISCHARGE_INPATIENT',
       'PERFORM_PROCEDURES',

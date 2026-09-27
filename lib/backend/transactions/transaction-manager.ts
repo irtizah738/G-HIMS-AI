@@ -101,6 +101,7 @@ function collectionForEntityType(entityType: string): string {
     RESOURCE_MASTER: 'resources',
     HOSPITAL_ROOM: 'rooms',
     HOSPITAL_BED: 'beds',
+    TELEHEALTH_SESSION: 'telehealthSessions',
     RESOURCE_RESERVATION: 'resourceReservations',
     MAINTENANCE_WORK_ORDER: 'maintenanceWorkOrders',
     CALIBRATION_RECORD: 'calibrationRecords',

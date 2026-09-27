@@ -7,7 +7,8 @@ import { AuthorizationPipeline } from '../auth/authorization-pipeline';
 import { TransactionManager } from '../transactions/transaction-manager';
 import { CommandContext, CommandResult } from '../types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
-import { Patient, TelehealthSession, TelehealthSoapNote, TelehealthPrescription } from '@/lib/types/ghims';
+import { TelehealthSession, TelehealthSoapNote, TelehealthPrescription } from '@/lib/types/ghims';
+import { PatientMPI } from '@/types/mpi';
 
 export interface CreateTelehealthSessionPayload {
   patientId: string;
@@ -49,9 +50,12 @@ export class TelehealthDomainService {
       return { success:false, commandId, idempotencyKey, error:{ code:'INVALID_TELEHEALTH_REQUEST', message:'patientId and chiefComplaint are required.' } };
     }
 
-    const patient = await DomainStateRepository.getById<Patient>(context.tenantId, 'patients', payload.patientId);
+    const patient = await DomainStateRepository.getById<PatientMPI>(context.tenantId, 'patients', payload.patientId);
     if (!patient) {
       return { success:false, commandId, idempotencyKey, error:{ code:'PATIENT_NOT_FOUND', message:'Telehealth patient does not exist in this tenant.' } };
+    }
+    if (patient.status === 'MERGED') {
+      return { success:false, commandId, idempotencyKey, error:{ code:'STALE_MERGED_PATIENT_CONTEXT', message:'Telehealth cannot start from a merged patient identity.' } };
     }
 
     const now = new Date().toISOString();
@@ -66,8 +70,16 @@ export class TelehealthDomainService {
       patientId: patient.id,
       patientName: patient.fullName,
       patientMrn: patient.mrn,
-      age: patient.age,
-      gender: patient.gender,
+      age: Math.max(
+        0,
+        new Date().getFullYear() - new Date(patient.dateOfBirth).getFullYear()
+      ),
+      gender:
+        patient.gender === 'male'
+          ? 'Male'
+          : patient.gender === 'female'
+            ? 'Female'
+            : 'Other',
       scheduledTime: payload.scheduledTime || now,
       status: 'WAITING_ROOM',
       type: payload.type || 'Telehealth Consultation',
@@ -102,14 +114,49 @@ export class TelehealthDomainService {
       updatedAt: now,
     };
 
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType:'TELEHEALTH_SESSION',
-      entityId:sessionId,
-      eventType:'TELEHEALTH_SESSION_CREATED',
-      domainState:session,
-      eventPayload:{ sessionId, encounterId, patientId:patient.id, type:session.type, scheduledTime:session.scheduledTime },
-      auditReason:`Telehealth session scheduled for patient ${patient.mrn}.`,
-      outboxTopic:'g-hims-telehealth-events',
+    const encounterState = {
+      encounterId,
+      tenantId: context.tenantId,
+      patientId: patient.id,
+      encounterType: 'TELEHEALTH',
+      chiefComplaint: payload.chiefComplaint.trim(),
+      departmentId: 'TELEHEALTH',
+      status: 'ACTIVE',
+      currentStage: 'CONSULTATION',
+      priority: 'ROUTINE',
+      assignedProviderId: context.actorId,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'CLINICIAN',
+      aggregateType: 'TELEHEALTH_SESSION',
+      aggregateId: sessionId,
+      eventType: 'TELEHEALTH_SESSION_CREATED',
+      eventPayload: {
+        sessionId,
+        encounterId,
+        patientId: patient.id,
+        type: session.type,
+        scheduledTime: session.scheduledTime,
+      },
+      auditAction: 'TELEHEALTH_SESSION_CREATED',
+      auditResourceType: 'TELEHEALTH_SESSION',
+      auditResourceId: sessionId,
+      auditReason: `Telehealth session scheduled for patient ${patient.mrn}.`,
+      outboxTopic: 'g-hims-telehealth-events',
+      idempotencyKey,
+      commandId,
+      correlationId: context.correlationId,
+      domainState: session,
+      additionalStateWrites: [{
+        entityType: 'ENCOUNTER',
+        entityId: encounterId,
+        domainState: encounterState,
+      }],
     });
 
     return {
@@ -117,9 +164,9 @@ export class TelehealthDomainService {
       commandId,
       idempotencyKey,
       entityId:sessionId,
-      eventId:tx.event.eventId,
-      auditId:tx.audit.auditId,
-      outboxId:tx.outbox.outboxId,
+      eventId:tx.eventId,
+      auditId:tx.auditId,
+      outboxId:tx.outboxId,
       data:session,
     };
   }

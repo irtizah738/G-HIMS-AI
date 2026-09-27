@@ -19,6 +19,7 @@ import {
   OperationalMatchRequest,
   OperationalMatchResult,
 } from '@/types/resource-management';
+import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 
 export class ResourceCapacityDomainService {
   private static resources: Map<string, ResourceMaster> = new Map();
@@ -27,6 +28,65 @@ export class ResourceCapacityDomainService {
   private static workOrders: Map<string, MaintenanceWorkOrder> = new Map();
   private static calibrations: Map<string, CalibrationRecord> = new Map();
   private static reservations: Map<string, ResourceReservation> = new Map();
+
+  private static async loadResource(
+    tenantId: string,
+    resourceId: string
+  ): Promise<ResourceMaster | null> {
+    const cached = this.resources.get(resourceId);
+    if (cached) return cached;
+
+    const persisted = await DomainStateRepository.getById<ResourceMaster>(
+      tenantId,
+      'resources',
+      resourceId
+    );
+    if (persisted) this.resources.set(resourceId, persisted);
+    return persisted;
+  }
+
+  private static async loadWorkOrder(
+    tenantId: string,
+    workOrderId: string
+  ): Promise<MaintenanceWorkOrder | null> {
+    const cached = this.workOrders.get(workOrderId);
+    if (cached) return cached;
+
+    const persisted = await DomainStateRepository.getById<MaintenanceWorkOrder>(
+      tenantId,
+      'maintenanceWorkOrders',
+      workOrderId
+    );
+    if (persisted) this.workOrders.set(workOrderId, persisted);
+    return persisted;
+  }
+
+  private static async loadReservationsForResource(
+    tenantId: string,
+    resourceId: string
+  ): Promise<ResourceReservation[]> {
+    const byId = new Map<string, ResourceReservation>();
+
+    for (const reservation of this.reservations.values()) {
+      if (reservation.resourceId === resourceId) {
+        byId.set(reservation.reservationId, reservation);
+      }
+    }
+
+    const persisted = await DomainStateRepository.queryEqual<ResourceReservation>(
+      tenantId,
+      'resourceReservations',
+      'resourceId',
+      resourceId
+    );
+
+    for (const reservation of persisted) {
+      this.reservations.set(reservation.reservationId, reservation);
+      byId.set(reservation.reservationId, reservation);
+    }
+
+    return Array.from(byId.values());
+  }
 
   // ============================================================================
   // 1. UNIFIED RESOURCE MASTER & REGISTRY
@@ -180,7 +240,7 @@ export class ResourceCapacityDomainService {
     }
 
     // Check resource status and calibration lockout
-    const resource = this.resources.get(payload.resourceId);
+    const resource = await this.loadResource(context.tenantId, payload.resourceId);
     if (resource) {
       if (resource.status === 'OUT_OF_SERVICE' || resource.status === 'MAINTENANCE') {
         return {
@@ -208,8 +268,13 @@ export class ResourceCapacityDomainService {
     }
 
     // Conflict Check: Double-booking prevention across overlapping reservations
-    const existingReservations = Array.from(this.reservations.values()).filter(
-      (r) => r.resourceId === payload.resourceId && r.status !== 'CANCELLED' && r.status !== 'COMPLETED'
+    const existingReservations = (await this.loadReservationsForResource(
+      context.tenantId,
+      payload.resourceId
+    )).filter(
+      (reservation) =>
+        reservation.status !== 'CANCELLED' &&
+        reservation.status !== 'COMPLETED'
     );
 
     for (const ex of existingReservations) {
@@ -301,7 +366,7 @@ export class ResourceCapacityDomainService {
       };
     }
 
-    const resource = this.resources.get(payload.resourceId);
+    const resource = await this.loadResource(context.tenantId, payload.resourceId);
     if (!resource) {
       return {
         success: false,
@@ -442,7 +507,7 @@ export class ResourceCapacityDomainService {
       };
     }
 
-    const wo = this.workOrders.get(payload.workOrderId);
+    const wo = await this.loadWorkOrder(context.tenantId, payload.workOrderId);
     if (!wo) {
       return {
         success: false,
@@ -463,7 +528,7 @@ export class ResourceCapacityDomainService {
     this.workOrders.set(payload.workOrderId, wo);
 
     // Return resource to AVAILABLE
-    const resource = this.resources.get(wo.resourceId);
+    const resource = await this.loadResource(context.tenantId, wo.resourceId);
     if (resource) {
       resource.status = 'AVAILABLE';
       resource.lastMaintenanceDate = now.split('T')[0];

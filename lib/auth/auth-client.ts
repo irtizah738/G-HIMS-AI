@@ -84,6 +84,10 @@ export class AuthClient {
       }
 
       const loginPayload: LoginResponsePayload = data;
+
+      // Refresh the token after the backend has synchronized tenant read claims.
+      await credential.user.getIdToken(true);
+
       const authUser: AuthenticatedUser = {
         uid: loginPayload.user.uid,
         email: loginPayload.user.email,
@@ -196,9 +200,12 @@ export class AuthClient {
    */
   public static async validateCurrentSession(): Promise<LoginResponsePayload | null> {
     try {
-      // 1. Instant check from local cache for immediate zero-latency startup
       const cached = await getCachedAuthSession();
-      if (cached) {
+      const currentUser = auth.currentUser;
+
+      // Offline cache is a continuity aid only; it is never used to mint new authority.
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        if (!cached) return null;
         return {
           authenticated: true,
           user: {
@@ -208,7 +215,7 @@ export class AuthClient {
           },
           tenant: {
             tenantId: cached.user.tenantId,
-            name: cached.user.tenantId === 'central-metro-hospital' ? 'Central Metro General Hospital' : 'Hospital Facility',
+            name: 'Offline cached facility',
           },
           authorization: {
             roles: cached.user.roles,
@@ -222,47 +229,32 @@ export class AuthClient {
             sessionId: cached.session.sessionId,
             expiresAt: cached.session.expiresAt,
           },
-          accessibleTenants: [
-            {
-              tenantId: cached.user.tenantId,
-              name: 'Central Metro General Hospital',
-              roles: cached.user.roles,
-            },
-          ],
+          accessibleTenants: [{
+            tenantId: cached.user.tenantId,
+            name: 'Offline cached facility',
+            roles: cached.user.roles,
+          }],
         };
       }
 
-      // 2. Firebase user token validation with safe 1.5s timeout
-      const currentUser = auth.currentUser;
-      if (currentUser) {
-        const idToken = await Promise.race([
-          currentUser.getIdToken(false),
-          new Promise<null>((res) => setTimeout(() => res(null), 1000)),
-        ]);
+      if (!currentUser || !cached) return null;
 
-        if (idToken) {
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 1500);
-          try {
-            const response = await fetch('/api/auth/session', {
-              method: 'GET',
-              headers: {
-                Authorization: `Bearer ${idToken}`,
-              },
-              signal: controller.signal,
-            });
+      const idToken = await currentUser.getIdToken(false);
+      const response = await fetch('/api/auth/session', {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'x-ghims-tenant-id': cached.user.tenantId,
+          'x-ghims-session-id': cached.session.sessionId,
+        },
+      });
 
-            if (response.ok) {
-              const payload: LoginResponsePayload = await response.json();
-              return payload;
-            }
-          } finally {
-            clearTimeout(timeout);
-          }
-        }
+      if (!response.ok) {
+        await clearCachedAuthSession();
+        return null;
       }
 
-      return null;
+      return await response.json() as LoginResponsePayload;
     } catch {
       return null;
     }
@@ -283,7 +275,10 @@ export class AuthClient {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${idToken}`,
             },
-            body: JSON.stringify({ sessionId }),
+            body: JSON.stringify({
+              sessionId: sessionId || (await getCachedAuthSession())?.session.sessionId,
+              tenantId: (await getCachedAuthSession())?.user.tenantId,
+            }),
           }).catch(() => {});
         }
       }

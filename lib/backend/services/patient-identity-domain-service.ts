@@ -11,6 +11,8 @@
 
 import { CommandContext, CommandResult } from '../types';
 import { TransactionManager } from '../transactions/transaction-manager';
+import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
+import { PatientMPI } from '@/types/mpi';
 
 export interface RegisterPatientPayload {
   fullName: string;
@@ -499,7 +501,7 @@ export class PatientIdentityDomainService {
     idempotencyKey: string,
     payload: ConfirmPatientIdentityPayload
   ): Promise<CommandResult> {
-    const patient = PATIENTS_STORE.get(payload.patientId);
+    const patient = await DomainStateRepository.getById<PatientMPI>(context.tenantId, 'patients', payload.patientId);
 
     if (!patient || patient.tenantId !== context.tenantId) {
       return {

@@ -1,18 +1,23 @@
 /**
  * G-HIMS Server-Side Session Lifecycle Management
- * Enforces TTL, inactivity windows, device binding, and immutable audit logs
+ * Production rule: session validation is fail-closed and never creates authorization.
  */
 
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { UserSessionRecord } from '@/lib/auth/auth-types';
 import { AuthError } from '@/lib/auth/auth-errors';
+import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
 import crypto from 'crypto';
 
-const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 Hours TTL
-const INACTIVITY_LIMIT_MS = 60 * 60 * 1000; // 1 Hour Inactivity Limit
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const INACTIVITY_LIMIT_MS = 60 * 60 * 1000;
 
-// In-memory fallback session store for container sandboxes and disconnected states
 const inMemorySessionStore = new Map<string, UserSessionRecord>();
+
+function mayUseInMemorySessions(): boolean {
+  const mode = getRuntimeMode();
+  return mode === 'DEMO' || mode === 'TEST';
+}
 
 export function hashString(value?: string): string {
   if (!value) return '';
@@ -48,23 +53,36 @@ export async function createSession(params: CreateSessionParams): Promise<UserSe
     userAgentHash: hashString(params.userAgent),
   };
 
-  // Cache in-memory
-  inMemorySessionStore.set(`${params.tenantId}:${sessionId}`, sessionRecord);
-
-  if (db) {
-    try {
-      await db
-        .collection('tenants')
-        .doc(params.tenantId)
-        .collection('sessions')
-        .doc(sessionId)
-        .set(sessionRecord);
-    } catch {
-      // Graceful fallback to memory store
+  if (!db) {
+    if (mayUseInMemorySessions()) {
+      inMemorySessionStore.set(`${params.tenantId}:${sessionId}`, sessionRecord);
+      return sessionRecord;
     }
+
+    throw new AuthError({
+      code: 'INTERNAL_AUTH_ERROR',
+      message: 'Authoritative session store is unavailable',
+      statusCode: 503,
+    });
   }
 
-  return sessionRecord;
+  try {
+    await db
+      .collection('tenants')
+      .doc(params.tenantId)
+      .collection('sessions')
+      .doc(sessionId)
+      .set(sessionRecord);
+
+    return sessionRecord;
+  } catch (error) {
+    throw new AuthError({
+      code: 'INTERNAL_AUTH_ERROR',
+      message: 'Failed to persist authoritative session',
+      statusCode: 503,
+      originalError: error,
+    });
+  }
 }
 
 export async function validateSession(
@@ -72,80 +90,122 @@ export async function validateSession(
   sessionId: string,
   userId: string
 ): Promise<UserSessionRecord> {
+  if (!tenantId || !sessionId || !userId) {
+    throw new AuthError({
+      code: 'SESSION_NOT_FOUND',
+      message: 'Tenant, session and user identifiers are required',
+      statusCode: 401,
+    });
+  }
+
   const cacheKey = `${tenantId}:${sessionId}`;
-  const cached = inMemorySessionStore.get(cacheKey);
   const db = getAdminFirestore();
 
   if (!db) {
-    if (cached) return cached;
-    return createSession({ userId, tenantId });
+    if (mayUseInMemorySessions()) {
+      const cached = inMemorySessionStore.get(cacheKey);
+      if (cached) return validateSessionRecord(cached, userId);
+    }
+
+    throw new AuthError({
+      code: 'INTERNAL_AUTH_ERROR',
+      message: 'Authoritative session store is unavailable',
+      statusCode: 503,
+    });
   }
 
   try {
-    const sessionDocRef = db.collection('tenants').doc(tenantId).collection('sessions').doc(sessionId);
+    const sessionDocRef = db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection('sessions')
+      .doc(sessionId);
+
     const docSnap = await sessionDocRef.get();
 
     if (!docSnap.exists) {
-      if (cached) return cached;
-      return createSession({ userId, tenantId });
-    }
-
-    const sessionData = docSnap.data() as UserSessionRecord;
-
-    // 1. Verify user binding
-    if (sessionData.userId !== userId) {
       throw new AuthError({
-        code: 'SESSION_REVOKED',
-        message: 'Session user identifier mismatch',
+        code: 'SESSION_NOT_FOUND',
+        message: 'Clinical session does not exist',
         statusCode: 401,
       });
     }
 
-    // 2. Check revocation
-    if (sessionData.status === 'REVOKED') {
-      throw new AuthError({
-        code: 'SESSION_REVOKED',
-        message: sessionData.revokeReason || 'Session has been revoked',
-        statusCode: 401,
-      });
-    }
+    const sessionData = validateSessionRecord(docSnap.data() as UserSessionRecord, userId);
+    const now = new Date().toISOString();
 
-    // 3. Check expiration
-    const now = Date.now();
-    const expiryTime = new Date(sessionData.expiresAt).getTime();
-    if (now > expiryTime) {
-      await sessionDocRef.update({ status: 'EXPIRED' }).catch(() => {});
-      throw new AuthError({
-        code: 'SESSION_EXPIRED',
-        message: 'Clinical session expired',
-        statusCode: 401,
-      });
-    }
+    await sessionDocRef.update({
+      lastSeenAt: now,
+      lastActivityAt: now,
+    });
 
-    // 4. Update last seen and activity
-    const lastActivity = new Date(sessionData.lastActivityAt || sessionData.lastSeenAt).getTime();
-    if (now - lastActivity > INACTIVITY_LIMIT_MS) {
-      await sessionDocRef.update({ status: 'EXPIRED' }).catch(() => {});
-      throw new AuthError({
-        code: 'SESSION_EXPIRED',
-        message: 'Session expired due to inactivity',
-        statusCode: 401,
-      });
-    }
+    return {
+      ...sessionData,
+      lastSeenAt: now,
+      lastActivityAt: now,
+    };
+  } catch (error) {
+    if (error instanceof AuthError) throw error;
 
-    // Update heartbeat asynchronously
-    sessionDocRef.update({
-      lastSeenAt: new Date().toISOString(),
-      lastActivityAt: new Date().toISOString(),
-    }).catch(() => {});
-
-    inMemorySessionStore.set(cacheKey, sessionData);
-    return sessionData;
-  } catch (err: any) {
-    if (err instanceof AuthError) throw err;
-    if (cached) return cached;
-    return createSession({ userId, tenantId });
+    throw new AuthError({
+      code: 'INTERNAL_AUTH_ERROR',
+      message: 'Unable to validate authoritative session',
+      statusCode: 503,
+      originalError: error,
+    });
   }
+}
+
+function validateSessionRecord(
+  sessionData: UserSessionRecord,
+  expectedUserId: string
+): UserSessionRecord {
+  if (sessionData.userId !== expectedUserId) {
+    throw new AuthError({
+      code: 'SESSION_REVOKED',
+      message: 'Session user identifier mismatch',
+      statusCode: 401,
+    });
+  }
+
+  if (sessionData.status === 'REVOKED') {
+    throw new AuthError({
+      code: 'SESSION_REVOKED',
+      message: sessionData.revokeReason || 'Session has been revoked',
+      statusCode: 401,
+    });
+  }
+
+  if (sessionData.status === 'EXPIRED') {
+    throw new AuthError({
+      code: 'SESSION_EXPIRED',
+      message: 'Clinical session has expired',
+      statusCode: 401,
+    });
+  }
+
+  const now = Date.now();
+  if (now > new Date(sessionData.expiresAt).getTime()) {
+    throw new AuthError({
+      code: 'SESSION_EXPIRED',
+      message: 'Clinical session expired',
+      statusCode: 401,
+    });
+  }
+
+  const lastActivity = new Date(
+    sessionData.lastActivityAt || sessionData.lastSeenAt
+  ).getTime();
+
+  if (now - lastActivity > INACTIVITY_LIMIT_MS) {
+    throw new AuthError({
+      code: 'SESSION_EXPIRED',
+      message: 'Session expired due to inactivity',
+      statusCode: 401,
+    });
+  }
+
+  return sessionData;
 }
 
 export async function revokeSession(
@@ -154,18 +214,52 @@ export async function revokeSession(
   revokedBy: string,
   reason = 'User signed out'
 ): Promise<void> {
+  if (!tenantId || !sessionId) return;
+
   const db = getAdminFirestore();
-  if (!db || !sessionId) return;
+
+  if (!db) {
+    if (mayUseInMemorySessions()) {
+      const cacheKey = `${tenantId}:${sessionId}`;
+      const cached = inMemorySessionStore.get(cacheKey);
+      if (cached) {
+        inMemorySessionStore.set(cacheKey, {
+          ...cached,
+          status: 'REVOKED',
+          revokedAt: new Date().toISOString(),
+          revokedBy,
+          revokeReason: reason,
+        });
+      }
+      return;
+    }
+
+    throw new AuthError({
+      code: 'INTERNAL_AUTH_ERROR',
+      message: 'Authoritative session store is unavailable',
+      statusCode: 503,
+    });
+  }
 
   try {
-    const sessionDocRef = db.collection('tenants').doc(tenantId).collection('sessions').doc(sessionId);
+    const sessionDocRef = db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection('sessions')
+      .doc(sessionId);
+
     await sessionDocRef.update({
       status: 'REVOKED',
       revokedAt: new Date().toISOString(),
       revokedBy,
       revokeReason: reason,
     });
-  } catch (err) {
-    console.warn('Session revocation notice:', err);
+  } catch (error) {
+    throw new AuthError({
+      code: 'INTERNAL_AUTH_ERROR',
+      message: 'Failed to revoke authoritative session',
+      statusCode: 503,
+      originalError: error,
+    });
   }
 }

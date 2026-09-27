@@ -34,6 +34,9 @@ jobs:
       - name: Run P0 trust-boundary regression suite
         run: bun run test:p0
 
+      - name: Run full existing G-HIMS test suite
+        run: bun run test
+
       - name: Production build and TypeScript validation
         run: bun run build
 

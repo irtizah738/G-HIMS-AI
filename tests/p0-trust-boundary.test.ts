@@ -66,6 +66,15 @@ describe('G-HIMS P0 Core Trust Boundary regression guards', () => {
     expect(membership).toContain('Authoritative tenant membership store is unavailable');
   });
 
+  test('authorization context never fabricates tenant or session authority', async () => {
+    const resolver = await source('server/auth/authorization-context.ts');
+
+    expect(resolver).not.toContain("'central-metro-hospital'");
+    expect(resolver).not.toContain('Math.random()');
+    expect(resolver).not.toContain('Date.now().toString(36)');
+    expect(resolver).toContain("sessionId: sessionId || ''");
+  });
+
   test('session validation never creates a replacement session', async () => {
     const session = await source('server/auth/session-service.ts');
     const validateStart = session.indexOf('export async function validateSession(');
@@ -84,6 +93,8 @@ describe('G-HIMS P0 Core Trust Boundary regression guards', () => {
     const authority = await source('lib/backend/security/authoritative-context.ts');
 
     expect(authority).toContain('verifyFirebaseToken');
+    expect(authority).toContain('validateSession');
+    expect(authority).toContain('x-ghims-session-id');
     expect(authority).toContain('resolveAuthorizationContext');
     expect(authority).not.toContain('STAFF_DIRECTORY');
     expect(authority).not.toContain('x-actor-id');
@@ -158,6 +169,21 @@ describe('G-HIMS P0 Core Trust Boundary regression guards', () => {
     const copilot = await source('app/api/gemini/copilot/route.ts');
     expect(copilot).not.toContain("'Ticagrelor 90mg PO BID'");
     expect(copilot).not.toContain("'Clinical Follow-up (ICD-10 Z09)'");
+  });
+
+  test('unverified credentials cannot receive derived clinical privileges', async () => {
+    const membership = await source('server/auth/tenant-membership.ts');
+
+    expect(membership).toContain("credentialStatus === 'VERIFIED'");
+    expect(membership).not.toContain("return ['*']");
+  });
+
+  test('device registration fails closed outside DEMO/TEST runtime', async () => {
+    const device = await source('server/auth/device-service.ts');
+
+    expect(device).toContain('canUseEphemeralDeviceState');
+    expect(device).toContain('Authoritative device registry is unavailable');
+    expect(device).toContain('Unable to validate or persist clinical device registration');
   });
 
   test('Cloud Function authorization has no default admin identity', async () => {

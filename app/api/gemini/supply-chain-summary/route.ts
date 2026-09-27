@@ -1,9 +1,41 @@
 import { GoogleGenAI } from '@google/genai';
 import { NextRequest, NextResponse } from 'next/server';
+import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
 
 export async function POST(req: NextRequest) {
   try {
-    const { purchaseOrders = [], suppliers = [], currentDate = new Date().toISOString() } = await req.json();
+    const body = await req.json();
+    const {
+      tenantId,
+      purchaseOrders = [],
+      suppliers = [],
+      currentDate = new Date().toISOString(),
+    } = body;
+
+    const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
+    if (!normalizedTenantId) {
+      return NextResponse.json({ success: false, error: 'tenantId is required.' }, { status: 400 });
+    }
+
+    const { context } = await deriveAuthoritativeContext(req, normalizedTenantId);
+    const allowedRoles = new Set([
+      'SYSTEM_ADMIN',
+      'SUPER_ADMIN',
+      'ADMINISTRATOR',
+      'HOSPITAL_ADMIN',
+      'SUPPLY_CHAIN_MANAGER',
+      'PROCUREMENT_MANAGER',
+      'PHARMACY_MANAGER',
+      'PHARMACIST',
+      'FINANCE_MANAGER',
+    ]);
+
+    if (!context.roles.some((role) => allowedRoles.has(role))) {
+      return NextResponse.json(
+        { success: false, error: 'Supply-chain analytics role required.' },
+        { status: 403 }
+      );
+    }
 
     // Determine heuristic summary if no API key or in case of fallback
     const heuristicAnalysis = generateHeuristicAnalysis(purchaseOrders, suppliers, currentDate);
@@ -218,22 +250,12 @@ function generateHeuristicAnalysis(purchaseOrders: any[], suppliers: any[], curr
     totalWeeklyOrders: activePOs.length,
     totalWeeklyValue: totalValue,
     highRiskOrdersCount: risks.length,
-    criticalDeliveryRisks: risks.length > 0 ? risks : [
-      {
-        poNumber: activePOs[0]?.poNumber || 'PO-2026-0041',
-        supplierName: activePOs[0]?.supplierName || 'Pfizer BioPharma Ltd',
-        expectedDate: activePOs[0]?.expectedDeliveryDate?.split('T')[0] || new Date().toISOString().split('T')[0],
-        severity: 'MEDIUM',
-        riskType: 'COLD_CHAIN_RISK',
-        impactSummary: 'Requires calibrated refrigerated receiving dock validation upon arrival.',
-        recommendedMitigation: 'Ensure continuous temperature logger download upon GRN inspection.',
-      }
-    ],
+    criticalDeliveryRisks: risks,
     keyTakeaways: [
       `${activePOs.length} active purchase orders valued at $${totalValue.toLocaleString()} monitored for this week.`,
       risks.length > 0
         ? `${risks.length} order(s) require proactive expediting due to low vendor on-time scores or tight dock windows.`
-        : 'Lead-time adherence across tier-1 suppliers is currently operating at 94.8% on-time baseline.',
+        : 'No high-risk order was identified from the supplied purchase-order and supplier data.',
       'Cold-chain and vital surgical supplies prioritized for automated GRN dock put-away within 30 minutes of receipt.',
     ],
     mitigationProtocols: [

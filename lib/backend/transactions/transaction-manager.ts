@@ -224,6 +224,14 @@ export class TransactionManager {
 
     await db.runTransaction(async (transaction) => {
       const idempotencySnapshot = await transaction.get(idempotencyRef);
+      if (!idempotencySnapshot.exists) {
+        throw new Error('IDEMPOTENCY_RESERVATION_MISSING');
+      }
+      const reservation = idempotencySnapshot.data() as { status?: string; commandId?: string };
+      if (reservation.status !== 'PENDING' || reservation.commandId !== commandId) {
+        throw new Error('IDEMPOTENCY_RESERVATION_INVALID');
+      }
+
       if (params.domainState !== undefined) {
         const stateRef = tenantRef.collection(collectionForEntityType(params.aggregateType)).doc(params.aggregateId);
         transaction.set(stateRef, toDocumentData(params.domainState, params.aggregateType), { merge: true });
@@ -305,6 +313,13 @@ export class TransactionManager {
 
     await db.runTransaction(async (transaction) => {
       const idempotencySnapshot = await transaction.get(idempotencyRef);
+      if (!idempotencySnapshot.exists) {
+        throw new Error('IDEMPOTENCY_RESERVATION_MISSING');
+      }
+      const reservation = idempotencySnapshot.data() as { status?: string; commandId?: string };
+      if (reservation.status !== 'PENDING' || reservation.commandId !== commandId) {
+        throw new Error('IDEMPOTENCY_RESERVATION_INVALID');
+      }
 
       transaction.set(stateRef, toDocumentData(payload.domainState, payload.entityType), { merge: true });
       transaction.create(eventRef, sanitizeForFirestore(event));

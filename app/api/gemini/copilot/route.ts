@@ -1,53 +1,45 @@
-import { GoogleGenAI } from '@google/genai';
 import { NextRequest, NextResponse } from 'next/server';
 import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
+import { AIGateway } from '@/lib/ai/gateway';
+import { AIDraftRepository } from '@/server/ai/ai-draft-repository';
 
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const noteText = String(body.noteText || '');
-    const tenantId = String(body.tenantId || '').trim().toLowerCase();
-
-    if (!tenantId || !noteText.trim()) {
-      return NextResponse.json({ error: 'tenantId and clinical note text are required' }, { status: 400 });
+export async function POST(req:NextRequest){
+  try{
+    const body=await req.json();
+    const noteText=String(body.noteText||'');
+    const tenantId=String(body.tenantId||'').trim().toLowerCase();
+    if(!tenantId||!noteText.trim()){
+      return NextResponse.json({error:'tenantId and clinical note text are required'},{status:400});
     }
-
-    await deriveAuthoritativeContext(req, tenantId);
-
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json({ error: 'AI_UNAVAILABLE' }, { status: 503 });
-    }
-
-    for (const modelName of ['gemini-3.6-flash', 'gemini-3.7-flash']) {
-      try {
-        const ai = new GoogleGenAI({ apiKey });
-        const response = await ai.models.generateContent({
-          model: modelName,
-          contents: `Analyze only the supplied clinician-authored note and context. Do not invent unsupported diagnoses, orders, medications, or codes.
-Patient context: ${JSON.stringify(body.patientContext || {})}
-Clinical note: ${noteText}
-Return JSON with chiefComplaint, diagnoses, medicationsPrescribed, recommendedProcedures, billingCodes, followUpDays, clinicalAlerts.`,
-          config: { responseMimeType: 'application/json', temperature: 0 },
-        });
-        const result = JSON.parse((response.text || '{}').replace(/```json\n?/g, '').replace(/```\n?/g, '').trim());
-        return NextResponse.json({
-          status: 'DRAFT_REQUIRES_CLINICIAN_REVIEW',
-          model: modelName,
-          ...result,
-        });
-      } catch {
-        // Try next model.
-      }
-    }
-
-    return NextResponse.json(
-      { error: 'AI_UNAVAILABLE', message: 'No clinical fallback content was generated.' },
-      { status: 503 }
-    );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'AI copilot failed';
-    const unauthorized = /AUTH|TENANT|UNAUTH/i.test(message);
-    return NextResponse.json({ error: message }, { status: unauthorized ? 403 : 500 });
+    const {context}=await deriveAuthoritativeContext(req,tenantId);
+    const sourceData={patientContext:body.patientContext||{},clinicalNote:noteText};
+    const generation=await AIGateway.generateJson<Record<string,unknown>>({
+      purpose:'CLINICAL_COPILOT',
+      systemInstruction:'Analyze only supplied clinician-authored evidence. Do not invent diagnoses, orders, medications, procedures, codes, alerts, or follow-up instructions. Return review-only structured candidates.',
+      sourceData,
+      responseSchema:JSON.stringify({
+        chiefComplaint:'string',diagnoses:['string'],medicationsPrescribed:['string'],
+        recommendedProcedures:['string'],billingCodes:['object'],followUpDays:'number or null',
+        clinicalAlerts:['string'],
+      }),
+      temperature:0,
+    });
+    const patientContext=body.patientContext&&typeof body.patientContext==='object'?body.patientContext:{};
+    const draft=await AIDraftRepository.create(context,{
+      purpose:'CLINICAL_COPILOT',
+      patientId:patientContext.patientId?String(patientContext.patientId):undefined,
+      encounterId:patientContext.encounterId?String(patientContext.encounterId):undefined,
+      sourceEvidenceIds:Array.isArray(body.sourceEvidenceIds)?body.sourceEvidenceIds.map(String):[],
+      input:sourceData,output:generation.data,provenance:generation.provenance,
+    });
+    return NextResponse.json({
+      status:draft.status,draftId:draft.draftId,
+      result:generation.data,aiProvenance:generation.provenance,
+    });
+  }catch(error){
+    const message=error instanceof Error?error.message:'AI copilot failed';
+    const unauthorized=/AUTH|TENANT|UNAUTH|SESSION|DEVICE/i.test(message);
+    const unavailable=/AI_|DRAFT_STORE/i.test(message);
+    return NextResponse.json({error:unavailable?'AI_UNAVAILABLE':message,message},{status:unauthorized?403:unavailable?503:500});
   }
 }

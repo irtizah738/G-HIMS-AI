@@ -41,6 +41,11 @@ function formatPrivateKey(rawKey: string | undefined): string | null {
   return key;
 }
 
+function canUseFirestoreEmulator(): boolean {
+  const mode = String(process.env.GHIMS_RUNTIME_MODE || '').toUpperCase();
+  return Boolean(process.env.FIRESTORE_EMULATOR_HOST) && (mode === 'TEST' || mode === 'DEMO');
+}
+
 export function hasAdminCredentials(): boolean {
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim();
   const privateKey = formatPrivateKey(process.env.FIREBASE_PRIVATE_KEY);
@@ -63,6 +68,18 @@ export function getAdminApp(): admin.app.App | null {
   const projectId = process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || firebaseConfig.projectId;
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim();
   const privateKey = formatPrivateKey(process.env.FIREBASE_PRIVATE_KEY);
+
+  if (canUseFirestoreEmulator()) {
+    try {
+      adminApp = admin.initializeApp({ projectId: projectId || 'ghims-p1-ci' });
+      return adminApp;
+    } catch {
+      if (admin.apps.length > 0) {
+        adminApp = admin.app();
+        return adminApp;
+      }
+    }
+  }
 
   // 1. Try initializing with explicit service account credentials if valid
   if (projectId && clientEmail && privateKey) {
@@ -104,14 +121,16 @@ export function getAdminAuth(): admin.auth.Auth | null {
 }
 
 export function getAdminFirestore(): admin.firestore.Firestore | null {
-  if (!hasAdminCredentials()) return null;
+  if (!hasAdminCredentials() && !canUseFirestoreEmulator()) return null;
   if (adminFirestoreInstance) {
     return adminFirestoreInstance;
   }
   const app = getAdminApp();
   if (!app) return null;
   try {
-    const dbId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
+    const dbId =
+      process.env.FIRESTORE_DATABASE_ID ||
+      (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
     let fs: admin.firestore.Firestore;
     if (dbId && dbId !== '(default)') {
       fs = getFirestore(app, dbId);

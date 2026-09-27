@@ -43,6 +43,7 @@ import {
   syncTelehealthSessionToFirestore,
 } from '@/lib/firebase/firestore-service';
 import { DischargedCensusRecord, initialDischargedCensus } from '@/lib/clinical/ipd-service';
+import { executeActiveTenantCommand } from '@/lib/api/command-client';
 
 const initialTelehealthSessions: TelehealthSession[] = [
   {
@@ -1446,122 +1447,170 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
   };
 
   const addClinicalNote = (patientId: string, note: Omit<ClinicalNote, 'id' | 'timestamp'>) => {
-    const noteId = `note-${Date.now()}`;
-    const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
-    const newNote: ClinicalNote = { ...note, id: noteId, timestamp };
-    let updatedPatient: Patient | undefined;
+    const patient = patients.find((item) => item.id === patientId);
+    const encounterId = patient?.activeEncounterId || patient?.encounters?.[0]?.id;
 
-    setPatients(prev => prev.map(p => {
-      if (p.id === patientId) {
-        const encounters = [...p.encounters];
+    if (!patient || !encounterId) {
+      console.error('CLINICAL_NOTE_REJECTED: active patient encounter is required.');
+      return;
+    }
+
+    const categoryMap: Record<ClinicalNote['category'], 'SOAP' | 'PROGRESS' | 'CONSULTATION' | 'DISCHARGE' | 'NURSING'> = {
+      SOAP: 'SOAP',
+      Progress: 'PROGRESS',
+      Consultation: 'CONSULTATION',
+      Discharge: 'DISCHARGE',
+      Nursing: 'NURSING',
+    };
+
+    void executeActiveTenantCommand('SignClinicalNoteCommand', {
+      encounterId,
+      patientId,
+      category: categoryMap[note.category],
+      content: note.content,
+      acceptedStructuredData: note.aiStructuredData || {},
+    }).then((result) => {
+      if (!result.success) {
+        throw new Error(result.error?.message || 'Clinical note command failed.');
+      }
+
+      const noteId = result.entityId || `note-${Date.now()}`;
+      const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
+      const newNote: ClinicalNote = { ...note, id: noteId, timestamp };
+
+      setPatients((previous) => previous.map((item) => {
+        if (item.id !== patientId) return item;
+        const encounters = [...item.encounters];
         if (encounters.length > 0) {
           encounters[0] = {
             ...encounters[0],
             clinicalNotes: [newNote, ...encounters[0].clinicalNotes],
           };
         }
-        updatedPatient = { ...p, encounters };
-        return updatedPatient;
-      }
-      return p;
-    }));
-    if (updatedPatient) syncPatientToFirestore(updatedPatient).catch(() => {});
+        return { ...item, encounters };
+      }));
 
-    // Auto-detect billing items from note structured data
-    if (note.aiStructuredData?.billingCodes && note.aiStructuredData.billingCodes.length > 0) {
-      note.aiStructuredData.billingCodes.forEach(codeItem => {
-        const newMismatch: BillingAuditMismatch = {
-          id: `mm-${Date.now()}-${Math.floor(Math.random() * 100)}`,
+      // Revenue Integrity findings are presentation-only until their own governed
+      // server command/projection is introduced. They are never persisted directly.
+      if (note.aiStructuredData?.billingCodes?.length) {
+        const projectedMismatches = note.aiStructuredData.billingCodes.map((codeItem, index) => ({
+          id: `mm-${Date.now()}-${index}`,
           patientId,
-          patientName: patients.find(p => p.id === patientId)?.fullName || 'Patient',
-          encounterId: patients.find(p => p.id === patientId)?.encounters[0]?.id || 'enc-0',
+          patientName: patient.fullName,
+          encounterId,
           noteId,
           date: new Date().toISOString().split('T')[0],
           documentedItem: `${codeItem.description} (CPT ${codeItem.code})`,
-          category: 'Procedure',
+          category: 'Procedure' as const,
           suggestedCptCode: codeItem.code,
           estimatedRecoverableRevenue: codeItem.fee,
-          status: 'pending_review',
-          evidenceSnippet: `Extracted from clinical documentation: "${note.content.slice(0, 80)}..."`,
+          status: 'pending_review' as const,
+          evidenceSnippet: `Extracted from clinician-accepted documentation: "${note.content.slice(0, 80)}..."`,
           confidenceScore: 0.96,
-        };
-        setMismatches(prev => [newMismatch, ...prev]);
-        syncMismatchToFirestore(newMismatch).catch(() => {});
-      });
-    }
+        }));
+        setMismatches((previous) => [...projectedMismatches, ...previous]);
+      }
 
-    recordMutation('INSERT_NOTE', `Note:${noteId}`, newNote);
-    addAuditLog('CREATE_CLINICAL_NOTE', `Patient ${patientId}`, `Added clinical note with AI billing extraction`);
+      recordMutation('INSERT_NOTE', `Note:${noteId}`, newNote);
+    }).catch((error) => {
+      console.error('CLINICAL_NOTE_COMMAND_FAILED', error);
+    });
   };
 
   const addLabOrder = (patientId: string, order: Omit<LabOrder, 'id' | 'orderedAt'>) => {
-    const orderId = `lab-ord-${Date.now().toString().slice(-3)}`;
-    const orderedAt = new Date().toISOString().replace('T', ' ').slice(0, 16);
-    const newOrder: LabOrder = { ...order, id: orderId, orderedAt };
-    let updatedPatient: Patient | undefined;
+    const patient = patients.find((item) => item.id === patientId);
+    const encounterId = patient?.activeEncounterId || patient?.encounters?.[0]?.id;
 
-    setPatients(prev => prev.map(p => {
-      if (p.id === patientId) {
-        const encounters = [...p.encounters];
+    if (!patient || !encounterId) {
+      console.error('DIAGNOSTIC_ORDER_REJECTED: active patient encounter is required.');
+      return;
+    }
+
+    const orderType = order.category === 'Radiology' ? 'RADIOLOGY' : 'LAB';
+
+    void executeActiveTenantCommand('PlaceDiagnosticOrderCommand', {
+      encounterId,
+      patientId,
+      orderType,
+      catalogCode: order.sampleId || order.testName,
+      orderName: order.testName,
+      priority: 'ROUTINE',
+      clinicalIndication: order.notes || 'Clinician ordered diagnostic investigation',
+      estimatedCostMinorUnits: Math.round((order.cost || 0) * 100),
+    }).then((result) => {
+      if (!result.success) {
+        throw new Error(result.error?.message || 'Diagnostic order command failed.');
+      }
+
+      const orderedAt = new Date().toISOString().replace('T', ' ').slice(0, 16);
+      const newOrder: LabOrder = {
+        ...order,
+        id: result.entityId || `lab-ord-${Date.now()}`,
+        orderedAt,
+      };
+
+      setPatients((previous) => previous.map((item) => {
+        if (item.id !== patientId) return item;
+        const encounters = [...item.encounters];
         if (encounters.length > 0) {
           encounters[0] = {
             ...encounters[0],
             labOrders: [newOrder, ...encounters[0].labOrders],
           };
         }
-        updatedPatient = { ...p, encounters };
-        return updatedPatient;
-      }
-      return p;
-    }));
-    if (updatedPatient) syncPatientToFirestore(updatedPatient).catch(() => {});
+        return { ...item, encounters };
+      }));
 
-    // Auto-generate HL7 message
-    const patient = patients.find(p => p.id === patientId);
-    if (patient) {
-      const hl7Msg: Hl7Message = {
-        id: `hl7-${Date.now()}`,
-        timestamp: orderedAt,
-        type: 'ORM^O01',
-        sendingApp: 'GHIMS_EHR',
-        receivingApp: 'LIS_ROCHE_COBAS',
-        patientMrn: patient.mrn,
-        patientName: patient.fullName,
-        status: 'dispatched',
-        rawPayload: `MSH|^~\\&|GHIMS_EHR|METRO|LIS|LAB|${Date.now()}||ORM^O01|MSG_${orderId}|P|2.5\rPID|1||${patient.mrn}||${patient.fullName}\rORC|NW|${orderId}\rOBR|1|${orderId}||${order.testName}`,
-        parsedSummary: `Dispatched Lab Order: ${order.testName} (Sample: ${order.sampleId})`,
-      };
-      setHl7Messages(prev => [hl7Msg, ...prev]);
-      syncHl7ToFirestore(hl7Msg).catch(() => {});
-    }
-
-    recordMutation('ORDER_LAB', `Order:${orderId}`, newOrder);
-    addAuditLog('DISPATCH_LAB_ORDER', `Patient ${patientId}`, `Dispatched ${order.testName}`);
+      // Integration delivery is now represented by the durable transaction outbox.
+      // Do not fabricate a browser-side HL7 dispatch record here.
+      recordMutation('ORDER_LAB', `Order:${newOrder.id}`, newOrder);
+    }).catch((error) => {
+      console.error('DIAGNOSTIC_ORDER_COMMAND_FAILED', error);
+    });
   };
 
   const addVitals = (patientId: string, vitals: Omit<Vitals, 'timestamp'>) => {
-    const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
-    const newVitals: Vitals = { ...vitals, timestamp };
-    let updatedPatient: Patient | undefined;
+    const patient = patients.find((item) => item.id === patientId);
+    const encounterId = patient?.activeEncounterId || patient?.encounters?.[0]?.id;
 
-    setPatients(prev => prev.map(p => {
-      if (p.id === patientId) {
-        const encounters = [...p.encounters];
+    if (!patient || !encounterId) {
+      console.error('VITALS_REJECTED: active patient encounter is required.');
+      return;
+    }
+
+    void executeActiveTenantCommand('RecordVitalsCommand', {
+      encounterId,
+      patientId,
+      heartRate: vitals.heartRate,
+      bloodPressure: vitals.bloodPressure,
+      temperature: vitals.temperature,
+      respiratoryRate: vitals.respiratoryRate,
+      oxygenSaturation: vitals.oxygenSaturation,
+      measuredAt: Date.now(),
+    }).then((result) => {
+      if (!result.success) {
+        throw new Error(result.error?.message || 'Vitals command failed.');
+      }
+
+      const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
+      const newVitals: Vitals = { ...vitals, timestamp };
+
+      setPatients((previous) => previous.map((item) => {
+        if (item.id !== patientId) return item;
+        const encounters = [...item.encounters];
         if (encounters.length > 0) {
           encounters[0] = {
             ...encounters[0],
             vitalsHistory: [newVitals, ...encounters[0].vitalsHistory],
           };
         }
-        updatedPatient = { ...p, encounters };
-        return updatedPatient;
-      }
-      return p;
-    }));
-    if (updatedPatient) syncPatientToFirestore(updatedPatient).catch(() => {});
+        return { ...item, encounters };
+      }));
 
-    recordMutation('UPDATE_VITALS', `Patient:${patientId}`, newVitals);
-    addAuditLog('RECORD_VITALS', `Patient ${patientId}`, `HR: ${vitals.heartRate}, BP: ${vitals.bloodPressure}, SpO2: ${vitals.oxygenSaturation}%`);
+      recordMutation('UPDATE_VITALS', `Patient:${patientId}`, newVitals);
+    }).catch((error) => {
+      console.error('VITALS_COMMAND_FAILED', error);
+    });
   };
 
   const reconcileMismatch = (mismatchId: string) => {

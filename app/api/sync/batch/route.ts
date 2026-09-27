@@ -57,8 +57,9 @@ export async function POST(req: NextRequest) {
       durationMs: elapsed(),
       attributes: {
         mutationCount: batch.mutations.length,
-        syncedCount: syncResponse.syncedCount,
-        conflictCount: syncResponse.conflictCount,
+        acceptedCount: syncResponse.summary.accepted,
+        conflictCount: syncResponse.summary.conflicted,
+        rejectedCount: syncResponse.summary.rejected,
       },
     });
 

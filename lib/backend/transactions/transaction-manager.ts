@@ -87,6 +87,7 @@ function collectionForEntityType(entityType: string): string {
   const map: Record<string, string> = {
     ENCOUNTER: 'encounters',
     ENCOUNTER_STAGE: 'encounterStages',
+    ENCOUNTER_EVIDENCE: 'encounterEvidence',
     DIAGNOSTIC_ORDER: 'orders',
     PRESCRIPTION: 'prescriptions',
     JOURNAL_ENTRY: 'journalEntries',

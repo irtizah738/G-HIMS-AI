@@ -14,7 +14,7 @@ jobs:
   p0-validation:
     name: P0 security regression + production build
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       GHIMS_RUNTIME_MODE: TEST
       NEXT_TELEMETRY_DISABLED: "1"
@@ -33,6 +33,18 @@ jobs:
 
       - name: Run P0 trust-boundary regression suite
         run: bun run test:p0
+
+      - name: Setup Java for Firestore Emulator
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install Firestore rules test tooling
+        run: npm install --no-save --package-lock=false @firebase/rules-unit-testing firebase-tools
+
+      - name: Run Firestore Emulator penetration suite
+        run: npx firebase emulators:exec --project ghims-p0-ci --only firestore "bun test security-tests/firestore-rules.test.ts"
 
       - name: Production build and TypeScript validation
         run: bun run build

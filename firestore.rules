@@ -199,6 +199,16 @@ service cloud.firestore {
         allow read: if tenantClaimMatches(tenantId);
         allow write: if false;
       }
+
+      match /billingMismatches/{id} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
+      }
+
+      match /encounterCharges/{id} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
+      }
       match /arOpenItems/{id} {
         allow read: if tenantClaimMatches(tenantId);
         allow write: if false;

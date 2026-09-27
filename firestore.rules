@@ -159,6 +159,16 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      match /generalLedgerProjections/{projectionId} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
+      }
+
+      // Projection checkpoints are internal idempotency state and server-only.
+      match /projectionCheckpoints/{eventId} {
+        allow read, write: if false;
+      }
+
       // Financial read models can be read only within tenant scope. All postings,
       // adjustments, reversals and idempotency records are server-only writes.
       match /accounts/{id} {

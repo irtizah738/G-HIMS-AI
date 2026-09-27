@@ -177,6 +177,26 @@ describe('G-HIMS P1 durable command infrastructure', () => {
     expect(state.exists).toBe(false);
   });
 
+  test('durable transaction rejects commits without an idempotency reservation', async () => {
+    const tenantId = unique('tenant');
+    const entityId = unique('enc');
+
+    await expect(
+      TransactionManager.executeAtomicWrite(
+        context(tenantId),
+        unique('cmd'),
+        unique('idem'),
+        {
+          entityType: 'ENCOUNTER',
+          entityId,
+          eventType: 'EncounterCreatedEvent',
+          domainState: { id: entityId, status: 'IN_PROGRESS' },
+          eventPayload: { patientId: 'pat-no-reservation' },
+        }
+      )
+    ).rejects.toThrow('IDEMPOTENCY_RESERVATION_MISSING');
+  });
+
   test('outbox claim is exclusive across concurrent workers', async () => {
     const tenantId = unique('tenant');
     const commandId = unique('cmd');

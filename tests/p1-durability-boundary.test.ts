@@ -112,4 +112,22 @@ describe('G-HIMS P1 durability boundary regression guards', () => {
     expect(registration).toContain('activeEncounterId: encounterId');
     expect(inpatient).toContain("import { PatientMPI } from '@/types/mpi'");
   });
+
+  test('Revenue Integrity findings are server-generated from signed evidence and reviewed through commands', async () => {
+    const documentation = await source('lib/backend/services/clinical-documentation-domain-service.ts');
+    const revenue = await source('lib/backend/services/revenue-integrity-domain-service.ts');
+    const context = await source('lib/context/hospital-context.tsx');
+    const tx = await source('lib/backend/transactions/transaction-manager.ts');
+
+    expect(documentation).toContain("entityType: 'REVENUE_INTEGRITY_FINDING'");
+    expect(documentation).toContain('revenueIntegrityFindingIds');
+    expect(revenue).toContain('ReconcileRevenueIntegrityFindingPayload');
+    expect(revenue).toContain("status: 'PENDING_INVOICE'");
+    expect(revenue).toContain('estimatedRecoverableAmountMinorUnits');
+    expect(context).toContain("'ReconcileRevenueIntegrityFindingCommand'");
+    expect(context).toContain("'DismissRevenueIntegrityFindingCommand'");
+    expect(tx).toContain("REVENUE_INTEGRITY_FINDING: 'billingMismatches'");
+    expect(tx).toContain("ENCOUNTER_CHARGE: 'encounterCharges'");
+  });
+
 });

@@ -7,11 +7,27 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 async function source(path: string): Promise<string> {
   return readFile(join(process.cwd(), path), 'utf8');
+}
+
+async function routeFiles(dir = join(process.cwd(), 'app', 'api')): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true });
+  const paths: string[] = [];
+
+  for (const entry of entries) {
+    const absolute = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      paths.push(...await routeFiles(absolute));
+    } else if (entry.name === 'route.ts') {
+      paths.push(absolute.replace(process.cwd() + '/', ''));
+    }
+  }
+
+  return paths;
 }
 
 describe('G-HIMS P0 Core Trust Boundary regression guards', () => {
@@ -184,6 +200,43 @@ describe('G-HIMS P0 Core Trust Boundary regression guards', () => {
     expect(device).toContain('canUseEphemeralDeviceState');
     expect(device).toContain('Authoritative device registry is unavailable');
     expect(device).toContain('Unable to validate or persist clinical device registration');
+  });
+
+  test('every state-changing API route declares an explicit trust boundary', async () => {
+    const intentionallyPublicOrPureRoutes = new Set([
+      'app/api/auth/password-reset/route.ts',
+      'app/api/clinical/timeline/route.ts',
+      'app/api/clinical/workflow/compile/route.ts',
+    ]);
+
+    const acceptedBoundaryMarkers = [
+      'deriveAuthoritativeContext',
+      'verifyFirebaseToken',
+      'GHIMS_HL7_INGEST_API_KEY',
+      'GHIMS_INTERNAL_WORKER_KEY',
+      'isDemoRuntime',
+      'LEGACY_MUTATION_ROUTE_RETIRED',
+      'status: 410',
+    ];
+
+    const unprotected: string[] = [];
+
+    for (const path of await routeFiles()) {
+      const route = await source(path);
+      const changesState = [
+        'export async function POST',
+        'export async function PUT',
+        'export async function PATCH',
+        'export async function DELETE',
+      ].some((signature) => route.includes(signature));
+
+      if (!changesState || intentionallyPublicOrPureRoutes.has(path)) continue;
+
+      const hasBoundary = acceptedBoundaryMarkers.some((marker) => route.includes(marker));
+      if (!hasBoundary) unprotected.push(path);
+    }
+
+    expect(unprotected).toEqual([]);
   });
 
   test('Cloud Function authorization has no default admin identity', async () => {

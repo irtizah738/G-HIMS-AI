@@ -36,40 +36,31 @@ service cloud.firestore {
     // Legacy root collections remain read-only while the UI is migrated to
     // tenant-scoped projections. No browser may mutate hospital state here.
     match /patients/{id} {
-      allow read: if signedIn();
-      allow write: if false;
+      allow read, write: if false;
     }
     match /beds/{id} {
-      allow read: if signedIn();
-      allow write: if false;
+      allow read, write: if false;
     }
     match /billingMismatches/{id} {
-      allow read: if signedIn();
-      allow write: if false;
+      allow read, write: if false;
     }
     match /opdQueue/{id} {
-      allow read: if signedIn();
-      allow write: if false;
+      allow read, write: if false;
     }
     match /staff/{id} {
-      allow read: if signedIn();
-      allow write: if false;
+      allow read, write: if false;
     }
     match /telehealth_sessions/{id} {
-      allow read: if signedIn();
-      allow write: if false;
+      allow read, write: if false;
     }
     match /telehealthAppointments/{id} {
-      allow read: if signedIn();
-      allow write: if false;
+      allow read, write: if false;
     }
     match /auditLogs/{id} {
-      allow read: if signedIn();
-      allow write: if false;
+      allow read, write: if false;
     }
     match /hl7Messages/{id} {
-      allow read: if signedIn();
-      allow write: if false;
+      allow read, write: if false;
     }
 
     // Tenant root metadata can be read only by a member whose verified Firebase

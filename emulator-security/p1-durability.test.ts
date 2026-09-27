@@ -774,4 +774,204 @@ describe('G-HIMS P1 durable command infrastructure', () => {
     expect(eventSnapshot.size).toBe(1);
   });
 
+
+  test('signed clinical note creates server-owned Revenue Integrity candidates but no charge', async () => {
+    const db = getAdminFirestore();
+    expect(db).not.toBeNull();
+    if (!db) throw new Error('Firestore emulator Admin connection unavailable');
+
+    const tenantId = unique('tenant');
+    const encounterId = unique('enc');
+    const patientId = unique('pat');
+
+    await db.collection('tenants').doc(tenantId).collection('encounters').doc(encounterId).set({
+      id: encounterId,
+      tenantId,
+      patientId,
+      status: 'IN_PROGRESS',
+      currentStageId: 'CONSULTATION',
+    });
+
+    const result = await CommandBus.dispatch(context(tenantId), {
+      commandId: unique('cmd'),
+      idempotencyKey: unique('idem'),
+      tenantId,
+      commandType: 'SignClinicalNoteCommand',
+      schemaVersion: 1,
+      payload: {
+        encounterId,
+        patientId,
+        category: 'SOAP',
+        content: 'Procedure documented and explicitly accepted by the signing clinician.',
+        acceptedStructuredData: {
+          billingCodes: [
+            { code: 'CPT-99214', description: 'Established patient follow-up', fee: 95 },
+          ],
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+
+    const findings = await db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection('billingMismatches')
+      .where('sourceEvidenceId', '==', result.entityId)
+      .get();
+
+    expect(findings.size).toBe(1);
+    const finding = findings.docs[0].data();
+    expect(finding.status).toBe('PENDING_REVIEW');
+    expect(finding.estimatedRecoverableAmountMinorUnits).toBe(9500);
+
+    const charges = await db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection('encounterCharges')
+      .where('sourceFindingId', '==', findings.docs[0].id)
+      .get();
+
+    expect(charges.size).toBe(0);
+  });
+
+  test('authorized revenue-cycle reconciliation atomically creates one encounter charge and is replay-safe', async () => {
+    const db = getAdminFirestore();
+    expect(db).not.toBeNull();
+    if (!db) throw new Error('Firestore emulator Admin connection unavailable');
+
+    const tenantId = unique('tenant');
+    const findingId = unique('ri');
+    const encounterId = unique('enc');
+    const patientId = unique('pat');
+
+    await db.collection('tenants').doc(tenantId).collection('billingMismatches').doc(findingId).set({
+      id: findingId,
+      tenantId,
+      patientId,
+      encounterId,
+      sourceEvidenceId: unique('evidence'),
+      documentedItem: 'Missing procedural charge',
+      category: 'Procedure',
+      suggestedCode: 'CPT-99214',
+      estimatedRecoverableAmountMinorUnits: 9500,
+      currency: 'USD',
+      status: 'PENDING_REVIEW',
+      evidenceSnippet: 'Signed clinician evidence',
+      createdAt: Date.now(),
+      createdBy: 'test-doctor',
+    });
+
+    const billingContext: CommandContext = {
+      ...context(tenantId),
+      actorId: 'test-billing',
+      roles: ['BILLING_STAFF'],
+      permissions: ['BILLING_WRITE'],
+      clinicalPrivileges: [],
+    };
+    const idempotencyKey = unique('idem');
+    const commandId = unique('cmd');
+
+    const first = await CommandBus.dispatch(billingContext, {
+      commandId,
+      idempotencyKey,
+      tenantId,
+      commandType: 'ReconcileRevenueIntegrityFindingCommand',
+      schemaVersion: 1,
+      payload: { findingId },
+    });
+
+    expect(first.success).toBe(true);
+
+    const updatedFinding = await db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection('billingMismatches')
+      .doc(findingId)
+      .get();
+
+    expect(updatedFinding.data()?.status).toBe('RECONCILED');
+    const chargeId = updatedFinding.data()?.chargeId;
+    expect(typeof chargeId).toBe('string');
+
+    const charge = await db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection('encounterCharges')
+      .doc(chargeId)
+      .get();
+
+    expect(charge.exists).toBe(true);
+    expect(charge.data()?.netAmountMinorUnits).toBe(9500);
+    expect(charge.data()?.status).toBe('PENDING_INVOICE');
+
+    const replay = await CommandBus.dispatch(billingContext, {
+      commandId: unique('cmd'),
+      idempotencyKey,
+      tenantId,
+      commandType: 'ReconcileRevenueIntegrityFindingCommand',
+      schemaVersion: 1,
+      payload: { findingId },
+    });
+
+    expect(replay.success).toBe(true);
+    expect(replay.replayedFromCache).toBe(true);
+
+    const chargeMatches = await db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection('encounterCharges')
+      .where('sourceFindingId', '==', findingId)
+      .get();
+
+    expect(chargeMatches.size).toBe(1);
+  });
+
+  test('clinician without billing authority cannot reconcile Revenue Integrity findings', async () => {
+    const db = getAdminFirestore();
+    expect(db).not.toBeNull();
+    if (!db) throw new Error('Firestore emulator Admin connection unavailable');
+
+    const tenantId = unique('tenant');
+    const findingId = unique('ri');
+
+    await db.collection('tenants').doc(tenantId).collection('billingMismatches').doc(findingId).set({
+      id: findingId,
+      tenantId,
+      patientId: unique('pat'),
+      encounterId: unique('enc'),
+      sourceEvidenceId: unique('evidence'),
+      documentedItem: 'Candidate charge',
+      category: 'Procedure',
+      suggestedCode: 'CPT-99214',
+      estimatedRecoverableAmountMinorUnits: 9500,
+      currency: 'USD',
+      status: 'PENDING_REVIEW',
+      evidenceSnippet: 'Signed evidence',
+      createdAt: Date.now(),
+      createdBy: 'test-doctor',
+    });
+
+    const result = await CommandBus.dispatch(context(tenantId), {
+      commandId: unique('cmd'),
+      idempotencyKey: unique('idem'),
+      tenantId,
+      commandType: 'ReconcileRevenueIntegrityFindingCommand',
+      schemaVersion: 1,
+      payload: { findingId },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('INSUFFICIENT_ROLE');
+
+    const finding = await db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection('billingMismatches')
+      .doc(findingId)
+      .get();
+
+    expect(finding.data()?.status).toBe('PENDING_REVIEW');
+  });
+
 });

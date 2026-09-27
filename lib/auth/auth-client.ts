@@ -315,6 +315,92 @@ export class AuthClient {
   }
 
   /**
+   * Returns the currently cached authoritative tenant identifier.
+   */
+  public static async getActiveTenantId(): Promise<string> {
+    const cached = await getCachedAuthSession();
+    if (!cached?.user?.tenantId) {
+      throw new AuthError({
+        code: 'AUTHENTICATION_REQUIRED',
+        message: 'No active G-HIMS tenant session is available',
+        statusCode: 401,
+      });
+    }
+    return cached.user.tenantId;
+  }
+
+  /**
+   * Authenticated fetch for protected G-HIMS API routes.
+   * Injects Firebase identity plus the active tenant/session/device scope.
+   */
+  public static async authorizedFetch(
+    input: RequestInfo | URL,
+    init: RequestInit = {},
+    tenantId?: string
+  ): Promise<Response> {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      throw new AuthError({
+        code: 'NETWORK_UNAVAILABLE',
+        message: 'Protected server actions require an online authoritative session',
+        statusCode: 503,
+      });
+    }
+
+    const currentUser = auth.currentUser;
+    const cached = await getCachedAuthSession();
+
+    if (!currentUser || !cached) {
+      throw new AuthError({
+        code: 'AUTHENTICATION_REQUIRED',
+        message: 'An active authenticated G-HIMS session is required',
+        statusCode: 401,
+      });
+    }
+
+    if (cached.session.status !== 'ACTIVE' || Date.now() >= new Date(cached.session.expiresAt).getTime()) {
+      await clearCachedAuthSession();
+      throw new AuthError({
+        code: 'SESSION_EXPIRED',
+        message: 'The cached clinical session is no longer active',
+        statusCode: 401,
+      });
+    }
+
+    const requestedTenantId = (tenantId || cached.user.tenantId).trim().toLowerCase();
+    const cachedTenantId = cached.user.tenantId.trim().toLowerCase();
+
+    if (!requestedTenantId || requestedTenantId !== cachedTenantId) {
+      throw new AuthError({
+        code: 'TENANT_ACCESS_DENIED',
+        message: 'Requested tenant does not match the active clinical session. Switch tenant first.',
+        statusCode: 403,
+      });
+    }
+
+    const idToken = await currentUser.getIdToken(false);
+    const headers = new Headers(init.headers || {});
+
+    headers.set('Authorization', `Bearer ${idToken}`);
+    headers.set('x-ghims-tenant-id', requestedTenantId);
+    headers.set('x-ghims-session-id', cached.session.sessionId);
+
+    if (cached.session.deviceId || cached.user.deviceId) {
+      headers.set('x-ghims-device-id', cached.session.deviceId || cached.user.deviceId || '');
+    }
+
+    const response = await fetch(input, {
+      ...init,
+      headers,
+    });
+
+    if (response.status === 401) {
+      await clearCachedAuthSession();
+    }
+
+    return response;
+  }
+
+  /**
    * Switch Active Tenant Context
    */
   public static async switchTenant(targetTenantId: string): Promise<LoginResponsePayload> {
@@ -337,15 +423,46 @@ export class AuthClient {
       body: JSON.stringify({ tenantId: targetTenantId }),
     });
 
-    const data = await response.json();
+    const data: LoginResponsePayload = await response.json();
     if (!response.ok) {
       throw new AuthError({
-        code: data.code || 'TENANT_ACCESS_DENIED',
-        message: data.error || 'Failed to switch tenant',
+        code: (data as any).code || 'TENANT_ACCESS_DENIED',
+        message: (data as any).error || 'Failed to switch tenant',
         statusCode: response.status,
       });
     }
 
+    // The server may have refreshed tenant-scoped Firebase claims.
+    await currentUser.getIdToken(true);
+
+    const authUser: AuthenticatedUser = {
+      uid: data.user.uid,
+      email: data.user.email,
+      displayName: data.user.displayName,
+      tenantId: data.tenant.tenantId,
+      roles: data.authorization.roles,
+      permissions: data.authorization.permissions,
+      departmentIds: data.authorization.departmentIds,
+      facilityIds: data.authorization.facilityIds,
+      accountStatus: data.authorization.accountStatus,
+      clinicalPrivileges: data.authorization.clinicalPrivileges,
+      sessionId: data.session.sessionId,
+      lastAuthenticatedAt: new Date().toISOString(),
+    };
+
+    const sessionRecord: UserSessionRecord = {
+      sessionId: data.session.sessionId,
+      userId: data.user.uid,
+      tenantId: data.tenant.tenantId,
+      status: 'ACTIVE',
+      createdAt: new Date().toISOString(),
+      lastSeenAt: new Date().toISOString(),
+      authenticatedAt: new Date().toISOString(),
+      lastActivityAt: new Date().toISOString(),
+      expiresAt: data.session.expiresAt,
+    };
+
+    await saveCachedAuthSession(authUser, sessionRecord);
     return data;
   }
 

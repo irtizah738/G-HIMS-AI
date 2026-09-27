@@ -213,8 +213,10 @@ export class TransactionManager {
     const eventRef = tenantRef.collection('events').doc(event.eventId);
     const auditRef = tenantRef.collection('audit_logs').doc(audit.auditId);
     const outboxRef = tenantRef.collection('outbox').doc(outbox.outboxId);
+    const idempotencyRef = tenantRef.collection('idempotency').doc(IdempotencyService.getDocumentId(idempotencyKey));
 
     await db.runTransaction(async (transaction) => {
+      const idempotencySnapshot = await transaction.get(idempotencyRef);
       if (params.domainState !== undefined) {
         const stateRef = tenantRef.collection(collectionForEntityType(params.aggregateType)).doc(params.aggregateId);
         transaction.set(stateRef, sanitizeForFirestore(params.domainState), { merge: true });
@@ -228,6 +230,26 @@ export class TransactionManager {
       transaction.create(eventRef, sanitizeForFirestore(event));
       transaction.create(auditRef, sanitizeForFirestore(audit));
       transaction.create(outboxRef, sanitizeForFirestore(outbox));
+
+      if (idempotencySnapshot.exists) {
+        transaction.set(idempotencyRef, sanitizeForFirestore({
+          ...idempotencySnapshot.data(),
+          status: 'COMPLETED',
+          completedAt: timestamp,
+          lastUpdatedAt: timestamp,
+          leaseExpiresAt: 0,
+          result: {
+            success: true,
+            commandId,
+            idempotencyKey,
+            entityId: params.aggregateId,
+            eventType: params.eventType,
+            eventId: event.eventId,
+            auditId: audit.auditId,
+            outboxId: outbox.outboxId,
+          },
+        }), { merge: true });
+      }
     });
 
     return { success: true, eventId: event.eventId, auditId: audit.auditId, outboxId: outbox.outboxId, committedAt: timestamp };
@@ -287,6 +309,8 @@ export class TransactionManager {
           ...idempotencySnapshot.data(),
           status: 'COMPLETED',
           completedAt: timestamp,
+          lastUpdatedAt: timestamp,
+          leaseExpiresAt: 0,
           result: {
             success: true,
             commandId,

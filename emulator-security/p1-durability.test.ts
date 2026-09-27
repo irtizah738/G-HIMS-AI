@@ -4,6 +4,7 @@ import { TransactionManager } from '@/lib/backend/transactions/transaction-manag
 import { CommandContext } from '@/lib/backend/types';
 import { CommandBus } from '@/lib/backend/commands/command-bus';
 import { getAdminFirestore } from '@/server/firebase/admin';
+import { registerPatientAndEncounter } from '@/server/runtime/registration-orchestrator';
 
 function unique(prefix: string): string {
   return `${prefix}_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
@@ -176,6 +177,70 @@ describe('G-HIMS P1 durable command infrastructure', () => {
       .get();
 
     expect(state.exists).toBe(false);
+  });
+
+
+
+  test('patient registration is atomically idempotent across replay', async () => {
+    const db = getAdminFirestore();
+    expect(db).not.toBeNull();
+    if (!db) throw new Error('Firestore emulator Admin connection unavailable');
+
+    const tenantId = unique('tenant');
+    const commandId = unique('cmd');
+    const idempotencyKey = unique('idem');
+    const phone = `+1555${Math.floor(1000000 + Math.random() * 8999999)}`;
+
+    const input = {
+      tenantId,
+      commandId,
+      idempotencyKey,
+      fullName: 'Replay Safe Patient',
+      gender: 'female' as const,
+      dateOfBirth: '1990-01-01',
+      identifiers: [{ type: 'PHONE' as const, value: phone, issuer: 'P1 Test' }],
+      contactPhone: phone,
+      address: 'P1 Test Address',
+      encounterType: 'OPD' as const,
+      department: 'General OPD',
+      priority: 'ROUTINE' as const,
+      chiefComplaint: 'P1 registration replay test',
+      actorId: 'test-registrar',
+      actorRole: 'RECEPTIONIST',
+      actorName: 'Test Registrar',
+      bloodGroup: 'O+',
+      allergies: [],
+      chronicConditions: [],
+    };
+
+    const first = await registerPatientAndEncounter(input);
+    const replay = await registerPatientAndEncounter({
+      ...input,
+      commandId: unique('retry_cmd'),
+    });
+
+    expect(replay.patient.id).toBe(first.patient.id);
+    expect(replay.patient.mrn).toBe(first.patient.mrn);
+    expect(replay.encounter.id).toBe(first.encounter.id);
+
+    const patientSnapshot = await db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection('patients')
+      .where('contactPhone', '==', phone)
+      .get();
+
+    expect(patientSnapshot.size).toBe(1);
+
+    const idem = await db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection('idempotency')
+      .doc(IdempotencyService.getDocumentId(idempotencyKey))
+      .get();
+
+    expect(idem.data()?.status).toBe('COMPLETED');
+    expect(idem.data()?.result?.data?.patient?.id).toBe(first.patient.id);
   });
 
 

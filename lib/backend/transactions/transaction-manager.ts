@@ -100,6 +100,7 @@ function collectionForEntityType(entityType: string): string {
     LEAVE_REQUEST: 'leaveRequests',
     RESOURCE_MASTER: 'resources',
     HOSPITAL_ROOM: 'rooms',
+    HOSPITAL_BED: 'beds',
     RESOURCE_RESERVATION: 'resourceReservations',
     MAINTENANCE_WORK_ORDER: 'maintenanceWorkOrders',
     CALIBRATION_RECORD: 'calibrationRecords',

@@ -223,7 +223,7 @@ export async function registerPatientAndEncounter(
     patientName: params.fullName,
     mrn,
     tokenNumber,
-    department: encounterRecord.department,
+    department: encounterRecord.department || 'General Medicine',
     priority: (params.priority || 'ROUTINE').toLowerCase(),
     status: 'waiting' as const,
     arrivalTime: new Date(now).toISOString(),

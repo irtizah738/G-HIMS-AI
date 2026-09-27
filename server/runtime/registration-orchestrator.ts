@@ -51,6 +51,19 @@ export interface OrchestrationResult {
   workflowSnapshot: WorkflowSnapshot;
   timelineEvent: PatientTimelineProjection;
   outboxEvent: OutboxEventRecord;
+  queueToken: {
+    id: string;
+    encounterId: string;
+    patientId: string;
+    patientName: string;
+    mrn: string;
+    tokenNumber: string;
+    department: string;
+    priority: string;
+    status: 'waiting';
+    arrivalTime: string;
+    createdAt: number;
+  };
 }
 
 function generateMRN(now = new Date()): string {
@@ -203,6 +216,20 @@ export async function registerPatientAndEncounter(
     createdAt: now,
   };
 
+  const queueToken = {
+    id: `opd_${encounterId}`,
+    encounterId,
+    patientId,
+    patientName: params.fullName,
+    mrn,
+    tokenNumber,
+    department: encounterRecord.department,
+    priority: (params.priority || 'ROUTINE').toLowerCase(),
+    status: 'waiting' as const,
+    arrivalTime: new Date(now).toISOString(),
+    createdAt: now,
+  };
+
   const auditLogId = `aud_${crypto.randomUUID()}`;
   const auditLogEntry = {
     id: auditLogId,
@@ -224,6 +251,7 @@ export async function registerPatientAndEncounter(
     workflowSnapshot,
     timelineEvent: timelineRecord,
     outboxEvent: outboxRecord,
+    queueToken,
   };
 
   await db.runTransaction(async (transaction) => {
@@ -233,6 +261,7 @@ export async function registerPatientAndEncounter(
     const timelineRef = db.doc(timelineEventDocPath(tenantId, patientId, timelineEventId));
     const outboxRef = db.doc(outboxEventDocPath(tenantId, outboxRecord.id));
     const auditRef = db.doc(auditLogDocPath(tenantId, auditLogId));
+    const queueRef = db.collection('tenants').doc(tenantId).collection('opd_queue').doc(queueToken.id);
     const idempotencyRef = db
       .collection('tenants')
       .doc(tenantId)
@@ -279,6 +308,7 @@ export async function registerPatientAndEncounter(
     transaction.create(timelineRef, sanitizeForFirestore(timelineRecord));
     transaction.create(outboxRef, sanitizeForFirestore(outboxRecord));
     transaction.create(auditRef, sanitizeForFirestore(auditLogEntry));
+    transaction.create(queueRef, sanitizeForFirestore(queueToken));
 
     if (mpiRef && mpiKey) {
       transaction.create(mpiRef, sanitizeForFirestore({

@@ -107,6 +107,8 @@ function collectionForEntityType(entityType: string): string {
     CALIBRATION_RECORD: 'calibrationRecords',
     PATIENT_MPI: 'patients',
     PATIENT_SAFETY: 'patients',
+    REVENUE_INTEGRITY_FINDING: 'billingMismatches',
+    ENCOUNTER_CHARGE: 'encounterCharges',
   };
 
   const collection = map[entityType];

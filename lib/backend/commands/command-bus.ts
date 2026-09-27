@@ -14,6 +14,7 @@ import { HrWorkforceDomainService } from '../services/hr-workforce-domain-servic
 import { ResourceCapacityDomainService } from '../services/resource-capacity-domain-service';
 import { PatientIdentityDomainService } from '../services/patient-identity-domain-service';
 import { PatientMergeDomainService } from '../services/patient-merge-domain-service';
+import { InpatientBedDomainService } from '../services/inpatient-bed-domain-service';
 import { IdempotencyService } from '../idempotency/idempotency-service';
 
 export class CommandBus {
@@ -126,6 +127,33 @@ export class CommandBus {
 
         case 'UpdateOpdQueueStatusCommand':
           result = await OpdQueueDomainService.updateStatus(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'AdmitPatientToBedCommand':
+          result = await InpatientBedDomainService.admit(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'UpdateBedStatusCommand':
+          result = await InpatientBedDomainService.updateStatus(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'DischargePatientFromBedCommand':
+          result = await InpatientBedDomainService.discharge(
             context,
             command.commandId,
             command.idempotencyKey,

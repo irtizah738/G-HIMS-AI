@@ -1430,7 +1430,22 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       Nursing: 'NURSING',
     };
 
-    void executeActiveTenantCommand('SignClinicalNoteCommand', {
+    void executeActiveTenantCommand<{
+      evidenceId: string;
+      revenueIntegrityFindings?: Array<{
+        id: string;
+        patientId: string;
+        encounterId: string;
+        sourceEvidenceId: string;
+        documentedItem: string;
+        category: 'Procedure' | 'Medication' | 'Lab' | 'Supply / Consumable' | 'Bed Tier';
+        suggestedCode: string;
+        estimatedRecoverableAmountMinorUnits: number;
+        status: 'PENDING_REVIEW' | 'RECONCILED' | 'DISMISSED';
+        evidenceSnippet: string;
+        confidenceScore?: number;
+      }>;
+    }>('SignClinicalNoteCommand', {
       encounterId,
       patientId,
       category: categoryMap[note.category],
@@ -1457,25 +1472,34 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
         return { ...item, encounters };
       }));
 
-      // Revenue Integrity findings are presentation-only until their own governed
-      // server command/projection is introduced. They are never persisted directly.
-      if (note.aiStructuredData?.billingCodes?.length) {
-        const projectedMismatches = note.aiStructuredData.billingCodes.map((codeItem, index) => ({
-          id: `mm-${Date.now()}-${index}`,
-          patientId,
+      // Revenue Integrity candidates are created server-side from the signed,
+      // clinician-accepted structured note. The browser only renders that result.
+      const authoritativeFindings = result.data?.revenueIntegrityFindings || [];
+      if (authoritativeFindings.length > 0) {
+        const projectedMismatches: BillingAuditMismatch[] = authoritativeFindings.map((finding) => ({
+          id: finding.id,
+          patientId: finding.patientId,
           patientName: patient.fullName,
-          encounterId,
-          noteId,
+          encounterId: finding.encounterId,
+          noteId: finding.sourceEvidenceId,
           date: new Date().toISOString().split('T')[0],
-          documentedItem: `${codeItem.description} (CPT ${codeItem.code})`,
-          category: 'Procedure' as const,
-          suggestedCptCode: codeItem.code,
-          estimatedRecoverableRevenue: codeItem.fee,
-          status: 'pending_review' as const,
-          evidenceSnippet: `Extracted from clinician-accepted documentation: "${note.content.slice(0, 80)}..."`,
-          confidenceScore: 0.96,
+          documentedItem: finding.documentedItem,
+          category: finding.category,
+          suggestedCptCode: finding.suggestedCode,
+          estimatedRecoverableRevenue: finding.estimatedRecoverableAmountMinorUnits / 100,
+          status:
+            finding.status === 'RECONCILED'
+              ? 'reconciled'
+              : finding.status === 'DISMISSED'
+                ? 'dismissed'
+                : 'pending_review',
+          evidenceSnippet: finding.evidenceSnippet,
+          confidenceScore: finding.confidenceScore ?? 1,
         }));
-        setMismatches((previous) => [...projectedMismatches, ...previous]);
+        setMismatches((previous) => [
+          ...projectedMismatches,
+          ...previous.filter((existing) => !projectedMismatches.some((item) => item.id === existing.id)),
+        ]);
       }
 
       recordMutation('INSERT_NOTE', `Note:${noteId}`, newNote);
@@ -1580,58 +1604,116 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
-  const reconcileMismatch = (mismatchId: string) => {
-    const mismatch = mismatches.find(m => m.id === mismatchId);
+  const reconcileMismatch = async (mismatchId: string) => {
+    const mismatch = mismatches.find((item) => item.id === mismatchId);
     if (!mismatch) return;
 
-    const reconciledItem: BillingAuditMismatch = { ...mismatch, status: 'reconciled' };
-    setMismatches(prev => prev.map(m => m.id === mismatchId ? reconciledItem : m));
+    const result = await executeActiveTenantCommand<{
+      finding: {
+        id: string;
+        status: 'RECONCILED';
+      };
+      charge: {
+        id: string;
+        code: string;
+        description: string;
+        category: 'Procedure' | 'Medication' | 'Lab' | 'Supply / Consumable' | 'Bed Tier';
+        quantity: number;
+        unitAmountMinorUnits: number;
+        netAmountMinorUnits: number;
+      };
+    }>('ReconcileRevenueIntegrityFindingCommand', { findingId: mismatchId });
 
-    // Add as bill item to the patient encounter
-    let updatedPatient: Patient | undefined;
-    setPatients(prev => prev.map(p => {
-      if (p.id === mismatch.patientId) {
-        const encounters = [...p.encounters];
-        if (encounters.length > 0) {
-          const enc = encounters[0];
-          const newBillItem: BillItem = {
-            id: `bi-rec-${Date.now()}`,
-            description: mismatch.documentedItem,
-            code: mismatch.suggestedCptCode,
-            category: mismatch.category === 'Procedure' ? 'Procedure' : mismatch.category === 'Lab' ? 'Lab & Diagnostics' : 'Pharmacy',
-            quantity: 1,
-            unitPrice: mismatch.estimatedRecoverableRevenue,
-            totalPrice: mismatch.estimatedRecoverableRevenue,
-            auditedStatus: 'reconciled',
-            sourceNoteId: mismatch.noteId,
-          };
-          const newSubtotal = enc.billing.subtotal + mismatch.estimatedRecoverableRevenue;
-          const newTax = Math.round(newSubtotal * 0.05);
-          encounters[0] = {
-            ...enc,
-            billing: {
-              ...enc.billing,
-              items: [...enc.billing.items, newBillItem],
-              subtotal: newSubtotal,
-              tax: newTax,
-              patientPayable: Math.round(newSubtotal * 0.25),
-            }
-          };
-        }
-        updatedPatient = { ...p, encounters };
-        return updatedPatient;
-      }
-      return p;
+    if (!result.success || !result.data?.charge) {
+      throw new Error(result.error?.message || 'Revenue Integrity reconciliation failed.');
+    }
+
+    const charge = result.data.charge;
+    setMismatches((previous) =>
+      previous.map((item) => item.id === mismatchId ? { ...item, status: 'reconciled' } : item)
+    );
+
+    // Billing inside HospitalContext is a transitional UI projection. The durable
+    // source of truth is now tenants/{tenantId}/encounterCharges/{chargeId}.
+    setPatients((previous) => previous.map((patientItem) => {
+      if (patientItem.id !== mismatch.patientId) return patientItem;
+
+      const encounters = [...patientItem.encounters];
+      const encounterIndex = encounters.findIndex((encounter) => encounter.id === mismatch.encounterId);
+      if (encounterIndex < 0) return patientItem;
+
+      const encounter = encounters[encounterIndex];
+      const amount = charge.netAmountMinorUnits / 100;
+      const existingItem = encounter.billing.items.find((item) => item.id === charge.id);
+      if (existingItem) return patientItem;
+
+      const newBillItem: BillItem = {
+        id: charge.id,
+        description: charge.description,
+        code: charge.code,
+        category:
+          charge.category === 'Lab'
+            ? 'Lab & Diagnostics'
+            : charge.category === 'Medication' || charge.category === 'Supply / Consumable'
+              ? 'Pharmacy'
+              : 'Procedure',
+        quantity: charge.quantity,
+        unitPrice: charge.unitAmountMinorUnits / 100,
+        totalPrice: amount,
+        auditedStatus: 'reconciled',
+        sourceNoteId: mismatch.noteId,
+      };
+
+      const newSubtotal = encounter.billing.subtotal + amount;
+      const newTax = Math.round(newSubtotal * 0.05 * 100) / 100;
+
+      encounters[encounterIndex] = {
+        ...encounter,
+        billing: {
+          ...encounter.billing,
+          items: [...encounter.billing.items, newBillItem],
+          subtotal: newSubtotal,
+          tax: newTax,
+        },
+      };
+
+      return { ...patientItem, encounters };
     }));
 
-    recordMutation('RECONCILE_BILL', `Mismatch:${mismatchId}`, mismatch);
-    addAuditLog('RECONCILE_LEAKAGE', `Encounter ${mismatch.encounterId}`, `Reconciled +$${mismatch.estimatedRecoverableRevenue} (${mismatch.suggestedCptCode}) into invoice`);
+    recordMutation('RECONCILE_BILL', `Mismatch:${mismatchId}`, {
+      findingId: mismatchId,
+      chargeId: charge.id,
+    });
+    addAuditLog(
+      'RECONCILE_LEAKAGE',
+      `Encounter ${mismatch.encounterId}`,
+      `Authoritative charge ${charge.code} accepted for ${(charge.netAmountMinorUnits / 100).toFixed(2)}.`
+    );
   };
 
-  const dismissMismatch = (mismatchId: string) => {
-    const dismissedItem = mismatches.find(m => m.id === mismatchId);
-    setMismatches(prev => prev.map(m => m.id === mismatchId ? { ...m, status: 'dismissed' } : m));
-    addAuditLog('DISMISS_MISMATCH', `Mismatch ${mismatchId}`, `Marked as not billable / clinical exception`);
+  const dismissMismatch = async (mismatchId: string) => {
+    const dismissedItem = mismatches.find((item) => item.id === mismatchId);
+    if (!dismissedItem) return;
+
+    const result = await executeActiveTenantCommand<{
+      finding: { id: string; status: 'DISMISSED' };
+    }>('DismissRevenueIntegrityFindingCommand', {
+      findingId: mismatchId,
+      reason: 'Reviewed by revenue-cycle staff and marked not billable / clinical exception.',
+    });
+
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Revenue Integrity dismissal failed.');
+    }
+
+    setMismatches((previous) =>
+      previous.map((item) => item.id === mismatchId ? { ...item, status: 'dismissed' } : item)
+    );
+    addAuditLog(
+      'DISMISS_MISMATCH',
+      `Mismatch ${mismatchId}`,
+      'Authoritative Revenue Integrity finding dismissed after human review.'
+    );
   };
 
   const dispatchHl7Message = (msg: Omit<Hl7Message, 'id' | 'timestamp' | 'status'>) => {

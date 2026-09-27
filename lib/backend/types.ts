@@ -101,6 +101,8 @@ export interface OutboxRecord {
   nextAttemptAt: number;
   createdAt: number;
   publishedAt?: number;
+  processingStartedAt?: number;
+  leaseExpiresAt?: number;
   lastError?: string;
 }
 

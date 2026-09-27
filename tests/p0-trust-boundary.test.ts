@@ -185,6 +185,11 @@ describe('G-HIMS P0 Core Trust Boundary regression guards', () => {
     const copilot = await source('app/api/gemini/copilot/route.ts');
     expect(copilot).not.toContain("'Ticagrelor 90mg PO BID'");
     expect(copilot).not.toContain("'Clinical Follow-up (ICD-10 Z09)'");
+
+    const denialFlow = await source('lib/ai/flows/denial-appeal.ts');
+    expect(denialFlow).toContain('AI_UNAVAILABLE');
+    expect(denialFlow).not.toContain('generateFallbackDenialAppeal');
+    expect(denialFlow).not.toContain('MCG Health Inpatient & Surgical Care 28th Edition Guidelines');
   });
 
   test('unverified credentials cannot receive derived clinical privileges', async () => {

@@ -1,21 +1,41 @@
 /**
  * Offline Reconciliation Domain Service
- * Handles server-side conflict resolution, vector clock alignment, and batch synchronization.
+ * Replays authenticated offline commands through the same CommandBus as online traffic.
+ * Unknown commands are rejected; no client-authored state merge is accepted implicitly.
  */
-
 import {
   OfflineSyncBatch,
   OfflineSyncResponse,
   SyncBatchResultItem,
   CommandContext,
+  ConflictCategory,
 } from '../types';
-import { EncounterDomainService } from './encounter-domain-service';
-import { ClinicalOrderDomainService } from './clinical-order-domain-service';
+import { CommandBus } from '../commands/command-bus';
+
+function conflictCategory(commandType: string): ConflictCategory {
+  if (['PostJournalCommand'].includes(commandType)) return 'FINANCIAL_CONFLICT';
+  if (
+    [
+      'PrescribeMedicationCommand',
+      'AdmitPatientToBedCommand',
+      'DischargePatientFromBedCommand',
+      'MergePatientCommand',
+      'AdvanceStageCommand',
+    ].includes(commandType)
+  ) return 'SAFETY_CRITICAL';
+  if (
+    [
+      'RecordVitalsCommand',
+      'SignClinicalNoteCommand',
+      'PlaceDiagnosticOrderCommand',
+      'CreateEncounterCommand',
+      'CreateTelehealthSessionCommand',
+    ].includes(commandType)
+  ) return 'SAFE_APPEND';
+  return 'STATE_CONFLICT';
+}
 
 export class OfflineReconciliationDomainService {
-  /**
-   * Processes a client-submitted offline synchronization batch.
-   */
   public static async processSyncBatch(
     context: CommandContext,
     batch: OfflineSyncBatch
@@ -26,84 +46,73 @@ export class OfflineReconciliationDomainService {
     let rejected = 0;
 
     for (const mutation of batch.mutations) {
+      const category = conflictCategory(mutation.commandType);
+
       try {
-        const commandId = mutation.mutationId;
-        const idempotencyKey = mutation.idempotencyKey || `sync_${mutation.mutationId}`;
-
-        switch (mutation.commandType) {
-          case 'CreateEncounterCommand': {
-            const res = await EncounterDomainService.createEncounter(
-              context,
-              commandId,
-              idempotencyKey,
-              mutation.payload as any
-            );
-            if (res.success) {
-              accepted++;
-              results.push({
-                mutationId: mutation.mutationId,
-                status: 'accepted',
-                conflictCategory: 'SAFE_APPEND',
-                serverEventId: res.eventId,
-                data: res.data,
-              });
-            } else {
-              rejected++;
-              results.push({
-                mutationId: mutation.mutationId,
-                status: 'rejected',
-                conflictCategory: 'STATE_CONFLICT',
-                reason: res.error?.message,
-              });
-            }
-            break;
-          }
-
-          case 'PlaceDiagnosticOrderCommand': {
-            const res = await ClinicalOrderDomainService.placeDiagnosticOrder(
-              context,
-              commandId,
-              idempotencyKey,
-              mutation.payload as any
-            );
-            if (res.success) {
-              accepted++;
-              results.push({
-                mutationId: mutation.mutationId,
-                status: 'accepted',
-                conflictCategory: 'SAFE_APPEND',
-                serverEventId: res.eventId,
-                data: res.data,
-              });
-            } else {
-              conflicted++;
-              results.push({
-                mutationId: mutation.mutationId,
-                status: 'conflict',
-                conflictCategory: 'SAFETY_CRITICAL',
-                reason: res.error?.message,
-              });
-            }
-            break;
-          }
-
-          default: {
-            // Unhandled or custom command -> Mergeable record
-            accepted++;
-            results.push({
-              mutationId: mutation.mutationId,
-              status: 'accepted',
-              conflictCategory: 'MERGEABLE',
-              serverEventId: `evt_merged_${Date.now()}`,
-            });
-          }
+        if (!mutation.commandType || !mutation.idempotencyKey) {
+          rejected += 1;
+          results.push({
+            mutationId: mutation.mutationId,
+            status: 'rejected',
+            conflictCategory: category,
+            reason: 'OFFLINE_COMMAND_INVALID: commandType and idempotencyKey are required.',
+          });
+          continue;
         }
-      } catch (err) {
-        rejected++;
+
+        const result = await CommandBus.dispatch(context, {
+          commandId: mutation.mutationId,
+          idempotencyKey: mutation.idempotencyKey,
+          tenantId: context.tenantId,
+          commandType: mutation.commandType,
+          payload: mutation.payload,
+          schemaVersion: mutation.schemaVersion || 1,
+          clientTimestamp: mutation.occurredAt,
+        });
+
+        if (result.success) {
+          accepted += 1;
+          results.push({
+            mutationId: mutation.mutationId,
+            status: 'accepted',
+            conflictCategory: category,
+            serverEventId: result.eventId,
+            data: result.data,
+          });
+          continue;
+        }
+
+        const code = result.error?.code || 'OFFLINE_COMMAND_REJECTED';
+        if (
+          code === 'IDEMPOTENCY_IN_PROGRESS' ||
+          code.includes('CONFLICT') ||
+          code.includes('STATE_') ||
+          code.includes('ALREADY_') ||
+          code.includes('UNAVAILABLE')
+        ) {
+          conflicted += 1;
+          results.push({
+            mutationId: mutation.mutationId,
+            status: 'requires_review',
+            conflictCategory: category,
+            reason: result.error?.message || code,
+          });
+        } else {
+          rejected += 1;
+          results.push({
+            mutationId: mutation.mutationId,
+            status: 'rejected',
+            conflictCategory: category,
+            reason: result.error?.message || code,
+          });
+        }
+      } catch (error) {
+        rejected += 1;
         results.push({
           mutationId: mutation.mutationId,
           status: 'rejected',
-          reason: err instanceof Error ? err.message : 'Unknown reconciliation error',
+          conflictCategory: category,
+          reason: error instanceof Error ? error.message : 'Unknown reconciliation error',
         });
       }
     }

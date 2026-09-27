@@ -5,6 +5,7 @@
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { UserDeviceRecord } from '@/lib/auth/auth-types';
 import { AuthError } from '@/lib/auth/auth-errors';
+import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
 
 export interface RegisterDeviceParams {
   deviceId: string;
@@ -13,6 +14,11 @@ export interface RegisterDeviceParams {
   deviceType?: 'DESKTOP' | 'TABLET' | 'MOBILE';
   platform?: string;
   appVersion?: string;
+}
+
+function canUseEphemeralDeviceState(): boolean {
+  const mode = getRuntimeMode();
+  return mode === 'DEMO' || mode === 'TEST';
 }
 
 export async function registerOrUpdateDevice(params: RegisterDeviceParams): Promise<UserDeviceRecord> {
@@ -32,7 +38,13 @@ export async function registerOrUpdateDevice(params: RegisterDeviceParams): Prom
   };
 
   if (!db) {
-    return deviceRecord;
+    if (canUseEphemeralDeviceState()) return deviceRecord;
+
+    throw new AuthError({
+      code: 'INTERNAL_AUTH_ERROR',
+      message: 'Authoritative device registry is unavailable.',
+      statusCode: 503,
+    });
   }
 
   try {
@@ -41,10 +53,19 @@ export async function registerOrUpdateDevice(params: RegisterDeviceParams): Prom
 
     if (existingSnap.exists) {
       const data = existingSnap.data() as UserDeviceRecord;
+
+      if (data.userId !== params.userId || data.tenantId !== params.tenantId) {
+        throw new AuthError({
+          code: 'DEVICE_REVOKED',
+          message: 'Clinical workstation is bound to a different user or tenant.',
+          statusCode: 403,
+        });
+      }
+
       if (data.status === 'REVOKED') {
         throw new AuthError({
           code: 'DEVICE_REVOKED',
-          message: 'Workstation device has been revoked by hospital IT policy',
+          message: 'Workstation device has been revoked by hospital IT policy.',
           statusCode: 403,
         });
       }
@@ -52,7 +73,7 @@ export async function registerOrUpdateDevice(params: RegisterDeviceParams): Prom
       await devDocRef.update({
         lastSeenAt: now,
         lastSyncAt: now,
-      }).catch(() => {});
+      });
 
       return {
         ...data,
@@ -61,10 +82,17 @@ export async function registerOrUpdateDevice(params: RegisterDeviceParams): Prom
       };
     }
 
-    await devDocRef.set(deviceRecord, { merge: true });
+    await devDocRef.create(deviceRecord);
     return deviceRecord;
-  } catch (err) {
-    if (err instanceof AuthError) throw err;
-    return deviceRecord;
+  } catch (error) {
+    if (error instanceof AuthError) throw error;
+    if (canUseEphemeralDeviceState()) return deviceRecord;
+
+    throw new AuthError({
+      code: 'INTERNAL_AUTH_ERROR',
+      message: 'Unable to validate or persist clinical device registration.',
+      statusCode: 503,
+      originalError: error,
+    });
   }
 }

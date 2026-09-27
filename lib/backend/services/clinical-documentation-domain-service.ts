@@ -7,6 +7,7 @@ import { AuthorizationPipeline } from '../auth/authorization-pipeline';
 import { TransactionManager } from '../transactions/transaction-manager';
 import { CommandContext, CommandResult } from '../types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
+import type { RevenueIntegrityFinding } from './revenue-integrity-domain-service';
 
 export interface RecordVitalsPayload {
   encounterId: string;
@@ -191,36 +192,82 @@ export class ClinicalDocumentationDomainService {
       status: 'FINAL',
     };
 
-    const tx = await TransactionManager.executeAtomicWrite(
-      context,
-      commandId,
+    // A signed note may create Revenue Integrity *candidates*, never automatic charges.
+    // Only explicitly clinician-accepted structured billing codes are considered.
+    const structured = payload.acceptedStructuredData || {};
+    const billingCodes = Array.isArray(structured.billingCodes) ? structured.billingCodes : [];
+    const revenueIntegrityFindings: RevenueIntegrityFinding[] = billingCodes.flatMap((raw, index) => {
+      if (!raw || typeof raw !== 'object') return [];
+      const candidate = raw as Record<string, unknown>;
+      const code = String(candidate.code || '').trim();
+      const description = String(candidate.description || '').trim();
+      const fee = Number(candidate.fee);
+
+      if (!code || !description || !Number.isFinite(fee) || fee <= 0) return [];
+
+      const findingId = `ri_${evidenceId}_${index}`;
+      return [{
+        id: findingId,
+        tenantId: context.tenantId,
+        patientId: payload.patientId,
+        encounterId: payload.encounterId,
+        sourceEvidenceId: evidenceId,
+        sourceNoteId: evidenceId,
+        documentedItem: description,
+        category: 'Procedure' as const,
+        suggestedCode: code,
+        estimatedRecoverableAmountMinorUnits: Math.round(fee * 100),
+        currency: 'USD',
+        status: 'PENDING_REVIEW' as const,
+        evidenceSnippet: payload.content.slice(0, 240),
+        createdAt: signedAt,
+        createdBy: context.actorId,
+      }];
+    });
+
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'CLINICIAN',
+      aggregateType: 'ENCOUNTER_EVIDENCE',
+      aggregateId: evidenceId,
+      eventType: 'CLINICAL_NOTE_SIGNED',
+      eventPayload: {
+        evidenceId,
+        patientId: payload.patientId,
+        encounterId: payload.encounterId,
+        category: payload.category,
+        sourceDraftId: payload.sourceDraftId,
+        revenueIntegrityFindingIds: revenueIntegrityFindings.map((finding) => finding.id),
+      },
+      auditAction: 'SIGN_CLINICAL_NOTE',
+      auditResourceType: 'ENCOUNTER_EVIDENCE',
+      auditResourceId: evidenceId,
+      auditReason: `Signed ${payload.category} note for encounter ${payload.encounterId}`,
+      outboxTopic: 'g-hims-clinical-events',
       idempotencyKey,
-      {
-        entityType: 'ENCOUNTER_EVIDENCE',
-        entityId: evidenceId,
-        eventType: 'CLINICAL_NOTE_SIGNED',
-        domainState,
-        eventPayload: {
-          evidenceId,
-          patientId: payload.patientId,
-          encounterId: payload.encounterId,
-          category: payload.category,
-          sourceDraftId: payload.sourceDraftId,
-        },
-        auditReason: `Signed ${payload.category} note for encounter ${payload.encounterId}`,
-        outboxTopic: 'g-hims-clinical-events',
-      }
-    );
+      commandId,
+      correlationId: context.correlationId,
+      domainState,
+      additionalStateWrites: revenueIntegrityFindings.map((finding) => ({
+        entityType: 'REVENUE_INTEGRITY_FINDING',
+        entityId: finding.id,
+        domainState: finding,
+      })),
+    });
 
     return {
       success: true,
       commandId,
       idempotencyKey,
       entityId: evidenceId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: domainState,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
+      data: {
+        ...domainState,
+        revenueIntegrityFindings,
+      },
     };
   }
 }

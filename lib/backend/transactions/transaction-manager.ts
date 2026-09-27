@@ -239,12 +239,14 @@ export class TransactionManager {
 
       if (params.domainState !== undefined) {
         const stateRef = tenantRef.collection(collectionForEntityType(params.aggregateType)).doc(params.aggregateId);
-        transaction.set(stateRef, toDocumentData(params.domainState, params.aggregateType), { merge: true });
+        // domainState is an authoritative aggregate snapshot, not a patch.
+        // Replace the document so removed/undefined fields do not survive from prior state.
+        transaction.set(stateRef, toDocumentData(params.domainState, params.aggregateType));
       }
 
       for (const write of params.additionalStateWrites || []) {
         const stateRef = tenantRef.collection(collectionForEntityType(write.entityType)).doc(write.entityId);
-        transaction.set(stateRef, toDocumentData(write.domainState, write.entityType), { merge: true });
+        transaction.set(stateRef, toDocumentData(write.domainState, write.entityType));
       }
 
       transaction.create(eventRef, sanitizeForFirestore(event));
@@ -326,7 +328,8 @@ export class TransactionManager {
         throw new Error('IDEMPOTENCY_RESERVATION_INVALID');
       }
 
-      transaction.set(stateRef, toDocumentData(payload.domainState, payload.entityType), { merge: true });
+      // Authoritative snapshot replacement is required to clear stale clinical fields.
+      transaction.set(stateRef, toDocumentData(payload.domainState, payload.entityType));
       transaction.create(eventRef, sanitizeForFirestore(event));
       transaction.create(auditRef, sanitizeForFirestore(audit));
       transaction.create(outboxRef, sanitizeForFirestore(outbox));

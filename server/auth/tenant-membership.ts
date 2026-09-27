@@ -36,11 +36,6 @@ function deriveDefaultPermissions(roles: string[]): string[] {
 
 function deriveClinicalPrivileges(roles: string[]): string[] {
   const normalized = roles.map((role) => role.toLowerCase());
-
-  if (normalized.includes('administrator') || normalized.includes('admin')) {
-    return ['*'];
-  }
-
   const privileges = new Set<string>();
 
   if (normalized.includes('doctor') || normalized.includes('physician')) {
@@ -98,9 +93,21 @@ function membershipFromDocument(tenantId: string, userId: string, data: Record<s
     ? data.permissions.map(String)
     : deriveDefaultPermissions(roles);
 
-  const clinicalPrivileges = Array.isArray(data.clinicalPrivileges)
+  const credentialStatus =
+    typeof data.credentialStatus === 'string'
+      ? data.credentialStatus.toUpperCase()
+      : 'UNVERIFIED';
+
+  const declaredClinicalPrivileges = Array.isArray(data.clinicalPrivileges)
     ? data.clinicalPrivileges.map(String)
     : deriveClinicalPrivileges(roles);
+
+  // Clinical authority is credential-gated. An ACTIVE account with an unverified
+  // or expired credential may retain non-clinical access but receives no clinical privileges.
+  const clinicalPrivileges =
+    credentialStatus === 'VERIFIED'
+      ? declaredClinicalPrivileges
+      : [];
 
   return {
     userId,
@@ -121,7 +128,7 @@ function membershipFromDocument(tenantId: string, userId: string, data: Record<s
     permissions,
     clinicalPrivileges,
     licenseId: typeof data.licenseId === 'string' ? data.licenseId : undefined,
-    credentialStatus: typeof data.credentialStatus === 'string' ? data.credentialStatus : 'UNVERIFIED',
+    credentialStatus,
     createdAt: typeof data.createdAt === 'string' ? data.createdAt : '',
     updatedAt: typeof data.updatedAt === 'string' ? data.updatedAt : '',
   };

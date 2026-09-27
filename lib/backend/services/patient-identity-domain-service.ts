@@ -304,9 +304,7 @@ export class PatientIdentityDomainService {
       idempotencyKey,
       commandId,
       correlationId: context.correlationId,
-      stateWrite: async () => {
-        // State written to persistent store
-      },
+      domainState: newPatient,
     });
 
     return {
@@ -464,7 +462,14 @@ export class PatientIdentityDomainService {
       idempotencyKey,
       commandId,
       correlationId: context.correlationId,
-      stateWrite: async () => {},
+      domainState: primary,
+      additionalStateWrites: [
+        {
+          entityType: 'PATIENT_MPI',
+          entityId: secondary.id,
+          domainState: secondary,
+        },
+      ],
     });
 
     return {
@@ -563,7 +568,6 @@ export class PatientIdentityDomainService {
       idempotencyKey,
       commandId,
       correlationId: context.correlationId,
-      stateWrite: async () => {},
     });
 
     return {

@@ -5,25 +5,47 @@ import { createSession, validateSession, revokeSession } from '@/server/auth/ses
 import { registerOrUpdateDevice } from '@/server/auth/device-service';
 import { logAuthEvent } from '@/server/auth/audit-service';
 import { getUserAccessibleTenants } from '@/server/auth/tenant-membership';
+import { getAdminAuth } from '@/server/firebase/admin';
 import { LoginResponsePayload } from '@/lib/auth/auth-types';
 import { AuthError } from '@/lib/auth/auth-errors';
 
+function errorResponse(error: unknown, fallbackCode: 'AUTHENTICATION_REQUIRED' | 'SESSION_EXPIRED' = 'AUTHENTICATION_REQUIRED') {
+  const authError = error instanceof AuthError
+    ? error
+    : new AuthError({
+        code: fallbackCode,
+        message: error instanceof Error ? error.message : 'Authentication failed',
+        statusCode: 401,
+      });
+
+  return NextResponse.json(
+    {
+      error: authError.message,
+      code: authError.code,
+      userMessage: authError.userMessage,
+    },
+    { status: authError.statusCode }
+  );
+}
+
 export async function POST(req: NextRequest) {
-  const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0] || req.headers.get('x-real-ip') || '127.0.0.1';
+  const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || '127.0.0.1';
   const userAgent = req.headers.get('user-agent') || 'Unknown';
 
   try {
-    const authHeader = req.headers.get('authorization');
-    const token = extractBearerToken(authHeader);
-
-    // 1. Verify token with Firebase Admin
+    const token = extractBearerToken(req.headers.get('authorization'));
     const verifiedToken = await verifyFirebaseToken(token, true);
-
     const body = await req.json().catch(() => ({}));
-    const requestedTenantId = body.tenantId || 'central-metro-hospital';
+    const requestedTenantId = String(body.tenantId || '').trim().toLowerCase();
     const deviceData = body.device || {};
 
-    // 2. Register / heartbeat device workstation if provided
+    if (!requestedTenantId) {
+      return NextResponse.json({ error: 'tenantId is required' }, { status: 400 });
+    }
+
+    // Membership is checked before any session/device authority is created.
+    await resolveAuthorizationContext(verifiedToken, requestedTenantId);
+
     let registeredDevice;
     if (deviceData.deviceId) {
       registeredDevice = await registerOrUpdateDevice({
@@ -36,7 +58,6 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 3. Create server-authoritative session
     const session = await createSession({
       userId: verifiedToken.uid,
       tenantId: requestedTenantId,
@@ -45,7 +66,6 @@ export async function POST(req: NextRequest) {
       userAgent,
     });
 
-    // 4. Resolve full authorization context (RBAC, ABAC, Department, Privileges, Status)
     const authContext = await resolveAuthorizationContext(
       verifiedToken,
       requestedTenantId,
@@ -53,10 +73,22 @@ export async function POST(req: NextRequest) {
       registeredDevice?.deviceId
     );
 
-    // 5. Get user's accessible tenants
     const accessibleTenants = await getUserAccessibleTenants(verifiedToken.uid, verifiedToken.email);
 
-    // 6. Log security audit event
+    // Claims are a convenience for Firestore read rules only. Tenant membership
+    // remains the server-side authority and is re-resolved on every sensitive request.
+    const adminAuth = getAdminAuth();
+    if (adminAuth) {
+      await adminAuth.setCustomUserClaims(verifiedToken.uid, {
+        tenantId: authContext.tenantId,
+        role: authContext.roles[0],
+        roles: authContext.roles,
+        accessibleTenants: accessibleTenants
+          .filter((tenant) => tenant.status === 'ACTIVE')
+          .map((tenant) => tenant.tenantId),
+      });
+    }
+
     await logAuthEvent({
       eventType: 'LOGIN_SUCCESS',
       tenantId: authContext.tenantId,
@@ -81,7 +113,7 @@ export async function POST(req: NextRequest) {
       },
       tenant: {
         tenantId: authContext.tenantId,
-        name: authContext.tenantId === 'central-metro-hospital' ? 'Central Metro General Hospital' : `Hospital (${authContext.tenantId})`,
+        name: accessibleTenants.find((tenant) => tenant.tenantId === authContext.tenantId)?.name || `Hospital (${authContext.tenantId})`,
       },
       authorization: {
         roles: authContext.roles,
@@ -95,53 +127,44 @@ export async function POST(req: NextRequest) {
         sessionId: session.sessionId,
         expiresAt: session.expiresAt,
       },
-      accessibleTenants: accessibleTenants.map((t) => ({
-        tenantId: t.tenantId,
-        name: t.name,
-        facilityCode: t.facilityCode,
-        roles: t.roles,
+      accessibleTenants: accessibleTenants.map((tenant) => ({
+        tenantId: tenant.tenantId,
+        name: tenant.name,
+        facilityCode: tenant.facilityCode,
+        roles: tenant.roles,
       })),
     };
 
     return NextResponse.json(payload);
-  } catch (err: any) {
-    const errorObj = err instanceof AuthError ? err : new AuthError({
-      code: 'AUTHENTICATION_REQUIRED',
-      message: err?.message || 'Authentication failed',
-      statusCode: 401,
-    });
-
+  } catch (error) {
     await logAuthEvent({
       eventType: 'LOGIN_FAILURE',
       ip: clientIp,
       userAgent,
-      reason: errorObj.message,
+      reason: error instanceof Error ? error.message : 'Authentication failed',
     }).catch(() => {});
 
-    return NextResponse.json(
-      {
-        error: errorObj.message,
-        code: errorObj.code,
-        userMessage: errorObj.userMessage,
-      },
-      { status: errorObj.statusCode }
-    );
+    return errorResponse(error);
   }
 }
 
 export async function GET(req: NextRequest) {
-  const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0] || req.headers.get('x-real-ip') || '127.0.0.1';
-  const userAgent = req.headers.get('user-agent') || 'Unknown';
-
   try {
-    const authHeader = req.headers.get('authorization');
-    const token = extractBearerToken(authHeader);
+    const token = extractBearerToken(req.headers.get('authorization'));
+    const verifiedToken = await verifyFirebaseToken(token, true);
+    const tenantId = String(req.headers.get('x-ghims-tenant-id') || verifiedToken.claims.tenantId || '').trim().toLowerCase();
+    const sessionId = String(req.headers.get('x-ghims-session-id') || '').trim();
 
-    const verifiedToken = await verifyFirebaseToken(token, false);
-    const tenantId = (req.headers.get('x-ghims-tenant-id') || verifiedToken.claims.tenantId || 'central-metro-hospital').toLowerCase();
+    if (!tenantId || !sessionId) {
+      throw new AuthError({
+        code: 'SESSION_NOT_FOUND',
+        message: 'Active tenant and session identifiers are required',
+        statusCode: 401,
+      });
+    }
 
-    // Resolve auth context
-    const authContext = await resolveAuthorizationContext(verifiedToken, tenantId);
+    const session = await validateSession(tenantId, sessionId, verifiedToken.uid);
+    const authContext = await resolveAuthorizationContext(verifiedToken, tenantId, session.sessionId, session.deviceId);
     const accessibleTenants = await getUserAccessibleTenants(verifiedToken.uid, verifiedToken.email);
 
     const payload: LoginResponsePayload = {
@@ -153,7 +176,7 @@ export async function GET(req: NextRequest) {
       },
       tenant: {
         tenantId: authContext.tenantId,
-        name: authContext.tenantId === 'central-metro-hospital' ? 'Central Metro General Hospital' : `Hospital (${authContext.tenantId})`,
+        name: accessibleTenants.find((tenant) => tenant.tenantId === authContext.tenantId)?.name || `Hospital (${authContext.tenantId})`,
       },
       authorization: {
         roles: authContext.roles,
@@ -164,72 +187,52 @@ export async function GET(req: NextRequest) {
         accountStatus: authContext.accountStatus,
       },
       session: {
-        sessionId: authContext.sessionId,
-        expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(),
+        sessionId: session.sessionId,
+        expiresAt: session.expiresAt,
       },
-      accessibleTenants: accessibleTenants.map((t) => ({
-        tenantId: t.tenantId,
-        name: t.name,
-        facilityCode: t.facilityCode,
-        roles: t.roles,
+      accessibleTenants: accessibleTenants.map((tenant) => ({
+        tenantId: tenant.tenantId,
+        name: tenant.name,
+        facilityCode: tenant.facilityCode,
+        roles: tenant.roles,
       })),
     };
 
     return NextResponse.json(payload);
-  } catch (err: any) {
-    const errorObj = err instanceof AuthError ? err : new AuthError({
-      code: 'SESSION_EXPIRED',
-      message: err?.message || 'Session validation failed',
-      statusCode: 401,
-    });
-
-    return NextResponse.json(
-      {
-        error: errorObj.message,
-        code: errorObj.code,
-        userMessage: errorObj.userMessage,
-      },
-      { status: errorObj.statusCode }
-    );
+  } catch (error) {
+    return errorResponse(error, 'SESSION_EXPIRED');
   }
 }
 
 export async function DELETE(req: NextRequest) {
-  const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0] || '127.0.0.1';
-  const userAgent = req.headers.get('user-agent') || 'Unknown';
-
   try {
-    const authHeader = req.headers.get('authorization');
-    let userId = 'anonymous';
-    let tenantId = 'central-metro-hospital';
-
-    if (authHeader) {
-      try {
-        const token = extractBearerToken(authHeader);
-        const verified = await verifyFirebaseToken(token, false);
-        userId = verified.uid;
-      } catch {
-        // Continue cleanup
-      }
-    }
-
+    const token = extractBearerToken(req.headers.get('authorization'));
+    const verifiedToken = await verifyFirebaseToken(token, false);
     const body = await req.json().catch(() => ({}));
-    if (body.sessionId) {
-      await revokeSession(body.tenantId || tenantId, body.sessionId, userId, 'User initiated sign out');
+    const tenantId = String(body.tenantId || req.headers.get('x-ghims-tenant-id') || '').trim().toLowerCase();
+    const sessionId = String(body.sessionId || req.headers.get('x-ghims-session-id') || '').trim();
+
+    if (!tenantId || !sessionId) {
+      throw new AuthError({
+        code: 'SESSION_NOT_FOUND',
+        message: 'tenantId and sessionId are required',
+        statusCode: 401,
+      });
     }
+
+    await validateSession(tenantId, sessionId, verifiedToken.uid);
+    await revokeSession(tenantId, sessionId, verifiedToken.uid, 'User initiated sign out');
 
     await logAuthEvent({
       eventType: 'LOGOUT',
-      tenantId: body.tenantId || tenantId,
-      userId,
-      sessionId: body.sessionId,
-      ip: clientIp,
-      userAgent,
+      tenantId,
+      userId: verifiedToken.uid,
+      sessionId,
       reason: 'Standard user sign out',
     });
 
     return NextResponse.json({ success: true, message: 'Session terminated successfully' });
-  } catch (err: any) {
-    return NextResponse.json({ success: true });
+  } catch (error) {
+    return errorResponse(error, 'SESSION_EXPIRED');
   }
 }

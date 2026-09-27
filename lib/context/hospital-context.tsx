@@ -1357,6 +1357,14 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
         department: string;
         chiefComplaint: string;
       };
+      queueToken: {
+        id: string;
+        tokenNumber: string;
+        department: string;
+        priority: string;
+        status: 'waiting';
+        arrivalTime: string;
+      };
     }>({
       fullName: patientData.fullName,
       dateOfBirth: patientData.dateOfBirth,
@@ -1407,11 +1415,35 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     };
 
     setPatients((previous) => [newPatient, ...previous.filter((item) => item.id !== newPatient.id)]);
+    setOpdQueue((previous) => [
+      {
+        id: registration.queueToken.id,
+        tokenNumber: registration.queueToken.tokenNumber,
+        patientId: newPatient.id,
+        patientName: newPatient.fullName,
+        mrn: newPatient.mrn,
+        age: newPatient.age,
+        gender: newPatient.gender,
+        department: registration.queueToken.department,
+        assignedDoctor: '',
+        priority:
+          registration.queueToken.priority === 'urgent'
+            ? 'urgent'
+            : registration.queueToken.priority === 'emergency'
+              ? 'stat_emergency'
+              : 'routine',
+        status: 'waiting',
+        arrivalTime: registration.queueToken.arrivalTime,
+        chiefComplaint: registration.encounter.chiefComplaint || 'Initial clinic intake and consultation',
+      },
+      ...previous.filter((token) => token.id !== registration.queueToken.id),
+    ]);
     setSelectedPatientId(newPatient.id);
     recordMutation('REGISTER_PATIENT', `Patient:${newPatient.id}`, {
       patientId: newPatient.id,
       mrn: newPatient.mrn,
       encounterId: registration.encounter.id,
+      queueTokenId: registration.queueToken.id,
     });
 
     return newPatient;
@@ -1726,36 +1758,44 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
   };
 
   const callNextOpdToken = (tokenId: string) => {
-    let updatedToken: OpdQueueToken | undefined;
-    setOpdQueue(prev => prev.map(t => {
-      if (t.id === tokenId) {
-        updatedToken = { ...t, status: 'in_consultation' };
-        return updatedToken;
+    const token = opdQueue.find((item) => item.id === tokenId);
+    if (!token) return;
+
+    void executeActiveTenantCommand('UpdateOpdQueueStatusCommand', {
+      tokenId,
+      targetStatus: 'in_consultation',
+    }).then((result) => {
+      if (!result.success) {
+        throw new Error(result.error?.message || 'Unable to call OPD patient.');
       }
-      return t;
-    }));
-    if (updatedToken) syncOpdTokenToFirestore(updatedToken).catch(() => {});
-    const token = opdQueue.find(t => t.id === tokenId);
-    if (token) {
+
+      setOpdQueue((previous) => previous.map((item) =>
+        item.id === tokenId ? { ...item, status: 'in_consultation' } : item
+      ));
       setSelectedPatientId(token.patientId);
-      addAuditLog('CALL_OPD_QUEUE', `Token ${token.tokenNumber}`, `Called ${token.patientName} into consultation`);
-    }
+    }).catch((error) => {
+      console.error('OPD_CALL_COMMAND_FAILED', error);
+    });
   };
 
   const completeOpdToken = (tokenId: string) => {
-    let updatedToken: OpdQueueToken | undefined;
-    setOpdQueue(prev => prev.map(t => {
-      if (t.id === tokenId) {
-        updatedToken = { ...t, status: 'completed' };
-        return updatedToken;
+    const token = opdQueue.find((item) => item.id === tokenId);
+    if (!token) return;
+
+    void executeActiveTenantCommand('UpdateOpdQueueStatusCommand', {
+      tokenId,
+      targetStatus: 'completed',
+    }).then((result) => {
+      if (!result.success) {
+        throw new Error(result.error?.message || 'Unable to complete OPD consultation.');
       }
-      return t;
-    }));
-    if (updatedToken) syncOpdTokenToFirestore(updatedToken).catch(() => {});
-    const token = opdQueue.find(t => t.id === tokenId);
-    if (token) {
-      addAuditLog('COMPLETE_OPD_CONSULT', `Token ${token.tokenNumber}`, `Completed consultation with ${token.patientName}`);
-    }
+
+      setOpdQueue((previous) => previous.map((item) =>
+        item.id === tokenId ? { ...item, status: 'completed' } : item
+      ));
+    }).catch((error) => {
+      console.error('OPD_COMPLETE_COMMAND_FAILED', error);
+    });
   };
 
   const triggerOfflineSync = () => {

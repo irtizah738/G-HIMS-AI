@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { parseHL7, extractORU_R01, generateACK } from '@/lib/interop/hl7-parser';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { getServerIntegrationState } from '@/lib/interop/integration-state';
+import { emitOperationalEvent, operationalTimer } from '@/lib/observability/server-telemetry';
 
 function safeEqual(provided: string, expected: string): boolean {
   const a = Buffer.from(provided);
@@ -11,8 +12,20 @@ function safeEqual(provided: string, expected: string): boolean {
 }
 
 export async function POST(req: NextRequest) {
+  const elapsed = operationalTimer();
+  const correlationId = req.headers.get('x-correlation-id') || undefined;
+  const requestId = req.headers.get('x-request-id') || undefined;
   const integrationState = getServerIntegrationState('HL7');
   if (integrationState !== 'LIVE') {
+    emitOperationalEvent({
+      event: 'interop.hl7_receive',
+      outcome: 'REJECTED',
+      correlationId,
+      requestId,
+      durationMs: elapsed(),
+      errorCode: 'HL7_NOT_LIVE',
+      attributes: { integrationState },
+    });
     return NextResponse.json(
       { error: 'HL7 integration is not LIVE.', integrationState },
       { status: 503 }
@@ -31,6 +44,15 @@ export async function POST(req: NextRequest) {
   }
 
   if (!providedKey || !safeEqual(providedKey, expectedKey)) {
+    emitOperationalEvent({
+      event: 'interop.hl7_receive',
+      outcome: 'REJECTED',
+      correlationId,
+      requestId,
+      tenantId,
+      durationMs: elapsed(),
+      errorCode: 'HL7_AUTH_REJECTED',
+    });
     return NextResponse.json({ error: 'Unauthorized integration source.' }, { status: 401 });
   }
 
@@ -162,6 +184,20 @@ export async function POST(req: NextRequest) {
 
     await batch.commit();
 
+    emitOperationalEvent({
+      event: 'interop.hl7_receive',
+      outcome: 'SUCCESS',
+      correlationId,
+      requestId,
+      tenantId,
+      durationMs: elapsed(),
+      attributes: {
+        resultCount: oruData.results.length,
+        patientMatched: Boolean(matchedPatientId),
+        sendingApplication: oruData.sendingApplication || 'unknown',
+      },
+    });
+
     const ack = generateACK(parsedHL7, 'AA', `Observation Results Ingested (${oruData.results.length} items parsed)`);
     return new NextResponse(ack, {
       status: 200,
@@ -173,6 +209,15 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'HL7 ingestion error';
+    emitOperationalEvent({
+      event: 'interop.hl7_receive',
+      outcome: 'FAILURE',
+      correlationId,
+      requestId,
+      tenantId,
+      durationMs: elapsed(),
+      errorCode: 'HL7_INGEST_ERROR',
+    });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -468,6 +468,49 @@ describe('G-HIMS P1 durable command infrastructure', () => {
     expect(secondClaim).toBeNull();
   });
 
+  test('expired PROCESSING outbox lease can be reclaimed after worker crash', async () => {
+    const tenantId = unique('tenant');
+    const commandId = unique('cmd');
+    const idempotencyKey = unique('idem');
+    const payload = { patientId: 'pat-outbox-recovery', encounterType: 'OPD' };
+
+    await IdempotencyService.acquireExecution(
+      tenantId,
+      idempotencyKey,
+      'CreateEncounterCommand',
+      payload,
+      commandId
+    );
+
+    const tx = await TransactionManager.executeAtomicWrite(
+      context(tenantId),
+      commandId,
+      idempotencyKey,
+      {
+        entityType: 'ENCOUNTER',
+        entityId: unique('enc'),
+        eventType: 'EncounterCreatedEvent',
+        domainState: { status: 'IN_PROGRESS' },
+        eventPayload: payload,
+      }
+    );
+
+    const firstClaim = await TransactionManager.claimOutbox(tenantId, tx.outbox.outboxId);
+    expect(firstClaim?.status).toBe('PROCESSING');
+    expect(firstClaim?.leaseExpiresAt).toBeGreaterThan(Date.now());
+
+    await TransactionManager.updateOutbox(tenantId, tx.outbox.outboxId, {
+      status: 'PROCESSING',
+      leaseExpiresAt: Date.now() - 1,
+    });
+
+    const reclaimed = await TransactionManager.claimOutbox(tenantId, tx.outbox.outboxId);
+    expect(reclaimed).not.toBeNull();
+    expect(reclaimed?.status).toBe('PROCESSING');
+    expect(reclaimed?.attempts).toBe(2);
+    expect(reclaimed?.leaseExpiresAt).toBeGreaterThan(Date.now());
+  });
+
   test('AdmitPatientToBedCommand atomically commits bed occupancy and patient active-bed state', async () => {
     const db = getAdminFirestore();
     expect(db).not.toBeNull();

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenAI } from '@google/genai';
 import { ClinicalNoteParseInputSchema } from '@/schemas/clinical-billing';
+import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
 
 export async function POST(req: NextRequest) {
   try {
@@ -11,107 +12,70 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid input format', details: parsedInput.error }, { status: 400 });
     }
 
-    const { rawNote, patientId } = parsedInput.data;
+    const tenantId = String((body as any).tenantId || '').trim().toLowerCase();
+    if (!tenantId) {
+      return NextResponse.json({ error: 'tenantId is required' }, { status: 400 });
+    }
+
+    await deriveAuthoritativeContext(req, tenantId);
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      // Fallback rule-based parsing if API key is not configured in local environment
-      return NextResponse.json({
-        structured: {
-          chiefComplaint: 'Patient evaluation documented in chart',
-          diagnoses: ['Clinical evaluation complete', 'Monitoring required'],
-          medicationsPrescribed: ['Prescription active according to orders'],
-          recommendedProcedures: ['Routine clinical follow-up'],
-          followUpDays: 7,
-          billingCodes: [
-            { code: '99214', description: 'Office/Outpatient Visit Moderate Complexity', fee: 185, category: 'Consultation' },
-          ],
-          summary: rawNote,
-        },
-      });
+      return NextResponse.json(
+        { error: 'AI_UNAVAILABLE', message: 'Clinical note extraction is not configured in this environment.' },
+        { status: 503 }
+      );
     }
 
+    const { rawNote } = parsedInput.data;
     const candidateModels = ['gemini-3.6-flash', 'gemini-3.7-flash'];
-    let structuredData: any = null;
 
     for (const modelName of candidateModels) {
       try {
-        const ai = new GoogleGenAI({
-          apiKey,
-          httpOptions: {
-            headers: {
-              'User-Agent': 'aistudio-build',
-            },
-          },
-        });
-
-        const prompt = `You are an expert Clinical Health Informatics AI. Parse the following doctor's clinical note and extract structured medical and billing data in JSON format.
-Only return valid JSON with the following structure:
+        const ai = new GoogleGenAI({ apiKey });
+        const prompt = `Extract structured clinical information from the clinician-authored note below.
+Return JSON only:
 {
   "chiefComplaint": "string",
   "diagnoses": ["string"],
   "medicationsPrescribed": ["string"],
   "recommendedProcedures": ["string"],
   "followUpDays": number,
-  "billingCodes": [
-    { "code": "CPT/ICD code string", "description": "description", "fee": number, "category": "Consultation|Procedure|Lab" }
-  ],
-  "summary": "concise 2-sentence summary"
+  "billingCodes": [{"code":"string","description":"string","fee":number,"category":"string"}],
+  "summary": "string"
 }
 
-Clinical Note:
-"${rawNote}"`;
+Do not invent facts that are absent from the source note. Use empty arrays/null-like omissions where information is unsupported.
+
+Clinical note:
+${rawNote}`;
 
         const response = await ai.models.generateContent({
           model: modelName,
           contents: prompt,
-          config: {
-            responseMimeType: 'application/json',
-          },
+          config: { responseMimeType: 'application/json', temperature: 0 },
         });
 
-        const responseText = response.text || '{}';
-        const cleaned = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        structuredData = JSON.parse(cleaned);
-        if (structuredData && structuredData.chiefComplaint) {
-          break;
-        }
-      } catch (err: any) {
-        console.warn(`Parse note attempt with ${modelName} encountered:`, err?.message || err);
+        const cleaned = (response.text || '{}').replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+        const structured = JSON.parse(cleaned);
+
+        return NextResponse.json({
+          status: 'DRAFT_REQUIRES_CLINICIAN_REVIEW',
+          structured,
+          model: modelName,
+        });
+      } catch {
+        // Try the next configured provider model.
       }
     }
 
-    if (structuredData) {
-      return NextResponse.json({ structured: structuredData });
-    }
-
-    // Heuristic fallback if AI models are temporarily unavailable
-    return NextResponse.json({
-      structured: {
-        chiefComplaint: rawNote.slice(0, 80) || 'Clinical evaluation documented',
-        diagnoses: ['Clinical evaluation complete', 'Active management'],
-        medicationsPrescribed: [],
-        recommendedProcedures: ['Routine clinical follow-up'],
-        followUpDays: 7,
-        billingCodes: [{ code: '99214', description: 'Office/Outpatient Visit Moderate Complexity', fee: 185, category: 'Consultation' }],
-        summary: rawNote.slice(0, 200),
-      },
-    });
-  } catch (error: any) {
-    console.error('Error parsing clinical note:', error);
     return NextResponse.json(
-      {
-        structured: {
-          chiefComplaint: 'Clinical note parsed',
-          diagnoses: ['Under clinical management'],
-          medicationsPrescribed: [],
-          recommendedProcedures: ['Standard care plan'],
-          followUpDays: 7,
-          billingCodes: [{ code: '99213', description: 'Standard Medical Evaluation', fee: 140, category: 'Consultation' }],
-          summary: 'Assessment and care plan saved.',
-        },
-      },
-      { status: 200 }
+      { error: 'AI_UNAVAILABLE', message: 'Clinical note extraction failed. No fallback clinical content was generated.' },
+      { status: 503 }
     );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Clinical note extraction failed';
+    const unauthorized = /AUTH|TENANT|UNAUTH/i.test(message);
+    return NextResponse.json({ error: message }, { status: unauthorized ? 403 : 500 });
   }
 }

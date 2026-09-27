@@ -1,13 +1,15 @@
 /**
  * G-HIMS authoritative server-side command context.
- * Authentication and authorization are resolved from Firebase + explicit tenant membership.
+ * Authentication, active session and authorization are resolved server-side.
  * Client-supplied identity, role, privilege, credential, facility and department fields are ignored.
  */
 
 import { NextRequest } from 'next/server';
 import { BaseCommand, CommandContext } from '../types';
+import { AuthError } from '@/lib/auth/auth-errors';
 import { extractBearerToken, verifyFirebaseToken } from '@/server/auth/verify-token';
 import { resolveAuthorizationContext } from '@/server/auth/authorization-context';
+import { validateSession } from '@/server/auth/session-service';
 
 export interface AuthoritativeUserDirectoryRecord {
   userId: string;
@@ -22,9 +24,8 @@ export interface AuthoritativeUserDirectoryRecord {
 }
 
 /**
- * Resolve an authoritative CommandContext from a verified Firebase ID token and
- * an existing tenant membership. There are no default users, proxy-header actors,
- * or bearer-token string shortcuts.
+ * Resolve an authoritative CommandContext from a verified Firebase ID token,
+ * an existing ACTIVE tenant membership and an existing server session.
  */
 export async function deriveAuthoritativeContext(
   req: NextRequest,
@@ -39,14 +40,38 @@ export async function deriveAuthoritativeContext(
       .toLowerCase();
 
   if (!targetTenant) {
-    throw new Error('AUTHORIZATION_FAILURE: Explicit tenant context is required.');
+    throw new AuthError({
+      code: 'TENANT_ACCESS_DENIED',
+      message: 'Explicit tenant context is required.',
+      statusCode: 403,
+    });
+  }
+
+  const sessionId = String(req.headers.get('x-ghims-session-id') || '').trim();
+  if (!sessionId) {
+    throw new AuthError({
+      code: 'SESSION_NOT_FOUND',
+      message: 'An active G-HIMS session is required for protected commands.',
+      statusCode: 401,
+    });
+  }
+
+  const session = await validateSession(targetTenant, sessionId, verifiedToken.uid);
+  const requestedDeviceId = String(req.headers.get('x-ghims-device-id') || '').trim();
+
+  if (requestedDeviceId && session.deviceId && requestedDeviceId !== session.deviceId) {
+    throw new AuthError({
+      code: 'DEVICE_REVOKED',
+      message: 'Request device does not match the authenticated clinical session.',
+      statusCode: 403,
+    });
   }
 
   const authContext = await resolveAuthorizationContext(
     verifiedToken,
     targetTenant,
-    req.headers.get('x-ghims-session-id') || undefined,
-    req.headers.get('x-ghims-device-id') || undefined
+    session.sessionId,
+    session.deviceId || requestedDeviceId || undefined
   );
 
   const context: CommandContext = {

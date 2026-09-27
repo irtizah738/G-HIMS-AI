@@ -15,6 +15,7 @@ import { ResourceCapacityDomainService } from '../services/resource-capacity-dom
 import { PatientIdentityDomainService } from '../services/patient-identity-domain-service';
 import { PatientMergeDomainService } from '../services/patient-merge-domain-service';
 import { InpatientBedDomainService } from '../services/inpatient-bed-domain-service';
+import { TelehealthDomainService } from '../services/telehealth-domain-service';
 import { IdempotencyService } from '../idempotency/idempotency-service';
 
 export class CommandBus {
@@ -154,6 +155,33 @@ export class CommandBus {
 
         case 'DischargePatientFromBedCommand':
           result = await InpatientBedDomainService.discharge(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'CreateTelehealthSessionCommand':
+          result = await TelehealthDomainService.create(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'UpdateTelehealthSessionCommand':
+          result = await TelehealthDomainService.update(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'CompleteTelehealthSessionCommand':
+          result = await TelehealthDomainService.complete(
             context,
             command.commandId,
             command.idempotencyKey,

@@ -1793,89 +1793,55 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     chiefComplaint: string;
     attendingPhysician?: string;
   }): Promise<TelehealthSession> => {
-    const patient = patients.find(p => p.id === data.patientId);
-    const newSessionId = `th-${Date.now()}`;
-    const newEncounterId = `enc-th-${Date.now()}`;
-    const roomToken = `ROOM-${Math.random().toString(36).substring(2, 7).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
-
-    const newSession: TelehealthSession = {
-      id: newSessionId,
-      encounterId: newEncounterId,
+    const result = await executeActiveTenantCommand<TelehealthSession>('CreateTelehealthSessionCommand', {
       patientId: data.patientId,
-      patientName: patient ? patient.fullName : 'Unknown Patient',
-      patientMrn: patient ? patient.mrn : 'MRN-PENDING',
-      age: patient ? patient.age : 35,
-      gender: patient ? patient.gender : 'Other',
-      scheduledTime: data.scheduledTime || 'Today, ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      status: 'WAITING_ROOM',
-      type: data.type || 'Telehealth Consultation',
-      attendingPhysician: data.attendingPhysician || 'Dr. Sarah Jenkins',
-      clinicianNpi: '1487920134',
-      specialty: 'Telehealth & Preventive Medicine',
+      type: data.type,
+      scheduledTime: data.scheduledTime,
       chiefComplaint: data.chiefComplaint,
-      roomToken,
-      connectionQuality: 'EXCELLENT',
-      callDurationSeconds: 0,
-      vitals: {
-        bp: '120/80',
-        hr: 72,
-        spo2: 99,
-        temp: 36.6,
-        rhythm: 'Normal Sinus Rhythm',
-        connectedDevice: 'Smart ECG + BLE Vitals Gateway',
-        lastSync: 'Just now',
-      },
-      transcription: [
-        {
-          id: `tr-${Date.now()}`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-          speaker: 'SYSTEM',
-          text: `Virtual consultation room initialized for ${patient ? patient.fullName : 'Patient'}. WebRTC token: ${roomToken}.`,
-        },
-      ],
-      soapNote: {
-        subjective: '',
-        objective: '',
-        assessment: '',
-        plan: '',
-        icd10Codes: [],
-        cptCodes: [],
-      },
-      prescriptions: [],
-      isAudioMuted: false,
-      isVideoMuted: false,
-      isRecording: false,
-      patientInvitedEmail: patient ? `${patient.fullName.toLowerCase().replace(/\s+/g, '.')}@patient-portal.demo` : undefined,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+      attendingPhysician: data.attendingPhysician,
+    });
 
-    setTelehealthSessions(prev => [newSession, ...prev]);
-    setActiveTelehealthSession(newSession);
-    syncTelehealthSessionToFirestore(newSession).catch(() => {});
-    recordMutation('INSERT_TELEHEALTH_SESSION', `Telehealth:${newSessionId}`, newSession);
-    addAuditLog('SCHEDULE_TELEHEALTH', `Session ${newSessionId}`, `Created virtual appointment for ${newSession.patientName}`);
+    if (!result.success || !result.data) {
+      throw new Error(result.error?.message || 'Telehealth session creation failed.');
+    }
 
-    return newSession;
+    const session = result.data;
+    setTelehealthSessions((previous) => [session, ...previous.filter((item) => item.id !== session.id)]);
+    setActiveTelehealthSession(session);
+    return session;
   };
 
-  const updateTelehealthSession = async (sessionId: string, updates: Partial<TelehealthSession>): Promise<void> => {
-    let updated: TelehealthSession | undefined;
-    setTelehealthSessions(prev =>
-      prev.map(s => {
-        if (s.id === sessionId) {
-          updated = { ...s, ...updates, updatedAt: new Date().toISOString() };
-          return updated;
-        }
-        return s;
-      })
-    );
-    if (activeTelehealthSession?.id === sessionId && updated) {
-      setActiveTelehealthSession(updated);
+  const updateTelehealthSession = async (
+    sessionId: string,
+    updates: Partial<TelehealthSession>
+  ): Promise<void> => {
+    const allowedUpdates = {
+      status: updates.status,
+      connectionQuality: updates.connectionQuality,
+      callDurationSeconds: updates.callDurationSeconds,
+      vitals: updates.vitals,
+      transcription: updates.transcription,
+      soapNote: updates.soapNote,
+      isAudioMuted: updates.isAudioMuted,
+      isVideoMuted: updates.isVideoMuted,
+      isRecording: updates.isRecording,
+    };
+
+    const result = await executeActiveTenantCommand<TelehealthSession>('UpdateTelehealthSessionCommand', {
+      sessionId,
+      updates: allowedUpdates,
+    });
+
+    if (!result.success || !result.data) {
+      throw new Error(result.error?.message || 'Telehealth session update failed.');
     }
-    if (updated) {
-      syncTelehealthSessionToFirestore(updated).catch(() => {});
-      recordMutation('UPDATE_TELEHEALTH_SESSION', `Telehealth:${sessionId}`, updates);
+
+    const authoritative = result.data;
+    setTelehealthSessions((previous) =>
+      previous.map((session) => session.id === sessionId ? authoritative : session)
+    );
+    if (activeTelehealthSession?.id === sessionId) {
+      setActiveTelehealthSession(authoritative);
     }
   };
 
@@ -1884,112 +1850,62 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     note?: Partial<TelehealthSoapNote>,
     prescriptions?: TelehealthPrescription[]
   ): Promise<void> => {
-    const session = telehealthSessions.find(s => s.id === sessionId) || activeTelehealthSession;
-    if (!session) return;
+    const result = await executeActiveTenantCommand<TelehealthSession>('CompleteTelehealthSessionCommand', {
+      sessionId,
+      soapNote: note || {},
+      prescriptions: prescriptions || [],
+    });
 
-    const finalNote: TelehealthSoapNote = {
-      ...session.soapNote,
-      ...(note || {}),
-    };
+    if (!result.success || !result.data) {
+      throw new Error(result.error?.message || 'Telehealth completion failed.');
+    }
 
-    const finalPrescriptions = prescriptions || session.prescriptions || [];
-
-    const updatedSession: TelehealthSession = {
-      ...session,
-      status: 'COMPLETED',
-      soapNote: finalNote,
-      prescriptions: finalPrescriptions,
-      updatedAt: new Date().toISOString(),
-    };
-
-    setTelehealthSessions(prev =>
-      prev.map(s => (s.id === sessionId ? updatedSession : s))
+    const authoritative = result.data;
+    setTelehealthSessions((previous) =>
+      previous.map((session) => session.id === sessionId ? authoritative : session)
     );
     if (activeTelehealthSession?.id === sessionId) {
-      setActiveTelehealthSession(updatedSession);
+      setActiveTelehealthSession(authoritative);
     }
-    syncTelehealthSessionToFirestore(updatedSession).catch(() => {});
-    recordMutation('COMPLETE_TELEHEALTH_SESSION', `Telehealth:${sessionId}`, updatedSession);
 
-    // Sync directly to the patient's Clinical Notes in the EHR
+    // The signed clinical note remains a separate governed clinical command.
+    const finalNote = authoritative.soapNote;
+    const finalPrescriptions = authoritative.prescriptions || [];
     const clinicalNoteContent = `[TELEHEALTH VIRTUAL CONSULTATION RECORD]
-Encounter Type: ${session.type}
-Chief Complaint: ${session.chiefComplaint}
-Room Token: ${session.roomToken}
-Attending: ${session.attendingPhysician} (NPI: ${session.clinicianNpi})
-Telemetry Device: ${session.vitals.connectedDevice || 'Standard Sensor Hub'}
+Encounter Type: ${authoritative.type}
+Chief Complaint: ${authoritative.chiefComplaint}
+Attending: ${authoritative.attendingPhysician}
 
 --- SUBJECTIVE ---
-${finalNote.subjective || 'Virtual consultation completed without acute complaints.'}
+${finalNote.subjective || ''}
 
 --- OBJECTIVE ---
-Vitals: BP ${session.vitals.bp}, HR ${session.vitals.hr} bpm, SpO2 ${session.vitals.spo2}%, Temp ${session.vitals.temp}°C
-${finalNote.objective || 'Visual inspection conducted via encrypted WebRTC video stream.'}
+${finalNote.objective || ''}
 
 --- ASSESSMENT ---
-${finalNote.assessment || 'Stable follow-up.'}
-Diagnoses: ${(finalNote.icd10Codes || []).map(i => `${i.code} - ${i.description}`).join('; ') || 'Routine Telehealth Evaluation'}
+${finalNote.assessment || ''}
 
 --- PLAN ---
-${finalNote.plan || 'Continue home regimen and follow up in 2-4 weeks.'}
-E-Prescriptions: ${finalPrescriptions.map(p => `${p.medication} ${p.dosage} ${p.frequency}`).join('; ') || 'None issued'}
-Billing CPT Codes: ${(finalNote.cptCodes || []).map(c => `${c.code} (${c.description})`).join(', ') || '99213'}`;
+${finalNote.plan || ''}`;
 
-    addClinicalNote(session.patientId, {
-      author: session.attendingPhysician,
+    addClinicalNote(authoritative.patientId, {
+      author: authoritative.attendingPhysician || 'Telehealth Clinician',
       role: 'Telehealth Attending Physician',
       category: 'SOAP',
       content: clinicalNoteContent,
       aiStructuredData: {
-        chiefComplaint: session.chiefComplaint,
-        diagnoses: (finalNote.icd10Codes || []).map(i => `${i.code}: ${i.description}`),
-        medicationsPrescribed: finalPrescriptions.map(p => `${p.medication} ${p.dosage} ${p.frequency}`),
-        recommendedProcedures: ['Remote Patient Monitoring (RPM)', 'Virtual Follow-up'],
-        followUpDays: 14,
-        billingCodes: (finalNote.cptCodes || []).map(c => ({
-          code: c.code,
-          description: c.description,
-          fee: c.fee || 125,
+        chiefComplaint: authoritative.chiefComplaint,
+        diagnoses: (finalNote.icd10Codes || []).map((item) => `${item.code}: ${item.description}`),
+        medicationsPrescribed: finalPrescriptions.map((item) => `${item.medication} ${item.dosage} ${item.frequency}`),
+        recommendedProcedures: [],
+        followUpDays: 0,
+        billingCodes: (finalNote.cptCodes || []).map((item) => ({
+          code: item.code,
+          description: item.description,
+          fee: item.fee || 0,
         })),
       },
     });
-
-    // If prescriptions were provided, also record them to patient's active medications
-    if (finalPrescriptions.length > 0) {
-      setPatients(prev =>
-        prev.map(p => {
-          if (p.id === session.patientId) {
-            const newMeds: Medication[] = finalPrescriptions.map(rx => ({
-              id: rx.id || `m-rx-${Date.now()}-${Math.random()}`,
-              name: rx.medication,
-              dosage: rx.dosage,
-              frequency: rx.frequency,
-              route: 'Oral',
-              status: 'active',
-              prescribedDate: new Date().toISOString().slice(0, 10),
-              prescribedBy: session.attendingPhysician,
-              stockRemaining: 100,
-              unitPrice: 15,
-            }));
-            const encounters = [...p.encounters];
-            if (encounters.length > 0) {
-              encounters[0] = {
-                ...encounters[0],
-                medications: [...encounters[0].medications, ...newMeds],
-              };
-            }
-            return { ...p, encounters };
-          }
-          return p;
-        })
-      );
-    }
-
-    addAuditLog(
-      'COMPLETE_TELEHEALTH_SESSION',
-      `Session ${sessionId}`,
-      `Completed remote consult for ${session.patientName}. SOAP note & ${finalPrescriptions.length} e-prescriptions synced to EHR.`
-    );
   };
 
   return (

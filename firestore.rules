@@ -99,6 +99,11 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      match /telehealthSessions/{sessionId} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
+      }
+
       match /mpi_registry/{mpiKey} {
         allow read: if tenantClaimMatches(tenantId);
         allow write: if false;

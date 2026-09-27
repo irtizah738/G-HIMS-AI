@@ -543,6 +543,10 @@ export async function addMutation(
         resourceId?: string;
         docId?: string;
         payload: Record<string, any>;
+        commandType?: string;
+        idempotencyKey?: string;
+        schemaVersion?: number;
+        baseEntityVersion?: number;
         id?: string;
       }
 ): Promise<SyncMutation> {
@@ -556,6 +560,10 @@ export async function addMutation(
     docId,
     resourceId,
     action: mutationOrParams.action,
+    commandType: (mutationOrParams as any).commandType,
+    idempotencyKey: (mutationOrParams as any).idempotencyKey,
+    schemaVersion: (mutationOrParams as any).schemaVersion || 1,
+    baseEntityVersion: (mutationOrParams as any).baseEntityVersion,
     payload: mutationOrParams.payload || {},
     vectorClock: (mutationOrParams as any).vectorClock || { localNode: 1 },
     timestamp: (mutationOrParams as any).timestamp || now,

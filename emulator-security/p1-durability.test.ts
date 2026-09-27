@@ -145,6 +145,18 @@ describe('G-HIMS P1 durable command infrastructure', () => {
 
     const tenantId = unique('tenant');
     const entityId = unique('enc');
+    const commandId = unique('cmd');
+    const idempotencyKey = unique('idem');
+    const eventPayload = { patientId: 'pat-rollback' };
+
+    const reservation = await IdempotencyService.acquireExecution(
+      tenantId,
+      idempotencyKey,
+      'EncounterCreatedEvent',
+      eventPayload,
+      commandId
+    );
+    expect(reservation.status).toBe('NEW');
 
     await expect(
       TransactionManager.executeAtomicMutation({
@@ -154,7 +166,7 @@ describe('G-HIMS P1 durable command infrastructure', () => {
         aggregateType: 'ENCOUNTER',
         aggregateId: entityId,
         eventType: 'EncounterCreatedEvent',
-        eventPayload: { patientId: 'pat-rollback' },
+        eventPayload,
         domainState: { id: entityId, patientId: 'pat-rollback' },
         additionalStateWrites: [
           {
@@ -163,8 +175,8 @@ describe('G-HIMS P1 durable command infrastructure', () => {
             domainState: { unsafe: true },
           },
         ],
-        commandId: unique('cmd'),
-        idempotencyKey: unique('idem'),
+        commandId,
+        idempotencyKey,
         correlationId: unique('corr'),
       })
     ).rejects.toThrow('UNMAPPED_DOMAIN_ENTITY_TYPE');

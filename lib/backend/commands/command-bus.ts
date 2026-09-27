@@ -23,18 +23,31 @@ export class CommandBus {
     command: BaseCommand
   ): Promise<CommandResult> {
     try {
-      // 1. Zero-Duplicate Idempotency Check
-      const idempotencyCheck = IdempotencyService.checkIdempotency(
+      // 1. Durable zero-duplicate idempotency reservation.
+      const idempotencyCheck = await IdempotencyService.acquireExecution(
         context.tenantId,
         command.idempotencyKey,
         command.commandType,
-        command.payload
+        command.payload,
+        command.commandId
       );
 
       if (idempotencyCheck.status === 'CACHED' && idempotencyCheck.record?.result) {
         return {
           ...idempotencyCheck.record.result,
           replayedFromCache: true,
+        };
+      }
+
+      if (idempotencyCheck.status === 'IN_PROGRESS') {
+        return {
+          success: false,
+          commandId: command.commandId,
+          idempotencyKey: command.idempotencyKey,
+          error: {
+            code: 'IDEMPOTENCY_IN_PROGRESS',
+            message: `Idempotency key '${command.idempotencyKey}' is already reserved by an in-flight or recovery-required command.`,
+          },
         };
       }
 
@@ -302,7 +315,7 @@ export class CommandBus {
           break;
 
         default:
-          return {
+          result = {
             success: false,
             commandId: command.commandId,
             idempotencyKey: command.idempotencyKey,
@@ -313,8 +326,8 @@ export class CommandBus {
           };
       }
 
-      // Record successful or failed execution in Idempotency cache
-      IdempotencyService.recordExecution(
+      // Finalize the durable idempotency record with the exact command result.
+      await IdempotencyService.completeExecution(
         context.tenantId,
         command.idempotencyKey,
         command.commandType,

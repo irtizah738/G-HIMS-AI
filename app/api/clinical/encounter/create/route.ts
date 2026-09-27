@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { registerPatientAndEncounter, RegisterPatientEncounterParams } from '@/lib/runtime/registration-orchestrator';
+import { registerPatientAndEncounter, RegisterPatientEncounterParams } from '@/server/runtime/registration-orchestrator';
 import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
 
 export async function POST(req: NextRequest) {

@@ -114,6 +114,9 @@ export interface IdempotencyRecord {
   error?: string;
   createdAt: number;
   completedAt?: number;
+  commandId?: string;
+  leaseExpiresAt?: number;
+  lastUpdatedAt?: number;
 }
 
 export type ConflictCategory =

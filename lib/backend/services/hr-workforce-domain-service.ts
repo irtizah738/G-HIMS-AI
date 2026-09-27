@@ -41,60 +41,68 @@ export class HrWorkforceDomainService {
     tenantId: string,
     employeeId: string
   ): Promise<EmployeeMaster | null> {
-    const cached = this.employees.get(employeeId);
-    if (cached) return cached;
-    const persisted = await DomainStateRepository.getById<EmployeeMaster>(
-      tenantId,
-      'employees',
-      employeeId
-    );
-    if (persisted) this.employees.set(employeeId, persisted);
-    return persisted;
+    if (DomainStateRepository.isAvailable()) {
+      const persisted = await DomainStateRepository.getById<EmployeeMaster>(
+        tenantId,
+        'employees',
+        employeeId
+      );
+      if (persisted) this.employees.set(employeeId, persisted);
+      else this.employees.delete(employeeId);
+      return persisted;
+    }
+    return this.employees.get(employeeId) || null;
   }
 
   private static async loadCredential(
     tenantId: string,
     credentialId: string
   ): Promise<EmployeeCredential | null> {
-    const cached = this.credentials.get(credentialId);
-    if (cached) return cached;
-    const persisted = await DomainStateRepository.getById<EmployeeCredential>(
-      tenantId,
-      'clinicalCredentials',
-      credentialId
-    );
-    if (persisted) this.credentials.set(credentialId, persisted);
-    return persisted;
+    if (DomainStateRepository.isAvailable()) {
+      const persisted = await DomainStateRepository.getById<EmployeeCredential>(
+        tenantId,
+        'clinicalCredentials',
+        credentialId
+      );
+      if (persisted) this.credentials.set(credentialId, persisted);
+      else this.credentials.delete(credentialId);
+      return persisted;
+    }
+    return this.credentials.get(credentialId) || null;
   }
 
   private static async loadAttendance(
     tenantId: string,
     attendanceId: string
   ): Promise<AttendanceRecord | null> {
-    const cached = this.attendanceRecords.get(attendanceId);
-    if (cached) return cached;
-    const persisted = await DomainStateRepository.getById<AttendanceRecord>(
-      tenantId,
-      'attendanceRecords',
-      attendanceId
-    );
-    if (persisted) this.attendanceRecords.set(attendanceId, persisted);
-    return persisted;
+    if (DomainStateRepository.isAvailable()) {
+      const persisted = await DomainStateRepository.getById<AttendanceRecord>(
+        tenantId,
+        'attendanceRecords',
+        attendanceId
+      );
+      if (persisted) this.attendanceRecords.set(attendanceId, persisted);
+      else this.attendanceRecords.delete(attendanceId);
+      return persisted;
+    }
+    return this.attendanceRecords.get(attendanceId) || null;
   }
 
   private static async loadLeave(
     tenantId: string,
     leaveId: string
   ): Promise<LeaveRequest | null> {
-    const cached = this.leaveRequests.get(leaveId);
-    if (cached) return cached;
-    const persisted = await DomainStateRepository.getById<LeaveRequest>(
-      tenantId,
-      'leaveRequests',
-      leaveId
-    );
-    if (persisted) this.leaveRequests.set(leaveId, persisted);
-    return persisted;
+    if (DomainStateRepository.isAvailable()) {
+      const persisted = await DomainStateRepository.getById<LeaveRequest>(
+        tenantId,
+        'leaveRequests',
+        leaveId
+      );
+      if (persisted) this.leaveRequests.set(leaveId, persisted);
+      else this.leaveRequests.delete(leaveId);
+      return persisted;
+    }
+    return this.leaveRequests.get(leaveId) || null;
   }
 
   private static async hydrateClinicalEligibility(

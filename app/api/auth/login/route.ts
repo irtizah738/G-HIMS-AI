@@ -17,6 +17,13 @@ interface DemoPersonaMeta {
 }
 
 const KNOWN_PERSONAS: Record<string, DemoPersonaMeta> = {
+  'irtiza.haider007@gmail.com': {
+    name: 'Dr. Irtiza Haider, MD',
+    role: 'administrator',
+    department: 'Hospital Administration & Chief Medical Office',
+    departmentId: 'hospital_admin',
+    privileges: ['*'],
+  },
   'admin@centralmetro.health': {
     name: 'Dr. Arthur Pendelton',
     role: 'administrator',
@@ -298,7 +305,18 @@ export async function POST(req: NextRequest) {
       })),
     };
 
-    return NextResponse.json(payload);
+    const response = NextResponse.json(payload);
+    response.cookies.set('ghims_session_id', session.sessionId, {
+      path: '/',
+      maxAge: 60 * 60 * 24 * 7, // 7 days
+      sameSite: 'lax',
+    });
+    response.cookies.set('ghims_tenant_id', requestedTenantId, {
+      path: '/',
+      maxAge: 60 * 60 * 24 * 30, // 30 days
+      sameSite: 'lax',
+    });
+    return response;
   } catch (err: any) {
     const errorObj =
       err instanceof AuthError

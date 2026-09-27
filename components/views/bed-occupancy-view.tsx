@@ -400,6 +400,8 @@ export function BedOccupancyView() {
   };
 
   const handleDischargeComplete = (summary: DischargeCompletedSummary) => {
+    const bedId = summary.bedId || dischargeBedTarget?.id || '';
+    const bedNumber = summary.bedNumber || dischargeBedTarget?.bedNumber || '';
     const censusRec: DischargedCensusRecord = {
       id: `dc-${Date.now()}`,
       patientId: summary.patientId || dischargeBedTarget?.patientId || 'p-gen',
@@ -407,8 +409,8 @@ export function BedOccupancyView() {
       mrn: summary.patientMRN || `GH-2026-${Math.floor(1000 + Math.random() * 9000)}`,
       age: 52,
       gender: 'Female',
-      bedId: summary.bedId,
-      bedNumber: summary.bedNumber,
+      bedId,
+      bedNumber,
       ward: dischargeBedTarget?.ward || 'General',
       admissionDate: dischargeBedTarget?.admissionDate || new Date(Date.now() - 3 * 86400000).toISOString().split('T')[0],
       dischargeDate: summary.dischargeDate || new Date().toISOString().split('T')[0],
@@ -424,7 +426,7 @@ export function BedOccupancyView() {
     };
 
     dischargePatientFromBed(
-      summary.bedId,
+      bedId,
       summary.summaryNotes || summary.dischargeInstructions || 'Clinical Discharge Completed',
       summary.disposition || summary.condition || 'Home with Self-Care',
       censusRec
@@ -436,8 +438,8 @@ export function BedOccupancyView() {
         id: `log-${Date.now()}`,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         type: 'DISCHARGE',
-        title: `Clinical Discharge & Gate Pass: Bed ${summary.bedNumber}`,
-        description: `Issued pass ${summary.dischargeId} for ${summary.patientName}. Condition: ${summary.condition}. Billed: ${formatCurrency(summary.totalCharges)}. Follow-up: ${summary.followUpDate}.`,
+        title: `Clinical Discharge & Gate Pass: Bed ${bedNumber}`,
+        description: `Issued pass ${summary.dischargeId || 'GP'} for ${summary.patientName || 'Patient'}. Condition: ${summary.condition || 'Recovered'}. Billed: ${formatCurrency(summary.totalCharges || 0)}. Follow-up: ${summary.followUpDate || 'OPD'}.`,
         severity: 'NORMAL',
       },
       ...prev,

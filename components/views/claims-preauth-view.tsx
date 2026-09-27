@@ -15,8 +15,12 @@ import {
   Search,
   Filter,
   FileText,
+  Download,
+  Code,
+  Check,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
+import { Edi837Generator, Edi837ClaimPayload } from '@/lib/interop/edi-837-generator';
 
 interface ClaimRecord {
   id: string;
@@ -88,11 +92,73 @@ export function ClaimsPreAuthView() {
   ]);
 
   const [generatedAppeal, setGeneratedAppeal] = useState<string | null>(null);
+  const [activeEdiView, setActiveEdiView] = useState<{ claimNumber: string; content: string } | null>(null);
+  const [submittingBatch, setSubmittingBatch] = useState(false);
+  const [batchNotice, setBatchNotice] = useState<string | null>(null);
 
   const handleGenerateAppeal = (claim: ClaimRecord) => {
     setGeneratedAppeal(
       `EXPEDITED APPEAL MEMORANDUM\nTo: ${claim.payerName} Claims Appeals Board\nRe: Claim #${claim.claimNumber} (Patient: ${claim.patientName}, MRN: ${claim.mrn})\n\nClinical Justification: The patient presented with acute symptomatic multivessel coronary occlusion necessitating emergent surgical revascularization (CPT 33512). Pursuant to Emergency Care Parity statutes, prior authorization requirement is waived under emergent medical necessity criteria.`
     );
+  };
+
+  const handleGenerate837P = (claim: ClaimRecord) => {
+    const payload: Edi837ClaimPayload = {
+      controlNumber: String(Math.floor(100000000 + Math.random() * 900000000)),
+      claimId: claim.claimNumber,
+      totalBilledAmount: claim.billedAmount,
+      payer: {
+        payerId: claim.payerName.includes('BlueCross') ? 'BCBS001' : claim.payerName.includes('Medicare') ? 'MEDICARE_B' : 'PAYER001',
+        name: claim.payerName,
+      },
+      billingProvider: {
+        npi: '1982736450',
+        taxId: '82-9382104',
+        lastName: 'Jenkins',
+        firstName: 'Sarah',
+        facilityName: 'Central Metro General Hospital',
+        facilityAddress: '1000 Hospital Boulevard',
+        city: 'Metro City',
+        state: 'NY',
+        zip: '10001',
+      },
+      patient: {
+        mrn: claim.mrn,
+        lastName: claim.patientName.split(' ')[1] || 'Patient',
+        firstName: claim.patientName.split(' ')[0] || 'Unknown',
+        gender: 'F',
+        dob: '19820414',
+        address: '742 Evergreen Terrace',
+        city: 'Metro City',
+        state: 'NY',
+        zip: '10001',
+        memberId: `MBR-${claim.mrn.replace(/[^0-9]/g, '')}`,
+        relationshipToInsured: '18',
+      },
+      icd10Codes: claim.icd10Codes,
+      priorAuthNumber: claim.status === 'pre_auth_pending' ? undefined : 'PA-2026-AUTOGEN',
+      serviceLines: claim.cptCodes.map((code, idx) => ({
+        lineItemNumber: idx + 1,
+        cptCode: code,
+        chargeAmount: claim.billedAmount / claim.cptCodes.length,
+        unitCount: 1,
+        serviceDate: new Date().toISOString().slice(0, 10).replace(/-/g, ''),
+        diagnosisPointers: [1],
+      })),
+    };
+
+    const edi = Edi837Generator.generate837P(payload);
+    setActiveEdiView({ claimNumber: claim.claimNumber, content: edi });
+  };
+
+  const handleSimulateClearinghouseBatch = () => {
+    setSubmittingBatch(true);
+    setBatchNotice(null);
+    setTimeout(() => {
+      setSubmittingBatch(false);
+      setBatchNotice('Batch #BATCH-837P-2026-092 validated: 4 Claims scrubbed clean (0 NCCI edits, 100% HIPAA compliant). Transmitted to Clearinghouse gateway.');
+      setTimeout(() => setBatchNotice(null), 7000);
+    }, 1200);
   };
 
   return (
@@ -210,16 +276,25 @@ export function ClaimsPreAuthView() {
                     )}
                   </td>
                   <td className="p-3 text-right">
-                    {c.status === 'denied' ? (
+                    <div className="flex items-center justify-end gap-1.5">
                       <button
-                        onClick={() => handleGenerateAppeal(c)}
-                        className="px-2.5 py-1 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer ml-auto"
+                        onClick={() => handleGenerate837P(c)}
+                        title="Inspect ANSI X12 837P EDI Payload"
+                        className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-mono font-medium flex items-center gap-1 border border-slate-300 cursor-pointer"
                       >
-                        <Sparkles className="w-3 h-3 text-amber-300" /> AI Appeal
+                        <Code className="w-3 h-3 text-blue-600" /> 837P
                       </button>
-                    ) : (
-                      <span className="text-[11px] text-slate-400 font-medium">Ready</span>
-                    )}
+                      {c.status === 'denied' ? (
+                        <button
+                          onClick={() => handleGenerateAppeal(c)}
+                          className="px-2.5 py-1 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer"
+                        >
+                          <Sparkles className="w-3 h-3 text-amber-300" /> AI Appeal
+                        </button>
+                      ) : (
+                        <span className="text-[11px] text-slate-400 font-medium px-1">Ready</span>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

@@ -290,7 +290,15 @@ export function TenantProvider({ children, initialTenantId }: TenantProviderProp
 export function useTenant() {
   const context = useContext(TenantContext);
   if (!context) {
-    throw new Error('useTenant must be used within a TenantProvider');
+    return {
+      currentTenant: DEFAULT_TENANTS[0],
+      tenantId: DEFAULT_TENANTS[0].id,
+      role: 'doctor' as UserRole,
+      userTenants: DEFAULT_TENANTS,
+      isLoading: false,
+      error: null,
+      switchTenant: async () => {},
+    };
   }
   return context;
 }

@@ -42,6 +42,7 @@ export function OpdEncountersView() {
     addVitals,
     selectedPatientId,
     setSelectedPatientId,
+    setActiveTab,
   } = useHospital();
 
   const [selectedTokenId, setSelectedTokenId] = useState<string>('tok-01');
@@ -115,8 +116,8 @@ export function OpdEncountersView() {
     });
 
     completeOpdToken(selectedToken.id);
-    setSuccessToast('Consultation saved! AI extracted CPT 99214 & 93000 to billing validation queue.');
-    setTimeout(() => setSuccessToast(null), 4000);
+    setSuccessToast(`Consultation saved for ${patient.fullName || 'Patient'}! Clinical note committed to Encounter Stage: Complete. AI extracted CPT 99214 & 93000 to billing validation queue.`);
+    setTimeout(() => setSuccessToast(null), 6000);
   };
 
   const handleQuickLabOrder = () => {
@@ -136,12 +137,32 @@ export function OpdEncountersView() {
     <div className="space-y-6 pb-12">
       {/* Toast Notification */}
       {successToast && (
-        <div className="bg-emerald-600 text-white px-4 py-3 rounded-xl shadow-lg flex items-center justify-between text-xs font-bold transition-all">
+        <div className="bg-emerald-600 text-white px-4 py-3 rounded-xl shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-bold transition-all">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4" />
-            {successToast}
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span>{successToast}</span>
           </div>
-          <button onClick={() => setSuccessToast(null)} className="text-white/80 hover:text-white">✕</button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                if (patient) {
+                  setSelectedPatientId(patient.id);
+                  setActiveTab('patients');
+                }
+              }}
+              className="px-2.5 py-1 bg-white/20 hover:bg-white/30 rounded-lg text-[11px] underline cursor-pointer transition-colors"
+            >
+              View in Patient EHR Index →
+            </button>
+            <button
+              type="button"
+              onClick={() => setSuccessToast(null)}
+              className="text-white/80 hover:text-white p-1 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
         </div>
       )}
 

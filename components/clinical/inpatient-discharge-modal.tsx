@@ -48,20 +48,33 @@ interface InpatientDischargeModalProps {
 }
 
 export interface DischargeCompletedSummary {
-  dischargeId: string;
-  patientId: string;
-  patientName: string;
-  patientMRN: string;
-  bedId: string;
-  bedNumber: string;
-  condition: string;
-  dischargeDate: string;
-  lengthOfStayDays: number;
-  attendingPhysician: string;
-  totalCharges: number;
-  reconciledMedications: Array<{ name: string; action: 'discontinued' | 'take_home'; instructions?: string }>;
-  dischargeInstructions: string;
-  followUpDate: string;
+  dischargeId?: string;
+  patientId?: string;
+  patientName?: string;
+  patientMRN?: string;
+  bedId?: string;
+  bedNumber?: string;
+  condition?: string;
+  dischargeDate?: string;
+  lengthOfStayDays?: number;
+  attendingPhysician?: string;
+  totalCharges?: number;
+  reconciledMedications?: Array<{ name: string; action: 'discontinued' | 'take_home'; instructions?: string }>;
+  dischargeInstructions?: string;
+  followUpDate?: string;
+  primaryDiagnosis?: string;
+  dischargedBy?: string;
+  disposition?: string;
+  gatePassCode?: string;
+  financialStatus?: string;
+  summaryNotes?: string;
+  dischargedAt?: string;
+  dischargingPhysician?: string;
+  reconciledMedicationsCount?: number;
+  dischargeSummaryNote?: string;
+  followUpInstructions?: string;
+  financialClearanceApproved?: boolean;
+  gatePassId?: string;
 }
 
 export function InpatientDischargeModal({

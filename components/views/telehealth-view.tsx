@@ -1120,19 +1120,34 @@ export function TelehealthView() {
           {/* Status filter tabs */}
           <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs overflow-x-auto">
             {(['ALL', 'WAITING_ROOM', 'IN_CONSULTATION', 'DOCUMENTING', 'COMPLETED'] as const).map(
-              (st) => (
-                <button
-                  key={st}
-                  onClick={() => setStatusFilter(st)}
-                  className={`px-2.5 py-1 rounded-lg font-bold text-[11px] whitespace-nowrap transition-colors cursor-pointer ${
-                    statusFilter === st
-                      ? 'bg-white text-teal-800 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  {st.replace('_', ' ')}
-                </button>
-              )
+              (st) => {
+                const count =
+                  st === 'ALL'
+                    ? telehealthSessions.length
+                    : telehealthSessions.filter((s) => s.status === st).length;
+                return (
+                  <button
+                    key={st}
+                    onClick={() => setStatusFilter(st)}
+                    className={`px-2.5 py-1 rounded-lg font-bold text-[11px] whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1.5 ${
+                      statusFilter === st
+                        ? 'bg-white text-teal-800 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <span>{st.replace('_', ' ')}</span>
+                    <span
+                      className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                        statusFilter === st
+                          ? 'bg-teal-100 text-teal-800'
+                          : 'bg-slate-200 text-slate-700'
+                      }`}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                );
+              }
             )}
           </div>
         </div>

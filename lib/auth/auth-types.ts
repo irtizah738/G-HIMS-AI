@@ -169,13 +169,13 @@ export interface LoginResponsePayload {
 export interface TenantSelectionItem {
   tenantId: string;
   name: string;
-  facilityCode: string;
-  tier: string;
-  region: string;
+  facilityCode?: string;
+  tier?: string;
+  region?: string;
   roles: string[];
-  status: AccountStatus;
-  departmentIds: string[];
-  primaryRole: string;
+  status?: AccountStatus;
+  departmentIds?: string[];
+  primaryRole?: string;
 }
 
 export type AuthStateLoadingStatus = 

@@ -26,29 +26,63 @@ function openDatabase(): Promise<IDBDatabase> {
       return;
     }
 
-    const request = window.indexedDB.open(DB_NAME, DB_VERSION);
+    const timer = setTimeout(() => {
+      reject(new Error('IndexedDB open request timed out'));
+    }, 800);
 
-    request.onupgradeneeded = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(STORE_SESSION)) {
-        db.createObjectStore(STORE_SESSION, { keyPath: 'id' });
-      }
-      if (!db.objectStoreNames.contains(STORE_MEMBERSHIPS)) {
-        db.createObjectStore(STORE_MEMBERSHIPS, { keyPath: 'tenantId' });
-      }
-      if (!db.objectStoreNames.contains(STORE_AUDIT_QUEUE)) {
-        db.createObjectStore(STORE_AUDIT_QUEUE, { keyPath: 'id', autoIncrement: true });
-      }
-    };
+    try {
+      const request = window.indexedDB.open(DB_NAME, DB_VERSION);
 
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+      request.onblocked = () => {
+        clearTimeout(timer);
+        reject(new Error('IndexedDB blocked'));
+      };
+
+      request.onupgradeneeded = (event) => {
+        const db = (event.target as IDBOpenDBRequest).result;
+        if (!db.objectStoreNames.contains(STORE_SESSION)) {
+          db.createObjectStore(STORE_SESSION, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(STORE_MEMBERSHIPS)) {
+          db.createObjectStore(STORE_MEMBERSHIPS, { keyPath: 'tenantId' });
+        }
+        if (!db.objectStoreNames.contains(STORE_AUDIT_QUEUE)) {
+          db.createObjectStore(STORE_AUDIT_QUEUE, { keyPath: 'id', autoIncrement: true });
+        }
+      };
+
+      request.onsuccess = () => {
+        clearTimeout(timer);
+        resolve(request.result);
+      };
+      request.onerror = () => {
+        clearTimeout(timer);
+        reject(request.error);
+      };
+    } catch (e) {
+      clearTimeout(timer);
+      reject(e);
+    }
   });
 }
 
 export async function saveCachedAuthSession(user: AuthenticatedUser, session: UserSessionRecord): Promise<void> {
+  // Always synchronously save to localStorage first for instant, guaranteed availability
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('ghims_cached_auth_user', JSON.stringify(user));
+      localStorage.setItem('ghims_cached_auth_session', JSON.stringify(session));
+      localStorage.setItem('ghims_active_tenant', user.tenantId);
+    } catch {
+      // storage quota or private mode
+    }
+  }
+
   try {
-    const db = await openDatabase();
+    const db = await Promise.race([
+      openDatabase(),
+      new Promise<IDBDatabase>((_, reject) => setTimeout(() => reject(new Error('IDB timeout')), 800)),
+    ]);
     const tx = db.transaction(STORE_SESSION, 'readwrite');
     const store = tx.objectStore(STORE_SESSION);
 
@@ -63,31 +97,41 @@ export async function saveCachedAuthSession(user: AuthenticatedUser, session: Us
     store.put(record);
 
     return new Promise((resolve, reject) => {
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+      const timer = setTimeout(() => resolve(), 800);
+      tx.oncomplete = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      tx.onerror = () => {
+        clearTimeout(timer);
+        reject(tx.error);
+      };
     });
   } catch (err) {
-    // Fallback to localStorage
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem('ghims_cached_auth_user', JSON.stringify(user));
-        localStorage.setItem('ghims_cached_auth_session', JSON.stringify(session));
-      } catch {
-        // storage quota or private mode
-      }
-    }
+    // Ignore IndexedDB error as localStorage already persisted
   }
 }
 
 export async function getCachedAuthSession(): Promise<{ user: AuthenticatedUser; session: UserSessionRecord } | null> {
+  // Fast path: Check localStorage first for instant synchronous resolution
+  const localCached = fallbackLocalStorage();
+  if (localCached) {
+    return localCached;
+  }
+
   try {
-    const db = await openDatabase();
+    const db = await Promise.race([
+      openDatabase(),
+      new Promise<IDBDatabase>((_, reject) => setTimeout(() => reject(new Error('IDB timeout')), 800)),
+    ]);
     const tx = db.transaction(STORE_SESSION, 'readonly');
     const store = tx.objectStore(STORE_SESSION);
     const request = store.get('current_active_session');
 
     return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(fallbackLocalStorage()), 800);
       request.onsuccess = () => {
+        clearTimeout(timer);
         const record = request.result as CachedAuthRecord | undefined;
         if (!record) {
           resolve(fallbackLocalStorage());
@@ -103,7 +147,10 @@ export async function getCachedAuthSession(): Promise<{ user: AuthenticatedUser;
 
         resolve({ user: record.user, session: record.session });
       };
-      request.onerror = () => resolve(fallbackLocalStorage());
+      request.onerror = () => {
+        clearTimeout(timer);
+        resolve(fallbackLocalStorage());
+      };
     });
   } catch {
     return fallbackLocalStorage();
@@ -119,6 +166,16 @@ function fallbackLocalStorage(): { user: AuthenticatedUser; session: UserSession
 
     const user = JSON.parse(userStr);
     const session = JSON.parse(sessionStr);
+
+    if (session?.expiresAt) {
+      const expiry = new Date(session.expiresAt).getTime();
+      if (Date.now() > expiry) {
+        localStorage.removeItem('ghims_cached_auth_user');
+        localStorage.removeItem('ghims_cached_auth_session');
+        return null;
+      }
+    }
+
     return { user, session };
   } catch {
     return null;
@@ -126,21 +183,26 @@ function fallbackLocalStorage(): { user: AuthenticatedUser; session: UserSession
 }
 
 export async function clearCachedAuthSession(): Promise<void> {
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.removeItem('ghims_cached_auth_user');
+      localStorage.removeItem('ghims_cached_auth_session');
+      localStorage.removeItem('ghims_active_tenant');
+    } catch {
+      // Ignore
+    }
+  }
+
   try {
-    const db = await openDatabase();
+    const db = await Promise.race([
+      openDatabase(),
+      new Promise<IDBDatabase>((_, reject) => setTimeout(() => reject(new Error('IDB timeout')), 800)),
+    ]);
     const tx = db.transaction([STORE_SESSION, STORE_MEMBERSHIPS], 'readwrite');
     tx.objectStore(STORE_SESSION).clear();
     tx.objectStore(STORE_MEMBERSHIPS).clear();
   } catch {
     // Ignore error
-  }
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.removeItem('ghims_cached_auth_user');
-      localStorage.removeItem('ghims_cached_auth_session');
-    } catch {
-      // Ignore
-    }
   }
 }
 

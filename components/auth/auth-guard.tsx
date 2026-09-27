@@ -7,6 +7,7 @@ import { getSSOConfiguration } from '@/lib/auth/sso-service';
 import { SSOConfiguration } from '@/lib/auth/sso-types';
 import { ShieldAlert, Lock, AlertCircle, RefreshCw, LogOut, Key, ArrowRight, ShieldCheck } from 'lucide-react';
 import { SessionLockModal } from './session-lock-modal';
+import { LoginPortal } from './login-portal';
 
 interface AuthGuardProps {
   children: React.ReactNode;
@@ -47,6 +48,11 @@ export function AuthGuard({
   const [ssoConfig, setSsoConfig] = useState<SSOConfiguration | null>(null);
   const [ssoAuthenticating, setSsoAuthenticating] = useState(false);
   const [ssoError, setSsoError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Check for active SSO config on tenant
   useEffect(() => {
@@ -78,7 +84,7 @@ export function AuthGuard({
     }
   };
 
-  if (loading && loadingStatus === 'RESTORING_SESSION') {
+  if (!mounted || (loading && loadingStatus === 'RESTORING_SESSION' && !user)) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-white space-y-4">
         <div className="w-12 h-12 rounded-2xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center animate-pulse">
@@ -96,69 +102,10 @@ export function AuthGuard({
     );
   }
 
-  // Not Authenticated State with SSO Bypass Support
+  // Not Authenticated State with Login Portal
   if (!user) {
     if (fallback) return <>{fallback}</>;
-    return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6">
-        <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 text-center space-y-6 shadow-xl">
-          <div className="w-14 h-14 bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 rounded-2xl flex items-center justify-center mx-auto border border-blue-200 dark:border-blue-800">
-            <Lock className="w-7 h-7" />
-          </div>
-          <div className="space-y-2">
-            <h2 className="text-xl font-bold text-slate-900 dark:text-white">
-              Authentication Required
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-              Sign in to the G-HIMS enterprise operating system with verified hospital credentials to access this clinical module.
-            </p>
-          </div>
-
-          {/* SSO Bypass Detection Banner */}
-          {ssoConfig && ssoConfig.enabled && (
-            <div className="p-4 rounded-xl bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 text-left space-y-3">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-blue-600" />
-                <span className="text-xs font-bold text-slate-900 dark:text-white">
-                  Enterprise SSO Federation Active
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-600 dark:text-slate-400">
-                Hospital federated identity detected via <strong>{ssoConfig.providerType}</strong>. You can bypass traditional password login.
-              </p>
-              <button
-                type="button"
-                onClick={() => handleQuickSSOBypass()}
-                disabled={ssoAuthenticating}
-                className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-xs font-bold shadow-xs transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-              >
-                {ssoAuthenticating ? (
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Key className="w-4 h-4" />
-                )}
-                <span>{ssoAuthenticating ? 'Exchanging SAML Assertion...' : 'Instant SSO Clinical Login (Bypass)'}</span>
-              </button>
-            </div>
-          )}
-
-          {ssoError && (
-            <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/50 border border-red-200 text-red-700 dark:text-red-400 text-xs font-medium">
-              {ssoError}
-            </div>
-          )}
-
-          <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-            <Link
-              href="/login"
-              className="block w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white text-xs font-semibold transition text-center"
-            >
-              Go to Standard Password Login Portal
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
+    return <LoginPortal />;
   }
 
   // Account Status Checks

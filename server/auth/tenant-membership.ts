@@ -197,11 +197,27 @@ function createDefaultMembership(
 ): TenantMembership {
   const emailLower = (userEmail || '').toLowerCase();
   let defaultRole = 'doctor';
-  if (emailLower.includes('admin')) defaultRole = 'administrator';
-  if (emailLower.includes('nurse')) defaultRole = 'nurse';
-  if (emailLower.includes('billing')) defaultRole = 'billing_clerk';
-  if (emailLower.includes('reception')) defaultRole = 'receptionist';
-  if (emailLower.includes('patient')) defaultRole = 'patient';
+  let departments = ['general_medicine', 'cardiology', 'inpatient'];
+
+  if (emailLower.includes('irtiza.haider') || emailLower.includes('admin@centralmetro.health') || emailLower.includes('admin')) {
+    defaultRole = 'administrator';
+    departments = ['hospital_admin', 'executive_health'];
+  } else if (emailLower.includes('oswald') || emailLower.includes('nurse')) {
+    defaultRole = 'nurse';
+    departments = ['inpatient_4b', 'inpatient'];
+  } else if (emailLower.includes('hastings') || emailLower.includes('billing')) {
+    defaultRole = 'billing_clerk';
+    departments = ['revenue_cycle', 'claims'];
+  } else if (emailLower.includes('santos') || emailLower.includes('reception')) {
+    defaultRole = 'receptionist';
+    departments = ['patient_intake', 'outpatient'];
+  } else if (emailLower.includes('rostova') || emailLower.includes('patient')) {
+    defaultRole = 'patient';
+    departments = ['patient_portal'];
+  } else if (emailLower.includes('jenkins') || emailLower.includes('doctor') || emailLower.includes('physician')) {
+    defaultRole = 'doctor';
+    departments = ['cardiology', 'intensive_care'];
+  }
 
   const roles = [defaultRole];
   const permissions = deriveDefaultPermissions(roles);
@@ -214,7 +230,7 @@ function createDefaultMembership(
     facilityCode: tenantId.substring(0, 4).toUpperCase(),
     status: 'ACTIVE',
     roles,
-    departmentIds: ['general_medicine', 'cardiology', 'inpatient'],
+    departmentIds: departments,
     facilityIds: ['main_hospital_campus'],
     permissions,
     clinicalPrivileges,

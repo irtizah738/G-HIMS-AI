@@ -70,7 +70,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       provider.setCustomParameters({ prompt: 'consent select_account' });
       
-      const result = await signInWithPopup(auth, provider);
+      const popupPromise = signInWithPopup(auth, provider);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('auth/popup-timeout')), 4500)
+      );
+
+      const result = await Promise.race([popupPromise, timeoutPromise]);
       const credential = GoogleAuthProvider.credentialFromResult(result);
       const token = credential?.accessToken || null;
       
@@ -82,20 +87,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const errorCode = error?.code || '';
       const errorMessage = error?.message || '';
       
-      // User closed the popup or cancelled authentication - handle cleanly without logging fatal error
+      // User closed the popup, cancelled, popup was blocked, or timed out in iframe sandbox
       if (
         errorCode === 'auth/popup-closed-by-user' ||
         errorCode === 'auth/cancelled-popup-request' ||
         errorCode === 'auth/user-cancelled' ||
+        errorCode === 'auth/popup-blocked' ||
         errorMessage.includes('popup-closed-by-user') ||
-        errorMessage.includes('cancelled-popup-request')
+        errorMessage.includes('cancelled-popup-request') ||
+        errorMessage.includes('popup-timeout') ||
+        errorMessage.includes('popup-blocked')
       ) {
-        console.info('Google Sign In popup closed or cancelled by user.');
-        return null;
-      }
-
-      if (errorCode === 'auth/popup-blocked') {
-        console.warn('Google Sign In popup was blocked by the browser.');
+        console.info('Google Sign In popup was cancelled, blocked, or timed out in iframe.');
         return null;
       }
 

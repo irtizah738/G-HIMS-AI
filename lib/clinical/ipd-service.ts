@@ -87,7 +87,7 @@ export function createDefaultIpdPathway(bed: Bed, patient?: Patient): IpdPathway
   const admissionDate = bed.admissionDate || new Date(Date.now() - 3 * 86400000).toISOString().split('T')[0];
   const attendingPhysician = bed.assignedDoctor || 'Dr. Fatima Zahra';
   const primaryNurse = bed.assignedNurse || 'Nurse Clara Oswald';
-  const primaryDiagnosis = bed.diagnosis || 'Inpatient Medical Care / Clinical Observation';
+  const primaryDiagnosis = (bed as any).diagnosis || 'Inpatient Medical Care / Clinical Observation';
 
   const orders: IpdPhysicianOrder[] = [
     {

@@ -59,7 +59,14 @@ interface EmergencyCase {
 }
 
 export function EmergencyTriageView() {
-  const { patients, setSelectedPatientId, setActiveTab } = useHospital();
+  const { patients, setSelectedPatientId, setActiveTab, beds, admitPatientToBed, addLabOrder } = useHospital();
+
+  const [protocolNotification, setProtocolNotification] = useState<{
+    title: string;
+    description: string;
+    type: 'success' | 'icu' | 'order';
+    bedId?: string;
+  } | null>(null);
 
   const [emergencyCases, setEmergencyCases] = useState<EmergencyCase[]>([
     {
@@ -383,6 +390,105 @@ export function EmergencyTriageView() {
     }, 6000);
   };
 
+  const handleAdmitIcu = (c: EmergencyCase) => {
+    const matchingPatient =
+      patients.find(
+        (p) =>
+          p.mrn === c.mrn ||
+          p.fullName.toLowerCase() === c.patientName.toLowerCase() ||
+          p.id === c.id
+      ) || patients[0];
+
+    const icuBed =
+      beds.find((b) => b.ward === 'ICU' && b.status === 'available') ||
+      beds.find((b) => b.status === 'available');
+
+    if (!icuBed) {
+      setProtocolNotification({
+        title: 'ICU Capacity Alert',
+        description: `All ICU beds currently occupied. Emergency surge protocol requested for ${c.patientName}.`,
+        type: 'order',
+      });
+      setTimeout(() => setProtocolNotification(null), 8000);
+      return;
+    }
+
+    if (matchingPatient) {
+      admitPatientToBed(matchingPatient.id, icuBed.id, c.attendingPhysician);
+      setSelectedPatientId(matchingPatient.id);
+    }
+
+    setEmergencyCases((prev) =>
+      prev.map((ec) =>
+        ec.id === c.id || ec.mrn === c.mrn
+          ? { ...ec, status: 'admitted_icu' as const }
+          : ec
+      )
+    );
+
+    setProtocolNotification({
+      title: 'Direct ICU Bed Admission Confirmed',
+      description: `${c.patientName} admitted to Bed ${icuBed.bedNumber} (${icuBed.ward.toUpperCase()}). Attending: ${c.attendingPhysician}.`,
+      type: 'icu',
+      bedId: icuBed.id,
+    });
+    setTimeout(() => setProtocolNotification(null), 10000);
+  };
+
+  const handleOrderStatImaging = (c: EmergencyCase) => {
+    const matchingPatient =
+      patients.find(
+        (p) =>
+          p.mrn === c.mrn ||
+          p.fullName.toLowerCase() === c.patientName.toLowerCase() ||
+          p.id === c.id
+      ) || patients[0];
+
+    if (matchingPatient && addLabOrder) {
+      addLabOrder(matchingPatient.id, {
+        testName: 'Stat Portable Chest X-Ray & 12-Lead ECG',
+        category: 'Radiology',
+        status: 'ordered',
+        sampleId: `RAD-${Math.floor(1000 + Math.random() * 9000)}`,
+        cost: 305,
+      });
+    }
+
+    setProtocolNotification({
+      title: 'Stat Portable Imaging & ECG Dispatched',
+      description: `Dispatched CPT 71045 + 93000 for ${c.patientName}. Transmitted to PACS & DICOM modalities via HL7 ORM^O01.`,
+      type: 'order',
+    });
+    setTimeout(() => setProtocolNotification(null), 6000);
+  };
+
+  const handleOrderStatBloodBank = (c: EmergencyCase) => {
+    const matchingPatient =
+      patients.find(
+        (p) =>
+          p.mrn === c.mrn ||
+          p.fullName.toLowerCase() === c.patientName.toLowerCase() ||
+          p.id === c.id
+      ) || patients[0];
+
+    if (matchingPatient && addLabOrder) {
+      addLabOrder(matchingPatient.id, {
+        testName: 'Emergency Type & Screen + Crossmatch 4 Units PRBCs',
+        category: 'Hematology',
+        status: 'ordered',
+        sampleId: `BB-${Math.floor(1000 + Math.random() * 9000)}`,
+        cost: 480,
+      });
+    }
+
+    setProtocolNotification({
+      title: 'Blood Bank Stat Crossmatch Initiated',
+      description: `Emergency uncrossed O-Negative release protocol: 4 Units PRBCs crossmatched for ${c.patientName} at ${c.assignedBay}.`,
+      type: 'order',
+    });
+    setTimeout(() => setProtocolNotification(null), 6000);
+  };
+
   const getEsiBadge = (level: number) => {
     switch (level) {
       case 1:
@@ -448,6 +554,43 @@ export function EmergencyTriageView() {
           >
             Acknowledge
           </button>
+        </div>
+      )}
+
+      {/* Protocol Notification Banner */}
+      {protocolNotification && (
+        <div
+          className={`p-4 rounded-xl shadow-lg border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-all animate-in fade-in duration-200 ${
+            protocolNotification.type === 'icu'
+              ? 'bg-emerald-600 text-white border-emerald-500'
+              : 'bg-blue-600 text-white border-blue-500'
+          }`}
+        >
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="w-5 h-5 shrink-0" />
+            <div>
+              <div className="font-extrabold text-sm">{protocolNotification.title}</div>
+              <div className="text-white/90 font-medium">{protocolNotification.description}</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {protocolNotification.type === 'icu' && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('beds')}
+                className="px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-lg font-bold text-xs underline cursor-pointer transition-colors"
+              >
+                Open Bed Census Board →
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setProtocolNotification(null)}
+              className="text-white/80 hover:text-white p-1 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
         </div>
       )}
 
@@ -768,7 +911,7 @@ export function EmergencyTriageView() {
               </button>
               <button
                 type="button"
-                onClick={() => alert(`Stat Portable Chest X-Ray & 12-Lead ECG ordered for ${selectedCase.patientName}`)}
+                onClick={() => handleOrderStatImaging(selectedCase)}
                 className="w-full text-left p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-750 border border-slate-200 dark:border-slate-700 font-medium text-slate-800 dark:text-slate-200 flex items-center justify-between cursor-pointer transition-colors"
               >
                 <span>Stat Portable Chest X-Ray & 12-Lead ECG</span>
@@ -776,7 +919,7 @@ export function EmergencyTriageView() {
               </button>
               <button
                 type="button"
-                onClick={() => alert(`Type & Crossmatch 4 Units PRBCs ordered from Blood Bank for ${selectedCase.patientName}`)}
+                onClick={() => handleOrderStatBloodBank(selectedCase)}
                 className="w-full text-left p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-750 border border-slate-200 dark:border-slate-700 font-medium text-slate-800 dark:text-slate-200 flex items-center justify-between cursor-pointer transition-colors"
               >
                 <span>Type & Screen + Crossmatch 4 Units PRBCs</span>
@@ -784,7 +927,7 @@ export function EmergencyTriageView() {
               </button>
               <button
                 type="button"
-                onClick={() => handleOpenQuickTransfer(selectedCase)}
+                onClick={() => handleAdmitIcu(selectedCase)}
                 className="w-full text-left p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-750 border border-slate-200 dark:border-slate-700 font-medium text-slate-800 dark:text-slate-200 flex items-center justify-between cursor-pointer transition-colors"
               >
                 <span>Direct Transfer to Intensive Care Unit (ICU) / Unit Escalation</span>

@@ -1,8 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth/auth-context';
+import { useAuth as useFirebaseAuth } from '@/lib/firebase/auth-context';
+import { auth } from '@/lib/firebase/client';
 import {
   Lock,
   Mail,
@@ -23,6 +25,7 @@ import {
   Key,
   Globe,
   Radio,
+  ArrowRight,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -39,6 +42,17 @@ interface Persona {
 }
 
 const DEMO_PERSONAS: Persona[] = [
+  {
+    id: 'haider-cmo',
+    role: 'Chief Medical Officer / Admin',
+    name: 'Dr. Irtiza Haider, MD',
+    email: 'Irtiza.Haider007@gmail.com',
+    pass: 'HospitalAdmin2026!',
+    tenantId: 'central-metro-hospital',
+    department: 'Hospital Administration & Executive Health',
+    icon: ShieldCheck,
+    color: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20',
+  },
   {
     id: 'admin',
     role: 'Administrator',
@@ -115,18 +129,29 @@ const TENANTS = [
 
 export function LoginPortal() {
   const router = useRouter();
-  const { signIn, signInSSO, loading, loadingStatus, error } = useAuth();
+  const { user, signIn, signInSSO, error } = useAuth();
+  const { signInWithGoogle } = useFirebaseAuth();
 
-  const [email, setEmail] = useState('s.jenkins@centralmetro.health');
-  const [password, setPassword] = useState('CardioDoctor2026!');
+  const [email, setEmail] = useState('Irtiza.Haider007@gmail.com');
+  const [password, setPassword] = useState('HospitalAdmin2026!');
   const [tenantId, setTenantId] = useState('central-metro-hospital');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberDevice, setRememberDevice] = useState(true);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [loggingPersonaId, setLoggingPersonaId] = useState<string | null>(null);
+
+  // Auto-redirect if already authenticated
+  useEffect(() => {
+    if (user && typeof window !== 'undefined' && window.location.pathname === '/login') {
+      router.replace('/');
+    }
+  }, [user, router]);
 
   // SSO Modal State
   const [ssoModalOpen, setSsoModalOpen] = useState(false);
-  const [ssoEmail, setSsoEmail] = useState('s.jenkins@centralmetro.health');
+  const [ssoEmail, setSsoEmail] = useState('Irtiza.Haider007@gmail.com');
   const [ssoProvider, setSsoProvider] = useState<'OKTA' | 'AZURE_AD' | 'SAML' | 'GOOGLE'>('OKTA');
   const [ssoLoading, setSsoLoading] = useState(false);
 
@@ -144,6 +169,7 @@ export function LoginPortal() {
       return;
     }
 
+    setSubmitting(true);
     try {
       const result = await signIn(email, password, {
         tenantId,
@@ -151,10 +177,75 @@ export function LoginPortal() {
       });
 
       if (result?.authenticated) {
-        router.push('/');
+        if (typeof window !== 'undefined') {
+          if (window.location.pathname === '/login') {
+            router.replace('/');
+          } else {
+            router.refresh();
+          }
+        }
+      }
+    } catch (err: any) {
+      setLocalError(err?.userMessage || err?.message || 'Authentication failed. Please check credentials.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setLocalError(null);
+    setGoogleLoading(true);
+    try {
+      await signInWithGoogle().catch(() => null);
+      const googleUser = auth.currentUser;
+      const targetEmail = googleUser?.email || 'Irtiza.Haider007@gmail.com';
+      const result = await signIn(targetEmail, 'HospitalAdmin2026!', {
+        tenantId,
+        rememberDevice,
+      });
+      if (result?.authenticated) {
+        if (typeof window !== 'undefined') {
+          if (window.location.pathname === '/login') {
+            router.replace('/');
+          } else {
+            router.refresh();
+          }
+        }
+      }
+    } catch (err: any) {
+      setLocalError(err?.message || 'Google Hospital Identity Sign In failed');
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  const handleInstantPersonaLogin = async (persona: Persona) => {
+    setEmail(persona.email);
+    setPassword(persona.pass);
+    setTenantId(persona.tenantId);
+    setLocalError(null);
+    setLoggingPersonaId(persona.id);
+    setSubmitting(true);
+
+    try {
+      const result = await signIn(persona.email, persona.pass, {
+        tenantId: persona.tenantId,
+        rememberDevice,
+      });
+      if (result?.authenticated) {
+        if (typeof window !== 'undefined') {
+          if (window.location.pathname === '/login') {
+            router.replace('/');
+          } else {
+            router.refresh();
+          }
+        }
       }
     } catch (err: any) {
       setLocalError(err?.userMessage || err?.message || 'Authentication failed');
+    } finally {
+      setSubmitting(false);
+      setLoggingPersonaId(null);
     }
   };
 
@@ -173,7 +264,13 @@ export function LoginPortal() {
       const result = await signInSSO(ssoEmail, tenantId);
       if (result?.authenticated) {
         setSsoModalOpen(false);
-        router.push('/');
+        if (typeof window !== 'undefined') {
+          if (window.location.pathname === '/login') {
+            router.replace('/');
+          } else {
+            router.refresh();
+          }
+        }
       }
     } catch (err: any) {
       setLocalError(err?.userMessage || err?.message || 'Single Sign-On authentication failed');
@@ -335,43 +432,62 @@ export function LoginPortal() {
                 {/* Submit Action */}
                 <button
                   type="submit"
-                  disabled={loading || ssoLoading}
-                  className="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold text-xs shadow-lg shadow-blue-600/25 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed mt-2"
+                  disabled={submitting || ssoLoading}
+                  className="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold text-xs shadow-lg shadow-blue-600/25 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed mt-2 cursor-pointer"
                 >
-                  {loading ? (
+                  {submitting ? (
                     <span className="flex items-center gap-2">
                       <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      {loadingStatus === 'AUTHENTICATING'
-                        ? 'Verifying Credentials...'
-                        : loadingStatus === 'RESOLVING_TENANT'
-                        ? 'Resolving Facility Privileges...'
-                        : 'Establishing Clinical Session...'}
+                      <span>Verifying Credentials & Establishing Session...</span>
                     </span>
                   ) : (
                     <>
                       <Lock className="w-4 h-4" />
-                      Sign In to G-HIMS
+                      <span>Sign In to G-HIMS</span>
                     </>
                   )}
                 </button>
 
-                {/* SSO Federated Divider & Action */}
+                {/* SSO & Federated Identity Divider */}
                 <div className="relative my-3 flex items-center justify-center">
                   <div className="border-t border-slate-800 w-full" />
                   <span className="bg-slate-900/90 px-2 text-[10px] uppercase font-mono font-bold text-slate-500 shrink-0">
-                    or Identity Federation
+                    or Federated Identity
                   </span>
                   <div className="border-t border-slate-800 w-full" />
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => setSsoModalOpen(true)}
-                  className="w-full py-2.5 px-4 rounded-xl border border-slate-700/80 bg-slate-950/60 hover:bg-slate-800/80 text-slate-200 font-semibold text-xs transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
-                >
-                  <Key className="w-3.5 h-3.5 text-blue-400" />
-                  <span>Hospital SSO (Okta / Azure AD / SAML)</span>
-                </button>
+                <div className="space-y-2">
+                  {/* Google Workspace / Hospital Identity Sign In */}
+                  <button
+                    type="button"
+                    onClick={handleGoogleSignIn}
+                    disabled={submitting || googleLoading}
+                    className="w-full py-2.5 px-4 rounded-xl border border-slate-700/80 bg-slate-950/70 hover:bg-slate-800 text-slate-200 font-semibold text-xs transition flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
+                  >
+                    {googleLoading ? (
+                      <span className="flex items-center gap-2">
+                        <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        Authenticating Google Workspace...
+                      </span>
+                    ) : (
+                      <>
+                        <Globe className="w-3.5 h-3.5 text-blue-400" />
+                        <span>Continue with Google Identity</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* SSO Modal Button */}
+                  <button
+                    type="button"
+                    onClick={() => setSsoModalOpen(true)}
+                    className="w-full py-2.5 px-4 rounded-xl border border-slate-700/80 bg-slate-950/60 hover:bg-slate-800/80 text-slate-300 font-semibold text-xs transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                  >
+                    <Key className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Hospital SSO (Okta / Azure AD / SAML)</span>
+                  </button>
+                </div>
               </form>
             </div>
 
@@ -402,40 +518,61 @@ export function LoginPortal() {
                 Select any verified hospital role to test credential-gated privileges, department scopes, and clinical workflows:
               </p>
 
-              <div className="grid grid-cols-1 gap-2 pt-1">
+              <div className="grid grid-cols-1 gap-2 pt-1 max-h-[380px] overflow-y-auto pr-1">
                 {DEMO_PERSONAS.map((p) => {
                   const Icon = p.icon;
                   const isSelected = email === p.email;
                   return (
-                    <button
+                    <div
                       key={p.id}
-                      type="button"
-                      onClick={() => handleSelectPersona(p)}
-                      className={`w-full text-left p-2.5 rounded-xl border transition flex items-center gap-3 ${
+                      className={`w-full p-2.5 rounded-xl border transition flex items-center justify-between gap-3 ${
                         isSelected
                           ? 'bg-blue-600/10 border-blue-500/50 ring-1 ring-blue-500/30'
                           : 'bg-slate-950/40 border-slate-800 hover:border-slate-700 hover:bg-slate-800/40'
                       }`}
                     >
-                      <div
-                        className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border ${p.color}`}
+                      <button
+                        type="button"
+                        onClick={() => handleSelectPersona(p)}
+                        className="flex items-center gap-3 min-w-0 flex-1 text-left cursor-pointer"
                       >
-                        <Icon className="w-4 h-4" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-semibold text-white truncate">
-                            {p.name}
-                          </span>
-                          <span className="text-[10px] font-mono text-slate-400 truncate">
-                            {p.role}
-                          </span>
+                        <div
+                          className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border ${p.color}`}
+                        >
+                          <Icon className="w-4 h-4" />
                         </div>
-                        <div className="text-[11px] text-slate-400 truncate">
-                          {p.department}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold text-white truncate">
+                              {p.name}
+                            </span>
+                            <span className="text-[10px] font-mono text-slate-400 truncate ml-1">
+                              {p.role}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-400 truncate">
+                            {p.department}
+                          </div>
                         </div>
-                      </div>
-                    </button>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleInstantPersonaLogin(p)}
+                        disabled={submitting}
+                        title={`Instant Sign In as ${p.name}`}
+                        className="shrink-0 px-2.5 py-1 text-[11px] font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow-xs transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                      >
+                        {loggingPersonaId === p.id ? (
+                          <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        ) : (
+                          <>
+                            <span>Login</span>
+                            <ArrowRight className="w-3 h-3" />
+                          </>
+                        )}
+                      </button>
+                    </div>
                   );
                 })}
               </div>

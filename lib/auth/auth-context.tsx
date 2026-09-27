@@ -24,7 +24,7 @@ import {
   hasClinicalPrivilege as checkPrivilege,
 } from './auth-guards';
 import { InactivityMonitor } from './auth-session';
-import { getCachedTenantMemberships } from '@/lib/offline/auth-storage';
+import { getCachedTenantMemberships, getCachedAuthSession } from '@/lib/offline/auth-storage';
 
 interface AuthContextType {
   user: AuthenticatedUser | null;
@@ -66,7 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [accountStatus, setAccountStatus] = useState<AccountStatus>('ACTIVE');
   const [isLocked, setIsLocked] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
-  const [loadingStatus, setLoadingStatus] = useState<AuthStateLoadingStatus>('IDLE');
+  const [loadingStatus, setLoadingStatus] = useState<AuthStateLoadingStatus>('RESTORING_SESSION');
   const [error, setError] = useState<string | null>(null);
   const [isOffline, setIsOffline] = useState<boolean>(false);
   const [accessibleTenants, setAccessibleTenants] = useState<TenantSelectionItem[]>([]);
@@ -166,14 +166,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Session Restoration & Initial Auth Lifecycle
   const refreshAuth = useCallback(async () => {
     try {
-      setLoading(true);
-      setLoadingStatus('RESTORING_SESSION');
       const payload = await AuthClient.validateCurrentSession();
 
       if (payload && payload.authenticated) {
         applyLoginPayload(payload);
-        const tenants = await AuthClient.getAccessibleTenants();
-        setAccessibleTenants(tenants);
+        if (payload.accessibleTenants && payload.accessibleTenants.length > 0) {
+          setAccessibleTenants(payload.accessibleTenants);
+        }
         setLoadingStatus('READY');
       } else {
         setUser(null);
@@ -186,8 +185,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (err: any) {
       console.warn('Session restoration notice:', err);
-      setError(err?.userMessage || err?.message || 'Failed to restore session');
-      setLoadingStatus('ERROR');
+      setLoadingStatus('IDLE');
     } finally {
       setLoading(false);
     }
@@ -200,15 +198,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     refreshAuth();
 
     // Listen to Firebase ID token updates
-    const unsubscribe = AuthClient.subscribeToAuthState((firebaseUser) => {
-      if (!firebaseUser && userRef.current) {
-        setUser(null);
-        setSession(null);
-        setActiveTenant(null);
-        setRoles([]);
-        setPermissions([]);
-        setClinicalPrivileges([]);
-        setLoadingStatus('IDLE');
+    const unsubscribe = AuthClient.subscribeToAuthState(async (firebaseUser) => {
+      if (firebaseUser) {
+        // Firebase client user available
       }
     });
 
@@ -223,12 +215,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setError(null);
 
       try {
-        const payload = await AuthClient.signIn(email, pass, options);
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Sign in timed out. Please check network connection.')), 15000)
+        );
+
+        const payload = await Promise.race([
+          AuthClient.signIn(email, pass, options),
+          timeoutPromise,
+        ]);
+
         applyLoginPayload(payload);
 
-        // Fetch accessible tenants
-        const tenants = await AuthClient.getAccessibleTenants();
-        setAccessibleTenants(tenants);
+        if (payload.accessibleTenants && payload.accessibleTenants.length > 0) {
+          setAccessibleTenants(payload.accessibleTenants);
+        }
 
         setLoadingStatus('READY');
         return payload;
@@ -252,16 +252,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setError(null);
 
       try {
-        const payload = await AuthClient.signInSSO(email, tenantId);
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Enterprise SSO timed out.')), 15000)
+        );
+
+        const payload = await Promise.race([
+          AuthClient.signInSSO(email, tenantId),
+          timeoutPromise,
+        ]);
+
         applyLoginPayload(payload);
 
-        const tenants = await AuthClient.getAccessibleTenants();
-        setAccessibleTenants(tenants);
+        if (payload.accessibleTenants && payload.accessibleTenants.length > 0) {
+          setAccessibleTenants(payload.accessibleTenants);
+        }
 
         setLoadingStatus('READY');
         return payload;
       } catch (err: any) {
-        const userMsg = err?.userMessage || err?.message || 'Enterprise SSO Authentication failed';
+        const userMsg = err?.userMessage || err?.message || 'Enterprise SSO failed';
         setError(userMsg);
         setLoadingStatus('ERROR');
         throw err;

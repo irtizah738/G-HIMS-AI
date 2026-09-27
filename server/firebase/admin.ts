@@ -41,6 +41,15 @@ function formatPrivateKey(rawKey: string | undefined): string | null {
   return key;
 }
 
+export function hasAdminCredentials(): boolean {
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim();
+  const privateKey = formatPrivateKey(process.env.FIREBASE_PRIVATE_KEY);
+  return Boolean(
+    (clientEmail && privateKey) ||
+    process.env.GOOGLE_APPLICATION_CREDENTIALS
+  );
+}
+
 export function getAdminApp(): admin.app.App | null {
   if (adminApp) {
     return adminApp;
@@ -73,38 +82,29 @@ export function getAdminApp(): admin.app.App | null {
   }
 
   // 2. Fallback: Google Application Default Credentials or GCloud Project environment
-  try {
-    if (process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.GCLOUD_PROJECT) {
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    try {
       adminApp = admin.initializeApp({
         projectId: projectId || process.env.GCLOUD_PROJECT,
       });
       return adminApp;
+    } catch {
+      // Continue
     }
-  } catch {
-    // Continue
   }
 
-  // 3. Fallback: Project-scoped initialization
-  try {
-    adminApp = admin.initializeApp({
-      projectId: projectId || firebaseConfig.projectId || 'g-hims-ai',
-    });
-    return adminApp;
-  } catch {
-    if (admin.apps.length > 0) {
-      adminApp = admin.app();
-      return adminApp;
-    }
-    return null;
-  }
+  // Without credentials, do not initialize an unauthenticated admin app because it hangs making network calls to compute metadata
+  return null;
 }
 
 export function getAdminAuth(): admin.auth.Auth | null {
+  if (!hasAdminCredentials()) return null;
   const app = getAdminApp();
   return app ? getAuth(app) : null;
 }
 
 export function getAdminFirestore(): admin.firestore.Firestore | null {
+  if (!hasAdminCredentials()) return null;
   if (adminFirestoreInstance) {
     return adminFirestoreInstance;
   }

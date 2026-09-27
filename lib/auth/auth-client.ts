@@ -44,21 +44,31 @@ export class AuthClient {
     try {
       const cleanEmail = email.trim();
       const deviceMeta = generateDeviceMetadata();
+      const requestedTenantId = options?.tenantId || 'central-metro-hospital';
 
-      // 1. Authoritative Backend Authentication & Identity Synchronization
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email: cleanEmail,
-          password: pass,
-          tenantId: options?.tenantId || 'central-metro-hospital',
-          device: deviceMeta,
-          rememberDevice: options?.rememberDevice ?? true,
-        }),
-      });
+      // 1. Authoritative Backend Authentication with 12s AbortController timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+      let response: Response;
+      try {
+        response = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          signal: controller.signal,
+          body: JSON.stringify({
+            email: cleanEmail,
+            password: pass,
+            tenantId: requestedTenantId,
+            device: deviceMeta,
+            rememberDevice: options?.rememberDevice ?? true,
+          }),
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       const data = await response.json();
 
@@ -73,10 +83,13 @@ export class AuthClient {
 
       const loginPayload: LoginResponsePayload = data;
 
-      // 2. Client SDK Synchronization with Custom Token (if provided)
+      // 2. Client SDK Synchronization with Custom Token (if provided) - safe 1000ms timeout
       if (loginPayload.customToken) {
         try {
-          await signInWithCustomToken(auth, loginPayload.customToken);
+          await Promise.race([
+            signInWithCustomToken(auth, loginPayload.customToken),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Custom token timeout')), 1000)),
+          ]);
         } catch (customTokenErr) {
           console.warn('Notice: Firebase Client Custom Token sync notice:', customTokenErr);
         }
@@ -112,7 +125,12 @@ export class AuthClient {
         expiresAt: loginPayload.session.expiresAt,
       };
 
-      await saveCachedAuthSession(authUser, sessionRecord);
+      // Persist to localStorage and IndexedDB before completing sign in
+      try {
+        await saveCachedAuthSession(authUser, sessionRecord);
+      } catch (cacheErr) {
+        console.warn('Notice: Local session caching warning:', cacheErr);
+      }
 
       return loginPayload;
     } catch (err) {
@@ -191,65 +209,7 @@ export class AuthClient {
    */
   public static async validateCurrentSession(): Promise<LoginResponsePayload | null> {
     try {
-      const currentUser = auth.currentUser;
-      if (!currentUser) {
-        // Try reading cached session for offline mode
-        const cached = await getCachedAuthSession();
-        if (cached) {
-          return {
-            authenticated: true,
-            user: {
-              uid: cached.user.uid,
-              displayName: cached.user.displayName,
-              email: cached.user.email,
-            },
-            tenant: {
-              tenantId: cached.user.tenantId,
-              name: 'Hospital Facility (Offline Mode)',
-            },
-            authorization: {
-              roles: cached.user.roles,
-              permissions: cached.user.permissions,
-              departmentIds: cached.user.departmentIds,
-              facilityIds: cached.user.facilityIds,
-              clinicalPrivileges: cached.user.clinicalPrivileges || [],
-              accountStatus: cached.user.accountStatus,
-            },
-            session: {
-              sessionId: cached.session.sessionId,
-              expiresAt: cached.session.expiresAt,
-            },
-            accessibleTenants: [
-              {
-                tenantId: cached.user.tenantId,
-                name: 'Cached Facility',
-                roles: cached.user.roles,
-              },
-            ],
-          };
-        }
-        return null;
-      }
-
-      const idToken = await currentUser.getIdToken(false);
-      const response = await fetch('/api/auth/session', {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${idToken}`,
-        },
-      });
-
-      if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
-          await this.signOut();
-        }
-        return null;
-      }
-
-      const payload: LoginResponsePayload = await response.json();
-      return payload;
-    } catch (err) {
-      // Fallback to offline cache on network error
+      // 1. Instant check from local cache for immediate zero-latency startup
       const cached = await getCachedAuthSession();
       if (cached) {
         return {
@@ -261,7 +221,7 @@ export class AuthClient {
           },
           tenant: {
             tenantId: cached.user.tenantId,
-            name: 'Hospital Facility (Offline Mode)',
+            name: cached.user.tenantId === 'central-metro-hospital' ? 'Central Metro General Hospital' : 'Hospital Facility',
           },
           authorization: {
             roles: cached.user.roles,
@@ -278,12 +238,45 @@ export class AuthClient {
           accessibleTenants: [
             {
               tenantId: cached.user.tenantId,
-              name: 'Cached Facility',
+              name: 'Central Metro General Hospital',
               roles: cached.user.roles,
             },
           ],
         };
       }
+
+      // 2. Firebase user token validation with safe 1.5s timeout
+      const currentUser = auth.currentUser;
+      if (currentUser) {
+        const idToken = await Promise.race([
+          currentUser.getIdToken(false),
+          new Promise<null>((res) => setTimeout(() => res(null), 1000)),
+        ]);
+
+        if (idToken) {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 1500);
+          try {
+            const response = await fetch('/api/auth/session', {
+              method: 'GET',
+              headers: {
+                Authorization: `Bearer ${idToken}`,
+              },
+              signal: controller.signal,
+            });
+
+            if (response.ok) {
+              const payload: LoginResponsePayload = await response.json();
+              return payload;
+            }
+          } finally {
+            clearTimeout(timeout);
+          }
+        }
+      }
+
+      return null;
+    } catch {
       return null;
     }
   }
@@ -378,20 +371,37 @@ export class AuthClient {
    * Fetch list of authorized tenants for the current user
    */
   public static async getAccessibleTenants(): Promise<TenantSelectionItem[]> {
-    const currentUser = auth.currentUser;
-    if (!currentUser) return [];
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser) return [];
 
-    const idToken = await currentUser.getIdToken(false);
-    const response = await fetch('/api/auth/tenant-selection', {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${idToken}`,
-      },
-    });
+      const idToken = await Promise.race([
+        currentUser.getIdToken(false),
+        new Promise<null>((res) => setTimeout(() => res(null), 1000)),
+      ]);
+      if (!idToken) return [];
 
-    if (!response.ok) return [];
-    const data = await response.json();
-    return data.tenants || [];
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 1500);
+
+      try {
+        const response = await fetch('/api/auth/tenant-selection', {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${idToken}`,
+          },
+          signal: controller.signal,
+        });
+
+        if (!response.ok) return [];
+        const data = await response.json();
+        return data.tenants || [];
+      } finally {
+        clearTimeout(timeout);
+      }
+    } catch {
+      return [];
+    }
   }
 
   /**

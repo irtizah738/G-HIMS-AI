@@ -27,25 +27,9 @@ interface HeaderProfileMenuProps {
 
 export function HeaderProfileMenu({ tenantId }: HeaderProfileMenuProps) {
   const { user: firebaseUser, signOut: firebaseSignOut, signInWithGoogle } = useFirebaseAuth();
-  
-  let enterpriseAuth: ReturnType<typeof useEnterpriseAuth> | null = null;
-  try {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    enterpriseAuth = useEnterpriseAuth();
-  } catch {
-    enterpriseAuth = null;
-  }
-
+  const enterpriseAuth = useEnterpriseAuth();
   const { tenantId: contextTenantId, currentTenant, role: tenantRole } = useTenant();
-  
-  // RBAC context (may be available depending on tree location)
-  let rbac: ReturnType<typeof useRBAC> | null = null;
-  try {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    rbac = useRBAC();
-  } catch {
-    rbac = null;
-  }
+  const rbac = useRBAC();
 
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);

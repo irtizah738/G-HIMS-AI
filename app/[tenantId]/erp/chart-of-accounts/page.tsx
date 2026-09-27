@@ -30,7 +30,7 @@ import {
 
 export default function ChartOfAccountsPage() {
   const params = useParams();
-  const tenantId = (params?.tenantId as string) || 'metro-health';
+  const tenantId = (params?.tenantId as string) || 'central-metro-hospital';
 
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);

@@ -138,7 +138,7 @@ export function PatientMpiView() {
   const activeEncounter = currentPatient?.encounters?.[0];
   const assignedBed = beds.find((b) => b.id === currentPatient?.activeBedId);
 
-  const handleCreatePatient = (e: React.FormEvent) => {
+  const handleCreatePatient = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newFullName) return;
 
@@ -160,25 +160,29 @@ export function PatientMpiView() {
       }
     }
 
-    const created = registerNewPatient({
-      fullName: newFullName,
-      dateOfBirth: newDob,
-      age: Number(newAge) || 30,
-      gender: newGender,
-      bloodGroup: newBlood,
-      contactNumber: newPhone,
-      email: newEmail || `${newFullName.toLowerCase().replace(/\s+/g, '.')}@example.com`,
-      address: newAddress || '123 Main St, Metro City',
-      emergencyContact: { name: 'Emergency Contact', relationship: 'Family', phone: newPhone },
-      allergies: newAllergies ? newAllergies.split(',').map((s) => s.trim()) : [],
-      chronicConditions: newConditions ? newConditions.split(',').map((s) => s.trim()) : [],
-    });
+    try {
+      const created = await registerNewPatient({
+        fullName: newFullName,
+        dateOfBirth: newDob,
+        age: Number(newAge) || 30,
+        gender: newGender,
+        bloodGroup: newBlood,
+        contactNumber: newPhone,
+        email: newEmail || `${newFullName.toLowerCase().replace(/\s+/g, '.')}@example.com`,
+        address: newAddress || '123 Main St, Metro City',
+        emergencyContact: { name: 'Emergency Contact', relationship: 'Family', phone: newPhone },
+        allergies: newAllergies ? newAllergies.split(',').map((s) => s.trim()) : [],
+        chronicConditions: newConditions ? newConditions.split(',').map((s) => s.trim()) : [],
+      });
 
-    setSelectedPatientId(created.id);
-    setShowNewPatientModal(false);
-    setNewFullName('');
-    setDuplicateWarningPatient(null);
-    setOverrideDuplicateRegistration(false);
+      setSelectedPatientId(created.id);
+      setShowNewPatientModal(false);
+      setNewFullName('');
+      setDuplicateWarningPatient(null);
+      setOverrideDuplicateRegistration(false);
+    } catch (error) {
+      console.error('PATIENT_REGISTRATION_FAILED', error);
+    }
   };
 
   const handleExecuteMerge = async (primaryId: string, secondaryId: string, mergeReason: string) => {

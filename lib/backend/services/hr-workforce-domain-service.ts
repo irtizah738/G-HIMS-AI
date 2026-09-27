@@ -554,15 +554,103 @@ export class HrWorkforceDomainService {
       };
     }
 
-    // Verify practitioner has active medical license
-    await this.hydrateClinicalEligibility(context.tenantId, payload.employeeId);
-    const eligibility = this.checkClinicalEligibility(payload.employeeId);
-    if (!eligibility.isEligible) {
+    const employee = await this.loadEmployee(context.tenantId, payload.employeeId);
+    if (!employee) {
       return {
         success: false,
         commandId,
         idempotencyKey,
-        error: { code: 'CREDENTIAL_PREREQUISITE_FAILED', message: eligibility.reason || 'Practice prerequisite failed.' },
+        error: { code: 'EMPLOYEE_NOT_FOUND', message: 'Clinical privilege target employee does not exist.' },
+      };
+    }
+
+    if (employee.employmentStatus !== 'ACTIVE') {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'EMPLOYEE_NOT_ACTIVE',
+          message: `Clinical privileges cannot be granted while employee status is ${employee.employmentStatus}.`,
+        },
+      };
+    }
+
+    // Credential authority is resolved from persistent tenant-scoped records,
+    // never from process memory alone.
+    const credentials = await DomainStateRepository.queryEqual<EmployeeCredential>(
+      context.tenantId,
+      'clinicalCredentials',
+      'employeeId',
+      payload.employeeId
+    );
+
+    const today = new Date().toISOString().split('T')[0];
+    const mandatoryCredentials = credentials.filter((credential) => credential.isMandatoryForPractice);
+    const invalidMandatory = mandatoryCredentials.filter(
+      (credential) =>
+        credential.verificationStatus !== 'VERIFIED' ||
+        !credential.expiryDate ||
+        credential.expiryDate < today
+    );
+    const verifiedActiveCredentials = credentials.filter(
+      (credential) =>
+        credential.verificationStatus === 'VERIFIED' &&
+        !!credential.expiryDate &&
+        credential.expiryDate >= today
+    );
+
+    if (verifiedActiveCredentials.length === 0 || invalidMandatory.length > 0) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'CREDENTIAL_PREREQUISITE_FAILED',
+          message:
+            invalidMandatory.length > 0
+              ? `Clinical privilege denied: ${invalidMandatory.length} mandatory credential(s) are expired or unverified.`
+              : 'Clinical privilege denied: no verified, unexpired professional credential is on file.',
+        },
+      };
+    }
+
+    if (!payload.effectiveFrom || !payload.effectiveUntil || payload.effectiveUntil < today) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INVALID_PRIVILEGE_VALIDITY',
+          message: 'Clinical privilege requires a valid effective period that has not already expired.',
+        },
+      };
+    }
+
+    const existingPrivileges = await DomainStateRepository.queryEqual<ClinicalPrivilege>(
+      context.tenantId,
+      'clinicalPrivileges',
+      'employeeId',
+      payload.employeeId
+    );
+    const duplicate = existingPrivileges.find(
+      (privilege) =>
+        privilege.privilegeType === payload.privilegeType &&
+        privilege.facilityId === payload.facilityId &&
+        privilege.departmentId === payload.departmentId &&
+        privilege.status === 'GRANTED' &&
+        privilege.effectiveUntil >= today
+    );
+
+    if (duplicate) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'ACTIVE_PRIVILEGE_ALREADY_EXISTS',
+          message: `An active ${payload.privilegeType} privilege already exists for this scope.`,
+        },
       };
     }
 

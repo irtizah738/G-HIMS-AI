@@ -1,9 +1,8 @@
 /**
- * G-HIMS Outbox Dispatcher & Pub/Sub Relay
- * Dispatches pending outbox records to asynchronous Pub/Sub topics and integration brokers.
+ * G-HIMS Durable Outbox Dispatcher
+ * Claims tenant-scoped records transactionally before projection/integration delivery.
  */
 
-import { OutboxRecord } from '../types';
 import { TransactionManager } from '../transactions/transaction-manager';
 import { ProjectionWorkers } from '../projections/projection-workers';
 
@@ -11,29 +10,29 @@ export interface DispatchResult {
   dispatchedCount: number;
   failedCount: number;
   deadLetterCount: number;
+  skippedCount: number;
   details: Array<{ outboxId: string; status: string; topic: string; error?: string }>;
 }
 
 export class OutboxDispatcher {
-  /**
-   * Scans and relays pending outbox messages to event bus and projection workers.
-   */
-  public static async relayPendingOutbox(): Promise<DispatchResult> {
-    const pendingItems = TransactionManager.getPendingOutbox();
+  public static async relayPendingOutbox(tenantId: string): Promise<DispatchResult> {
+    const candidates = await TransactionManager.getPendingOutbox(tenantId);
     const details: DispatchResult['details'] = [];
     let dispatchedCount = 0;
     let failedCount = 0;
     let deadLetterCount = 0;
+    let skippedCount = 0;
 
-    for (const record of pendingItems) {
+    for (const candidate of candidates) {
+      const record = await TransactionManager.claimOutbox(tenantId, candidate.outboxId);
+      if (!record) {
+        skippedCount += 1;
+        continue;
+      }
+
       try {
-        record.status = 'PROCESSING';
-        record.attempts += 1;
-
-        // 1. Simulate Pub/Sub Transmission to Topic
-        console.log(`[PUB/SUB] Transmitted event '${record.eventType}' (${record.eventId}) to topic '${record.topic}'`);
-
-        // 2. Trigger In-Process CQRS Projection Workers (§17)
+        // Projection consumption is currently the in-process event-bus consumer.
+        // External broker publication is introduced in the next integration layer.
         await ProjectionWorkers.consumeEvent({
           eventId: record.eventId,
           tenantId: record.tenantId,
@@ -41,36 +40,46 @@ export class OutboxDispatcher {
           payload: record.payload,
         });
 
-        // 3. Mark Published in Outbox Store
-        TransactionManager.markOutboxPublished(record.outboxId);
-        dispatchedCount++;
+        await TransactionManager.updateOutbox(tenantId, record.outboxId, {
+          status: 'PUBLISHED',
+          publishedAt: Date.now(),
+          lastError: undefined,
+        });
+
+        dispatchedCount += 1;
         details.push({
           outboxId: record.outboxId,
           status: 'PUBLISHED',
           topic: record.topic,
         });
-      } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        record.lastError = errorMsg;
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
 
         if (record.attempts >= record.maxAttempts) {
-          record.status = 'DEAD_LETTER';
-          deadLetterCount++;
+          await TransactionManager.updateOutbox(tenantId, record.outboxId, {
+            status: 'DEAD_LETTER',
+            lastError: errorMessage,
+          });
+          deadLetterCount += 1;
           details.push({
             outboxId: record.outboxId,
             status: 'DEAD_LETTER',
             topic: record.topic,
-            error: errorMsg,
+            error: errorMessage,
           });
         } else {
-          record.status = 'FAILED';
-          record.nextAttemptAt = Date.now() + record.attempts * 5000; // Exponential backoff
-          failedCount++;
+          const backoffMs = Math.min(60_000, Math.pow(2, record.attempts) * 1000);
+          await TransactionManager.updateOutbox(tenantId, record.outboxId, {
+            status: 'FAILED',
+            lastError: errorMessage,
+            nextAttemptAt: Date.now() + backoffMs,
+          });
+          failedCount += 1;
           details.push({
             outboxId: record.outboxId,
             status: 'FAILED',
             topic: record.topic,
-            error: errorMsg,
+            error: errorMessage,
           });
         }
       }
@@ -80,6 +89,7 @@ export class OutboxDispatcher {
       dispatchedCount,
       failedCount,
       deadLetterCount,
+      skippedCount,
       details,
     };
   }

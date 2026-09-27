@@ -989,15 +989,15 @@ interface HospitalContextType {
   };
 
   // Actions
-  updateBedStatus: (bedId: string, status: BedStatus, patientId?: string, notes?: string) => void;
-  assignPatientToBed: (bedId: string, patientId: string) => void;
-  admitPatientToBed: (patientId: string, bedId: string, doctor?: string, nurse?: string) => void;
+  updateBedStatus: (bedId: string, status: BedStatus, patientId?: string, notes?: string) => Promise<void>;
+  assignPatientToBed: (bedId: string, patientId: string) => Promise<void>;
+  admitPatientToBed: (patientId: string, bedId: string, doctor?: string, nurse?: string) => Promise<void>;
   dischargePatientFromBed: (
     bedId: string,
     notes?: string,
     disposition?: string,
     censusRecord?: DischargedCensusRecord
-  ) => void;
+  ) => Promise<void>;
   registerNewPatient: (patientData: Omit<Patient, 'id' | 'mrn' | 'registeredAt' | 'encounters'>) => Promise<Patient>;
   mergePatients: (primaryId: string, secondaryId: string, mergeReason: string) => Promise<Patient>;
   addClinicalNote: (patientId: string, note: Omit<ClinicalNote, 'id' | 'timestamp'>) => void;
@@ -1166,88 +1166,70 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     setOfflineMutations(prev => [mutation, ...prev]);
   };
 
-  const updateBedStatus = (bedId: string, status: BedStatus, patientId?: string, notes?: string) => {
-    let updatedBed: Bed | undefined;
-    setBeds(prev => prev.map(bed => {
-      if (bed.id === bedId) {
-        updatedBed = {
-          ...bed,
-          status,
-          patientId: status === 'available' ? undefined : (patientId || bed.patientId),
-          patientName: status === 'available' ? undefined : (patientId ? patients.find(p => p.id === patientId)?.fullName : bed.patientName),
-          notes: notes !== undefined ? notes : bed.notes,
-        };
-        return updatedBed;
-      }
-      return bed;
-    }));
-    if (updatedBed) {
-      syncBedToFirestore(updatedBed).catch(() => {});
+  const updateBedStatus = async (bedId: string, status: BedStatus, _patientId?: string, notes?: string) => {
+    if (status === 'occupied') {
+      throw new Error('BED_STATUS_REJECTED: use admitPatientToBed for occupied beds.');
     }
-    recordMutation('ALLOCATE_BED', `Bed:${bedId}`, { status, patientId });
-    addAuditLog('UPDATE_BED_STATUS', `Bed ${bedId}`, `Status changed to ${status}`);
+
+    const result = await executeActiveTenantCommand<{ bed: Bed }>('UpdateBedStatusCommand', {
+      bedId,
+      status,
+      notes,
+    });
+
+    if (!result.success || !result.data?.bed) {
+      throw new Error(result.error?.message || 'Bed-status command failed.');
+    }
+
+    const authoritativeBed = result.data.bed;
+    setBeds((previous) => previous.map((bed) => bed.id === bedId ? authoritativeBed : bed));
   };
 
-  const assignPatientToBed = (bedId: string, patientId: string) => {
-    const patient = patients.find(p => p.id === patientId);
-    if (!patient) return;
-    let updatedBed: Bed | undefined;
-    let updatedPatient: Patient | undefined;
-    setBeds(prev => prev.map(bed => {
-      if (bed.id === bedId) {
-        updatedBed = {
-          ...bed,
-          status: 'occupied',
-          patientId: patient.id,
-          patientName: patient.fullName,
-          admissionDate: new Date().toISOString().split('T')[0],
-        };
-        return updatedBed;
-      }
-      return bed;
-    }));
-    setPatients(prev => prev.map(p => {
-      if (p.id === patientId) {
-        updatedPatient = { ...p, activeBedId: bedId };
-        return updatedPatient;
-      }
-      return p;
-    }));
-    if (updatedBed) syncBedToFirestore(updatedBed).catch(() => {});
-    if (updatedPatient) syncPatientToFirestore(updatedPatient).catch(() => {});
-    addAuditLog('ASSIGN_BED', `Bed ${bedId}`, `Assigned to ${patient.fullName} (MRN: ${patient.mrn})`);
+  const assignPatientToBed = async (bedId: string, patientId: string) => {
+    await admitPatientToBed(patientId, bedId);
   };
 
-  const admitPatientToBed = (patientId: string, bedId: string, doctor?: string, nurse?: string) => {
-    const patient = patients.find(p => p.id === patientId);
-    if (!patient) return;
-    let updatedBed: Bed | undefined;
-    let updatedPatient: Patient | undefined;
-    setBeds(prev => prev.map(bed => {
-      if (bed.id === bedId) {
-        updatedBed = {
-          ...bed,
-          status: 'occupied',
-          patientId: patient.id,
-          patientName: patient.fullName,
-          assignedDoctor: doctor || bed.assignedDoctor || 'Dr. Sarah Jenkins',
-          assignedNurse: nurse || bed.assignedNurse || 'Nurse John Davis',
-          admissionDate: new Date().toISOString().split('T')[0],
-        };
-        return updatedBed;
-      }
-      return bed;
-    }));
-    setPatients(prev => prev.map(p => {
-      if (p.id === patientId) {
-        updatedPatient = { ...p, activeBedId: bedId };
-        return updatedPatient;
-      }
-      return p;
-    }));
-    if (updatedBed) syncBedToFirestore(updatedBed).catch(() => {});
-    if (updatedPatient) syncPatientToFirestore(updatedPatient).catch(() => {});
-    addAuditLog('ADMIT_PATIENT_BED', `Bed ${bedId}`, `Admitted ${patient.fullName} (Dr: ${doctor || 'Dr. Jenkins'})`);
+  const admitPatientToBed = async (patientId: string, bedId: string, doctor?: string, nurse?: string) => {
+    const result = await executeActiveTenantCommand<{ bed: Bed; patient: Patient }>('AdmitPatientToBedCommand', {
+      patientId,
+      bedId,
+      assignedDoctor: doctor,
+      assignedNurse: nurse,
+    });
+
+    if (!result.success || !result.data?.bed || !result.data?.patient) {
+      throw new Error(result.error?.message || 'Inpatient admission command failed.');
+    }
+
+    setBeds((previous) => previous.map((bed) => bed.id === bedId ? result.data!.bed : bed));
+    setPatients((previous) => previous.map((patient) => patient.id === patientId ? result.data!.patient : patient));
+  };
+
+  const dischargePatientFromBed = async (
+    bedId: string,
+    notes?: string,
+    disposition?: string,
+    censusRecord?: DischargedCensusRecord
+  ) => {
+    const result = await executeActiveTenantCommand<{ bed: Bed; patient: Patient; disposition?: string }>(
+      'DischargePatientFromBedCommand',
+      { bedId, notes, disposition }
+    );
+
+    if (!result.success || !result.data?.bed || !result.data?.patient) {
+      throw new Error(result.error?.message || 'Inpatient discharge command failed.');
+    }
+
+    setBeds((previous) => previous.map((bed) => bed.id === bedId ? result.data!.bed : bed));
+    setPatients((previous) => previous.map((patient) =>
+      patient.id === result.data!.patient.id ? result.data!.patient : patient
+    ));
+
+    // Discharged census remains a UI/read-model projection in P1. It is populated
+    // only after the authoritative discharge command succeeds.
+    if (censusRecord) {
+      setDischargedCensus((previous) => [censusRecord, ...previous]);
+    }
   };
 
   const reconcileCensus = () => {

@@ -1,46 +1,42 @@
 /**
  * G-HIMS Finance Universal Journal API Route
- * POST /api/finance/journal
+ * Identity and authority are derived server-side.
  */
-
 import { NextRequest, NextResponse } from 'next/server';
 import { FinancialLedgerDomainService, PostJournalPayload } from '@/lib/backend/services/financial-ledger-domain-service';
-import { CommandContext } from '@/lib/backend/types';
+import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const payload: PostJournalPayload = body.journal;
-    const idempotencyKey = body.idempotencyKey || `je_${Date.now()}`;
-    const commandId = body.commandId || `cmd_${Date.now()}`;
+    const tenantId = String(body.tenantId || '').trim().toLowerCase();
 
-    if (!payload || !Array.isArray(payload.lines)) {
+    if (!tenantId || !payload || !Array.isArray(payload.lines)) {
       return NextResponse.json(
-        { success: false, error: { code: 'INVALID_JOURNAL', message: 'Journal lines are required.' } },
+        { success: false, error: { code: 'INVALID_JOURNAL', message: 'tenantId and journal lines are required.' } },
         { status: 400 }
       );
     }
 
-    const context: CommandContext = {
-      actorId: req.headers.get('x-actor-id') || 'usr_finance_officer',
-      tenantId: req.headers.get('x-tenant-id') || 'tenant_default',
-      roles: ['FINANCE_MANAGER', 'ACCOUNTANT'],
-      permissions: ['ALL_FINANCE'],
-      correlationId: `fin_corr_${Date.now()}`,
-      requestId: `req_${Date.now()}`,
-    };
+    const { context } = await deriveAuthoritativeContext(req, tenantId);
+    const idempotencyKey = String(body.idempotencyKey || crypto.randomUUID());
+    const commandId = String(body.commandId || `cmd_${crypto.randomUUID()}`);
 
-    const result = await FinancialLedgerDomainService.postUniversalJournal(context, commandId, idempotencyKey, payload);
-    const statusCode = result.success ? 200 : 400;
+    const result = await FinancialLedgerDomainService.postUniversalJournal(
+      context,
+      commandId,
+      idempotencyKey,
+      payload
+    );
 
-    return NextResponse.json(result, { status: statusCode });
-  } catch (err) {
+    return NextResponse.json(result, { status: result.success ? 200 : 403 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Finance request failed';
+    const unauthorized = /AUTH|TENANT|UNAUTH/i.test(message);
     return NextResponse.json(
-      {
-        success: false,
-        error: { code: 'FINANCE_ERROR', message: err instanceof Error ? err.message : 'Internal finance error' },
-      },
-      { status: 500 }
+      { success: false, error: { code: unauthorized ? 'UNAUTHORIZED' : 'FINANCE_ERROR', message } },
+      { status: unauthorized ? 403 : 500 }
     );
   }
 }

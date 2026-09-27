@@ -115,6 +115,7 @@ function collectionForEntityType(entityType: string): string {
 }
 
 export class TransactionManager {
+  private static readonly OUTBOX_LEASE_MS = 2 * 60 * 1000;
   private static inMemoryEventStore: DomainEventEnvelope[] = [];
   private static inMemoryAuditStore: AuditRecord[] = [];
   private static inMemoryOutboxStore: OutboxRecord[] = [];
@@ -377,21 +378,28 @@ export class TransactionManager {
   public static async getPendingOutbox(tenantId: string): Promise<OutboxRecord[]> {
     const db = getAdminFirestore();
     if (!db) {
+      const now = Date.now();
       return canUseEphemeralPersistence()
         ? this.inMemoryOutboxStore.filter((record) =>
             record.tenantId === tenantId &&
-            (record.status === 'PENDING' || record.status === 'FAILED') &&
-            record.nextAttemptAt <= Date.now()
+            (
+              ((record.status === 'PENDING' || record.status === 'FAILED') && record.nextAttemptAt <= now) ||
+              (record.status === 'PROCESSING' && (record.leaseExpiresAt || 0) <= now)
+            )
           )
         : [];
     }
 
     const snapshot = await db.collection('tenants').doc(tenantId).collection('outbox')
-      .where('status', 'in', ['PENDING', 'FAILED']).limit(100).get();
+      .where('status', 'in', ['PENDING', 'FAILED', 'PROCESSING']).limit(100).get();
 
+    const now = Date.now();
     return snapshot.docs
       .map((doc) => doc.data() as OutboxRecord)
-      .filter((record) => record.nextAttemptAt <= Date.now());
+      .filter((record) =>
+        ((record.status === 'PENDING' || record.status === 'FAILED') && record.nextAttemptAt <= now) ||
+        (record.status === 'PROCESSING' && (record.leaseExpiresAt || 0) <= now)
+      );
   }
 
   public static async claimOutbox(
@@ -403,16 +411,22 @@ export class TransactionManager {
     if (!db) {
       if (!canUseEphemeralPersistence()) return null;
       const item = this.inMemoryOutboxStore.find((record) => record.outboxId === outboxId);
-      if (
-        !item ||
-        !['PENDING', 'FAILED'].includes(item.status) ||
-        item.nextAttemptAt > Date.now()
-      ) {
+      const now = Date.now();
+      const eligible =
+        !!item &&
+        (
+          ((item.status === 'PENDING' || item.status === 'FAILED') && item.nextAttemptAt <= now) ||
+          (item.status === 'PROCESSING' && (item.leaseExpiresAt || 0) <= now)
+        );
+
+      if (!item || !eligible) {
         return null;
       }
 
       item.status = 'PROCESSING';
       item.attempts += 1;
+      item.processingStartedAt = now;
+      item.leaseExpiresAt = now + this.OUTBOX_LEASE_MS;
       return { ...item };
     }
 
@@ -423,10 +437,12 @@ export class TransactionManager {
       if (!snapshot.exists) return null;
 
       const record = snapshot.data() as OutboxRecord;
-      if (
-        !['PENDING', 'FAILED'].includes(record.status) ||
-        record.nextAttemptAt > Date.now()
-      ) {
+      const now = Date.now();
+      const eligible =
+        ((record.status === 'PENDING' || record.status === 'FAILED') && record.nextAttemptAt <= now) ||
+        (record.status === 'PROCESSING' && (record.leaseExpiresAt || 0) <= now);
+
+      if (!eligible) {
         return null;
       }
 
@@ -434,6 +450,8 @@ export class TransactionManager {
         ...record,
         status: 'PROCESSING',
         attempts: record.attempts + 1,
+        processingStartedAt: now,
+        leaseExpiresAt: now + this.OUTBOX_LEASE_MS,
       };
 
       transaction.set(ref, sanitizeForFirestore(claimed), { merge: true });
@@ -450,11 +468,22 @@ export class TransactionManager {
     if (!db) {
       if (!canUseEphemeralPersistence()) throw new Error('TRANSACTION_STORE_UNAVAILABLE');
       const item = this.inMemoryOutboxStore.find((record) => record.outboxId === outboxId);
-      if (item) Object.assign(item, patch);
+      if (item) {
+        const normalizedPatch: Partial<OutboxRecord> =
+          patch.status && patch.status !== 'PROCESSING'
+            ? { ...patch, processingStartedAt: 0, leaseExpiresAt: 0 }
+            : patch;
+        Object.assign(item, normalizedPatch);
+      }
       return;
     }
 
+    const normalizedPatch: Partial<OutboxRecord> =
+      patch.status && patch.status !== 'PROCESSING'
+        ? { ...patch, processingStartedAt: 0, leaseExpiresAt: 0 }
+        : patch;
+
     await db.collection('tenants').doc(tenantId).collection('outbox').doc(outboxId)
-      .set(sanitizeForFirestore(patch), { merge: true });
+      .set(sanitizeForFirestore(normalizedPatch), { merge: true });
   }
 }

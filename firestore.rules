@@ -258,6 +258,11 @@ service cloud.firestore {
       match /idempotency/{id} {
         allow read, write: if false;
       }
+      // AI-generated drafts contain PHI/provenance and remain server-only until accepted
+      // through an authorized clinical command.
+      match /aiDrafts/{id} {
+        allow read, write: if false;
+      }
       match /financialIdempotency/{id} {
         allow read, write: if false;
       }

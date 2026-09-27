@@ -9,6 +9,7 @@ import {
 import { Auth, getAuth } from 'firebase-admin/auth';
 import { Firestore, getFirestore } from 'firebase-admin/firestore';
 import firebaseConfig from '@/firebase-applet-config.json';
+import { assertServerFirebaseProjectIsolation } from '@/lib/runtime/environment-contract';
 
 let adminApp: App | null = null;
 let adminFirestoreInstance: Firestore | null = null;
@@ -57,6 +58,8 @@ function canUseFirestoreEmulator(): boolean {
 }
 
 export function hasAdminCredentials(): boolean {
+  assertServerFirebaseProjectIsolation(String(projectId || ''));
+
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim();
   const privateKey = formatPrivateKey(process.env.FIREBASE_PRIVATE_KEY);
 

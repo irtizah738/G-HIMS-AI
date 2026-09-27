@@ -21,6 +21,7 @@ import {
 import { SoapDrafterOutput, RecommendedIcd10 } from '@/lib/ai/flows/soap-drafter';
 import { Icd10CrosswalkOutput, MappedIcd10Code } from '@/lib/ai/flows/icn10-crosswalk';
 import { DenialAppealOutput } from '@/lib/ai/flows/denial-appeal';
+import { AuthClient } from '@/lib/auth/auth-client';
 
 interface ClinicalCopilotDrawerProps {
   isOpen: boolean;
@@ -46,7 +47,7 @@ type CopilotTab = 'soap' | 'icd10' | 'denial';
 export function ClinicalCopilotDrawer({
   isOpen,
   onClose,
-  tenantId = 'default',
+  tenantId,
   patientContext,
   onApplySoap,
   onApplyIcd10,
@@ -55,37 +56,26 @@ export function ClinicalCopilotDrawer({
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
 
   // SOAP State
-  const [chiefComplaint, setChiefComplaint] = useState(
-    patientContext?.chiefComplaint || 'Acute retrosternal chest pain with diaphoresis'
-  );
-  const [doctorNotes, setDoctorNotes] = useState(
-    'Patient arrived with 4-hour acute retrosternal chest pain radiating to left arm. Bedside 2D Echocardiogram showing mild inferior wall hypokinesis. Started IV Nitroglycerin infusion 20mcg/min. Administered IV Morphine 4mg and ordered stat Troponin I panel.'
-  );
+  const [chiefComplaint, setChiefComplaint] = useState(patientContext?.chiefComplaint || '');
+  const [doctorNotes, setDoctorNotes] = useState('');
   const [isGeneratingSoap, setIsGeneratingSoap] = useState(false);
   const [soapResult, setSoapResult] = useState<SoapDrafterOutput | null>(null);
 
   // ICD-10 State
-  const [icdPrimaryDiag, setIcdPrimaryDiag] = useState('Acute ST-elevation myocardial infarction');
-  const [icdSummary, setIcdSummary] = useState(
-    'Patient presenting with acute chest tightness, elevated Troponin I (0.84 ng/mL), ST elevation in leads II, III, aVF. Underwent emergency cardiac catheterization.'
-  );
+  const [icdPrimaryDiag, setIcdPrimaryDiag] = useState('');
+  const [icdSummary, setIcdSummary] = useState('');
   const [isGeneratingIcd, setIsGeneratingIcd] = useState(false);
   const [icdResult, setIcdResult] = useState<Icd10CrosswalkOutput | null>(null);
 
   // Denial Appeal State
-  const [claimId, setClaimId] = useState('CLM-2026-8942');
-  const [denialCode, setDenialCode] = useState('CO-50');
-  const [denialDesc, setDenialDesc] = useState(
-    'These are non-covered services because this is not deemed a medical necessity by the payer.'
-  );
-  const [procedure, setProcedure] = useState(
-    'Emergency Percutaneous Coronary Intervention (PCI) with Drug-Eluting Stent Placement'
-  );
-  const [doctorAttestation, setDoctorAttestation] = useState(
-    'Patient presented with acute inferolateral STEMI in cardiogenic shock. Immediate revascularization was required to prevent fatal myocardial necrosis.'
-  );
+  const [claimId, setClaimId] = useState('');
+  const [denialCode, setDenialCode] = useState('');
+  const [denialDesc, setDenialDesc] = useState('');
+  const [procedure, setProcedure] = useState('');
+  const [doctorAttestation, setDoctorAttestation] = useState('');
   const [isGeneratingAppeal, setIsGeneratingAppeal] = useState(false);
   const [appealResult, setAppealResult] = useState<DenialAppealOutput | null>(null);
+  const [copilotError, setCopilotError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -98,29 +88,27 @@ export function ClinicalCopilotDrawer({
   // Generate SOAP Note
   const handleGenerateSoap = async () => {
     setIsGeneratingSoap(true);
+    setCopilotError(null);
     try {
-      const res = await fetch('/api/ai/soap', {
+      const activeTenantId = tenantId || await AuthClient.getActiveTenantId();
+      const res = await AuthClient.authorizedFetch('/api/ai/soap', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          tenantId,
-          patientId: patientContext?.mrn || patientContext?.patientId || 'PT-UNKNOWN',
+          tenantId: activeTenantId,
+          patientId: patientContext?.patientId || patientContext?.mrn,
           chiefComplaint,
-          vitals: patientContext?.vitals || {
-            BP: '148/92 mmHg',
-            HR: '104 bpm',
-            SpO2: '94% on room air',
-            Temp: '37.1 °C',
-            RR: '22 /min',
-          },
+          vitals: patientContext?.vitals || {},
           doctorNotes,
         }),
-      });
+      }, activeTenantId);
 
       const data = await res.json();
-      setSoapResult(data);
+      if (!res.ok) throw new Error(data.message || data.error || 'SOAP AI unavailable');
+      setSoapResult(data.result || data);
     } catch (err) {
-      console.error('SOAP Generation error:', err);
+      setSoapResult(null);
+      setCopilotError(err instanceof Error ? err.message : 'SOAP AI unavailable');
     } finally {
       setIsGeneratingSoap(false);
     }
@@ -129,21 +117,25 @@ export function ClinicalCopilotDrawer({
   // Generate ICD-10 Crosswalk
   const handleGenerateIcd = async () => {
     setIsGeneratingIcd(true);
+    setCopilotError(null);
     try {
-      const res = await fetch('/api/ai/icd10', {
+      const activeTenantId = tenantId || await AuthClient.getActiveTenantId();
+      const res = await AuthClient.authorizedFetch('/api/ai/icd10', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          tenantId,
+          tenantId: activeTenantId,
           primaryDiagnosis: icdPrimaryDiag,
           clinicalSummary: icdSummary,
         }),
-      });
+      }, activeTenantId);
 
       const data = await res.json();
-      setIcdResult(data);
+      if (!res.ok) throw new Error(data.message || data.error || 'ICD-10 AI unavailable');
+      setIcdResult(data.result || data);
     } catch (err) {
-      console.error('ICD-10 Generation error:', err);
+      setIcdResult(null);
+      setCopilotError(err instanceof Error ? err.message : 'ICD-10 AI unavailable');
     } finally {
       setIsGeneratingIcd(false);
     }
@@ -152,29 +144,33 @@ export function ClinicalCopilotDrawer({
   // Generate Denial Appeal
   const handleGenerateAppeal = async () => {
     setIsGeneratingAppeal(true);
+    setCopilotError(null);
     try {
-      const res = await fetch('/api/ai/denial-appeal', {
+      const activeTenantId = tenantId || await AuthClient.getActiveTenantId();
+      const res = await AuthClient.authorizedFetch('/api/ai/denial-appeal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          tenantId,
+          tenantId: activeTenantId,
           claimId,
           denialReasonCode: denialCode,
           denialDescription: denialDesc,
           patientDemographics: {
-            Name: patientContext?.fullName || 'John Doe',
-            MRN: patientContext?.mrn || 'MRN-89021',
-            Age: patientContext?.age || 58,
+            ...(patientContext?.fullName ? { Name: patientContext.fullName } : {}),
+            ...(patientContext?.mrn ? { MRN: patientContext.mrn } : {}),
+            ...(patientContext?.age !== undefined ? { Age: patientContext.age } : {}),
           },
           clinicalProcedure: procedure,
           doctorAttestation,
         }),
-      });
+      }, activeTenantId);
 
       const data = await res.json();
-      setAppealResult(data);
+      if (!res.ok) throw new Error(data.message || data.error || 'Denial appeal AI unavailable');
+      setAppealResult(data.result || data);
     } catch (err) {
-      console.error('Denial Appeal generation error:', err);
+      setAppealResult(null);
+      setCopilotError(err instanceof Error ? err.message : 'Denial appeal AI unavailable');
     } finally {
       setIsGeneratingAppeal(false);
     }
@@ -261,6 +257,11 @@ export function ClinicalCopilotDrawer({
 
         {/* Drawer Body Content */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {copilotError && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+              {copilotError}
+            </div>
+          )}
           {/* TAB 1: SOAP DRAFTER */}
           {activeTab === 'soap' && (
             <div className="space-y-4">

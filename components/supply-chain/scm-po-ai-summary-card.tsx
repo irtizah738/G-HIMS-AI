@@ -15,6 +15,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
+import { AuthClient } from '@/lib/auth/auth-client';
 
 interface ScmPoAiSummaryCardProps {
   purchaseOrders: PurchaseOrderRecord[];
@@ -53,6 +54,7 @@ export function ScmPoAiSummaryCard({
   const [isLoading, setIsLoading] = useState(false);
   const [isExpanded, setIsExpanded] = useState(true);
   const [lastRefreshed, setLastRefreshed] = useState<string | null>(null);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
 
   // Filter current week active POs
   const currentWeekActivePOs = useMemo(() => {
@@ -81,67 +83,44 @@ export function ScmPoAiSummaryCard({
 
   const generateSummary = async () => {
     setIsLoading(true);
-    try {
-      const res = await fetch('/app/api/gemini/supply-chain-summary', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          purchaseOrders: currentWeekActivePOs.length > 0 ? currentWeekActivePOs : purchaseOrders.slice(0, 10),
-          suppliers,
-          currentDate: new Date().toISOString(),
-        }),
-      });
+    setSummaryError(null);
 
-      if (res.ok) {
-        const data = await res.json();
-        setSummaryData(data);
-        setLastRefreshed(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-      } else {
-        throw new Error('API failed');
+    try {
+      const tenantId = await AuthClient.getActiveTenantId();
+      const res = await AuthClient.authorizedFetch(
+        '/api/gemini/supply-chain-summary',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tenantId,
+            purchaseOrders:
+              currentWeekActivePOs.length > 0
+                ? currentWeekActivePOs
+                : purchaseOrders.slice(0, 10),
+            suppliers,
+            currentDate: new Date().toISOString(),
+          }),
+        },
+        tenantId
+      );
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Supply-chain intelligence is unavailable.');
       }
-    } catch {
-      // Fallback deterministic card
-      const totalVal = currentWeekActivePOs.reduce((acc, p) => acc + p.totalAmount, 0);
-      setSummaryData({
-        riskLevel: 'ELEVATED',
-        headline: 'Active Weekly Procurement Delivery Risk Watch',
-        executiveSummary: `Monitoring ${currentWeekActivePOs.length} active weekly Purchase Orders valued at $${totalVal.toLocaleString()}. 2 shipments require dock expediting to prevent ICU stockout.`,
-        totalWeeklyOrders: currentWeekActivePOs.length,
-        totalWeeklyValue: totalVal,
-        highRiskOrdersCount: 2,
-        criticalDeliveryRisks: [
-          {
-            poNumber: currentWeekActivePOs[0]?.poNumber || 'PO-2026-0041',
-            supplierName: currentWeekActivePOs[0]?.supplierName || 'Pfizer BioPharma Ltd',
-            expectedDate: currentWeekActivePOs[0]?.expectedDeliveryDate?.split('T')[0] || '2026-09-08',
-            severity: 'HIGH',
-            riskType: 'COLD_CHAIN_EXPEDITE',
-            impactSummary: 'Antibiotic & biologics shipment requiring immediate cold-chain dock receipt verification.',
-            recommendedMitigation: 'Pre-assign temperature loggers and clear Cold Room Bay 2 for inbound batch receipt.',
-          },
-          {
-            poNumber: currentWeekActivePOs[1]?.poNumber || 'PO-2026-0042',
-            supplierName: currentWeekActivePOs[1]?.supplierName || 'Medtronic Surgical',
-            expectedDate: currentWeekActivePOs[1]?.expectedDeliveryDate?.split('T')[0] || '2026-09-09',
-            severity: 'CRITICAL',
-            riskType: 'DELAY_RISK',
-            impactSummary: 'Surgical implant components allocated to upcoming Orthopedic OR schedules.',
-            recommendedMitigation: 'Contact freight dispatcher to confirm priority tracking and notify OR coordinator.',
-          },
-        ],
-        keyTakeaways: [
-          `${currentWeekActivePOs.length} active POs totaling $${totalVal.toLocaleString()} are due for delivery this week.`,
-          '2 vendor shipments exhibit tight dock clearance windows threatening OT & ICU buffer levels.',
-          'Quality & cold-chain receiving docks operating at 92% SLA adherence.',
-        ],
-        mitigationProtocols: [
-          'Pre-alert receiving inspection dock for priority release of vital antibiotic lines.',
-          'Verify carrier temperature records immediately upon freight seal removal.',
-        ],
-        isAiGenerated: false,
-        source: 'HEURISTIC_ALGORITHM',
-      });
-      setLastRefreshed(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+
+      setSummaryData(data);
+      setLastRefreshed(
+        new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      );
+    } catch (error) {
+      setSummaryData(null);
+      setSummaryError(
+        error instanceof Error
+          ? error.message
+          : 'Supply-chain intelligence is unavailable. No synthetic risk data was generated.'
+      );
     } finally {
       setIsLoading(false);
     }
@@ -205,6 +184,12 @@ export function ScmPoAiSummaryCard({
           </button>
         </div>
       </div>
+
+      {summaryError && (
+        <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+          {summaryError}
+        </div>
+      )}
 
       {isExpanded && summaryData && (
         <div className="space-y-4 pt-4">

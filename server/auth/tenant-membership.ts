@@ -1,296 +1,268 @@
 /**
  * G-HIMS Server-Side Tenant Membership Resolution
- * Strictly authorizes user identity within multi-tenant boundaries
+ * Production rule: membership is explicit and fail-closed. Authentication never creates authorization.
  */
 
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { TenantMembership, AccountStatus, TenantSelectionItem } from '@/lib/auth/auth-types';
 import { AuthError } from '@/lib/auth/auth-errors';
 import { ROLE_DEFINITIONS } from '@/lib/auth/rbac';
-import { RoleId, ResourceId } from '@/types/rbac';
-
-const DEFAULT_TENANTS = [
-  {
-    id: 'central-metro-hospital',
-    name: 'Central Metro General Hospital',
-    facilityCode: 'CMGH',
-    tier: 'enterprise',
-    region: 'asia-east1',
-  },
-  {
-    id: 'st-jude-childrens',
-    name: 'St. Jude Specialist Pediatric Center',
-    facilityCode: 'SJPC',
-    tier: 'enterprise',
-    region: 'us-central1',
-  },
-  {
-    id: 'mayo-clinic-hub',
-    name: 'Metropolitan Academic Medical Center',
-    facilityCode: 'MAMC',
-    tier: 'enterprise',
-    region: 'europe-west3',
-  },
-];
-
-const inMemoryMembershipStore = new Map<string, TenantMembership>();
-
-export async function getTenantMembership(
-  tenantId: string,
-  userId: string,
-  userEmail?: string,
-  userName?: string
-): Promise<TenantMembership> {
-  const db = getAdminFirestore();
-  const normalizedTenantId = tenantId.trim().toLowerCase();
-  const cacheKey = `${normalizedTenantId}:${userId}`;
-
-  if (!db) {
-    // In-memory fallback if Firestore is not accessible in dev test
-    if (inMemoryMembershipStore.has(cacheKey)) {
-      return inMemoryMembershipStore.get(cacheKey)!;
-    }
-    const defaultM = createDefaultMembership(normalizedTenantId, userId, userEmail, userName);
-    inMemoryMembershipStore.set(cacheKey, defaultM);
-    return defaultM;
-  }
-
-  try {
-    const userDocRef = db.collection('tenants').doc(normalizedTenantId).collection('users').doc(userId);
-    const docSnap = await userDocRef.get();
-
-    if (docSnap.exists) {
-      const data = docSnap.data() || {};
-      const status: AccountStatus = normalizeAccountStatus(data.status);
-      const rawRole = (data.role || 'doctor').toLowerCase();
-      const roles: string[] = Array.isArray(data.roles) && data.roles.length > 0 ? data.roles : [rawRole];
-      const permissions: string[] = Array.isArray(data.permissions)
-        ? data.permissions
-        : deriveDefaultPermissions(roles);
-      const clinicalPrivileges: string[] = Array.isArray(data.clinicalPrivileges)
-        ? data.clinicalPrivileges
-        : deriveClinicalPrivileges(roles);
-
-      const mem: TenantMembership = {
-        userId,
-        tenantId: normalizedTenantId,
-        tenantName: data.tenantName || getTenantDisplayName(normalizedTenantId),
-        facilityCode: data.facilityCode || normalizedTenantId.substring(0, 4).toUpperCase(),
-        status,
-        roles,
-        departmentIds: Array.isArray(data.departmentIds) ? data.departmentIds : [data.department || 'general_medicine'],
-        facilityIds: Array.isArray(data.facilityIds) ? data.facilityIds : ['main_campus'],
-        permissions,
-        clinicalPrivileges,
-        licenseId: data.licenseId || 'MD-LIC-2026-GH',
-        credentialStatus: data.credentialStatus || 'VERIFIED',
-        createdAt: data.createdAt || new Date().toISOString(),
-        updatedAt: data.updatedAt || new Date().toISOString(),
-      };
-      inMemoryMembershipStore.set(cacheKey, mem);
-      return mem;
-    }
-
-    // Auto-register membership for verified user on first login if tenant exists or is default
-    const newMembership = createDefaultMembership(normalizedTenantId, userId, userEmail, userName);
-    inMemoryMembershipStore.set(cacheKey, newMembership);
-
-    try {
-      await userDocRef.set({
-        userId: newMembership.userId,
-        tenantId: newMembership.tenantId,
-        email: userEmail || '',
-        displayName: userName || userEmail?.split('@')[0] || 'Medical Professional',
-        role: newMembership.roles[0],
-        roles: newMembership.roles,
-        status: newMembership.status,
-        department: newMembership.departmentIds[0],
-        departmentIds: newMembership.departmentIds,
-        facilityIds: newMembership.facilityIds,
-        permissions: newMembership.permissions,
-        clinicalPrivileges: newMembership.clinicalPrivileges,
-        licenseId: newMembership.licenseId,
-        credentialStatus: newMembership.credentialStatus,
-        createdAt: newMembership.createdAt,
-        updatedAt: newMembership.updatedAt,
-      }, { merge: true });
-    } catch {
-      // In-memory cache is already saved
-    }
-
-    return newMembership;
-  } catch {
-    if (inMemoryMembershipStore.has(cacheKey)) {
-      return inMemoryMembershipStore.get(cacheKey)!;
-    }
-    const defaultM = createDefaultMembership(normalizedTenantId, userId, userEmail, userName);
-    inMemoryMembershipStore.set(cacheKey, defaultM);
-    return defaultM;
-  }
-}
-
-export async function getUserAccessibleTenants(
-  userId: string,
-  userEmail?: string
-): Promise<TenantSelectionItem[]> {
-  const db = getAdminFirestore();
-  const results: TenantSelectionItem[] = [];
-
-  for (const t of DEFAULT_TENANTS) {
-    let status: AccountStatus = 'ACTIVE';
-    let roles = ['doctor'];
-    let departmentIds = ['cardiology', 'general_medicine'];
-
-    if (db) {
-      try {
-        const doc = await db.collection('tenants').doc(t.id).collection('users').doc(userId).get();
-        if (doc.exists) {
-          const d = doc.data() || {};
-          status = normalizeAccountStatus(d.status);
-          roles = Array.isArray(d.roles) ? d.roles : [d.role || 'doctor'];
-          departmentIds = Array.isArray(d.departmentIds) ? d.departmentIds : [d.department || 'general_medicine'];
-        }
-      } catch {
-        // Fallback to default
-      }
-    }
-
-    // Include only accessible tenants (ACTIVE or PENDING for selection)
-    if (status !== 'DISABLED') {
-      results.push({
-        tenantId: t.id,
-        name: t.name,
-        facilityCode: t.facilityCode,
-        tier: t.tier,
-        region: t.region,
-        roles,
-        status,
-        departmentIds,
-        primaryRole: roles[0] || 'doctor',
-      });
-    }
-  }
-
-  return results;
-}
+import { RoleId } from '@/types/rbac';
 
 function normalizeAccountStatus(rawStatus?: string): AccountStatus {
-  if (!rawStatus) return 'ACTIVE';
-  const clean = rawStatus.toUpperCase().trim();
+  const clean = String(rawStatus || '').toUpperCase().trim();
   if (clean === 'ACTIVE') return 'ACTIVE';
   if (clean === 'PENDING') return 'PENDING';
   if (clean === 'SUSPENDED') return 'SUSPENDED';
   if (clean === 'DISABLED') return 'DISABLED';
-  return 'ACTIVE';
-}
-
-function getTenantDisplayName(tenantId: string): string {
-  const match = DEFAULT_TENANTS.find((t) => t.id === tenantId);
-  return match ? match.name : `Hospital Organization (${tenantId})`;
-}
-
-function createDefaultMembership(
-  tenantId: string,
-  userId: string,
-  userEmail?: string,
-  userName?: string
-): TenantMembership {
-  const emailLower = (userEmail || '').toLowerCase();
-  let defaultRole = 'doctor';
-  let departments = ['general_medicine', 'cardiology', 'inpatient'];
-
-  if (emailLower.includes('irtiza.haider') || emailLower.includes('admin@centralmetro.health') || emailLower.includes('admin')) {
-    defaultRole = 'administrator';
-    departments = ['hospital_admin', 'executive_health'];
-  } else if (emailLower.includes('oswald') || emailLower.includes('nurse')) {
-    defaultRole = 'nurse';
-    departments = ['inpatient_4b', 'inpatient'];
-  } else if (emailLower.includes('hastings') || emailLower.includes('billing')) {
-    defaultRole = 'billing_clerk';
-    departments = ['revenue_cycle', 'claims'];
-  } else if (emailLower.includes('santos') || emailLower.includes('reception')) {
-    defaultRole = 'receptionist';
-    departments = ['patient_intake', 'outpatient'];
-  } else if (emailLower.includes('rostova') || emailLower.includes('patient')) {
-    defaultRole = 'patient';
-    departments = ['patient_portal'];
-  } else if (emailLower.includes('jenkins') || emailLower.includes('doctor') || emailLower.includes('physician')) {
-    defaultRole = 'doctor';
-    departments = ['cardiology', 'intensive_care'];
-  }
-
-  const roles = [defaultRole];
-  const permissions = deriveDefaultPermissions(roles);
-  const clinicalPrivileges = deriveClinicalPrivileges(roles);
-
-  return {
-    userId,
-    tenantId,
-    tenantName: getTenantDisplayName(tenantId),
-    facilityCode: tenantId.substring(0, 4).toUpperCase(),
-    status: 'ACTIVE',
-    roles,
-    departmentIds: departments,
-    facilityIds: ['main_hospital_campus'],
-    permissions,
-    clinicalPrivileges,
-    licenseId: 'MD-GHIMS-2026-98',
-    credentialStatus: 'VERIFIED',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
+  // Missing or unknown status must never silently become ACTIVE.
+  return 'PENDING';
 }
 
 function deriveDefaultPermissions(roles: string[]): string[] {
-  const permsSet = new Set<string>();
+  const permissions = new Set<string>();
 
-  for (const r of roles) {
-    const roleId = (r.toLowerCase() as RoleId);
-    const def = ROLE_DEFINITIONS[roleId];
-    if (def) {
-      Object.entries(def.permissions).forEach(([resource, actions]) => {
-        actions.forEach((act) => {
-          permsSet.add(`${resource}:${act}`);
-        });
-      });
-    }
+  for (const role of roles) {
+    const definition = ROLE_DEFINITIONS[role.toLowerCase() as RoleId];
+    if (!definition) continue;
+
+    Object.entries(definition.permissions).forEach(([resource, actions]) => {
+      actions.forEach((action) => permissions.add(`${resource}:${action}`));
+    });
   }
 
-  return Array.from(permsSet);
+  return Array.from(permissions);
 }
 
 function deriveClinicalPrivileges(roles: string[]): string[] {
-  const privileges: string[] = [];
-  if (roles.includes('administrator') || roles.includes('admin')) {
-    return ['*'];
-  }
-  if (roles.includes('doctor') || roles.includes('physician')) {
-    privileges.push(
+  const normalized = roles.map((role) => role.toLowerCase());
+  const privileges = new Set<string>();
+
+  if (normalized.includes('doctor') || normalized.includes('physician')) {
+    [
       'ORDER_MEDICATIONS',
       'ORDER_DIAGNOSTICS',
       'ADMIT_INPATIENT',
       'DISCHARGE_INPATIENT',
       'PERFORM_PROCEDURES',
       'SIGN_CLINICAL_NOTES',
-      'SIGN_PRESCRIPTIONS'
-    );
+      'SIGN_PRESCRIPTIONS',
+    ].forEach((privilege) => privileges.add(privilege));
   }
-  if (roles.includes('nurse')) {
-    privileges.push(
+
+  if (normalized.includes('nurse')) {
+    [
       'ADMINISTER_MEDICATIONS',
       'RECORD_VITALS',
       'TRIAGE_PATIENTS',
       'UPDATE_BED_OCCUPANCY',
-      'EXECUTE_NURSING_CARE_PLAN'
-    );
+      'EXECUTE_NURSING_CARE_PLAN',
+    ].forEach((privilege) => privileges.add(privilege));
   }
-  if (roles.includes('billing_clerk')) {
-    privileges.push(
+
+  if (normalized.includes('billing_clerk')) {
+    [
       'GENERATE_INVOICES',
       'PROCESS_CLAIMS',
       'POST_GL_JOURNALS',
-      'RECONCILE_PAYMENTS'
-    );
+      'RECONCILE_PAYMENTS',
+    ].forEach((privilege) => privileges.add(privilege));
   }
-  return privileges;
+
+  return Array.from(privileges);
+}
+
+function membershipFromDocument(tenantId: string, userId: string, data: Record<string, any>): TenantMembership {
+  const rawRole = typeof data.role === 'string' ? data.role.toLowerCase() : '';
+  const roles: string[] =
+    Array.isArray(data.roles) && data.roles.length > 0
+      ? data.roles.map((role: unknown) => String(role).toLowerCase())
+      : rawRole
+        ? [rawRole]
+        : [];
+
+  if (roles.length === 0) {
+    throw new AuthError({
+      code: 'TENANT_ACCESS_DENIED',
+      message: `Tenant membership for ${userId} has no assigned role`,
+      statusCode: 403,
+    });
+  }
+
+  const permissions = Array.isArray(data.permissions)
+    ? data.permissions.map(String)
+    : deriveDefaultPermissions(roles);
+
+  const credentialStatus =
+    typeof data.credentialStatus === 'string'
+      ? data.credentialStatus.toUpperCase()
+      : 'UNVERIFIED';
+
+  const declaredClinicalPrivileges = Array.isArray(data.clinicalPrivileges)
+    ? data.clinicalPrivileges.map(String)
+    : deriveClinicalPrivileges(roles);
+
+  // Clinical authority is credential-gated. An ACTIVE account with an unverified
+  // or expired credential may retain non-clinical access but receives no clinical privileges.
+  const clinicalPrivileges =
+    credentialStatus === 'VERIFIED'
+      ? declaredClinicalPrivileges
+      : [];
+
+  return {
+    userId,
+    tenantId,
+    tenantName: typeof data.tenantName === 'string' ? data.tenantName : `Hospital Organization (${tenantId})`,
+    facilityCode:
+      typeof data.facilityCode === 'string' && data.facilityCode
+        ? data.facilityCode
+        : tenantId.substring(0, 4).toUpperCase(),
+    status: normalizeAccountStatus(data.status),
+    roles,
+    departmentIds: Array.isArray(data.departmentIds)
+      ? data.departmentIds.map(String)
+      : data.department
+        ? [String(data.department)]
+        : [],
+    facilityIds: Array.isArray(data.facilityIds) ? data.facilityIds.map(String) : [],
+    permissions,
+    clinicalPrivileges,
+    licenseId: typeof data.licenseId === 'string' ? data.licenseId : undefined,
+    credentialStatus,
+    createdAt: typeof data.createdAt === 'string' ? data.createdAt : '',
+    updatedAt: typeof data.updatedAt === 'string' ? data.updatedAt : '',
+  };
+}
+
+export async function getTenantMembership(
+  tenantId: string,
+  userId: string,
+  _userEmail?: string,
+  _userName?: string
+): Promise<TenantMembership> {
+  const db = getAdminFirestore();
+  const normalizedTenantId = tenantId.trim().toLowerCase();
+
+  if (!normalizedTenantId || !userId) {
+    throw new AuthError({
+      code: 'TENANT_ACCESS_DENIED',
+      message: 'Tenant and user identifiers are required',
+      statusCode: 403,
+    });
+  }
+
+  if (!db) {
+    throw new AuthError({
+      code: 'INTERNAL_AUTH_ERROR',
+      message: 'Authoritative tenant membership store is unavailable',
+      statusCode: 503,
+    });
+  }
+
+  try {
+    const userDoc = await db
+      .collection('tenants')
+      .doc(normalizedTenantId)
+      .collection('users')
+      .doc(userId)
+      .get();
+
+    if (!userDoc.exists) {
+      throw new AuthError({
+        code: 'TENANT_ACCESS_DENIED',
+        message: `User ${userId} has no membership in tenant ${normalizedTenantId}`,
+        statusCode: 403,
+      });
+    }
+
+    return membershipFromDocument(
+      normalizedTenantId,
+      userId,
+      (userDoc.data() || {}) as Record<string, any>
+    );
+  } catch (error) {
+    if (error instanceof AuthError) throw error;
+
+    throw new AuthError({
+      code: 'INTERNAL_AUTH_ERROR',
+      message: 'Unable to resolve authoritative tenant membership',
+      statusCode: 503,
+      originalError: error,
+    });
+  }
+}
+
+export async function getUserAccessibleTenants(
+  userId: string,
+  _userEmail?: string
+): Promise<TenantSelectionItem[]> {
+  const db = getAdminFirestore();
+
+  if (!db) {
+    throw new AuthError({
+      code: 'INTERNAL_AUTH_ERROR',
+      message: 'Authoritative tenant membership store is unavailable',
+      statusCode: 503,
+    });
+  }
+
+  try {
+    const membershipSnapshot = await db
+      .collectionGroup('users')
+      .where('userId', '==', userId)
+      .get();
+
+    const results: TenantSelectionItem[] = [];
+
+    for (const document of membershipSnapshot.docs) {
+      const tenantRef = document.ref.parent.parent;
+      if (!tenantRef || tenantRef.parent.id !== 'tenants') continue;
+
+      const tenantId = tenantRef.id;
+      const membership = membershipFromDocument(
+        tenantId,
+        userId,
+        (document.data() || {}) as Record<string, any>
+      );
+
+      if (membership.status === 'DISABLED') continue;
+
+      let tenantData: Record<string, any> = {};
+      try {
+        const tenantDoc = await tenantRef.get();
+        if (tenantDoc.exists) tenantData = (tenantDoc.data() || {}) as Record<string, any>;
+      } catch {
+        // Membership remains authoritative even if optional tenant metadata cannot be loaded.
+      }
+
+      results.push({
+        tenantId,
+        name:
+          typeof tenantData.name === 'string'
+            ? tenantData.name
+            : membership.tenantName || `Hospital Organization (${tenantId})`,
+        facilityCode:
+          typeof tenantData.facilityCode === 'string'
+            ? tenantData.facilityCode
+            : membership.facilityCode,
+        tier: typeof tenantData.tier === 'string' ? tenantData.tier : undefined,
+        region: typeof tenantData.region === 'string' ? tenantData.region : undefined,
+        roles: membership.roles,
+        status: membership.status,
+        departmentIds: membership.departmentIds,
+        primaryRole: membership.roles[0],
+      });
+    }
+
+    return results;
+  } catch (error) {
+    if (error instanceof AuthError) throw error;
+
+    throw new AuthError({
+      code: 'INTERNAL_AUTH_ERROR',
+      message: 'Unable to list authoritative tenant memberships',
+      statusCode: 503,
+      originalError: error,
+    });
+  }
 }

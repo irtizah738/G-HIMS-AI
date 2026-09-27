@@ -1,9 +1,9 @@
 /**
  * G-HIMS Server-Side Authorization Context Resolver
- * Resolves complete RBAC, ABAC, Department & Facility Scopes, Clinical Privileges
+ * Resolves complete RBAC, ABAC, Department & Facility Scopes, Clinical Privileges.
  */
 
-import { AuthorizationContext, AccountStatus } from '@/lib/auth/auth-types';
+import { AuthorizationContext } from '@/lib/auth/auth-types';
 import { AuthError } from '@/lib/auth/auth-errors';
 import { VerifiedTokenResult } from './verify-token';
 import { getTenantMembership } from './tenant-membership';
@@ -14,9 +14,16 @@ export async function resolveAuthorizationContext(
   sessionId?: string,
   deviceId?: string
 ): Promise<AuthorizationContext> {
-  const tenantId = (targetTenantId || verifiedToken.claims.tenantId || 'central-metro-hospital').toLowerCase().trim();
+  const tenantId = (targetTenantId || verifiedToken.claims.tenantId || '').toLowerCase().trim();
 
-  // 1. Resolve membership in target tenant
+  if (!tenantId) {
+    throw new AuthError({
+      code: 'TENANT_ACCESS_DENIED',
+      message: 'Explicit tenant scope is required to resolve authorization.',
+      statusCode: 403,
+    });
+  }
+
   const membership = await getTenantMembership(
     tenantId,
     verifiedToken.uid,
@@ -24,7 +31,6 @@ export async function resolveAuthorizationContext(
     verifiedToken.name
   );
 
-  // 2. Validate Account Status (Crucial zero-trust guard)
   if (membership.status === 'DISABLED') {
     throw new AuthError({
       code: 'ACCOUNT_DISABLED',
@@ -62,8 +68,8 @@ export async function resolveAuthorizationContext(
     facilityIds: membership.facilityIds,
     clinicalPrivileges: membership.clinicalPrivileges,
     accountStatus: membership.status,
-    sessionId: sessionId || `sess_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 9)}`,
-    deviceId: deviceId,
+    sessionId: sessionId || '',
+    deviceId,
     isEmergencyOverride: false,
   };
 }

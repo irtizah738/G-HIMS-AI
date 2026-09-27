@@ -16,7 +16,6 @@ import {
   AiOptimizationResult,
   RiskSeverity,
 } from '@/lib/types/disease-intake';
-import { generateClinicalIntakePackage } from '@/lib/clinical/client-clinical-rules';
 import {
   HeartPulse,
   Brain,
@@ -50,6 +49,7 @@ import {
   Workflow,
   Download,
 } from 'lucide-react';
+import { AuthClient } from '@/lib/auth/auth-client';
 
 export function DiseaseCentricIntakeView() {
   const { patients, addClinicalNote, selectedPatientId, setSelectedPatientId } = useHospital();
@@ -227,14 +227,23 @@ export function DiseaseCentricIntakeView() {
     });
   };
 
-  // Run AI Optimization via Gemini Route
+  // Run AI Optimization via authenticated server route.
   const handleRunAiOptimization = async () => {
     setAiLoading(true);
     setAiError(null);
+    setAiResult(null);
+
     try {
+      if (!selectedPatient) {
+        throw new Error('Select a patient before requesting clinical intelligence.');
+      }
+
+      const tenantId = await AuthClient.getActiveTenantId();
       const activeBranchLabels = selectedTreeNodeIds.map((id) => id.replace(/_/g, ' ').toUpperCase());
+      const latestVitals = selectedPatient.encounters?.[0]?.vitalsHistory?.[0];
 
       const payload = {
+        tenantId,
         templateId: currentTemplate.id,
         diseaseName: currentTemplate.name,
         guidedAnswers,
@@ -246,66 +255,62 @@ export function DiseaseCentricIntakeView() {
         riskSignals: {
           score: totalRiskScore,
           overallRisk: maxRiskSeverity,
-          primaryAlert: activeRiskSignals[0]?.title || 'Protocol Assessment',
-          flags: activeRiskSignals.map((s) => s.title),
+          primaryAlert: activeRiskSignals[0]?.title,
+          flags: activeRiskSignals.map((signal) => signal.title),
         },
         patientContext: {
-          id: selectedPatient?.id || 'PT-901',
-          name: selectedPatient?.fullName || 'Jane Doe',
-          age: selectedPatient?.age || 58,
-          gender: selectedPatient?.gender || 'Female',
-          mrn: selectedPatient?.mrn || 'MRN-88219',
-          vitals: selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]
+          id: selectedPatient.id,
+          name: selectedPatient.fullName,
+          age: selectedPatient.age,
+          gender: selectedPatient.gender,
+          mrn: selectedPatient.mrn,
+          ...(latestVitals
             ? {
-                heartRate: selectedPatient.encounters[0].vitalsHistory[0].heartRate,
-                bp: selectedPatient.encounters[0].vitalsHistory[0].bloodPressure,
-                spO2: selectedPatient.encounters[0].vitalsHistory[0].oxygenSaturation,
-                temp: String(selectedPatient.encounters[0].vitalsHistory[0].temperature),
+                vitals: {
+                  heartRate: latestVitals.heartRate,
+                  bp: latestVitals.bloodPressure,
+                  spO2: latestVitals.oxygenSaturation,
+                  temp: String(latestVitals.temperature),
+                },
               }
-            : { heartRate: 92, bp: '154/94', spO2: 97, temp: '98.6' },
+            : {}),
         },
         localization: currentLocalization.name,
         facilityTier: currentHospitalTier.name,
       };
 
-      let data: any = null;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
 
       try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 12000);
+        const res = await AuthClient.authorizedFetch(
+          '/api/clinical/intake-optimize',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+          },
+          tenantId
+        );
 
-        const res = await fetch('/api/clinical/intake-optimize', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-          signal: controller.signal,
-        });
-
-        clearTimeout(timeoutId);
-
-        if (res.ok) {
-          data = await res.json();
+        const data = await res.json();
+        if (!res.ok || !data.executiveSummary) {
+          throw new Error(data.message || data.error || 'Clinical intelligence is unavailable.');
         }
-      } catch (fetchErr: any) {
-        console.warn('Direct API fetch failed or timed out, executing instant client-side Clinical Rules Engine:', fetchErr?.message);
-      }
 
-      // If network fetch failed or returned invalid output, synthesize via clinical rules engine seamlessly
-      if (!data || !data.executiveSummary) {
-        data = generateClinicalIntakePackage(payload);
+        setAiResult(data);
+        setActiveTabMode('ai_optimize');
+      } finally {
+        clearTimeout(timeoutId);
       }
-
-      setAiResult(data);
-      setActiveTabMode('ai_optimize');
-    } catch (err: any) {
-      console.error('AI Clinical Optimization error:', err);
-      // Ensure physician flow is never broken even on unexpected exceptions
-      const safeFallback = generateClinicalIntakePackage({
-        templateId: currentTemplate.id,
-        diseaseName: currentTemplate.name,
-        specialtyHistory: specialtyHistoryAnswers,
-      });
-      setAiResult(safeFallback);
+    } catch (error) {
+      setAiResult(null);
+      setAiError(
+        error instanceof Error
+          ? error.message
+          : 'Clinical intelligence is unavailable. No fallback clinical recommendations were generated.'
+      );
       setActiveTabMode('ai_optimize');
     } finally {
       setAiLoading(false);

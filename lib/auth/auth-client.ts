@@ -4,9 +4,7 @@
  */
 
 import {
-  signInWithCustomToken,
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
   sendPasswordResetEmail,
   onIdTokenChanged,
@@ -43,24 +41,27 @@ export class AuthClient {
   ): Promise<LoginResponsePayload> {
     try {
       const cleanEmail = email.trim();
-      const deviceMeta = generateDeviceMetadata();
       const requestedTenantId = options?.tenantId || 'central-metro-hospital';
+      const deviceMeta = generateDeviceMetadata();
 
-      // 1. Authoritative Backend Authentication with 12s AbortController timeout
+      // Firebase Authentication is the only password authority. The G-HIMS backend
+      // never receives, stores, resets, or synchronizes the submitted password.
+      const credential = await signInWithEmailAndPassword(auth, cleanEmail, pass);
+      const idToken = await credential.user.getIdToken(true);
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 12000);
 
       let response: Response;
       try {
-        response = await fetch('/api/auth/login', {
+        response = await fetch('/api/auth/session', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            Authorization: `Bearer ${idToken}`,
           },
           signal: controller.signal,
           body: JSON.stringify({
-            email: cleanEmail,
-            password: pass,
             tenantId: requestedTenantId,
             device: deviceMeta,
             rememberDevice: options?.rememberDevice ?? true,
@@ -73,9 +74,10 @@ export class AuthClient {
       const data = await response.json();
 
       if (!response.ok) {
+        await firebaseSignOut(auth).catch(() => {});
         throw new AuthError({
-          code: data.code || 'INVALID_CREDENTIALS',
-          message: data.error || 'Authentication failed',
+          code: data.code || 'AUTHORIZATION_REQUIRED',
+          message: data.error || 'Hospital authorization failed',
           statusCode: response.status,
           userMessage: data.userMessage || data.error,
         });
@@ -83,19 +85,9 @@ export class AuthClient {
 
       const loginPayload: LoginResponsePayload = data;
 
-      // 2. Client SDK Synchronization with Custom Token (if provided) - safe 1000ms timeout
-      if (loginPayload.customToken) {
-        try {
-          await Promise.race([
-            signInWithCustomToken(auth, loginPayload.customToken),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Custom token timeout')), 1000)),
-          ]);
-        } catch (customTokenErr) {
-          console.warn('Notice: Firebase Client Custom Token sync notice:', customTokenErr);
-        }
-      }
+      // Refresh the token after the backend has synchronized tenant read claims.
+      await credential.user.getIdToken(true);
 
-      // 3. Build and cache authenticated session locally for offline resilience
       const authUser: AuthenticatedUser = {
         uid: loginPayload.user.uid,
         email: loginPayload.user.email,
@@ -125,7 +117,6 @@ export class AuthClient {
         expiresAt: loginPayload.session.expiresAt,
       };
 
-      // Persist to localStorage and IndexedDB before completing sign in
       try {
         await saveCachedAuthSession(authUser, sessionRecord);
       } catch (cacheErr) {
@@ -209,9 +200,12 @@ export class AuthClient {
    */
   public static async validateCurrentSession(): Promise<LoginResponsePayload | null> {
     try {
-      // 1. Instant check from local cache for immediate zero-latency startup
       const cached = await getCachedAuthSession();
-      if (cached) {
+      const currentUser = auth.currentUser;
+
+      // Offline cache is a continuity aid only; it is never used to mint new authority.
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        if (!cached) return null;
         return {
           authenticated: true,
           user: {
@@ -221,7 +215,7 @@ export class AuthClient {
           },
           tenant: {
             tenantId: cached.user.tenantId,
-            name: cached.user.tenantId === 'central-metro-hospital' ? 'Central Metro General Hospital' : 'Hospital Facility',
+            name: 'Offline cached facility',
           },
           authorization: {
             roles: cached.user.roles,
@@ -235,47 +229,32 @@ export class AuthClient {
             sessionId: cached.session.sessionId,
             expiresAt: cached.session.expiresAt,
           },
-          accessibleTenants: [
-            {
-              tenantId: cached.user.tenantId,
-              name: 'Central Metro General Hospital',
-              roles: cached.user.roles,
-            },
-          ],
+          accessibleTenants: [{
+            tenantId: cached.user.tenantId,
+            name: 'Offline cached facility',
+            roles: cached.user.roles,
+          }],
         };
       }
 
-      // 2. Firebase user token validation with safe 1.5s timeout
-      const currentUser = auth.currentUser;
-      if (currentUser) {
-        const idToken = await Promise.race([
-          currentUser.getIdToken(false),
-          new Promise<null>((res) => setTimeout(() => res(null), 1000)),
-        ]);
+      if (!currentUser || !cached) return null;
 
-        if (idToken) {
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 1500);
-          try {
-            const response = await fetch('/api/auth/session', {
-              method: 'GET',
-              headers: {
-                Authorization: `Bearer ${idToken}`,
-              },
-              signal: controller.signal,
-            });
+      const idToken = await currentUser.getIdToken(false);
+      const response = await fetch('/api/auth/session', {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'x-ghims-tenant-id': cached.user.tenantId,
+          'x-ghims-session-id': cached.session.sessionId,
+        },
+      });
 
-            if (response.ok) {
-              const payload: LoginResponsePayload = await response.json();
-              return payload;
-            }
-          } finally {
-            clearTimeout(timeout);
-          }
-        }
+      if (!response.ok) {
+        await clearCachedAuthSession();
+        return null;
       }
 
-      return null;
+      return await response.json() as LoginResponsePayload;
     } catch {
       return null;
     }
@@ -296,7 +275,10 @@ export class AuthClient {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${idToken}`,
             },
-            body: JSON.stringify({ sessionId }),
+            body: JSON.stringify({
+              sessionId: sessionId || (await getCachedAuthSession())?.session.sessionId,
+              tenantId: (await getCachedAuthSession())?.user.tenantId,
+            }),
           }).catch(() => {});
         }
       }
@@ -333,6 +315,92 @@ export class AuthClient {
   }
 
   /**
+   * Returns the currently cached authoritative tenant identifier.
+   */
+  public static async getActiveTenantId(): Promise<string> {
+    const cached = await getCachedAuthSession();
+    if (!cached?.user?.tenantId) {
+      throw new AuthError({
+        code: 'AUTHENTICATION_REQUIRED',
+        message: 'No active G-HIMS tenant session is available',
+        statusCode: 401,
+      });
+    }
+    return cached.user.tenantId;
+  }
+
+  /**
+   * Authenticated fetch for protected G-HIMS API routes.
+   * Injects Firebase identity plus the active tenant/session/device scope.
+   */
+  public static async authorizedFetch(
+    input: RequestInfo | URL,
+    init: RequestInit = {},
+    tenantId?: string
+  ): Promise<Response> {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      throw new AuthError({
+        code: 'NETWORK_UNAVAILABLE',
+        message: 'Protected server actions require an online authoritative session',
+        statusCode: 503,
+      });
+    }
+
+    const currentUser = auth.currentUser;
+    const cached = await getCachedAuthSession();
+
+    if (!currentUser || !cached) {
+      throw new AuthError({
+        code: 'AUTHENTICATION_REQUIRED',
+        message: 'An active authenticated G-HIMS session is required',
+        statusCode: 401,
+      });
+    }
+
+    if (cached.session.status !== 'ACTIVE' || Date.now() >= new Date(cached.session.expiresAt).getTime()) {
+      await clearCachedAuthSession();
+      throw new AuthError({
+        code: 'SESSION_EXPIRED',
+        message: 'The cached clinical session is no longer active',
+        statusCode: 401,
+      });
+    }
+
+    const requestedTenantId = (tenantId || cached.user.tenantId).trim().toLowerCase();
+    const cachedTenantId = cached.user.tenantId.trim().toLowerCase();
+
+    if (!requestedTenantId || requestedTenantId !== cachedTenantId) {
+      throw new AuthError({
+        code: 'TENANT_ACCESS_DENIED',
+        message: 'Requested tenant does not match the active clinical session. Switch tenant first.',
+        statusCode: 403,
+      });
+    }
+
+    const idToken = await currentUser.getIdToken(false);
+    const headers = new Headers(init.headers || {});
+
+    headers.set('Authorization', `Bearer ${idToken}`);
+    headers.set('x-ghims-tenant-id', requestedTenantId);
+    headers.set('x-ghims-session-id', cached.session.sessionId);
+
+    if (cached.session.deviceId || cached.user.deviceId) {
+      headers.set('x-ghims-device-id', cached.session.deviceId || cached.user.deviceId || '');
+    }
+
+    const response = await fetch(input, {
+      ...init,
+      headers,
+    });
+
+    if (response.status === 401) {
+      await clearCachedAuthSession();
+    }
+
+    return response;
+  }
+
+  /**
    * Switch Active Tenant Context
    */
   public static async switchTenant(targetTenantId: string): Promise<LoginResponsePayload> {
@@ -355,15 +423,46 @@ export class AuthClient {
       body: JSON.stringify({ tenantId: targetTenantId }),
     });
 
-    const data = await response.json();
+    const data: LoginResponsePayload = await response.json();
     if (!response.ok) {
       throw new AuthError({
-        code: data.code || 'TENANT_ACCESS_DENIED',
-        message: data.error || 'Failed to switch tenant',
+        code: (data as any).code || 'TENANT_ACCESS_DENIED',
+        message: (data as any).error || 'Failed to switch tenant',
         statusCode: response.status,
       });
     }
 
+    // The server may have refreshed tenant-scoped Firebase claims.
+    await currentUser.getIdToken(true);
+
+    const authUser: AuthenticatedUser = {
+      uid: data.user.uid,
+      email: data.user.email,
+      displayName: data.user.displayName,
+      tenantId: data.tenant.tenantId,
+      roles: data.authorization.roles,
+      permissions: data.authorization.permissions,
+      departmentIds: data.authorization.departmentIds,
+      facilityIds: data.authorization.facilityIds,
+      accountStatus: data.authorization.accountStatus,
+      clinicalPrivileges: data.authorization.clinicalPrivileges,
+      sessionId: data.session.sessionId,
+      lastAuthenticatedAt: new Date().toISOString(),
+    };
+
+    const sessionRecord: UserSessionRecord = {
+      sessionId: data.session.sessionId,
+      userId: data.user.uid,
+      tenantId: data.tenant.tenantId,
+      status: 'ACTIVE',
+      createdAt: new Date().toISOString(),
+      lastSeenAt: new Date().toISOString(),
+      authenticatedAt: new Date().toISOString(),
+      lastActivityAt: new Date().toISOString(),
+      expiresAt: data.session.expiresAt,
+    };
+
+    await saveCachedAuthSession(authUser, sessionRecord);
     return data;
   }
 

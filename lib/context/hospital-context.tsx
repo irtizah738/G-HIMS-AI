@@ -41,7 +41,6 @@ import {
   syncAuditLogToFirestore,
   syncHl7ToFirestore,
   syncTelehealthSessionToFirestore,
-  seedInitialFirestoreData,
 } from '@/lib/firebase/firestore-service';
 import { DischargedCensusRecord, initialDischargedCensus } from '@/lib/clinical/ipd-service';
 
@@ -1053,8 +1052,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
 
   // Sync with Firestore on mount
   useEffect(() => {
-    // Seed initial dataset if Firestore database is fresh
-    seedInitialFirestoreData(initialPatients, initialBeds, initialMismatches, initialOpdQueue, initialStaff, initialTelehealthSessions);
+    // Demo datasets remain in-memory only. Production Firestore is never auto-seeded from a UI mount.
 
     // Attach real-time Firestore listeners
     const unsubPatients = subscribeToPatients((remotePatients) => {

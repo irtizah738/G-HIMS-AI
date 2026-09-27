@@ -1,42 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { DEFAULT_SSO_CONFIG } from '@/lib/auth/sso-service';
+import { isDemoRuntime } from '@/lib/runtime/runtime-mode';
 
-export async function GET(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const tenantId = searchParams.get('tenantId') || 'central-metro-hospital';
-
-    return NextResponse.json({
-      success: true,
-      tenantId,
-      config: { ...DEFAULT_SSO_CONFIG, tenantId },
-    });
-  } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error?.message || 'Failed to fetch SSO config' },
-      { status: 500 }
-    );
-  }
+function unavailable() {
+  return NextResponse.json(
+    {
+      success: false,
+      code: 'SSO_CONFIG_ERROR',
+      error: 'Enterprise SSO configuration is disabled until a verified OIDC/SAML implementation is installed.',
+    },
+    { status: 501 }
+  );
 }
 
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const { tenantId, config } = body;
+export async function GET(req: NextRequest) {
+  if (!isDemoRuntime()) return unavailable();
+  const tenantId = req.nextUrl.searchParams.get('tenantId') || 'demo-hospital';
+  return NextResponse.json({
+    success: true,
+    tenantId,
+    config: { providerType: 'DEMO', enabled: true },
+  });
+}
 
-    return NextResponse.json({
-      success: true,
-      tenantId: tenantId || 'central-metro-hospital',
-      config: {
-        ...config,
-        updatedAt: new Date().toISOString(),
-      },
-      message: 'SSO provider configuration updated successfully.',
-    });
-  } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error?.message || 'Failed to update SSO config' },
-      { status: 500 }
-    );
-  }
+export async function POST() {
+  if (!isDemoRuntime()) return unavailable();
+  return NextResponse.json({
+    success: true,
+    message: 'Demo SSO configuration accepted in DEMO runtime only.',
+  });
 }

@@ -122,17 +122,30 @@ export function enforceRoleAuth(
   allowedRoles: string[],
   requiredTenantId?: string
 ): { uid: string; role: string; name: string; tenantId: string } {
-  // If running in development without strict token, supply verified fallback
-  const uid = context?.auth?.uid || 'usr_clinical_auth';
-  const role = context?.auth?.token?.role || 'admin';
-  const name = context?.auth?.token?.name || 'Clinical Practitioner';
-  const tenantId = context?.auth?.token?.tenantId || requiredTenantId || 'central-metro-hospital';
-
-  if (requiredTenantId && context?.auth?.token?.tenantId && context.auth.token.tenantId !== requiredTenantId) {
-    throw new Error(`Tenant Authorization Denied: Caller tenant '${context.auth.token.tenantId}' does not match target tenant '${requiredTenantId}'.`);
+  if (!context?.auth?.uid) {
+    throw new Error('Authentication Required: callable function requires verified Firebase authentication.');
   }
 
-  const isAuthorized = allowedRoles.includes('*') || allowedRoles.includes(role) || role === 'admin' || role === 'HospitalAdmin';
+  const uid = context.auth.uid;
+  const role = String(context.auth.token?.role || '').trim();
+  const name = String(context.auth.token?.name || context.auth.token?.email || uid);
+  const tenantId = String(context.auth.token?.tenantId || '').trim();
+
+  if (!tenantId) {
+    throw new Error('Tenant Authorization Denied: authenticated token has no tenant scope.');
+  }
+
+  if (requiredTenantId && tenantId !== requiredTenantId) {
+    throw new Error(`Tenant Authorization Denied: Caller tenant '${tenantId}' does not match target tenant '${requiredTenantId}'.`);
+  }
+
+  const normalizedRole = role.toLowerCase();
+  const normalizedAllowedRoles = allowedRoles.map((allowedRole) => allowedRole.toLowerCase());
+  const isAuthorized =
+    normalizedAllowedRoles.includes('*') ||
+    normalizedAllowedRoles.includes(normalizedRole) ||
+    normalizedRole === 'admin' ||
+    normalizedRole === 'hospitaladmin';
   if (!isAuthorized) {
     throw new Error(`Role Authorization Denied: User role '${role}' is not authorized to execute this clinical action.`);
   }

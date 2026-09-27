@@ -34,6 +34,7 @@ import { formatCurrency } from '@/lib/utils';
 import { PatientConsultantRoutingModal, ConsultantDoctor } from '@/components/clinical/patient-consultant-routing-modal';
 import { PatientMergeModal } from '@/components/mpi/patient-merge-modal';
 import { useRBAC } from '@/lib/auth/rbac-context';
+import { AuthClient } from '@/lib/auth/auth-client';
 
 export function PatientMpiView() {
   const { patients, selectedPatientId, setSelectedPatientId, registerNewPatient, mergePatients, addClinicalNote, addVitals, beds } = useHospital();
@@ -52,6 +53,7 @@ export function PatientMpiView() {
   // AI note parsing state
   const [rawNoteText, setRawNoteText] = useState('');
   const [isAiProcessing, setIsAiProcessing] = useState(false);
+  const [aiParseError, setAiParseError] = useState<string | null>(null);
   const [noteCategory, setNoteCategory] = useState<'SOAP' | 'Progress' | 'Nursing' | 'Discharge'>('SOAP');
   const [authorName, setAuthorName] = useState('Dr. Sarah Jenkins');
 
@@ -201,52 +203,48 @@ export function PatientMpiView() {
   const handleAiNoteParse = async () => {
     if (!rawNoteText.trim() || !currentPatient) return;
     setIsAiProcessing(true);
+    setAiParseError(null);
 
     try {
-      const res = await fetch('/api/genkit/parse-note', {
+      const tenantId = await AuthClient.getActiveTenantId();
+      const res = await AuthClient.authorizedFetch('/api/genkit/parse-note', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          tenantId,
           rawNote: rawNoteText,
           patientId: currentPatient.id,
           patientName: currentPatient.fullName,
         }),
-      });
+      }, tenantId);
 
       const data = await res.json();
-      
+      if (!res.ok || !data.structured) {
+        throw new Error(data.message || data.error || 'Clinical note AI extraction unavailable');
+      }
+
       addClinicalNote(currentPatient.id, {
         author: authorName,
         role: 'Attending Physician',
         category: noteCategory,
         content: rawNoteText,
-        aiStructuredData: data.structured || {
-          chiefComplaint: 'Evaluated patient condition',
-          diagnoses: ['Clinical review complete'],
-          medicationsPrescribed: ['Routine care maintained'],
-          recommendedProcedures: ['Follow-up in 7 days'],
-          followUpDays: 7,
-          billingCodes: [{ code: '99213', description: 'Outpatient Evaluation & Management', fee: 140 }],
-        },
+        aiStructuredData: data.structured,
       });
 
       setRawNoteText('');
-    } catch {
-      // Fallback
+    } catch (error) {
+      // Preserve the clinician-authored note without inventing AI-derived facts.
       addClinicalNote(currentPatient.id, {
         author: authorName,
         role: 'Attending Physician',
         category: noteCategory,
         content: rawNoteText,
-        aiStructuredData: {
-          chiefComplaint: 'Clinical Assessment',
-          diagnoses: ['General evaluation'],
-          medicationsPrescribed: ['As documented in chart'],
-          recommendedProcedures: ['Standard recovery'],
-          followUpDays: 7,
-          billingCodes: [{ code: '99214', description: 'Standard Inpatient Consultation', fee: 195 }],
-        },
       });
+      setAiParseError(
+        error instanceof Error
+          ? `Note saved without AI structure: ${error.message}`
+          : 'Note saved without AI structure because AI extraction was unavailable.'
+      );
       setRawNoteText('');
     } finally {
       setIsAiProcessing(false);
@@ -569,6 +567,12 @@ export function PatientMpiView() {
                       placeholder="e.g., Patient presented with stable hemodynamics. Sternal discomfort resolved. Administered Aspirin 81mg and Atorvastatin 80mg. Schedule follow-up ECG in 3 days. Recommend CPT 99233 high complexity review..."
                       className="w-full bg-slate-950/60 border border-slate-700 rounded-lg p-3 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-400"
                     />
+
+                    {aiParseError && (
+                      <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
+                        {aiParseError}
+                      </div>
+                    )}
 
                     <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
                       <div className="flex items-center gap-2">

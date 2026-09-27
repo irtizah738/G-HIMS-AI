@@ -1,50 +1,45 @@
 /**
  * G-HIMS Offline Batch Synchronization API Route
- * POST /api/sync/batch
+ * Offline actors are re-authenticated on reconnect; batch actor/role fields are not trusted.
  */
-
 import { NextRequest, NextResponse } from 'next/server';
 import { OfflineReconciliationDomainService } from '@/lib/backend/services/offline-reconciliation-domain-service';
-import { OfflineSyncBatch, CommandContext } from '@/lib/backend/types';
+import { OfflineSyncBatch } from '@/lib/backend/types';
+import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const batch: OfflineSyncBatch = body.batch;
 
-    if (!batch || !Array.isArray(batch.mutations)) {
+    if (!batch || !batch.tenantId || !Array.isArray(batch.mutations)) {
       return NextResponse.json(
-        {
-          success: false,
-          error: { code: 'INVALID_SYNC_BATCH', message: 'Batch object with mutations array is required.' },
-        },
+        { success: false, error: { code: 'INVALID_SYNC_BATCH', message: 'A tenant-scoped batch with mutations is required.' } },
         { status: 400 }
       );
     }
 
-    const tenantIdHeader = req.headers.get('x-tenant-id') || batch.tenantId || 'tenant_default';
-    const actorIdHeader = req.headers.get('x-actor-id') || batch.actorId || 'usr_offline_sync';
+    const { context } = await deriveAuthoritativeContext(req, batch.tenantId);
 
-    const context: CommandContext = {
-      actorId: actorIdHeader,
-      tenantId: tenantIdHeader,
-      roles: ['CLINICIAN', 'DOCTOR', 'NURSE'],
-      permissions: ['ALL_CLINICAL'],
-      clinicalPrivileges: ['CONSULT', 'PRESCRIBE', 'ORDER_LAB', 'ORDER_RADIOLOGY'],
-      deviceId: batch.deviceId,
-      correlationId: `sync_corr_${Date.now()}`,
-      requestId: `req_${Date.now()}`,
+    const authoritativeBatch: OfflineSyncBatch = {
+      ...batch,
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      deviceId: context.deviceId || batch.deviceId,
     };
 
-    const syncResponse = await OfflineReconciliationDomainService.processSyncBatch(context, batch);
+    const syncResponse = await OfflineReconciliationDomainService.processSyncBatch(
+      context,
+      authoritativeBatch
+    );
+
     return NextResponse.json({ success: true, ...syncResponse }, { status: 200 });
-  } catch (err) {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Offline sync failed';
+    const unauthorized = /AUTH|TENANT|UNAUTH/i.test(message);
     return NextResponse.json(
-      {
-        success: false,
-        error: { code: 'SYNC_ERROR', message: err instanceof Error ? err.message : 'Internal sync error' },
-      },
-      { status: 500 }
+      { success: false, error: { code: unauthorized ? 'UNAUTHORIZED' : 'SYNC_ERROR', message } },
+      { status: unauthorized ? 403 : 500 }
     );
   }
 }

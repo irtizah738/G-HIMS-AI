@@ -1,0 +1,190 @@
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import {
+  assertFails,
+  assertSucceeds,
+  initializeTestEnvironment,
+  RulesTestEnvironment,
+} from '@firebase/rules-unit-testing';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
+let testEnv: RulesTestEnvironment;
+
+beforeAll(async () => {
+  const rules = await readFile(join(process.cwd(), 'firestore.rules'), 'utf8');
+
+  testEnv = await initializeTestEnvironment({
+    projectId: 'ghims-p0-ci',
+    firestore: {
+      host: '127.0.0.1',
+      port: 8080,
+      rules,
+    },
+  });
+
+  await testEnv.clearFirestore();
+
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+
+    await setDoc(doc(db, 'tenants', 'tenant-a'), {
+      name: 'Tenant A',
+    });
+    await setDoc(doc(db, 'tenants', 'tenant-b'), {
+      name: 'Tenant B',
+    });
+
+    await setDoc(doc(db, 'tenants', 'tenant-a', 'users', 'user-a'), {
+      userId: 'user-a',
+      tenantId: 'tenant-a',
+      status: 'ACTIVE',
+      role: 'doctor',
+    });
+    await setDoc(doc(db, 'tenants', 'tenant-a', 'users', 'user-other'), {
+      userId: 'user-other',
+      tenantId: 'tenant-a',
+      status: 'ACTIVE',
+      role: 'nurse',
+    });
+    await setDoc(doc(db, 'tenants', 'tenant-b', 'users', 'user-b'), {
+      userId: 'user-b',
+      tenantId: 'tenant-b',
+      status: 'ACTIVE',
+      role: 'doctor',
+    });
+
+    await setDoc(doc(db, 'tenants', 'tenant-a', 'patients', 'pat-a'), {
+      id: 'pat-a',
+      mrn: 'MRN-A',
+    });
+    await setDoc(doc(db, 'tenants', 'tenant-b', 'patients', 'pat-b'), {
+      id: 'pat-b',
+      mrn: 'MRN-B',
+    });
+
+    await setDoc(doc(db, 'patients', 'legacy-pat'), {
+      id: 'legacy-pat',
+      mrn: 'LEGACY',
+    });
+  });
+});
+
+afterAll(async () => {
+  await testEnv.cleanup();
+});
+
+describe('Firestore P0 tenant isolation and server-authoritative writes', () => {
+  test('anonymous user cannot read tenant patient PHI', async () => {
+    const db = testEnv.unauthenticatedContext().firestore();
+    await assertFails(getDoc(doc(db, 'tenants', 'tenant-a', 'patients', 'pat-a')));
+  });
+
+  test('tenant A authenticated user can read tenant A patient read model', async () => {
+    const db = testEnv.authenticatedContext('user-a', {
+      tenantId: 'tenant-a',
+      accessibleTenants: ['tenant-a'],
+      role: 'doctor',
+    }).firestore();
+
+    await assertSucceeds(getDoc(doc(db, 'tenants', 'tenant-a', 'patients', 'pat-a')));
+  });
+
+  test('tenant A authenticated user cannot read tenant B patient', async () => {
+    const db = testEnv.authenticatedContext('user-a', {
+      tenantId: 'tenant-a',
+      accessibleTenants: ['tenant-a'],
+      role: 'doctor',
+    }).firestore();
+
+    await assertFails(getDoc(doc(db, 'tenants', 'tenant-b', 'patients', 'pat-b')));
+  });
+
+  test('signed-in user cannot read legacy root patient collection', async () => {
+    const db = testEnv.authenticatedContext('user-a', {
+      tenantId: 'tenant-a',
+      accessibleTenants: ['tenant-a'],
+    }).firestore();
+
+    await assertFails(getDoc(doc(db, 'patients', 'legacy-pat')));
+  });
+
+  test('browser cannot directly mutate tenant patient state', async () => {
+    const db = testEnv.authenticatedContext('user-a', {
+      tenantId: 'tenant-a',
+      accessibleTenants: ['tenant-a'],
+      role: 'doctor',
+    }).firestore();
+
+    await assertFails(
+      setDoc(doc(db, 'tenants', 'tenant-a', 'patients', 'new-patient'), {
+        id: 'new-patient',
+      })
+    );
+  });
+
+  test('browser cannot create audit, event, outbox, idempotency or journal authority records', async () => {
+    const db = testEnv.authenticatedContext('user-a', {
+      tenantId: 'tenant-a',
+      accessibleTenants: ['tenant-a'],
+      role: 'doctor',
+    }).firestore();
+
+    const forbiddenWrites = [
+      ['audit_logs', 'audit-1'],
+      ['events', 'evt-1'],
+      ['outbox', 'out-1'],
+      ['idempotency', 'idem-1'],
+      ['journalEntries', 'je-1'],
+    ] as const;
+
+    for (const [collectionName, id] of forbiddenWrites) {
+      await assertFails(
+        setDoc(doc(db, 'tenants', 'tenant-a', collectionName, id), {
+          createdBy: 'user-a',
+        })
+      );
+    }
+  });
+
+  test('user can read own membership but not another user membership', async () => {
+    const db = testEnv.authenticatedContext('user-a', {
+      tenantId: 'tenant-a',
+      accessibleTenants: ['tenant-a'],
+    }).firestore();
+
+    await assertSucceeds(getDoc(doc(db, 'tenants', 'tenant-a', 'users', 'user-a')));
+    await assertFails(getDoc(doc(db, 'tenants', 'tenant-a', 'users', 'user-other')));
+  });
+
+  test('browser cannot create or update tenant membership', async () => {
+    const db = testEnv.authenticatedContext('user-a', {
+      tenantId: 'tenant-a',
+      accessibleTenants: ['tenant-a'],
+      role: 'administrator',
+    }).firestore();
+
+    await assertFails(
+      setDoc(doc(db, 'tenants', 'tenant-a', 'users', 'attacker'), {
+        userId: 'attacker',
+        tenantId: 'tenant-a',
+        role: 'administrator',
+        status: 'ACTIVE',
+      })
+    );
+  });
+
+  test('browser cannot access session state', async () => {
+    const db = testEnv.authenticatedContext('user-a', {
+      tenantId: 'tenant-a',
+      accessibleTenants: ['tenant-a'],
+    }).firestore();
+
+    await assertFails(getDoc(doc(db, 'tenants', 'tenant-a', 'sessions', 'sess-1')));
+    await assertFails(
+      setDoc(doc(db, 'tenants', 'tenant-a', 'sessions', 'sess-1'), {
+        userId: 'user-a',
+      })
+    );
+  });
+});

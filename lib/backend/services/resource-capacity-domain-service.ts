@@ -33,59 +33,58 @@ export class ResourceCapacityDomainService {
     tenantId: string,
     resourceId: string
   ): Promise<ResourceMaster | null> {
-    const cached = this.resources.get(resourceId);
-    if (cached) return cached;
-
-    const persisted = await DomainStateRepository.getById<ResourceMaster>(
-      tenantId,
-      'resources',
-      resourceId
-    );
-    if (persisted) this.resources.set(resourceId, persisted);
-    return persisted;
+    if (DomainStateRepository.isAvailable()) {
+      const persisted = await DomainStateRepository.getById<ResourceMaster>(
+        tenantId,
+        'resources',
+        resourceId
+      );
+      if (persisted) this.resources.set(resourceId, persisted);
+      else this.resources.delete(resourceId);
+      return persisted;
+    }
+    return this.resources.get(resourceId) || null;
   }
 
   private static async loadWorkOrder(
     tenantId: string,
     workOrderId: string
   ): Promise<MaintenanceWorkOrder | null> {
-    const cached = this.workOrders.get(workOrderId);
-    if (cached) return cached;
-
-    const persisted = await DomainStateRepository.getById<MaintenanceWorkOrder>(
-      tenantId,
-      'maintenanceWorkOrders',
-      workOrderId
-    );
-    if (persisted) this.workOrders.set(workOrderId, persisted);
-    return persisted;
+    if (DomainStateRepository.isAvailable()) {
+      const persisted = await DomainStateRepository.getById<MaintenanceWorkOrder>(
+        tenantId,
+        'maintenanceWorkOrders',
+        workOrderId
+      );
+      if (persisted) this.workOrders.set(workOrderId, persisted);
+      else this.workOrders.delete(workOrderId);
+      return persisted;
+    }
+    return this.workOrders.get(workOrderId) || null;
   }
 
   private static async loadReservationsForResource(
     tenantId: string,
     resourceId: string
   ): Promise<ResourceReservation[]> {
-    const byId = new Map<string, ResourceReservation>();
+    if (DomainStateRepository.isAvailable()) {
+      const persisted = await DomainStateRepository.queryEqual<ResourceReservation>(
+        tenantId,
+        'resourceReservations',
+        'resourceId',
+        resourceId
+      );
 
-    for (const reservation of this.reservations.values()) {
-      if (reservation.resourceId === resourceId) {
-        byId.set(reservation.reservationId, reservation);
+      for (const reservation of persisted) {
+        this.reservations.set(reservation.reservationId, reservation);
       }
+
+      return persisted;
     }
 
-    const persisted = await DomainStateRepository.queryEqual<ResourceReservation>(
-      tenantId,
-      'resourceReservations',
-      'resourceId',
-      resourceId
+    return Array.from(this.reservations.values()).filter(
+      (reservation) => reservation.resourceId === resourceId
     );
-
-    for (const reservation of persisted) {
-      this.reservations.set(reservation.reservationId, reservation);
-      byId.set(reservation.reservationId, reservation);
-    }
-
-    return Array.from(byId.values());
   }
 
   // ============================================================================

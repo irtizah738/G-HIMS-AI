@@ -7,8 +7,11 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const tenantId = String(body.tenantId || '').trim().toLowerCase();
 
-    if (!tenantId) {
-      return NextResponse.json({ success: false, error: 'tenantId is required.' }, { status: 400 });
+    if (!tenantId || !body.dateOfBirth && !body.dob || !body.contactPhone && !body.phone || !body.address) {
+      return NextResponse.json(
+        { success: false, error: 'tenantId, dateOfBirth, contactPhone and address are required.' },
+        { status: 400 }
+      );
     }
 
     const { context } = await deriveAuthoritativeContext(req, tenantId);
@@ -46,10 +49,10 @@ export async function POST(req: NextRequest) {
       patientId: body.patientId,
       fullName,
       gender,
-      dateOfBirth: body.dateOfBirth || body.dob,
+      dateOfBirth: String(body.dateOfBirth || body.dob),
       identifiers,
-      contactPhone: body.contactPhone || body.phone,
-      address: body.address,
+      contactPhone: String(body.contactPhone || body.phone),
+      address: String(body.address),
       encounterType: body.encounterType || 'OPD',
       department: body.department || 'General Medicine',
       priority: body.priority || 'ROUTINE',

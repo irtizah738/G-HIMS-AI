@@ -94,6 +94,11 @@ service cloud.firestore {
         }
       }
 
+      match /beds/{bedId} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
+      }
+
       match /mpi_registry/{mpiKey} {
         allow read: if tenantClaimMatches(tenantId);
         allow write: if false;

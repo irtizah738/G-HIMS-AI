@@ -1,8 +1,6 @@
 /**
  * G-HIMS Durable Idempotency Service
- *
- * Production authority is Firestore. DEMO/TEST may use the in-process fallback so
- * pure domain tests do not require cloud credentials.
+ * Production authority is Firestore. DEMO/TEST may use an in-process fallback.
  */
 
 import crypto from 'node:crypto';
@@ -27,22 +25,16 @@ export class IdempotencyService {
   }
 
   private static canonicalStringify(value: unknown): string {
-    if (value === null || typeof value !== 'object') {
-      return JSON.stringify(value);
-    }
+    if (value === null || typeof value !== 'object') return JSON.stringify(value);
     if (Array.isArray(value)) {
       return '[' + value.map((item) => this.canonicalStringify(item)).join(',') + ']';
     }
 
     const object = value as Record<string, unknown>;
-    return (
-      '{' +
-      Object.keys(object)
-        .sort()
-        .map((key) => JSON.stringify(key) + ':' + this.canonicalStringify(object[key]))
-        .join(',') +
-      '}'
-    );
+    return '{' + Object.keys(object)
+      .sort()
+      .map((key) => JSON.stringify(key) + ':' + this.canonicalStringify(object[key]))
+      .join(',') + '}';
   }
 
   public static computeHash(commandType: string, payload: unknown): string {
@@ -58,14 +50,6 @@ export class IdempotencyService {
     return `${tenantId}:${idempotencyKey}`;
   }
 
-  /**
-   * Atomically reserves an idempotency key before command execution.
-   *
-   * - NEW: caller owns the reservation and may execute.
-   * - CACHED: identical command already completed.
-   * - IN_PROGRESS: identical command is already executing or requires recovery.
-   * - CONFLICT: same key was reused with different command content.
-   */
   public static async acquireExecution(
     tenantId: string,
     idempotencyKey: string,
@@ -105,39 +89,33 @@ export class IdempotencyService {
       return { status: 'IN_PROGRESS', record: existing };
     }
 
-    const ref = db
-      .collection('tenants')
-      .doc(tenantId)
-      .collection('idempotency')
-      .doc(this.getDocumentId(idempotencyKey));
+    const ref = db.collection('tenants').doc(tenantId)
+      .collection('idempotency').doc(this.getDocumentId(idempotencyKey));
 
     return db.runTransaction(async (transaction) => {
       const snapshot = await transaction.get(ref);
-
       if (!snapshot.exists) {
-        const record: IdempotencyRecord & { commandId: string } = {
+        const record = {
           tenantId,
           idempotencyKey,
           commandType,
           requestHash,
-          status: 'PENDING',
-          createdAt: Date.now(),
+          status: 'PENDING' as const,
           commandId,
+          createdAt: Date.now(),
         };
         transaction.create(ref, sanitizeForFirestore(record));
-        return { status: 'NEW', record } as IdempotencyAcquireResult;
+        return { status: 'NEW' as const, record };
       }
 
       const existing = snapshot.data() as IdempotencyRecord;
       if (existing.requestHash !== requestHash || existing.commandType !== commandType) {
-        return { status: 'CONFLICT', record: existing };
+        return { status: 'CONFLICT' as const, record: existing };
       }
-
       if (existing.status === 'COMPLETED' && existing.result) {
-        return { status: 'CACHED', record: existing };
+        return { status: 'CACHED' as const, record: existing };
       }
-
-      return { status: 'IN_PROGRESS', record: existing };
+      return { status: 'IN_PROGRESS' as const, record: existing };
     });
   }
 
@@ -159,56 +137,27 @@ export class IdempotencyService {
       return;
     }
 
-    const ref = db
-      .collection('tenants')
-      .doc(tenantId)
-      .collection('idempotency')
-      .doc(this.getDocumentId(idempotencyKey));
+    const ref = db.collection('tenants').doc(tenantId)
+      .collection('idempotency').doc(this.getDocumentId(idempotencyKey));
 
     await db.runTransaction(async (transaction) => {
       const snapshot = await transaction.get(ref);
-      if (!snapshot.exists) {
-        throw new Error('IDEMPOTENCY_RESERVATION_MISSING');
-      }
+      if (!snapshot.exists) throw new Error('IDEMPOTENCY_RESERVATION_MISSING');
 
       const existing = snapshot.data() as IdempotencyRecord;
       if (existing.requestHash !== requestHash || existing.commandType !== commandType) {
         throw new Error('IDEMPOTENCY_KEY_CONFLICT');
       }
 
-      transaction.set(
-        ref,
-        sanitizeForFirestore({
-          ...existing,
-          status: result.success ? 'COMPLETED' : 'FAILED',
-          result,
-          completedAt: Date.now(),
-        }),
-        { merge: true }
-      );
+      transaction.set(ref, sanitizeForFirestore({
+        ...existing,
+        status: result.success ? 'COMPLETED' : 'FAILED',
+        result,
+        completedAt: Date.now(),
+      }), { merge: true });
     });
   }
 
-  public static async failExecution(
-    tenantId: string,
-    idempotencyKey: string,
-    commandType: string,
-    payload: unknown,
-    error: string
-  ): Promise<void> {
-    const result: CommandResult = {
-      success: false,
-      commandId: '',
-      idempotencyKey,
-      error: { code: 'COMMAND_EXECUTION_FAILURE', message: error },
-    };
-    await this.completeExecution(tenantId, idempotencyKey, commandType, payload, result);
-  }
-
-  /**
-   * Legacy synchronous helpers retained for internal domain-unit compatibility.
-   * Production command ingress uses acquireExecution()/completeExecution().
-   */
   public static checkIdempotency(
     tenantId: string,
     idempotencyKey: string,
@@ -224,6 +173,7 @@ export class IdempotencyService {
         ? { status: 'CACHED', record: existing }
         : { status: 'NEW', record: existing };
     }
+
     return { status: 'CONFLICT', record: existing };
   }
 
@@ -234,7 +184,7 @@ export class IdempotencyService {
     payload: unknown,
     result: CommandResult
   ): void {
-    const record: IdempotencyRecord = {
+    this.localMemoryCache.set(this.memoryKey(tenantId, idempotencyKey), {
       tenantId,
       idempotencyKey,
       commandType,
@@ -243,7 +193,6 @@ export class IdempotencyService {
       result,
       createdAt: Date.now(),
       completedAt: Date.now(),
-    };
-    this.localMemoryCache.set(this.memoryKey(tenantId, idempotencyKey), record);
+    });
   }
 }

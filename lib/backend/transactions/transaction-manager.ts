@@ -88,6 +88,7 @@ function collectionForEntityType(entityType: string): string {
     ENCOUNTER: 'encounters',
     ENCOUNTER_STAGE: 'encounterStages',
     ENCOUNTER_EVIDENCE: 'encounterEvidence',
+    OPD_QUEUE_TOKEN: 'opd_queue',
     DIAGNOSTIC_ORDER: 'orders',
     PRESCRIPTION: 'prescriptions',
     JOURNAL_ENTRY: 'journalEntries',

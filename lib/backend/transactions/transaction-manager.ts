@@ -76,6 +76,13 @@ function canUseEphemeralPersistence(): boolean {
   return mode === 'DEMO' || mode === 'TEST';
 }
 
+function toDocumentData(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`INVALID_DOMAIN_STATE: ${label} must be a Firestore document object.`);
+  }
+  return sanitizeForFirestore(value as Record<string, unknown>);
+}
+
 function collectionForEntityType(entityType: string): string {
   const map: Record<string, string> = {
     ENCOUNTER: 'encounters',
@@ -219,12 +226,12 @@ export class TransactionManager {
       const idempotencySnapshot = await transaction.get(idempotencyRef);
       if (params.domainState !== undefined) {
         const stateRef = tenantRef.collection(collectionForEntityType(params.aggregateType)).doc(params.aggregateId);
-        transaction.set(stateRef, sanitizeForFirestore(params.domainState), { merge: true });
+        transaction.set(stateRef, toDocumentData(params.domainState, params.aggregateType), { merge: true });
       }
 
       for (const write of params.additionalStateWrites || []) {
         const stateRef = tenantRef.collection(collectionForEntityType(write.entityType)).doc(write.entityId);
-        transaction.set(stateRef, sanitizeForFirestore(write.domainState), { merge: true });
+        transaction.set(stateRef, toDocumentData(write.domainState, write.entityType), { merge: true });
       }
 
       transaction.create(eventRef, sanitizeForFirestore(event));
@@ -299,7 +306,7 @@ export class TransactionManager {
     await db.runTransaction(async (transaction) => {
       const idempotencySnapshot = await transaction.get(idempotencyRef);
 
-      transaction.set(stateRef, sanitizeForFirestore(payload.domainState), { merge: true });
+      transaction.set(stateRef, toDocumentData(payload.domainState, payload.entityType), { merge: true });
       transaction.create(eventRef, sanitizeForFirestore(event));
       transaction.create(auditRef, sanitizeForFirestore(audit));
       transaction.create(outboxRef, sanitizeForFirestore(outbox));

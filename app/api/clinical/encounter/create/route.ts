@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { registerPatientAndEncounter, RegisterPatientEncounterParams } from '@/server/runtime/registration-orchestrator';
 import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
+import { AuthorizationPipeline } from '@/lib/backend/auth/authorization-pipeline';
 
 export async function POST(req: NextRequest) {
   try {
@@ -15,6 +16,19 @@ export async function POST(req: NextRequest) {
     }
 
     const { context } = await deriveAuthoritativeContext(req, tenantId);
+    const registrationAuth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: ['RECEPTIONIST', 'REGISTRAR', 'SYSTEM_ADMIN', 'ADMINISTRATOR'],
+    });
+    if (!registrationAuth.authorized) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: registrationAuth.reason || 'Front-desk registration authority required.',
+          code: registrationAuth.code || 'INSUFFICIENT_ROLE',
+        },
+        { status: 403 }
+      );
+    }
 
     const fullName =
       body.fullName ||

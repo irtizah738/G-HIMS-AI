@@ -1,5 +1,3 @@
-import 'server-only';
-
 import { getAdminFirestore } from '@/server/firebase/admin';
 
 export class DomainStateRepository {

@@ -81,3 +81,59 @@ export async function executeActiveTenantCommand<TData = unknown>(
     schemaVersion: options?.schemaVersion,
   });
 }
+
+
+export interface RegistrationRequest {
+  fullName: string;
+  dateOfBirth: string;
+  gender: string;
+  contactPhone: string;
+  address: string;
+  bloodGroup?: string;
+  identifiers?: Array<{ type: string; value: string; issuer?: string }>;
+  allergies?: string[];
+  chronicConditions?: string[];
+  encounterType?: string;
+  department?: string;
+  priority?: string;
+  chiefComplaint?: string;
+  assignedDoctor?: string;
+  commandId?: string;
+  idempotencyKey?: string;
+}
+
+export async function registerActiveTenantPatient<TData = unknown>(
+  request: RegistrationRequest
+): Promise<TData> {
+  const currentUser = auth.currentUser;
+  const cached = await getCachedAuthSession();
+
+  if (!currentUser || !cached) {
+    throw new Error('AUTHENTICATION_REQUIRED: active G-HIMS session is required.');
+  }
+
+  const idToken = await currentUser.getIdToken(false);
+  const response = await fetch('/api/clinical/encounter/create', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${idToken}`,
+      'x-ghims-tenant-id': cached.user.tenantId,
+      'x-ghims-session-id': cached.session.sessionId,
+      ...(cached.session.deviceId ? { 'x-ghims-device-id': cached.session.deviceId } : {}),
+    },
+    body: JSON.stringify({
+      ...request,
+      tenantId: cached.user.tenantId,
+      commandId: request.commandId || `cmd_${crypto.randomUUID()}`,
+      idempotencyKey: request.idempotencyKey || `idem_${crypto.randomUUID()}`,
+    }),
+  });
+
+  const payload = await response.json();
+  if (!response.ok || !payload.success) {
+    throw new Error(payload.error || 'Patient registration failed.');
+  }
+
+  return payload.data as TData;
+}

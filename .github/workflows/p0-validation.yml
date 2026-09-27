@@ -34,6 +34,9 @@ jobs:
       - name: Run P0 trust-boundary regression suite
         run: bun run test:p0
 
+      - name: Production build and TypeScript validation
+        run: bun run build
+
       - name: Setup Java for Firestore Emulator
         uses: actions/setup-java@v5
         with:
@@ -45,6 +48,3 @@ jobs:
 
       - name: Run Firestore Emulator penetration suite
         run: npx firebase emulators:exec --project ghims-p0-ci --only firestore "bun test security-tests/firestore-rules.test.ts"
-
-      - name: Production build and TypeScript validation
-        run: bun run build

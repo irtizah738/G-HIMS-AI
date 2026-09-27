@@ -191,12 +191,15 @@ export class CommandBus {
 
         // --- Patient Identity & Safety Domain ---
         case 'RegisterPatientCommand':
-          result = await PatientIdentityDomainService.registerPatient(
-            context,
-            command.commandId,
-            command.idempotencyKey,
-            command.payload as any
-          );
+          result = {
+            success: false,
+            commandId: command.commandId,
+            idempotencyKey: command.idempotencyKey,
+            error: {
+              code: 'REGISTRATION_ORCHESTRATOR_REQUIRED',
+              message: 'Patient registration must use the atomic patient+encounter registration endpoint.',
+            },
+          };
           break;
 
         case 'MergePatientCommand':

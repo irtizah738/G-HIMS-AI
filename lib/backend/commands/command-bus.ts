@@ -412,14 +412,26 @@ export class CommandBus {
           };
       }
 
-      // Finalize the durable idempotency record with the exact command result.
-      await IdempotencyService.completeExecution(
-        context.tenantId,
-        command.idempotencyKey,
-        command.commandType,
-        command.payload,
-        result
-      );
+      // Enrich the durable idempotency record with the exact command result.
+      // Successful domain services have already atomically committed state + event +
+      // audit + outbox + a replay-safe idempotency result. If this enrichment write
+      // fails after that commit, the command itself must still be reported as committed.
+      try {
+        await IdempotencyService.completeExecution(
+          context.tenantId,
+          command.idempotencyKey,
+          command.commandType,
+          command.payload,
+          result
+        );
+      } catch (finalizationError) {
+        console.error('IDEMPOTENCY_RESULT_ENRICHMENT_FAILED', {
+          tenantId: context.tenantId,
+          commandId: command.commandId,
+          idempotencyKey: command.idempotencyKey,
+          error: finalizationError instanceof Error ? finalizationError.message : String(finalizationError),
+        });
+      }
 
       return result;
     } catch (err) {

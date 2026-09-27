@@ -6,7 +6,6 @@
 import { CommandContext, CommandResult } from '../types';
 import { AuthorizationPipeline } from '../auth/authorization-pipeline';
 import { TransactionManager } from '../transactions/transaction-manager';
-import { IdempotencyService } from '../idempotency/idempotency-service';
 
 export interface PlaceOrderPayload {
   encounterId: string;

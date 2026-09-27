@@ -43,7 +43,7 @@ import {
   syncTelehealthSessionToFirestore,
 } from '@/lib/firebase/firestore-service';
 import { DischargedCensusRecord, initialDischargedCensus } from '@/lib/clinical/ipd-service';
-import { executeActiveTenantCommand } from '@/lib/api/command-client';
+import { executeActiveTenantCommand, registerActiveTenantPatient } from '@/lib/api/command-client';
 
 const initialTelehealthSessions: TelehealthSession[] = [
   {
@@ -998,7 +998,7 @@ interface HospitalContextType {
     disposition?: string,
     censusRecord?: DischargedCensusRecord
   ) => void;
-  registerNewPatient: (patientData: Omit<Patient, 'id' | 'mrn' | 'registeredAt' | 'encounters'>) => Patient;
+  registerNewPatient: (patientData: Omit<Patient, 'id' | 'mrn' | 'registeredAt' | 'encounters'>) => Promise<Patient>;
   mergePatients: (primaryId: string, secondaryId: string, mergeReason: string) => Promise<Patient>;
   addClinicalNote: (patientId: string, note: Omit<ClinicalNote, 'id' | 'timestamp'>) => void;
   addLabOrder: (patientId: string, order: Omit<LabOrder, 'id' | 'orderedAt'>) => void;
@@ -1342,37 +1342,78 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     addAuditLog('DISCHARGE_BED', `Bed ${bedId}`, `Patient discharged from bed. Invariant verified: archived to census.`);
   };
 
-  const registerNewPatient = (patientData: Omit<Patient, 'id' | 'mrn' | 'registeredAt' | 'encounters'>): Patient => {
-    const newId = `p-${Date.now().toString().slice(-4)}`;
-    const newMrn = `GH-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+  const registerNewPatient = async (
+    patientData: Omit<Patient, 'id' | 'mrn' | 'registeredAt' | 'encounters'>
+  ): Promise<Patient> => {
+    const registration = await registerActiveTenantPatient<{
+      patient: {
+        id: string;
+        mrn: string;
+        fullName: string;
+        dateOfBirth: string;
+      };
+      encounter: {
+        id: string;
+        department: string;
+        chiefComplaint: string;
+      };
+    }>({
+      fullName: patientData.fullName,
+      dateOfBirth: patientData.dateOfBirth,
+      gender: patientData.gender,
+      contactPhone: patientData.contactNumber,
+      address: patientData.address,
+      bloodGroup: patientData.bloodGroup,
+      identifiers: patientData.contactNumber
+        ? [{ type: 'PHONE', value: patientData.contactNumber, issuer: 'Patient Registration' }]
+        : [],
+      allergies: patientData.allergies,
+      chronicConditions: patientData.chronicConditions,
+      encounterType: 'OPD',
+      department: 'General OPD',
+      priority: 'ROUTINE',
+      chiefComplaint: 'Initial clinic intake and consultation',
+    });
+
     const newPatient: Patient = {
       ...patientData,
-      id: newId,
-      mrn: newMrn,
+      id: registration.patient.id,
+      mrn: registration.patient.mrn,
+      activeEncounterId: registration.encounter.id,
       registeredAt: new Date().toISOString().split('T')[0],
       encounters: [
         {
-          id: `enc-${Date.now().toString().slice(-3)}`,
+          id: registration.encounter.id,
           type: 'Outpatient',
-          department: 'General OPD',
+          department: registration.encounter.department || 'General OPD',
           admitDate: new Date().toISOString().split('T')[0],
-          chiefComplaint: 'Initial clinic intake and consultation',
-          attendingPhysician: 'Dr. Sarah Jenkins',
+          chiefComplaint: registration.encounter.chiefComplaint || 'Initial clinic intake and consultation',
+          attendingPhysician: '',
           status: 'active',
-          vitalsHistory: [
-            { heartRate: 78, bloodPressure: '120/80', temperature: 37.0, respiratoryRate: 16, oxygenSaturation: 98, timestamp: new Date().toLocaleTimeString() }
-          ],
+          vitalsHistory: [],
           clinicalNotes: [],
           medications: [],
           labOrders: [],
-          billing: { items: [{ id: `bi-${Date.now()}`, description: 'Outpatient Triage & Registration', code: 'REG-OPD', category: 'Consultation', quantity: 1, unitPrice: 75, totalPrice: 75, auditedStatus: 'verified' }], subtotal: 75, tax: 3.75, insuranceCoverage: 60, patientPayable: 18.75, paymentStatus: 'settled' }
-        }
+          billing: {
+            items: [],
+            subtotal: 0,
+            tax: 0,
+            insuranceCoverage: 0,
+            patientPayable: 0,
+            paymentStatus: 'pending',
+          },
+        },
       ],
     };
-    setPatients(prev => [newPatient, ...prev]);
-    syncPatientToFirestore(newPatient).catch(() => {});
-    recordMutation('INSERT_NOTE', `Patient:${newId}`, newPatient);
-    addAuditLog('REGISTER_PATIENT', `Patient ${newMrn}`, `Registered patient ${newPatient.fullName}`);
+
+    setPatients((previous) => [newPatient, ...previous.filter((item) => item.id !== newPatient.id)]);
+    setSelectedPatientId(newPatient.id);
+    recordMutation('REGISTER_PATIENT', `Patient:${newPatient.id}`, {
+      patientId: newPatient.id,
+      mrn: newPatient.mrn,
+      encounterId: registration.encounter.id,
+    });
+
     return newPatient;
   };
 

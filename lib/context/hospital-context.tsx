@@ -1354,72 +1354,61 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     return newPatient;
   };
 
-  const mergePatients = async (primaryId: string, secondaryId: string, mergeReason: string): Promise<Patient> => {
-    const primary = patients.find(p => p.id === primaryId);
-    const secondary = patients.find(p => p.id === secondaryId);
+  const mergePatients = async (
+    primaryId: string,
+    secondaryId: string,
+    mergeReason: string
+  ): Promise<Patient> => {
+    const primary = patients.find((patient) => patient.id === primaryId);
+    const secondary = patients.find((patient) => patient.id === secondaryId);
+
     if (!primary || !secondary) {
       throw new Error('Primary or secondary patient record not found.');
     }
     if (primary.id === secondary.id) {
       throw new Error('Cannot merge a patient record into itself.');
     }
-
-    const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
-    const combinedAllergies = Array.from(new Set([...(primary.allergies || []), ...(secondary.allergies || [])]));
-    const combinedConditions = Array.from(new Set([...(primary.chronicConditions || []), ...(secondary.chronicConditions || [])]));
-    const combinedEncounters = [...(primary.encounters || []), ...(secondary.encounters || [])];
-
-    // Audit clinical note on surviving primary record
-    const auditNote: ClinicalNote = {
-      id: `note-merge-${Date.now()}`,
-      timestamp,
-      author: 'Clinical Governance Supervisor',
-      role: 'MPI Identity Consolidation',
-      category: 'Progress',
-      content: `[MPI IDENTITY MERGE]: Secondary duplicate patient record "${secondary.fullName}" (MRN: ${secondary.mrn}) was consolidated into this primary surviving record (MRN: ${primary.mrn}).\nReason: ${mergeReason}\nAll historical clinical notes, allergies, conditions, and encounters have been permanently re-indexed to this surviving identifier.`,
-      aiStructuredData: {
-        chiefComplaint: 'MPI Record Consolidation',
-        diagnoses: ['Administrative Patient Merge'],
-        medicationsPrescribed: [],
-        recommendedProcedures: ['Longitudinal Chart Re-Indexing'],
-        followUpDays: 0,
-        billingCodes: [],
-      },
-    };
-
-    if (combinedEncounters.length > 0) {
-      combinedEncounters[0] = {
-        ...combinedEncounters[0],
-        clinicalNotes: [auditNote, ...combinedEncounters[0].clinicalNotes],
-      };
+    if (!mergeReason.trim()) {
+      throw new Error('A governed patient-merge reason is required.');
     }
 
+    const result = await executeActiveTenantCommand<{
+      primaryPatientId: string;
+      secondaryPatientId: string;
+      status: 'MERGED';
+      allergies: string[];
+      chronicConditions: string[];
+    }>('MergePatientCommand', {
+      primaryPatientId: primaryId,
+      secondaryPatientId: secondaryId,
+      mergeReason: mergeReason.trim(),
+    });
+
+    if (!result.success || !result.data) {
+      throw new Error(result.error?.message || 'Authoritative patient merge failed.');
+    }
+
+    // P1 keeps the legacy UI projection synchronized only with state that the
+    // authoritative merge command actually committed. Dependent encounter/queue/
+    // bed re-indexing is not fabricated client-side.
     const consolidatedPrimary: Patient = {
       ...primary,
-      allergies: combinedAllergies,
-      chronicConditions: combinedConditions,
-      encounters: combinedEncounters,
-      activeBedId: primary.activeBedId || secondary.activeBedId,
+      allergies: result.data.allergies || primary.allergies,
+      chronicConditions: result.data.chronicConditions || primary.chronicConditions,
     };
 
-    // Filter out secondary patient and update primary patient
-    setPatients(prev => prev.filter(p => p.id !== secondaryId).map(p => p.id === primaryId ? consolidatedPrimary : p));
-
-    // Update beds pointing to secondary
-    setBeds(prev => prev.map(b => b.patientId === secondaryId ? { ...b, patientId: primaryId, patientName: primary.fullName } : b));
-
-    // Update OPD queue pointing to secondary
-    setOpdQueue(prev => prev.map(q => q.patientId === secondaryId ? { ...q, patientId: primaryId, patientName: primary.fullName, mrn: primary.mrn } : q));
-
-    // Update billing mismatches pointing to secondary
-    setMismatches(prev => prev.map(m => m.patientId === secondaryId ? { ...m, patientId: primaryId, patientName: primary.fullName } : m));
-
+    setPatients((previous) =>
+      previous
+        .filter((patient) => patient.id !== secondaryId)
+        .map((patient) => patient.id === primaryId ? consolidatedPrimary : patient)
+    );
     setSelectedPatientId(primaryId);
 
-    // Sync to Firestore & record audit log
-    syncPatientToFirestore(consolidatedPrimary).catch(() => {});
-    addAuditLog('MPI_PATIENT_MERGE', `Primary ${primary.mrn} <= Secondary ${secondary.mrn}`, `Consolidated duplicate identity: ${mergeReason}`);
-    recordMutation('INSERT_NOTE', `Patient:${primaryId}`, consolidatedPrimary);
+    addAuditLog(
+      'MPI_PATIENT_MERGE',
+      `Primary ${primary.mrn} <= Secondary ${secondary.mrn}`,
+      `Authoritative merge committed. Secondary identity is marked MERGED into the primary record. Reason: ${mergeReason.trim()}`
+    );
 
     return consolidatedPrimary;
   };

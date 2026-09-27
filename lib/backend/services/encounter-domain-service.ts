@@ -6,7 +6,6 @@
 import { CommandContext, CommandResult } from '../types';
 import { AuthorizationPipeline } from '../auth/authorization-pipeline';
 import { TransactionManager } from '../transactions/transaction-manager';
-import { IdempotencyService } from '../idempotency/idempotency-service';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 
 export interface CreateEncounterPayload {
@@ -83,25 +82,6 @@ export class EncounterDomainService {
     idempotencyKey: string,
     payload: CreateEncounterPayload
   ): Promise<CommandResult> {
-    // 1. Check Idempotency
-    const idemCheck = IdempotencyService.checkIdempotency(
-      context.tenantId,
-      idempotencyKey,
-      'CreateEncounterCommand',
-      payload
-    );
-    if (idemCheck.status === 'CACHED' && idemCheck.record?.result) {
-      return { ...idemCheck.record.result, replayedFromCache: true };
-    }
-    if (idemCheck.status === 'CONFLICT') {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: 'IDEMPOTENCY_CONFLICT', message: 'Reused idempotency key with conflicting payload.' },
-      };
-    }
-
     // 2. Authorization
     const auth = AuthorizationPipeline.evaluate(context, {
       requiredRoles: ['NURSE', 'DOCTOR', 'RECEPTIONIST', 'REGISTRAR', 'SYSTEM_ADMIN'],
@@ -160,8 +140,6 @@ export class EncounterDomainService {
       outboxId: tx.outbox.outboxId,
       data: domainState,
     };
-
-    IdempotencyService.recordExecution(context.tenantId, idempotencyKey, 'CreateEncounterCommand', payload, result);
     return result;
   }
 

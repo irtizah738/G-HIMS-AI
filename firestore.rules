@@ -1,390 +1,258 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Global Safety Net: Default-deny all unlisted paths
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function tenantClaimMatches(tenantId) {
+      return signedIn() && (
+        request.auth.token.tenantId == tenantId ||
+        (
+          request.auth.token.accessibleTenants is list &&
+          tenantId in request.auth.token.accessibleTenants
+        )
+      );
+    }
+
+    function self(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    // Default deny. Firebase Admin/server SDK bypasses these rules and is the
+    // authoritative mutation path.
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Helper functions for Authentication & RBAC
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
-    function isSuperAdmin() {
-      return isSignedIn() && (
-        request.auth.token.role == 'SuperAdmin' || 
-        request.auth.token.admin == true
-      );
-    }
-
-    function hasRole(role) {
-      return isSignedIn() && (
-        request.auth.token.role == role || 
-        isSuperAdmin()
-      );
-    }
-
-    function belongsToTenant(tenantId) {
-      return isSignedIn() && (
-        request.auth.token.tenantId == tenantId ||
-        (request.auth.token.accessibleTenants != null && tenantId in request.auth.token.accessibleTenants) ||
-        isSuperAdmin()
-      );
-    }
-
-    function isValidId(id) {
-      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
-    function incoming() {
-      return request.resource.data;
-    }
-
-    function existing() {
-      return resource.data;
-    }
-
-    // Verification Test Connection
-    match /test/{testId} {
-      allow read, write: if true;
-    }
-
-    // User Authentication Profiles & Multi-Role Directory
+    // Minimal authenticated profile read. Authorization data itself is server managed.
     match /user_profiles/{userId} {
-      allow get, list: if isSignedIn() || true;
-      allow create, update: if (isSignedIn() && (request.auth.uid == userId || isSuperAdmin())) || true;
-      allow delete: if isSignedIn() && (request.auth.uid == userId || isSuperAdmin());
+      allow get: if self(userId);
+      allow list: if false;
+      allow create, update, delete: if false;
     }
 
-    // Master Patient Index (MPI / EHR)
-    function isValidPatient(data) {
-      return (!('id' in data) || (data.id is string && data.id.size() <= 128))
-        && (!('mrn' in data) || (data.mrn is string && data.mrn.size() <= 128))
-        && (!('fullName' in data) || (data.fullName is string && data.fullName.size() <= 256))
-        && (!('age' in data) || data.age is number)
-        && (!('gender' in data) || (data.gender is string && data.gender.size() <= 32))
-        && (!('registeredAt' in data) || (data.registeredAt is string && data.registeredAt.size() <= 128));
+    // Legacy root collections remain read-only while the UI is migrated to
+    // tenant-scoped projections. No browser may mutate hospital state here.
+    match /patients/{id} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+    match /beds/{id} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+    match /billingMismatches/{id} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+    match /opdQueue/{id} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+    match /staff/{id} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+    match /telehealth_sessions/{id} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+    match /telehealthAppointments/{id} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+    match /auditLogs/{id} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+    match /hl7Messages/{id} {
+      allow read: if signedIn();
+      allow write: if false;
     }
 
-    match /patients/{patientId} {
-      allow get, list: if isSignedIn() || true;
-      allow create: if (isSignedIn() || true) && isValidId(patientId) && isValidPatient(incoming());
-      allow update: if (isSignedIn() || true) && isValidId(patientId) && isValidPatient(incoming());
-      allow delete: if isSignedIn();
-    }
-
-    // Bed Census & Inpatient Ward
-    function isValidBed(data) {
-      return (!('id' in data) || (data.id is string && data.id.size() <= 128))
-        && (!('bedNumber' in data) || (data.bedNumber is string && data.bedNumber.size() <= 64))
-        && (!('ward' in data) || (data.ward is string && data.ward.size() <= 128))
-        && (!('status' in data) || (data.status is string && data.status.size() <= 64));
-    }
-
-    match /beds/{bedId} {
-      allow get, list: if isSignedIn() || true;
-      allow create, update: if (isSignedIn() || true) && isValidId(bedId) && isValidBed(incoming());
-      allow delete: if isSignedIn();
-    }
-
-    // Revenue Leakage & Billing Audit Mismatches
-    function isValidBillingMismatch(data) {
-      return (!('id' in data) || (data.id is string && data.id.size() <= 128))
-        && (!('patientId' in data) || (data.patientId is string && data.patientId.size() <= 128))
-        && (!('documentedItem' in data) || (data.documentedItem is string && data.documentedItem.size() <= 512))
-        && (!('suggestedCptCode' in data) || (data.suggestedCptCode is string && data.suggestedCptCode.size() <= 128))
-        && (!('estimatedRecoverableRevenue' in data) || data.estimatedRecoverableRevenue is number)
-        && (!('status' in data) || (data.status is string && data.status.size() <= 64));
-    }
-
-    match /billingMismatches/{mismatchId} {
-      allow get, list: if isSignedIn() || true;
-      allow create, update: if (isSignedIn() || true) && isValidId(mismatchId) && isValidBillingMismatch(incoming());
-      allow delete: if isSignedIn();
-    }
-
-    // OPD Queue Tokens
-    function isValidOpdToken(data) {
-      return (!('id' in data) || (data.id is string && data.id.size() <= 128))
-        && (!('tokenNumber' in data) || (data.tokenNumber is string && data.tokenNumber.size() <= 64))
-        && (!('patientId' in data) || (data.patientId is string && data.patientId.size() <= 128))
-        && (!('department' in data) || (data.department is string && data.department.size() <= 128))
-        && (!('status' in data) || (data.status is string && data.status.size() <= 64));
-    }
-
-    match /opdQueue/{tokenId} {
-      allow get, list: if isSignedIn() || true;
-      allow create, update: if (isSignedIn() || true) && isValidId(tokenId) && isValidOpdToken(incoming());
-      allow delete: if isSignedIn();
-    }
-
-    // Clinical Staff & Rosters
-    function isValidStaff(data) {
-      return (!('id' in data) || (data.id is string && data.id.size() <= 128))
-        && (!('fullName' in data) || (data.fullName is string && data.fullName.size() <= 256))
-        && (!('role' in data) || (data.role is string && data.role.size() <= 128))
-        && (!('department' in data) || (data.department is string && data.department.size() <= 128))
-        && (!('status' in data) || (data.status is string && data.status.size() <= 64));
-    }
-
-    match /staff/{staffId} {
-      allow get, list: if isSignedIn() || true;
-      allow create, update: if (isSignedIn() || true) && isValidId(staffId) && isValidStaff(incoming());
-      allow delete: if isSignedIn();
-    }
-
-    // Immutable HIPAA Audit Logs (Write once, never update or delete)
-    function isValidAuditLog(data) {
-      return (!('id' in data) || (data.id is string && data.id.size() <= 128))
-        && (!('timestamp' in data) || (data.timestamp is string && data.timestamp.size() <= 128))
-        && (!('userId' in data) || (data.userId is string && data.userId.size() <= 128))
-        && (!('action' in data) || (data.action is string && data.action.size() <= 128))
-        && (!('resource' in data) || (data.resource is string && data.resource.size() <= 512))
-        && (!('status' in data) || (data.status is string && data.status.size() <= 64));
-    }
-
-    match /auditLogs/{logId} {
-      allow get, list: if isSignedIn() || true;
-      allow create: if (isSignedIn() || true) && isValidId(logId) && isValidAuditLog(incoming());
-      // Immutable log: No updates or deletions allowed to ensure HIPAA compliance
-      allow update, delete: if false;
-    }
-
-    // HL7 v2 / FHIR Message Telemetry
-    function isValidHl7(data) {
-      return (!('id' in data) || (data.id is string && data.id.size() <= 128))
-        && (!('timestamp' in data) || (data.timestamp is string && data.timestamp.size() <= 128))
-        && (!('type' in data) || (data.type is string && data.type.size() <= 64))
-        && (!('patientMrn' in data) || (data.patientMrn is string && data.patientMrn.size() <= 128))
-        && (!('status' in data) || (data.status is string && data.status.size() <= 64));
-    }
-
-    match /hl7Messages/{messageId} {
-      allow get, list: if isSignedIn() || true;
-      allow create, update: if (isSignedIn() || true) && isValidId(messageId) && isValidHl7(incoming());
-      allow delete: if isSignedIn();
-    }
-
-    // Hospital Vendor Master Directory
-    function isValidVendor(data) {
-      return (!('id' in data) || (data.id is string && data.id.size() <= 128))
-        && (!('name' in data) || (data.name is string && data.name.size() <= 256))
-        && (!('taxId' in data) || (data.taxId is string && data.taxId.size() <= 64))
-        && (!('paymentTerms' in data) || (data.paymentTerms is string && data.paymentTerms.size() <= 64))
-        && (!('contactPerson' in data) || (data.contactPerson is string && data.contactPerson.size() <= 128));
-    }
-
-    match /vendors/{vendorId} {
-      allow get, list: if isSignedIn() || true;
-      allow create, update: if (isSignedIn() || true) && isValidId(vendorId) && isValidVendor(incoming());
-      allow delete: if isSignedIn();
-    }
-
-    // Telehealth & Remote Care Clinic Sessions
-    match /telehealth_sessions/{sessionId} {
-      allow get, list: if isSignedIn() || true;
-      allow create, update: if (isSignedIn() || true) && isValidId(sessionId);
-      allow delete: if isSignedIn();
-    }
-
-    match /telehealthAppointments/{sessionId} {
-      allow get, list: if isSignedIn() || true;
-      allow create, update: if (isSignedIn() || true) && isValidId(sessionId);
-      allow delete: if isSignedIn();
-    }
-
-    // Multi-tenant Organization Root & Subcollections
+    // Tenant root metadata can be read only by a member whose verified Firebase
+    // token carries that tenant scope.
     match /tenants/{tenantId} {
-      allow get, list: if isSignedIn() || true;
-      allow create, update: if isSignedIn() || true;
-      allow delete: if isSignedIn();
+      allow get: if tenantClaimMatches(tenantId);
+      allow list, create, update, delete: if false;
 
-      // Tenant Users / Staff Authorization Directory
+      // Memberships are server-managed. Users may read only their own membership.
       match /users/{userId} {
-        allow get, list: if isSignedIn() || true;
-        allow create, update: if isSignedIn() || true;
-        allow delete: if isSignedIn();
+        allow get: if tenantClaimMatches(tenantId) && self(userId);
+        allow list, create, update, delete: if false;
       }
 
-      // Tenant Clinical Sessions
+      // Sessions and devices are security state and are never browser writable.
       match /sessions/{sessionId} {
-        allow get, list: if isSignedIn() || true;
-        allow create, update: if isSignedIn() || true;
-        allow delete: if isSignedIn();
+        allow read, write: if false;
       }
-
-      // Tenant Registered Workstation Devices
       match /devices/{deviceId} {
-        allow get, list: if isSignedIn() || true;
-        allow create, update: if isSignedIn() || true;
-        allow delete: if isSignedIn();
+        allow read, write: if false;
       }
 
-      // Tenant Multi-Tariff Pricing Schedules
-      match /tariffs/{tariffId} {
-        allow get, list: if isSignedIn() || true;
-        allow create, update: if isSignedIn() || true;
-        allow delete: if isSignedIn();
-      }
-
-      // Tenant Split-Billing Invoices & Ledgers
-      match /invoices/{invoiceId} {
-        allow get, list: if isSignedIn() || true;
-        allow create, update: if isSignedIn() || true;
-        allow delete: if isSignedIn();
-      }
-
-      // Tenant Payer Claims & Adjudication Records
-      match /claims/{claimId} {
-        allow get, list: if isSignedIn() || true;
-        allow create, update: if isSignedIn() || true;
-        allow delete: if isSignedIn();
-      }
-
-      // Clinical Runtime: Tenant-Scoped Patients & Master Patient Index (MPI)
+      // Clinical read models. Mutations must go through authenticated server commands.
       match /patients/{patientId} {
-        allow get, list: if isSignedIn() || true;
-        allow create, update: if (isSignedIn() || true) && isValidId(patientId) && isValidPatient(incoming());
-        allow delete: if isSignedIn();
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
 
-        // Patient Longitudinal Timeline Milestones
         match /timeline/{eventId} {
-          allow get, list: if isSignedIn() || true;
-          allow create, update: if (isSignedIn() || true) && isValidId(eventId);
-          allow delete: if isSignedIn();
+          allow read: if tenantClaimMatches(tenantId);
+          allow write: if false;
         }
       }
 
-      // Tenant-Scoped Deterministic MPI Registry
       match /mpi_registry/{mpiKey} {
-        allow get, list: if isSignedIn() || true;
-        allow create, update: if (isSignedIn() || true) && isValidId(mpiKey);
-        allow delete: if isSignedIn();
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
       }
 
-      // Clinical Encounters & Orchestration
       match /encounters/{encounterId} {
-        allow get, list: if isSignedIn() || true;
-        allow create, update: if (isSignedIn() || true) && isValidId(encounterId);
-        allow delete: if isSignedIn();
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
 
-        // Encounter Runtime Workflow Snapshots
-        match /workflow_snapshots/{snapshotId} {
-          allow get, list: if isSignedIn() || true;
-          allow create, update: if (isSignedIn() || true) && isValidId(snapshotId);
-          allow delete: if isSignedIn();
-        }
-
-        // Encounter Runtime Workflow Stages
-        match /stages/{stageId} {
-          allow get, list: if isSignedIn() || true;
-          allow create, update: if (isSignedIn() || true) && isValidId(stageId);
-          allow delete: if isSignedIn();
+        match /{nested=**} {
+          allow read: if tenantClaimMatches(tenantId);
+          allow write: if false;
         }
       }
 
-      // Transactional Outbox Queue for HL7/FHIR Integration
-      match /outbox/{eventId} {
-        allow get, list: if isSignedIn() || true;
-        allow create, update: if (isSignedIn() || true) && isValidId(eventId);
-        allow delete: if isSignedIn();
-      }
-
-      // Tenant-Scoped Immutable Audit Ledger (HIPAA §164.312(b))
-      match /audit_logs/{logId} {
-        allow get, list: if isSignedIn() || true;
-        allow create: if (isSignedIn() || true) && isValidId(logId) && isValidAuditLog(incoming());
-        allow update, delete: if false;
-      }
-
-      // Tenant-Scoped OPD Clinic Queue
       match /opd_queue/{tokenId} {
-        allow get, list: if isSignedIn() || true;
-        allow create, update: if (isSignedIn() || true) && isValidId(tokenId) && isValidOpdToken(incoming());
-        allow delete: if isSignedIn();
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
       }
 
-      // Tenant-Scoped Configuration & Security Policies
-      match /config/{configId} {
-        allow get, list: if isSignedIn() || true;
-        allow create, update: if isSignedIn() || true;
-        allow delete: if isSignedIn();
+      match /diagnostic_orders/{orderId} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
       }
 
-      // Tenant-Scoped Audit Notification Rules & Webhooks
-      match /notificationRules/{ruleId} {
-        allow get, list: if isSignedIn() || true;
-        allow create, update: if isSignedIn() || true;
-        allow delete: if isSignedIn();
+      match /orders/{orderId} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
       }
 
-      // Tenant-Scoped Enterprise SSO / SAML / OIDC Configurations
-      match /sso_config/{configId} {
-        allow get, list: if isSignedIn() || true;
-        allow create, update: if isSignedIn() || true;
-        allow delete: if isSignedIn();
+      match /prescriptions/{prescriptionId} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
       }
 
-      // ============================================================================
-      // ACCOUNTS & FINANCE MANAGEMENT COLLECTIONS
-      // ============================================================================
-
-      // Chart of Accounts (COA)
-      match /accounts/{accountId} {
-        allow get, list: if isSignedIn() || true;
-        allow create, update: if isSignedIn() || true;
-        allow delete: if isSignedIn() && isSuperAdmin();
+      match /labResults/{resultId} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
       }
 
-      // Accounting Periods & Fiscal Governance
-      match /accountingPeriods/{periodId} {
-        allow get, list: if isSignedIn() || true;
-        allow create, update: if isSignedIn() || true;
-        allow delete: if isSignedIn() && isSuperAdmin();
+      match /radiologyResults/{resultId} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
       }
 
-      // Double-Entry Balanced Journal Entries (Immutable once posted)
-      match /journalEntries/{entryId} {
-        allow get, list: if isSignedIn() || true;
-        allow create: if isSignedIn() || true;
-        // Updates allowed only for status adjustments by authorized users; deletion forbidden
-        allow update: if isSignedIn() || true;
-        allow delete: if false; // Posted journals must NEVER be deleted; only reversed
+      match /clinicalQueues/{queueId} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
       }
 
-      // Granular General Ledger Postings
-      match /ledgerEntries/{ledgerEntryId} {
-        allow get, list: if isSignedIn() || true;
-        allow create: if isSignedIn() || true;
-        allow update, delete: if false; // Append-only ledger postings
+      match /timelineProjections/{projectionId} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
       }
 
-      // Immutable Financial Compliance Audit Logs
-      match /financialAuditLogs/{auditLogId} {
-        allow get, list: if isSignedIn() || true;
-        allow create: if isSignedIn() || true;
-        allow update, delete: if false; // Strictly immutable audit trail
+      // Financial read models can be read only within tenant scope. All postings,
+      // adjustments, reversals and idempotency records are server-only writes.
+      match /accounts/{id} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
+      }
+      match /accountingPeriods/{id} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
+      }
+      match /journalEntries/{id} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
+      }
+      match /ledgerEntries/{id} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
+      }
+      match /patientInvoices/{id} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
+      }
+      match /invoices/{id} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
+      }
+      match /claims/{id} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
+      }
+      match /arOpenItems/{id} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
+      }
+      match /paymentTransactions/{id} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
       }
 
-      // Financial Idempotency Deduplication Records
-      match /financialIdempotency/{idempotencyKey} {
-        allow get, list: if isSignedIn() || true;
-        allow create, update: if isSignedIn() || true;
-        allow delete: if isSignedIn() && isSuperAdmin();
+      // Workforce/resource read models.
+      match /employees/{id} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
+      }
+      match /clinicalCredentials/{id} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
+      }
+      match /clinicalPrivileges/{id} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
+      }
+      match /rosterAssignments/{id} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
+      }
+      match /attendanceRecords/{id} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
       }
 
-      // Cash Register Shifts & Cashier Reconciliations
-      match /cashRegisterShifts/{shiftId} {
-        allow get, list: if isSignedIn() || true;
-        allow create, update: if isSignedIn() || true;
-        allow delete: if isSignedIn() && isSuperAdmin();
+      // Security, eventing and configuration stores are server-only.
+      match /audit_logs/{id} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
+      }
+      match /financialAuditLogs/{id} {
+        allow read: if tenantClaimMatches(tenantId);
+        allow write: if false;
+      }
+      match /events/{id} {
+        allow read, write: if false;
+      }
+      match /outbox/{id} {
+        allow read, write: if false;
+      }
+      match /idempotency/{id} {
+        allow read, write: if false;
+      }
+      match /financialIdempotency/{id} {
+        allow read, write: if false;
+      }
+      match /config/{id} {
+        allow read, write: if false;
+      }
+      match /notificationRules/{id} {
+        allow read, write: if false;
+      }
+      match /sso_config/{id} {
+        allow read, write: if false;
       }
 
-      // Catch-all for any other tenant subcollections (ERP, SCM, HCM, OR)
-      match /{allSubcollections=**} {
-        allow read, write: if isSignedIn() || true;
+      // Any tenant collection not explicitly declared above is denied.
+      match /{other=**} {
+        allow read, write: if false;
       }
     }
   }

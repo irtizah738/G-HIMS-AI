@@ -4,9 +4,7 @@
  */
 
 import {
-  signInWithCustomToken,
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
   sendPasswordResetEmail,
   onIdTokenChanged,
@@ -43,24 +41,27 @@ export class AuthClient {
   ): Promise<LoginResponsePayload> {
     try {
       const cleanEmail = email.trim();
-      const deviceMeta = generateDeviceMetadata();
       const requestedTenantId = options?.tenantId || 'central-metro-hospital';
+      const deviceMeta = generateDeviceMetadata();
 
-      // 1. Authoritative Backend Authentication with 12s AbortController timeout
+      // Firebase Authentication is the only password authority. The G-HIMS backend
+      // never receives, stores, resets, or synchronizes the submitted password.
+      const credential = await signInWithEmailAndPassword(auth, cleanEmail, pass);
+      const idToken = await credential.user.getIdToken(true);
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 12000);
 
       let response: Response;
       try {
-        response = await fetch('/api/auth/login', {
+        response = await fetch('/api/auth/session', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            Authorization: `Bearer ${idToken}`,
           },
           signal: controller.signal,
           body: JSON.stringify({
-            email: cleanEmail,
-            password: pass,
             tenantId: requestedTenantId,
             device: deviceMeta,
             rememberDevice: options?.rememberDevice ?? true,
@@ -73,29 +74,16 @@ export class AuthClient {
       const data = await response.json();
 
       if (!response.ok) {
+        await firebaseSignOut(auth).catch(() => {});
         throw new AuthError({
-          code: data.code || 'INVALID_CREDENTIALS',
-          message: data.error || 'Authentication failed',
+          code: data.code || 'AUTHORIZATION_REQUIRED',
+          message: data.error || 'Hospital authorization failed',
           statusCode: response.status,
           userMessage: data.userMessage || data.error,
         });
       }
 
       const loginPayload: LoginResponsePayload = data;
-
-      // 2. Client SDK Synchronization with Custom Token (if provided) - safe 1000ms timeout
-      if (loginPayload.customToken) {
-        try {
-          await Promise.race([
-            signInWithCustomToken(auth, loginPayload.customToken),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Custom token timeout')), 1000)),
-          ]);
-        } catch (customTokenErr) {
-          console.warn('Notice: Firebase Client Custom Token sync notice:', customTokenErr);
-        }
-      }
-
-      // 3. Build and cache authenticated session locally for offline resilience
       const authUser: AuthenticatedUser = {
         uid: loginPayload.user.uid,
         email: loginPayload.user.email,
@@ -125,7 +113,6 @@ export class AuthClient {
         expiresAt: loginPayload.session.expiresAt,
       };
 
-      // Persist to localStorage and IndexedDB before completing sign in
       try {
         await saveCachedAuthSession(authUser, sessionRecord);
       } catch (cacheErr) {

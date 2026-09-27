@@ -22,7 +22,7 @@ export interface RecordVitalsPayload {
 export interface SignClinicalNotePayload {
   encounterId: string;
   patientId: string;
-  category: 'SOAP' | 'PROGRESS' | 'CONSULTATION' | 'DISCHARGE';
+  category: 'SOAP' | 'PROGRESS' | 'CONSULTATION' | 'DISCHARGE' | 'NURSING';
   content: string;
   sourceDraftId?: string;
   acceptedStructuredData?: Record<string, unknown>;
@@ -124,10 +124,14 @@ export class ClinicalDocumentationDomainService {
     idempotencyKey: string,
     payload: SignClinicalNotePayload
   ): Promise<CommandResult> {
-    const auth = AuthorizationPipeline.evaluate(context, {
-      requiredRoles: ['DOCTOR', 'CONSULTANT', 'SYSTEM_ADMIN'],
-      requiredPrivilege: 'SIGN_CLINICAL_NOTES',
-    });
+    const auth = payload.category === 'NURSING'
+      ? AuthorizationPipeline.evaluate(context, {
+          requiredRoles: ['NURSE', 'DOCTOR', 'CONSULTANT', 'SYSTEM_ADMIN'],
+        })
+      : AuthorizationPipeline.evaluate(context, {
+          requiredRoles: ['DOCTOR', 'CONSULTANT', 'SYSTEM_ADMIN'],
+          requiredPrivilege: 'SIGN_CLINICAL_NOTES',
+        });
     if (!auth.authorized) {
       return {
         success: false,

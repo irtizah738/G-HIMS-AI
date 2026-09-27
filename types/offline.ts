@@ -10,6 +10,10 @@ export interface SyncMutation {
   docId: string;
   resourceId?: string;
   action: MutationAction;
+  commandType?: string;
+  idempotencyKey?: string;
+  schemaVersion?: number;
+  baseEntityVersion?: number;
   payload: Record<string, any>;
   vectorClock: VectorClock;
   timestamp: number;

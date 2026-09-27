@@ -192,7 +192,7 @@ describe('G-HIMS Clinical Safety, Financial & Interoperability Engine', () => {
   });
 
   describe('4. External Device Telemetry Adapter', () => {
-    test('Rejects stale telemetry packet in PRODUCTION_MODE (>30,000ms old)', async () => {
+    test('Blocks production telemetry until physical integration certification is complete', async () => {
       const stalePacket: RawTelemetryPacket = {
         deviceId: 'ALS-MONITOR-01',
         deviceType: 'ALS_MONITOR_DEFIBRILLATOR',
@@ -206,10 +206,10 @@ describe('G-HIMS Clinical Safety, Financial & Interoperability Engine', () => {
 
       const res = await DeviceTelemetryAdapter.ingestPacket(doctorContext, stalePacket, 'PRODUCTION_MODE');
       expect(res.success).toBe(false);
-      expect(res.error?.code).toBe('STALE_DATA_REJECTED');
+      expect(['TELEMETRY_LIVE_VALIDATION_INCOMPLETE', 'TELEMETRY_INTEGRATION_NOT_LIVE']).toContain(res.error?.code);
     });
 
-    test('Ingests valid real-time packet, normalizes metrics and Lead II ECG', async () => {
+    test('Does not interpret or persist a valid packet through the uncertified production path', async () => {
       const validPacket: RawTelemetryPacket = {
         deviceId: 'ALS-MONITOR-02',
         deviceType: 'ALS_MONITOR_DEFIBRILLATOR',
@@ -235,10 +235,8 @@ describe('G-HIMS Clinical Safety, Financial & Interoperability Engine', () => {
       };
 
       const res = await DeviceTelemetryAdapter.ingestPacket(doctorContext, validPacket, 'PRODUCTION_MODE');
-      expect(res.success).toBe(true);
-      expect(res.record).toBeDefined();
-      expect(res.record?.metrics.heartRateBpm).toBe(142);
-      expect(res.record?.ecgLeadII?.stElevationDetected).toBe(true);
+      expect(res.success).toBe(false);
+      expect(['TELEMETRY_LIVE_VALIDATION_INCOMPLETE', 'TELEMETRY_INTEGRATION_NOT_LIVE']).toContain(res.error?.code);
     });
   });
 

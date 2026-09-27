@@ -13,6 +13,7 @@ import { HcmPrivilegeDomainService } from '../services/hcm-privilege-domain-serv
 import { HrWorkforceDomainService } from '../services/hr-workforce-domain-service';
 import { ResourceCapacityDomainService } from '../services/resource-capacity-domain-service';
 import { PatientIdentityDomainService } from '../services/patient-identity-domain-service';
+import { PatientMergeDomainService } from '../services/patient-merge-domain-service';
 import { IdempotencyService } from '../idempotency/idempotency-service';
 
 export class CommandBus {
@@ -143,7 +144,7 @@ export class CommandBus {
           break;
 
         case 'MergePatientCommand':
-          result = await PatientIdentityDomainService.mergePatients(
+          result = await PatientMergeDomainService.merge(
             context,
             command.commandId,
             command.idempotencyKey,

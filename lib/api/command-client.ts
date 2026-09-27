@@ -60,3 +60,24 @@ export async function executeCommand<TData = unknown>(
 
   return result;
 }
+
+
+export async function executeActiveTenantCommand<TData = unknown>(
+  commandType: string,
+  payload: Record<string, unknown>,
+  options?: { commandId?: string; idempotencyKey?: string; schemaVersion?: number }
+): Promise<CommandResult<TData>> {
+  const cached = await getCachedAuthSession();
+  if (!cached) {
+    throw new Error('AUTHENTICATION_REQUIRED: active G-HIMS session is required.');
+  }
+
+  return executeCommand<TData>({
+    tenantId: cached.user.tenantId,
+    commandType,
+    payload,
+    commandId: options?.commandId,
+    idempotencyKey: options?.idempotencyKey,
+    schemaVersion: options?.schemaVersion,
+  });
+}

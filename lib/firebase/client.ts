@@ -3,6 +3,7 @@ import { getAuth, Auth } from 'firebase/auth';
 import { initializeFirestore, getFirestore, Firestore, setLogLevel } from 'firebase/firestore';
 import { getAnalytics, isSupported, Analytics } from 'firebase/analytics';
 import firebaseConfig from '@/firebase-applet-config.json';
+import { assertClientFirebaseProjectIsolation } from '@/lib/runtime/environment-contract';
 
 // Configure Firestore log level to avoid unhandled connection retry logs in development/offline modes
 if (typeof window !== 'undefined') {
@@ -22,6 +23,8 @@ const clientCredentials = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || firebaseConfig.appId,
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID || firebaseConfig.measurementId,
 };
+
+assertClientFirebaseProjectIsolation(String(clientCredentials.projectId || ''));
 
 // Singleton Client App instance
 export const app: FirebaseApp = !getApps().length

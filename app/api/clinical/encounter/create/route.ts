@@ -1,22 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { registerPatientAndEncounter, RegisterPatientEncounterParams } from '@/lib/runtime/registration-orchestrator';
+import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    const tenantId = String(body.tenantId || '').trim().toLowerCase();
 
-    // Support both formats (direct RegisterPatientEncounterParams and legacy form payload)
+    if (!tenantId) {
+      return NextResponse.json({ success: false, error: 'tenantId is required.' }, { status: 400 });
+    }
+
+    const { context } = await deriveAuthoritativeContext(req, tenantId);
+
     const fullName =
       body.fullName ||
-      (body.firstName && body.lastName ? `${body.firstName} ${body.lastName}`.trim() : body.firstName || 'Anonymous Patient');
+      (body.firstName && body.lastName
+        ? `${body.firstName} ${body.lastName}`.trim()
+        : body.firstName || '');
 
-    const gender = (body.gender?.toLowerCase() === 'male' || body.gender === 'male'
-      ? 'male'
-      : body.gender?.toLowerCase() === 'female' || body.gender === 'female'
-      ? 'female'
-      : 'other') as 'male' | 'female' | 'other' | 'unknown';
+    if (!fullName) {
+      return NextResponse.json({ success: false, error: 'Patient full name is required.' }, { status: 400 });
+    }
 
-    const identifiers = body.identifiers || [];
+    const gender = (
+      body.gender?.toLowerCase() === 'male'
+        ? 'male'
+        : body.gender?.toLowerCase() === 'female'
+          ? 'female'
+          : body.gender?.toLowerCase() === 'unknown'
+            ? 'unknown'
+            : 'other'
+    ) as 'male' | 'female' | 'other' | 'unknown';
+
+    const identifiers = Array.isArray(body.identifiers) ? [...body.identifiers] : [];
     if (body.nationalId && !identifiers.some((i: any) => i.value === body.nationalId)) {
       identifiers.push({ type: 'CNIC', value: body.nationalId, issuer: 'National Registry' });
     }
@@ -25,50 +42,53 @@ export async function POST(req: NextRequest) {
     }
 
     const normalizedParams: RegisterPatientEncounterParams = {
-      tenantId: body.tenantId || 'metro_general',
+      tenantId: context.tenantId,
       patientId: body.patientId,
       fullName,
       gender,
-      dateOfBirth: body.dateOfBirth || body.dob || '1990-01-01',
+      dateOfBirth: body.dateOfBirth || body.dob,
       identifiers,
-      contactPhone: body.contactPhone || body.phone || '+1 (555) 000-0000',
-      address: body.address || 'Central District, Metropolitan City',
+      contactPhone: body.contactPhone || body.phone,
+      address: body.address,
       encounterType: body.encounterType || 'OPD',
       department: body.department || 'General Medicine',
       priority: body.priority || 'ROUTINE',
-      chiefComplaint: body.chiefComplaint || 'Consultation intake',
-      assignedDoctor: body.assignedDoctor || body.attendingPhysicianName || 'Dr. Sarah Al-Mansoor, MD',
-      actorId: body.actorId || body.initiatorUserId || 'staff-registrar-01',
-      actorRole: body.actorRole || body.initiatorUserRole || 'receptionist',
-      actorName: body.actorName || body.initiatorUserName || 'Front Desk Staff',
-      bloodGroup: body.bloodGroup || 'O+',
-      allergies: body.allergies || [],
-      chronicConditions: body.chronicConditions || [],
+      chiefComplaint: body.chiefComplaint || '',
+      assignedDoctor: body.assignedDoctor || body.attendingPhysicianName || '',
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'AUTHENTICATED_USER',
+      actorName: context.actorId,
+      bloodGroup: body.bloodGroup,
+      allergies: Array.isArray(body.allergies) ? body.allergies : [],
+      chronicConditions: Array.isArray(body.chronicConditions) ? body.chronicConditions : [],
     };
 
     const result = await registerPatientAndEncounter(normalizedParams);
 
-    // Return data bundled with queueToken & patient aliases for backwards-compatibility
-    const responsePayload = {
-      ...result,
-      initialStage: {
-        id: result.workflowSnapshot?.currentStageId || 'REGISTRATION',
-        stageType: result.workflowSnapshot?.currentStageId || 'REGISTRATION',
-        status: 'ACTIVE',
+    return NextResponse.json({
+      success: true,
+      data: {
+        ...result,
+        initialStage: {
+          id: result.workflowSnapshot?.currentStageId || 'REGISTRATION',
+          stageType: result.workflowSnapshot?.currentStageId || 'REGISTRATION',
+          status: 'ACTIVE',
+        },
+        outboxEventsCount: result.outboxEvent ? 1 : 0,
+        queueToken: {
+          tokenNumber: result.encounter.tokenNumber,
+          department: result.encounter.department,
+          patientMrn: result.patient.mrn,
+          patientName: result.patient.fullName,
+        },
       },
-      outboxEventsCount: result.outboxEvent ? 1 : 0,
-      queueToken: {
-        tokenNumber: result.encounter.tokenNumber || 'OPD-101',
-        department: result.encounter.department,
-        patientMrn: result.patient.mrn,
-        patientName: result.patient.fullName,
-      },
-    };
-
-    return NextResponse.json({ success: true, data: responsePayload });
-  } catch (error: unknown) {
-    const err = error as Error;
-    console.error('API /api/clinical/encounter/create Error:', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 400 });
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Encounter creation failed';
+    const unauthorized = /AUTH|TENANT|UNAUTH/i.test(message);
+    return NextResponse.json(
+      { success: false, error: message },
+      { status: unauthorized ? 403 : 400 }
+    );
   }
 }

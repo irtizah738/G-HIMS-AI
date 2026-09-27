@@ -241,6 +241,50 @@ describe('G-HIMS P1 durable command infrastructure', () => {
 
     expect(idem.data()?.status).toBe('COMPLETED');
     expect(idem.data()?.result?.data?.patient?.id).toBe(first.patient.id);
+
+    const queueBefore = await db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection('opd_queue')
+      .doc(first.queueToken.id)
+      .get();
+
+    expect(queueBefore.exists).toBe(true);
+    expect(queueBefore.data()?.status).toBe('waiting');
+
+    const called = await CommandBus.dispatch(context(tenantId), {
+      commandId: unique('cmd'),
+      idempotencyKey: unique('idem'),
+      tenantId,
+      commandType: 'UpdateOpdQueueStatusCommand',
+      schemaVersion: 1,
+      payload: {
+        tokenId: first.queueToken.id,
+        targetStatus: 'in_consultation',
+      },
+    });
+    expect(called.success).toBe(true);
+
+    const completed = await CommandBus.dispatch(context(tenantId), {
+      commandId: unique('cmd'),
+      idempotencyKey: unique('idem'),
+      tenantId,
+      commandType: 'UpdateOpdQueueStatusCommand',
+      schemaVersion: 1,
+      payload: {
+        tokenId: first.queueToken.id,
+        targetStatus: 'completed',
+      },
+    });
+    expect(completed.success).toBe(true);
+
+    const queueAfter = await db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection('opd_queue')
+      .doc(first.queueToken.id)
+      .get();
+    expect(queueAfter.data()?.status).toBe('completed');
   });
 
 

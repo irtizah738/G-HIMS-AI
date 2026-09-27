@@ -430,7 +430,29 @@ export class ResourceCapacityDomainService {
     idempotencyKey: string,
     payload: Omit<MaintenanceWorkOrder, 'workOrderId' | 'workOrderNumber' | 'status' | 'openedAt' | 'createdAt' | 'updatedAt'>
   ): Promise<CommandResult<MaintenanceWorkOrder>> {
-    const workOrderId = `wo_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: ['BIOMEDICAL_ENGINEER', 'FACILITIES_ADMIN', 'SYSTEM_ADMIN'],
+    });
+    if (!auth.authorized) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: 'UNAUTHORIZED', message: 'Biomedical / Facilities authorization required.' },
+      };
+    }
+
+    const resource = await this.loadResource(context.tenantId, payload.resourceId);
+    if (!resource) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: 'RESOURCE_NOT_FOUND', message: `Resource ${payload.resourceId} does not exist.` },
+      };
+    }
+
+    const workOrderId = `wo_${crypto.randomUUID()}`;
     const workOrderNumber = `WO-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
     const now = new Date().toISOString();
 
@@ -444,21 +466,19 @@ export class ResourceCapacityDomainService {
       updatedAt: now,
     };
 
-    this.workOrders.set(workOrderId, workOrder);
+    const updatedResource: ResourceMaster = {
+      ...resource,
+      status: 'MAINTENANCE',
+      updatedAt: now,
+    };
 
-    // Update resource state to MAINTENANCE
-    const resource = this.resources.get(payload.resourceId);
-    if (resource) {
-      resource.status = 'MAINTENANCE';
-      resource.updatedAt = now;
-      this.resources.set(payload.resourceId, resource);
-    }
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'MAINTENANCE_WORK_ORDER',
-      entityId: workOrderId,
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'CLINICIAN',
+      aggregateType: 'MAINTENANCE_WORK_ORDER',
+      aggregateId: workOrderId,
       eventType: 'WORK_ORDER_CREATED',
-      domainState: workOrder,
       eventPayload: {
         workOrderId,
         workOrderNumber,
@@ -469,16 +489,30 @@ export class ResourceCapacityDomainService {
       },
       auditReason: `Created work order ${workOrderNumber} for ${payload.resourceName}: ${payload.issueDescription}`,
       outboxTopic: 'g-hims-maintenance-events',
+      idempotencyKey,
+      commandId,
+      correlationId: context.correlationId,
+      domainState: workOrder,
+      additionalStateWrites: [
+        {
+          entityType: 'RESOURCE_MASTER',
+          entityId: resource.resourceId,
+          domainState: updatedResource,
+        },
+      ],
     });
+
+    this.workOrders.set(workOrderId, workOrder);
+    this.resources.set(resource.resourceId, updatedResource);
 
     return {
       success: true,
       commandId,
       idempotencyKey,
       entityId: workOrderId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
       data: workOrder,
     };
   }
@@ -507,8 +541,8 @@ export class ResourceCapacityDomainService {
       };
     }
 
-    const wo = await this.loadWorkOrder(context.tenantId, payload.workOrderId);
-    if (!wo) {
+    const workOrder = await this.loadWorkOrder(context.tenantId, payload.workOrderId);
+    if (!workOrder) {
       return {
         success: false,
         commandId,
@@ -517,49 +551,74 @@ export class ResourceCapacityDomainService {
       };
     }
 
-    const now = new Date().toISOString();
-    wo.status = 'COMPLETED';
-    wo.completedAt = now;
-    wo.resolutionSummary = payload.resolutionSummary;
-    wo.totalCost = payload.totalCost;
-    wo.downtimeHours = payload.downtimeHours;
-    wo.updatedAt = now;
-
-    this.workOrders.set(payload.workOrderId, wo);
-
-    // Return resource to AVAILABLE
-    const resource = await this.loadResource(context.tenantId, wo.resourceId);
-    if (resource) {
-      resource.status = 'AVAILABLE';
-      resource.lastMaintenanceDate = now.split('T')[0];
-      resource.updatedAt = now;
-      this.resources.set(wo.resourceId, resource);
+    const resource = await this.loadResource(context.tenantId, workOrder.resourceId);
+    if (!resource) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: 'RESOURCE_NOT_FOUND', message: `Resource ${workOrder.resourceId} does not exist.` },
+      };
     }
 
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'MAINTENANCE_WORK_ORDER',
-      entityId: payload.workOrderId,
+    const now = new Date().toISOString();
+    const completedWorkOrder: MaintenanceWorkOrder = {
+      ...workOrder,
+      status: 'COMPLETED',
+      completedAt: now,
+      resolutionSummary: payload.resolutionSummary,
+      totalCost: payload.totalCost,
+      downtimeHours: payload.downtimeHours,
+      updatedAt: now,
+    };
+
+    const updatedResource: ResourceMaster = {
+      ...resource,
+      status: 'AVAILABLE',
+      lastMaintenanceDate: now.split('T')[0],
+      updatedAt: now,
+    };
+
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'CLINICIAN',
+      aggregateType: 'MAINTENANCE_WORK_ORDER',
+      aggregateId: payload.workOrderId,
       eventType: 'WORK_ORDER_COMPLETED',
-      domainState: wo,
       eventPayload: {
         workOrderId: payload.workOrderId,
-        resourceId: wo.resourceId,
+        resourceId: workOrder.resourceId,
         resolutionSummary: payload.resolutionSummary,
         totalCost: payload.totalCost,
       },
-      auditReason: `Completed work order ${wo.workOrderNumber} on ${wo.resourceName}`,
+      auditReason: `Completed work order ${workOrder.workOrderNumber} on ${workOrder.resourceName}`,
       outboxTopic: 'g-hims-maintenance-events',
+      idempotencyKey,
+      commandId,
+      correlationId: context.correlationId,
+      domainState: completedWorkOrder,
+      additionalStateWrites: [
+        {
+          entityType: 'RESOURCE_MASTER',
+          entityId: resource.resourceId,
+          domainState: updatedResource,
+        },
+      ],
     });
+
+    this.workOrders.set(payload.workOrderId, completedWorkOrder);
+    this.resources.set(resource.resourceId, updatedResource);
 
     return {
       success: true,
       commandId,
       idempotencyKey,
       entityId: payload.workOrderId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: wo,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
+      data: completedWorkOrder,
     };
   }
 
@@ -586,7 +645,17 @@ export class ResourceCapacityDomainService {
       };
     }
 
-    const calibrationId = `cal_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const resource = await this.loadResource(context.tenantId, payload.resourceId);
+    if (!resource) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: 'RESOURCE_NOT_FOUND', message: `Resource ${payload.resourceId} does not exist.` },
+      };
+    }
+
+    const calibrationId = `cal_${crypto.randomUUID()}`;
     const now = new Date().toISOString();
     const isPassed = payload.result === 'PASS' || payload.result === 'CONDITIONAL_PASS';
 
@@ -597,29 +666,27 @@ export class ResourceCapacityDomainService {
       createdAt: now,
     };
 
-    this.calibrations.set(calibrationId, calibration);
+    const updatedResource: ResourceMaster = {
+      ...resource,
+      calibrationStatus: isPassed ? 'VALID' : 'FAILED',
+      lastCalibrationDate: payload.calibrationDate,
+      nextCalibrationDate: payload.nextDueDate,
+      calibrationCertificateNumber: payload.certificateNumber,
+      status: !isPassed
+        ? 'OUT_OF_SERVICE'
+        : resource.status === 'OUT_OF_SERVICE'
+          ? 'AVAILABLE'
+          : resource.status,
+      updatedAt: now,
+    };
 
-    // Update resource calibration state
-    const resource = this.resources.get(payload.resourceId);
-    if (resource) {
-      resource.calibrationStatus = isPassed ? 'VALID' : 'FAILED';
-      resource.lastCalibrationDate = payload.calibrationDate;
-      resource.nextCalibrationDate = payload.nextDueDate;
-      resource.calibrationCertificateNumber = payload.certificateNumber;
-      if (!isPassed) {
-        resource.status = 'OUT_OF_SERVICE';
-      } else if (resource.status === 'OUT_OF_SERVICE') {
-        resource.status = 'AVAILABLE';
-      }
-      resource.updatedAt = now;
-      this.resources.set(payload.resourceId, resource);
-    }
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'CALIBRATION_RECORD',
-      entityId: calibrationId,
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'CLINICIAN',
+      aggregateType: 'CALIBRATION_RECORD',
+      aggregateId: calibrationId,
       eventType: 'CALIBRATION_RECORDED',
-      domainState: calibration,
       eventPayload: {
         calibrationId,
         resourceId: payload.resourceId,
@@ -629,16 +696,30 @@ export class ResourceCapacityDomainService {
       },
       auditReason: `Recorded calibration (${payload.result}) for ${payload.resourceName}, certificate ${payload.certificateNumber}`,
       outboxTopic: 'g-hims-calibration-events',
+      idempotencyKey,
+      commandId,
+      correlationId: context.correlationId,
+      domainState: calibration,
+      additionalStateWrites: [
+        {
+          entityType: 'RESOURCE_MASTER',
+          entityId: resource.resourceId,
+          domainState: updatedResource,
+        },
+      ],
     });
+
+    this.calibrations.set(calibrationId, calibration);
+    this.resources.set(resource.resourceId, updatedResource);
 
     return {
       success: true,
       commandId,
       idempotencyKey,
       entityId: calibrationId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
       data: calibration,
     };
   }

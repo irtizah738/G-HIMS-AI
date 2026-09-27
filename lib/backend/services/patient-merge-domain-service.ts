@@ -7,6 +7,7 @@ import { AuthorizationPipeline } from '../auth/authorization-pipeline';
 import { TransactionManager } from '../transactions/transaction-manager';
 import { CommandContext, CommandResult } from '../types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
+import { PatientMPI } from '@/types/mpi';
 
 export interface DurablePatientMergePayload {
   primaryPatientId: string;
@@ -57,8 +58,8 @@ export class PatientMergeDomainService {
     }
 
     const [primary, secondary] = await Promise.all([
-      DomainStateRepository.getById<Record<string, any>>(context.tenantId, 'patients', payload.primaryPatientId),
-      DomainStateRepository.getById<Record<string, any>>(context.tenantId, 'patients', payload.secondaryPatientId),
+      DomainStateRepository.getById<PatientMPI>(context.tenantId, 'patients', payload.primaryPatientId),
+      DomainStateRepository.getById<PatientMPI>(context.tenantId, 'patients', payload.secondaryPatientId),
     ]);
 
     if (!primary || !secondary) {

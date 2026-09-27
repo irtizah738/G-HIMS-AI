@@ -25,7 +25,9 @@ export const generateDenialAppealFlow={
   name:'generateDenialAppealFlow',
   description:'Produces a review-only denial appeal draft from supplied claim evidence.',
   async run(input:DenialAppealInput):Promise<DenialAppealOutput>{
-    const generation=await AIGateway.generateJson<ProviderOutput>({
+    let generation;
+    try {
+      generation=await AIGateway.generateJson<ProviderOutput>({
       purpose:'DENIAL_APPEAL_DRAFT',
       systemInstruction:[
         'Draft an insurance denial appeal for authorized human review.',
@@ -36,8 +38,12 @@ export const generateDenialAppealFlow={
       ].join(' '),
       sourceData:input,
       responseSchema:JSON.stringify({appealLetterSubject:'string',appealLetterBody:'string',citedMedicalNecessityGuidelines:['supported citation or verification-required statement'],supportingEvidenceRequired:['string']}),
-      temperature:0,
-    });
+        temperature:0,
+      });
+    } catch (error) {
+      const message=error instanceof Error?error.message:'unknown AI failure';
+      throw new Error('AI_UNAVAILABLE: '+message);
+    }
     return {...validate(generation.data),aiProvenance:generation.provenance};
   },
 };

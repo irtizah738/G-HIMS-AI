@@ -6,6 +6,7 @@
 import { BaseCommand, CommandContext, CommandResult } from '../types';
 import { EncounterDomainService } from '../services/encounter-domain-service';
 import { ClinicalOrderDomainService } from '../services/clinical-order-domain-service';
+import { ClinicalDocumentationDomainService } from '../services/clinical-documentation-domain-service';
 import { FinancialLedgerDomainService } from '../services/financial-ledger-domain-service';
 import { HcmPrivilegeDomainService } from '../services/hcm-privilege-domain-service';
 import { HrWorkforceDomainService } from '../services/hr-workforce-domain-service';
@@ -96,6 +97,24 @@ export class CommandBus {
 
         case 'PrescribeMedicationCommand':
           result = await ClinicalOrderDomainService.prescribeMedication(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecordVitalsCommand':
+          result = await ClinicalDocumentationDomainService.recordVitals(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'SignClinicalNoteCommand':
+          result = await ClinicalDocumentationDomainService.signClinicalNote(
             context,
             command.commandId,
             command.idempotencyKey,

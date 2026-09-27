@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { parseHL7, extractORU_R01, generateACK } from '@/lib/interop/hl7-parser';
 import { getAdminFirestore } from '@/server/firebase/admin';
+import { getServerIntegrationState } from '@/lib/interop/integration-state';
 
 function safeEqual(provided: string, expected: string): boolean {
   const a = Buffer.from(provided);
@@ -10,6 +11,14 @@ function safeEqual(provided: string, expected: string): boolean {
 }
 
 export async function POST(req: NextRequest) {
+  const integrationState = getServerIntegrationState('HL7');
+  if (integrationState !== 'LIVE') {
+    return NextResponse.json(
+      { error: 'HL7 integration is not LIVE.', integrationState },
+      { status: 503 }
+    );
+  }
+
   const expectedKey = process.env.GHIMS_HL7_INGEST_API_KEY;
   const providedKey = String(req.headers.get('x-api-key') || '').trim();
   const tenantId = String(req.headers.get('x-ghims-tenant-id') || req.nextUrl.searchParams.get('tenantId') || '').trim().toLowerCase();
@@ -51,7 +60,26 @@ export async function POST(req: NextRequest) {
     }
 
     const parsedHL7 = parseHL7(rawBody);
+    const messageType = [
+      parsedHL7.getFieldValue('MSH', 9, 0),
+      parsedHL7.getFieldValue('MSH', 9, 1),
+    ].filter(Boolean).join('^');
+
+    if (messageType !== 'ORU^R01') {
+      return NextResponse.json(
+        { error: 'Unsupported HL7 message type.', messageType },
+        { status: 422 }
+      );
+    }
+
     const oruData = extractORU_R01(parsedHL7);
+    const allowedApps = String(process.env.GHIMS_HL7_ALLOWED_SENDING_APPS || '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (allowedApps.length > 0 && !allowedApps.includes(oruData.sendingApplication)) {
+      return NextResponse.json({ error: 'HL7 sending application is not allowlisted.' }, { status: 403 });
+    }
 
     if (!oruData.messageControlId) {
       return NextResponse.json({ error: 'MSH-10 message control ID is required.' }, { status: 422 });
@@ -111,12 +139,12 @@ export async function POST(req: NextRequest) {
     batch.create(inboxRef, {
       messageControlId: oruData.messageControlId,
       tenantId,
-      messageType: [
-        parsedHL7.getFieldValue('MSH', 9, 0),
-        parsedHL7.getFieldValue('MSH', 9, 1),
-      ].filter(Boolean).join('^'),
+      messageType,
+      sendingApplication: oruData.sendingApplication,
+      sendingFacility: oruData.sendingFacility,
       receivedAt: new Date().toISOString(),
-      rawMessage: rawBody,
+      rawMessageSha256: crypto.createHash('sha256').update(rawBody).digest('hex'),
+      ...(process.env.GHIMS_HL7_RETAIN_RAW === 'true' ? { rawMessage: rawBody } : {}),
       status: matchedPatientId ? 'PROCESSED' : 'REQUIRES_RECONCILIATION',
     });
 

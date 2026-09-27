@@ -1,7 +1,9 @@
 /**
- * G-HIMS ANSI ASC X12 EDI Standards Engine
- * Production ANSI X12 837P (Professional Healthcare Claim) & 835 (Health Care Claim Payment/Advice)
- * Conforming strictly to HIPAA ASC X12N Standards and G-HIMS Master Architectural Doctrine.
+ * G-HIMS ANSI ASC X12 EDI structural encoder/parser.
+ *
+ * IMPORTANT: this code performs deterministic structural validation only. It is not a
+ * substitute for payer-specific companion-guide validation, clearinghouse certification,
+ * HIPAA transaction certification, or external conformance testing.
  */
 
 export interface EdiClaimPayer {
@@ -83,12 +85,48 @@ export interface Edi835RemittanceAdvice {
   }>;
 }
 
+export interface EdiConformanceReport {
+  valid: boolean;
+  level: 'STRUCTURAL_ONLY';
+  certifiedExternalConformance: false;
+  errors: string[];
+  warnings: string[];
+}
+
+function isYyyyMmDd(value: string): boolean {
+  return /^\\d{8}$/.test(value);
+}
+
+function validateClaimPayload(claim: Edi837ClaimPayload): void {
+  const errors: string[] = [];
+  if (!claim.controlNumber) errors.push('controlNumber is required');
+  if (!claim.claimId) errors.push('claimId is required');
+  if (!(claim.totalBilledAmount > 0)) errors.push('totalBilledAmount must be positive');
+  if (!claim.payer?.payerId) errors.push('payer.payerId is required');
+  if (!claim.billingProvider?.npi || !/^\\d{10}$/.test(claim.billingProvider.npi)) errors.push('billingProvider.npi must be 10 digits');
+  if (!claim.patient?.memberId) errors.push('patient.memberId is required');
+  if (!isYyyyMmDd(claim.patient?.dob || '')) errors.push('patient.dob must be YYYYMMDD');
+  if (!Array.isArray(claim.icd10Codes) || claim.icd10Codes.length === 0) errors.push('at least one ICD-10 code is required');
+  if (!Array.isArray(claim.serviceLines) || claim.serviceLines.length === 0) errors.push('at least one service line is required');
+  for (const line of claim.serviceLines || []) {
+    if (!line.cptCode) errors.push('service line CPT/HCPCS code is required');
+    if (!(line.chargeAmount >= 0)) errors.push('service line chargeAmount must be non-negative');
+    if (!(line.unitCount > 0)) errors.push('service line unitCount must be positive');
+    if (!isYyyyMmDd(line.serviceDate)) errors.push('service line serviceDate must be YYYYMMDD');
+    if (!Array.isArray(line.diagnosisPointers) || line.diagnosisPointers.length === 0) errors.push('service line diagnosisPointers are required');
+  }
+  if (errors.length > 0) {
+    throw new Error('EDI_CLAIM_VALIDATION_FAILED: ' + errors.join('; '));
+  }
+}
+
 export class Edi837Generator {
   /**
-   * Generates a fully compliant ANSI X12 837 Professional Healthcare Claim transaction file.
-   * Uses standard segment delimiters: Segment Terminator (~), Element Separator (*), Sub-element (:).
+   * Generates a structurally validated ANSI X12 837P transaction candidate.
+   * External payer/clearinghouse conformance certification is still required before LIVE use.
    */
   public static generate837P(claim: Edi837ClaimPayload): string {
+    validateClaimPayload(claim);
     const today = new Date();
     const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
     const timeStr = today.toTimeString().slice(0, 5).replace(/:/g, '');
@@ -167,7 +205,55 @@ export class Edi837Generator {
     // Interchange Control Trailer
     segments.push(`IEA*1*${ctrlNum}~`);
 
-    return segments.join('\n');
+    const edi = segments.join('\n');
+    const report = this.validate837PStructure(edi);
+    if (!report.valid) {
+      throw new Error('EDI_STRUCTURAL_VALIDATION_FAILED: ' + report.errors.join('; '));
+    }
+    return edi;
+  }
+
+  public static validate837PStructure(ediText: string): EdiConformanceReport {
+    const segments = String(ediText || '').split('~').map((s) => s.trim()).filter(Boolean);
+    const errors: string[] = [];
+    const warnings: string[] = [
+      'Structural validation only; payer companion-guide and clearinghouse certification remain required.',
+    ];
+
+    const required = ['ISA', 'GS', 'ST', 'BHT', 'CLM', 'SE', 'GE', 'IEA'];
+    for (const tag of required) {
+      if (!segments.some((segment) => segment.startsWith(tag + '*'))) {
+        errors.push('Missing required segment ' + tag);
+      }
+    }
+
+    const st = segments.find((segment) => segment.startsWith('ST*'))?.split('*') || [];
+    const se = segments.find((segment) => segment.startsWith('SE*'))?.split('*') || [];
+    if (st[2] && se[2] && st[2] !== se[2]) {
+      errors.push('ST02 and SE02 transaction control numbers do not match');
+    }
+
+    const isa = segments.find((segment) => segment.startsWith('ISA*'))?.split('*') || [];
+    const iea = segments.find((segment) => segment.startsWith('IEA*'))?.split('*') || [];
+    if (isa[13] && iea[2] && isa[13] !== iea[2]) {
+      errors.push('ISA13 and IEA02 interchange control numbers do not match');
+    }
+
+    const seIndex = segments.findIndex((segment) => segment.startsWith('SE*'));
+    const stIndex = segments.findIndex((segment) => segment.startsWith('ST*'));
+    if (stIndex >= 0 && seIndex >= stIndex && se[1]) {
+      const declared = Number.parseInt(se[1], 10);
+      const actual = seIndex - stIndex + 1;
+      if (declared !== actual) errors.push('SE01 segment count does not match transaction-set segment count');
+    }
+
+    return {
+      valid: errors.length === 0,
+      level: 'STRUCTURAL_ONLY',
+      certifiedExternalConformance: false,
+      errors,
+      warnings,
+    };
   }
 
   /**

@@ -94,7 +94,7 @@ export interface EdiConformanceReport {
 }
 
 function isYyyyMmDd(value: string): boolean {
-  return /^\\d{8}$/.test(value);
+  return /^\d{8}$/.test(value);
 }
 
 function validateClaimPayload(claim: Edi837ClaimPayload): void {
@@ -103,7 +103,7 @@ function validateClaimPayload(claim: Edi837ClaimPayload): void {
   if (!claim.claimId) errors.push('claimId is required');
   if (!(claim.totalBilledAmount > 0)) errors.push('totalBilledAmount must be positive');
   if (!claim.payer?.payerId) errors.push('payer.payerId is required');
-  if (!claim.billingProvider?.npi || !/^\\d{10}$/.test(claim.billingProvider.npi)) errors.push('billingProvider.npi must be 10 digits');
+  if (!claim.billingProvider?.npi || !/^\d{10}$/.test(claim.billingProvider.npi)) errors.push('billingProvider.npi must be 10 digits');
   if (!claim.patient?.memberId) errors.push('patient.memberId is required');
   if (!isYyyyMmDd(claim.patient?.dob || '')) errors.push('patient.dob must be YYYYMMDD');
   if (!Array.isArray(claim.icd10Codes) || claim.icd10Codes.length === 0) errors.push('at least one ICD-10 code is required');

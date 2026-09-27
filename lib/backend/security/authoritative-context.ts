@@ -52,10 +52,10 @@ export async function deriveAuthoritativeContext(
   const context: CommandContext = {
     actorId: authContext.uid,
     tenantId: authContext.tenantId,
-    roles: [...authContext.roles],
-    permissions: [...authContext.permissions],
+    roles: authContext.roles.map((role) => role.toUpperCase()),
+    permissions: authContext.permissions.map((permission) => permission.toUpperCase()),
     departmentId: authContext.departmentIds[0],
-    clinicalPrivileges: [...authContext.clinicalPrivileges],
+    clinicalPrivileges: authContext.clinicalPrivileges.map((privilege) => privilege.toUpperCase()),
     correlationId: req.headers.get('x-correlation-id') || `corr_${crypto.randomUUID()}`,
     requestId: req.headers.get('x-request-id') || `req_${crypto.randomUUID()}`,
     deviceId: authContext.deviceId,
@@ -67,11 +67,11 @@ export async function deriveAuthoritativeContext(
     userId: authContext.uid,
     email: authContext.email,
     tenantId: authContext.tenantId,
-    roles: [...authContext.roles],
-    permissions: [...authContext.permissions],
+    roles: authContext.roles.map((role) => role.toUpperCase()),
+    permissions: authContext.permissions.map((permission) => permission.toUpperCase()),
     departmentIds: [...authContext.departmentIds],
     facilityIds: [...authContext.facilityIds],
-    clinicalPrivileges: [...authContext.clinicalPrivileges],
+    clinicalPrivileges: authContext.clinicalPrivileges.map((privilege) => privilege.toUpperCase()),
     accountStatus: authContext.accountStatus,
   };
 

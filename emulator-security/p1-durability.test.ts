@@ -3,6 +3,8 @@ import { IdempotencyService } from '@/lib/backend/idempotency/idempotency-servic
 import { TransactionManager } from '@/lib/backend/transactions/transaction-manager';
 import { CommandContext } from '@/lib/backend/types';
 import { CommandBus } from '@/lib/backend/commands/command-bus';
+import { OutboxDispatcher } from '@/lib/backend/outbox/dispatcher';
+import { ProjectionWorkers } from '@/lib/backend/projections/projection-workers';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { registerPatientAndEncounter } from '@/server/runtime/registration-orchestrator';
 
@@ -509,6 +511,108 @@ describe('G-HIMS P1 durable command infrastructure', () => {
     expect(reclaimed?.status).toBe('PROCESSING');
     expect(reclaimed?.attempts).toBe(2);
     expect(reclaimed?.leaseExpiresAt).toBeGreaterThan(Date.now());
+  });
+
+  test('outbox is published only after durable projection checkpoint and read models commit', async () => {
+    const db = getAdminFirestore();
+    expect(db).not.toBeNull();
+    if (!db) throw new Error('Firestore emulator Admin connection unavailable');
+
+    const tenantId = unique('tenant');
+    const encounterId = unique('enc');
+    const patientId = unique('pat');
+    const commandId = unique('cmd');
+    const idempotencyKey = unique('idem');
+    const payload = {
+      encounterId,
+      patientId,
+      encounterType: 'OPD',
+      chiefComplaint: 'Projection durability test',
+      priority: 'ROUTINE',
+    };
+
+    await IdempotencyService.acquireExecution(
+      tenantId,
+      idempotencyKey,
+      'CreateEncounterCommand',
+      payload,
+      commandId
+    );
+
+    const tx = await TransactionManager.executeAtomicWrite(
+      context(tenantId),
+      commandId,
+      idempotencyKey,
+      {
+        entityType: 'ENCOUNTER',
+        entityId: encounterId,
+        eventType: 'ENCOUNTER_CREATED',
+        domainState: {
+          encounterId,
+          tenantId,
+          patientId,
+          status: 'ACTIVE',
+          currentStage: 'TRIAGE',
+        },
+        eventPayload: payload,
+      }
+    );
+
+    const relay = await OutboxDispatcher.relayPendingOutbox(tenantId);
+    expect(relay.dispatchedCount).toBe(1);
+
+    const tenantRef = db.collection('tenants').doc(tenantId);
+    const [outbox, checkpoint, timeline, queue] = await Promise.all([
+      tenantRef.collection('outbox').doc(tx.outbox.outboxId).get(),
+      tenantRef.collection('projectionCheckpoints').doc(tx.event.eventId).get(),
+      tenantRef.collection('timelineProjections').doc(tx.event.eventId).get(),
+      tenantRef.collection('clinicalQueues').doc(encounterId).get(),
+    ]);
+
+    expect(outbox.data()?.status).toBe('PUBLISHED');
+    expect(checkpoint.exists).toBe(true);
+    expect(timeline.exists).toBe(true);
+    expect(timeline.data()?.patientId).toBe(patientId);
+    expect(queue.exists).toBe(true);
+    expect(queue.data()?.stage).toBe('TRIAGE');
+  });
+
+  test('projection checkpoint prevents duplicate financial projection application', async () => {
+    const db = getAdminFirestore();
+    expect(db).not.toBeNull();
+    if (!db) throw new Error('Firestore emulator Admin connection unavailable');
+
+    const tenantId = unique('tenant');
+    const eventId = unique('evt');
+    const event = {
+      eventId,
+      tenantId,
+      eventType: 'JOURNAL_ENTRY_POSTED',
+      payload: { totalAmountMinorUnits: 12500 },
+    };
+
+    await ProjectionWorkers.consumeEvent(event);
+    await ProjectionWorkers.consumeEvent(event);
+
+    const balance = await db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection('generalLedgerProjections')
+      .doc('universal-journal-balance')
+      .get();
+
+    expect(balance.exists).toBe(true);
+    expect(balance.data()?.totalDebits).toBe(12500);
+    expect(balance.data()?.totalCredits).toBe(12500);
+
+    const checkpoints = await db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection('projectionCheckpoints')
+      .where('eventId', '==', eventId)
+      .get();
+
+    expect(checkpoints.size).toBe(1);
   });
 
   test('AdmitPatientToBedCommand atomically commits bed occupancy and patient active-bed state', async () => {

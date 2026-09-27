@@ -18,6 +18,7 @@ export interface IdempotencyAcquireResult {
 
 export class IdempotencyService {
   private static localMemoryCache = new Map<string, IdempotencyRecord>();
+  private static readonly LEASE_MS = 2 * 60 * 1000;
 
   private static canUseEphemeralStore(): boolean {
     const mode = getRuntimeMode();
@@ -68,13 +69,17 @@ export class IdempotencyService {
       const key = this.memoryKey(tenantId, idempotencyKey);
       const existing = this.localMemoryCache.get(key);
       if (!existing) {
+        const now = Date.now();
         const record: IdempotencyRecord = {
           tenantId,
           idempotencyKey,
           commandType,
           requestHash,
           status: 'PENDING',
-          createdAt: Date.now(),
+          commandId,
+          createdAt: now,
+          lastUpdatedAt: now,
+          leaseExpiresAt: now + this.LEASE_MS,
         };
         this.localMemoryCache.set(key, record);
         return { status: 'NEW', record };
@@ -83,8 +88,19 @@ export class IdempotencyService {
       if (existing.requestHash !== requestHash || existing.commandType !== commandType) {
         return { status: 'CONFLICT', record: existing };
       }
-      if (existing.status === 'COMPLETED' && existing.result) {
+      if ((existing.status === 'COMPLETED' || existing.status === 'FAILED') && existing.result) {
         return { status: 'CACHED', record: existing };
+      }
+      if (existing.status === 'PENDING' && (existing.leaseExpiresAt || 0) <= Date.now()) {
+        const now = Date.now();
+        const reclaimed = {
+          ...existing,
+          commandId,
+          lastUpdatedAt: now,
+          leaseExpiresAt: now + this.LEASE_MS,
+        };
+        this.localMemoryCache.set(key, reclaimed);
+        return { status: 'NEW', record: reclaimed };
       }
       return { status: 'IN_PROGRESS', record: existing };
     }
@@ -95,6 +111,7 @@ export class IdempotencyService {
     return db.runTransaction(async (transaction) => {
       const snapshot = await transaction.get(ref);
       if (!snapshot.exists) {
+        const now = Date.now();
         const record = {
           tenantId,
           idempotencyKey,
@@ -102,7 +119,9 @@ export class IdempotencyService {
           requestHash,
           status: 'PENDING' as const,
           commandId,
-          createdAt: Date.now(),
+          createdAt: now,
+          lastUpdatedAt: now,
+          leaseExpiresAt: now + this.LEASE_MS,
         };
         transaction.create(ref, sanitizeForFirestore(record));
         return { status: 'NEW' as const, record };
@@ -112,9 +131,22 @@ export class IdempotencyService {
       if (existing.requestHash !== requestHash || existing.commandType !== commandType) {
         return { status: 'CONFLICT' as const, record: existing };
       }
-      if (existing.status === 'COMPLETED' && existing.result) {
+      if ((existing.status === 'COMPLETED' || existing.status === 'FAILED') && existing.result) {
         return { status: 'CACHED' as const, record: existing };
       }
+
+      if (existing.status === 'PENDING' && (existing.leaseExpiresAt || 0) <= Date.now()) {
+        const now = Date.now();
+        const reclaimed: IdempotencyRecord = {
+          ...existing,
+          commandId,
+          lastUpdatedAt: now,
+          leaseExpiresAt: now + this.LEASE_MS,
+        };
+        transaction.set(ref, sanitizeForFirestore(reclaimed), { merge: true });
+        return { status: 'NEW' as const, record: reclaimed };
+      }
+
       return { status: 'IN_PROGRESS' as const, record: existing };
     });
   }
@@ -154,6 +186,8 @@ export class IdempotencyService {
         status: result.success ? 'COMPLETED' : 'FAILED',
         result,
         completedAt: Date.now(),
+        lastUpdatedAt: Date.now(),
+        leaseExpiresAt: undefined,
       }), { merge: true });
     });
   }
@@ -193,6 +227,7 @@ export class IdempotencyService {
       result,
       createdAt: Date.now(),
       completedAt: Date.now(),
+      lastUpdatedAt: Date.now(),
     });
   }
 }

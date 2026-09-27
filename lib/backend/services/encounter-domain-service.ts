@@ -58,16 +58,21 @@ export class EncounterDomainService {
     encounterId: string
   ): Promise<EncounterState | null> {
     const key = this.cacheKey(tenantId, encounterId);
-    const cached = this.encounterCache.get(key);
-    if (cached) return cached;
 
-    const persisted = await DomainStateRepository.getById<EncounterState>(
-      tenantId,
-      'encounters',
-      encounterId
-    );
-    if (persisted) this.encounterCache.set(key, persisted);
-    return persisted;
+    if (DomainStateRepository.isAvailable()) {
+      const persisted = await DomainStateRepository.getById<EncounterState>(
+        tenantId,
+        'encounters',
+        encounterId
+      );
+
+      if (persisted) this.encounterCache.set(key, persisted);
+      else this.encounterCache.delete(key);
+
+      return persisted;
+    }
+
+    return this.encounterCache.get(key) || null;
   }
   /**
    * Creates a new clinical encounter with atomic transaction.

@@ -1,6 +1,10 @@
 import { getAdminFirestore } from '@/server/firebase/admin';
 
 export class DomainStateRepository {
+  public static isAvailable(): boolean {
+    return getAdminFirestore() !== null;
+  }
+
   public static async getById<T>(
     tenantId: string,
     collectionName: string,

@@ -9,6 +9,7 @@ import {
 import { Auth, getAuth } from 'firebase-admin/auth';
 import { Firestore, getFirestore } from 'firebase-admin/firestore';
 import firebaseConfig from '@/firebase-applet-config.json';
+import { assertServerFirebaseProjectIsolation } from '@/lib/runtime/environment-contract';
 
 let adminApp: App | null = null;
 let adminFirestoreInstance: Firestore | null = null;
@@ -69,16 +70,27 @@ export function hasAdminCredentials(): boolean {
 export function getAdminApp(): App | null {
   if (adminApp) return adminApp;
 
-  const existingApps = getApps();
-  if (existingApps.length > 0) {
-    adminApp = getApp();
-    return adminApp;
-  }
-
   const projectId =
     process.env.FIREBASE_PROJECT_ID ||
     process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
     firebaseConfig.projectId;
+
+  assertServerFirebaseProjectIsolation(String(projectId || ''));
+
+  const existingApps = getApps();
+  if (existingApps.length > 0) {
+    const existing = getApp();
+    const existingProjectId = String(existing.options.projectId || '');
+    assertServerFirebaseProjectIsolation(existingProjectId || String(projectId || ''));
+    if (existingProjectId && projectId && existingProjectId !== projectId) {
+      throw new Error(
+        `FIREBASE_ADMIN_PROJECT_MISMATCH: existing app uses ${existingProjectId}, expected ${projectId}.`
+      );
+    }
+    adminApp = existing;
+    return adminApp;
+  }
+
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim();
   const privateKey = formatPrivateKey(process.env.FIREBASE_PRIVATE_KEY);
 

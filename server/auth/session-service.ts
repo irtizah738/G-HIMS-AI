@@ -156,7 +156,7 @@ export async function validateSession(
   }
 }
 
-function validateSessionRecord(
+export function validateSessionRecord(
   sessionData: UserSessionRecord,
   expectedUserId: string
 ): UserSessionRecord {

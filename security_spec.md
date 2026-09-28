@@ -47,7 +47,7 @@
 2. **Bed Invariant**: Ward bed updates must preserve bed number and ward assignment, and only permit valid status transitions (`available`, `occupied`, `maintenance`, `cleaning`, `reserved`).
 3. **Billing Reconciliation Invariant**: Billing mismatch items must include a positive recoverable revenue number and valid status (`pending_review`, `reconciled`, `dismissed`).
 4. **OPD Queue Invariant**: Outpatient tokens must belong to a known patient and hospital department.
-5. **Audit Ledger Invariant**: Audit log records are append-only / immutable once recorded to satisfy HIPAA log tamper-proofing rules. Updates and deletions on audit logs are strictly denied.
+5. **Audit Ledger Invariant**: Audit log writes are server-authoritative and client updates/deletes are denied. This supports audit-control objectives but does not by itself establish HIPAA compliance or universal cryptographic tamper-proofing.
 6. **Master Gate / Authentication Invariant**: All read and write operations require authenticated medical or administrative credentials (`isSignedIn()`).
 7. **Identity Integrity**: Staff member updates can only be modified by verified clinical administrators or assigned staff users.
 

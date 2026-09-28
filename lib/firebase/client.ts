@@ -3,6 +3,7 @@ import { getAuth, Auth } from 'firebase/auth';
 import { initializeFirestore, getFirestore, Firestore, setLogLevel } from 'firebase/firestore';
 import { getAnalytics, isSupported, Analytics } from 'firebase/analytics';
 import firebaseConfig from '@/firebase-applet-config.json';
+import { assertClientFirebaseProjectIsolation } from '@/lib/runtime/environment-contract';
 
 // Configure Firestore log level to avoid unhandled connection retry logs in development/offline modes
 if (typeof window !== 'undefined') {
@@ -23,10 +24,28 @@ const clientCredentials = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID || firebaseConfig.measurementId,
 };
 
-// Singleton Client App instance
-export const app: FirebaseApp = !getApps().length
-  ? initializeApp(clientCredentials)
-  : getApp();
+assertClientFirebaseProjectIsolation(String(clientCredentials.projectId || ''));
+
+// Singleton Client App instance. A pre-existing default app must belong to the
+// same environment; never silently reuse another project's app.
+const existingClientApp: FirebaseApp | null = getApps().length > 0 ? getApp() : null;
+if (existingClientApp) {
+  const existingProjectId = String(existingClientApp.options.projectId || '');
+  assertClientFirebaseProjectIsolation(
+    existingProjectId || String(clientCredentials.projectId || '')
+  );
+  if (
+    existingProjectId &&
+    clientCredentials.projectId &&
+    existingProjectId !== clientCredentials.projectId
+  ) {
+    throw new Error(
+      `FIREBASE_CLIENT_PROJECT_MISMATCH: existing app uses ${existingProjectId}, expected ${clientCredentials.projectId}.`
+    );
+  }
+}
+
+export const app: FirebaseApp = existingClientApp || initializeApp(clientCredentials);
 
 // Authentication Instance
 export const auth: Auth = getAuth(app);

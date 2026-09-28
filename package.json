@@ -6,11 +6,19 @@
     "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start --port 3000",
-    "lint": "tsc --noEmit",
+    "lint": "eslint . --quiet",
     "test": "bun test tests/",
     "test:p0": "bun test tests/p0-trust-boundary.test.ts",
     "validate:p0": "bun run test:p0 && bun run test:p0:rules && npm run build",
-    "test:p0:rules": "firebase emulators:exec --only firestore --project ghims-p0-ci \"bun test emulator-security/firestore-rules.test.ts\""
+    "test:p0:rules": "firebase emulators:exec --only firestore --project ghims-p0-ci \"bun test emulator-security/firestore-rules.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "bun test tests/",
+    "test:security": "bun test tests/security-penetration.test.ts tests/p0-trust-boundary.test.ts tests/p1-durability-boundary.test.ts tests/p2-offline-ai-interop-boundary.test.ts tests/p3-operational-assurance.test.ts",
+    "test:rules": "firebase emulators:exec --project ghims-p0-ci --only firestore \"bun test emulator-security/firestore-rules.test.ts\" && firebase emulators:exec --project ghims-p1-ci --only firestore \"bun test emulator-security/p1-durability.test.ts\"",
+    "test:e2e": "playwright test",
+    "ops:backup": "node scripts/ops/firestore-backup.mjs",
+    "ops:restore": "node scripts/ops/firestore-restore.mjs",
+    "validate:p3": "bun run typecheck && bun run lint && bun run test:unit && bun run test:security && bun run build"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",
@@ -48,5 +56,6 @@
     "postcss": "^8.5.2",
     "tailwindcss": "^4.0.6",
     "typescript": "^5.7.3"
-  }
+  },
+  "packageManager": "bun@1.4.2"
 }

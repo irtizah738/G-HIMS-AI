@@ -18,6 +18,7 @@ import { InpatientBedDomainService } from '../services/inpatient-bed-domain-serv
 import { TelehealthDomainService } from '../services/telehealth-domain-service';
 import { RevenueIntegrityDomainService } from '../services/revenue-integrity-domain-service';
 import { IdempotencyService } from '../idempotency/idempotency-service';
+import { emitOperationalEvent, operationalTimer } from '@/lib/observability/server-telemetry';
 
 export class CommandBus {
   /**
@@ -28,6 +29,28 @@ export class CommandBus {
     context: CommandContext,
     command: BaseCommand
   ): Promise<CommandResult> {
+    const elapsed = operationalTimer();
+
+    const emit = (
+      outcome: 'SUCCESS' | 'REJECTED' | 'FAILURE',
+      errorCode?: string,
+      attributes?: Record<string, string | number | boolean | null | undefined>
+    ) => {
+      emitOperationalEvent({
+        event: 'command.dispatch',
+        outcome,
+        tenantId: context.tenantId,
+        correlationId: context.correlationId,
+        requestId: context.requestId,
+        durationMs: elapsed(),
+        errorCode,
+        attributes: {
+          commandType: command.commandType,
+          ...attributes,
+        },
+      });
+    };
+
     try {
       // 1. Durable zero-duplicate idempotency reservation.
       const idempotencyCheck = await IdempotencyService.acquireExecution(
@@ -39,6 +62,7 @@ export class CommandBus {
       );
 
       if (idempotencyCheck.status === 'CACHED' && idempotencyCheck.record?.result) {
+        emit('SUCCESS', undefined, { replayedFromCache: true });
         return {
           ...idempotencyCheck.record.result,
           replayedFromCache: true,
@@ -46,6 +70,7 @@ export class CommandBus {
       }
 
       if (idempotencyCheck.status === 'IN_PROGRESS') {
+        emit('REJECTED', 'IDEMPOTENCY_IN_PROGRESS');
         return {
           success: false,
           commandId: command.commandId,
@@ -58,6 +83,7 @@ export class CommandBus {
       }
 
       if (idempotencyCheck.status === 'CONFLICT') {
+        emit('REJECTED', 'IDEMPOTENCY_KEY_CONFLICT');
         return {
           success: false,
           commandId: command.commandId,
@@ -446,17 +472,26 @@ export class CommandBus {
           command.payload,
           result
         );
-      } catch (finalizationError) {
-        console.error('IDEMPOTENCY_RESULT_ENRICHMENT_FAILED', {
+      } catch {
+        emitOperationalEvent({
+          event: 'command.idempotency_result_enrichment',
+          outcome: 'FAILURE',
           tenantId: context.tenantId,
-          commandId: command.commandId,
-          idempotencyKey: command.idempotencyKey,
-          error: finalizationError instanceof Error ? finalizationError.message : String(finalizationError),
+          correlationId: context.correlationId,
+          requestId: context.requestId,
+          durationMs: elapsed(),
+          errorCode: 'IDEMPOTENCY_RESULT_ENRICHMENT_FAILED',
+          attributes: { commandType: command.commandType },
         });
       }
 
+      emit(
+        result.success ? 'SUCCESS' : 'REJECTED',
+        result.success ? undefined : result.error?.code
+      );
       return result;
     } catch (err) {
+      emit('FAILURE', 'COMMAND_EXECUTION_FAILURE');
       return {
         success: false,
         commandId: command.commandId,

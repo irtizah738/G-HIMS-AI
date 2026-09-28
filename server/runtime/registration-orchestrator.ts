@@ -15,6 +15,7 @@ import { PatientMPI, PatientIdentifier } from '@/types/mpi';
 import { EncounterRuntime, WorkflowSnapshot, EncounterType } from '@/types/encounter-runtime';
 import { PatientTimelineProjection } from '@/types/patient-timeline';
 import { OutboxEventRecord } from '@/types/clinical-event';
+import type { AuditRecord, DomainEventEnvelope, OutboxRecord } from '@/lib/backend/types';
 import { OPD_WORKFLOW_DEFINITION } from '@/lib/workflow/opd-definition';
 import { compileWorkflow } from '@/lib/workflow/compiler';
 
@@ -131,6 +132,9 @@ export async function registerPatientAndEncounter(
   const encounterId = `enc_${crypto.randomUUID()}`;
   const mrn = generateMRN();
   const tokenNumber = generateTokenNumber();
+  const correlationId = `corr_${crypto.randomUUID()}`;
+  const canonicalEventId = `evt_${crypto.randomUUID()}`;
+  const canonicalOutboxId = `obx_${crypto.randomUUID()}`;
 
   const patientRecord: PatientMPI = {
     id: patientId,
@@ -193,6 +197,48 @@ export async function registerPatientAndEncounter(
     },
   };
 
+  const canonicalEvent: DomainEventEnvelope = {
+    eventId: canonicalEventId,
+    tenantId,
+    aggregateType: 'ENCOUNTER',
+    aggregateId: encounterId,
+    eventType: 'PATIENT_REGISTERED',
+    eventVersion: 1,
+    payload: {
+      patientId,
+      encounterId,
+      mrn,
+      encounterType: encounterRecord.type,
+      department: encounterRecord.department,
+      chiefComplaint: encounterRecord.chiefComplaint,
+      priority: encounterRecord.priority,
+      initialStage: encounterRecord.currentStageId,
+    },
+    actorId: params.actorId,
+    actorRole: params.actorRole,
+    occurredAt: now,
+    recordedAt: now,
+    correlationId,
+    commandId: params.commandId,
+    idempotencyKey: params.idempotencyKey,
+    source: 'web',
+    schemaVersion: 1,
+  };
+
+  const canonicalOutbox: OutboxRecord = {
+    outboxId: canonicalOutboxId,
+    tenantId,
+    eventId: canonicalEventId,
+    eventType: canonicalEvent.eventType,
+    topic: 'g-hims-clinical-events',
+    payload: canonicalEvent.payload,
+    status: 'PENDING',
+    attempts: 0,
+    maxAttempts: 5,
+    nextAttemptAt: now,
+    createdAt: now,
+  };
+
   const outboxRecord: OutboxEventRecord = {
     id: `ob_${crypto.randomUUID()}`,
     tenantId,
@@ -233,17 +279,42 @@ export async function registerPatientAndEncounter(
   };
 
   const auditLogId = `aud_${crypto.randomUUID()}`;
-  const auditLogEntry = {
+  const auditDetails = `Registered patient ${params.fullName} (${mrn}) with encounter ${encounterId}`;
+  const auditLogEntry: AuditRecord & {
+    id: string;
+    timestamp: string;
+    userId: string;
+    userName: string;
+    role: string;
+    resource: string;
+    status: string;
+    details: string;
+  } = {
     id: auditLogId,
+    auditId: auditLogId,
     tenantId,
     timestamp: new Date(now).toISOString(),
     userId: params.actorId,
     userName: params.actorName,
     role: params.actorRole,
+    actorId: params.actorId,
+    actorRole: params.actorRole,
     action: 'PATIENT_REGISTERED_ENCOUNTER_INIT',
     resource: `patients/${patientId}`,
+    resourceType: 'PATIENT',
+    resourceId: patientId,
     status: 'SUCCESS',
-    details: `Registered patient ${params.fullName} (${mrn}) with encounter ${encounterId}`,
+    details: auditDetails,
+    commandId: params.commandId,
+    eventId: canonicalEventId,
+    correlationId,
+    occurredAt: now,
+    recordedAt: now,
+    reason: auditDetails,
+    metadata: {
+      encounterId,
+      mrn,
+    },
   };
 
   const result: OrchestrationResult = {
@@ -257,16 +328,17 @@ export async function registerPatientAndEncounter(
   };
 
   await db.runTransaction(async (transaction) => {
+    const tenantRef = db.collection('tenants').doc(tenantId);
     const patientRef = db.doc(patientDocPath(tenantId, patientId));
     const encounterRef = db.doc(encounterDocPath(tenantId, encounterId));
     const workflowRef = db.doc(workflowSnapshotDocPath(tenantId, encounterId, workflowSnapshot.id));
     const timelineRef = db.doc(timelineEventDocPath(tenantId, patientId, timelineEventId));
     const outboxRef = db.doc(outboxEventDocPath(tenantId, outboxRecord.id));
     const auditRef = db.doc(auditLogDocPath(tenantId, auditLogId));
-    const queueRef = db.collection('tenants').doc(tenantId).collection('opd_queue').doc(queueToken.id);
-    const idempotencyRef = db
-      .collection('tenants')
-      .doc(tenantId)
+    const canonicalEventRef = tenantRef.collection('events').doc(canonicalEventId);
+    const canonicalOutboxRef = tenantRef.collection('outbox').doc(canonicalOutboxId);
+    const queueRef = tenantRef.collection('opd_queue').doc(queueToken.id);
+    const idempotencyRef = tenantRef
       .collection('idempotency')
       .doc(IdempotencyService.getDocumentId(params.idempotencyKey));
 
@@ -309,6 +381,8 @@ export async function registerPatientAndEncounter(
     transaction.create(workflowRef, sanitizeForFirestore(workflowSnapshot));
     transaction.create(timelineRef, sanitizeForFirestore(timelineRecord));
     transaction.create(outboxRef, sanitizeForFirestore(outboxRecord));
+    transaction.create(canonicalEventRef, sanitizeForFirestore(canonicalEvent));
+    transaction.create(canonicalOutboxRef, sanitizeForFirestore(canonicalOutbox));
     transaction.create(auditRef, sanitizeForFirestore(auditLogEntry));
     transaction.create(queueRef, sanitizeForFirestore(queueToken));
 
@@ -331,6 +405,9 @@ export async function registerPatientAndEncounter(
         commandId: params.commandId,
         idempotencyKey: params.idempotencyKey,
         entityId: patientId,
+        eventId: canonicalEventId,
+        auditId: auditLogId,
+        outboxId: canonicalOutboxId,
         data: result,
       },
       completedAt: Date.now(),

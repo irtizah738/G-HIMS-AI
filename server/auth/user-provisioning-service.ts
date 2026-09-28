@@ -10,7 +10,8 @@ export type ProvisionableUiRole =
   | 'reception'
   | 'billing'
   | 'pharmacy'
-  | 'lab';
+  | 'lab'
+  | 'patient';
 
 export interface ProvisionUserInput {
   tenantId: string;
@@ -40,6 +41,7 @@ const UI_TO_CANONICAL_ROLE: Record<ProvisionableUiRole, string> = {
   billing: 'billing_clerk',
   pharmacy: 'pharmacist',
   lab: 'lab_tech',
+  patient: 'patient',
 };
 
 const CANONICAL_TO_UI_ROLE: Record<string, ProvisionableUiRole> = {
@@ -55,6 +57,7 @@ const CANONICAL_TO_UI_ROLE: Record<string, ProvisionableUiRole> = {
   pharmacy: 'pharmacy',
   lab_tech: 'lab',
   lab: 'lab',
+  patient: 'patient',
 };
 
 function cleanTenantId(value: string): string {

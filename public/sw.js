@@ -3,7 +3,6 @@ const CACHE_NAME = 'ghims-clinical-shell-v1';
 const DATA_CACHE_NAME = 'ghims-clinical-data-v1';
 
 const PRECACHE_ASSETS = [
-  '/',
   '/manifest.webmanifest',
   '/icon.png',
   '/favicon.ico',
@@ -73,23 +72,22 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // HTML Navigation & Document routes: Network-First with Cache Fallback
+  // HTML navigation is never cached. Authenticated clinical pages may contain PHI
+  // and must not survive in Cache Storage on shared hospital workstations.
   if (event.request.mode === 'navigate' || event.request.headers.get('accept')?.includes('text/html')) {
     event.respondWith(
-      fetch(event.request)
-        .then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            const clone = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+      fetch(event.request).catch(() =>
+        new Response(
+          '<!doctype html><html><body><main><h1>G-HIMS is offline</h1><p>Reconnect to authenticate and load this page. Previously viewed clinical pages are not cached.</p></main></body></html>',
+          {
+            status: 503,
+            headers: {
+              'Content-Type': 'text/html; charset=utf-8',
+              'Cache-Control': 'no-store',
+            },
           }
-          return networkResponse;
-        })
-        .catch(() => {
-          return caches.match(event.request).then((cached) => {
-            if (cached) return cached;
-            return caches.match('/');
-          });
-        })
+        )
+      )
     );
     return;
   }

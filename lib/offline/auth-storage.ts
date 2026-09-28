@@ -4,6 +4,7 @@
  */
 
 import { AuthenticatedUser, TenantMembership, UserSessionRecord } from '@/lib/auth/auth-types';
+import { clearOfflineReadModelsForTenant } from '@/lib/offline/db';
 
 const DB_NAME = 'ghims_offline_auth_db';
 const DB_VERSION = 1;
@@ -67,17 +68,8 @@ function openDatabase(): Promise<IDBDatabase> {
 }
 
 export async function saveCachedAuthSession(user: AuthenticatedUser, session: UserSessionRecord): Promise<void> {
-  // Always synchronously save to localStorage first for instant, guaranteed availability
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.setItem('ghims_cached_auth_user', JSON.stringify(user));
-      localStorage.setItem('ghims_cached_auth_session', JSON.stringify(session));
-      localStorage.setItem('ghims_active_tenant', user.tenantId);
-    } catch {
-      // storage quota or private mode
-    }
-  }
-
+  // Identity/session material is stored in IndexedDB only. Do not mirror clinical
+  // identity or session records into localStorage on shared workstations.
   try {
     const db = await Promise.race([
       openDatabase(),
@@ -91,13 +83,13 @@ export async function saveCachedAuthSession(user: AuthenticatedUser, session: Us
       user,
       session,
       cachedAt: new Date().toISOString(),
-      expiresAt: session.expiresAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      expiresAt: session.expiresAt,
     };
 
     store.put(record);
 
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => resolve(), 800);
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('IDB session write timeout')), 1200);
       tx.oncomplete = () => {
         clearTimeout(timer);
         resolve();
@@ -106,41 +98,42 @@ export async function saveCachedAuthSession(user: AuthenticatedUser, session: Us
         clearTimeout(timer);
         reject(tx.error);
       };
+      tx.onabort = () => {
+        clearTimeout(timer);
+        reject(tx.error || new Error('IDB session write aborted'));
+      };
     });
-  } catch (err) {
-    // Ignore IndexedDB error as localStorage already persisted
+  } finally {
+    if (typeof window !== 'undefined') {
+      // Remove legacy copies created by earlier builds.
+      localStorage.removeItem('ghims_cached_auth_user');
+      localStorage.removeItem('ghims_cached_auth_session');
+      localStorage.removeItem('ghims_cached_memberships');
+    }
   }
 }
 
 export async function getCachedAuthSession(): Promise<{ user: AuthenticatedUser; session: UserSessionRecord } | null> {
-  // Fast path: Check localStorage first for instant synchronous resolution
-  const localCached = fallbackLocalStorage();
-  if (localCached) {
-    return localCached;
-  }
-
   try {
     const db = await Promise.race([
       openDatabase(),
       new Promise<IDBDatabase>((_, reject) => setTimeout(() => reject(new Error('IDB timeout')), 800)),
     ]);
     const tx = db.transaction(STORE_SESSION, 'readonly');
-    const store = tx.objectStore(STORE_SESSION);
-    const request = store.get('current_active_session');
+    const request = tx.objectStore(STORE_SESSION).get('current_active_session');
 
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => resolve(fallbackLocalStorage()), 800);
+    return await new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(null), 1000);
       request.onsuccess = () => {
         clearTimeout(timer);
         const record = request.result as CachedAuthRecord | undefined;
         if (!record) {
-          resolve(fallbackLocalStorage());
+          resolve(null);
           return;
         }
 
-        // Verify expiration
-        const expiresTime = new Date(record.expiresAt).getTime();
-        if (Date.now() > expiresTime) {
+        const expiresTime = Date.parse(record.expiresAt);
+        if (!Number.isFinite(expiresTime) || Date.now() >= expiresTime) {
           resolve(null);
           return;
         }
@@ -149,48 +142,24 @@ export async function getCachedAuthSession(): Promise<{ user: AuthenticatedUser;
       };
       request.onerror = () => {
         clearTimeout(timer);
-        resolve(fallbackLocalStorage());
+        resolve(null);
       };
     });
-  } catch {
-    return fallbackLocalStorage();
-  }
-}
-
-function fallbackLocalStorage(): { user: AuthenticatedUser; session: UserSessionRecord } | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const userStr = localStorage.getItem('ghims_cached_auth_user');
-    const sessionStr = localStorage.getItem('ghims_cached_auth_session');
-    if (!userStr || !sessionStr) return null;
-
-    const user = JSON.parse(userStr);
-    const session = JSON.parse(sessionStr);
-
-    if (session?.expiresAt) {
-      const expiry = new Date(session.expiresAt).getTime();
-      if (Date.now() > expiry) {
-        localStorage.removeItem('ghims_cached_auth_user');
-        localStorage.removeItem('ghims_cached_auth_session');
-        return null;
-      }
-    }
-
-    return { user, session };
   } catch {
     return null;
   }
 }
 
 export async function clearCachedAuthSession(): Promise<void> {
+  let tenantId = '';
+
   if (typeof window !== 'undefined') {
-    try {
-      localStorage.removeItem('ghims_cached_auth_user');
-      localStorage.removeItem('ghims_cached_auth_session');
-      localStorage.removeItem('ghims_active_tenant');
-    } catch {
-      // Ignore
-    }
+    // Remove all legacy localStorage auth artifacts unconditionally.
+    localStorage.removeItem('ghims_cached_auth_user');
+    localStorage.removeItem('ghims_cached_auth_session');
+    localStorage.removeItem('ghims_cached_memberships');
+    localStorage.removeItem('ghims_active_tenant');
+    localStorage.removeItem('ghims_active_rbac_role');
   }
 
   try {
@@ -198,11 +167,30 @@ export async function clearCachedAuthSession(): Promise<void> {
       openDatabase(),
       new Promise<IDBDatabase>((_, reject) => setTimeout(() => reject(new Error('IDB timeout')), 800)),
     ]);
+
+    const readTx = db.transaction(STORE_SESSION, 'readonly');
+    const request = readTx.objectStore(STORE_SESSION).get('current_active_session');
+    const existing = await new Promise<CachedAuthRecord | undefined>((resolve) => {
+      request.onsuccess = () => resolve(request.result as CachedAuthRecord | undefined);
+      request.onerror = () => resolve(undefined);
+    });
+    tenantId = existing?.user?.tenantId || '';
+
     const tx = db.transaction([STORE_SESSION, STORE_MEMBERSHIPS], 'readwrite');
     tx.objectStore(STORE_SESSION).clear();
     tx.objectStore(STORE_MEMBERSHIPS).clear();
+
+    await new Promise<void>((resolve) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
+    });
   } catch {
-    // Ignore error
+    // Best-effort local privacy cleanup continues below.
+  }
+
+  if (tenantId) {
+    await clearOfflineReadModelsForTenant(tenantId).catch(() => {});
   }
 }
 
@@ -216,13 +204,7 @@ export async function saveCachedTenantMemberships(memberships: TenantMembership[
       store.put(item);
     }
   } catch {
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem('ghims_cached_memberships', JSON.stringify(memberships));
-      } catch {
-        // Ignore
-      }
-    }
+    // Membership cache is optional; never downgrade to localStorage on shared devices.
   }
 }
 
@@ -238,14 +220,6 @@ export async function getCachedTenantMemberships(): Promise<TenantMembership[]> 
       request.onerror = () => resolve([]);
     });
   } catch {
-    if (typeof window !== 'undefined') {
-      try {
-        const memStr = localStorage.getItem('ghims_cached_memberships');
-        return memStr ? JSON.parse(memStr) : [];
-      } catch {
-        return [];
-      }
-    }
     return [];
   }
 }

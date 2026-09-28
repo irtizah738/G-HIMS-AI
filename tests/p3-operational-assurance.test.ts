@@ -2,7 +2,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { NextRequest } from 'next/server';
-import { assertServerFirebaseProjectIsolation } from '../lib/runtime/environment-contract';
+import { assertServerFirebaseProjectIsolation, getPublicRuntimeMode } from '../lib/runtime/environment-contract';
+import { getRuntimeMode, inferRuntimeModeFromNodeEnv } from '../lib/runtime/runtime-mode';
 import { emitOperationalEvent } from '../lib/observability/server-telemetry';
 import { validateSessionRecord } from '../server/auth/session-service';
 import { POST as receiveHl7 } from '../app/api/interop/hl7/receive/route';
@@ -21,6 +22,23 @@ afterEach(()=>{
 });
 
 describe('G-HIMS P3 operational assurance and adversarial matrix',()=>{
+  test('implicit runtime treats development/test as TEST and deployed modes as PRODUCTION',()=>{
+    expect(inferRuntimeModeFromNodeEnv('development')).toBe('TEST');
+    expect(inferRuntimeModeFromNodeEnv('test')).toBe('TEST');
+    expect(inferRuntimeModeFromNodeEnv('production')).toBe('PRODUCTION');
+    expect(inferRuntimeModeFromNodeEnv(undefined)).toBe('PRODUCTION');
+  });
+
+  test('explicit G-HIMS runtime overrides development inference',()=>{
+    process.env.NODE_ENV='development';
+    process.env.GHIMS_RUNTIME_MODE='STAGING';
+    process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE='DEMO';
+
+    expect(getRuntimeMode()).toBe('STAGING');
+    expect(getPublicRuntimeMode()).toBe('DEMO');
+  });
+
+
   test('production Firebase authority is bound to its declared project',()=>{
     process.env.GHIMS_RUNTIME_MODE='PRODUCTION';
     process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO='ghims-demo';

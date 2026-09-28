@@ -37,15 +37,18 @@ Use `GHIMS_BACKUP_DRY_RUN=true` to verify targeting without invoking gcloud.
 2. Confirm the target environment and project ID.
 3. Identify the last known-good export and verify its source project/database metadata.
 4. Restore into a non-production recovery project first whenever the incident allows.
-5. Run integrity checks before reopening writes:
+5. In the isolated recovery project, rebuild disposable projections from the authoritative event stream with `bun run ops:projection-rebuild`.
+6. Require event/checkpoint cardinality equality and retain the event-stream/projection SHA-256 fingerprints. Repeat the rebuild when rehearsing determinism; identical authoritative input must yield the same projection fingerprint.
+7. Run integrity checks before reopening writes:
    - tenant isolation/security rules
    - patient/encounter counts
    - event/audit/outbox referential checks
    - journal debit/credit balance
    - idempotency and outbox processing checks
-6. For a production import, require explicit project confirmation and production-restore override.
-7. Re-enable traffic in stages and monitor authorization failures, outbox lag, sync conflicts, and reconciliation findings.
-8. Record actual RPO/RTO from the exercise or incident.
+   - projection recovery manifest status is `SUCCESS`
+8. For a production import, require explicit project confirmation and production-restore override. Do not run projection rebuild directly against the production runtime.
+9. Re-enable traffic in stages and monitor authorization failures, outbox lag, sync conflicts, and reconciliation findings.
+10. Record actual RPO/RTO from the exercise or incident.
 
 Restore entrypoint:
 
@@ -54,6 +57,8 @@ Restore entrypoint:
 Production restore additionally requires:
 - `GHIMS_RESTORE_CONFIRM_PROJECT=<exact project id>`
 - `GHIMS_ALLOW_PRODUCTION_RESTORE=true`
+
+Projection rebuild is a separate isolated-recovery step. See `docs/operations/PROJECTION_RECOVERY.md`. Its operator command deliberately refuses `GHIMS_RUNTIME_MODE=PRODUCTION`.
 
 ## Required exercises
 

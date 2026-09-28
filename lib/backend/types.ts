@@ -17,6 +17,10 @@ export interface CommandContext {
   requestId: string;
   ipAddress?: string;
   userAgent?: string;
+  isEmergencyOverride?: boolean;
+  breakGlassGrantId?: string;
+  breakGlassPatientId?: string;
+  breakGlassEncounterId?: string;
 }
 
 export interface BaseCommand<TPayload = Record<string, unknown>> {

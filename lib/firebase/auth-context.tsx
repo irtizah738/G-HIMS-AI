@@ -10,13 +10,9 @@ import {
 } from 'firebase/auth';
 import { auth } from './config';
 
-export const WORKSPACE_SCOPES = [
-  'https://www.googleapis.com/auth/spreadsheets',
-  'https://www.googleapis.com/auth/spreadsheets.readonly',
-  'https://www.googleapis.com/auth/drive',
-  'https://www.googleapis.com/auth/drive.file',
-  'https://www.googleapis.com/auth/drive.readonly',
-];
+// Authentication requests identity only. Workspace/Drive scopes must be requested
+// separately and just-in-time by the feature that actually needs them.
+export const WORKSPACE_SCOPES: string[] = [];
 
 interface AuthContextType {
   user: User | null;
@@ -64,15 +60,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signInWithGoogle = useCallback(async (): Promise<string | null> => {
     try {
       const provider = new GoogleAuthProvider();
-      // Add Google Sheets and Google Drive Workspace scopes
-      WORKSPACE_SCOPES.forEach((scope) => {
-        provider.addScope(scope);
-      });
-      provider.setCustomParameters({ prompt: 'consent select_account' });
+      provider.setCustomParameters({ prompt: 'select_account' });
       
       const popupPromise = signInWithPopup(auth, provider);
       const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('auth/popup-timeout')), 4500)
+        setTimeout(() => reject(new Error('auth/popup-timeout')), 30000)
       );
 
       const result = await Promise.race([popupPromise, timeoutPromise]);

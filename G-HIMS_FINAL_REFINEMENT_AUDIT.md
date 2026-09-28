@@ -1,3 +1,5 @@
+> **Historical snapshot:** This document predates the P3 production-evidence boundary. Any production/compliance/cryptographic claims below are superseded by `G-HIMS_PRODUCTION_EVIDENCE_BOUNDARY.md` and the current system status.
+
 # G-HIMS OS — Final Product Perfection, Clinical UX, Reliability & Production Polish Audit
 **Document Version:** 1.0.0-PROD-RC  
 **Target Release:** G-HIMS OS Enterprise Pilot Release Candidate  
@@ -58,7 +60,7 @@ ONE PATIENT → ONE LONGITUDINAL RECORD → ONE OPERATIONAL CONTEXT → ONE AUDI
 16. **`supply-chain-scm-view.tsx`**: Pharmaceutical inventory, FEFO batch expiry control, automated purchase requisitions, POS dispensing.
 17. **`hr-management-view.tsx`**: Hospital workforce directory, credential verification, license expiry lockouts, shift rosters.
 18. **`resource-capacity-view.tsx`**: Biomedical equipment asset register, calibration log, maintenance work orders, room scheduling.
-19. **`audit-ledger-view.tsx`**: Immutable cryptographic audit logs, SHA-256 hash chaining, edge sync outbox monitor.
+19. **`audit-ledger-view.tsx`**: Server-owned audit evidence viewer and edge sync outbox monitor; cryptographic-chain attestation is not currently a production control.
 20. **`patient-portal-view.tsx`**: Patient self-service portal, appointments, medication refills, diagnostic reports, invoice payment.
 21. **`all-modules-directory.tsx`**: Complete 52-domain taxonomy directory across clinical, operational, and financial subsystems.
 22. **`module-readiness-matrix-view.tsx`**: Enterprise architecture maturity, compliance matrices, security controls.
@@ -91,7 +93,7 @@ ONE PATIENT → ONE LONGITUDINAL RECORD → ONE OPERATIONAL CONTEXT → ONE AUDI
 - `/beds/{bedId}`: Ward bed inventory, occupancy state, assigned patient, equipment telemetry.
 - `/billing_mismatches/{mismatchId}`: Discovered clinical note vs. billing fee discrepancies.
 - `/opd_queue/{tokenId}`: Outpatient clinic queue, priority, consultation status.
-- `/audit_logs/{logId}`: Immutable system audit records with SHA-256 integrity hashes.
+- `/audit_logs/{logId}`: Server-owned durable audit records. Hash-chain attestation is not assumed.
 - `/telehealth_sessions/{sessionId}`: Virtual visit rooms, vitals, transcription logs, e-prescriptions.
 - `/tenants/{tenantId}/...`: Multi-tenant subcollections (accounts, journal entries, staff, resources, work orders).
 

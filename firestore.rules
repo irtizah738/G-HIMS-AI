@@ -30,15 +30,23 @@ service cloud.firestore {
         get(membershipPath(tenantId)).data.status == 'ACTIVE';
     }
 
+    function membershipData(tenantId) {
+      return get(membershipPath(tenantId)).data;
+    }
+
     function memberRoles(tenantId) {
-      return get(membershipPath(tenantId)).data.roles is list
-        ? get(membershipPath(tenantId)).data.roles
-        : [get(membershipPath(tenantId)).data.role];
+      return membershipData(tenantId).get('roles', []);
+    }
+
+    function memberLegacyRole(tenantId) {
+      return membershipData(tenantId).get('role', '');
     }
 
     function hasAnyRole(tenantId, allowedRoles) {
-      return hasActiveMembership(tenantId) &&
-        memberRoles(tenantId).hasAny(allowedRoles);
+      return hasActiveMembership(tenantId) && (
+        memberRoles(tenantId).hasAny(allowedRoles) ||
+        memberLegacyRole(tenantId) in allowedRoles
+      );
     }
 
     function canReadClinical(tenantId) {

@@ -102,8 +102,17 @@ class ClinicalSyncEngine {
    * The collection/action fields remain only for optimistic local-cache rendering.
    */
   public async queueMutation(params: QueueMutationParams): Promise<OfflineMutation> {
+    const cached = await getCachedAuthSession();
+    if (!cached?.user?.uid) {
+      throw new Error('AUTHENTICATION_REQUIRED: offline commands require an authenticated originating user.');
+    }
+    if (cached.user.tenantId !== params.tenantId) {
+      throw new Error('TENANT_MISMATCH: offline command tenant must match the active session.');
+    }
+
     const mutation = await addMutation({
       tenantId: params.tenantId,
+      actorId: cached.user.uid,
       collection: params.collection,
       action: params.action,
       resourceId: params.resourceId,
@@ -183,8 +192,28 @@ class ClinicalSyncEngine {
           continue;
         }
 
-        const replayable = mutations.filter((mutation) => mutation.commandType && mutation.idempotencyKey);
-        const legacy = mutations.filter((mutation) => !mutation.commandType || !mutation.idempotencyKey);
+        const wrongActor = mutations.filter(
+          (mutation) => !mutation.actorId || mutation.actorId !== cached.user.uid
+        );
+        for (const mutation of wrongActor) {
+          await updateMutationStatus(
+            mutation.id,
+            'failed',
+            mutation.actorId
+              ? 'OFFLINE_ACTOR_MISMATCH: queued command belongs to a different authenticated user.'
+              : 'OFFLINE_ACTOR_MISSING: legacy queued command has no authoritative originating user.'
+          );
+        }
+
+        const actorOwned = mutations.filter(
+          (mutation) => mutation.actorId === cached.user.uid
+        );
+        const replayable = actorOwned.filter(
+          (mutation) => mutation.commandType && mutation.idempotencyKey
+        );
+        const legacy = actorOwned.filter(
+          (mutation) => !mutation.commandType || !mutation.idempotencyKey
+        );
 
         for (const mutation of legacy) {
           await updateMutationStatus(

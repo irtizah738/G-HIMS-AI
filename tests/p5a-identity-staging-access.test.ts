@@ -128,6 +128,18 @@ describe('G-HIMS P5A identity and staging access boundary',()=>{
     expect(storage).toContain('clearOfflineReadModelsForTenant');
   });
 
+  test('staging readiness performs real Firebase connectivity probes and exposes only blocker codes',async()=>{
+    const readiness=await source('app/api/health/ready/route.ts');
+    const admin=await source('server/firebase/admin.ts');
+
+    expect(readiness).toContain('await auth.listUsers(1)');
+    expect(readiness).toContain("db.collection('_ghims_operational').limit(1).get()");
+    expect(readiness).toContain('FIREBASE_ADMIN_AUTH_CONNECTIVITY_FAILED');
+    expect(readiness).toContain('FIRESTORE_CONNECTIVITY_FAILED');
+    expect(admin).toContain("!process.env.VERCEL");
+    expect(admin).toContain('Use FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY on Vercel');
+  });
+
   test('bootstrap requires explicit project and production confirmations',async()=>{
     const bootstrap=await source('scripts/ops/bootstrap-admin.ts');
     expect(bootstrap).toContain('GHIMS_ALLOW_ADMIN_BOOTSTRAP');

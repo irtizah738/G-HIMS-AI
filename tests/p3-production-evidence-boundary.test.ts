@@ -102,6 +102,20 @@ describe('G-HIMS P3 production evidence boundary',()=>{
     expect(ledger).toContain('cryptographic chain attestation is not currently implemented');
   });
 
+  test('audit exports and SCM evidence surfaces do not manufacture compliance or hash attestation',async()=>{
+    const auditPage=await source('app/[tenantId]/admin/audit-logs/page.tsx');
+    const auditPdf=await source('lib/audit/generateAuditPdf.ts');
+    const auditModal=await source('components/audit/AuditPdfSummaryModal.tsx');
+    const scm=await source('components/supply-chain/scm-audit-compliance-view.tsx');
+    const all=[auditPage,auditPdf,auditModal,scm].join('\n');
+    expect(all).not.toContain('100% UNBROKEN');
+    expect(all).not.toContain('SHA-256 LINKED VALIDATED');
+    expect(all).not.toContain('99.9% Full Read/Write Continuity');
+    expect(all).not.toContain('sha256_verified_immutable');
+    expect(auditPdf).toContain('NO REGULATORY OR CRYPTOGRAPHIC-CHAIN CERTIFICATION IMPLIED');
+    expect(auditModal).not.toContain('I hereby certify that this audit log extract represents an immutable, unaltered');
+  });
+
   test('current status documents do not self-approve compliance, pilot or recovery performance',async()=>{
     const docs=await Promise.all([
       source('G-HIMS_FINAL_SYSTEM_STATUS.md'),

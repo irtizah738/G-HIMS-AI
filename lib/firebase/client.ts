@@ -26,10 +26,26 @@ const clientCredentials = {
 
 assertClientFirebaseProjectIsolation(String(clientCredentials.projectId || ''));
 
-// Singleton Client App instance
-export const app: FirebaseApp = !getApps().length
-  ? initializeApp(clientCredentials)
-  : getApp();
+// Singleton Client App instance. A pre-existing default app must belong to the
+// same environment; never silently reuse another project's app.
+const existingClientApp: FirebaseApp | null = getApps().length > 0 ? getApp() : null;
+if (existingClientApp) {
+  const existingProjectId = String(existingClientApp.options.projectId || '');
+  assertClientFirebaseProjectIsolation(
+    existingProjectId || String(clientCredentials.projectId || '')
+  );
+  if (
+    existingProjectId &&
+    clientCredentials.projectId &&
+    existingProjectId !== clientCredentials.projectId
+  ) {
+    throw new Error(
+      `FIREBASE_CLIENT_PROJECT_MISMATCH: existing app uses ${existingProjectId}, expected ${clientCredentials.projectId}.`
+    );
+  }
+}
+
+export const app: FirebaseApp = existingClientApp || initializeApp(clientCredentials);
 
 // Authentication Instance
 export const auth: Auth = getAuth(app);

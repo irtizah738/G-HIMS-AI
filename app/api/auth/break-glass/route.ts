@@ -56,6 +56,7 @@ export async function POST(req: NextRequest) {
       reason,
       scope: ['EMERGENCY_CLINICAL_OVERRIDE'],
       status: 'ACTIVE',
+      reviewStatus: 'PENDING_REVIEW',
       createdAt: new Date(now).toISOString(),
       expiresAt: new Date(expiresAt).toISOString(),
     });

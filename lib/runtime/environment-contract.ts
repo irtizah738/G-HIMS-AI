@@ -6,12 +6,23 @@ function clean(value: string | undefined): string {
   return String(value || '').trim();
 }
 
-function configuredProjectMap(prefix: 'GHIMS_FIREBASE_PROJECT_ID_' | 'NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_'): ProjectMap {
+function serverProjectMap(): ProjectMap {
   return {
-    DEMO: clean(process.env[prefix + 'DEMO']),
-    TEST: clean(process.env[prefix + 'TEST']),
-    STAGING: clean(process.env[prefix + 'STAGING']),
-    PRODUCTION: clean(process.env[prefix + 'PRODUCTION']),
+    DEMO: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO),
+    TEST: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_TEST),
+    STAGING: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_STAGING),
+    PRODUCTION: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION),
+  };
+}
+
+function clientProjectMap(): ProjectMap {
+  // NEXT_PUBLIC variables must be referenced statically so Next.js can inline them
+  // into the browser bundle.
+  return {
+    DEMO: clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_DEMO),
+    TEST: clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST),
+    STAGING: clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING),
+    PRODUCTION: clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION),
   };
 }
 
@@ -69,7 +80,7 @@ export function assertServerFirebaseProjectIsolation(actualProjectId: string): v
     'server',
     getRuntimeMode(),
     actualProjectId,
-    configuredProjectMap('GHIMS_FIREBASE_PROJECT_ID_')
+    serverProjectMap()
   );
 }
 
@@ -88,6 +99,6 @@ export function assertClientFirebaseProjectIsolation(actualProjectId: string): v
     'client',
     getPublicRuntimeMode(),
     actualProjectId,
-    configuredProjectMap('NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_')
+    clientProjectMap()
   );
 }

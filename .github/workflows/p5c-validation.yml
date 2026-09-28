@@ -77,9 +77,19 @@ jobs:
         run: bun run test:rules
 
       - name: Firebase Auth and IAM integration
+        env:
+          FIREBASE_PROJECT_ID: ghims-p5a-ci
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p5a-ci
+          GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p5a-ci
+          NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p5a-ci
         run: bun run test:p5a:emulator
 
       - name: Synthetic patient and recovery journey
+        env:
+          FIREBASE_PROJECT_ID: ghims-p4-ci
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p4-ci
+          GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+          NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
         run: bun run test:p4:emulator
 
       - name: Production build

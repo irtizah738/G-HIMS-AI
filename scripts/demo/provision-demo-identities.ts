@@ -24,7 +24,7 @@ const personas: Array<{
   { email: 'demo.nurse@example.invalid', displayName: 'Demo Nurse', role: 'nurse', department: 'Inpatient Nursing' },
   { email: 'demo.reception@example.invalid', displayName: 'Demo Receptionist', role: 'reception', department: 'Patient Access' },
   { email: 'demo.billing@example.invalid', displayName: 'Demo Billing Officer', role: 'billing', department: 'Revenue Cycle' },
-  { email: 'demo.patient@example.invalid', displayName: 'Demo Patient', role: 'doctor', department: 'Demo Only' },
+  { email: 'demo.patient@example.invalid', displayName: 'Demo Patient', role: 'patient', department: 'Patient Portal' },
 ];
 
 const auth = getAdminAuth();

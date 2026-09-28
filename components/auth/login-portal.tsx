@@ -4,7 +4,6 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth/auth-context';
 import { useAuth as useFirebaseAuth } from '@/lib/firebase/auth-context';
-import { auth } from '@/lib/firebase/client';
 import {
   Lock,
   Mail,
@@ -25,7 +24,6 @@ import {
   Key,
   Globe,
   Radio,
-  ArrowRight,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -34,7 +32,6 @@ interface Persona {
   role: string;
   name: string;
   email: string;
-  pass: string;
   tenantId: string;
   department: string;
   icon: React.ComponentType<{ className?: string }>;
@@ -43,22 +40,10 @@ interface Persona {
 
 const DEMO_PERSONAS: Persona[] = [
   {
-    id: 'haider-cmo',
-    role: 'Chief Medical Officer / Admin',
-    name: 'Dr. Irtiza Haider, MD',
-    email: 'Irtiza.Haider007@gmail.com',
-    pass: 'HospitalAdmin2026!',
-    tenantId: 'central-metro-hospital',
-    department: 'Hospital Administration & Executive Health',
-    icon: ShieldCheck,
-    color: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20',
-  },
-  {
     id: 'admin',
     role: 'Administrator',
-    name: 'Dr. Arthur Pendelton',
-    email: 'admin@centralmetro.health',
-    pass: 'HospitalAdmin2026!',
+    name: 'Demo Administrator',
+    email: 'demo.admin@example.invalid',
     tenantId: 'central-metro-hospital',
     department: 'Hospital Administration',
     icon: ShieldCheck,
@@ -67,9 +52,8 @@ const DEMO_PERSONAS: Persona[] = [
   {
     id: 'doctor',
     role: 'Attending Cardiologist',
-    name: 'Dr. Sarah Jenkins, MD',
-    email: 's.jenkins@centralmetro.health',
-    pass: 'CardioDoctor2026!',
+    name: 'Demo Physician',
+    email: 'demo.doctor@example.invalid',
     tenantId: 'central-metro-hospital',
     department: 'Cardiology & Intensive Care',
     icon: Stethoscope,
@@ -78,9 +62,8 @@ const DEMO_PERSONAS: Persona[] = [
   {
     id: 'nurse',
     role: 'Head Nurse',
-    name: 'Clara Oswald, RN',
-    email: 'c.oswald@centralmetro.health',
-    pass: 'NurseInpatient2026!',
+    name: 'Demo Nurse',
+    email: 'demo.nurse@example.invalid',
     tenantId: 'central-metro-hospital',
     department: 'Inpatient Ward 4B',
     icon: HeartPulse,
@@ -89,9 +72,8 @@ const DEMO_PERSONAS: Persona[] = [
   {
     id: 'reception',
     role: 'Intake Officer',
-    name: 'Maria Santos',
-    email: 'm.santos@centralmetro.health',
-    pass: 'ReceptionStaff2026!',
+    name: 'Demo Receptionist',
+    email: 'demo.reception@example.invalid',
     tenantId: 'central-metro-hospital',
     department: 'Outpatient Patient Intake',
     icon: ClipboardList,
@@ -100,9 +82,8 @@ const DEMO_PERSONAS: Persona[] = [
   {
     id: 'billing',
     role: 'Revenue Auditor',
-    name: 'Robert Hastings',
-    email: 'r.hastings@centralmetro.health',
-    pass: 'BillingOfficer2026!',
+    name: 'Demo Billing Officer',
+    email: 'demo.billing@example.invalid',
     tenantId: 'central-metro-hospital',
     department: 'Revenue Cycle & Claims',
     icon: DollarSign,
@@ -111,9 +92,8 @@ const DEMO_PERSONAS: Persona[] = [
   {
     id: 'patient',
     role: 'Patient Portal',
-    name: 'Elena Rostova',
-    email: 'elena.rostova@example.com',
-    pass: 'PatientPortal2026!',
+    name: 'Demo Patient',
+    email: 'demo.patient@example.invalid',
     tenantId: 'central-metro-hospital',
     department: 'Consumer Health Portal',
     icon: User,
@@ -129,18 +109,17 @@ const TENANTS = [
 
 export function LoginPortal() {
   const router = useRouter();
-  const { user, signIn, signInSSO, error } = useAuth();
+  const { user, signIn, signInFederated, signInSSO, error } = useAuth();
   const { signInWithGoogle } = useFirebaseAuth();
 
-  const [email, setEmail] = useState('Irtiza.Haider007@gmail.com');
-  const [password, setPassword] = useState('HospitalAdmin2026!');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [tenantId, setTenantId] = useState('central-metro-hospital');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberDevice, setRememberDevice] = useState(true);
   const [localError, setLocalError] = useState<string | null>(null);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [loggingPersonaId, setLoggingPersonaId] = useState<string | null>(null);
 
   // Auto-redirect if already authenticated
   useEffect(() => {
@@ -151,9 +130,10 @@ export function LoginPortal() {
 
   // SSO Modal State
   const [ssoModalOpen, setSsoModalOpen] = useState(false);
-  const [ssoEmail, setSsoEmail] = useState('Irtiza.Haider007@gmail.com');
+  const [ssoEmail, setSsoEmail] = useState('');
   const [ssoProvider, setSsoProvider] = useState<'OKTA' | 'AZURE_AD' | 'SAML' | 'GOOGLE'>('OKTA');
   const [ssoLoading, setSsoLoading] = useState(false);
+  const showDemoPersonas = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -196,56 +176,25 @@ export function LoginPortal() {
     setLocalError(null);
     setGoogleLoading(true);
     try {
-      await signInWithGoogle().catch(() => null);
-      const googleUser = auth.currentUser;
-      const targetEmail = googleUser?.email || 'Irtiza.Haider007@gmail.com';
-      const result = await signIn(targetEmail, 'HospitalAdmin2026!', {
+      const googleToken = await signInWithGoogle();
+      if (!googleToken) return;
+
+      const result = await signInFederated({
         tenantId,
         rememberDevice,
       });
-      if (result?.authenticated) {
-        if (typeof window !== 'undefined') {
-          if (window.location.pathname === '/login') {
-            router.replace('/');
-          } else {
-            router.refresh();
-          }
+
+      if (result?.authenticated && typeof window !== 'undefined') {
+        if (window.location.pathname === '/login') {
+          router.replace('/');
+        } else {
+          router.refresh();
         }
       }
     } catch (err: any) {
-      setLocalError(err?.message || 'Google Hospital Identity Sign In failed');
+      setLocalError(err?.userMessage || err?.message || 'Google Identity sign in failed');
     } finally {
       setGoogleLoading(false);
-    }
-  };
-
-  const handleInstantPersonaLogin = async (persona: Persona) => {
-    setEmail(persona.email);
-    setPassword(persona.pass);
-    setTenantId(persona.tenantId);
-    setLocalError(null);
-    setLoggingPersonaId(persona.id);
-    setSubmitting(true);
-
-    try {
-      const result = await signIn(persona.email, persona.pass, {
-        tenantId: persona.tenantId,
-        rememberDevice,
-      });
-      if (result?.authenticated) {
-        if (typeof window !== 'undefined') {
-          if (window.location.pathname === '/login') {
-            router.replace('/');
-          } else {
-            router.refresh();
-          }
-        }
-      }
-    } catch (err: any) {
-      setLocalError(err?.userMessage || err?.message || 'Authentication failed');
-    } finally {
-      setSubmitting(false);
-      setLoggingPersonaId(null);
     }
   };
 
@@ -281,7 +230,7 @@ export function LoginPortal() {
 
   const handleSelectPersona = (persona: Persona) => {
     setEmail(persona.email);
-    setPassword(persona.pass);
+    setPassword('');
     setTenantId(persona.tenantId);
     setLocalError(null);
   };
@@ -312,7 +261,7 @@ export function LoginPortal() {
         <div className="flex items-center gap-4 text-xs text-slate-400">
           <span className="hidden sm:flex items-center gap-1.5 font-mono text-[11px] text-slate-300">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            Zero-Trust Auth & HIPAA Tier-4
+            Server-Authoritative Identity
           </span>
         </div>
       </header>
@@ -494,7 +443,7 @@ export function LoginPortal() {
             <div className="mt-6 pt-4 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-500">
               <span className="flex items-center gap-1">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                TLS 1.3 + FIPS 140-3 Compliant
+                Firebase identity + server session
               </span>
               <span className="font-mono text-[10px] text-slate-400">
                 Session Timeout: 15 min
@@ -508,18 +457,18 @@ export function LoginPortal() {
               <div className="flex items-center justify-between">
                 <div className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
                   <ShieldCheck className="w-4 h-4 text-blue-400" />
-                  Quick Staff Personas
+                  Demo Staff Personas
                 </div>
                 <span className="text-[10px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded-full">
-                  Fast Verification
+                  DEMO only
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 leading-normal">
-                Select any verified hospital role to test credential-gated privileges, department scopes, and clinical workflows:
+                Demo personas only select an identity email. They do not contain passwords or bypass Firebase Authentication.
               </p>
 
               <div className="grid grid-cols-1 gap-2 pt-1 max-h-[380px] overflow-y-auto pr-1">
-                {DEMO_PERSONAS.map((p) => {
+                {showDemoPersonas ? DEMO_PERSONAS.map((p) => {
                   const Icon = p.icon;
                   const isSelected = email === p.email;
                   return (
@@ -556,25 +505,16 @@ export function LoginPortal() {
                         </div>
                       </button>
 
-                      <button
-                        type="button"
-                        onClick={() => handleInstantPersonaLogin(p)}
-                        disabled={submitting}
-                        title={`Instant Sign In as ${p.name}`}
-                        className="shrink-0 px-2.5 py-1 text-[11px] font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow-xs transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                      >
-                        {loggingPersonaId === p.id ? (
-                          <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        ) : (
-                          <>
-                            <span>Login</span>
-                            <ArrowRight className="w-3 h-3" />
-                          </>
-                        )}
-                      </button>
+                      <span className="shrink-0 px-2 py-1 text-[10px] font-semibold text-slate-400 border border-slate-700 rounded-lg">
+                        Select
+                      </span>
                     </div>
                   );
-                })}
+                }) : (
+                  <div className="p-4 rounded-xl border border-slate-800 bg-slate-950/40 text-[11px] text-slate-400 leading-relaxed">
+                    Demo personas are disabled outside the DEMO runtime. Use a provisioned Firebase identity and an active tenant membership.
+                  </div>
+                )}
               </div>
             </div>
 
@@ -582,7 +522,7 @@ export function LoginPortal() {
             <div className="bg-slate-900/40 border border-slate-800/60 rounded-xl p-3.5 flex items-center gap-3 text-xs text-slate-400">
               <Laptop className="w-4 h-4 text-blue-400 shrink-0" />
               <div className="text-[11px] leading-tight">
-                <span className="font-semibold text-slate-200">Offline-Ready Architecture:</span> Authenticated sessions and clinical rosters persist in IndexedDB for unhindered offline triage.
+                <span className="font-semibold text-slate-200">Offline-Ready Architecture:</span> Offline continuity is bounded by the cached authenticated session. Protected server mutations require an online authoritative session.
               </div>
             </div>
           </div>

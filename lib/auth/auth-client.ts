@@ -8,6 +8,8 @@ import {
   signOut as firebaseSignOut,
   sendPasswordResetEmail,
   onIdTokenChanged,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
   User as FirebaseUser,
 } from 'firebase/auth';
 import { auth } from '@/lib/firebase/client';
@@ -32,7 +34,107 @@ export interface SignInOptions {
 
 export class AuthClient {
   /**
-   * Primary Sign In: Authenticates against Authoritative Backend, establishes session, and signs into Firebase Client SDK
+   * Exchange the currently authenticated Firebase identity for a server-authoritative
+   * G-HIMS tenant session. Firebase Auth remains the only identity/password authority.
+   */
+  private static async establishServerSession(
+    options?: SignInOptions
+  ): Promise<LoginResponsePayload> {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      throw new AuthError({
+        code: 'AUTHENTICATION_REQUIRED',
+        message: 'A Firebase identity is required before establishing a G-HIMS session.',
+        statusCode: 401,
+      });
+    }
+
+    const requestedTenantId = options?.tenantId || 'central-metro-hospital';
+    const deviceMeta = generateDeviceMetadata();
+    const rememberDevice = options?.rememberDevice ?? true;
+    const idToken = await currentUser.getIdToken(true);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+    let response: Response;
+    try {
+      response = await fetch('/api/auth/session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          tenantId: requestedTenantId,
+          device: deviceMeta,
+          rememberDevice,
+        }),
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      await firebaseSignOut(auth).catch(() => {});
+      throw new AuthError({
+        code: data.code || 'AUTHORIZATION_REQUIRED',
+        message: data.error || 'Hospital authorization failed',
+        statusCode: response.status,
+        userMessage: data.userMessage || data.error,
+      });
+    }
+
+    const loginPayload: LoginResponsePayload = data;
+    await currentUser.getIdToken(true);
+
+    const effectiveDeviceId = rememberDevice ? deviceMeta.deviceId : undefined;
+
+    const authUser: AuthenticatedUser = {
+      uid: loginPayload.user.uid,
+      email: loginPayload.user.email,
+      displayName: loginPayload.user.displayName,
+      tenantId: loginPayload.tenant.tenantId,
+      roles: loginPayload.authorization.roles,
+      permissions: loginPayload.authorization.permissions,
+      departmentIds: loginPayload.authorization.departmentIds,
+      facilityIds: loginPayload.authorization.facilityIds,
+      accountStatus: loginPayload.authorization.accountStatus,
+      clinicalPrivileges: loginPayload.authorization.clinicalPrivileges,
+      sessionId: loginPayload.session.sessionId,
+      deviceId: effectiveDeviceId,
+      lastAuthenticatedAt: new Date().toISOString(),
+    };
+
+    const now = new Date().toISOString();
+    const sessionRecord: UserSessionRecord = {
+      sessionId: loginPayload.session.sessionId,
+      userId: loginPayload.user.uid,
+      tenantId: loginPayload.tenant.tenantId,
+      deviceId: effectiveDeviceId,
+      status: 'ACTIVE',
+      createdAt: now,
+      lastSeenAt: now,
+      authenticatedAt: now,
+      lastActivityAt: now,
+      expiresAt: loginPayload.session.expiresAt,
+    };
+
+    try {
+      await saveCachedAuthSession(authUser, sessionRecord);
+    } catch (cacheErr) {
+      console.warn('Notice: Local session caching warning:', cacheErr);
+    }
+
+    return loginPayload;
+  }
+
+  /**
+   * Email/password sign in. Firebase Authentication validates the credential;
+   * the backend only exchanges the verified identity for tenant/session authority.
    */
   public static async signIn(
     email: string,
@@ -41,89 +143,51 @@ export class AuthClient {
   ): Promise<LoginResponsePayload> {
     try {
       const cleanEmail = email.trim();
-      const requestedTenantId = options?.tenantId || 'central-metro-hospital';
-      const deviceMeta = generateDeviceMetadata();
+      await signInWithEmailAndPassword(auth, cleanEmail, pass);
+      return await this.establishServerSession(options);
+    } catch (err) {
+      throw mapAuthError(err);
+    }
+  }
 
-      // Firebase Authentication is the only password authority. The G-HIMS backend
-      // never receives, stores, resets, or synchronizes the submitted password.
-      const credential = await signInWithEmailAndPassword(auth, cleanEmail, pass);
-      const idToken = await credential.user.getIdToken(true);
+  /**
+   * Complete Google/OIDC/Firebase-provider login without re-entering a password.
+   */
+  public static async signInWithCurrentFirebaseIdentity(
+    options?: SignInOptions
+  ): Promise<LoginResponsePayload> {
+    try {
+      return await this.establishServerSession(options);
+    } catch (err) {
+      throw mapAuthError(err);
+    }
+  }
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 12000);
+  /**
+   * Reauthenticate the current password-based Firebase identity without creating
+   * a second G-HIMS session. The existing server session is revalidated afterward.
+   */
+  public static async reauthenticateCurrentSession(password: string): Promise<boolean> {
+    const currentUser = auth.currentUser;
+    const cached = await getCachedAuthSession();
 
-      let response: Response;
-      try {
-        response = await fetch('/api/auth/session', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${idToken}`,
-          },
-          signal: controller.signal,
-          body: JSON.stringify({
-            tenantId: requestedTenantId,
-            device: deviceMeta,
-            rememberDevice: options?.rememberDevice ?? true,
-          }),
-        });
-      } finally {
-        clearTimeout(timeoutId);
-      }
+    if (!currentUser?.email || !cached) return false;
 
-      const data = await response.json();
+    const providerIds = currentUser.providerData.map((provider) => provider.providerId);
+    if (!providerIds.includes('password')) {
+      throw new AuthError({
+        code: 'REAUTH_PROVIDER_REQUIRED',
+        message: 'This account uses a federated identity provider.',
+        statusCode: 400,
+        userMessage: 'Unlock this workstation using your configured identity provider.',
+      });
+    }
 
-      if (!response.ok) {
-        await firebaseSignOut(auth).catch(() => {});
-        throw new AuthError({
-          code: data.code || 'AUTHORIZATION_REQUIRED',
-          message: data.error || 'Hospital authorization failed',
-          statusCode: response.status,
-          userMessage: data.userMessage || data.error,
-        });
-      }
-
-      const loginPayload: LoginResponsePayload = data;
-
-      // Refresh the token after the backend has synchronized tenant read claims.
-      await credential.user.getIdToken(true);
-
-      const authUser: AuthenticatedUser = {
-        uid: loginPayload.user.uid,
-        email: loginPayload.user.email,
-        displayName: loginPayload.user.displayName,
-        tenantId: loginPayload.tenant.tenantId,
-        roles: loginPayload.authorization.roles,
-        permissions: loginPayload.authorization.permissions,
-        departmentIds: loginPayload.authorization.departmentIds,
-        facilityIds: loginPayload.authorization.facilityIds,
-        accountStatus: loginPayload.authorization.accountStatus,
-        clinicalPrivileges: loginPayload.authorization.clinicalPrivileges,
-        sessionId: loginPayload.session.sessionId,
-        deviceId: deviceMeta.deviceId,
-        lastAuthenticatedAt: new Date().toISOString(),
-      };
-
-      const sessionRecord: UserSessionRecord = {
-        sessionId: loginPayload.session.sessionId,
-        userId: loginPayload.user.uid,
-        tenantId: loginPayload.tenant.tenantId,
-        deviceId: deviceMeta.deviceId,
-        status: 'ACTIVE',
-        createdAt: new Date().toISOString(),
-        lastSeenAt: new Date().toISOString(),
-        authenticatedAt: new Date().toISOString(),
-        lastActivityAt: new Date().toISOString(),
-        expiresAt: loginPayload.session.expiresAt,
-      };
-
-      try {
-        await saveCachedAuthSession(authUser, sessionRecord);
-      } catch (cacheErr) {
-        console.warn('Notice: Local session caching warning:', cacheErr);
-      }
-
-      return loginPayload;
+    try {
+      const credential = EmailAuthProvider.credential(currentUser.email, password);
+      await reauthenticateWithCredential(currentUser, credential);
+      const payload = await this.validateCurrentSession();
+      return Boolean(payload?.authenticated);
     } catch (err) {
       throw mapAuthError(err);
     }
@@ -289,29 +353,27 @@ export class AuthClient {
   }
 
   /**
-   * Request Password Reset Instructions
+   * Request password reset through Firebase Client Auth, which actually sends the
+   * configured Firebase reset email. The server endpoint is audit-only.
    */
   public static async sendPasswordReset(email: string): Promise<{ success: boolean; message: string }> {
-    try {
-      // Server-side password reset request with audit logging
-      const response = await fetch('/api/auth/password-reset', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim() }),
-      });
+    const cleanEmail = email.trim().toLowerCase();
+    const genericMessage =
+      'If an account exists for this email, password-reset instructions have been sent.';
 
-      const data = await response.json();
-      return {
-        success: true,
-        message: data.message || 'If an account exists for this email, password-reset instructions have been sent.',
-      };
+    try {
+      await sendPasswordResetEmail(auth, cleanEmail);
     } catch {
-      // Return identical generic success message to prevent user enumeration
-      return {
-        success: true,
-        message: 'If an account exists for this email, password-reset instructions have been sent.',
-      };
+      // Preserve a non-enumerating response for unknown users/provider differences.
     }
+
+    await fetch('/api/auth/password-reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: cleanEmail }),
+    }).catch(() => {});
+
+    return { success: true, message: genericMessage };
   }
 
   /**

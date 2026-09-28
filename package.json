@@ -29,7 +29,9 @@
     "demo:provision-identities": "bun scripts/demo/provision-demo-identities.ts",
     "validate:p5a": "bun run typecheck && bun run lint && bun run test:p5a && bun run test:unit && bun run test:security && bun run test:rules && bun run test:p5a:emulator && bun run build && bun run test:e2e",
     "ops:staging-smoke": "bun scripts/ops/staging-smoke.ts",
-    "test:p5b": "bun test tests/p5b-staging-verification.test.ts"
+    "test:p5b": "bun test tests/p5b-staging-verification.test.ts",
+    "test:p5c": "bun test tests/p5c-pilot-readiness.test.ts",
+    "validate:p5c": "bun run typecheck && bun run lint && bun run test:p5c && bun run test:unit && bun run test:security && bun run test:rules && bun run test:p5a:emulator && bun run test:p4:emulator && bun run build && bun run test:e2e"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

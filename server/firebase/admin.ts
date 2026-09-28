@@ -69,13 +69,20 @@ function canUseFirebaseEmulator(): boolean {
   return canUseFirestoreEmulator() || canUseAuthEmulator();
 }
 
+function canUseApplicationDefaultCredentials(): boolean {
+  // Vercel functions do not have a local service-account JSON file unless an
+  // operator explicitly provisions one into the runtime, which G-HIMS does not do.
+  // Use FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY on Vercel.
+  return Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS) && !process.env.VERCEL;
+}
+
 export function hasAdminCredentials(): boolean {
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim();
   const privateKey = formatPrivateKey(process.env.FIREBASE_PRIVATE_KEY);
 
   return Boolean(
     (clientEmail && privateKey) ||
-    process.env.GOOGLE_APPLICATION_CREDENTIALS
+    canUseApplicationDefaultCredentials()
   );
 }
 
@@ -131,7 +138,7 @@ export function getAdminApp(): App | null {
     }
   }
 
-  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+  if (canUseApplicationDefaultCredentials()) {
     try {
       adminApp = initializeApp({
         credential: applicationDefault(),

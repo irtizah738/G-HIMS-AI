@@ -51,7 +51,7 @@ interface AuthContextType {
   hasPermission: (permission: string) => boolean;
   hasRole: (role: string) => boolean;
   hasPrivilege: (privilege: string) => boolean;
-  triggerBreakGlass: (reason: string) => Promise<void>;
+  triggerBreakGlass: (reason: string, patientId: string, encounterId: string) => Promise<void>;
   refreshAuth: () => Promise<void>;
 }
 
@@ -373,21 +373,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Break-Glass Emergency Access Elevation Action
   const triggerBreakGlass = useCallback(
-    async (reason: string) => {
-      if (!user) return;
-      const res = await fetch('/api/auth/break-glass', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: user.uid,
-          tenantId: user.tenantId,
-          reason,
-        }),
-      });
-
-      if (res.ok) {
-        setUser((prev) => (prev ? { ...prev, isEmergencyOverride: true } : null));
+    async (reason: string, patientId: string, encounterId: string) => {
+      if (!user || !patientId || !encounterId) {
+        throw new Error('Patient and encounter context are required for emergency access.');
       }
+
+      const res = await AuthClient.authorizedFetch(
+        '/api/auth/break-glass',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tenantId: user.tenantId,
+            patientId,
+            encounterId,
+            reason,
+          }),
+        },
+        user.tenantId
+      );
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Emergency access request failed');
+      }
+
+      setUser((prev) => (prev ? { ...prev, isEmergencyOverride: true } : null));
     },
     [user]
   );

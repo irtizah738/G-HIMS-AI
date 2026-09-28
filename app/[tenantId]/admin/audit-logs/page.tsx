@@ -201,7 +201,7 @@ export default function TenantAuditLogsPage() {
   const [roleSearchQuery, setRoleSearchQuery] = useState<string>('');
   const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
   const [verificationResult, setVerificationResult] = useState<ChainVerificationResult | null>(null);
-  const [logVerificationMap, setLogVerificationMap] = useState<Record<string, 'VERIFIED' | 'MISMATCH'>>({});
+  const [logVerificationMap, setLogVerificationMap] = useState<Record<string, 'VERIFIED' | 'MISMATCH' | 'UNVERIFIED'>>({});
   const [isVerifying, setIsVerifying] = useState<boolean>(false);
   const [isSummaryDrawerOpen, setIsSummaryDrawerOpen] = useState<boolean>(false);
   const [activeLogModal, setActiveLogModal] = useState<AuditLogEntry | null>(null);
@@ -222,24 +222,27 @@ export default function TenantAuditLogsPage() {
   const selectAllCheckboxRef = useRef<HTMLInputElement>(null);
 
   // Helper to verify individual logs in the chain
-  const verifyIndividualLogs = async (logList: AuditLogEntry[]): Promise<Record<string, 'VERIFIED' | 'MISMATCH'>> => {
+  const verifyIndividualLogs = async (logList: AuditLogEntry[]): Promise<Record<string, 'VERIFIED' | 'MISMATCH' | 'UNVERIFIED'>> => {
     if (!logList || logList.length === 0) return {};
-    const statusMap: Record<string, 'VERIFIED' | 'MISMATCH'> = {};
+    const statusMap: Record<string, 'VERIFIED' | 'MISMATCH' | 'UNVERIFIED'> = {};
     const sorted = [...logList].sort(
       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
 
     for (let i = 0; i < sorted.length; i++) {
       const current = sorted[i];
-      const expectedPreviousHash = i === 0 ? current.previousHash : sorted[i - 1].hash;
 
-      // Link mismatch
+      if (!current.hash || !current.previousHash || current.authoritative === false) {
+        statusMap[current.id] = 'UNVERIFIED';
+        continue;
+      }
+
+      const expectedPreviousHash = i === 0 ? current.previousHash : sorted[i - 1].hash;
       if (i > 0 && current.previousHash !== expectedPreviousHash) {
         statusMap[current.id] = 'MISMATCH';
         continue;
       }
 
-      // Recompute canonical SHA-256
       const canonical = buildCanonicalAuditString(
         current.previousHash,
         current.tenantId,
@@ -251,11 +254,7 @@ export default function TenantAuditLogsPage() {
         current.details
       );
       const expectedHash = await calculateSha256(canonical);
-      if (expectedHash === current.hash) {
-        statusMap[current.id] = 'VERIFIED';
-      } else {
-        statusMap[current.id] = 'MISMATCH';
-      }
+      statusMap[current.id] = expectedHash === current.hash ? 'VERIFIED' : 'MISMATCH';
     }
     return statusMap;
   };
@@ -661,7 +660,7 @@ export default function TenantAuditLogsPage() {
       'Resource Target',
       'Status',
       'IP Address',
-      'SHA-256 Hash',
+      'Record Hash (if present)',
       'Previous Hash',
       'Details',
     ];
@@ -687,7 +686,7 @@ export default function TenantAuditLogsPage() {
     link.setAttribute('href', encodedUri);
     link.setAttribute(
       'download',
-      `HIPAA_Audit_Ledger_${tenantId}${filenameSuffix ? `_${filenameSuffix}` : ''}_${
+      `Audit_Evidence_Ledger_${tenantId}${filenameSuffix ? `_${filenameSuffix}` : ''}_${
         new Date().toISOString().split('T')[0]
       }.csv`
     );
@@ -720,8 +719,8 @@ export default function TenantAuditLogsPage() {
         exportedAt: new Date().toISOString(),
         totalSelected: target.length,
         isSelectiveBatch: isSelectionBatch,
-        systemAuditEngine: 'G-HIMS Immutable Event Ledger v2.4',
-        chainIntegrityStatus: verificationResult?.isValid ? 'VERIFIED_VALID' : 'UNVERIFIED_OR_MISMATCH_DETECTED',
+        systemAuditEngine: 'G-HIMS Server Audit Evidence',
+        chainIntegrityStatus: verificationResult?.reason || (verificationResult?.isValid ? 'HASHES_VERIFIED_FOR_LOADED_RECORDS' : 'NOT_ATTESTED'),
         filterSnapshot: {
           onlyAlertsAndWarningsActive: onlyAlertsAndWarnings,
           selectedStatus,
@@ -779,7 +778,7 @@ export default function TenantAuditLogsPage() {
               <ShieldCheck className="w-4 h-4" />
             </span>
             <h1 className="text-xl font-bold text-slate-900">
-              HIPAA &amp; ISO 27001 Compliance Audit Ledger
+              Security Audit Evidence Ledger
             </h1>
           </div>
           <p className="text-xs text-slate-500 mt-1">
@@ -840,7 +839,7 @@ export default function TenantAuditLogsPage() {
             className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
           >
             <Lock className={`w-3.5 h-3.5 ${isVerifying ? 'animate-spin' : 'text-emerald-400'}`} />
-            <span>{isVerifying ? 'Verifying Hashes...' : 'Verify Cryptographic Chain'}</span>
+            <span>{isVerifying ? 'Verifying Hashes...' : 'Verify available hashes'}</span>
           </button>
 
           {/* Download PDF Report Button */}
@@ -848,7 +847,7 @@ export default function TenantAuditLogsPage() {
             type="button"
             onClick={() => handleExportPDF(filteredLogs)}
             className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
-            title="Download formal branded HIPAA & ISO 27001 PDF compliance report"
+            title="Download audit evidence PDF report"
           >
             <FileDown className="w-3.5 h-3.5" />
             <span>Download PDF Report</span>
@@ -1579,7 +1578,7 @@ export default function TenantAuditLogsPage() {
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-bold text-slate-900">Cryptographic Audit Sequence</h3>
+            <h3 className="text-sm font-bold text-slate-900">Audit Record Sequence</h3>
             <span className="text-xs text-slate-400 font-mono">
               ({filteredLogs.length} events matching filter)
             </span>
@@ -1592,7 +1591,7 @@ export default function TenantAuditLogsPage() {
               </span>
             )}
             <span className="text-[11px] text-slate-500 font-mono hidden sm:inline-block">
-              Chain Mode: Forward Linked SHA-256
+              Hash attestation: only where hashes are actually present
             </span>
           </div>
         </div>
@@ -1600,7 +1599,7 @@ export default function TenantAuditLogsPage() {
         {isLoading ? (
           <div className="p-12 text-center text-slate-400 text-xs flex items-center justify-center gap-2">
             <RefreshCw className="w-4 h-4 animate-spin text-blue-600" />
-            <span>Loading cryptographic audit logs...</span>
+            <span>Loading durable audit records...</span>
           </div>
         ) : filteredLogs.length === 0 ? (
           <div className="p-12 text-center text-slate-400 text-xs">
@@ -1628,7 +1627,7 @@ export default function TenantAuditLogsPage() {
                   <th className="py-3 px-4 text-left">Resource Target</th>
                   <th className="py-3 px-4 text-left">IP Address</th>
                   <th className="py-3 px-4 text-center">Verification</th>
-                  <th className="py-3 px-4 text-left">Cryptographic Hash</th>
+                  <th className="py-3 px-4 text-left">Record Hash</th>
                   <th className="py-3 px-4 text-right">Status</th>
                   <th className="py-3 px-4 text-center">Inspect</th>
                 </tr>
@@ -1639,7 +1638,7 @@ export default function TenantAuditLogsPage() {
                   const isAlert = log.status === 'SECURITY_ALERT' || log.status === 'WARNING';
                   const isConflict =
                     log.status === 'CONFLICT_RESOLVED' || log.action === 'OFFLINE_SYNC_OVERRIDE';
-                  const logVerification = logVerificationMap[log.id] || (verificationResult?.isValid ? 'VERIFIED' : 'MISMATCH');
+                  const logVerification = logVerificationMap[log.id] || 'UNVERIFIED';
                   const isMismatch = logVerification === 'MISMATCH';
 
                   return (
@@ -1729,12 +1728,17 @@ export default function TenantAuditLogsPage() {
                         ) : logVerification === 'VERIFIED' ? (
                           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs">
                             <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                            <span>Verified</span>
+                            <span>Hash verified</span>
                           </span>
-                        ) : (
+                        ) : logVerification === 'MISMATCH' ? (
                           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200 shadow-2xs">
                             <ShieldAlert className="w-3 h-3 text-rose-600" />
-                            <span>Mismatch</span>
+                            <span>Hash mismatch</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 shadow-2xs">
+                            <AlertTriangle className="w-3 h-3 text-amber-600" />
+                            <span>Not attested</span>
                           </span>
                         )}
                       </td>
@@ -1743,7 +1747,7 @@ export default function TenantAuditLogsPage() {
                       <td className="py-3 px-4 font-mono text-[10px] text-slate-600">
                         <div className="flex items-center gap-1">
                           <span className="text-blue-700 font-bold">
-                            {log.hash.substring(0, 10)}...
+                            {log.hash ? `${log.hash.substring(0, 10)}...` : 'Not attested'}
                           </span>
                           <button
                             type="button"
@@ -1783,7 +1787,7 @@ export default function TenantAuditLogsPage() {
                           type="button"
                           onClick={() => setActiveLogModal(log)}
                           className="p-1.5 rounded-lg bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-600 transition-colors cursor-pointer"
-                          title="View complete cryptographic audit payload"
+                          title="View complete audit record payload"
                         >
                           <Eye className="w-3.5 h-3.5" />
                         </button>
@@ -1887,7 +1891,7 @@ export default function TenantAuditLogsPage() {
               <div>
                 <div className="flex items-center gap-2">
                   <ShieldCheck className="w-5 h-5 text-emerald-400" />
-                  <h3 className="text-base font-bold text-white">Immutable HIPAA Audit Record</h3>
+                  <h3 className="text-base font-bold text-white">Server-Owned Audit Record</h3>
                 </div>
                 <p className="text-xs text-slate-400 font-mono mt-0.5">
                   Event ID: {activeLogModal.id}
@@ -1945,14 +1949,14 @@ export default function TenantAuditLogsPage() {
                 </p>
               </div>
 
-              {/* Cryptographic Hash Chaining Verification Box */}
+              {/* Record Hash Chaining Verification Box */}
               <div className="p-4 rounded-xl bg-slate-900 text-white space-y-3 font-mono">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] text-slate-400 uppercase font-bold flex items-center gap-1.5">
                     <KeyRound className="w-3.5 h-3.5 text-emerald-400" /> Cryptographic Chain
                     Integrity
                   </span>
-                  <span className="text-[10px] text-emerald-400 font-bold">SHA-256 Validated</span>
+                  <span className="text-[10px] text-emerald-400 font-bold">Only when present</span>
                 </div>
 
                 <div className="space-y-1.5 text-[11px]">
@@ -2002,7 +2006,7 @@ export default function TenantAuditLogsPage() {
                     </span>
                   </h3>
                   <p className="text-xs text-slate-400 font-mono mt-0.5">
-                    Tenant: <span className="text-purple-300 font-bold">{tenantId}</span> • HIPAA §164.312(b) &amp; ISO 27001
+                    Tenant: <span className="text-purple-300 font-bold">{tenantId}</span> • repository audit evidence
                   </p>
                 </div>
               </div>
@@ -2035,7 +2039,7 @@ export default function TenantAuditLogsPage() {
                 <div>
                   <div className="flex items-center gap-1.5 text-purple-900 font-bold text-sm">
                     <ShieldCheck className="w-4 h-4 text-purple-600" />
-                    <span>Cryptographic Audit Chain Attestation</span>
+                    <span>Audit Evidence Summary</span>
                   </div>
                   <p className="text-xs text-purple-800 mt-1">
                     Generated on <strong>{new Date().toLocaleString()}</strong> for batch subset of <strong>{selectedLogsList.length}</strong> sequential audit records.
@@ -2187,7 +2191,7 @@ export default function TenantAuditLogsPage() {
                       </thead>
                       <tbody className="divide-y divide-slate-100 bg-white font-mono">
                         {selectedLogsList.map((log) => {
-                          const status = logVerificationMap[log.id] || (verificationResult?.isValid ? 'VERIFIED' : 'MISMATCH');
+                          const status = logVerificationMap[log.id] || 'UNVERIFIED';
                           return (
                             <tr key={log.id} className="hover:bg-slate-50">
                               <td className="py-1.5 px-3 text-slate-500 whitespace-nowrap text-[10px]">
@@ -2219,12 +2223,11 @@ export default function TenantAuditLogsPage() {
                               </td>
                               <td className="py-1.5 px-3 text-center">
                                 {status === 'VERIFIED' ? (
-                                  <span className="text-emerald-600 font-bold text-[10px] flex items-center justify-center gap-0.5">
-                                    <Check className="w-3 h-3" />
-                                    <span>OK</span>
-                                  </span>
+                                  <span className="text-emerald-600 font-bold text-[10px]">Hash OK</span>
+                                ) : status === 'MISMATCH' ? (
+                                  <span className="text-rose-600 font-bold text-[10px]">Hash mismatch</span>
                                 ) : (
-                                  <span className="text-rose-600 font-bold text-[10px]">Mismatch</span>
+                                  <span className="text-amber-600 font-bold text-[10px]">Not attested</span>
                                 )}
                               </td>
                             </tr>
@@ -2241,14 +2244,14 @@ export default function TenantAuditLogsPage() {
                 <div className="flex items-center justify-between">
                   <span className="text-slate-400 uppercase text-[10px] font-bold flex items-center gap-1.5">
                     <KeyRound className="w-3.5 h-3.5 text-purple-400" />
-                    Cryptographic Ledger Seal
+                    Evidence Boundary
                   </span>
                   <span className="text-emerald-400 font-bold text-[10px]">
-                    SHA-256 LINKED VALIDATED
+                    NO COMPLIANCE ATTESTATION
                   </span>
                 </div>
                 <p className="text-slate-300 font-sans text-xs leading-relaxed">
-                  This summary report confirms that all selected records satisfy HIPAA Security Rule §164.312(b) and ISO/IEC 27001:2022 Control A.12.4. Cryptographic forward-chaining prevents retroactive alterations.
+                  This report contains repository audit evidence only. It does not certify regulatory compliance or cryptographic-chain integrity unless corresponding external and technical evidence exists.
                 </p>
               </div>
             </div>

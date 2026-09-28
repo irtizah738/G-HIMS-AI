@@ -38,6 +38,14 @@ describe('G-HIMS P5C pilot readiness guards', () => {
     expect(clinicalBlock).not.toContain("'patient'");
   });
 
+  test('patient registration requires a stable caller-supplied idempotency key', async () => {
+    const route = await source('app/api/clinical/encounter/create/route.ts');
+
+    expect(route).toContain("req.headers.get('idempotency-key')");
+    expect(route).toContain('IDEMPOTENCY_KEY_REQUIRED');
+    expect(route).not.toContain("body.idempotencyKey || `idem_");
+  });
+
   test('P5C validation includes security rules and staged recovery regressions', async () => {
     const pkg = JSON.parse(await source('package.json'));
 

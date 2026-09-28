@@ -379,7 +379,6 @@ describe('G-HIMS P1 durable command infrastructure', () => {
         patientId,
         category: 'SOAP',
         content: 'Patient reviewed. Assessment and plan documented by clinician.',
-        sourceDraftId: 'draft-test',
         acceptedStructuredData: {
           chiefComplaint: 'Follow-up',
         },

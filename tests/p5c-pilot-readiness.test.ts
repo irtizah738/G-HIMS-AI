@@ -63,4 +63,10 @@ describe('G-HIMS P5C pilot readiness guards', () => {
     expect(workflow).toContain('FIREBASE_PROJECT_ID: ghims-p4-ci');
     expect(workflow).toContain('GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci');
   });
+
+  test('main cannot auto-deploy directly to Vercel production', async () => {
+    const config = JSON.parse(await source('vercel.json'));
+
+    expect(config.git?.deploymentEnabled?.main).toBe(false);
+  });
 });

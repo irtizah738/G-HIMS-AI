@@ -32,13 +32,27 @@ Before controlled pilot use:
 
 ### STAGING-01 — Current-main deployment proof
 
-Deploy the exact approved P5C/main commit to dedicated STAGING and run:
+Automatic Vercel Git deployment from `main` is intentionally disabled in `vercel.json`. A merge to `main` must not be equivalent to a production release.
+
+Create/use a dedicated Vercel custom environment named `staging` and configure it with a dedicated staging Firebase project. At minimum:
+
+- `GHIMS_RUNTIME_MODE=STAGING`
+- `NEXT_PUBLIC_GHIMS_RUNTIME_MODE=STAGING`
+- `FIREBASE_PROJECT_ID=<dedicated-staging-project>`
+- `NEXT_PUBLIC_FIREBASE_PROJECT_ID=<dedicated-staging-project>`
+- `GHIMS_FIREBASE_PROJECT_ID_STAGING=<dedicated-staging-project>`
+- `NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING=<dedicated-staging-project>`
+- staging-only Firebase Admin credentials;
+- matching Firestore database configuration;
+- pilot-unneeded external integrations set to `DISABLED`.
+
+Deploy the exact approved main commit explicitly to the `staging` target, then run:
 
 `GHIMS_STAGING_BASE_URL=https://<staging-host> bun run ops:staging-smoke`
 
 Retain deployment ID, Git commit SHA, readiness response, smoke output, operator, and timestamp.
 
-A Vercel build-rate-limit or other platform quota failure is a blocker until a deployment of the approved commit reaches READY.
+Production promotion is a separate action after STAGING-01 and the required recovery/operational evidence pass. A Vercel quota, build, environment-contract, or deployment failure is a blocker until the approved commit reaches READY in STAGING.
 
 ### DR-01 — Timed isolated restore drill
 

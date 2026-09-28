@@ -43,10 +43,18 @@ export async function POST(req: NextRequest) {
     // 1. Verify membership in target tenant
     const membership = await getTenantMembership(targetTenantId, verifiedToken.uid, verifiedToken.email, verifiedToken.name);
 
-    if (membership.status === 'DISABLED') {
+    // Authorization must be ACTIVE before any durable security state is mutated.
+    // In particular, never mint tenant claims or sessions for PENDING/SUSPENDED users:
+    // Firestore clients can refresh custom claims independently of this request.
+    if (membership.status !== 'ACTIVE') {
       throw new AuthError({
-        code: 'ACCOUNT_DISABLED',
-        message: 'Account disabled in target facility',
+        code:
+          membership.status === 'DISABLED'
+            ? 'ACCOUNT_DISABLED'
+            : membership.status === 'SUSPENDED'
+              ? 'ACCOUNT_SUSPENDED'
+              : 'ACCOUNT_PENDING',
+        message: `Account is not active in target facility: ${membership.status}`,
         statusCode: 403,
       });
     }

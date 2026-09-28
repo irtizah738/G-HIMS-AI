@@ -20,6 +20,60 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == userId;
     }
 
+    function membershipPath(tenantId) {
+      return /databases/$(database)/documents/tenants/$(tenantId)/users/$(request.auth.uid);
+    }
+
+    function hasActiveMembership(tenantId) {
+      return tenantClaimMatches(tenantId) &&
+        exists(membershipPath(tenantId)) &&
+        get(membershipPath(tenantId)).data.status == 'ACTIVE';
+    }
+
+    function membershipData(tenantId) {
+      return get(membershipPath(tenantId)).data;
+    }
+
+    function memberRoles(tenantId) {
+      return membershipData(tenantId).get('roles', []);
+    }
+
+    function memberLegacyRole(tenantId) {
+      return membershipData(tenantId).get('role', '');
+    }
+
+    function hasAnyRole(tenantId, allowedRoles) {
+      return hasActiveMembership(tenantId) && (
+        memberRoles(tenantId).hasAny(allowedRoles) ||
+        memberLegacyRole(tenantId) in allowedRoles
+      );
+    }
+
+    function canReadClinical(tenantId) {
+      return hasAnyRole(tenantId, [
+        'administrator',
+        'doctor',
+        'nurse',
+        'receptionist',
+        'pharmacist',
+        'lab_tech',
+        'radiologist',
+        'surgeon'
+      ]);
+    }
+
+    function canReadFinance(tenantId) {
+      return hasAnyRole(tenantId, [
+        'administrator',
+        'billing_clerk',
+        'billing_staff'
+      ]);
+    }
+
+    function canReadAudit(tenantId) {
+      return hasAnyRole(tenantId, ['administrator']);
+    }
+
     // Default deny. Firebase Admin/server SDK bypasses these rules and is the
     // authoritative mutation path.
     match /{document=**} {
@@ -66,12 +120,12 @@ service cloud.firestore {
     // Tenant root metadata can be read only by a member whose verified Firebase
     // token carries that tenant scope.
     match /tenants/{tenantId} {
-      allow get: if tenantClaimMatches(tenantId);
+      allow get: if hasActiveMembership(tenantId);
       allow list, create, update, delete: if false;
 
       // Memberships are server-managed. Users may read only their own membership.
       match /users/{userId} {
-        allow get: if tenantClaimMatches(tenantId) && self(userId);
+        allow get: if hasActiveMembership(tenantId) && self(userId);
         allow list, create, update, delete: if false;
       }
 
@@ -85,82 +139,82 @@ service cloud.firestore {
 
       // Clinical read models. Mutations must go through authenticated server commands.
       match /patients/{patientId} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadClinical(tenantId);
         allow write: if false;
 
         match /timeline/{eventId} {
-          allow read: if tenantClaimMatches(tenantId);
+          allow read: if canReadClinical(tenantId);
           allow write: if false;
         }
       }
 
       match /beds/{bedId} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadClinical(tenantId);
         allow write: if false;
       }
 
       match /telehealthSessions/{sessionId} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadClinical(tenantId);
         allow write: if false;
       }
 
       match /mpi_registry/{mpiKey} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadClinical(tenantId);
         allow write: if false;
       }
 
       match /encounters/{encounterId} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadClinical(tenantId);
         allow write: if false;
 
         match /{nested=**} {
-          allow read: if tenantClaimMatches(tenantId);
+          allow read: if canReadClinical(tenantId);
           allow write: if false;
         }
       }
 
       match /opd_queue/{tokenId} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadClinical(tenantId);
         allow write: if false;
       }
 
       match /diagnostic_orders/{orderId} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadClinical(tenantId);
         allow write: if false;
       }
 
       match /orders/{orderId} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadClinical(tenantId);
         allow write: if false;
       }
 
       match /prescriptions/{prescriptionId} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadClinical(tenantId);
         allow write: if false;
       }
 
       match /labResults/{resultId} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadClinical(tenantId);
         allow write: if false;
       }
 
       match /radiologyResults/{resultId} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadClinical(tenantId);
         allow write: if false;
       }
 
       match /clinicalQueues/{queueId} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadClinical(tenantId);
         allow write: if false;
       }
 
       match /timelineProjections/{projectionId} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadClinical(tenantId);
         allow write: if false;
       }
 
       match /generalLedgerProjections/{projectionId} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadClinical(tenantId);
         allow write: if false;
       }
 
@@ -172,81 +226,81 @@ service cloud.firestore {
       // Financial read models can be read only within tenant scope. All postings,
       // adjustments, reversals and idempotency records are server-only writes.
       match /accounts/{id} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadFinance(tenantId);
         allow write: if false;
       }
       match /accountingPeriods/{id} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadFinance(tenantId);
         allow write: if false;
       }
       match /journalEntries/{id} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadFinance(tenantId);
         allow write: if false;
       }
       match /ledgerEntries/{id} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadFinance(tenantId);
         allow write: if false;
       }
       match /patientInvoices/{id} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadFinance(tenantId);
         allow write: if false;
       }
       match /invoices/{id} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadFinance(tenantId);
         allow write: if false;
       }
       match /claims/{id} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadFinance(tenantId);
         allow write: if false;
       }
 
       match /billingMismatches/{id} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadFinance(tenantId);
         allow write: if false;
       }
 
       match /encounterCharges/{id} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadFinance(tenantId);
         allow write: if false;
       }
       match /arOpenItems/{id} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadFinance(tenantId);
         allow write: if false;
       }
       match /paymentTransactions/{id} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadFinance(tenantId);
         allow write: if false;
       }
 
       // Workforce/resource read models.
       match /employees/{id} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadAudit(tenantId);
         allow write: if false;
       }
       match /clinicalCredentials/{id} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadAudit(tenantId);
         allow write: if false;
       }
       match /clinicalPrivileges/{id} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadAudit(tenantId);
         allow write: if false;
       }
       match /rosterAssignments/{id} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadAudit(tenantId);
         allow write: if false;
       }
       match /attendanceRecords/{id} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadAudit(tenantId);
         allow write: if false;
       }
 
       // Security, eventing and configuration stores are server-only.
       match /audit_logs/{id} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadAudit(tenantId);
         allow write: if false;
       }
       match /financialAuditLogs/{id} {
-        allow read: if tenantClaimMatches(tenantId);
+        allow read: if canReadAudit(tenantId);
         allow write: if false;
       }
       match /events/{id} {

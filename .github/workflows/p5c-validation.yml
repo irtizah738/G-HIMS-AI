@@ -1,0 +1,102 @@
+name: P5C Pilot Readiness Validation
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - hardening/pilot-readiness-p5c
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p5c-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  p5c-pilot-readiness:
+    name: P5C security recovery and pilot gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-p5c-ci
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p5c-ci
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p5c-ci
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p5c-ci
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      GHIMS_INTEGRATION_HL7_STATE: DISABLED
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_INTEGRATION_DICOMWEB_STATE: DISABLED
+      GHIMS_INTEGRATION_DEVICE_TELEMETRY_STATE: DISABLED
+      GHIMS_INTEGRATION_EDI_X12_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: TypeScript typecheck
+        run: bun run typecheck
+
+      - name: ESLint quality gate
+        run: bun run lint
+
+      - name: P5C pilot readiness guards
+        run: bun run test:p5c
+
+      - name: Full unit and domain regression
+        run: bun run test:unit
+
+      - name: Security regression matrix
+        run: bun run test:security
+
+      - name: Setup Java for Firebase emulators
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install Firebase emulator tooling
+        run: npm install --no-save --package-lock=false @firebase/rules-unit-testing@4.0.1 firebase-tools
+
+      - name: Firestore tenant durability and least-privilege rules
+        run: bun run test:rules
+
+      - name: Firebase Auth and IAM integration
+        env:
+          FIREBASE_PROJECT_ID: ghims-p5a-ci
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p5a-ci
+          GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p5a-ci
+          NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p5a-ci
+        run: bun run test:p5a:emulator
+
+      - name: Synthetic patient and recovery journey
+        env:
+          FIREBASE_PROJECT_ID: ghims-p4-ci
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p4-ci
+          GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+          NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+        run: bun run test:p4:emulator
+
+      - name: Production build
+        run: bun run build
+
+      - name: Install Playwright Chromium
+        run: bunx playwright install --with-deps chromium
+
+      - name: Deployment fail-closed smoke
+        run: bun run test:e2e

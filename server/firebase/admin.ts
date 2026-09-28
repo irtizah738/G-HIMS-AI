@@ -52,9 +52,21 @@ function formatPrivateKey(rawKey: string | undefined): string | null {
   return key;
 }
 
-function canUseFirestoreEmulator(): boolean {
+function emulatorRuntimeAllowed(): boolean {
   const mode = String(process.env.GHIMS_RUNTIME_MODE || '').toUpperCase();
-  return Boolean(process.env.FIRESTORE_EMULATOR_HOST) && (mode === 'TEST' || mode === 'DEMO');
+  return mode === 'TEST' || mode === 'DEMO';
+}
+
+function canUseFirestoreEmulator(): boolean {
+  return Boolean(process.env.FIRESTORE_EMULATOR_HOST) && emulatorRuntimeAllowed();
+}
+
+function canUseAuthEmulator(): boolean {
+  return Boolean(process.env.FIREBASE_AUTH_EMULATOR_HOST) && emulatorRuntimeAllowed();
+}
+
+function canUseFirebaseEmulator(): boolean {
+  return canUseFirestoreEmulator() || canUseAuthEmulator();
 }
 
 export function hasAdminCredentials(): boolean {
@@ -94,7 +106,7 @@ export function getAdminApp(): App | null {
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim();
   const privateKey = formatPrivateKey(process.env.FIREBASE_PRIVATE_KEY);
 
-  if (canUseFirestoreEmulator()) {
+  if (canUseFirebaseEmulator()) {
     adminApp = initializeApp({ projectId: projectId || 'ghims-p1-ci' });
     return adminApp;
   }
@@ -135,7 +147,7 @@ export function getAdminApp(): App | null {
 }
 
 export function getAdminAuth(): Auth | null {
-  if (!hasAdminCredentials()) return null;
+  if (!hasAdminCredentials() && !canUseAuthEmulator()) return null;
   const app = getAdminApp();
   return app ? getAuth(app) : null;
 }

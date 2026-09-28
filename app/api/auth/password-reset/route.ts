@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminAuth } from '@/server/firebase/admin';
 import { logAuthEvent } from '@/server/auth/audit-service';
 
 export async function POST(req: NextRequest) {
@@ -15,16 +14,6 @@ export async function POST(req: NextRequest) {
         success: true,
         message: 'If an account exists for this email, password-reset instructions have been sent.',
       });
-    }
-
-    const auth = getAdminAuth();
-    if (auth) {
-      try {
-        await auth.generatePasswordResetLink(email);
-      } catch (err: any) {
-        // Do not leak user existence error
-        console.warn('Password reset generation notice:', err?.message);
-      }
     }
 
     await logAuthEvent({

@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { CommandBus } from '@/lib/backend/commands/command-bus';
 import { BaseCommand } from '@/lib/backend/types';
 import { deriveAuthoritativeContext, verifyCommandIntegrity } from '@/lib/backend/security/authoritative-context';
+import { findActiveBreakGlassGrant } from '@/server/auth/break-glass-service';
 
 export async function POST(req: NextRequest) {
   try {
@@ -30,7 +31,29 @@ export async function POST(req: NextRequest) {
     // Verify command integrity against authoritative context
     verifyCommandIntegrity(context, command);
 
-    const result = await CommandBus.dispatch(context, command);
+    const patientId = String((command.payload as any)?.patientId || '').trim();
+    const encounterId = String((command.payload as any)?.encounterId || '').trim();
+    const breakGlassGrant =
+      patientId && encounterId
+        ? await findActiveBreakGlassGrant({
+            tenantId: context.tenantId,
+            userId: context.actorId,
+            patientId,
+            encounterId,
+          })
+        : null;
+
+    const commandContext = breakGlassGrant
+      ? {
+          ...context,
+          isEmergencyOverride: true,
+          breakGlassGrantId: breakGlassGrant.grantId,
+          breakGlassPatientId: breakGlassGrant.patientId,
+          breakGlassEncounterId: breakGlassGrant.encounterId,
+        }
+      : context;
+
+    const result = await CommandBus.dispatch(commandContext, command);
     const statusCode = result.success ? 200 : result.error?.code === 'UNAUTHORIZED' ? 403 : 400;
 
     return NextResponse.json(result, { status: statusCode });

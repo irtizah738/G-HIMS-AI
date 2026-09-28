@@ -17,9 +17,13 @@ jobs:
     timeout-minutes: 25
     env:
       GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p1-ci
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p1-ci
       NEXT_TELEMETRY_DISABLED: "1"
       FIREBASE_PROJECT_ID: ghims-p1-ci
       NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p1-ci
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
       FIRESTORE_DATABASE_ID: "(default)"
 
     steps:

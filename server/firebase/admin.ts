@@ -52,9 +52,28 @@ function formatPrivateKey(rawKey: string | undefined): string | null {
   return key;
 }
 
-function canUseFirestoreEmulator(): boolean {
+function emulatorRuntimeAllowed(): boolean {
   const mode = String(process.env.GHIMS_RUNTIME_MODE || '').toUpperCase();
-  return Boolean(process.env.FIRESTORE_EMULATOR_HOST) && (mode === 'TEST' || mode === 'DEMO');
+  return mode === 'TEST' || mode === 'DEMO';
+}
+
+function canUseFirestoreEmulator(): boolean {
+  return Boolean(process.env.FIRESTORE_EMULATOR_HOST) && emulatorRuntimeAllowed();
+}
+
+function canUseAuthEmulator(): boolean {
+  return Boolean(process.env.FIREBASE_AUTH_EMULATOR_HOST) && emulatorRuntimeAllowed();
+}
+
+function canUseFirebaseEmulator(): boolean {
+  return canUseFirestoreEmulator() || canUseAuthEmulator();
+}
+
+function canUseApplicationDefaultCredentials(): boolean {
+  // Vercel functions do not have a local service-account JSON file unless an
+  // operator explicitly provisions one into the runtime, which G-HIMS does not do.
+  // Use FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY on Vercel.
+  return Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS) && !process.env.VERCEL;
 }
 
 export function hasAdminCredentials(): boolean {
@@ -63,7 +82,7 @@ export function hasAdminCredentials(): boolean {
 
   return Boolean(
     (clientEmail && privateKey) ||
-    process.env.GOOGLE_APPLICATION_CREDENTIALS
+    canUseApplicationDefaultCredentials()
   );
 }
 
@@ -94,7 +113,7 @@ export function getAdminApp(): App | null {
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim();
   const privateKey = formatPrivateKey(process.env.FIREBASE_PRIVATE_KEY);
 
-  if (canUseFirestoreEmulator()) {
+  if (canUseFirebaseEmulator()) {
     adminApp = initializeApp({ projectId: projectId || 'ghims-p1-ci' });
     return adminApp;
   }
@@ -119,7 +138,7 @@ export function getAdminApp(): App | null {
     }
   }
 
-  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+  if (canUseApplicationDefaultCredentials()) {
     try {
       adminApp = initializeApp({
         credential: applicationDefault(),
@@ -135,7 +154,7 @@ export function getAdminApp(): App | null {
 }
 
 export function getAdminAuth(): Auth | null {
-  if (!hasAdminCredentials()) return null;
+  if (!hasAdminCredentials() && !canUseAuthEmulator()) return null;
   const app = getAdminApp();
   return app ? getAuth(app) : null;
 }

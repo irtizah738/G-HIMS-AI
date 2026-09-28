@@ -23,6 +23,7 @@ export type AuthErrorCode =
   | 'TOKEN_EXPIRED'
   | 'INTERNAL_AUTH_ERROR'
   | 'BREAK_GLASS_REASON_REQUIRED'
+  | 'REAUTH_PROVIDER_REQUIRED'
   | 'SSO_AUTH_FAILED'
   | 'SSO_CONFIG_ERROR';
 
@@ -88,6 +89,8 @@ export function getDefaultUserMessage(code: AuthErrorCode): string {
       return 'Security token expired. Refreshing authorization context...';
     case 'BREAK_GLASS_REASON_REQUIRED':
       return 'Emergency Break-Glass access elevation requires a clinical justification reason.';
+    case 'REAUTH_PROVIDER_REQUIRED':
+      return 'Unlock this workstation using the identity provider configured for your account.';
     case 'SSO_AUTH_FAILED':
       return 'Enterprise SSO authentication failed. Please verify your hospital federated credentials.';
     case 'SSO_CONFIG_ERROR':

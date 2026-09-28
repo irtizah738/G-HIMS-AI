@@ -54,10 +54,10 @@ export async function registerOrUpdateDevice(params: RegisterDeviceParams): Prom
     if (existingSnap.exists) {
       const data = existingSnap.data() as UserDeviceRecord;
 
-      if (data.userId !== params.userId || data.tenantId !== params.tenantId) {
+      if (data.tenantId !== params.tenantId) {
         throw new AuthError({
           code: 'DEVICE_REVOKED',
-          message: 'Clinical workstation is bound to a different user or tenant.',
+          message: 'Clinical workstation is enrolled to a different tenant.',
           statusCode: 403,
         });
       }
@@ -71,12 +71,16 @@ export async function registerOrUpdateDevice(params: RegisterDeviceParams): Prom
       }
 
       await devDocRef.update({
+        userId: params.userId,
         lastSeenAt: now,
         lastSyncAt: now,
       });
 
+      // userId is the most recent user for backward-compatible audit display only.
+      // Device trust is tenant/workstation scoped; user authority remains session scoped.
       return {
         ...data,
+        userId: params.userId,
         lastSeenAt: now,
         lastSyncAt: now,
       };

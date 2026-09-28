@@ -38,6 +38,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const requestedTenantId = String(body.tenantId || '').trim().toLowerCase();
     const deviceData = body.device || {};
+    const rememberDevice = body.rememberDevice !== false;
 
     if (!requestedTenantId) {
       return NextResponse.json({ error: 'tenantId is required' }, { status: 400 });
@@ -47,7 +48,7 @@ export async function POST(req: NextRequest) {
     await resolveAuthorizationContext(verifiedToken, requestedTenantId);
 
     let registeredDevice;
-    if (deviceData.deviceId) {
+    if (rememberDevice && deviceData.deviceId) {
       registeredDevice = await registerOrUpdateDevice({
         deviceId: deviceData.deviceId,
         userId: verifiedToken.uid,

@@ -295,7 +295,16 @@ export class TransactionManager {
       eventType: payload.eventType,
       eventPayload: payload.eventPayload,
       auditReason: payload.auditReason,
-      auditMetadata: payload.auditMetadata,
+      auditMetadata: {
+        ...(payload.auditMetadata || {}),
+        ...(context.isEmergencyOverride && context.breakGlassGrantId
+          ? {
+              breakGlassGrantId: context.breakGlassGrantId,
+              breakGlassPatientId: context.breakGlassPatientId,
+              breakGlassEncounterId: context.breakGlassEncounterId,
+            }
+          : {}),
+      },
       outboxTopic: payload.outboxTopic,
       idempotencyKey,
       commandId,

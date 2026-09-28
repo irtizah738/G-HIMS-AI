@@ -22,7 +22,12 @@
     "test:p4": "bun test tests/p4-release-candidate-boundary.test.ts",
     "test:p4:emulator": "firebase emulators:exec --project ghims-p4-ci --only firestore \"bun test emulator-security/p4-release-candidate.test.ts\"",
     "ops:projection-rebuild": "bun scripts/ops/projection-rebuild.ts",
-    "validate:p4": "bun run typecheck && bun run lint && bun run test:p4 && bun run test:unit && bun run test:security && bun run test:rules && bun run test:p4:emulator && bun run build && bun run test:e2e"
+    "validate:p4": "bun run typecheck && bun run lint && bun run test:p4 && bun run test:unit && bun run test:security && bun run test:rules && bun run test:p4:emulator && bun run build && bun run test:e2e",
+    "test:p5a": "bun test tests/p5a-identity-staging-access.test.ts",
+    "test:p5a:emulator": "firebase emulators:exec --project ghims-p5a-ci --only auth,firestore \"bun test emulator-security/p5a-auth-iam.test.ts\"",
+    "ops:bootstrap-admin": "bun scripts/ops/bootstrap-admin.ts",
+    "demo:provision-identities": "bun scripts/demo/provision-demo-identities.ts",
+    "validate:p5a": "bun run typecheck && bun run lint && bun run test:p5a && bun run test:unit && bun run test:security && bun run test:rules && bun run test:p5a:emulator && bun run build && bun run test:e2e"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

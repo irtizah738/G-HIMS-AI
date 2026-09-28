@@ -99,6 +99,8 @@ export type AuthAuditEventType =
   | 'DEVICE_REGISTERED'
   | 'BREAK_GLASS_ELEVATED'
   | 'TENANT_SWITCHED'
+  | 'USER_PROVISIONED'
+  | 'USER_ACCESS_UPDATED'
   | 'UNAUTHORIZED_ACCESS_ATTEMPT';
 
 export interface AuthAuditEvent {

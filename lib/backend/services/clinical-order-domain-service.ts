@@ -44,7 +44,7 @@ export class ClinicalOrderDomainService {
     const auth = AuthorizationPipeline.evaluate(context, {
       requiredRoles: ['DOCTOR', 'CONSULTANT', 'SYSTEM_ADMIN'],
       requiredPrivilege,
-      isEmergencyOverride: payload.priority === 'STAT',
+      allowBreakGlass: payload.priority === 'STAT',
     });
 
     if (!auth.authorized) {

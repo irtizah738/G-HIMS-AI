@@ -41,6 +41,7 @@ interface AuthContextType {
   isOffline: boolean;
   accessibleTenants: TenantSelectionItem[];
   signIn: (email: string, pass: string, options?: SignInOptions) => Promise<LoginResponsePayload>;
+  signInFederated: (options?: SignInOptions) => Promise<LoginResponsePayload>;
   signInSSO: (email: string, tenantId?: string) => Promise<LoginResponsePayload>;
   signOut: () => Promise<void>;
   switchTenant: (tenantId: string) => Promise<void>;
@@ -50,7 +51,7 @@ interface AuthContextType {
   hasPermission: (permission: string) => boolean;
   hasRole: (role: string) => boolean;
   hasPrivilege: (privilege: string) => boolean;
-  triggerBreakGlass: (reason: string) => Promise<void>;
+  triggerBreakGlass: (reason: string, patientId: string, encounterId: string) => Promise<void>;
   refreshAuth: () => Promise<void>;
 }
 
@@ -244,6 +245,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [applyLoginPayload]
   );
 
+  // Federated Firebase identity exchange (Google/OIDC/SAML provider already authenticated)
+  const signInFederated = useCallback(
+    async (options?: SignInOptions): Promise<LoginResponsePayload> => {
+      setLoading(true);
+      setLoadingStatus('AUTHENTICATING');
+      setError(null);
+
+      try {
+        const payload = await AuthClient.signInWithCurrentFirebaseIdentity(options);
+        applyLoginPayload(payload);
+
+        if (payload.accessibleTenants && payload.accessibleTenants.length > 0) {
+          setAccessibleTenants(payload.accessibleTenants);
+        }
+
+        setLoadingStatus('READY');
+        return payload;
+      } catch (err: any) {
+        const userMsg = err?.userMessage || err?.message || 'Federated sign in failed';
+        setError(userMsg);
+        setLoadingStatus('ERROR');
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [applyLoginPayload]
+  );
+
   // Enterprise Single Sign-On (SSO) Action
   const signInSSO = useCallback(
     async (email: string, tenantId: string = 'central-metro-hospital'): Promise<LoginResponsePayload> => {
@@ -329,7 +359,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (password: string): Promise<boolean> => {
       if (!user) return false;
       try {
-        await AuthClient.signIn(user.email, password, { tenantId: user.tenantId });
+        const reauthenticated = await AuthClient.reauthenticateCurrentSession(password);
+        if (!reauthenticated) return false;
         setIsLocked(false);
         setLoadingStatus('READY');
         return true;
@@ -342,21 +373,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Break-Glass Emergency Access Elevation Action
   const triggerBreakGlass = useCallback(
-    async (reason: string) => {
-      if (!user) return;
-      const res = await fetch('/api/auth/break-glass', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: user.uid,
-          tenantId: user.tenantId,
-          reason,
-        }),
-      });
-
-      if (res.ok) {
-        setUser((prev) => (prev ? { ...prev, isEmergencyOverride: true } : null));
+    async (reason: string, patientId: string, encounterId: string) => {
+      if (!user || !patientId || !encounterId) {
+        throw new Error('Patient and encounter context are required for emergency access.');
       }
+
+      const res = await AuthClient.authorizedFetch(
+        '/api/auth/break-glass',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tenantId: user.tenantId,
+            patientId,
+            encounterId,
+            reason,
+          }),
+        },
+        user.tenantId
+      );
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Emergency access request failed');
+      }
+
+      setUser((prev) => (prev ? { ...prev, isEmergencyOverride: true } : null));
     },
     [user]
   );
@@ -398,6 +440,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isOffline,
       accessibleTenants,
       signIn,
+      signInFederated,
       signInSSO,
       signOut,
       switchTenant,
@@ -425,6 +468,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isOffline,
       accessibleTenants,
       signIn,
+      signInFederated,
       signInSSO,
       signOut,
       switchTenant,

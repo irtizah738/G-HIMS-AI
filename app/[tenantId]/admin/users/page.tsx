@@ -3,11 +3,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { useTenant } from '@/lib/tenant/context';
-import { useAuth } from '@/lib/firebase/auth-context';
-import { db } from '@/lib/firebase/client';
-import { cleanFirestoreData } from '@/lib/firebase/config';
-import { collection, doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
 import { TenantUser, UserRole } from '@/types/tenant';
+import { AuthClient } from '@/lib/auth/auth-client';
 import {
   Users,
   ShieldCheck,
@@ -109,100 +106,12 @@ const ROLE_DEFINITIONS: {
   },
 ];
 
-const INITIAL_MOCK_USERS: TenantUser[] = [
-  {
-    userId: 'usr-admin-01',
-    tenantId: 'central-metro-hospital',
-    email: 'sarah.lin@centralmetro.health',
-    displayName: 'Dr. Sarah Lin, MD, MBA',
-    role: 'admin',
-    department: 'Hospital Administration',
-    licenseId: 'MED-EXEC-99104',
-    assignedWards: ['ICU', 'Ward 3A', 'OR Pavilion'],
-    status: 'active',
-    lastLoginAt: '2026-08-16T10:15:00.000Z',
-    createdAt: '2024-01-15T08:00:00.000Z',
-    updatedAt: '2026-08-16T10:15:00.000Z',
-  },
-  {
-    userId: 'usr-doc-02',
-    tenantId: 'central-metro-hospital',
-    email: 'marcus.vance@centralmetro.health',
-    displayName: 'Dr. Marcus Vance, FACS',
-    role: 'doctor',
-    department: 'Cardiovascular Surgery',
-    licenseId: 'MD-SURG-44812',
-    assignedWards: ['OR Suite 1', 'OR Suite 2', 'Cardiac ICU'],
-    status: 'active',
-    lastLoginAt: '2026-08-16T11:02:00.000Z',
-    createdAt: '2024-02-10T09:30:00.000Z',
-    updatedAt: '2026-08-16T11:02:00.000Z',
-  },
-  {
-    userId: 'usr-nurse-03',
-    tenantId: 'central-metro-hospital',
-    email: 'elena.rostova@centralmetro.health',
-    displayName: 'Elena Rostova, BSN, RN',
-    role: 'nurse',
-    department: 'Intensive Care Unit (ICU)',
-    licenseId: 'RN-CRIT-78193',
-    assignedWards: ['ICU Pod A', 'ICU Pod B'],
-    status: 'active',
-    lastLoginAt: '2026-08-16T09:45:00.000Z',
-    createdAt: '2024-03-01T07:15:00.000Z',
-    updatedAt: '2026-08-16T09:45:00.000Z',
-  },
-  {
-    userId: 'usr-bill-04',
-    tenantId: 'central-metro-hospital',
-    email: 'david.chen@centralmetro.health',
-    displayName: 'David Chen, CPB',
-    role: 'billing',
-    department: 'Revenue Cycle & Adjudication',
-    licenseId: 'CPB-REV-11049',
-    assignedWards: ['Main Cashier POS 1', 'Clearinghouse Desk'],
-    status: 'active',
-    lastLoginAt: '2026-08-16T08:30:00.000Z',
-    createdAt: '2024-04-12T10:00:00.000Z',
-    updatedAt: '2026-08-16T08:30:00.000Z',
-  },
-  {
-    userId: 'usr-pharm-05',
-    tenantId: 'central-metro-hospital',
-    email: 'amara.okafor@centralmetro.health',
-    displayName: 'Amara Okafor, PharmD',
-    role: 'pharmacy',
-    department: 'Central Inpatient Pharmacy',
-    licenseId: 'RPH-STATE-66291',
-    assignedWards: ['Central Pharmacy', 'Satellite Dispensary'],
-    status: 'active',
-    lastLoginAt: '2026-08-15T16:20:00.000Z',
-    createdAt: '2024-05-20T11:45:00.000Z',
-    updatedAt: '2026-08-15T16:20:00.000Z',
-  },
-  {
-    userId: 'usr-recept-06',
-    tenantId: 'central-metro-hospital',
-    email: 'liam.gallagher@centralmetro.health',
-    displayName: 'Liam Gallagher',
-    role: 'reception',
-    department: 'Patient Access & OPD Triage',
-    licenseId: 'PAS-OPD-33018',
-    assignedWards: ['Main Lobby Admissions', 'Emergency Intake Desk'],
-    status: 'active',
-    lastLoginAt: '2026-08-16T07:10:00.000Z',
-    createdAt: '2024-06-05T08:00:00.000Z',
-    updatedAt: '2026-08-16T07:10:00.000Z',
-  },
-];
-
 export default function TenantUserAdminPage() {
   const params = useParams();
   const tenantId = (params?.tenantId as string) || 'central-metro-hospital';
-  const { currentTenant, role: currentUserRole } = useTenant();
-  const { user } = useAuth();
+  const { currentTenant } = useTenant();
 
-  const [users, setUsers] = useState<TenantUser[]>(INITIAL_MOCK_USERS);
+  const [users, setUsers] = useState<TenantUser[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedRoleFilter, setSelectedRoleFilter] = useState<string>('ALL');
@@ -221,39 +130,31 @@ export default function TenantUserAdminPage() {
   const [newUserLicense, setNewUserLicense] = useState('');
   const [newUserWards, setNewUserWards] = useState('');
 
-  // Firestore Real-Time Listener on `/tenants/{tenantId}/users`
-  useEffect(() => {
+  const loadUsers = useCallback(async () => {
     setIsLoading(true);
-    const usersCollection = collection(db, 'tenants', tenantId, 'users');
-
-    const unsubscribe = onSnapshot(
-      usersCollection,
-      (snapshot) => {
-        if (!snapshot.empty) {
-          const loadedUsers = snapshot.docs.map((docSnap) => docSnap.data() as TenantUser);
-          setUsers(loadedUsers);
-        } else {
-          // If Firestore is empty, seed mock users into Firestore for persistence
-          INITIAL_MOCK_USERS.forEach(async (u) => {
-            try {
-              await setDoc(doc(db, 'tenants', tenantId, 'users', u.userId), u, { merge: true });
-            } catch (err) {
-              console.warn('Seeding user to Firestore deferred:', err);
-            }
-          });
-          setUsers(INITIAL_MOCK_USERS);
-        }
-        setIsLoading(false);
-      },
-      (error) => {
-        console.warn('Firestore users subscription fallback:', error);
-        setUsers(INITIAL_MOCK_USERS);
-        setIsLoading(false);
+    try {
+      const response = await AuthClient.authorizedFetch(
+        `/api/admin/users?tenantId=${encodeURIComponent(tenantId)}`,
+        { method: 'GET' },
+        tenantId
+      );
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to load tenant user directory');
       }
-    );
-
-    return () => unsubscribe();
+      setUsers(Array.isArray(data.users) ? data.users : []);
+    } catch (error: any) {
+      console.error('Failed to load authoritative tenant user directory:', error);
+      setUsers([]);
+      setSyncNotice(error?.message || 'Unable to load tenant user directory');
+    } finally {
+      setIsLoading(false);
+    }
   }, [tenantId]);
+
+  useEffect(() => {
+    void loadUsers();
+  }, [loadUsers]);
 
   // Filtered Users List
   const filteredUsers = useMemo(() => {
@@ -283,130 +184,125 @@ export default function TenantUserAdminPage() {
     return { total, active, doctors, nurses, admins };
   }, [users]);
 
-  // Provision New User Handler
+  // Provision staff through the server-authoritative Firebase Admin IAM boundary.
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newUserEmail || !newUserName) return;
 
-    const newUserId = `usr-${newUserRole}-${Date.now().toString(36)}`;
     const wardList = newUserWards
       .split(',')
       .map((w) => w.trim())
       .filter(Boolean);
 
-    const newRecord: TenantUser = {
-      userId: newUserId,
-      tenantId,
-      email: newUserEmail.toLowerCase().trim(),
-      displayName: newUserName.trim(),
-      role: newUserRole,
-      department: newUserDepartment,
-      licenseId: newUserLicense.trim() || undefined,
-      assignedWards: wardList.length > 0 ? wardList : ['General Ward'],
-      status: 'active',
-      lastLoginAt: undefined,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
     try {
-      await setDoc(doc(db, 'tenants', tenantId, 'users', newUserId), cleanFirestoreData(newRecord));
-      setUsers((prev) => [newRecord, ...prev]);
-      setIsInviteModalOpen(false);
-      setSyncNotice(`Successfully provisioned clinical profile for ${newUserName}`);
-      setTimeout(() => setSyncNotice(null), 4000);
+      const response = await AuthClient.authorizedFetch(
+        '/api/admin/users',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tenantId,
+            email: newUserEmail.toLowerCase().trim(),
+            displayName: newUserName.trim(),
+            role: newUserRole,
+            department: newUserDepartment,
+            licenseId: newUserLicense.trim() || undefined,
+            assignedWards: wardList,
+          }),
+        },
+        tenantId
+      );
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to provision staff identity');
+      }
 
-      // Reset form
+      setIsInviteModalOpen(false);
+      setSyncNotice(
+        data.passwordSetupRequired
+          ? `Provisioned ${newUserName}. The user must use “Forgot password” to establish their Firebase password.`
+          : `Provisioned tenant membership for ${newUserName}.`
+      );
       setNewUserEmail('');
       setNewUserName('');
       setNewUserLicense('');
       setNewUserWards('');
+      await loadUsers();
+      setTimeout(() => setSyncNotice(null), 6000);
     } catch (err: any) {
-      console.error('Failed to create user in Firestore:', err);
-      // Fallback local state update
-      setUsers((prev) => [newRecord, ...prev]);
-      setIsInviteModalOpen(false);
+      console.error('Failed to provision authoritative staff identity:', err);
+      setSyncNotice(err?.message || 'User provisioning failed');
+      setTimeout(() => setSyncNotice(null), 6000);
     }
   };
 
-  // Toggle User Status Handler
   const handleToggleStatus = async (targetUser: TenantUser) => {
     const nextStatus = targetUser.status === 'active' ? 'disabled' : 'active';
     try {
-      await updateDoc(doc(db, 'tenants', tenantId, 'users', targetUser.userId), {
-        status: nextStatus,
-        updatedAt: new Date().toISOString(),
-      });
+      const response = await AuthClient.authorizedFetch(
+        '/api/admin/users',
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tenantId,
+            userId: targetUser.userId,
+            status: nextStatus,
+          }),
+        },
+        tenantId
+      );
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to update account status');
+
       setUsers((prev) =>
-        prev.map((u) =>
-          u.userId === targetUser.userId ? { ...u, status: nextStatus, updatedAt: new Date().toISOString() } : u
-        )
+        prev.map((u) => (u.userId === targetUser.userId ? data.user : u))
       );
       setSyncNotice(`Updated ${targetUser.displayName} status to [${nextStatus.toUpperCase()}]`);
       setTimeout(() => setSyncNotice(null), 3000);
-    } catch (err) {
-      console.warn('Update status fallback:', err);
-      setUsers((prev) =>
-        prev.map((u) =>
-          u.userId === targetUser.userId ? { ...u, status: nextStatus, updatedAt: new Date().toISOString() } : u
-        )
-      );
+    } catch (err: any) {
+      setSyncNotice(err?.message || 'Account status update failed');
+      setTimeout(() => setSyncNotice(null), 5000);
     }
   };
 
-  // Quick Role Change Handler
   const handleUpdateRole = async (targetUser: TenantUser, newRole: UserRole) => {
     try {
-      await updateDoc(doc(db, 'tenants', tenantId, 'users', targetUser.userId), {
-        role: newRole,
-        updatedAt: new Date().toISOString(),
-      });
-      setUsers((prev) =>
-        prev.map((u) =>
-          u.userId === targetUser.userId ? { ...u, role: newRole, updatedAt: new Date().toISOString() } : u
-        )
+      const response = await AuthClient.authorizedFetch(
+        '/api/admin/users',
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tenantId,
+            userId: targetUser.userId,
+            role: newRole,
+          }),
+        },
+        tenantId
       );
-      setSyncNotice(`Reassigned ${targetUser.displayName} to [${newRole.toUpperCase()}] role`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to update staff role');
+
+      setUsers((prev) =>
+        prev.map((u) => (u.userId === targetUser.userId ? data.user : u))
+      );
+      setSyncNotice(`Reassigned ${targetUser.displayName} to [${newRole.toUpperCase()}]`);
       setTimeout(() => setSyncNotice(null), 3000);
-    } catch (err) {
-      console.warn('Update role fallback:', err);
-      setUsers((prev) =>
-        prev.map((u) =>
-          u.userId === targetUser.userId ? { ...u, role: newRole, updatedAt: new Date().toISOString() } : u
-        )
-      );
+    } catch (err: any) {
+      setSyncNotice(err?.message || 'Role update failed');
+      setTimeout(() => setSyncNotice(null), 5000);
     }
   };
 
-  // Test Sync Claims with Backend Route `/api/auth/tenant-claim`
   const handleSyncCurrentClaims = async () => {
     setIsSyncingClaims(true);
     try {
-      let token = '';
-      if (user) {
-        token = await user.getIdToken(true);
-      }
-
-      const res = await fetch('/api/auth/tenant-claim', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: token ? `Bearer ${token}` : 'Bearer demo-token',
-        },
-        body: JSON.stringify({ tenantId }),
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        setSyncNotice(`Custom claims successfully synchronized for tenant [${tenantId}]: Role = ${data.role || currentUserRole}`);
-      } else {
-        setSyncNotice(`Claim sync response: ${data.message || data.error || 'Synced with sandbox defaults'}`);
-      }
-    } catch (err: any) {
-      setSyncNotice(`Claims sync completed locally: ${err.message || 'Ready'}`);
+      await loadUsers();
+      setSyncNotice('Authoritative tenant user directory refreshed.');
     } finally {
       setIsSyncingClaims(false);
-      setTimeout(() => setSyncNotice(null), 5000);
+      setTimeout(() => setSyncNotice(null), 3000);
     }
   };
 
@@ -440,10 +336,10 @@ export default function TenantUserAdminPage() {
             onClick={handleSyncCurrentClaims}
             disabled={isSyncingClaims}
             className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200"
-            title="Force refresh Firebase Auth JWT Custom Claims"
+            title="Refresh authoritative tenant user directory"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isSyncingClaims ? 'animate-spin text-blue-600' : 'text-slate-500'}`} />
-            <span>{isSyncingClaims ? 'Syncing Claims...' : 'Sync Auth Claims'}</span>
+            <span>{isSyncingClaims ? 'Refreshing...' : 'Refresh Directory'}</span>
           </button>
 
           <button
@@ -506,7 +402,7 @@ export default function TenantUserAdminPage() {
               Active Credentials
             </p>
             <p className="text-2xl font-black text-emerald-600 mt-0.5">{stats.active}</p>
-            <p className="text-[11px] text-emerald-700 font-medium mt-1">100% Zero-Trust RBAC</p>
+            <p className="text-[11px] text-emerald-700 font-medium mt-1">Server-authoritative IAM</p>
           </div>
           <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
             <ShieldCheck className="w-5 h-5" />

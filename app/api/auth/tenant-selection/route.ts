@@ -53,17 +53,29 @@ export async function POST(req: NextRequest) {
 
     // 2. Update Firebase custom claims for active tenant scope
     const adminAuth = getAdminAuth();
-    if (adminAuth) {
-      await adminAuth.setCustomUserClaims(verifiedToken.uid, {
-        tenantId: targetTenantId,
-        role: membership.roles[0] || 'doctor',
-        roles: membership.roles,
-        department: membership.departmentIds[0] || 'general_medicine',
-        claimedAt: Date.now(),
-      }).catch((claimsErr) => {
-        console.warn('Tenant claims update notice:', claimsErr);
+    if (!adminAuth) {
+      throw new AuthError({
+        code: 'INTERNAL_AUTH_ERROR',
+        message: 'Firebase Admin Auth is required to synchronize tenant claims.',
+        statusCode: 503,
       });
     }
+
+    const accessibleTenantsBeforeSwitch = await getUserAccessibleTenants(
+      verifiedToken.uid,
+      verifiedToken.email
+    );
+
+    await adminAuth.setCustomUserClaims(verifiedToken.uid, {
+      tenantId: targetTenantId,
+      role: membership.roles[0] || 'doctor',
+      roles: membership.roles,
+      accessibleTenants: accessibleTenantsBeforeSwitch
+        .filter((tenant) => tenant.status === 'ACTIVE')
+        .map((tenant) => tenant.tenantId),
+      department: membership.departmentIds[0] || 'general_medicine',
+      claimedAt: Date.now(),
+    });
 
     // 3. Create fresh session in target tenant
     const session = await createSession({

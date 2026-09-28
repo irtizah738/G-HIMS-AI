@@ -54,4 +54,13 @@ describe('G-HIMS P5C pilot readiness guards', () => {
     expect(pkg.scripts['validate:p5c']).toContain('test:p4:emulator');
     expect(pkg.scripts['validate:p5c']).toContain('test:e2e');
   });
+
+  test('P5C CI aligns Firebase Admin project identity with embedded emulator suites', async () => {
+    const workflow = await source('.github/workflows/p5c-validation.yml');
+
+    expect(workflow).toContain('FIREBASE_PROJECT_ID: ghims-p5a-ci');
+    expect(workflow).toContain('GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p5a-ci');
+    expect(workflow).toContain('FIREBASE_PROJECT_ID: ghims-p4-ci');
+    expect(workflow).toContain('GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci');
+  });
 });

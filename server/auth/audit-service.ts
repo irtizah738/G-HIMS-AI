@@ -39,7 +39,7 @@ export async function logAuthEvent(params: RecordAuthAuditParams): Promise<AuthA
     eventType: params.eventType,
     userId: params.userId ?? null,
     userEmail: params.userEmail ?? null,
-    tenantId: params.tenantId || 'central-metro-hospital',
+    ...(params.tenantId ? { tenantId: params.tenantId } : {}),
     sessionId: params.sessionId ?? null,
     deviceId: params.deviceId ?? null,
     requestId: params.requestId || `req_${Date.now().toString(36)}`,
@@ -56,19 +56,23 @@ export async function logAuthEvent(params: RecordAuthAuditParams): Promise<AuthA
   }
 
   try {
-    const tenantId = auditRecord.tenantId || 'central-metro-hospital';
+    const tenantId = auditRecord.tenantId;
 
-    // 1. Tenant-scoped audit log
-    const tenantLogRef = db.collection('tenants').doc(tenantId).collection('audit_logs').doc(eventId);
-    // 2. Global audit log for enterprise compliance
     const globalLogRef = db.collection('auditLogs').doc(eventId);
-
     const batch = db.batch();
-    batch.set(tenantLogRef, auditRecord);
+
+    if (tenantId) {
+      const tenantLogRef = db.collection('tenants').doc(tenantId).collection('audit_logs').doc(eventId);
+      batch.set(tenantLogRef, auditRecord);
+    }
+
+    // Authentication failures that occur before tenant resolution are deliberately
+    // recorded only in the server-owned global security stream; they are never
+    // attributed to a fabricated default hospital.
     batch.set(globalLogRef, {
       ...auditRecord,
       action: params.eventType,
-      resource: `auth/tenant/${tenantId}`,
+      resource: tenantId ? `auth/tenant/${tenantId}` : 'auth/unscoped',
       status: params.eventType.includes('FAILURE') || params.eventType.includes('UNAUTHORIZED') ? 'FAILED' : 'SUCCESS',
     });
 

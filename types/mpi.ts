@@ -25,6 +25,11 @@ export interface PatientMPI {
   updatedAt: number;
   createdById: string;
   version: number;
+  status?: 'ACTIVE' | 'MERGED' | 'DECEASED' | 'INACTIVE';
+  mergedIntoPatientId?: string;
+  activeEncounterId?: string;
+  activeBedId?: string;
+  email?: string;
   bloodGroup?: string;
   allergies?: string[];
   chronicConditions?: string[];

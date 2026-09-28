@@ -6,11 +6,17 @@
 import { BaseCommand, CommandContext, CommandResult } from '../types';
 import { EncounterDomainService } from '../services/encounter-domain-service';
 import { ClinicalOrderDomainService } from '../services/clinical-order-domain-service';
+import { ClinicalDocumentationDomainService } from '../services/clinical-documentation-domain-service';
+import { OpdQueueDomainService } from '../services/opd-queue-domain-service';
 import { FinancialLedgerDomainService } from '../services/financial-ledger-domain-service';
 import { HcmPrivilegeDomainService } from '../services/hcm-privilege-domain-service';
 import { HrWorkforceDomainService } from '../services/hr-workforce-domain-service';
 import { ResourceCapacityDomainService } from '../services/resource-capacity-domain-service';
 import { PatientIdentityDomainService } from '../services/patient-identity-domain-service';
+import { PatientMergeDomainService } from '../services/patient-merge-domain-service';
+import { InpatientBedDomainService } from '../services/inpatient-bed-domain-service';
+import { TelehealthDomainService } from '../services/telehealth-domain-service';
+import { RevenueIntegrityDomainService } from '../services/revenue-integrity-domain-service';
 import { IdempotencyService } from '../idempotency/idempotency-service';
 
 export class CommandBus {
@@ -23,18 +29,31 @@ export class CommandBus {
     command: BaseCommand
   ): Promise<CommandResult> {
     try {
-      // 1. Zero-Duplicate Idempotency Check
-      const idempotencyCheck = IdempotencyService.checkIdempotency(
+      // 1. Durable zero-duplicate idempotency reservation.
+      const idempotencyCheck = await IdempotencyService.acquireExecution(
         context.tenantId,
         command.idempotencyKey,
         command.commandType,
-        command.payload
+        command.payload,
+        command.commandId
       );
 
       if (idempotencyCheck.status === 'CACHED' && idempotencyCheck.record?.result) {
         return {
           ...idempotencyCheck.record.result,
           replayedFromCache: true,
+        };
+      }
+
+      if (idempotencyCheck.status === 'IN_PROGRESS') {
+        return {
+          success: false,
+          commandId: command.commandId,
+          idempotencyKey: command.idempotencyKey,
+          error: {
+            code: 'IDEMPOTENCY_IN_PROGRESS',
+            message: `Idempotency key '${command.idempotencyKey}' is already reserved by an in-flight or recovery-required command.`,
+          },
         };
       }
 
@@ -90,9 +109,8 @@ export class CommandBus {
           );
           break;
 
-        // --- Patient Identity & Safety Domain ---
-        case 'RegisterPatientCommand':
-          result = await PatientIdentityDomainService.registerPatient(
+        case 'RecordVitalsCommand':
+          result = await ClinicalDocumentationDomainService.recordVitals(
             context,
             command.commandId,
             command.idempotencyKey,
@@ -100,8 +118,93 @@ export class CommandBus {
           );
           break;
 
+        case 'SignClinicalNoteCommand':
+          result = await ClinicalDocumentationDomainService.signClinicalNote(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'UpdateOpdQueueStatusCommand':
+          result = await OpdQueueDomainService.updateStatus(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'AdmitPatientToBedCommand':
+          result = await InpatientBedDomainService.admit(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'UpdateBedStatusCommand':
+          result = await InpatientBedDomainService.updateStatus(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'DischargePatientFromBedCommand':
+          result = await InpatientBedDomainService.discharge(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'CreateTelehealthSessionCommand':
+          result = await TelehealthDomainService.create(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'UpdateTelehealthSessionCommand':
+          result = await TelehealthDomainService.update(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'CompleteTelehealthSessionCommand':
+          result = await TelehealthDomainService.complete(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        // --- Patient Identity & Safety Domain ---
+        case 'RegisterPatientCommand':
+          result = {
+            success: false,
+            commandId: command.commandId,
+            idempotencyKey: command.idempotencyKey,
+            error: {
+              code: 'REGISTRATION_ORCHESTRATOR_REQUIRED',
+              message: 'Patient registration must use the atomic patient+encounter registration endpoint.',
+            },
+          };
+          break;
+
         case 'MergePatientCommand':
-          result = await PatientIdentityDomainService.mergePatients(
+          result = await PatientMergeDomainService.merge(
             context,
             command.commandId,
             command.idempotencyKey,
@@ -121,6 +224,24 @@ export class CommandBus {
         // --- Finance Domain ---
         case 'PostJournalCommand':
           result = await FinancialLedgerDomainService.postUniversalJournal(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ReconcileRevenueIntegrityFindingCommand':
+          result = await RevenueIntegrityDomainService.reconcile(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'DismissRevenueIntegrityFindingCommand':
+          result = await RevenueIntegrityDomainService.dismiss(
             context,
             command.commandId,
             command.idempotencyKey,
@@ -302,7 +423,7 @@ export class CommandBus {
           break;
 
         default:
-          return {
+          result = {
             success: false,
             commandId: command.commandId,
             idempotencyKey: command.idempotencyKey,
@@ -313,14 +434,26 @@ export class CommandBus {
           };
       }
 
-      // Record successful or failed execution in Idempotency cache
-      IdempotencyService.recordExecution(
-        context.tenantId,
-        command.idempotencyKey,
-        command.commandType,
-        command.payload,
-        result
-      );
+      // Enrich the durable idempotency record with the exact command result.
+      // Successful domain services have already atomically committed state + event +
+      // audit + outbox + a replay-safe idempotency result. If this enrichment write
+      // fails after that commit, the command itself must still be reported as committed.
+      try {
+        await IdempotencyService.completeExecution(
+          context.tenantId,
+          command.idempotencyKey,
+          command.commandType,
+          command.payload,
+          result
+        );
+      } catch (finalizationError) {
+        console.error('IDEMPOTENCY_RESULT_ENRICHMENT_FAILED', {
+          tenantId: context.tenantId,
+          commandId: command.commandId,
+          idempotencyKey: command.idempotencyKey,
+          error: finalizationError instanceof Error ? finalizationError.message : String(finalizationError),
+        });
+      }
 
       return result;
     } catch (err) {

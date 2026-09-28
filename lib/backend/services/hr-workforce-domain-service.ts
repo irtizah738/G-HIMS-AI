@@ -21,6 +21,7 @@ import {
   DisciplinaryRecord,
   EmployeeTrainingRecord,
 } from '@/types/hcm-advanced';
+import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 
 export class HrWorkforceDomainService {
   // In-memory CQRS cache stores for instant simulation and persistence sync
@@ -35,6 +36,126 @@ export class HrWorkforceDomainService {
   private static performanceReviews: Map<string, PerformanceReview> = new Map();
   private static disciplinaryRecords: Map<string, DisciplinaryRecord> = new Map();
   private static trainingRecords: Map<string, EmployeeTrainingRecord[]> = new Map();
+
+  private static async loadEmployee(
+    tenantId: string,
+    employeeId: string
+  ): Promise<EmployeeMaster | null> {
+    if (DomainStateRepository.isAvailable()) {
+      const persisted = await DomainStateRepository.getById<EmployeeMaster>(
+        tenantId,
+        'employees',
+        employeeId
+      );
+      if (persisted) this.employees.set(employeeId, persisted);
+      else this.employees.delete(employeeId);
+      return persisted;
+    }
+    return this.employees.get(employeeId) || null;
+  }
+
+  private static async loadCredential(
+    tenantId: string,
+    credentialId: string
+  ): Promise<EmployeeCredential | null> {
+    if (DomainStateRepository.isAvailable()) {
+      const persisted = await DomainStateRepository.getById<EmployeeCredential>(
+        tenantId,
+        'clinicalCredentials',
+        credentialId
+      );
+      if (persisted) this.credentials.set(credentialId, persisted);
+      else this.credentials.delete(credentialId);
+      return persisted;
+    }
+    return this.credentials.get(credentialId) || null;
+  }
+
+  private static async loadAttendance(
+    tenantId: string,
+    attendanceId: string
+  ): Promise<AttendanceRecord | null> {
+    if (DomainStateRepository.isAvailable()) {
+      const persisted = await DomainStateRepository.getById<AttendanceRecord>(
+        tenantId,
+        'attendanceRecords',
+        attendanceId
+      );
+      if (persisted) this.attendanceRecords.set(attendanceId, persisted);
+      else this.attendanceRecords.delete(attendanceId);
+      return persisted;
+    }
+    return this.attendanceRecords.get(attendanceId) || null;
+  }
+
+  private static async loadLeave(
+    tenantId: string,
+    leaveId: string
+  ): Promise<LeaveRequest | null> {
+    if (DomainStateRepository.isAvailable()) {
+      const persisted = await DomainStateRepository.getById<LeaveRequest>(
+        tenantId,
+        'leaveRequests',
+        leaveId
+      );
+      if (persisted) this.leaveRequests.set(leaveId, persisted);
+      else this.leaveRequests.delete(leaveId);
+      return persisted;
+    }
+    return this.leaveRequests.get(leaveId) || null;
+  }
+
+  private static async hydrateClinicalEligibility(
+    tenantId: string,
+    employeeId: string
+  ): Promise<void> {
+    const [credentials, privileges] = await Promise.all([
+      DomainStateRepository.queryEqual<EmployeeCredential>(
+        tenantId,
+        'clinicalCredentials',
+        'employeeId',
+        employeeId
+      ),
+      DomainStateRepository.queryEqual<ClinicalPrivilege>(
+        tenantId,
+        'clinicalPrivileges',
+        'employeeId',
+        employeeId
+      ),
+    ]);
+
+    for (const credential of credentials) {
+      this.credentials.set(credential.credentialId, credential);
+    }
+    for (const privilege of privileges) {
+      this.privileges.set(privilege.privilegeId, privilege);
+    }
+  }
+
+  private static async loadShiftsForEmployee(
+    tenantId: string,
+    employeeId: string
+  ): Promise<RosterShiftEntry[]> {
+    const byId = new Map<string, RosterShiftEntry>();
+
+    for (const shift of this.shifts.values()) {
+      if (shift.employeeId === employeeId) byId.set(shift.rosterId, shift);
+    }
+
+    const persisted = await DomainStateRepository.queryEqual<RosterShiftEntry>(
+      tenantId,
+      'rosterAssignments',
+      'employeeId',
+      employeeId
+    );
+
+    for (const shift of persisted) {
+      this.shifts.set(shift.rosterId, shift);
+      byId.set(shift.rosterId, shift);
+    }
+
+    return Array.from(byId.values());
+  }
 
   // ============================================================================
   // 1. EMPLOYEE MASTER & LIFECYCLE
@@ -130,7 +251,7 @@ export class HrWorkforceDomainService {
       };
     }
 
-    const employee = this.employees.get(payload.employeeId);
+    const employee = await this.loadEmployee(context.tenantId, payload.employeeId);
     if (!employee) {
       return {
         success: false,
@@ -199,7 +320,7 @@ export class HrWorkforceDomainService {
       };
     }
 
-    const employee = this.employees.get(payload.employeeId);
+    const employee = await this.loadEmployee(context.tenantId, payload.employeeId);
     if (!employee) {
       return {
         success: false,
@@ -327,7 +448,7 @@ export class HrWorkforceDomainService {
       };
     }
 
-    const credential = this.credentials.get(payload.credentialId);
+    const credential = await this.loadCredential(context.tenantId, payload.credentialId);
     if (!credential) {
       return {
         success: false,
@@ -433,14 +554,103 @@ export class HrWorkforceDomainService {
       };
     }
 
-    // Verify practitioner has active medical license
-    const eligibility = this.checkClinicalEligibility(payload.employeeId);
-    if (!eligibility.isEligible) {
+    const employee = await this.loadEmployee(context.tenantId, payload.employeeId);
+    if (!employee) {
       return {
         success: false,
         commandId,
         idempotencyKey,
-        error: { code: 'CREDENTIAL_PREREQUISITE_FAILED', message: eligibility.reason || 'Practice prerequisite failed.' },
+        error: { code: 'EMPLOYEE_NOT_FOUND', message: 'Clinical privilege target employee does not exist.' },
+      };
+    }
+
+    if (employee.employmentStatus !== 'ACTIVE') {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'EMPLOYEE_NOT_ACTIVE',
+          message: `Clinical privileges cannot be granted while employee status is ${employee.employmentStatus}.`,
+        },
+      };
+    }
+
+    // Credential authority is resolved from persistent tenant-scoped records,
+    // never from process memory alone.
+    const credentials = await DomainStateRepository.queryEqual<EmployeeCredential>(
+      context.tenantId,
+      'clinicalCredentials',
+      'employeeId',
+      payload.employeeId
+    );
+
+    const today = new Date().toISOString().split('T')[0];
+    const mandatoryCredentials = credentials.filter((credential) => credential.isMandatoryForPractice);
+    const invalidMandatory = mandatoryCredentials.filter(
+      (credential) =>
+        credential.verificationStatus !== 'VERIFIED' ||
+        !credential.expiryDate ||
+        credential.expiryDate < today
+    );
+    const verifiedActiveCredentials = credentials.filter(
+      (credential) =>
+        credential.verificationStatus === 'VERIFIED' &&
+        !!credential.expiryDate &&
+        credential.expiryDate >= today
+    );
+
+    if (verifiedActiveCredentials.length === 0 || invalidMandatory.length > 0) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'CREDENTIAL_PREREQUISITE_FAILED',
+          message:
+            invalidMandatory.length > 0
+              ? `Clinical privilege denied: ${invalidMandatory.length} mandatory credential(s) are expired or unverified.`
+              : 'Clinical privilege denied: no verified, unexpired professional credential is on file.',
+        },
+      };
+    }
+
+    if (!payload.effectiveFrom || !payload.effectiveUntil || payload.effectiveUntil < today) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INVALID_PRIVILEGE_VALIDITY',
+          message: 'Clinical privilege requires a valid effective period that has not already expired.',
+        },
+      };
+    }
+
+    const existingPrivileges = await DomainStateRepository.queryEqual<ClinicalPrivilege>(
+      context.tenantId,
+      'clinicalPrivileges',
+      'employeeId',
+      payload.employeeId
+    );
+    const duplicate = existingPrivileges.find(
+      (privilege) =>
+        privilege.privilegeType === payload.privilegeType &&
+        privilege.facilityId === payload.facilityId &&
+        privilege.departmentId === payload.departmentId &&
+        privilege.status === 'GRANTED' &&
+        privilege.effectiveUntil >= today
+    );
+
+    if (duplicate) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'ACTIVE_PRIVILEGE_ALREADY_EXISTS',
+          message: `An active ${payload.privilegeType} privilege already exists for this scope.`,
+        },
       };
     }
 
@@ -511,6 +721,7 @@ export class HrWorkforceDomainService {
     }
 
     // Check credential lockout for clinical shifts
+    await this.hydrateClinicalEligibility(context.tenantId, payload.employeeId);
     const eligibility = this.checkClinicalEligibility(payload.employeeId);
     if (!eligibility.isEligible) {
       return {
@@ -525,9 +736,10 @@ export class HrWorkforceDomainService {
     }
 
     // Fatigue compliance: Check for rest period violation (< 10 hours rest between consecutive shifts)
-    const existingEmployeeShifts = Array.from(this.shifts.values()).filter(
-      (s) => s.employeeId === payload.employeeId && s.status !== 'CANCELLED'
-    );
+    const existingEmployeeShifts = (await this.loadShiftsForEmployee(
+      context.tenantId,
+      payload.employeeId
+    )).filter((shift) => shift.status !== 'CANCELLED');
 
     const proposedStart = new Date(payload.startTime).getTime();
     const minRestMs = 10 * 60 * 60 * 1000; // 10 hours
@@ -723,7 +935,7 @@ export class HrWorkforceDomainService {
       attendanceId: string;
     }
   ): Promise<CommandResult<AttendanceRecord>> {
-    const attendance = this.attendanceRecords.get(payload.attendanceId);
+    const attendance = await this.loadAttendance(context.tenantId, payload.attendanceId);
     if (!attendance) {
       return {
         success: false,
@@ -798,7 +1010,7 @@ export class HrWorkforceDomainService {
       };
     }
 
-    const record = this.attendanceRecords.get(payload.attendanceId);
+    const record = await this.loadAttendance(context.tenantId, payload.attendanceId);
     if (!record) {
       return {
         success: false,
@@ -948,7 +1160,7 @@ export class HrWorkforceDomainService {
       };
     }
 
-    const leave = this.leaveRequests.get(payload.leaveId);
+    const leave = await this.loadLeave(context.tenantId, payload.leaveId);
     if (!leave) {
       return {
         success: false,

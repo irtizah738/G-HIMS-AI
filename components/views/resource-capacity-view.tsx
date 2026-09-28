@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useParams } from 'next/navigation';
 import {
   Boxes,
   Building,
@@ -41,9 +42,12 @@ import {
   OperationalMatchRequest,
   OperationalMatchResult,
 } from '@/types/resource-management';
-import { ResourceCapacityDomainService } from '@/lib/backend/services/resource-capacity-domain-service';
+import { executeCommand } from '@/lib/api/command-client';
 
 export function ResourceCapacityView() {
+  const params = useParams<{ tenantId: string }>();
+  const tenantId = String(params?.tenantId || '').trim().toLowerCase();
+
   const [activeTab, setActiveTab] = useState<
     'master' | 'rooms' | 'transfers' | 'reservations' | 'maintenance' | 'calibration' | 'matcher'
   >('master');
@@ -325,17 +329,33 @@ export function ResourceCapacityView() {
   const pendingMaintenance = workOrders.filter((w) => w.status !== 'COMPLETED').length;
 
   const handleExecuteMatching = () => {
-    const result = ResourceCapacityDomainService.matchOperationalCapacity({
-      serviceType: matchServiceType,
-      specialty: 'Cardiothoracic Surgery',
-      scheduledTime: new Date().toISOString(),
-      durationMinutes: 180,
-      requiredRoomType: 'operating_room',
-      requiredPrivileges: ['PERFORM_CARDIOTHORACIC_SURGERY', 'ADMINISTER_ANESTHESIA'],
-      requiredEquipmentTypes: ['MEDICAL_DEVICE', 'SURGICAL_EQUIPMENT'],
-    });
+    // UI feasibility preview only. Authoritative reservation/calibration decisions
+    // must be executed through server commands.
+    const matchedRoom = rooms.find((room) =>
+      room.status === 'AVAILABLE' &&
+      (matchServiceType !== 'OT_SURGERY' || room.roomType === 'operating_room')
+    );
+    const matchedEquipment = resources.filter(
+      (resource) => resource.status === 'AVAILABLE' && resource.calibrationStatus === 'VALID'
+    );
 
-    setMatchResult(result);
+    const isAvailable = Boolean(matchedRoom) && matchedEquipment.length > 0;
+    setMatchResult({
+      isAvailable,
+      matchScore: isAvailable ? 92 : 35,
+      matchedPhysician: isAvailable
+        ? {
+            employeeId: 'preview-physician',
+            fullName: 'Credentialed clinician required',
+            role: 'Physician',
+            specialty: matchServiceType === 'OT_SURGERY' ? 'Cardiothoracic Surgery' : 'Assigned Specialty',
+            privilegeStatus: 'VALID',
+          }
+        : undefined,
+      matchedRoom,
+      matchedEquipment: matchedEquipment.slice(0, 2),
+      conflictReason: isAvailable ? undefined : 'No locally available calibrated room/equipment combination.',
+    });
   };
 
   const handleRecordCalibrationPass = async (resource: ResourceMaster) => {
@@ -344,18 +364,14 @@ export function ResourceCapacityView() {
     const certNumber = `CAL-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
     try {
-      const result = await ResourceCapacityDomainService.recordCalibration(
-        {
-          actorId: 'usr_biomed_engineer',
-          tenantId: 'metro-health',
-          roles: ['BIOMEDICAL_ENGINEER'],
-          permissions: ['CALIBRATE_EQUIPMENT'],
-          correlationId: `cor_${Date.now()}`,
-          requestId: `req_${Date.now()}`,
-        },
-        `cmd_${Date.now()}`,
-        `idemp_${Date.now()}`,
-        {
+      if (!tenantId) {
+        throw new Error('Tenant context is required.');
+      }
+
+      const result = await executeCommand({
+        tenantId,
+        commandType: 'RecordCalibrationCommand',
+        payload: {
           resourceId: resource.resourceId,
           resourceName: resource.name,
           model: resource.model || 'Standard',
@@ -365,8 +381,8 @@ export function ResourceCapacityView() {
           certificateNumber: certNumber,
           technicianName: 'Lead Biomedical Engineer',
           result: 'PASS',
-        }
-      );
+        },
+      });
 
       if (result.success) {
         setResources((prev) =>

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useParams } from 'next/navigation';
 import {
   Users,
   Building2,
@@ -58,11 +59,13 @@ import {
   HospitalDepartment,
   PositionDefinition,
 } from '@/types/hcm-advanced';
-import { HrWorkforceDomainService } from '@/lib/backend/services/hr-workforce-domain-service';
+import { executeCommand } from '@/lib/api/command-client';
 import { useHospital } from '@/lib/context/hospital-context';
 import { useRBAC } from '@/lib/auth/rbac-context';
 
 export function HrManagementView() {
+  const params = useParams<{ tenantId: string }>();
+  const tenantId = String(params?.tenantId || '').trim().toLowerCase();
   const { staff } = useHospital();
   const { currentRole } = useRBAC();
   const [activeTab, setActiveTab] = useState<
@@ -609,30 +612,26 @@ export function HrManagementView() {
     if (!selectedCredentialToVerify) return;
 
     try {
-      const result = await HrWorkforceDomainService.verifyCredential(
-        {
-          actorId: 'usr_med_director',
-          tenantId: 'metro-health',
-          roles: ['MEDICAL_DIRECTOR'],
-          permissions: ['VERIFY_CREDENTIALS'],
-          correlationId: `cor_${Date.now()}`,
-          requestId: `req_${Date.now()}`,
-        },
-        `cmd_${Date.now()}`,
-        `idemp_${Date.now()}`,
-        {
+      if (!tenantId) throw new Error('Tenant context is required.');
+
+      const result = await executeCommand({
+        tenantId,
+        commandType: 'VerifyCredentialCommand',
+        payload: {
           credentialId: selectedCredentialToVerify.credentialId,
           status: approved ? 'VERIFIED' : 'REJECTED',
-          notes: approved ? 'Verified via primary source check' : 'License document illegible or unverified',
-        }
-      );
+          notes: approved
+            ? 'Verified via primary source check'
+            : 'License document illegible or unverified',
+        },
+      });
 
       if (result.success) {
         setCredentials((prev) =>
-          prev.map((c) =>
-            c.credentialId === selectedCredentialToVerify.credentialId
-              ? { ...c, verificationStatus: approved ? 'VERIFIED' : 'REJECTED' }
-              : c
+          prev.map((credential) =>
+            credential.credentialId === selectedCredentialToVerify.credentialId
+              ? { ...credential, verificationStatus: approved ? 'VERIFIED' : 'REJECTED' }
+              : credential
           )
         );
         setActionMessage({
@@ -642,8 +641,8 @@ export function HrManagementView() {
       } else {
         setActionMessage({ text: result.error?.message || 'Verification failed', type: 'error' });
       }
-    } catch (e: any) {
-      setActionMessage({ text: e.message || 'Operation failed', type: 'error' });
+    } catch (error: any) {
+      setActionMessage({ text: error.message || 'Operation failed', type: 'error' });
     } finally {
       setShowVerifyCredentialModal(false);
       setSelectedCredentialToVerify(null);
@@ -652,27 +651,27 @@ export function HrManagementView() {
 
   const handleApproveLeave = async (leaveId: string, approved: boolean) => {
     try {
-      const result = await HrWorkforceDomainService.approveLeaveRequest(
-        {
-          actorId: 'usr_hr_admin',
-          tenantId: 'metro-health',
-          roles: ['HR_ADMIN'],
-          permissions: ['APPROVE_LEAVE'],
-          correlationId: `cor_${Date.now()}`,
-          requestId: `req_${Date.now()}`,
-        },
-        `cmd_${Date.now()}`,
-        `idemp_${Date.now()}`,
-        {
+      if (!tenantId) throw new Error('Tenant context is required.');
+
+      const result = await executeCommand({
+        tenantId,
+        commandType: 'ApproveLeaveRequestCommand',
+        payload: {
           leaveId,
           approved,
-          rejectionReason: approved ? undefined : 'Department staffing coverage requirement cannot be met.',
-        }
-      );
+          rejectionReason: approved
+            ? undefined
+            : 'Department staffing coverage requirement cannot be met.',
+        },
+      });
 
       if (result.success) {
         setLeaveRequests((prev) =>
-          prev.map((l) => (l.leaveId === leaveId ? { ...l, status: approved ? 'APPROVED' : 'REJECTED' } : l))
+          prev.map((leave) =>
+            leave.leaveId === leaveId
+              ? { ...leave, status: approved ? 'APPROVED' : 'REJECTED' }
+              : leave
+          )
         );
         setActionMessage({
           text: `Leave request ${approved ? 'APPROVED' : 'REJECTED'} successfully!`,
@@ -681,8 +680,8 @@ export function HrManagementView() {
       } else {
         setActionMessage({ text: result.error?.message || 'Leave decision failed', type: 'error' });
       }
-    } catch (e: any) {
-      setActionMessage({ text: e.message || 'Operation failed', type: 'error' });
+    } catch (error: any) {
+      setActionMessage({ text: error.message || 'Operation failed', type: 'error' });
     }
   };
 
@@ -690,46 +689,40 @@ export function HrManagementView() {
     if (!selectedAttendanceRecord || !correctedClockIn || !correctionReason) return;
 
     try {
-      const result = await HrWorkforceDomainService.correctAttendanceTime(
-        {
-          actorId: 'usr_supervisor',
-          tenantId: 'metro-health',
-          roles: ['HR_ADMIN', 'SUPERVISOR'],
-          permissions: ['CORRECT_TIME'],
-          correlationId: `cor_${Date.now()}`,
-          requestId: `req_${Date.now()}`,
-        },
-        `cmd_${Date.now()}`,
-        `idemp_${Date.now()}`,
-        {
+      if (!tenantId) throw new Error('Tenant context is required.');
+
+      const result = await executeCommand({
+        tenantId,
+        commandType: 'CorrectAttendanceTimeCommand',
+        payload: {
           attendanceId: selectedAttendanceRecord.attendanceId,
           newClockInTime: correctedClockIn,
           reason: correctionReason,
-        }
-      );
+        },
+      });
 
       if (result.success) {
         setAttendances((prev) =>
-          prev.map((a) =>
-            a.attendanceId === selectedAttendanceRecord.attendanceId
+          prev.map((attendance) =>
+            attendance.attendanceId === selectedAttendanceRecord.attendanceId
               ? {
-                  ...a,
+                  ...attendance,
                   clockInTime: correctedClockIn,
                   isCorrected: true,
                   status: 'CORRECTED',
                 }
-              : a
+              : attendance
           )
         );
         setActionMessage({
-          text: `Attendance record corrected with immutable audit trail.`,
+          text: 'Attendance record corrected with immutable audit trail.',
           type: 'success',
         });
       } else {
         setActionMessage({ text: result.error?.message || 'Correction failed', type: 'error' });
       }
-    } catch (e: any) {
-      setActionMessage({ text: e.message || 'Operation failed', type: 'error' });
+    } catch (error: any) {
+      setActionMessage({ text: error.message || 'Operation failed', type: 'error' });
     } finally {
       setShowAttendanceCorrectionModal(false);
       setSelectedAttendanceRecord(null);

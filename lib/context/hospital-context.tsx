@@ -34,15 +34,10 @@ import {
   subscribeToOpdQueue,
   subscribeToAuditLogs,
   subscribeToTelehealthSessions,
-  syncPatientToFirestore,
-  syncBedToFirestore,
-  syncMismatchToFirestore,
-  syncOpdTokenToFirestore,
-  syncAuditLogToFirestore,
-  syncHl7ToFirestore,
-  syncTelehealthSessionToFirestore,
 } from '@/lib/firebase/firestore-service';
 import { DischargedCensusRecord, initialDischargedCensus } from '@/lib/clinical/ipd-service';
+import { executeActiveTenantCommand, registerActiveTenantPatient } from '@/lib/api/command-client';
+import { syncEngine } from '@/lib/offline/sync-engine';
 
 const initialTelehealthSessions: TelehealthSession[] = [
   {
@@ -988,16 +983,16 @@ interface HospitalContextType {
   };
 
   // Actions
-  updateBedStatus: (bedId: string, status: BedStatus, patientId?: string, notes?: string) => void;
-  assignPatientToBed: (bedId: string, patientId: string) => void;
-  admitPatientToBed: (patientId: string, bedId: string, doctor?: string, nurse?: string) => void;
+  updateBedStatus: (bedId: string, status: BedStatus, patientId?: string, notes?: string) => Promise<void>;
+  assignPatientToBed: (bedId: string, patientId: string) => Promise<void>;
+  admitPatientToBed: (patientId: string, bedId: string, doctor?: string, nurse?: string) => Promise<void>;
   dischargePatientFromBed: (
     bedId: string,
     notes?: string,
     disposition?: string,
     censusRecord?: DischargedCensusRecord
-  ) => void;
-  registerNewPatient: (patientData: Omit<Patient, 'id' | 'mrn' | 'registeredAt' | 'encounters'>) => Patient;
+  ) => Promise<void>;
+  registerNewPatient: (patientData: Omit<Patient, 'id' | 'mrn' | 'registeredAt' | 'encounters'>) => Promise<Patient>;
   mergePatients: (primaryId: string, secondaryId: string, mergeReason: string) => Promise<Patient>;
   addClinicalNote: (patientId: string, note: Omit<ClinicalNote, 'id' | 'timestamp'>) => void;
   addLabOrder: (patientId: string, order: Omit<LabOrder, 'id' | 'orderedAt'>) => void;
@@ -1149,7 +1144,6 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       details,
     };
     setAuditLogs(prev => [newLog, ...prev]);
-    syncAuditLogToFirestore(newLog).catch(() => {});
   };
 
   const recordMutation = (actionType: OfflineMutation['actionType'], entity: string, payload: Record<string, any>) => {
@@ -1165,88 +1159,70 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     setOfflineMutations(prev => [mutation, ...prev]);
   };
 
-  const updateBedStatus = (bedId: string, status: BedStatus, patientId?: string, notes?: string) => {
-    let updatedBed: Bed | undefined;
-    setBeds(prev => prev.map(bed => {
-      if (bed.id === bedId) {
-        updatedBed = {
-          ...bed,
-          status,
-          patientId: status === 'available' ? undefined : (patientId || bed.patientId),
-          patientName: status === 'available' ? undefined : (patientId ? patients.find(p => p.id === patientId)?.fullName : bed.patientName),
-          notes: notes !== undefined ? notes : bed.notes,
-        };
-        return updatedBed;
-      }
-      return bed;
-    }));
-    if (updatedBed) {
-      syncBedToFirestore(updatedBed).catch(() => {});
+  const updateBedStatus = async (bedId: string, status: BedStatus, _patientId?: string, notes?: string) => {
+    if (status === 'occupied') {
+      throw new Error('BED_STATUS_REJECTED: use admitPatientToBed for occupied beds.');
     }
-    recordMutation('ALLOCATE_BED', `Bed:${bedId}`, { status, patientId });
-    addAuditLog('UPDATE_BED_STATUS', `Bed ${bedId}`, `Status changed to ${status}`);
+
+    const result = await executeActiveTenantCommand<{ bed: Bed }>('UpdateBedStatusCommand', {
+      bedId,
+      status,
+      notes,
+    });
+
+    if (!result.success || !result.data?.bed) {
+      throw new Error(result.error?.message || 'Bed-status command failed.');
+    }
+
+    const authoritativeBed = result.data.bed;
+    setBeds((previous) => previous.map((bed) => bed.id === bedId ? authoritativeBed : bed));
   };
 
-  const assignPatientToBed = (bedId: string, patientId: string) => {
-    const patient = patients.find(p => p.id === patientId);
-    if (!patient) return;
-    let updatedBed: Bed | undefined;
-    let updatedPatient: Patient | undefined;
-    setBeds(prev => prev.map(bed => {
-      if (bed.id === bedId) {
-        updatedBed = {
-          ...bed,
-          status: 'occupied',
-          patientId: patient.id,
-          patientName: patient.fullName,
-          admissionDate: new Date().toISOString().split('T')[0],
-        };
-        return updatedBed;
-      }
-      return bed;
-    }));
-    setPatients(prev => prev.map(p => {
-      if (p.id === patientId) {
-        updatedPatient = { ...p, activeBedId: bedId };
-        return updatedPatient;
-      }
-      return p;
-    }));
-    if (updatedBed) syncBedToFirestore(updatedBed).catch(() => {});
-    if (updatedPatient) syncPatientToFirestore(updatedPatient).catch(() => {});
-    addAuditLog('ASSIGN_BED', `Bed ${bedId}`, `Assigned to ${patient.fullName} (MRN: ${patient.mrn})`);
+  const assignPatientToBed = async (bedId: string, patientId: string) => {
+    await admitPatientToBed(patientId, bedId);
   };
 
-  const admitPatientToBed = (patientId: string, bedId: string, doctor?: string, nurse?: string) => {
-    const patient = patients.find(p => p.id === patientId);
-    if (!patient) return;
-    let updatedBed: Bed | undefined;
-    let updatedPatient: Patient | undefined;
-    setBeds(prev => prev.map(bed => {
-      if (bed.id === bedId) {
-        updatedBed = {
-          ...bed,
-          status: 'occupied',
-          patientId: patient.id,
-          patientName: patient.fullName,
-          assignedDoctor: doctor || bed.assignedDoctor || 'Dr. Sarah Jenkins',
-          assignedNurse: nurse || bed.assignedNurse || 'Nurse John Davis',
-          admissionDate: new Date().toISOString().split('T')[0],
-        };
-        return updatedBed;
-      }
-      return bed;
-    }));
-    setPatients(prev => prev.map(p => {
-      if (p.id === patientId) {
-        updatedPatient = { ...p, activeBedId: bedId };
-        return updatedPatient;
-      }
-      return p;
-    }));
-    if (updatedBed) syncBedToFirestore(updatedBed).catch(() => {});
-    if (updatedPatient) syncPatientToFirestore(updatedPatient).catch(() => {});
-    addAuditLog('ADMIT_PATIENT_BED', `Bed ${bedId}`, `Admitted ${patient.fullName} (Dr: ${doctor || 'Dr. Jenkins'})`);
+  const admitPatientToBed = async (patientId: string, bedId: string, doctor?: string, nurse?: string) => {
+    const result = await executeActiveTenantCommand<{ bed: Bed; patient: Patient }>('AdmitPatientToBedCommand', {
+      patientId,
+      bedId,
+      assignedDoctor: doctor,
+      assignedNurse: nurse,
+    });
+
+    if (!result.success || !result.data?.bed || !result.data?.patient) {
+      throw new Error(result.error?.message || 'Inpatient admission command failed.');
+    }
+
+    setBeds((previous) => previous.map((bed) => bed.id === bedId ? result.data!.bed : bed));
+    setPatients((previous) => previous.map((patient) => patient.id === patientId ? result.data!.patient : patient));
+  };
+
+  const dischargePatientFromBed = async (
+    bedId: string,
+    notes?: string,
+    disposition?: string,
+    censusRecord?: DischargedCensusRecord
+  ) => {
+    const result = await executeActiveTenantCommand<{ bed: Bed; patient: Patient; disposition?: string }>(
+      'DischargePatientFromBedCommand',
+      { bedId, notes, disposition }
+    );
+
+    if (!result.success || !result.data?.bed || !result.data?.patient) {
+      throw new Error(result.error?.message || 'Inpatient discharge command failed.');
+    }
+
+    setBeds((previous) => previous.map((bed) => bed.id === bedId ? result.data!.bed : bed));
+    setPatients((previous) => previous.map((patient) =>
+      patient.id === result.data!.patient.id ? result.data!.patient : patient
+    ));
+
+    // Discharged census remains a UI/read-model projection in P1. It is populated
+    // only after the authoritative discharge command succeeds.
+    if (censusRecord) {
+      setDischargedCensus((previous) => [censusRecord, ...previous]);
+    }
   };
 
   const reconcileCensus = () => {
@@ -1271,356 +1247,473 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     };
   };
 
-  const dischargePatientFromBed = (
-    bedId: string,
-    notes?: string,
-    disposition?: string,
-    censusRecord?: DischargedCensusRecord
-  ) => {
-    const bed = beds.find(b => b.id === bedId);
-    if (!bed) return;
-    const pId = bed.patientId;
-    const patient = patients.find(p => p.id === pId);
-    let updatedBed: Bed | undefined;
-    let updatedPatient: Patient | undefined;
-
-    setBeds(prev => prev.map(b => {
-      if (b.id === bedId) {
-        updatedBed = {
-          ...b,
-          status: 'cleaning',
-          patientId: undefined,
-          patientName: undefined,
-          notes: notes || 'Sanitizing protocol in progress (Discharged)',
-        };
-        return updatedBed;
-      }
-      return b;
-    }));
-
-    if (pId) {
-      setPatients(prev => prev.map(p => {
-        if (p.id === pId) {
-          updatedPatient = { ...p, activeBedId: undefined, activeEncounterId: undefined };
-          return updatedPatient;
-        }
-        return p;
-      }));
-    }
-
-    if (censusRecord) {
-      setDischargedCensus(prev => [censusRecord, ...prev]);
-    } else if (bed && (bed.patientName || patient)) {
-      const newRecord: DischargedCensusRecord = {
-        id: `dc-${Date.now()}`,
-        patientId: pId || 'p-gen',
-        patientName: bed.patientName || patient?.fullName || 'Inpatient',
-        mrn: patient?.mrn || `GH-2026-${(pId || '1000').replace(/\D/g, '') || '4412'}`,
-        age: patient?.age || 52,
-        gender: patient?.gender || 'Female',
-        bedId: bed.id,
-        bedNumber: bed.bedNumber,
-        ward: bed.ward,
-        admissionDate: bed.admissionDate || new Date(Date.now() - 3 * 86400000).toISOString().split('T')[0],
-        dischargeDate: new Date().toISOString().split('T')[0],
-        lengthOfStayDays: 3,
-        primaryDiagnosis: bed.notes || 'Inpatient Stay Completed',
-        dischargingDoctor: bed.assignedDoctor || 'Dr. Sarah Jenkins',
-        dischargeDisposition: disposition || 'Home with Self-Care',
-        gatePassCode: `GP-2026-${Math.floor(1000 + Math.random() * 9000)}`,
-        medicationReconciliationCompleted: true,
-        financialClearanceCompleted: true,
-        followUpDate: 'In 7 days (OPD)',
-        dischargeSummaryNote: notes || 'Discharged from bed. Medication reconciliation completed.',
+  const registerNewPatient = async (
+    patientData: Omit<Patient, 'id' | 'mrn' | 'registeredAt' | 'encounters'>
+  ): Promise<Patient> => {
+    const registration = await registerActiveTenantPatient<{
+      patient: {
+        id: string;
+        mrn: string;
+        fullName: string;
+        dateOfBirth: string;
       };
-      setDischargedCensus(prev => [newRecord, ...prev]);
-    }
+      encounter: {
+        id: string;
+        department: string;
+        chiefComplaint: string;
+      };
+      queueToken: {
+        id: string;
+        tokenNumber: string;
+        department: string;
+        priority: string;
+        status: 'waiting';
+        arrivalTime: string;
+      };
+    }>({
+      fullName: patientData.fullName,
+      dateOfBirth: patientData.dateOfBirth,
+      gender: patientData.gender,
+      contactPhone: patientData.contactNumber,
+      address: patientData.address,
+      bloodGroup: patientData.bloodGroup,
+      identifiers: patientData.contactNumber
+        ? [{ type: 'PHONE', value: patientData.contactNumber, issuer: 'Patient Registration' }]
+        : [],
+      allergies: patientData.allergies,
+      chronicConditions: patientData.chronicConditions,
+      encounterType: 'OPD',
+      department: 'General OPD',
+      priority: 'ROUTINE',
+      chiefComplaint: 'Initial clinic intake and consultation',
+    });
 
-    if (updatedBed) syncBedToFirestore(updatedBed).catch(() => {});
-    if (updatedPatient) syncPatientToFirestore(updatedPatient).catch(() => {});
-    addAuditLog('DISCHARGE_BED', `Bed ${bedId}`, `Patient discharged from bed. Invariant verified: archived to census.`);
-  };
-
-  const registerNewPatient = (patientData: Omit<Patient, 'id' | 'mrn' | 'registeredAt' | 'encounters'>): Patient => {
-    const newId = `p-${Date.now().toString().slice(-4)}`;
-    const newMrn = `GH-2026-${Math.floor(1000 + Math.random() * 9000)}`;
     const newPatient: Patient = {
       ...patientData,
-      id: newId,
-      mrn: newMrn,
+      id: registration.patient.id,
+      mrn: registration.patient.mrn,
+      activeEncounterId: registration.encounter.id,
       registeredAt: new Date().toISOString().split('T')[0],
       encounters: [
         {
-          id: `enc-${Date.now().toString().slice(-3)}`,
+          id: registration.encounter.id,
           type: 'Outpatient',
-          department: 'General OPD',
+          department: registration.encounter.department || 'General OPD',
           admitDate: new Date().toISOString().split('T')[0],
-          chiefComplaint: 'Initial clinic intake and consultation',
-          attendingPhysician: 'Dr. Sarah Jenkins',
+          chiefComplaint: registration.encounter.chiefComplaint || 'Initial clinic intake and consultation',
+          attendingPhysician: '',
           status: 'active',
-          vitalsHistory: [
-            { heartRate: 78, bloodPressure: '120/80', temperature: 37.0, respiratoryRate: 16, oxygenSaturation: 98, timestamp: new Date().toLocaleTimeString() }
-          ],
+          vitalsHistory: [],
           clinicalNotes: [],
           medications: [],
           labOrders: [],
-          billing: { items: [{ id: `bi-${Date.now()}`, description: 'Outpatient Triage & Registration', code: 'REG-OPD', category: 'Consultation', quantity: 1, unitPrice: 75, totalPrice: 75, auditedStatus: 'verified' }], subtotal: 75, tax: 3.75, insuranceCoverage: 60, patientPayable: 18.75, paymentStatus: 'settled' }
-        }
+          billing: {
+            items: [],
+            subtotal: 0,
+            tax: 0,
+            insuranceCoverage: 0,
+            patientPayable: 0,
+            paymentStatus: 'pending',
+          },
+        },
       ],
     };
-    setPatients(prev => [newPatient, ...prev]);
-    syncPatientToFirestore(newPatient).catch(() => {});
-    recordMutation('INSERT_NOTE', `Patient:${newId}`, newPatient);
-    addAuditLog('REGISTER_PATIENT', `Patient ${newMrn}`, `Registered patient ${newPatient.fullName}`);
+
+    setPatients((previous) => [newPatient, ...previous.filter((item) => item.id !== newPatient.id)]);
+    setOpdQueue((previous) => [
+      {
+        id: registration.queueToken.id,
+        tokenNumber: registration.queueToken.tokenNumber,
+        patientId: newPatient.id,
+        patientName: newPatient.fullName,
+        mrn: newPatient.mrn,
+        age: newPatient.age,
+        gender: newPatient.gender,
+        department: registration.queueToken.department,
+        assignedDoctor: '',
+        priority:
+          registration.queueToken.priority === 'urgent'
+            ? 'urgent'
+            : registration.queueToken.priority === 'emergency'
+              ? 'stat_emergency'
+              : 'routine',
+        status: 'waiting',
+        arrivalTime: registration.queueToken.arrivalTime,
+        chiefComplaint: registration.encounter.chiefComplaint || 'Initial clinic intake and consultation',
+      },
+      ...previous.filter((token) => token.id !== registration.queueToken.id),
+    ]);
+    setSelectedPatientId(newPatient.id);
+    recordMutation('REGISTER_PATIENT', `Patient:${newPatient.id}`, {
+      patientId: newPatient.id,
+      mrn: newPatient.mrn,
+      encounterId: registration.encounter.id,
+      queueTokenId: registration.queueToken.id,
+    });
+
     return newPatient;
   };
 
-  const mergePatients = async (primaryId: string, secondaryId: string, mergeReason: string): Promise<Patient> => {
-    const primary = patients.find(p => p.id === primaryId);
-    const secondary = patients.find(p => p.id === secondaryId);
+  const mergePatients = async (
+    primaryId: string,
+    secondaryId: string,
+    mergeReason: string
+  ): Promise<Patient> => {
+    const primary = patients.find((patient) => patient.id === primaryId);
+    const secondary = patients.find((patient) => patient.id === secondaryId);
+
     if (!primary || !secondary) {
       throw new Error('Primary or secondary patient record not found.');
     }
     if (primary.id === secondary.id) {
       throw new Error('Cannot merge a patient record into itself.');
     }
-
-    const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
-    const combinedAllergies = Array.from(new Set([...(primary.allergies || []), ...(secondary.allergies || [])]));
-    const combinedConditions = Array.from(new Set([...(primary.chronicConditions || []), ...(secondary.chronicConditions || [])]));
-    const combinedEncounters = [...(primary.encounters || []), ...(secondary.encounters || [])];
-
-    // Audit clinical note on surviving primary record
-    const auditNote: ClinicalNote = {
-      id: `note-merge-${Date.now()}`,
-      timestamp,
-      author: 'Clinical Governance Supervisor',
-      role: 'MPI Identity Consolidation',
-      category: 'Progress',
-      content: `[MPI IDENTITY MERGE]: Secondary duplicate patient record "${secondary.fullName}" (MRN: ${secondary.mrn}) was consolidated into this primary surviving record (MRN: ${primary.mrn}).\nReason: ${mergeReason}\nAll historical clinical notes, allergies, conditions, and encounters have been permanently re-indexed to this surviving identifier.`,
-      aiStructuredData: {
-        chiefComplaint: 'MPI Record Consolidation',
-        diagnoses: ['Administrative Patient Merge'],
-        medicationsPrescribed: [],
-        recommendedProcedures: ['Longitudinal Chart Re-Indexing'],
-        followUpDays: 0,
-        billingCodes: [],
-      },
-    };
-
-    if (combinedEncounters.length > 0) {
-      combinedEncounters[0] = {
-        ...combinedEncounters[0],
-        clinicalNotes: [auditNote, ...combinedEncounters[0].clinicalNotes],
-      };
+    if (!mergeReason.trim()) {
+      throw new Error('A governed patient-merge reason is required.');
     }
 
+    const result = await executeActiveTenantCommand<{
+      primaryPatientId: string;
+      secondaryPatientId: string;
+      status: 'MERGED';
+      allergies: string[];
+      chronicConditions: string[];
+    }>('MergePatientCommand', {
+      primaryPatientId: primaryId,
+      secondaryPatientId: secondaryId,
+      mergeReason: mergeReason.trim(),
+    });
+
+    if (!result.success || !result.data) {
+      throw new Error(result.error?.message || 'Authoritative patient merge failed.');
+    }
+
+    // P1 keeps the legacy UI projection synchronized only with state that the
+    // authoritative merge command actually committed. Dependent encounter/queue/
+    // bed re-indexing is not fabricated client-side.
     const consolidatedPrimary: Patient = {
       ...primary,
-      allergies: combinedAllergies,
-      chronicConditions: combinedConditions,
-      encounters: combinedEncounters,
-      activeBedId: primary.activeBedId || secondary.activeBedId,
+      allergies: result.data.allergies || primary.allergies,
+      chronicConditions: result.data.chronicConditions || primary.chronicConditions,
     };
 
-    // Filter out secondary patient and update primary patient
-    setPatients(prev => prev.filter(p => p.id !== secondaryId).map(p => p.id === primaryId ? consolidatedPrimary : p));
-
-    // Update beds pointing to secondary
-    setBeds(prev => prev.map(b => b.patientId === secondaryId ? { ...b, patientId: primaryId, patientName: primary.fullName } : b));
-
-    // Update OPD queue pointing to secondary
-    setOpdQueue(prev => prev.map(q => q.patientId === secondaryId ? { ...q, patientId: primaryId, patientName: primary.fullName, mrn: primary.mrn } : q));
-
-    // Update billing mismatches pointing to secondary
-    setMismatches(prev => prev.map(m => m.patientId === secondaryId ? { ...m, patientId: primaryId, patientName: primary.fullName } : m));
-
+    setPatients((previous) =>
+      previous
+        .filter((patient) => patient.id !== secondaryId)
+        .map((patient) => patient.id === primaryId ? consolidatedPrimary : patient)
+    );
     setSelectedPatientId(primaryId);
 
-    // Sync to Firestore & record audit log
-    syncPatientToFirestore(consolidatedPrimary).catch(() => {});
-    addAuditLog('MPI_PATIENT_MERGE', `Primary ${primary.mrn} <= Secondary ${secondary.mrn}`, `Consolidated duplicate identity: ${mergeReason}`);
-    recordMutation('INSERT_NOTE', `Patient:${primaryId}`, consolidatedPrimary);
+    addAuditLog(
+      'MPI_PATIENT_MERGE',
+      `Primary ${primary.mrn} <= Secondary ${secondary.mrn}`,
+      `Authoritative merge committed. Secondary identity is marked MERGED into the primary record. Reason: ${mergeReason.trim()}`
+    );
 
     return consolidatedPrimary;
   };
 
   const addClinicalNote = (patientId: string, note: Omit<ClinicalNote, 'id' | 'timestamp'>) => {
-    const noteId = `note-${Date.now()}`;
-    const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
-    const newNote: ClinicalNote = { ...note, id: noteId, timestamp };
-    let updatedPatient: Patient | undefined;
+    const patient = patients.find((item) => item.id === patientId);
+    const encounterId = patient?.activeEncounterId || patient?.encounters?.[0]?.id;
 
-    setPatients(prev => prev.map(p => {
-      if (p.id === patientId) {
-        const encounters = [...p.encounters];
+    if (!patient || !encounterId) {
+      console.error('CLINICAL_NOTE_REJECTED: active patient encounter is required.');
+      return;
+    }
+
+    const categoryMap: Record<ClinicalNote['category'], 'SOAP' | 'PROGRESS' | 'CONSULTATION' | 'DISCHARGE' | 'NURSING'> = {
+      SOAP: 'SOAP',
+      Progress: 'PROGRESS',
+      Consultation: 'CONSULTATION',
+      Discharge: 'DISCHARGE',
+      Nursing: 'NURSING',
+    };
+
+    void executeActiveTenantCommand<{
+      evidenceId: string;
+      revenueIntegrityFindings?: Array<{
+        id: string;
+        patientId: string;
+        encounterId: string;
+        sourceEvidenceId: string;
+        documentedItem: string;
+        category: 'Procedure' | 'Medication' | 'Lab' | 'Supply / Consumable' | 'Bed Tier';
+        suggestedCode: string;
+        estimatedRecoverableAmountMinorUnits: number;
+        status: 'PENDING_REVIEW' | 'RECONCILED' | 'DISMISSED';
+        evidenceSnippet: string;
+        confidenceScore?: number;
+      }>;
+    }>('SignClinicalNoteCommand', {
+      encounterId,
+      patientId,
+      category: categoryMap[note.category],
+      content: note.content,
+      acceptedStructuredData: note.aiStructuredData || {},
+    }).then((result) => {
+      if (!result.success) {
+        throw new Error(result.error?.message || 'Clinical note command failed.');
+      }
+
+      const noteId = result.entityId || `note-${Date.now()}`;
+      const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
+      const newNote: ClinicalNote = { ...note, id: noteId, timestamp };
+
+      setPatients((previous) => previous.map((item) => {
+        if (item.id !== patientId) return item;
+        const encounters = [...item.encounters];
         if (encounters.length > 0) {
           encounters[0] = {
             ...encounters[0],
             clinicalNotes: [newNote, ...encounters[0].clinicalNotes],
           };
         }
-        updatedPatient = { ...p, encounters };
-        return updatedPatient;
-      }
-      return p;
-    }));
-    if (updatedPatient) syncPatientToFirestore(updatedPatient).catch(() => {});
+        return { ...item, encounters };
+      }));
 
-    // Auto-detect billing items from note structured data
-    if (note.aiStructuredData?.billingCodes && note.aiStructuredData.billingCodes.length > 0) {
-      note.aiStructuredData.billingCodes.forEach(codeItem => {
-        const newMismatch: BillingAuditMismatch = {
-          id: `mm-${Date.now()}-${Math.floor(Math.random() * 100)}`,
-          patientId,
-          patientName: patients.find(p => p.id === patientId)?.fullName || 'Patient',
-          encounterId: patients.find(p => p.id === patientId)?.encounters[0]?.id || 'enc-0',
-          noteId,
+      // Revenue Integrity candidates are created server-side from the signed,
+      // clinician-accepted structured note. The browser only renders that result.
+      const authoritativeFindings = result.data?.revenueIntegrityFindings || [];
+      if (authoritativeFindings.length > 0) {
+        const projectedMismatches: BillingAuditMismatch[] = authoritativeFindings.map((finding) => ({
+          id: finding.id,
+          patientId: finding.patientId,
+          patientName: patient.fullName,
+          encounterId: finding.encounterId,
+          noteId: finding.sourceEvidenceId,
           date: new Date().toISOString().split('T')[0],
-          documentedItem: `${codeItem.description} (CPT ${codeItem.code})`,
-          category: 'Procedure',
-          suggestedCptCode: codeItem.code,
-          estimatedRecoverableRevenue: codeItem.fee,
-          status: 'pending_review',
-          evidenceSnippet: `Extracted from clinical documentation: "${note.content.slice(0, 80)}..."`,
-          confidenceScore: 0.96,
-        };
-        setMismatches(prev => [newMismatch, ...prev]);
-        syncMismatchToFirestore(newMismatch).catch(() => {});
-      });
-    }
+          documentedItem: finding.documentedItem,
+          category: finding.category,
+          suggestedCptCode: finding.suggestedCode,
+          estimatedRecoverableRevenue: finding.estimatedRecoverableAmountMinorUnits / 100,
+          status:
+            finding.status === 'RECONCILED'
+              ? 'reconciled'
+              : finding.status === 'DISMISSED'
+                ? 'dismissed'
+                : 'pending_review',
+          evidenceSnippet: finding.evidenceSnippet,
+          confidenceScore: finding.confidenceScore ?? 1,
+        }));
+        setMismatches((previous) => [
+          ...projectedMismatches,
+          ...previous.filter((existing) => !projectedMismatches.some((item) => item.id === existing.id)),
+        ]);
+      }
 
-    recordMutation('INSERT_NOTE', `Note:${noteId}`, newNote);
-    addAuditLog('CREATE_CLINICAL_NOTE', `Patient ${patientId}`, `Added clinical note with AI billing extraction`);
+      recordMutation('INSERT_NOTE', `Note:${noteId}`, newNote);
+    }).catch((error) => {
+      console.error('CLINICAL_NOTE_COMMAND_FAILED', error);
+    });
   };
 
   const addLabOrder = (patientId: string, order: Omit<LabOrder, 'id' | 'orderedAt'>) => {
-    const orderId = `lab-ord-${Date.now().toString().slice(-3)}`;
-    const orderedAt = new Date().toISOString().replace('T', ' ').slice(0, 16);
-    const newOrder: LabOrder = { ...order, id: orderId, orderedAt };
-    let updatedPatient: Patient | undefined;
+    const patient = patients.find((item) => item.id === patientId);
+    const encounterId = patient?.activeEncounterId || patient?.encounters?.[0]?.id;
 
-    setPatients(prev => prev.map(p => {
-      if (p.id === patientId) {
-        const encounters = [...p.encounters];
+    if (!patient || !encounterId) {
+      console.error('DIAGNOSTIC_ORDER_REJECTED: active patient encounter is required.');
+      return;
+    }
+
+    const orderType = order.category === 'Radiology' ? 'RADIOLOGY' : 'LAB';
+
+    void executeActiveTenantCommand('PlaceDiagnosticOrderCommand', {
+      encounterId,
+      patientId,
+      orderType,
+      catalogCode: order.sampleId || order.testName,
+      orderName: order.testName,
+      priority: 'ROUTINE',
+      clinicalIndication: order.notes || 'Clinician ordered diagnostic investigation',
+      estimatedCostMinorUnits: Math.round((order.cost || 0) * 100),
+    }).then((result) => {
+      if (!result.success) {
+        throw new Error(result.error?.message || 'Diagnostic order command failed.');
+      }
+
+      const orderedAt = new Date().toISOString().replace('T', ' ').slice(0, 16);
+      const newOrder: LabOrder = {
+        ...order,
+        id: result.entityId || `lab-ord-${Date.now()}`,
+        orderedAt,
+      };
+
+      setPatients((previous) => previous.map((item) => {
+        if (item.id !== patientId) return item;
+        const encounters = [...item.encounters];
         if (encounters.length > 0) {
           encounters[0] = {
             ...encounters[0],
             labOrders: [newOrder, ...encounters[0].labOrders],
           };
         }
-        updatedPatient = { ...p, encounters };
-        return updatedPatient;
-      }
-      return p;
-    }));
-    if (updatedPatient) syncPatientToFirestore(updatedPatient).catch(() => {});
+        return { ...item, encounters };
+      }));
 
-    // Auto-generate HL7 message
-    const patient = patients.find(p => p.id === patientId);
-    if (patient) {
-      const hl7Msg: Hl7Message = {
-        id: `hl7-${Date.now()}`,
-        timestamp: orderedAt,
-        type: 'ORM^O01',
-        sendingApp: 'GHIMS_EHR',
-        receivingApp: 'LIS_ROCHE_COBAS',
-        patientMrn: patient.mrn,
-        patientName: patient.fullName,
-        status: 'dispatched',
-        rawPayload: `MSH|^~\\&|GHIMS_EHR|METRO|LIS|LAB|${Date.now()}||ORM^O01|MSG_${orderId}|P|2.5\rPID|1||${patient.mrn}||${patient.fullName}\rORC|NW|${orderId}\rOBR|1|${orderId}||${order.testName}`,
-        parsedSummary: `Dispatched Lab Order: ${order.testName} (Sample: ${order.sampleId})`,
-      };
-      setHl7Messages(prev => [hl7Msg, ...prev]);
-      syncHl7ToFirestore(hl7Msg).catch(() => {});
-    }
-
-    recordMutation('ORDER_LAB', `Order:${orderId}`, newOrder);
-    addAuditLog('DISPATCH_LAB_ORDER', `Patient ${patientId}`, `Dispatched ${order.testName}`);
+      // Integration delivery is now represented by the durable transaction outbox.
+      // Do not fabricate a browser-side HL7 dispatch record here.
+      recordMutation('ORDER_LAB', `Order:${newOrder.id}`, newOrder);
+    }).catch((error) => {
+      console.error('DIAGNOSTIC_ORDER_COMMAND_FAILED', error);
+    });
   };
 
   const addVitals = (patientId: string, vitals: Omit<Vitals, 'timestamp'>) => {
-    const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
-    const newVitals: Vitals = { ...vitals, timestamp };
-    let updatedPatient: Patient | undefined;
+    const patient = patients.find((item) => item.id === patientId);
+    const encounterId = patient?.activeEncounterId || patient?.encounters?.[0]?.id;
 
-    setPatients(prev => prev.map(p => {
-      if (p.id === patientId) {
-        const encounters = [...p.encounters];
+    if (!patient || !encounterId) {
+      console.error('VITALS_REJECTED: active patient encounter is required.');
+      return;
+    }
+
+    void executeActiveTenantCommand('RecordVitalsCommand', {
+      encounterId,
+      patientId,
+      heartRate: vitals.heartRate,
+      bloodPressure: vitals.bloodPressure,
+      temperature: vitals.temperature,
+      respiratoryRate: vitals.respiratoryRate,
+      oxygenSaturation: vitals.oxygenSaturation,
+      measuredAt: Date.now(),
+    }).then((result) => {
+      if (!result.success) {
+        throw new Error(result.error?.message || 'Vitals command failed.');
+      }
+
+      const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
+      const newVitals: Vitals = { ...vitals, timestamp };
+
+      setPatients((previous) => previous.map((item) => {
+        if (item.id !== patientId) return item;
+        const encounters = [...item.encounters];
         if (encounters.length > 0) {
           encounters[0] = {
             ...encounters[0],
             vitalsHistory: [newVitals, ...encounters[0].vitalsHistory],
           };
         }
-        updatedPatient = { ...p, encounters };
-        return updatedPatient;
-      }
-      return p;
-    }));
-    if (updatedPatient) syncPatientToFirestore(updatedPatient).catch(() => {});
+        return { ...item, encounters };
+      }));
 
-    recordMutation('UPDATE_VITALS', `Patient:${patientId}`, newVitals);
-    addAuditLog('RECORD_VITALS', `Patient ${patientId}`, `HR: ${vitals.heartRate}, BP: ${vitals.bloodPressure}, SpO2: ${vitals.oxygenSaturation}%`);
+      recordMutation('UPDATE_VITALS', `Patient:${patientId}`, newVitals);
+    }).catch((error) => {
+      console.error('VITALS_COMMAND_FAILED', error);
+    });
   };
 
-  const reconcileMismatch = (mismatchId: string) => {
-    const mismatch = mismatches.find(m => m.id === mismatchId);
+  const reconcileMismatch = async (mismatchId: string) => {
+    const mismatch = mismatches.find((item) => item.id === mismatchId);
     if (!mismatch) return;
 
-    const reconciledItem: BillingAuditMismatch = { ...mismatch, status: 'reconciled' };
-    setMismatches(prev => prev.map(m => m.id === mismatchId ? reconciledItem : m));
-    syncMismatchToFirestore(reconciledItem).catch(() => {});
+    const result = await executeActiveTenantCommand<{
+      finding: {
+        id: string;
+        status: 'RECONCILED';
+      };
+      charge: {
+        id: string;
+        code: string;
+        description: string;
+        category: 'Procedure' | 'Medication' | 'Lab' | 'Supply / Consumable' | 'Bed Tier';
+        quantity: number;
+        unitAmountMinorUnits: number;
+        netAmountMinorUnits: number;
+      };
+    }>('ReconcileRevenueIntegrityFindingCommand', { findingId: mismatchId });
 
-    // Add as bill item to the patient encounter
-    let updatedPatient: Patient | undefined;
-    setPatients(prev => prev.map(p => {
-      if (p.id === mismatch.patientId) {
-        const encounters = [...p.encounters];
-        if (encounters.length > 0) {
-          const enc = encounters[0];
-          const newBillItem: BillItem = {
-            id: `bi-rec-${Date.now()}`,
-            description: mismatch.documentedItem,
-            code: mismatch.suggestedCptCode,
-            category: mismatch.category === 'Procedure' ? 'Procedure' : mismatch.category === 'Lab' ? 'Lab & Diagnostics' : 'Pharmacy',
-            quantity: 1,
-            unitPrice: mismatch.estimatedRecoverableRevenue,
-            totalPrice: mismatch.estimatedRecoverableRevenue,
-            auditedStatus: 'reconciled',
-            sourceNoteId: mismatch.noteId,
-          };
-          const newSubtotal = enc.billing.subtotal + mismatch.estimatedRecoverableRevenue;
-          const newTax = Math.round(newSubtotal * 0.05);
-          encounters[0] = {
-            ...enc,
-            billing: {
-              ...enc.billing,
-              items: [...enc.billing.items, newBillItem],
-              subtotal: newSubtotal,
-              tax: newTax,
-              patientPayable: Math.round(newSubtotal * 0.25),
-            }
-          };
-        }
-        updatedPatient = { ...p, encounters };
-        return updatedPatient;
-      }
-      return p;
+    if (!result.success || !result.data?.charge) {
+      throw new Error(result.error?.message || 'Revenue Integrity reconciliation failed.');
+    }
+
+    const charge = result.data.charge;
+    setMismatches((previous) =>
+      previous.map((item) => item.id === mismatchId ? { ...item, status: 'reconciled' } : item)
+    );
+
+    // Billing inside HospitalContext is a transitional UI projection. The durable
+    // source of truth is now tenants/{tenantId}/encounterCharges/{chargeId}.
+    setPatients((previous) => previous.map((patientItem) => {
+      if (patientItem.id !== mismatch.patientId) return patientItem;
+
+      const encounters = [...patientItem.encounters];
+      const encounterIndex = encounters.findIndex((encounter) => encounter.id === mismatch.encounterId);
+      if (encounterIndex < 0) return patientItem;
+
+      const encounter = encounters[encounterIndex];
+      const amount = charge.netAmountMinorUnits / 100;
+      const existingItem = encounter.billing.items.find((item) => item.id === charge.id);
+      if (existingItem) return patientItem;
+
+      const newBillItem: BillItem = {
+        id: charge.id,
+        description: charge.description,
+        code: charge.code,
+        category:
+          charge.category === 'Lab'
+            ? 'Lab & Diagnostics'
+            : charge.category === 'Medication' || charge.category === 'Supply / Consumable'
+              ? 'Pharmacy'
+              : 'Procedure',
+        quantity: charge.quantity,
+        unitPrice: charge.unitAmountMinorUnits / 100,
+        totalPrice: amount,
+        auditedStatus: 'reconciled',
+        sourceNoteId: mismatch.noteId,
+      };
+
+      const newSubtotal = encounter.billing.subtotal + amount;
+      const newTax = Math.round(newSubtotal * 0.05 * 100) / 100;
+
+      encounters[encounterIndex] = {
+        ...encounter,
+        billing: {
+          ...encounter.billing,
+          items: [...encounter.billing.items, newBillItem],
+          subtotal: newSubtotal,
+          tax: newTax,
+        },
+      };
+
+      return { ...patientItem, encounters };
     }));
-    if (updatedPatient) syncPatientToFirestore(updatedPatient).catch(() => {});
 
-    recordMutation('RECONCILE_BILL', `Mismatch:${mismatchId}`, mismatch);
-    addAuditLog('RECONCILE_LEAKAGE', `Encounter ${mismatch.encounterId}`, `Reconciled +$${mismatch.estimatedRecoverableRevenue} (${mismatch.suggestedCptCode}) into invoice`);
+    recordMutation('RECONCILE_BILL', `Mismatch:${mismatchId}`, {
+      findingId: mismatchId,
+      chargeId: charge.id,
+    });
+    addAuditLog(
+      'RECONCILE_LEAKAGE',
+      `Encounter ${mismatch.encounterId}`,
+      `Authoritative charge ${charge.code} accepted for ${(charge.netAmountMinorUnits / 100).toFixed(2)}.`
+    );
   };
 
-  const dismissMismatch = (mismatchId: string) => {
-    const dismissedItem = mismatches.find(m => m.id === mismatchId);
-    setMismatches(prev => prev.map(m => m.id === mismatchId ? { ...m, status: 'dismissed' } : m));
-    if (dismissedItem) {
-      syncMismatchToFirestore({ ...dismissedItem, status: 'dismissed' }).catch(() => {});
+  const dismissMismatch = async (mismatchId: string) => {
+    const dismissedItem = mismatches.find((item) => item.id === mismatchId);
+    if (!dismissedItem) return;
+
+    const result = await executeActiveTenantCommand<{
+      finding: { id: string; status: 'DISMISSED' };
+    }>('DismissRevenueIntegrityFindingCommand', {
+      findingId: mismatchId,
+      reason: 'Reviewed by revenue-cycle staff and marked not billable / clinical exception.',
+    });
+
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Revenue Integrity dismissal failed.');
     }
-    addAuditLog('DISMISS_MISMATCH', `Mismatch ${mismatchId}`, `Marked as not billable / clinical exception`);
+
+    setMismatches((previous) =>
+      previous.map((item) => item.id === mismatchId ? { ...item, status: 'dismissed' } : item)
+    );
+    addAuditLog(
+      'DISMISS_MISMATCH',
+      `Mismatch ${mismatchId}`,
+      'Authoritative Revenue Integrity finding dismissed after human review.'
+    );
   };
 
   const dispatchHl7Message = (msg: Omit<Hl7Message, 'id' | 'timestamp' | 'status'>) => {
@@ -1631,47 +1724,73 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       status: 'dispatched',
     };
     setHl7Messages(prev => [newMsg, ...prev]);
-    syncHl7ToFirestore(newMsg).catch(() => {});
     addAuditLog('DISPATCH_HL7', msg.type, `Dispatched to ${msg.receivingApp} for MRN: ${msg.patientMrn}`);
   };
 
   const callNextOpdToken = (tokenId: string) => {
-    let updatedToken: OpdQueueToken | undefined;
-    setOpdQueue(prev => prev.map(t => {
-      if (t.id === tokenId) {
-        updatedToken = { ...t, status: 'in_consultation' };
-        return updatedToken;
+    const token = opdQueue.find((item) => item.id === tokenId);
+    if (!token) return;
+
+    void executeActiveTenantCommand('UpdateOpdQueueStatusCommand', {
+      tokenId,
+      targetStatus: 'in_consultation',
+    }).then((result) => {
+      if (!result.success) {
+        throw new Error(result.error?.message || 'Unable to call OPD patient.');
       }
-      return t;
-    }));
-    if (updatedToken) syncOpdTokenToFirestore(updatedToken).catch(() => {});
-    const token = opdQueue.find(t => t.id === tokenId);
-    if (token) {
+
+      setOpdQueue((previous) => previous.map((item) =>
+        item.id === tokenId ? { ...item, status: 'in_consultation' } : item
+      ));
       setSelectedPatientId(token.patientId);
-      addAuditLog('CALL_OPD_QUEUE', `Token ${token.tokenNumber}`, `Called ${token.patientName} into consultation`);
-    }
+    }).catch((error) => {
+      console.error('OPD_CALL_COMMAND_FAILED', error);
+    });
   };
 
   const completeOpdToken = (tokenId: string) => {
-    let updatedToken: OpdQueueToken | undefined;
-    setOpdQueue(prev => prev.map(t => {
-      if (t.id === tokenId) {
-        updatedToken = { ...t, status: 'completed' };
-        return updatedToken;
+    const token = opdQueue.find((item) => item.id === tokenId);
+    if (!token) return;
+
+    void executeActiveTenantCommand('UpdateOpdQueueStatusCommand', {
+      tokenId,
+      targetStatus: 'completed',
+    }).then((result) => {
+      if (!result.success) {
+        throw new Error(result.error?.message || 'Unable to complete OPD consultation.');
       }
-      return t;
-    }));
-    if (updatedToken) syncOpdTokenToFirestore(updatedToken).catch(() => {});
-    const token = opdQueue.find(t => t.id === tokenId);
-    if (token) {
-      addAuditLog('COMPLETE_OPD_CONSULT', `Token ${token.tokenNumber}`, `Completed consultation with ${token.patientName}`);
-    }
+
+      setOpdQueue((previous) => previous.map((item) =>
+        item.id === tokenId ? { ...item, status: 'completed' } : item
+      ));
+    }).catch((error) => {
+      console.error('OPD_COMPLETE_COMMAND_FAILED', error);
+    });
   };
 
   const triggerOfflineSync = () => {
-    setOfflineMutations(prev => prev.map(m => ({ ...m, syncStatus: 'synced' })));
     setNetworkMode('online');
-    addAuditLog('OFFLINE_SYNC_COMPLETE', 'Dual-Engine Sync Queue', 'Replayed 100% of pending offline mutations to cloud database with zero conflicts');
+
+    if (!syncEngine) {
+      addAuditLog('OFFLINE_SYNC_ERROR', 'Command Sync Queue', 'Offline sync engine is unavailable in this runtime.', 'ERROR');
+      return;
+    }
+
+    void syncEngine.processSyncQueue().then(({ syncedCount, conflictCount }) => {
+      addAuditLog(
+        conflictCount > 0 ? 'OFFLINE_SYNC_REVIEW_REQUIRED' : 'OFFLINE_SYNC_COMPLETE',
+        'Command Sync Queue',
+        `Server replay completed: ${syncedCount} accepted, ${conflictCount} requiring review.`,
+        conflictCount > 0 ? 'WARNING' : 'SUCCESS'
+      );
+    }).catch((error) => {
+      addAuditLog(
+        'OFFLINE_SYNC_ERROR',
+        'Command Sync Queue',
+        error instanceof Error ? error.message : 'Offline sync failed.',
+        'ERROR'
+      );
+    });
   };
 
   const createTelehealthSession = async (data: {
@@ -1681,89 +1800,55 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     chiefComplaint: string;
     attendingPhysician?: string;
   }): Promise<TelehealthSession> => {
-    const patient = patients.find(p => p.id === data.patientId);
-    const newSessionId = `th-${Date.now()}`;
-    const newEncounterId = `enc-th-${Date.now()}`;
-    const roomToken = `ROOM-${Math.random().toString(36).substring(2, 7).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
-
-    const newSession: TelehealthSession = {
-      id: newSessionId,
-      encounterId: newEncounterId,
+    const result = await executeActiveTenantCommand<TelehealthSession>('CreateTelehealthSessionCommand', {
       patientId: data.patientId,
-      patientName: patient ? patient.fullName : 'Unknown Patient',
-      patientMrn: patient ? patient.mrn : 'MRN-PENDING',
-      age: patient ? patient.age : 35,
-      gender: patient ? patient.gender : 'Other',
-      scheduledTime: data.scheduledTime || 'Today, ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      status: 'WAITING_ROOM',
-      type: data.type || 'Telehealth Consultation',
-      attendingPhysician: data.attendingPhysician || 'Dr. Sarah Jenkins',
-      clinicianNpi: '1487920134',
-      specialty: 'Telehealth & Preventive Medicine',
+      type: data.type,
+      scheduledTime: data.scheduledTime,
       chiefComplaint: data.chiefComplaint,
-      roomToken,
-      connectionQuality: 'EXCELLENT',
-      callDurationSeconds: 0,
-      vitals: {
-        bp: '120/80',
-        hr: 72,
-        spo2: 99,
-        temp: 36.6,
-        rhythm: 'Normal Sinus Rhythm',
-        connectedDevice: 'Smart ECG + BLE Vitals Gateway',
-        lastSync: 'Just now',
-      },
-      transcription: [
-        {
-          id: `tr-${Date.now()}`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-          speaker: 'SYSTEM',
-          text: `Virtual consultation room initialized for ${patient ? patient.fullName : 'Patient'}. WebRTC token: ${roomToken}.`,
-        },
-      ],
-      soapNote: {
-        subjective: '',
-        objective: '',
-        assessment: '',
-        plan: '',
-        icd10Codes: [],
-        cptCodes: [],
-      },
-      prescriptions: [],
-      isAudioMuted: false,
-      isVideoMuted: false,
-      isRecording: false,
-      patientInvitedEmail: patient ? `${patient.fullName.toLowerCase().replace(/\s+/g, '.')}@patient-portal.demo` : undefined,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+      attendingPhysician: data.attendingPhysician,
+    });
 
-    setTelehealthSessions(prev => [newSession, ...prev]);
-    setActiveTelehealthSession(newSession);
-    syncTelehealthSessionToFirestore(newSession).catch(() => {});
-    recordMutation('INSERT_TELEHEALTH_SESSION', `Telehealth:${newSessionId}`, newSession);
-    addAuditLog('SCHEDULE_TELEHEALTH', `Session ${newSessionId}`, `Created virtual appointment for ${newSession.patientName}`);
+    if (!result.success || !result.data) {
+      throw new Error(result.error?.message || 'Telehealth session creation failed.');
+    }
 
-    return newSession;
+    const session = result.data;
+    setTelehealthSessions((previous) => [session, ...previous.filter((item) => item.id !== session.id)]);
+    setActiveTelehealthSession(session);
+    return session;
   };
 
-  const updateTelehealthSession = async (sessionId: string, updates: Partial<TelehealthSession>): Promise<void> => {
-    let updated: TelehealthSession | undefined;
-    setTelehealthSessions(prev =>
-      prev.map(s => {
-        if (s.id === sessionId) {
-          updated = { ...s, ...updates, updatedAt: new Date().toISOString() };
-          return updated;
-        }
-        return s;
-      })
-    );
-    if (activeTelehealthSession?.id === sessionId && updated) {
-      setActiveTelehealthSession(updated);
+  const updateTelehealthSession = async (
+    sessionId: string,
+    updates: Partial<TelehealthSession>
+  ): Promise<void> => {
+    const allowedUpdates = {
+      status: updates.status,
+      connectionQuality: updates.connectionQuality,
+      callDurationSeconds: updates.callDurationSeconds,
+      vitals: updates.vitals,
+      transcription: updates.transcription,
+      soapNote: updates.soapNote,
+      isAudioMuted: updates.isAudioMuted,
+      isVideoMuted: updates.isVideoMuted,
+      isRecording: updates.isRecording,
+    };
+
+    const result = await executeActiveTenantCommand<TelehealthSession>('UpdateTelehealthSessionCommand', {
+      sessionId,
+      updates: allowedUpdates,
+    });
+
+    if (!result.success || !result.data) {
+      throw new Error(result.error?.message || 'Telehealth session update failed.');
     }
-    if (updated) {
-      syncTelehealthSessionToFirestore(updated).catch(() => {});
-      recordMutation('UPDATE_TELEHEALTH_SESSION', `Telehealth:${sessionId}`, updates);
+
+    const authoritative = result.data;
+    setTelehealthSessions((previous) =>
+      previous.map((session) => session.id === sessionId ? authoritative : session)
+    );
+    if (activeTelehealthSession?.id === sessionId) {
+      setActiveTelehealthSession(authoritative);
     }
   };
 
@@ -1772,112 +1857,62 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     note?: Partial<TelehealthSoapNote>,
     prescriptions?: TelehealthPrescription[]
   ): Promise<void> => {
-    const session = telehealthSessions.find(s => s.id === sessionId) || activeTelehealthSession;
-    if (!session) return;
+    const result = await executeActiveTenantCommand<TelehealthSession>('CompleteTelehealthSessionCommand', {
+      sessionId,
+      soapNote: note || {},
+      prescriptions: prescriptions || [],
+    });
 
-    const finalNote: TelehealthSoapNote = {
-      ...session.soapNote,
-      ...(note || {}),
-    };
+    if (!result.success || !result.data) {
+      throw new Error(result.error?.message || 'Telehealth completion failed.');
+    }
 
-    const finalPrescriptions = prescriptions || session.prescriptions || [];
-
-    const updatedSession: TelehealthSession = {
-      ...session,
-      status: 'COMPLETED',
-      soapNote: finalNote,
-      prescriptions: finalPrescriptions,
-      updatedAt: new Date().toISOString(),
-    };
-
-    setTelehealthSessions(prev =>
-      prev.map(s => (s.id === sessionId ? updatedSession : s))
+    const authoritative = result.data;
+    setTelehealthSessions((previous) =>
+      previous.map((session) => session.id === sessionId ? authoritative : session)
     );
     if (activeTelehealthSession?.id === sessionId) {
-      setActiveTelehealthSession(updatedSession);
+      setActiveTelehealthSession(authoritative);
     }
-    syncTelehealthSessionToFirestore(updatedSession).catch(() => {});
-    recordMutation('COMPLETE_TELEHEALTH_SESSION', `Telehealth:${sessionId}`, updatedSession);
 
-    // Sync directly to the patient's Clinical Notes in the EHR
+    // The signed clinical note remains a separate governed clinical command.
+    const finalNote = authoritative.soapNote;
+    const finalPrescriptions = authoritative.prescriptions || [];
     const clinicalNoteContent = `[TELEHEALTH VIRTUAL CONSULTATION RECORD]
-Encounter Type: ${session.type}
-Chief Complaint: ${session.chiefComplaint}
-Room Token: ${session.roomToken}
-Attending: ${session.attendingPhysician} (NPI: ${session.clinicianNpi})
-Telemetry Device: ${session.vitals.connectedDevice || 'Standard Sensor Hub'}
+Encounter Type: ${authoritative.type}
+Chief Complaint: ${authoritative.chiefComplaint}
+Attending: ${authoritative.attendingPhysician}
 
 --- SUBJECTIVE ---
-${finalNote.subjective || 'Virtual consultation completed without acute complaints.'}
+${finalNote.subjective || ''}
 
 --- OBJECTIVE ---
-Vitals: BP ${session.vitals.bp}, HR ${session.vitals.hr} bpm, SpO2 ${session.vitals.spo2}%, Temp ${session.vitals.temp}°C
-${finalNote.objective || 'Visual inspection conducted via encrypted WebRTC video stream.'}
+${finalNote.objective || ''}
 
 --- ASSESSMENT ---
-${finalNote.assessment || 'Stable follow-up.'}
-Diagnoses: ${(finalNote.icd10Codes || []).map(i => `${i.code} - ${i.description}`).join('; ') || 'Routine Telehealth Evaluation'}
+${finalNote.assessment || ''}
 
 --- PLAN ---
-${finalNote.plan || 'Continue home regimen and follow up in 2-4 weeks.'}
-E-Prescriptions: ${finalPrescriptions.map(p => `${p.medication} ${p.dosage} ${p.frequency}`).join('; ') || 'None issued'}
-Billing CPT Codes: ${(finalNote.cptCodes || []).map(c => `${c.code} (${c.description})`).join(', ') || '99213'}`;
+${finalNote.plan || ''}`;
 
-    addClinicalNote(session.patientId, {
-      author: session.attendingPhysician,
+    addClinicalNote(authoritative.patientId, {
+      author: authoritative.attendingPhysician || 'Telehealth Clinician',
       role: 'Telehealth Attending Physician',
       category: 'SOAP',
       content: clinicalNoteContent,
       aiStructuredData: {
-        chiefComplaint: session.chiefComplaint,
-        diagnoses: (finalNote.icd10Codes || []).map(i => `${i.code}: ${i.description}`),
-        medicationsPrescribed: finalPrescriptions.map(p => `${p.medication} ${p.dosage} ${p.frequency}`),
-        recommendedProcedures: ['Remote Patient Monitoring (RPM)', 'Virtual Follow-up'],
-        followUpDays: 14,
-        billingCodes: (finalNote.cptCodes || []).map(c => ({
-          code: c.code,
-          description: c.description,
-          fee: c.fee || 125,
+        chiefComplaint: authoritative.chiefComplaint,
+        diagnoses: (finalNote.icd10Codes || []).map((item) => `${item.code}: ${item.description}`),
+        medicationsPrescribed: finalPrescriptions.map((item) => `${item.medication} ${item.dosage} ${item.frequency}`),
+        recommendedProcedures: [],
+        followUpDays: 0,
+        billingCodes: (finalNote.cptCodes || []).map((item) => ({
+          code: item.code,
+          description: item.description,
+          fee: item.fee || 0,
         })),
       },
     });
-
-    // If prescriptions were provided, also record them to patient's active medications
-    if (finalPrescriptions.length > 0) {
-      setPatients(prev =>
-        prev.map(p => {
-          if (p.id === session.patientId) {
-            const newMeds: Medication[] = finalPrescriptions.map(rx => ({
-              id: rx.id || `m-rx-${Date.now()}-${Math.random()}`,
-              name: rx.medication,
-              dosage: rx.dosage,
-              frequency: rx.frequency,
-              route: 'Oral',
-              status: 'active',
-              prescribedDate: new Date().toISOString().slice(0, 10),
-              prescribedBy: session.attendingPhysician,
-              stockRemaining: 100,
-              unitPrice: 15,
-            }));
-            const encounters = [...p.encounters];
-            if (encounters.length > 0) {
-              encounters[0] = {
-                ...encounters[0],
-                medications: [...encounters[0].medications, ...newMeds],
-              };
-            }
-            return { ...p, encounters };
-          }
-          return p;
-        })
-      );
-    }
-
-    addAuditLog(
-      'COMPLETE_TELEHEALTH_SESSION',
-      `Session ${sessionId}`,
-      `Completed remote consult for ${session.patientName}. SOAP note & ${finalPrescriptions.length} e-prescriptions synced to EHR.`
-    );
   };
 
   return (

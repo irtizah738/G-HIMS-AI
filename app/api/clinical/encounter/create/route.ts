@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { registerPatientAndEncounter, RegisterPatientEncounterParams } from '@/lib/runtime/registration-orchestrator';
+import { registerPatientAndEncounter, RegisterPatientEncounterParams } from '@/server/runtime/registration-orchestrator';
 import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
+import { AuthorizationPipeline } from '@/lib/backend/auth/authorization-pipeline';
 
 export async function POST(req: NextRequest) {
   try {
@@ -15,6 +16,19 @@ export async function POST(req: NextRequest) {
     }
 
     const { context } = await deriveAuthoritativeContext(req, tenantId);
+    const registrationAuth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: ['RECEPTIONIST', 'REGISTRAR', 'SYSTEM_ADMIN', 'ADMINISTRATOR'],
+    });
+    if (!registrationAuth.authorized) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: registrationAuth.reason || 'Front-desk registration authority required.',
+          code: registrationAuth.code || 'INSUFFICIENT_ROLE',
+        },
+        { status: 403 }
+      );
+    }
 
     const fullName =
       body.fullName ||
@@ -46,6 +60,8 @@ export async function POST(req: NextRequest) {
 
     const normalizedParams: RegisterPatientEncounterParams = {
       tenantId: context.tenantId,
+      commandId: String(body.commandId || `cmd_${crypto.randomUUID()}`),
+      idempotencyKey: String(body.idempotencyKey || `idem_${crypto.randomUUID()}`),
       patientId: body.patientId,
       fullName,
       gender,
@@ -78,12 +94,7 @@ export async function POST(req: NextRequest) {
           status: 'ACTIVE',
         },
         outboxEventsCount: result.outboxEvent ? 1 : 0,
-        queueToken: {
-          tokenNumber: result.encounter.tokenNumber,
-          department: result.encounter.department,
-          patientMrn: result.patient.mrn,
-          patientName: result.patient.fullName,
-        },
+        queueToken: result.queueToken,
       },
     });
   } catch (error) {

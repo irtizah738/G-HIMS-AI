@@ -1,66 +1,216 @@
 /**
- * G-HIMS Master Idempotency Service
- * Guarantees zero-duplicate execution for clinical, billing, and accounting operations.
+ * G-HIMS Durable Idempotency Service
+ * Production authority is Firestore. DEMO/TEST may use an in-process fallback.
  */
 
+import crypto from 'node:crypto';
 import { IdempotencyRecord, CommandResult } from '../types';
+import { getAdminFirestore } from '@/server/firebase/admin';
+import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
+import { sanitizeForFirestore } from '@/lib/firestore/sanitize';
+
+export type IdempotencyAcquireStatus = 'NEW' | 'CACHED' | 'CONFLICT' | 'IN_PROGRESS';
+
+export interface IdempotencyAcquireResult {
+  status: IdempotencyAcquireStatus;
+  record?: IdempotencyRecord;
+}
 
 export class IdempotencyService {
   private static localMemoryCache = new Map<string, IdempotencyRecord>();
+  private static readonly LEASE_MS = 2 * 60 * 1000;
 
-  /**
-   * Computes a deterministic hash representation of a command payload.
-   */
-  public static computeHash(commandType: string, payload: unknown): string {
-    const canonicalStringify = (val: unknown): string => {
-      if (val === null || typeof val !== 'object') {
-        return JSON.stringify(val);
-      }
-      if (Array.isArray(val)) {
-        return '[' + val.map(canonicalStringify).join(',') + ']';
-      }
-      const keys = Object.keys(val as Record<string, unknown>).sort();
-      return '{' + keys.map((k) => JSON.stringify(k) + ':' + canonicalStringify((val as Record<string, unknown>)[k])).join(',') + '}';
-    };
-
-    const raw = canonicalStringify({ commandType, payload });
-    let hash = 0;
-    for (let i = 0; i < raw.length; i++) {
-      const char = raw.charCodeAt(i);
-      hash = (hash << 5) - hash + char;
-      hash |= 0; // Convert to 32bit integer
-    }
-    return `hash_${Math.abs(hash).toString(16)}`;
+  private static canUseEphemeralStore(): boolean {
+    const mode = getRuntimeMode();
+    return mode === 'DEMO' || mode === 'TEST';
   }
 
-  /**
-   * Evaluates if a command with the specified key has already executed or is pending.
-   */
+  private static canonicalStringify(value: unknown): string {
+    if (value === null || typeof value !== 'object') return JSON.stringify(value);
+    if (Array.isArray(value)) {
+      return '[' + value.map((item) => this.canonicalStringify(item)).join(',') + ']';
+    }
+
+    const object = value as Record<string, unknown>;
+    return '{' + Object.keys(object)
+      .sort()
+      .map((key) => JSON.stringify(key) + ':' + this.canonicalStringify(object[key]))
+      .join(',') + '}';
+  }
+
+  public static computeHash(commandType: string, payload: unknown): string {
+    const canonical = this.canonicalStringify({ commandType, payload });
+    return crypto.createHash('sha256').update(canonical).digest('hex');
+  }
+
+  public static getDocumentId(idempotencyKey: string): string {
+    return `idem_${crypto.createHash('sha256').update(idempotencyKey).digest('hex')}`;
+  }
+
+  private static memoryKey(tenantId: string, idempotencyKey: string): string {
+    return `${tenantId}:${idempotencyKey}`;
+  }
+
+  public static async acquireExecution(
+    tenantId: string,
+    idempotencyKey: string,
+    commandType: string,
+    payload: unknown,
+    commandId: string
+  ): Promise<IdempotencyAcquireResult> {
+    const requestHash = this.computeHash(commandType, payload);
+    const db = getAdminFirestore();
+
+    if (!db) {
+      if (!this.canUseEphemeralStore()) {
+        throw new Error('IDEMPOTENCY_STORE_UNAVAILABLE: durable idempotency registry is required.');
+      }
+
+      const key = this.memoryKey(tenantId, idempotencyKey);
+      const existing = this.localMemoryCache.get(key);
+      if (!existing) {
+        const now = Date.now();
+        const record: IdempotencyRecord = {
+          tenantId,
+          idempotencyKey,
+          commandType,
+          requestHash,
+          status: 'PENDING',
+          commandId,
+          createdAt: now,
+          lastUpdatedAt: now,
+          leaseExpiresAt: now + this.LEASE_MS,
+        };
+        this.localMemoryCache.set(key, record);
+        return { status: 'NEW', record };
+      }
+
+      if (existing.requestHash !== requestHash || existing.commandType !== commandType) {
+        return { status: 'CONFLICT', record: existing };
+      }
+      if ((existing.status === 'COMPLETED' || existing.status === 'FAILED') && existing.result) {
+        return { status: 'CACHED', record: existing };
+      }
+      if (existing.status === 'PENDING' && (existing.leaseExpiresAt || 0) <= Date.now()) {
+        const now = Date.now();
+        const reclaimed = {
+          ...existing,
+          commandId,
+          lastUpdatedAt: now,
+          leaseExpiresAt: now + this.LEASE_MS,
+        };
+        this.localMemoryCache.set(key, reclaimed);
+        return { status: 'NEW', record: reclaimed };
+      }
+      return { status: 'IN_PROGRESS', record: existing };
+    }
+
+    const ref = db.collection('tenants').doc(tenantId)
+      .collection('idempotency').doc(this.getDocumentId(idempotencyKey));
+
+    return db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists) {
+        const now = Date.now();
+        const record = {
+          tenantId,
+          idempotencyKey,
+          commandType,
+          requestHash,
+          status: 'PENDING' as const,
+          commandId,
+          createdAt: now,
+          lastUpdatedAt: now,
+          leaseExpiresAt: now + this.LEASE_MS,
+        };
+        transaction.create(ref, sanitizeForFirestore(record));
+        return { status: 'NEW' as const, record };
+      }
+
+      const existing = snapshot.data() as IdempotencyRecord;
+      if (existing.requestHash !== requestHash || existing.commandType !== commandType) {
+        return { status: 'CONFLICT' as const, record: existing };
+      }
+      if ((existing.status === 'COMPLETED' || existing.status === 'FAILED') && existing.result) {
+        return { status: 'CACHED' as const, record: existing };
+      }
+
+      if (existing.status === 'PENDING' && (existing.leaseExpiresAt || 0) <= Date.now()) {
+        const now = Date.now();
+        const reclaimed: IdempotencyRecord = {
+          ...existing,
+          commandId,
+          lastUpdatedAt: now,
+          leaseExpiresAt: now + this.LEASE_MS,
+        };
+        transaction.set(ref, sanitizeForFirestore(reclaimed), { merge: true });
+        return { status: 'NEW' as const, record: reclaimed };
+      }
+
+      return { status: 'IN_PROGRESS' as const, record: existing };
+    });
+  }
+
+  public static async completeExecution(
+    tenantId: string,
+    idempotencyKey: string,
+    commandType: string,
+    payload: unknown,
+    result: CommandResult
+  ): Promise<void> {
+    const requestHash = this.computeHash(commandType, payload);
+    const db = getAdminFirestore();
+
+    if (!db) {
+      if (!this.canUseEphemeralStore()) {
+        throw new Error('IDEMPOTENCY_STORE_UNAVAILABLE: durable idempotency registry is required.');
+      }
+      this.recordExecution(tenantId, idempotencyKey, commandType, payload, result);
+      return;
+    }
+
+    const ref = db.collection('tenants').doc(tenantId)
+      .collection('idempotency').doc(this.getDocumentId(idempotencyKey));
+
+    await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists) throw new Error('IDEMPOTENCY_RESERVATION_MISSING');
+
+      const existing = snapshot.data() as IdempotencyRecord;
+      if (existing.requestHash !== requestHash || existing.commandType !== commandType) {
+        throw new Error('IDEMPOTENCY_KEY_CONFLICT');
+      }
+
+      transaction.set(ref, sanitizeForFirestore({
+        ...existing,
+        status: result.success ? 'COMPLETED' : 'FAILED',
+        result,
+        completedAt: Date.now(),
+        lastUpdatedAt: Date.now(),
+        leaseExpiresAt: undefined,
+      }), { merge: true });
+    });
+  }
+
   public static checkIdempotency(
     tenantId: string,
     idempotencyKey: string,
     commandType: string,
     payload: unknown
   ): { status: 'NEW' | 'CACHED' | 'CONFLICT'; record?: IdempotencyRecord } {
-    const cacheKey = `${tenantId}:${idempotencyKey}`;
-    const existing = this.localMemoryCache.get(cacheKey);
-
-    if (!existing) {
-      return { status: 'NEW' };
-    }
+    const existing = this.localMemoryCache.get(this.memoryKey(tenantId, idempotencyKey));
+    if (!existing) return { status: 'NEW' };
 
     const currentHash = this.computeHash(commandType, payload);
-    if (existing.requestHash === currentHash) {
-      return { status: 'CACHED', record: existing };
+    if (existing.requestHash === currentHash && existing.commandType === commandType) {
+      return existing.status === 'COMPLETED' && existing.result
+        ? { status: 'CACHED', record: existing }
+        : { status: 'NEW', record: existing };
     }
 
-    // Key reused with differing payload/commandType -> CONFLICT
     return { status: 'CONFLICT', record: existing };
   }
 
-  /**
-   * Commits the execution result to the idempotency registry.
-   */
   public static recordExecution(
     tenantId: string,
     idempotencyKey: string,
@@ -68,8 +218,7 @@ export class IdempotencyService {
     payload: unknown,
     result: CommandResult
   ): void {
-    const cacheKey = `${tenantId}:${idempotencyKey}`;
-    const record: IdempotencyRecord = {
+    this.localMemoryCache.set(this.memoryKey(tenantId, idempotencyKey), {
       tenantId,
       idempotencyKey,
       commandType,
@@ -78,8 +227,7 @@ export class IdempotencyService {
       result,
       createdAt: Date.now(),
       completedAt: Date.now(),
-    };
-
-    this.localMemoryCache.set(cacheKey, record);
+      lastUpdatedAt: Date.now(),
+    });
   }
 }

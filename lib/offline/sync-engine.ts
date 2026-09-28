@@ -8,9 +8,8 @@ import {
   OfflineMutation,
   MutationAction,
 } from './db';
-import { db } from '@/lib/firebase/client';
-import { doc, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
-import { logAuditEvent } from '@/lib/audit/logger';
+import { auth } from '@/lib/firebase/client';
+import { getCachedAuthSession } from '@/lib/offline/auth-storage';
 
 export interface SyncEngineState {
   isOnline: boolean;
@@ -26,7 +25,11 @@ export interface QueueMutationParams {
   collection: string;
   action: MutationAction;
   resourceId: string;
+  commandType: string;
   payload: Record<string, any>;
+  idempotencyKey?: string;
+  schemaVersion?: number;
+  baseEntityVersion?: number;
   optimisticCache?: boolean;
 }
 
@@ -46,13 +49,9 @@ class ClinicalSyncEngine {
   constructor() {
     if (typeof window !== 'undefined') {
       this.initNetworkListeners();
-      this.refreshPendingCount();
-
-      // Periodic check every 25 seconds if online
+      void this.refreshPendingCount();
       this.autoSyncInterval = setInterval(() => {
-        if (this.state.isOnline && !this.state.isSyncing) {
-          this.processSyncQueue();
-        }
+        if (this.state.isOnline && !this.state.isSyncing) void this.processSyncQueue();
       }, 25000);
     }
   }
@@ -60,19 +59,13 @@ class ClinicalSyncEngine {
   private initNetworkListeners() {
     window.addEventListener('online', () => {
       this.updateState({ isOnline: true });
-      this.processSyncQueue();
+      void this.processSyncQueue();
     });
+    window.addEventListener('offline', () => this.updateState({ isOnline: false }));
 
-    window.addEventListener('offline', () => {
-      this.updateState({ isOnline: false });
-    });
-
-    // Listen to messages from Service Worker
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.addEventListener('message', (event) => {
-        if (event.data && event.data.type === 'TRIGGER_SYNC_QUEUE') {
-          this.processSyncQueue();
-        }
+        if (event.data?.type === 'TRIGGER_SYNC_QUEUE') void this.processSyncQueue();
       });
     }
   }
@@ -80,19 +73,13 @@ class ClinicalSyncEngine {
   public subscribe(listener: (state: SyncEngineState) => void): () => void {
     this.listeners.add(listener);
     listener(this.state);
-    return () => {
-      this.listeners.delete(listener);
-    };
+    return () => { this.listeners.delete(listener); };
   }
 
   private updateState(partial: Partial<SyncEngineState>) {
     this.state = { ...this.state, ...partial };
     this.listeners.forEach((listener) => {
-      try {
-        listener(this.state);
-      } catch (err) {
-        console.error('Error in sync engine listener:', err);
-      }
+      try { listener(this.state); } catch (error) { console.error('Sync listener failed:', error); }
     });
   }
 
@@ -103,76 +90,65 @@ class ClinicalSyncEngine {
   public async refreshPendingCount(tenantId?: string): Promise<number> {
     try {
       const pending = await getPendingMutations(tenantId);
-      const count = pending.length;
-      this.updateState({ pendingCount: count });
-      return count;
+      this.updateState({ pendingCount: pending.length });
+      return pending.length;
     } catch {
       return 0;
     }
   }
 
   /**
-   * Queues an offline mutation and updates the local cache for optimistic UI rendering.
+   * Offline storage captures a domain command, never a raw Firestore mutation.
+   * The collection/action fields remain only for optimistic local-cache rendering.
    */
   public async queueMutation(params: QueueMutationParams): Promise<OfflineMutation> {
-    const { tenantId, collection, action, resourceId, payload, optimisticCache = true } = params;
-
-    // 1. Write mutation to IndexedDB queue
     const mutation = await addMutation({
-      tenantId,
-      collection,
-      action,
-      resourceId,
-      payload,
+      tenantId: params.tenantId,
+      collection: params.collection,
+      action: params.action,
+      resourceId: params.resourceId,
+      commandType: params.commandType,
+      idempotencyKey: params.idempotencyKey || `offline_${crypto.randomUUID()}`,
+      schemaVersion: params.schemaVersion || 1,
+      baseEntityVersion: params.baseEntityVersion,
+      payload: params.payload,
     });
 
-    // 2. Optimistic local cache update
-    if (optimisticCache) {
-      if (action === 'DELETE') {
-        // Cached item could be flagged or removed
-      } else {
-        await saveToOfflineCache(tenantId, collection, resourceId, payload);
-      }
+    if (params.optimisticCache !== false && params.action !== 'DELETE') {
+      await saveToOfflineCache(
+        params.tenantId,
+        params.collection,
+        params.resourceId,
+        params.payload
+      );
     }
 
-    await this.refreshPendingCount(tenantId);
+    await this.refreshPendingCount(params.tenantId);
 
-    // 3. If online, trigger immediate sync or request background sync registration
-    if (this.state.isOnline) {
-      this.processSyncQueue(tenantId);
-    } else {
-      this.registerBackgroundSync();
-    }
+    if (this.state.isOnline) void this.processSyncQueue(params.tenantId);
+    else void this.registerBackgroundSync();
 
     return mutation;
   }
 
-  /**
-   * Registers a Background Sync tag with the Service Worker.
-   */
   public async registerBackgroundSync() {
     try {
       if ('serviceWorker' in navigator && 'SyncManager' in window) {
         const registration = await navigator.serviceWorker.ready;
-        // @ts-ignore: SyncManager types
-        if (registration.sync) {
-          // @ts-ignore
-          await registration.sync.register('sync-clinical-queue');
-        }
+        // @ts-ignore browser support is runtime-detected.
+        if (registration.sync) await registration.sync.register('sync-clinical-queue');
       }
-    } catch (err) {
-      console.warn('Background sync registration not supported or failed:', err);
+    } catch (error) {
+      console.warn('Background sync registration unavailable:', error);
     }
   }
 
   /**
-   * Processes all pending mutations in chronological order with conflict detection.
+   * Replays queued domain commands through the authenticated server sync endpoint.
+   * No browser Firestore write or client-side LWW resolution is permitted.
    */
   public async processSyncQueue(tenantId?: string): Promise<{ syncedCount: number; conflictCount: number }> {
-    if (this.isProcessing) {
-      return { syncedCount: 0, conflictCount: 0 };
-    }
-
+    if (this.isProcessing) return { syncedCount: 0, conflictCount: 0 };
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       this.updateState({ isOnline: false });
       return { syncedCount: 0, conflictCount: 0 };
@@ -185,125 +161,120 @@ class ClinicalSyncEngine {
     let conflictCount = 0;
 
     try {
-      const pendingMutations = await getPendingMutations(tenantId);
+      const currentUser = auth.currentUser;
+      const cached = await getCachedAuthSession();
+      if (!currentUser || !cached) {
+        throw new Error('AUTHENTICATION_REQUIRED: offline replay requires an active authenticated session.');
+      }
 
-      for (const mut of pendingMutations) {
-        this.updateState({ activeProcessingId: mut.id });
-        await updateMutationStatus(mut.id, 'syncing');
+      const pending = await getPendingMutations(tenantId);
+      const byTenant = new Map<string, OfflineMutation[]>();
+      for (const mutation of pending) {
+        const list = byTenant.get(mutation.tenantId) || [];
+        list.push(mutation);
+        byTenant.set(mutation.tenantId, list);
+      }
 
-        try {
-          const docId = mut.resourceId || mut.docId;
-          // Resolve Firestore Document Reference
-          const docRef = this.getFirestoreDocRef(mut.tenantId, mut.collection, docId);
-
-          if (mut.action === 'CREATE' || mut.action === 'UPDATE') {
-            // Check for server-side concurrent conflicts
-            const serverDocSnap = await getDoc(docRef);
-
-            if (serverDocSnap.exists()) {
-              const serverData = serverDocSnap.data() as Record<string, any>;
-              const serverUpdatedAt = serverData.updatedAt || serverData.timestamp || null;
-              const serverTime = serverUpdatedAt ? new Date(serverUpdatedAt).getTime() : 0;
-              const clientTime = mut.clientTimestamp || mut.timestamp;
-
-              // Sensitive clinical conflict check: If server was modified after client mutation was generated
-              const isSensitiveResource = ['patients', 'vitals', 'soapNotes', 'medications', 'triage', 'invoices', 'claims'].includes(
-                mut.collection
-              );
-
-              if (isSensitiveResource && serverTime > clientTime) {
-                // Conflict detected: Last-Write-Wins with explicit audit flag
-                conflictCount += 1;
-
-                await recordSyncConflict({
-                  tenantId: mut.tenantId,
-                  collection: mut.collection,
-                  resourceId: docId,
-                  serverData,
-                  clientData: mut.payload,
-                  conflictType: 'CONCURRENT_EDIT',
-                });
-
-                await logAuditEvent({
-                  tenantId: mut.tenantId,
-                  action: 'CONFLICT_DETECTED',
-                  resource: `${mut.collection}:${docId}`,
-                  status: 'WARNING',
-                  details: `Concurrent edit collision detected during offline replay. Server updatedAt: ${serverUpdatedAt}, Client queue time: ${mut.timestamp}`,
-                  metadata: {
-                    mutationId: mut.id,
-                    serverTime,
-                    clientTime,
-                  },
-                });
-
-                // Apply deterministic resolution: LWW with merged audit marker
-                const mergedPayload = {
-                  ...serverData,
-                  ...mut.payload,
-                  _conflictResolved: true,
-                  _replayedAt: new Date().toISOString(),
-                };
-
-                await setDoc(docRef, mergedPayload, { merge: true });
-
-                await logAuditEvent({
-                  tenantId: mut.tenantId,
-                  action: 'OFFLINE_SYNC_OVERRIDE',
-                  resource: `${mut.collection}:${docId}`,
-                  status: 'CONFLICT_RESOLVED',
-                  details: `Replayed offline mutation with LWW resolution strategy for ${mut.collection}:${docId}`,
-                });
-              } else {
-                // Clean update
-                await setDoc(docRef, { ...mut.payload, updatedAt: new Date().toISOString() }, { merge: true });
-              }
-            } else {
-              // Document does not exist on server: clean create
-              await setDoc(docRef, { ...mut.payload, createdAt: mut.payload.createdAt || new Date().toISOString() });
-            }
-
-            // Sync successful: remove from mutation queue & update local cache
-            await deleteMutation(mut.id);
-            await saveToOfflineCache(mut.tenantId, mut.collection, docId, mut.payload);
-            syncedCount += 1;
-
-            await logAuditEvent({
-              tenantId: mut.tenantId,
-              action: 'OFFLINE_SYNC_COMPLETE',
-              resource: `${mut.collection}:${docId}`,
-              status: 'SUCCESS',
-              details: `Successfully synchronized offline ${mut.action} mutation to cloud Firestore`,
-            });
-          } else if (mut.action === 'DELETE') {
-            await deleteDoc(docRef);
-            await deleteMutation(mut.id);
-            syncedCount += 1;
-
-            await logAuditEvent({
-              tenantId: mut.tenantId,
-              action: 'DELETE',
-              resource: `${mut.collection}:${docId}`,
-              status: 'SUCCESS',
-              details: `Offline deletion applied to cloud Firestore for ${mut.collection}:${docId}`,
-            });
+      for (const [mutationTenantId, mutations] of byTenant) {
+        if (cached.user.tenantId !== mutationTenantId) {
+          for (const mutation of mutations) {
+            await updateMutationStatus(mutation.id, 'failed', 'TENANT_MISMATCH: active session differs from queued mutation tenant.');
           }
-        } catch (err: any) {
-          console.error(`Failed to process mutation ${mut.id}:`, err);
-          const errorMsg = err?.message || 'Unknown network error';
-          await updateMutationStatus(mut.id, 'failed', errorMsg);
-          this.updateState({ lastError: errorMsg });
+          continue;
+        }
+
+        const replayable = mutations.filter((mutation) => mutation.commandType && mutation.idempotencyKey);
+        const legacy = mutations.filter((mutation) => !mutation.commandType || !mutation.idempotencyKey);
+
+        for (const mutation of legacy) {
+          await updateMutationStatus(
+            mutation.id,
+            'failed',
+            'LEGACY_RAW_MUTATION_REJECTED: mutation must be re-created as a governed domain command.'
+          );
+        }
+
+        if (replayable.length === 0) continue;
+
+        const idToken = await currentUser.getIdToken(false);
+        const batchId = `sync_${crypto.randomUUID()}`;
+
+        for (const mutation of replayable) {
+          this.updateState({ activeProcessingId: mutation.id });
+          await updateMutationStatus(mutation.id, 'syncing');
+        }
+
+        const response = await fetch('/api/sync/batch', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${idToken}`,
+            'x-ghims-tenant-id': mutationTenantId,
+            'x-ghims-session-id': cached.session.sessionId,
+            ...(cached.session.deviceId ? { 'x-ghims-device-id': cached.session.deviceId } : {}),
+          },
+          body: JSON.stringify({
+            batch: {
+              deviceId: cached.session.deviceId || 'unknown-device',
+              tenantId: mutationTenantId,
+              actorId: cached.user.uid,
+              batchId,
+              submittedAt: Date.now(),
+              mutations: replayable.map((mutation) => ({
+                mutationId: mutation.id,
+                occurredAt: mutation.clientTimestamp || mutation.timestamp,
+                commandType: mutation.commandType,
+                payload: mutation.payload,
+                idempotencyKey: mutation.idempotencyKey,
+                entityId: mutation.resourceId || mutation.docId,
+                schemaVersion: mutation.schemaVersion || 1,
+              })),
+            },
+          }),
+        });
+
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload?.error?.message || 'Offline replay request failed.');
+        }
+
+        for (const result of payload.results || []) {
+          const mutation = replayable.find((item) => item.id === result.mutationId);
+          if (!mutation) continue;
+
+          if (result.status === 'accepted') {
+            await deleteMutation(mutation.id);
+            await saveToOfflineCache(
+              mutation.tenantId,
+              mutation.collection,
+              mutation.resourceId || mutation.docId,
+              result.data || mutation.payload
+            );
+            syncedCount += 1;
+          } else if (result.status === 'conflict' || result.status === 'requires_review') {
+            conflictCount += 1;
+            await updateMutationStatus(mutation.id, 'conflict', result.reason || 'Server reconciliation required.');
+            await recordSyncConflict({
+              id: mutation.id,
+              mutationId: mutation.id,
+              tenantId: mutation.tenantId,
+              collection: mutation.collection,
+              resourceId: mutation.resourceId || mutation.docId,
+              clientData: mutation.payload,
+              conflictType: result.conflictCategory || 'STATE_CONFLICT',
+              reason: result.reason,
+            });
+          } else {
+            await updateMutationStatus(mutation.id, 'failed', result.reason || 'Server rejected offline command.');
+          }
         }
       }
 
       await this.refreshPendingCount(tenantId);
-      this.updateState({
-        lastSyncedAt: new Date(),
-        activeProcessingId: null,
-      });
-    } catch (globalErr: any) {
-      console.error('Global error in sync queue loop:', globalErr);
-      this.updateState({ lastError: globalErr?.message || 'Sync loop failed' });
+      this.updateState({ lastSyncedAt: new Date(), activeProcessingId: null });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Sync loop failed';
+      this.updateState({ lastError: message });
     } finally {
       this.isProcessing = false;
       this.updateState({ isSyncing: false, activeProcessingId: null });
@@ -311,16 +282,9 @@ class ClinicalSyncEngine {
 
     return { syncedCount, conflictCount };
   }
-
-  private getFirestoreDocRef(tenantId: string, collectionName: string, docId: string) {
-    // Check if it's a tenant-scoped collection or top-level collection
-    const tenantScopedCollections = ['tariffs', 'invoices', 'claims', 'audit_logs', 'encounters', 'orders'];
-    if (tenantScopedCollections.includes(collectionName)) {
-      return doc(db, 'tenants', tenantId, collectionName, docId);
-    }
-    return doc(db, collectionName, docId);
-  }
 }
 
-// Global Singleton Instance
-export const syncEngine = typeof window !== 'undefined' ? new ClinicalSyncEngine() : (null as unknown as ClinicalSyncEngine);
+export const syncEngine =
+  typeof window !== 'undefined'
+    ? new ClinicalSyncEngine()
+    : (null as unknown as ClinicalSyncEngine);

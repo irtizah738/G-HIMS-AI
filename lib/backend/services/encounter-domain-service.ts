@@ -6,7 +6,7 @@
 import { CommandContext, CommandResult } from '../types';
 import { AuthorizationPipeline } from '../auth/authorization-pipeline';
 import { TransactionManager } from '../transactions/transaction-manager';
-import { IdempotencyService } from '../idempotency/idempotency-service';
+import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 
 export interface CreateEncounterPayload {
   patientId: string;
@@ -30,7 +30,49 @@ export interface AdvanceStagePayload {
   };
 }
 
+interface EncounterState {
+  encounterId: string;
+  tenantId: string;
+  patientId: string;
+  encounterType: CreateEncounterPayload['encounterType'];
+  chiefComplaint: string;
+  departmentId: string;
+  status: string;
+  currentStage: string;
+  priority: 'STAT' | 'URGENT' | 'ROUTINE';
+  assignedProviderId: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export class EncounterDomainService {
+  private static encounterCache = new Map<string, EncounterState>();
+
+  private static cacheKey(tenantId: string, encounterId: string): string {
+    return `${tenantId}:${encounterId}`;
+  }
+
+  private static async loadEncounter(
+    tenantId: string,
+    encounterId: string
+  ): Promise<EncounterState | null> {
+    const key = this.cacheKey(tenantId, encounterId);
+
+    if (DomainStateRepository.isAvailable()) {
+      const persisted = await DomainStateRepository.getById<EncounterState>(
+        tenantId,
+        'encounters',
+        encounterId
+      );
+
+      if (persisted) this.encounterCache.set(key, persisted);
+      else this.encounterCache.delete(key);
+
+      return persisted;
+    }
+
+    return this.encounterCache.get(key) || null;
+  }
   /**
    * Creates a new clinical encounter with atomic transaction.
    */
@@ -40,25 +82,6 @@ export class EncounterDomainService {
     idempotencyKey: string,
     payload: CreateEncounterPayload
   ): Promise<CommandResult> {
-    // 1. Check Idempotency
-    const idemCheck = IdempotencyService.checkIdempotency(
-      context.tenantId,
-      idempotencyKey,
-      'CreateEncounterCommand',
-      payload
-    );
-    if (idemCheck.status === 'CACHED' && idemCheck.record?.result) {
-      return { ...idemCheck.record.result, replayedFromCache: true };
-    }
-    if (idemCheck.status === 'CONFLICT') {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: 'IDEMPOTENCY_CONFLICT', message: 'Reused idempotency key with conflicting payload.' },
-      };
-    }
-
     // 2. Authorization
     const auth = AuthorizationPipeline.evaluate(context, {
       requiredRoles: ['NURSE', 'DOCTOR', 'RECEPTIONIST', 'REGISTRAR', 'SYSTEM_ADMIN'],
@@ -74,7 +97,7 @@ export class EncounterDomainService {
 
     // 3. Domain Logic & State Initialization
     const encounterId = `enc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const domainState = {
+    const domainState: EncounterState = {
       encounterId,
       tenantId: context.tenantId,
       patientId: payload.patientId,
@@ -105,6 +128,8 @@ export class EncounterDomainService {
       outboxTopic: 'g-hims-clinical-events',
     });
 
+    this.encounterCache.set(this.cacheKey(context.tenantId, encounterId), domainState);
+
     const result: CommandResult = {
       success: true,
       commandId,
@@ -115,8 +140,6 @@ export class EncounterDomainService {
       outboxId: tx.outbox.outboxId,
       data: domainState,
     };
-
-    IdempotencyService.recordExecution(context.tenantId, idempotencyKey, 'CreateEncounterCommand', payload, result);
     return result;
   }
 
@@ -141,41 +164,105 @@ export class EncounterDomainService {
       };
     }
 
-    const stageRuntimeId = `stg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const domainState = {
+    const encounter = await this.loadEncounter(context.tenantId, payload.encounterId);
+    if (!encounter) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'ENCOUNTER_NOT_FOUND',
+          message: `Encounter ${payload.encounterId} was not found in tenant ${context.tenantId}.`,
+        },
+      };
+    }
+
+    if (encounter.currentStage !== payload.currentStage) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'STALE_ENCOUNTER_STAGE',
+          message: `Encounter is currently at '${encounter.currentStage}', not caller-declared '${payload.currentStage}'.`,
+        },
+      };
+    }
+
+    if (!payload.targetStage || payload.targetStage === payload.currentStage) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INVALID_STAGE_TRANSITION',
+          message: 'Target stage must differ from the current persisted stage.',
+        },
+      };
+    }
+
+    const transitionedAt = Date.now();
+    const stageRuntimeId = `stg_${crypto.randomUUID()}`;
+    const stageState = {
       encounterId: payload.encounterId,
-      previousStage: payload.currentStage,
+      previousStage: encounter.currentStage,
       newStage: payload.targetStage,
       advancedBy: context.actorId,
       evidenceId: payload.evidenceId,
       sbar: payload.handoffSbar,
-      transitionedAt: Date.now(),
+      stageNotes: payload.stageNotes,
+      transitionedAt,
     };
 
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'ENCOUNTER_STAGE',
-      entityId: stageRuntimeId,
+    const updatedEncounter: EncounterState = {
+      ...encounter,
+      currentStage: payload.targetStage,
+      updatedAt: transitionedAt,
+    };
+
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'CLINICIAN',
+      aggregateType: 'ENCOUNTER_STAGE',
+      aggregateId: stageRuntimeId,
       eventType: 'STAGE_COMPLETED',
-      domainState,
       eventPayload: {
         encounterId: payload.encounterId,
-        fromStage: payload.currentStage,
+        fromStage: encounter.currentStage,
         toStage: payload.targetStage,
         evidenceId: payload.evidenceId,
       },
-      auditReason: `Transitioned stage from ${payload.currentStage} to ${payload.targetStage}`,
+      auditReason: `Transitioned encounter ${payload.encounterId} from ${encounter.currentStage} to ${payload.targetStage}`,
       outboxTopic: 'g-hims-clinical-events',
+      idempotencyKey,
+      commandId,
+      correlationId: context.correlationId,
+      domainState: stageState,
+      additionalStateWrites: [
+        {
+          entityType: 'ENCOUNTER',
+          entityId: payload.encounterId,
+          domainState: updatedEncounter,
+        },
+      ],
     });
+
+    this.encounterCache.set(
+      this.cacheKey(context.tenantId, payload.encounterId),
+      updatedEncounter
+    );
 
     return {
       success: true,
       commandId,
       idempotencyKey,
       entityId: payload.encounterId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: domainState,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
+      data: stageState,
     };
   }
+
 }

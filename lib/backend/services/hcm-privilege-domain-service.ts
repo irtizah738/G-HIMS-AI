@@ -63,7 +63,7 @@ export class HcmPrivilegeDomainService {
     };
 
     const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'CLINICAL_CREDENTIAL',
+      entityType: 'EMPLOYEE_CREDENTIAL',
       entityId: credentialId,
       eventType: 'CREDENTIAL_VERIFIED',
       domainState,

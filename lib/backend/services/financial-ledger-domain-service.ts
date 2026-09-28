@@ -6,7 +6,6 @@
 import { CommandContext, CommandResult } from '../types';
 import { AuthorizationPipeline } from '../auth/authorization-pipeline';
 import { TransactionManager } from '../transactions/transaction-manager';
-import { IdempotencyService } from '../idempotency/idempotency-service';
 
 export interface JournalLineItem {
   glAccountId: string;
@@ -45,24 +44,6 @@ export class FinancialLedgerDomainService {
     idempotencyKey: string,
     payload: PostJournalPayload
   ): Promise<CommandResult> {
-    const idemCheck = IdempotencyService.checkIdempotency(
-      context.tenantId,
-      idempotencyKey,
-      'PostJournalCommand',
-      payload
-    );
-    if (idemCheck.status === 'CACHED' && idemCheck.record?.result) {
-      return { ...idemCheck.record.result, replayedFromCache: true };
-    }
-    if (idemCheck.status === 'CONFLICT') {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: 'IDEMPOTENCY_CONFLICT', message: 'Reused idempotency key with conflicting payload.' },
-      };
-    }
-
     const auth = AuthorizationPipeline.evaluate(context, {
       requiredRoles: ['FINANCE_MANAGER', 'ACCOUNTANT', 'SYSTEM_ADMIN'],
     });
@@ -144,8 +125,6 @@ export class FinancialLedgerDomainService {
       outboxId: tx.outbox.outboxId,
       data: domainState,
     };
-
-    IdempotencyService.recordExecution(context.tenantId, idempotencyKey, 'PostJournalCommand', payload, result);
     return result;
   }
 

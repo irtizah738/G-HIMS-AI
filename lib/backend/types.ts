@@ -101,6 +101,8 @@ export interface OutboxRecord {
   nextAttemptAt: number;
   createdAt: number;
   publishedAt?: number;
+  processingStartedAt?: number;
+  leaseExpiresAt?: number;
   lastError?: string;
 }
 
@@ -114,6 +116,9 @@ export interface IdempotencyRecord {
   error?: string;
   createdAt: number;
   completedAt?: number;
+  commandId?: string;
+  leaseExpiresAt?: number;
+  lastUpdatedAt?: number;
 }
 
 export type ConflictCategory =

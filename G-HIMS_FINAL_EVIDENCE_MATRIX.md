@@ -20,6 +20,8 @@
 | Liveness/readiness probes | health routes | P3 tests | Runtime/platform health checks | IMPLEMENTED |
 | Structured operational log redaction | structured logger | P3 tests | Log sink/alert platform | IMPLEMENTED |
 | Firestore backup procedure | DR runbook + readiness config | configuration tests only | GCS/IAM/scheduler | IMPLEMENTED |
+| Deterministic projection rebuild | canonical event stream + projection recovery service | P4 boundary + emulator synthetic journey | Isolated recovery project for real drill | AUTOMATED-VERIFIED |
+| Cross-module synthetic patient recovery journey | registration + command bus + outbox + projections + finance | P4 Firestore emulator journey | Real hospital workflow validation remains external | AUTOMATED-VERIFIED |
 | Measured restore/RPO/RTO evidence | external drill record | none in repo | Restore environment + operators | EXTERNALLY_BLOCKED |
 | HIPAA/GDPR/ISO certification | none | impossible via repo test | Independent/institutional process | EXTERNALLY_BLOCKED |
 | Hospital pilot approval | none | impossible via repo test | Hospital governance | EXTERNALLY_BLOCKED |

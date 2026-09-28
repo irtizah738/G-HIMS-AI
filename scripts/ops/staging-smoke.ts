@@ -1,3 +1,5 @@
+export {};
+
 const rawBaseUrl = String(process.env.GHIMS_STAGING_BASE_URL || '').trim();
 
 if (!rawBaseUrl) {

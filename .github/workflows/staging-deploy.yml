@@ -1,0 +1,139 @@
+name: STAGING Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type STAGING to deploy the current main commit'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ghims-staging-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy-staging:
+    name: Deploy current main to STAGING and verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      VERCEL_ORG_ID: team_0S9QQkyN4yTIj7QUZ9BVKsVV
+      VERCEL_PROJECT_ID: prj_a0TEuNNMAE61UziOoLNTok6Wbp1v
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      GHIMS_STAGING_EXPECTED_RUNTIME: STAGING
+      GHIMS_STAGING_SMOKE_HEADER_NAME: x-vercel-protection-bypass
+      GHIMS_STAGING_SMOKE_HEADER_VALUE: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+
+    steps:
+      - name: Require explicit STAGING confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.confirm }}" != "STAGING" ]; then
+            echo "Refusing deployment: confirmation must be exactly STAGING." >&2
+            exit 1
+          fi
+
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Verify exact current main head
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          CHECKED_OUT_SHA="$(git rev-parse HEAD)"
+          REMOTE_MAIN_SHA="$(git rev-parse origin/main)"
+          if [ "$CHECKED_OUT_SHA" != "$REMOTE_MAIN_SHA" ]; then
+            echo "Refusing stale staging deploy: checkout is not current origin/main." >&2
+            exit 1
+          fi
+          echo "MAIN_SHA=$CHECKED_OUT_SHA" >> "$GITHUB_ENV"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install pinned Vercel CLI
+        run: npm install --global vercel@59.19.1
+
+      - name: Validate Vercel credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "VERCEL_TOKEN GitHub secret is required." >&2
+            exit 1
+          fi
+
+      - name: Pull STAGING project configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          vercel pull --yes --environment=staging --token="$VERCEL_TOKEN"
+
+      - name: Deploy exact main commit to Vercel STAGING
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          vercel deploy --target=staging --yes --token="$VERCEL_TOKEN" 2>&1 | tee /tmp/vercel-staging-deploy.log
+          DEPLOY_URL="$(grep -Eo 'https://[A-Za-z0-9.-]+\.vercel\.app' /tmp/vercel-staging-deploy.log | tail -n 1 || true)"
+          if [ -z "$DEPLOY_URL" ]; then
+            echo "Could not resolve the STAGING deployment URL from Vercel output." >&2
+            exit 1
+          fi
+          echo "deployment_url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Run fail-closed STAGING smoke gate
+        shell: bash
+        env:
+          GHIMS_STAGING_BASE_URL: ${{ steps.deploy.outputs.deployment_url }}
+        run: |
+          set -euo pipefail
+          bun run ops:staging-smoke | tee staging-smoke.json
+
+      - name: Record STAGING evidence
+        shell: bash
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment_url }}
+        run: |
+          set -euo pipefail
+          {
+            echo "main_sha=$MAIN_SHA"
+            echo "deployment_url=$DEPLOYMENT_URL"
+            echo "target=staging"
+            echo "verified_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > staging-deployment-evidence.txt
+
+      - name: Upload STAGING verification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghims-staging-verification-${{ env.MAIN_SHA }}
+          path: |
+            staging-smoke.json
+            staging-deployment-evidence.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish job summary
+        shell: bash
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment_url }}
+        run: |
+          {
+            echo "## G-HIMS STAGING deployment"
+            echo ""
+            echo "- Commit: \`$MAIN_SHA\`"
+            echo "- Target: \`staging\`"
+            echo "- Deployment: $DEPLOYMENT_URL"
+            echo "- Smoke gate: PASS"
+          } >> "$GITHUB_STEP_SUMMARY"

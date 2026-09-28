@@ -1,5 +1,6 @@
-import { describe, expect, test } from 'bun:test';
-import { getAdminFirestore } from '@/server/firebase/admin';
+import { afterAll, describe, expect, test } from 'bun:test';
+import getAdminApp, { getAdminFirestore } from '@/server/firebase/admin';
+import { deleteApp } from 'firebase-admin/app';
 import { verifyFirebaseToken } from '@/server/auth/verify-token';
 import { resolveAuthorizationContext } from '@/server/auth/authorization-context';
 import { createSession, validateSession } from '@/server/auth/session-service';
@@ -47,6 +48,18 @@ async function createEmulatorIdentity(
 }
 
 describe('P5A Firebase Auth + IAM integration', () => {
+  afterAll(async () => {
+    const db = getAdminFirestore();
+    if (db) {
+      await db.terminate().catch(() => {});
+    }
+
+    const app = getAdminApp();
+    if (app) {
+      await deleteApp(app).catch(() => {});
+    }
+  });
+
   test('real Firebase UID becomes the tenant membership key and authorizes a session', async () => {
     const tenantId = `tenant-p5a-${crypto.randomUUID().slice(0,8)}`;
     const email = uniqueEmail('doctor');

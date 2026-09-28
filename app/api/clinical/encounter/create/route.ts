@@ -15,6 +15,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const idempotencyKey = String(
+      req.headers.get('idempotency-key') || body.idempotencyKey || ''
+    ).trim();
+
+    if (!idempotencyKey) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: 'IDEMPOTENCY_KEY_REQUIRED',
+          error:
+            'Patient registration requires a stable idempotency key. Reuse the same key when retrying the same registration request.',
+        },
+        { status: 400 }
+      );
+    }
+
     const { context } = await deriveAuthoritativeContext(req, tenantId);
     const registrationAuth = AuthorizationPipeline.evaluate(context, {
       requiredRoles: ['RECEPTIONIST', 'REGISTRAR', 'SYSTEM_ADMIN', 'ADMINISTRATOR'],
@@ -61,7 +77,7 @@ export async function POST(req: NextRequest) {
     const normalizedParams: RegisterPatientEncounterParams = {
       tenantId: context.tenantId,
       commandId: String(body.commandId || `cmd_${crypto.randomUUID()}`),
-      idempotencyKey: String(body.idempotencyKey || `idem_${crypto.randomUUID()}`),
+      idempotencyKey,
       patientId: body.patientId,
       fullName,
       gender,

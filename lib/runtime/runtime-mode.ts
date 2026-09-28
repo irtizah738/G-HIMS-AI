@@ -2,6 +2,24 @@ export type GhimsRuntimeMode = 'DEMO' | 'TEST' | 'STAGING' | 'PRODUCTION';
 
 const VALID_MODES = new Set<GhimsRuntimeMode>(['DEMO', 'TEST', 'STAGING', 'PRODUCTION']);
 
+/**
+ * Infer the safest implicit runtime from Node's execution mode.
+ *
+ * Development/test workspaces are non-production sandboxes and default to TEST
+ * so a fresh clone can boot without being misclassified as PRODUCTION.
+ * Any non-development deployment remains fail-closed as PRODUCTION unless
+ * GHIMS_RUNTIME_MODE is set explicitly.
+ */
+export function inferRuntimeModeFromNodeEnv(
+  nodeEnv: string | undefined
+): GhimsRuntimeMode {
+  const normalized = String(nodeEnv || '').trim().toLowerCase();
+  if (normalized === 'development' || normalized === 'test') {
+    return 'TEST';
+  }
+  return 'PRODUCTION';
+}
+
 export function getRuntimeMode(): GhimsRuntimeMode {
   const raw = (process.env.GHIMS_RUNTIME_MODE || '').trim().toUpperCase();
 
@@ -9,12 +27,7 @@ export function getRuntimeMode(): GhimsRuntimeMode {
     return raw as GhimsRuntimeMode;
   }
 
-  if (process.env.NODE_ENV === 'test') {
-    return 'TEST';
-  }
-
-  // Fail closed: an unspecified deployed runtime is treated as production.
-  return 'PRODUCTION';
+  return inferRuntimeModeFromNodeEnv(process.env.NODE_ENV);
 }
 
 export function isDemoRuntime(): boolean {

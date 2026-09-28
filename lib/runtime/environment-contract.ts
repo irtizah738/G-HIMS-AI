@@ -1,4 +1,4 @@
-import { getRuntimeMode, type GhimsRuntimeMode } from './runtime-mode';
+import { getRuntimeMode, inferRuntimeModeFromNodeEnv, type GhimsRuntimeMode } from './runtime-mode';
 
 type ProjectMap = Partial<Record<GhimsRuntimeMode, string>>;
 
@@ -90,8 +90,9 @@ export function getPublicRuntimeMode(): GhimsRuntimeMode {
     return raw;
   }
 
-  // Browser builds must not silently downgrade a deployed runtime.
-  return process.env.NODE_ENV === 'test' ? 'TEST' : 'PRODUCTION';
+  // Local/dev previews are sandboxes. Production builds remain fail-closed
+  // unless NEXT_PUBLIC_GHIMS_RUNTIME_MODE is explicitly configured.
+  return inferRuntimeModeFromNodeEnv(process.env.NODE_ENV);
 }
 
 export function assertClientFirebaseProjectIsolation(actualProjectId: string): void {

@@ -90,14 +90,14 @@ export function AuditLedgerView() {
 
     for (let i = 0; i < sorted.length; i++) {
       const log = sorted[i];
-      if (!log.hash || !log.previousHash || log.authoritative === false) {
+      if (!log.hash || !log.previousHash || !tenantId) {
         newMap[log.id] = 'UNVERIFIED';
         continue;
       }
 
       const canonical = buildCanonicalAuditString(
         log.previousHash,
-        log.tenantId,
+        tenantId,
         log.userId,
         log.action,
         log.resource,

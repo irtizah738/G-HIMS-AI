@@ -18,7 +18,11 @@
     "test:e2e": "playwright test",
     "ops:backup": "node scripts/ops/firestore-backup.mjs",
     "ops:restore": "node scripts/ops/firestore-restore.mjs",
-    "validate:p3": "bun run typecheck && bun run lint && bun run test:unit && bun run test:security && bun run build"
+    "validate:p3": "bun run typecheck && bun run lint && bun run test:unit && bun run test:security && bun run build",
+    "test:p4": "bun test tests/p4-release-candidate-boundary.test.ts",
+    "test:p4:emulator": "firebase emulators:exec --project ghims-p4-ci --only firestore \"bun test emulator-security/p4-release-candidate.test.ts\"",
+    "ops:projection-rebuild": "bun scripts/ops/projection-rebuild.ts",
+    "validate:p4": "bun run typecheck && bun run lint && bun run test:p4 && bun run test:unit && bun run test:security && bun run test:rules && bun run test:p4:emulator && bun run build && bun run test:e2e"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

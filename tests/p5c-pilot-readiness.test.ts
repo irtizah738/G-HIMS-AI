@@ -69,4 +69,19 @@ describe('G-HIMS P5C pilot readiness guards', () => {
 
     expect(config.git?.deploymentEnabled?.main).toBe(false);
   });
+
+  test('manual staging workflow is pinned to current main and never uses a production target', async () => {
+    const workflow = await source('.github/workflows/staging-deploy.yml');
+
+    expect(workflow).toContain('workflow_dispatch:');
+    expect(workflow).toContain('ref: main');
+    expect(workflow).toContain('git rev-parse origin/main');
+    expect(workflow).toContain('vercel pull --yes --environment=staging');
+    expect(workflow).toContain('vercel deploy --target=staging');
+    expect(workflow).toContain('bun run ops:staging-smoke');
+    expect(workflow).toContain('VERCEL_TOKEN');
+    expect(workflow).not.toContain('vercel --prod');
+    expect(workflow).not.toContain('vercel deploy --prod');
+    expect(workflow).not.toContain('--target=production');
+  });
 });

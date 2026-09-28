@@ -46,11 +46,25 @@ Create/use a dedicated Vercel custom environment named `staging` and configure i
 - matching Firestore database configuration;
 - pilot-unneeded external integrations set to `DISABLED`.
 
-Deploy the exact approved main commit explicitly to the `staging` target, then run:
+After the custom environment and its variables exist, use the repository workflow **STAGING Deployment** (`.github/workflows/staging-deploy.yml`). Run it manually and type `STAGING` when prompted.
 
-`GHIMS_STAGING_BASE_URL=https://<staging-host> bun run ops:staging-smoke`
+The workflow:
 
-Retain deployment ID, Git commit SHA, readiness response, smoke output, operator, and timestamp.
+1. checks out the current `main`;
+2. refuses a stale checkout that differs from `origin/main`;
+3. pulls the Vercel `staging` environment;
+4. deploys only with `--target=staging`;
+5. runs `bun run ops:staging-smoke` against the returned deployment URL;
+6. retains the smoke payload and commit/deployment evidence as a GitHub Actions artifact.
+
+Repository prerequisites for the workflow are:
+
+- GitHub Actions secret `VERCEL_TOKEN`;
+- optional `VERCEL_AUTOMATION_BYPASS_SECRET` when Vercel Deployment Protection is enabled for staging.
+
+The Vercel organization and project identifiers are non-secret deployment coordinates and are pinned in the workflow to prevent accidental cross-project targeting.
+
+Retain deployment URL/ID, Git commit SHA, readiness response, smoke output, operator, and timestamp.
 
 Production promotion is a separate action after STAGING-01 and the required recovery/operational evidence pass. A Vercel quota, build, environment-contract, or deployment failure is a blocker until the approved commit reaches READY in STAGING.
 

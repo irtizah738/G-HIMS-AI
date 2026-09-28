@@ -1,0 +1,130 @@
+name: TEST Administrator Bootstrap
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type BOOTSTRAP TEST ADMIN to provision the TEST administrator'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ghims-test-admin-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  bootstrap-test-admin:
+    name: Bootstrap TEST administrator
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: g-hims-ai
+      GHIMS_FIREBASE_PROJECT_ID_TEST: g-hims-ai
+      FIRESTORE_DATABASE_ID: ai-studio-ghimsos-8d860f4b-3a80-47b3-bf97-15b9dc0d7fa7
+
+      FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
+      FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
+
+      GHIMS_BOOTSTRAP_ADMIN_EMAIL: irtiza.haider007@gmail.com
+      GHIMS_BOOTSTRAP_ADMIN_TENANT: central-metro-hospital
+      GHIMS_BOOTSTRAP_ADMIN_DISPLAY_NAME: Irtiza Haider
+      GHIMS_BOOTSTRAP_CONFIRM_PROJECT: g-hims-ai
+      GHIMS_ALLOW_ADMIN_BOOTSTRAP: "true"
+      GHIMS_ALLOW_PRODUCTION_ADMIN_BOOTSTRAP: "false"
+
+    steps:
+      - name: Require exact manual confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.confirm }}" != "BOOTSTRAP TEST ADMIN" ]; then
+            echo "Refusing administrator bootstrap: confirmation text is incorrect." >&2
+            exit 1
+          fi
+
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Verify exact current main head
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          CHECKED_OUT_SHA="$(git rev-parse HEAD)"
+          REMOTE_MAIN_SHA="$(git rev-parse origin/main)"
+          if [ "$CHECKED_OUT_SHA" != "$REMOTE_MAIN_SHA" ]; then
+            echo "Refusing bootstrap: checkout is not current origin/main." >&2
+            exit 1
+          fi
+          echo "MAIN_SHA=$CHECKED_OUT_SHA" >> "$GITHUB_ENV"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Validate Firebase Admin secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "$FIREBASE_CLIENT_EMAIL" ]; then
+            echo "Missing GitHub secret: FIREBASE_CLIENT_EMAIL" >&2
+            exit 1
+          fi
+
+          if [ -z "$FIREBASE_PRIVATE_KEY" ]; then
+            echo "Missing GitHub secret: FIREBASE_PRIVATE_KEY" >&2
+            exit 1
+          fi
+
+          case "$FIREBASE_CLIENT_EMAIL" in
+            *@g-hims-ai.iam.gserviceaccount.com) ;;
+            *)
+              echo "Refusing bootstrap: FIREBASE_CLIENT_EMAIL is not a g-hims-ai service account." >&2
+              exit 1
+              ;;
+          esac
+
+          case "$FIREBASE_PRIVATE_KEY" in
+            *"BEGIN PRIVATE KEY"*) ;;
+            *)
+              echo "Refusing bootstrap: FIREBASE_PRIVATE_KEY does not look like a service-account private key." >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Bootstrap TEST administrator
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun run ops:bootstrap-admin | tee bootstrap-result.json
+
+      - name: Publish safe job summary
+        shell: bash
+        run: |
+          {
+            echo "## G-HIMS TEST administrator bootstrap"
+            echo ""
+            echo "- Runtime: `TEST`"
+            echo "- Firebase project: `g-hims-ai`"
+            echo "- Firestore database: `ai-studio-ghimsos-8d860f4b-3a80-47b3-bf97-15b9dc0d7fa7`"
+            echo "- Tenant: `central-metro-hospital`"
+            echo "- Administrator: `irtiza.haider007@gmail.com`"
+            echo "- Main commit: `$MAIN_SHA`"
+            echo "- Result: PASS"
+            echo ""
+            echo "The workflow does not print or persist Firebase Admin secrets."
+          } >> "$GITHUB_STEP_SUMMARY"

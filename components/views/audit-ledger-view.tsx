@@ -54,7 +54,7 @@ export function AuditLedgerView() {
   const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
 
   // 4. Cryptographic chain verification & mismatch mapping
-  const [verificationMap, setVerificationMap] = useState<Record<string, 'VERIFIED' | 'MISMATCH'>>({});
+  const [verificationMap, setVerificationMap] = useState<Record<string, 'VERIFIED' | 'MISMATCH' | 'UNVERIFIED'>>({});
   const [isVerifying, setIsVerifying] = useState<boolean>(false);
   const [lastVerifiedAt, setLastVerifiedAt] = useState<string | null>(null);
 
@@ -81,20 +81,24 @@ export function AuditLedgerView() {
   // Run cryptographic verification on logs
   const runChainVerification = useCallback(async () => {
     setIsVerifying(true);
-    const newMap: Record<string, 'VERIFIED' | 'MISMATCH'> = {};
+    const newMap: Record<string, 'VERIFIED' | 'MISMATCH' | 'UNVERIFIED'> = {};
 
     // Sort chronologically for forward hash evaluation
     const sorted = [...auditLogs].sort(
       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
 
-    let prevHash = '0000000000000000000000000000000000000000000000000000000000000000';
     for (let i = 0; i < sorted.length; i++) {
       const log = sorted[i];
+      if (!log.hash || !log.previousHash || log.authoritative === false) {
+        newMap[log.id] = 'UNVERIFIED';
+        continue;
+      }
+
       const canonical = buildCanonicalAuditString(
-        log.previousHash || prevHash,
-        tenantId || 'central-metro-hospital',
-        log.userId || log.userName || 'sys',
+        log.previousHash,
+        log.tenantId,
+        log.userId,
         log.action,
         log.resource,
         log.timestamp,
@@ -102,14 +106,7 @@ export function AuditLedgerView() {
         log.details || ''
       );
       const expectedHash = await calculateSha256(canonical);
-
-      // If log already carries a hash, check match; otherwise test canonical validity
-      if (log.hash && log.hash !== expectedHash) {
-        newMap[log.id] = 'MISMATCH';
-      } else {
-        newMap[log.id] = 'VERIFIED';
-      }
-      prevHash = log.hash || expectedHash;
+      newMap[log.id] = log.hash === expectedHash ? 'VERIFIED' : 'MISMATCH';
     }
 
     setVerificationMap(newMap);
@@ -177,7 +174,7 @@ export function AuditLedgerView() {
         recordCount: target.length,
         selectedIds: target.map((l) => l.id),
         filterMode: onlyAlertsAndWarnings ? 'ALERTS_AND_WARNINGS_ONLY' : 'ALL_ENTRIES',
-        complianceStandard: 'HIPAA Security Rule §164.312(b) & ISO 27001',
+        complianceStandard: 'Repository audit evidence; no regulatory certification implied',
       },
       auditLogs: target,
     };
@@ -207,7 +204,7 @@ export function AuditLedgerView() {
             <h1 className="text-lg font-bold text-slate-900">Dual-Engine Local Sync &amp; Audit Ledger</h1>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Zero-latency offline operation with automated vector-clock mutation replay and immutable HIPAA/ISO 27001 audit trail
+            Governed offline command replay with server-owned audit evidence; external compliance attestation is not implied
           </p>
         </div>
 
@@ -218,7 +215,7 @@ export function AuditLedgerView() {
             className="px-3.5 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 text-xs font-bold flex items-center gap-1.5 transition-all shadow-2xs"
           >
             <KeyRound className="w-3.5 h-3.5" />
-            <span>Full HIPAA Audit Explorer</span>
+            <span>Audit Evidence Explorer</span>
             <ExternalLink className="w-3 h-3 ml-0.5" />
           </Link>
 
@@ -272,7 +269,7 @@ export function AuditLedgerView() {
               : 'text-slate-600 hover:bg-slate-100'
           }`}
         >
-          HIPAA & ISO 27001 Security Audit Log ({auditLogs.length})
+          Security Audit Evidence ({auditLogs.length})
         </button>
       </div>
 
@@ -289,17 +286,17 @@ export function AuditLedgerView() {
               <div className="space-y-3 text-xs">
                 <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
                   <span className="text-slate-500 font-semibold block">Active Storage Engine:</span>
-                  <strong className="text-slate-900 font-mono">IndexedDB + SQLite Edge Gateway</strong>
+                  <strong className="text-slate-900 font-mono">IndexedDB offline command queue</strong>
                 </div>
 
                 <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
                   <span className="text-slate-500 font-semibold block">Conflict Resolution Strategy:</span>
-                  <strong className="text-slate-900">Deterministic Vector Clocks (LWW-Physician Priority)</strong>
+                  <strong className="text-slate-900">Server command replay with explicit conflict handling</strong>
                 </div>
 
                 <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 space-y-1">
                   <span className="text-emerald-800 font-semibold block">Uptime In Disaster/Outage:</span>
-                  <strong className="text-emerald-950 font-bold">99.9% Full Read/Write Continuity</strong>
+                  <strong className="text-emerald-950 font-bold">No uptime claim without measured production evidence</strong>
                 </div>
               </div>
             </div>
@@ -353,11 +350,11 @@ export function AuditLedgerView() {
               <div className="flex items-center gap-2">
                 <ShieldCheck className="w-5 h-5 text-emerald-600" />
                 <h3 className="text-base font-bold text-slate-900">
-                  Immutable Audit Trail (HIPAA Security Rule §164.312(b))
+                  Server-Owned Audit Evidence
                 </h3>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Every chart modification, medication administration, and security event is cryptographically sealed with SHA-256
+                Audit records are server-owned; cryptographic chain attestation is not currently implemented
               </p>
             </div>
 
@@ -391,7 +388,7 @@ export function AuditLedgerView() {
                 onClick={runChainVerification}
                 disabled={isVerifying}
                 className="px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
-                title="Verify SHA-256 cryptographic chain"
+                title="Verify hashes where attestation data exists"
               >
                 <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
                 <span>{isVerifying ? 'Verifying...' : 'Verify Chain'}</span>
@@ -501,7 +498,7 @@ export function AuditLedgerView() {
                 ) : (
                   filteredAuditLogs.map((log) => {
                     const isSelected = selectedLogIds.includes(log.id);
-                    const verification = verificationMap[log.id];
+                    const verification = verificationMap[log.id] || 'UNVERIFIED';
                     const isMismatch = verification === 'MISMATCH';
 
                     return (
@@ -551,10 +548,10 @@ export function AuditLedgerView() {
                           ) : (
                             <span
                               className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] font-medium"
-                              title="SHA-256 forward chain verified"
+                              title="Hash verified for this record only"
                             >
                               <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                              <span>Verified</span>
+                              <span>Hash verified</span>
                             </span>
                           )}
                         </td>

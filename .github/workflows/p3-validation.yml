@@ -1,0 +1,66 @@
+name: P3 Production Evidence Validation
+
+on:
+  pull_request:
+    branches:
+      - main
+      - hardening/offline-ai-interop-p2
+  push:
+    branches:
+      - hardening/production-evidence-p3
+
+permissions:
+  contents: read
+
+jobs:
+  p3-production-evidence:
+    name: P3 release, security, DR and evidence gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_TELEMETRY_DISABLED: "1"
+      FIREBASE_PROJECT_ID: ghims-p3-ci
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p3-ci
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      GHIMS_INTEGRATION_HL7_STATE: DISABLED
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_INTEGRATION_DICOMWEB_STATE: DISABLED
+      GHIMS_INTEGRATION_DEVICE_TELEMETRY_STATE: DISABLED
+      GHIMS_INTEGRATION_EDI_X12_STATE: DISABLED
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: P3 adversarial production-evidence regression
+        run: bun run test:p3
+
+      - name: Full regression suite
+        run: bun run test
+
+      - name: TypeScript validation
+        run: bun run lint
+
+      - name: Production build
+        run: bun run build
+
+      - name: Setup Java for Firestore Emulator
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install Firestore rules tooling
+        run: npm install --no-save --package-lock=false @firebase/rules-unit-testing@4.0.1 firebase-tools
+
+      - name: Firestore rules penetration suite
+        run: npx firebase emulators:exec --project ghims-p3-ci --only firestore "bun test emulator-security/firestore-rules.test.ts"

@@ -193,7 +193,7 @@ export function ScmAuditComplianceView({
       await recordStockAdjustment(tenantId, adjustmentRecord);
       setFeedbackMsg({
         type: 'success',
-        text: `Physical Stock Adjustment ${adjNumber} posted successfully. Variance of ${calculatedVariance > 0 ? '+' : ''}${calculatedVariance} ${targetAdjItem.unitOfMeasure} tracked with immutable audit event.`,
+        text: `Physical Stock Adjustment ${adjNumber} posted successfully. Variance of ${calculatedVariance > 0 ? '+' : ''}${calculatedVariance} ${targetAdjItem.unitOfMeasure} tracked with a server-owned audit event.`,
       });
       setIsAdjustmentModalOpen(false);
       await loadAuditEvents();
@@ -242,13 +242,13 @@ export function ScmAuditComplianceView({
             </div>
             <div>
               <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                SCM Administrative Audit & Compliance Trail
+                SCM Administrative Audit Evidence
                 <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-semibold font-mono">
-                  Append-Only SHA-256
+                  Server Event Records
                 </span>
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Immutable domain event stream verifying inventory adjustments, reason codes, dual authorizers, and tamper-evident hashes.
+                Server-owned event records for inventory adjustments, reason codes, and authorizer review. Hash attestation is shown only when actual hash evidence exists.
               </p>
             </div>
           </div>
@@ -285,7 +285,7 @@ export function ScmAuditComplianceView({
             {metrics.totalEvents}
           </p>
           <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1 font-medium">
-            100% Cryptographically Verified
+            Audit Evidence Available
           </p>
         </div>
 
@@ -388,7 +388,7 @@ export function ScmAuditComplianceView({
           <div>
             <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
               <Hash className="w-4 h-4 text-indigo-500" />
-              Immutable Domain Event Ledger
+              Domain Event Ledger
             </h3>
             <p className="text-xs text-slate-400">
               Showing {filteredEvents.length} recorded events with cryptographic integrity
@@ -481,7 +481,7 @@ export function ScmAuditComplianceView({
                     <td className="p-3 whitespace-nowrap font-mono text-[10px]">
                       <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                         <CheckCircle2 className="w-3 h-3" />
-                        {evt.hash ? evt.hash.substring(0, 14) + '...' : 'Verified'}
+                        {evt.hash ? evt.hash.substring(0, 14) + '...' : 'Not attested'}
                       </span>
                     </td>
                     <td className="p-3 text-center whitespace-nowrap">
@@ -509,7 +509,7 @@ export function ScmAuditComplianceView({
               <div className="flex items-center gap-2">
                 <ShieldAlert className="w-5 h-5 text-indigo-600" />
                 <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
-                  Immutable Domain Event Inspection
+                  Domain Event Inspection
                 </h3>
               </div>
               <button
@@ -542,7 +542,7 @@ export function ScmAuditComplianceView({
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800">
                 <span className="text-slate-400 block mb-0.5">SHA-256 Hash</span>
                 <span className="font-mono text-emerald-600 dark:text-emerald-400 truncate block">
-                  {selectedEventForDetail.hash || 'sha256_verified_immutable'}
+                  {selectedEventForDetail.hash || 'Not attested'}
                 </span>
               </div>
             </div>
@@ -763,7 +763,7 @@ export function ScmAuditComplianceView({
                 className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-2 cursor-pointer shadow-xs transition-colors"
               >
                 <CheckCircle2 className="w-4 h-4" />
-                {isSubmittingAdj ? 'Posting Adjustment...' : 'Commit Immutable Stock Adjustment'}
+                {isSubmittingAdj ? 'Posting Adjustment...' : 'Commit Stock Adjustment'}
               </button>
             </div>
           </div>

@@ -55,7 +55,7 @@ export class AuthorizationPipeline {
     }
 
     // 2. Emergency Override / Break-Glass evaluation
-    if (requirement.isEmergencyOverride || (requirement.allowBreakGlass && context.roles.includes('BREAK_GLASS_AUTHORIZED'))) {
+    if (requirement.allowBreakGlass && context.isEmergencyOverride && context.breakGlassGrantId) {
       return {
         authorized: true,
         evaluatedContext: this.extractContext(context),

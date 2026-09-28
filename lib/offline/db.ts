@@ -77,7 +77,20 @@ export async function getLocalCacheEntry(key: string): Promise<OfflineCacheEntry
   return await localDb.offline_cache.get(key);
 }
 
+function assertDemoSeedAllowed(): void {
+  const mode = String(
+    process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE ||
+    process.env.GHIMS_RUNTIME_MODE ||
+    ''
+  ).trim().toUpperCase();
+
+  if (mode !== 'DEMO' && process.env.NODE_ENV !== 'test') {
+    throw new Error('DEMO_SEED_FORBIDDEN: synthetic clinical data is DEMO-only.');
+  }
+}
+
 export async function seedDefaultBedOccupancy(tenantId: string): Promise<void> {
+  assertDemoSeedAllowed();
   const existing = await localDb.bed_occupancy.where('tenantId').equals(tenantId).count();
   if (existing > 0) return;
 
@@ -330,6 +343,7 @@ export async function seedDefaultBedOccupancy(tenantId: string): Promise<void> {
 }
 
 export async function seedDefaultSurgicalCases(tenantId: string): Promise<void> {
+  assertDemoSeedAllowed();
   const existing = await localDb.surgical_cases.where('tenantId').equals(tenantId).count();
   if (existing > 0) return;
 
@@ -538,6 +552,7 @@ export async function addMutation(
     | SyncMutation
     | {
         tenantId: string;
+        actorId?: string;
         collection: string;
         action: MutationAction;
         resourceId?: string;
@@ -556,6 +571,7 @@ export async function addMutation(
   const mutation: SyncMutation = {
     id: mutationOrParams.id || `mut_${now}_${Math.random().toString(36).substring(2, 9)}`,
     tenantId: mutationOrParams.tenantId,
+    actorId: (mutationOrParams as any).actorId,
     collection: mutationOrParams.collection,
     docId,
     resourceId,
@@ -665,3 +681,28 @@ export async function resolveSyncConflict(
   await localDb.offline_cache.delete(key);
 }
 
+
+
+/**
+ * Clear PHI-bearing read caches for a tenant when a user leaves a shared workstation.
+ * Pending governed mutations are deliberately preserved and remain bound to their
+ * originating Firebase UID for later replay by that same user.
+ */
+export async function clearOfflineReadModelsForTenant(tenantId: string): Promise<void> {
+  const normalizedTenantId = String(tenantId || '').trim();
+  if (!normalizedTenantId) return;
+
+  await localDb.transaction(
+    'rw',
+    localDb.offline_cache,
+    localDb.clinical_patients,
+    localDb.bed_occupancy,
+    localDb.surgical_cases,
+    async () => {
+      await localDb.offline_cache.where('tenantId').equals(normalizedTenantId).delete();
+      await localDb.clinical_patients.where('tenantId').equals(normalizedTenantId).delete();
+      await localDb.bed_occupancy.where('tenantId').equals(normalizedTenantId).delete();
+      await localDb.surgical_cases.where('tenantId').equals(normalizedTenantId).delete();
+    }
+  );
+}

@@ -6,6 +6,8 @@ export type MutationStatus = 'pending' | 'syncing' | 'failed' | 'conflict';
 export interface SyncMutation {
   id: string;
   tenantId: string;
+  /** Firebase UID that created this offline command. Never reassigned on replay. */
+  actorId?: string;
   collection: string;
   docId: string;
   resourceId?: string;

@@ -17,7 +17,14 @@ jobs:
     timeout-minutes: 20
     env:
       GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p0-ci
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p0-ci
       NEXT_TELEMETRY_DISABLED: "1"
+      FIREBASE_PROJECT_ID: ghims-p0-ci
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p0-ci
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
 
     steps:
       - name: Checkout

@@ -17,6 +17,15 @@ export interface ConsumableEvent {
   occurredAt?: number;
 }
 
+export interface ProjectionRebuildOptions {
+  expectedTenantId?: string;
+  /**
+   * Destructive rebuilds are allowed only in an isolated non-production recovery environment.
+   * Production in-place rebuild is intentionally forbidden.
+   */
+  allowDestructive?: boolean;
+}
+
 export interface PatientTimelineItem {
   eventId: string;
   tenantId: string;
@@ -69,9 +78,11 @@ export class ProjectionWorkers {
     const occurredAt = event.occurredAt || now;
 
     switch (eventType) {
+      case 'PATIENT_REGISTERED':
       case 'ENCOUNTER_CREATED': {
         const patientId = String(payload.patientId || '');
         const encounterId = String(payload.encounterId || '');
+        const isRegistration = eventType === 'PATIENT_REGISTERED';
         if (patientId) {
           const key = `${event.tenantId}:${patientId}`;
           const list = this.patientTimelines.get(key) || [];
@@ -81,7 +92,9 @@ export class ProjectionWorkers {
             patientId,
             encounterId,
             eventType,
-            summary: `Encounter created (${payload.encounterType || 'OPD'}) - ${payload.chiefComplaint || ''}`,
+            summary: isRegistration
+              ? `Patient registered; encounter initialized in ${payload.department || 'General Medicine'}`
+              : `Encounter created (${payload.encounterType || 'OPD'}) - ${payload.chiefComplaint || ''}`,
             occurredAt,
             projectedAt: now,
           });
@@ -92,7 +105,7 @@ export class ProjectionWorkers {
             encounterId,
             tenantId: event.tenantId,
             patientId: patientId || undefined,
-            stage: 'TRIAGE',
+            stage: isRegistration ? String(payload.initialStage || 'REGISTRATION') : 'TRIAGE',
             priority: String(payload.priority || 'ROUTINE'),
             updatedAt: now,
             lastEventId: eventId,
@@ -197,9 +210,11 @@ export class ProjectionWorkers {
       }
 
       switch (event.eventType) {
+        case 'PATIENT_REGISTERED':
         case 'ENCOUNTER_CREATED': {
           const patientId = String(payload.patientId || '');
           const encounterId = String(payload.encounterId || '');
+          const isRegistration = event.eventType === 'PATIENT_REGISTERED';
 
           if (patientId) {
             const timelineRef = tenantRef.collection('timelineProjections').doc(event.eventId);
@@ -209,7 +224,9 @@ export class ProjectionWorkers {
               patientId,
               encounterId: encounterId || undefined,
               eventType: event.eventType,
-              summary: `Encounter created (${payload.encounterType || 'OPD'}) - ${payload.chiefComplaint || ''}`,
+              summary: isRegistration
+                ? `Patient registered; encounter initialized in ${payload.department || 'General Medicine'}`
+                : `Encounter created (${payload.encounterType || 'OPD'}) - ${payload.chiefComplaint || ''}`,
               occurredAt,
               projectedAt: now,
             };
@@ -222,7 +239,7 @@ export class ProjectionWorkers {
               encounterId,
               tenantId: event.tenantId,
               patientId: patientId || undefined,
-              stage: 'TRIAGE',
+              stage: isRegistration ? String(payload.initialStage || 'REGISTRATION') : 'TRIAGE',
               priority: String(payload.priority || 'ROUTINE'),
               updatedAt: now,
               lastEventId: event.eventId,
@@ -315,12 +332,50 @@ export class ProjectionWorkers {
   }
 
   /**
-   * Rebuild disposable projections from an ordered event history.
+   * Rebuild disposable projections from a validated single-tenant event history.
+   *
+   * This is intentionally destructive and therefore forbidden against a PRODUCTION
+   * runtime. Production recovery must restore into an isolated recovery project,
+   * run this rebuild there, validate it, and only then follow the DR promotion plan.
    */
   public static async rebuildProjections(
-    events: ConsumableEvent[]
-  ): Promise<{ rebuiltCount: number }> {
-    const tenantIds = Array.from(new Set(events.map((event) => event.tenantId).filter(Boolean)));
+    events: ConsumableEvent[],
+    options: ProjectionRebuildOptions = {}
+  ): Promise<{ rebuiltCount: number; tenantId: string }> {
+    if (!Array.isArray(events) || events.length === 0) {
+      throw new Error('PROJECTION_REBUILD_EMPTY_STREAM: at least one authoritative event is required.');
+    }
+
+    const tenantIds = Array.from(new Set(events.map((event) => String(event.tenantId || '').trim()).filter(Boolean)));
+    if (tenantIds.length !== 1) {
+      throw new Error('PROJECTION_REBUILD_TENANT_SCOPE_INVALID: rebuild must contain exactly one tenant.');
+    }
+
+    const tenantId = tenantIds[0];
+    if (options.expectedTenantId && options.expectedTenantId !== tenantId) {
+      throw new Error('PROJECTION_REBUILD_TENANT_MISMATCH: event stream does not match the confirmed tenant.');
+    }
+
+    const seen = new Set<string>();
+    for (const event of events) {
+      if (!event.eventId || !event.eventType || event.tenantId !== tenantId) {
+        throw new Error('PROJECTION_REBUILD_EVENT_INVALID: eventId, eventType and tenantId are required.');
+      }
+      if (seen.has(event.eventId)) {
+        throw new Error(`PROJECTION_REBUILD_DUPLICATE_EVENT: ${event.eventId}`);
+      }
+      seen.add(event.eventId);
+      if (!event.payload || typeof event.payload !== 'object' || Array.isArray(event.payload)) {
+        throw new Error(`PROJECTION_REBUILD_EVENT_INVALID: event ${event.eventId} has an invalid payload.`);
+      }
+      if (event.occurredAt !== undefined && !Number.isFinite(event.occurredAt)) {
+        throw new Error(`PROJECTION_REBUILD_EVENT_INVALID: event ${event.eventId} has an invalid timestamp.`);
+      }
+    }
+
+    const orderedEvents = [...events].sort(
+      (a, b) => Number(a.occurredAt || 0) - Number(b.occurredAt || 0) || a.eventId.localeCompare(b.eventId)
+    );
     const db = getAdminFirestore();
 
     if (!db) {
@@ -328,30 +383,41 @@ export class ProjectionWorkers {
         throw new Error('PROJECTION_STORE_UNAVAILABLE: Firestore Admin is required.');
       }
 
-      this.processedEventIds.clear();
-      this.patientTimelines.clear();
-      this.clinicalQueues.clear();
-      this.generalLedgerBalances.clear();
-
-      for (const event of events) await this.consumeInMemory(event);
-      return { rebuiltCount: events.length };
-    }
-
-    for (const tenantId of tenantIds) {
-      for (const collectionName of [
-        'projectionCheckpoints',
-        'timelineProjections',
-        'clinicalQueues',
-        'generalLedgerProjections',
-      ]) {
-        await this.clearCollection(tenantId, collectionName);
+      for (const key of Array.from(this.processedEventIds)) {
+        if (key.startsWith(`${tenantId}:`)) this.processedEventIds.delete(key);
       }
+      for (const key of Array.from(this.patientTimelines.keys())) {
+        if (key.startsWith(`${tenantId}:`)) this.patientTimelines.delete(key);
+      }
+      for (const key of Array.from(this.clinicalQueues.keys())) {
+        if (key.startsWith(`${tenantId}:`)) this.clinicalQueues.delete(key);
+      }
+      this.generalLedgerBalances.delete(tenantId);
+
+      for (const event of orderedEvents) await this.consumeInMemory(event);
+      return { rebuiltCount: orderedEvents.length, tenantId };
     }
 
-    for (const event of events) {
+    if (getRuntimeMode() === 'PRODUCTION') {
+      throw new Error('PROJECTION_REBUILD_FORBIDDEN_IN_PRODUCTION: restore into an isolated recovery project first.');
+    }
+    if (!options.allowDestructive) {
+      throw new Error('PROJECTION_REBUILD_CONFIRMATION_REQUIRED: destructive rebuild requires explicit confirmation.');
+    }
+
+    for (const collectionName of [
+      'projectionCheckpoints',
+      'timelineProjections',
+      'clinicalQueues',
+      'generalLedgerProjections',
+    ]) {
+      await this.clearCollection(tenantId, collectionName);
+    }
+
+    for (const event of orderedEvents) {
       await this.consumeEvent(event);
     }
 
-    return { rebuiltCount: events.length };
+    return { rebuiltCount: orderedEvents.length, tenantId };
   }
 }

@@ -138,6 +138,19 @@ describe('G-HIMS P3 operational assurance and adversarial matrix',()=>{
     expect(obs).toContain('does not claim that an external dashboard');
   });
 
+  test('production audit persistence fails closed and SCM never fabricates hash attestation',async()=>{
+    const authAudit=await source('server/auth/audit-service.ts');
+    const scmAudit=await source('components/supply-chain/scm-audit-compliance-view.tsx');
+
+    expect(authAudit).toContain('AUDIT_STORE_UNAVAILABLE');
+    expect(authAudit).toContain('AUDIT_WRITE_FAILED');
+    expect(authAudit).not.toContain('central-metro-hospital');
+
+    expect(scmAudit).not.toContain('100% Cryptographically Verified');
+    expect(scmAudit).not.toContain('sha256_verified_immutable');
+    expect(scmAudit).toContain('Not attested');
+  });
+
   test('status documents no longer declare regulatory approval or unsupported production verification',async()=>{
     const status=await source('G-HIMS_FINAL_SYSTEM_STATUS.md');
     const compliance=await source('G-HIMS_COMPLIANCE_READINESS.md');

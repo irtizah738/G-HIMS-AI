@@ -10,7 +10,11 @@
     "test": "bun test tests/",
     "test:p0": "bun test tests/p0-trust-boundary.test.ts",
     "validate:p0": "bun run test:p0 && bun run test:p0:rules && npm run build",
-    "test:p0:rules": "firebase emulators:exec --only firestore --project ghims-p0-ci \"bun test emulator-security/firestore-rules.test.ts\""
+    "test:p0:rules": "firebase emulators:exec --only firestore --project ghims-p0-ci \"bun test emulator-security/firestore-rules.test.ts\"",
+    "test:p1": "bun test tests/p1-durability-boundary.test.ts",
+    "test:p2": "bun test tests/p2-offline-ai-interop-boundary.test.ts",
+    "test:p3": "bun test tests/p3-production-evidence-boundary.test.ts",
+    "validate:p3": "bun run test:p3 && bun run test && bun run test:p0:rules && bun run lint && bun run build"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

@@ -61,7 +61,7 @@ export default function AuditPdfSummaryModal({
     timeZoneName: 'short',
   });
 
-  const reportId = `REP-HIPAA-${Date.now().toString(36).toUpperCase()}-${Math.random()
+  const reportId = `REP-AUDIT-${Date.now().toString(36).toUpperCase()}-${Math.random()
     .toString(36)
     .substring(2, 6)
     .toUpperCase()}`;
@@ -89,14 +89,14 @@ export default function AuditPdfSummaryModal({
     window.print();
   };
 
-  // Download standalone self-contained HTML compliance report
+  // Download standalone self-contained audit evidence report
   const handleDownloadHtml = () => {
     if (!printableAreaRef.current) return;
     const content = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>HIPAA Compliance Audit Report - ${tenantId} - ${reportId}</title>
+  <title>Audit Evidence Report - ${tenantId} - ${reportId}</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 40px; color: #1e293b; line-height: 1.5; font-size: 12px; }
     h1 { font-size: 20px; margin: 0; color: #0f172a; }
@@ -125,7 +125,7 @@ export default function AuditPdfSummaryModal({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `Compliance_Audit_Report_${tenantId}_${reportId}.html`;
+    link.download = `Audit_Evidence_Report_${tenantId}_${reportId}.html`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -143,7 +143,7 @@ export default function AuditPdfSummaryModal({
             </span>
             <div>
               <h3 className="text-sm font-bold text-white">
-                HIPAA &amp; ISO 27001 Compliance Audit Summary Report
+                Audit Evidence Summary Report
               </h3>
               <p className="text-[11px] text-slate-400 font-mono">
                 {logs.length} filtered audit events ready for export &amp; print
@@ -192,10 +192,10 @@ export default function AuditPdfSummaryModal({
                   </div>
                   <div>
                     <h1 className="text-xl font-black text-slate-950 tracking-tight">
-                      G-HIMS EXECUTIVE COMPLIANCE REPORT
+                      G-HIMS AUDIT EVIDENCE REPORT
                     </h1>
                     <span className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">
-                      HIPAA Security Rule §164.312(b) &amp; ISO 27001 Annex A.12.4
+                      Repository evidence only — no regulatory certification implied
                     </span>
                   </div>
                 </div>
@@ -215,7 +215,7 @@ export default function AuditPdfSummaryModal({
                 </div>
               </div>
 
-              {/* Verified Cryptographic Seal */}
+              {/* Audit Evidence Boundary */}
               <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-2xl flex items-center gap-3 shrink-0">
                 <Award className="w-8 h-8 text-emerald-600 shrink-0" />
                 <div>
@@ -223,7 +223,7 @@ export default function AuditPdfSummaryModal({
                     Cryptographic Integrity
                   </div>
                   <div className="text-xs font-bold text-emerald-700">
-                    {verificationResult?.isValid ? 'SHA-256 Validated' : 'Audited Ledger'}
+                    {verificationResult?.isValid ? 'Hash evidence present' : 'Audited Ledger'}
                   </div>
                   <div className="text-[9px] font-mono text-emerald-600">
                     {verificationResult?.totalLogsChecked || logs.length} Hashes Chained
@@ -232,11 +232,11 @@ export default function AuditPdfSummaryModal({
               </div>
             </div>
 
-            {/* Cryptographic Attestation Block */}
+            {/* Evidence Boundary Block */}
             <div className="p-4 rounded-xl bg-slate-900 text-white space-y-2 font-mono">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-bold flex items-center gap-1.5 text-emerald-400">
-                  <Lock className="w-3.5 h-3.5" /> Cryptographic Tamper-Evidence Summary
+                  <Lock className="w-3.5 h-3.5" /> Audit Evidence Summary
                 </span>
                 <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-300">
                   Status: 100% Unbroken Sequence
@@ -388,7 +388,7 @@ export default function AuditPdfSummaryModal({
                       <th className="py-2.5 px-3">Resource Target</th>
                       <th className="py-2.5 px-3">Severity</th>
                       <th className="py-2.5 px-3">IP Address</th>
-                      <th className="py-2.5 px-3">SHA-256 Digest</th>
+                      <th className="py-2.5 px-3">Record Hash</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200">
@@ -448,28 +448,28 @@ export default function AuditPdfSummaryModal({
               </div>
             </div>
 
-            {/* Compliance Officer Attestation & Signature Sign-Off Block */}
+            {/* Reviewer Sign-Off Block */}
             <div className="pt-6 border-t-2 border-slate-900 grid grid-cols-1 sm:grid-cols-2 gap-6 items-end">
               <div className="space-y-1 text-[11px] text-slate-600">
-                <p className="font-bold text-slate-900">Statutory Attestation:</p>
+                <p className="font-bold text-slate-900">Reviewer acknowledgement:</p>
                 <p className="text-[10px] leading-relaxed">
-                  I hereby certify that this audit log extract represents an immutable, unaltered
+                  I acknowledge that this audit log extract represents the records exported from the server-owned audit store at the stated time.
                   record of electronic protected health information (ePHI) access and administrative
-                  events for the stated tenant. All events have been cryptographically verified
-                  against SHA-256 blockchain-style chaining standards.
+                  No claim of cryptographic-chain verification, regulatory compliance, or tamper-proof storage is made by this report.
+                  
                 </p>
               </div>
 
               <div className="space-y-4 font-mono text-xs">
                 <div className="border-b border-slate-400 pb-1">
-                  <span className="text-[9px] text-slate-400 block">AUTHORIZED COMPLIANCE OFFICER SIGNATURE</span>
+                  <span className="text-[9px] text-slate-400 block">AUTHORIZED REVIEWER SIGNATURE</span>
                   <div className="font-serif italic text-base text-slate-900 pt-1">
-                    Compliance Officer / Security Lead
+                    Authorized Reviewer
                   </div>
                 </div>
                 <div className="flex items-center justify-between text-[10px] text-slate-500">
                   <span>DATE: {new Date().toISOString().split('T')[0]}</span>
-                  <span>JURISDICTION: US-HIPAA-HITECH</span>
+                  <span>EVIDENCE SCOPE: REPOSITORY EXPORT</span>
                 </div>
               </div>
             </div>

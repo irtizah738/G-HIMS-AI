@@ -79,7 +79,15 @@ export function getAdminApp(): App | null {
 
   const existingApps = getApps();
   if (existingApps.length > 0) {
-    adminApp = getApp();
+    const existing = getApp();
+    const existingProjectId = String(existing.options.projectId || '');
+    assertServerFirebaseProjectIsolation(existingProjectId || String(projectId || ''));
+    if (existingProjectId && projectId && existingProjectId !== projectId) {
+      throw new Error(
+        `FIREBASE_ADMIN_PROJECT_MISMATCH: existing app uses ${existingProjectId}, expected ${projectId}.`
+      );
+    }
+    adminApp = existing;
     return adminApp;
   }
 

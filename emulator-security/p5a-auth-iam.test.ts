@@ -1,12 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { initializeApp, deleteApp, type FirebaseApp } from 'firebase/app';
-import {
-  connectAuthEmulator,
-  createUserWithEmailAndPassword,
-  getAuth,
-  signOut,
-  type Auth,
-} from 'firebase/auth';
+import { describe, expect, test } from 'bun:test';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { verifyFirebaseToken } from '@/server/auth/verify-token';
 import { resolveAuthorizationContext } from '@/server/auth/authorization-context';
@@ -15,41 +7,53 @@ import { registerOrUpdateDevice } from '@/server/auth/device-service';
 import { UserProvisioningService } from '@/server/auth/user-provisioning-service';
 import { findActiveBreakGlassGrant } from '@/server/auth/break-glass-service';
 
-let clientApp: FirebaseApp;
-let clientAuth: Auth;
+interface EmulatorIdentity {
+  localId: string;
+  email: string;
+  idToken: string;
+}
 
 function uniqueEmail(prefix: string): string {
   return `${prefix}.${Date.now()}.${crypto.randomUUID().slice(0,8)}@example.test`;
 }
 
+function authEmulatorBase(): string {
+  const host = process.env.FIREBASE_AUTH_EMULATOR_HOST || '127.0.0.1:9099';
+  return `http://${host}/identitytoolkit.googleapis.com/v1`;
+}
+
+async function createEmulatorIdentity(
+  email: string,
+  password: string
+): Promise<EmulatorIdentity> {
+  const response = await fetch(
+    `${authEmulatorBase()}/accounts:signUp?key=fake-api-key`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        password,
+        returnSecureToken: true,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    }
+  );
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(`AUTH_EMULATOR_SIGNUP_FAILED: ${JSON.stringify(payload)}`);
+  }
+  return payload as EmulatorIdentity;
+}
+
 describe('P5A Firebase Auth + IAM integration', () => {
-  beforeAll(() => {
-    const projectId = process.env.FIREBASE_PROJECT_ID || 'ghims-p5a-ci';
-    clientApp = initializeApp(
-      {
-        apiKey: 'fake-api-key-for-emulator',
-        authDomain: `${projectId}.firebaseapp.com`,
-        projectId,
-      },
-      `p5a-client-${Date.now()}`
-    );
-    clientAuth = getAuth(clientApp);
-    const host = process.env.FIREBASE_AUTH_EMULATOR_HOST || '127.0.0.1:9099';
-    connectAuthEmulator(clientAuth, `http://${host}`, { disableWarnings: true });
-  });
-
-  afterAll(async () => {
-    await signOut(clientAuth).catch(() => {});
-    await deleteApp(clientApp).catch(() => {});
-  });
-
   test('real Firebase UID becomes the tenant membership key and authorizes a session', async () => {
     const tenantId = `tenant-p5a-${crypto.randomUUID().slice(0,8)}`;
     const email = uniqueEmail('doctor');
-    const password = 'P5a-Test-Password-123!';
-
-    const credential = await createUserWithEmailAndPassword(clientAuth, email, password);
-    const uid = credential.user.uid;
+    const identity = await createEmulatorIdentity(
+      email,
+      'P5a-Test-Password-123!'
+    );
 
     const provisioned = await UserProvisioningService.provision({
       tenantId,
@@ -62,7 +66,7 @@ describe('P5A Firebase Auth + IAM integration', () => {
     });
 
     expect(provisioned.identityCreated).toBe(false);
-    expect(provisioned.user.userId).toBe(uid);
+    expect(provisioned.user.userId).toBe(identity.localId);
 
     const db = getAdminFirestore();
     expect(db).not.toBeNull();
@@ -72,46 +76,49 @@ describe('P5A Firebase Auth + IAM integration', () => {
       .collection('tenants')
       .doc(tenantId)
       .collection('users')
-      .doc(uid)
+      .doc(identity.localId)
       .get();
 
     expect(membership.exists).toBe(true);
-    expect(membership.data()?.userId).toBe(uid);
+    expect(membership.data()?.userId).toBe(identity.localId);
     expect(membership.data()?.roles).toEqual(['doctor']);
     expect(membership.data()?.credentialStatus).toBe('UNVERIFIED');
 
-    const idToken = await credential.user.getIdToken(true);
-    const verified = await verifyFirebaseToken(idToken, false);
-    expect(verified.uid).toBe(uid);
+    const verified = await verifyFirebaseToken(identity.idToken, false);
+    expect(verified.uid).toBe(identity.localId);
 
     const authorization = await resolveAuthorizationContext(verified, tenantId);
-    expect(authorization.uid).toBe(uid);
+    expect(authorization.uid).toBe(identity.localId);
     expect(authorization.roles).toContain('doctor');
-    // Clinical authority remains credential-gated.
     expect(authorization.clinicalPrivileges).toEqual([]);
 
     const session = await createSession({
-      userId: uid,
+      userId: identity.localId,
       tenantId,
       deviceId: 'shared-workstation-a',
       ip: '127.0.0.1',
       userAgent: 'P5A Auth Emulator',
     });
-    const validated = await validateSession(tenantId, session.sessionId, uid);
+    const validated = await validateSession(
+      tenantId,
+      session.sessionId,
+      identity.localId
+    );
     expect(validated.status).toBe('ACTIVE');
-    expect(validated.userId).toBe(uid);
+    expect(validated.userId).toBe(identity.localId);
   });
 
   test('shared tenant workstation supports sequential users without transferring user authority', async () => {
     const tenantId = `tenant-shared-${crypto.randomUUID().slice(0,8)}`;
-    const password = 'P5a-Shared-Password-123!';
     const deviceId = 'shared-nurse-station-01';
 
-    const emailA = uniqueEmail('usera');
-    const userA = await createUserWithEmailAndPassword(clientAuth, emailA, password);
+    const identityA = await createEmulatorIdentity(
+      uniqueEmail('usera'),
+      'P5a-Shared-A-Password-123!'
+    );
     await UserProvisioningService.provision({
       tenantId,
-      email: emailA,
+      email: identityA.email,
       displayName: 'Shared User A',
       role: 'nurse',
       department: 'Ward A',
@@ -120,18 +127,18 @@ describe('P5A Firebase Auth + IAM integration', () => {
 
     const deviceA = await registerOrUpdateDevice({
       deviceId,
-      userId: userA.user.uid,
+      userId: identityA.localId,
       tenantId,
     });
-    expect(deviceA.userId).toBe(userA.user.uid);
+    expect(deviceA.userId).toBe(identityA.localId);
 
-    await signOut(clientAuth);
-
-    const emailB = uniqueEmail('userb');
-    const userB = await createUserWithEmailAndPassword(clientAuth, emailB, password);
+    const identityB = await createEmulatorIdentity(
+      uniqueEmail('userb'),
+      'P5a-Shared-B-Password-123!'
+    );
     await UserProvisioningService.provision({
       tenantId,
-      email: emailB,
+      email: identityB.email,
       displayName: 'Shared User B',
       role: 'nurse',
       department: 'Ward A',
@@ -140,10 +147,10 @@ describe('P5A Firebase Auth + IAM integration', () => {
 
     const deviceB = await registerOrUpdateDevice({
       deviceId,
-      userId: userB.user.uid,
+      userId: identityB.localId,
       tenantId,
     });
-    expect(deviceB.userId).toBe(userB.user.uid);
+    expect(deviceB.userId).toBe(identityB.localId);
     expect(deviceB.tenantId).toBe(tenantId);
 
     const db = getAdminFirestore();
@@ -155,28 +162,27 @@ describe('P5A Firebase Auth + IAM integration', () => {
       .doc(deviceId)
       .get();
 
-    expect(deviceDoc.data()?.userId).toBe(userB.user.uid);
+    expect(deviceDoc.data()?.userId).toBe(identityB.localId);
     expect(deviceDoc.data()?.tenantId).toBe(tenantId);
   });
 
   test('disabled membership and wrong tenant fail closed after Firebase authentication', async () => {
-    await signOut(clientAuth).catch(() => {});
     const tenantId = `tenant-deny-${crypto.randomUUID().slice(0,8)}`;
-    const email = uniqueEmail('disabled');
-    const password = 'P5a-Disabled-Password-123!';
+    const identity = await createEmulatorIdentity(
+      uniqueEmail('disabled'),
+      'P5a-Disabled-Password-123!'
+    );
 
-    const credential = await createUserWithEmailAndPassword(clientAuth, email, password);
     await UserProvisioningService.provision({
       tenantId,
-      email,
+      email: identity.email,
       displayName: 'Disabled User',
       role: 'reception',
       department: 'Front Desk',
       assignedWards: [],
     });
 
-    const token = await credential.user.getIdToken(true);
-    const verified = await verifyFirebaseToken(token, false);
+    const verified = await verifyFirebaseToken(identity.idToken, false);
 
     await expect(
       resolveAuthorizationContext(verified, `wrong-${tenantId}`)
@@ -184,7 +190,7 @@ describe('P5A Firebase Auth + IAM integration', () => {
 
     await UserProvisioningService.update({
       tenantId,
-      userId: credential.user.uid,
+      userId: identity.localId,
       status: 'disabled',
     });
 
@@ -261,13 +267,14 @@ describe('P5A Firebase Auth + IAM integration', () => {
     });
     expect(active?.grantId).toBe(grantId);
 
-    const wrongPatient = await findActiveBreakGlassGrant({
-      tenantId,
-      userId,
-      patientId: 'patient-b',
-      encounterId,
-    });
-    expect(wrongPatient).toBeNull();
+    expect(
+      await findActiveBreakGlassGrant({
+        tenantId,
+        userId,
+        patientId: 'patient-b',
+        encounterId,
+      })
+    ).toBeNull();
 
     await ref.set(
       {
@@ -277,15 +284,15 @@ describe('P5A Firebase Auth + IAM integration', () => {
       { merge: true }
     );
 
-    const expired = await findActiveBreakGlassGrant({
-      tenantId,
-      userId,
-      patientId,
-      encounterId,
-    });
-    expect(expired).toBeNull();
+    expect(
+      await findActiveBreakGlassGrant({
+        tenantId,
+        userId,
+        patientId,
+        encounterId,
+      })
+    ).toBeNull();
 
-    const expiredDoc = await ref.get();
-    expect(expiredDoc.data()?.status).toBe('EXPIRED');
+    expect((await ref.get()).data()?.status).toBe('EXPIRED');
   });
 });

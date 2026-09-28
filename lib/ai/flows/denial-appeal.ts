@@ -1,98 +1,49 @@
-import { defineClinicalFlow, getGenAIClient, DEFAULT_CLINICAL_MODEL } from '../genkit-config';
-
+import { AIGateway, type AIGenerationProvenance } from '../gateway';
 export interface DenialAppealInput {
-  claimId: string;
-  denialReasonCode: string;
-  denialDescription: string;
-  patientDemographics: Record<string, unknown>;
-  clinicalProcedure: string;
-  doctorAttestation: string;
+  claimId:string; denialReasonCode:string; denialDescription:string; patientDemographics:Record<string,unknown>;
+  clinicalProcedure:string; doctorAttestation:string;
 }
-
 export interface DenialAppealOutput {
-  appealLetterSubject: string;
-  appealLetterBody: string;
-  citedMedicalNecessityGuidelines: string[];
-  supportingEvidenceRequired: string[];
+  appealLetterSubject:string; appealLetterBody:string; citedMedicalNecessityGuidelines:string[];
+  supportingEvidenceRequired:string[]; aiProvenance:AIGenerationProvenance; draftId?:string;
 }
-
-function assertCompleteOutput(value: unknown): DenialAppealOutput {
-  if (!value || typeof value !== 'object') {
-    throw new Error('AI_UNAVAILABLE: Denial appeal model returned an invalid payload.');
+type ProviderOutput=Omit<DenialAppealOutput,'aiProvenance'|'draftId'>;
+function validate(value:unknown):ProviderOutput{
+  if(!value||typeof value!=='object') throw new Error('AI_INVALID_RESPONSE: denial appeal draft must be an object.');
+  const v=value as Partial<ProviderOutput>;
+  if(typeof v.appealLetterSubject!=='string'||typeof v.appealLetterBody!=='string'||!Array.isArray(v.citedMedicalNecessityGuidelines)||!Array.isArray(v.supportingEvidenceRequired)){
+    throw new Error('AI_INVALID_RESPONSE: denial appeal draft is incomplete.');
   }
-
-  const result = value as Partial<DenialAppealOutput>;
-  if (
-    typeof result.appealLetterSubject !== 'string' ||
-    typeof result.appealLetterBody !== 'string' ||
-    !Array.isArray(result.citedMedicalNecessityGuidelines) ||
-    !Array.isArray(result.supportingEvidenceRequired)
-  ) {
-    throw new Error('AI_UNAVAILABLE: Denial appeal model returned an incomplete payload.');
-  }
-
   return {
-    appealLetterSubject: result.appealLetterSubject,
-    appealLetterBody: result.appealLetterBody,
-    citedMedicalNecessityGuidelines: result.citedMedicalNecessityGuidelines.map(String),
-    supportingEvidenceRequired: result.supportingEvidenceRequired.map(String),
+    appealLetterSubject:v.appealLetterSubject,
+    appealLetterBody:v.appealLetterBody,
+    citedMedicalNecessityGuidelines:v.citedMedicalNecessityGuidelines.map(String),
+    supportingEvidenceRequired:v.supportingEvidenceRequired.map(String),
   };
 }
-
-export const generateDenialAppealFlow = defineClinicalFlow<DenialAppealInput, DenialAppealOutput>({
-  name: 'generateDenialAppealFlow',
-  description: 'Generates a draft insurance denial appeal for authorized human review.',
-  execute: async (input): Promise<DenialAppealOutput> => {
-    const ai = getGenAIClient();
-
-    if (!ai) {
-      throw new Error('AI_UNAVAILABLE: Denial appeal AI provider is not configured.');
-    }
-
-    const patientSummary = Object.entries(input.patientDemographics || {})
-      .map(([key, value]) => `${key}: ${value}`)
-      .join(', ');
-
-    const systemPrompt = `You are assisting an authorized hospital revenue-cycle professional with a DRAFT insurance denial appeal.
-
-STRICT SAFETY REQUIREMENTS:
-1. Use only facts supplied in the input. Do not invent diagnoses, physician attestations, procedures, payer policies, dates, or patient facts.
-2. Do not claim that any law, CMS policy, MCG criterion, InterQual criterion, or payer rule applies unless the supplied input contains enough information to support that statement.
-3. If a guideline or policy must be verified before submission, state that verification is required instead of inventing an exact citation.
-4. This output is a draft requiring human clinical, coding, legal, and revenue-cycle review before external submission.
-5. Output STRICT JSON ONLY.
-
-JSON Schema:
-{
-  "appealLetterSubject": "string",
-  "appealLetterBody": "string",
-  "citedMedicalNecessityGuidelines": ["Only supported citations or verification-required statements"],
-  "supportingEvidenceRequired": ["string"]
-}`;
-
-    const userPrompt = `Claim ID: ${input.claimId}
-Denial Code: ${input.denialReasonCode}
-Denial Reason: ${input.denialDescription}
-Patient Demographics: ${patientSummary}
-Procedure / Service: ${input.clinicalProcedure}
-Physician Attestation / Clinical Notes: ${input.doctorAttestation}`;
-
+export const generateDenialAppealFlow={
+  name:'generateDenialAppealFlow',
+  description:'Produces a review-only denial appeal draft from supplied claim evidence.',
+  async run(input:DenialAppealInput):Promise<DenialAppealOutput>{
+    let generation;
     try {
-      const response = await ai.models.generateContent({
-        model: DEFAULT_CLINICAL_MODEL,
-        contents: [
-          { role: 'user', parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] },
-        ],
-        config: {
-          responseMimeType: 'application/json',
-          temperature: 0,
-        },
+      generation=await AIGateway.generateJson<ProviderOutput>({
+      purpose:'DENIAL_APPEAL_DRAFT',
+      systemInstruction:[
+        'Draft an insurance denial appeal for authorized human review.',
+        'Use only facts supplied in source data.',
+        'Do not invent diagnoses, attestations, payer policies, laws, CMS policy, MCG/InterQual criteria, dates, or clinical facts.',
+        'If a policy or guideline must be verified, explicitly say verification is required instead of fabricating a citation.',
+        'The result must not claim it has been submitted.',
+      ].join(' '),
+      sourceData:input,
+      responseSchema:JSON.stringify({appealLetterSubject:'string',appealLetterBody:'string',citedMedicalNecessityGuidelines:['supported citation or verification-required statement'],supportingEvidenceRequired:['string']}),
+        temperature:0,
       });
-
-      return assertCompleteOutput(JSON.parse(response.text || '{}'));
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown model failure';
-      throw new Error(`AI_UNAVAILABLE: Denial appeal generation failed: ${message}`);
+      const message=error instanceof Error?error.message:'unknown AI failure';
+      throw new Error('AI_UNAVAILABLE: '+message);
     }
+    return {...validate(generation.data),aiProvenance:generation.provenance};
   },
-});
+};

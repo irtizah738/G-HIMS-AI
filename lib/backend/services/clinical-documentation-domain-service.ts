@@ -8,6 +8,7 @@ import { TransactionManager } from '../transactions/transaction-manager';
 import { CommandContext, CommandResult } from '../types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import type { RevenueIntegrityFinding } from './revenue-integrity-domain-service';
+import { AIDraftRepository, type AIDraftRecord } from '@/server/ai/ai-draft-repository';
 
 export interface RecordVitalsPayload {
   encounterId: string;
@@ -174,6 +175,35 @@ export class ClinicalDocumentationDomainService {
       };
     }
 
+    let sourceDraft: AIDraftRecord | null = null;
+    if (payload.sourceDraftId) {
+      sourceDraft = await AIDraftRepository.get(context.tenantId, payload.sourceDraftId);
+      if (!sourceDraft) {
+        return {
+          success: false, commandId, idempotencyKey,
+          error: { code: 'AI_DRAFT_NOT_FOUND', message: 'Referenced AI draft was not found.' },
+        };
+      }
+      if (sourceDraft.status !== 'DRAFT_REQUIRES_CLINICIAN_REVIEW') {
+        return {
+          success: false, commandId, idempotencyKey,
+          error: { code: 'AI_DRAFT_NOT_REVIEWABLE', message: 'Referenced AI draft is not in reviewable state.' },
+        };
+      }
+      if (sourceDraft.patientId && sourceDraft.patientId !== payload.patientId) {
+        return {
+          success: false, commandId, idempotencyKey,
+          error: { code: 'AI_DRAFT_PATIENT_MISMATCH', message: 'AI draft belongs to a different patient.' },
+        };
+      }
+      if (sourceDraft.encounterId && sourceDraft.encounterId !== payload.encounterId) {
+        return {
+          success: false, commandId, idempotencyKey,
+          error: { code: 'AI_DRAFT_ENCOUNTER_MISMATCH', message: 'AI draft belongs to a different encounter.' },
+        };
+      }
+    }
+
     const evidenceId = `ev_note_${crypto.randomUUID()}`;
     const signedAt = Date.now();
     const domainState = {
@@ -249,11 +279,26 @@ export class ClinicalDocumentationDomainService {
       commandId,
       correlationId: context.correlationId,
       domainState,
-      additionalStateWrites: revenueIntegrityFindings.map((finding) => ({
-        entityType: 'REVENUE_INTEGRITY_FINDING',
-        entityId: finding.id,
-        domainState: finding,
-      })),
+      additionalStateWrites: [
+        ...revenueIntegrityFindings.map((finding) => ({
+          entityType: 'REVENUE_INTEGRITY_FINDING',
+          entityId: finding.id,
+          domainState: finding,
+        })),
+        ...(sourceDraft
+          ? [{
+              entityType: 'AI_DRAFT',
+              entityId: sourceDraft.draftId,
+              domainState: AIDraftRepository.buildAcceptedState(sourceDraft, {
+                actorId: context.actorId,
+                evidenceId,
+                signedContent: payload.content,
+                acceptedStructuredData: payload.acceptedStructuredData,
+                acceptedAt: signedAt,
+              }),
+            }]
+          : []),
+      ],
     });
 
     return {

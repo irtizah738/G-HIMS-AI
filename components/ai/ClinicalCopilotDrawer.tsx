@@ -195,7 +195,7 @@ export function ClinicalCopilotDrawer({
               <h2 className="text-base font-semibold text-slate-900 dark:text-white flex items-center gap-2">
                 G-HIMS Clinical AI Copilot
                 <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 font-medium">
-                  Gemini 3.7 Pro
+                  Governed Draft
                 </span>
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">

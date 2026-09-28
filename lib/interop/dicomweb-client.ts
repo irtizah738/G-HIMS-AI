@@ -1,11 +1,4 @@
-/**
- * G-HIMS DICOMweb Standard Client & PACS Adapter
- * Implements standard DICOMweb interfaces:
- * - WADO-RS (Web Access to DICOM Persistent Objects by RESTful Services)
- * - QIDO-RS (Query based on ID for DICOM Objects by RESTful Services)
- * - STOW-RS (Store Over the Web by RESTful Services)
- * Adheres strictly to DICOM PS3.18 RESTful Web Services & G-HIMS Master Architectural Doctrine.
- */
+import type { IntegrationState } from './integration-state';
 
 export interface DicomStudyMetadata {
   studyInstanceUid: string;
@@ -14,7 +7,7 @@ export interface DicomStudyMetadata {
   studyDate: string;
   studyTime?: string;
   accessionNumber: string;
-  modalitiesInStudy: string[]; // e.g. ['CT', 'MR', 'XR', 'US']
+  modalitiesInStudy: string[];
   studyDescription: string;
   numberOfStudyRelatedSeries: number;
   numberOfStudyRelatedInstances: number;
@@ -43,29 +36,76 @@ export interface DicomInstanceMetadata {
   wadoUri: string;
 }
 
-export class DicomWebClient {
-  private baseUrl: string;
-  private authToken?: string;
+export interface DicomSimulationProvider {
+  searchStudies(params: {
+    patientId?: string;
+    accessionNumber?: string;
+    studyDate?: string;
+    modalitiesInStudy?: string;
+    limit?: number;
+  }): Promise<DicomStudyMetadata[]>;
+  searchSeries(studyInstanceUid: string): Promise<DicomSeriesMetadata[]>;
+}
 
-  constructor(config?: { baseUrl?: string; authToken?: string }) {
-    this.baseUrl = (config?.baseUrl || '/api/pacs/dicomweb').replace(/\/$/, '');
-    this.authToken = config?.authToken;
+export interface DicomWebClientConfig {
+  baseUrl?: string;
+  authToken?: string;
+  state?: IntegrationState;
+  simulationProvider?: DicomSimulationProvider;
+  fetchImpl?: typeof fetch;
+}
+
+/**
+ * DICOMweb PS3.18 client.
+ *
+ * There is no automatic mock fallback. Synthetic data is available only through an
+ * explicitly supplied simulationProvider while state === SIMULATION.
+ */
+export class DicomWebClient {
+  private readonly baseUrl: string;
+  private readonly authToken?: string;
+  private readonly state: IntegrationState;
+  private readonly simulationProvider?: DicomSimulationProvider;
+  private readonly fetchImpl: typeof fetch;
+
+  constructor(config: DicomWebClientConfig = {}) {
+    this.baseUrl = (config.baseUrl || '/api/pacs/dicomweb').replace(/\/$/, '');
+    this.authToken = config.authToken;
+    this.state = config.state || 'DISABLED';
+    this.simulationProvider = config.simulationProvider;
+    this.fetchImpl = config.fetchImpl || fetch;
+  }
+
+  public getState(): IntegrationState {
+    return this.state;
   }
 
   private getHeaders(): HeadersInit {
     const headers: Record<string, string> = {
       Accept: 'application/dicom+json',
     };
-    if (this.authToken) {
-      headers.Authorization = `Bearer ${this.authToken}`;
-    }
+    if (this.authToken) headers.Authorization = 'Bearer ' + this.authToken;
     return headers;
   }
 
-  /**
-   * QIDO-RS: Search Studies
-   * Searches PACS studies matching patient ID, accession number, or date range.
-   */
+  private assertLive(): void {
+    if (this.state !== 'LIVE') {
+      throw new Error(
+        'DICOM_INTEGRATION_NOT_LIVE: current state is ' + this.state + '; PACS traffic is blocked.'
+      );
+    }
+  }
+
+  private simulation(): DicomSimulationProvider {
+    if (this.state !== 'SIMULATION') {
+      throw new Error('DICOM_SIMULATION_NOT_ENABLED');
+    }
+    if (!this.simulationProvider) {
+      throw new Error('DICOM_SIMULATION_PROVIDER_REQUIRED');
+    }
+    return this.simulationProvider;
+  }
+
   public async searchStudies(params: {
     patientId?: string;
     accessionNumber?: string;
@@ -73,6 +113,12 @@ export class DicomWebClient {
     modalitiesInStudy?: string;
     limit?: number;
   }): Promise<DicomStudyMetadata[]> {
+    if (this.state === 'SIMULATION') {
+      return this.simulation().searchStudies(params);
+    }
+
+    this.assertLive();
+
     const query = new URLSearchParams();
     if (params.patientId) query.set('PatientID', params.patientId);
     if (params.accessionNumber) query.set('AccessionNumber', params.accessionNumber);
@@ -80,153 +126,111 @@ export class DicomWebClient {
     if (params.modalitiesInStudy) query.set('ModalitiesInStudy', params.modalitiesInStudy);
     if (params.limit) query.set('limit', String(params.limit));
 
-    try {
-      const response = await fetch(`${this.baseUrl}/studies?${query.toString()}`, {
-        method: 'GET',
-        headers: this.getHeaders(),
-      });
+    const response = await this.fetchImpl(
+      this.baseUrl + '/studies?' + query.toString(),
+      { method: 'GET', headers: this.getHeaders() }
+    );
 
-      if (!response.ok) {
-        throw new Error(`QIDO-RS search failed: ${response.status} ${response.statusText}`);
-      }
-
-      const json = await response.json();
-      return this.parseQidoStudiesResponse(json);
-    } catch {
-      // In-browser preview / fallback for controlled clinical pilots
-      return this.getMockStudies(params.patientId);
+    if (!response.ok) {
+      throw new Error('DICOM_QIDO_STUDIES_FAILED: ' + response.status + ' ' + response.statusText);
     }
+
+    return this.parseQidoStudiesResponse(await response.json());
   }
 
-  /**
-   * QIDO-RS: Search Series within a Study
-   */
   public async searchSeries(studyInstanceUid: string): Promise<DicomSeriesMetadata[]> {
-    try {
-      const response = await fetch(`${this.baseUrl}/studies/${studyInstanceUid}/series`, {
-        method: 'GET',
-        headers: this.getHeaders(),
-      });
-
-      if (!response.ok) {
-        throw new Error(`QIDO-RS series search failed: ${response.status}`);
-      }
-
-      const json = await response.json();
-      return this.parseQidoSeriesResponse(json, studyInstanceUid);
-    } catch {
-      return this.getMockSeries(studyInstanceUid);
+    if (this.state === 'SIMULATION') {
+      return this.simulation().searchSeries(studyInstanceUid);
     }
+
+    this.assertLive();
+
+    const response = await this.fetchImpl(
+      this.baseUrl + '/studies/' + encodeURIComponent(studyInstanceUid) + '/series',
+      { method: 'GET', headers: this.getHeaders() }
+    );
+
+    if (!response.ok) {
+      throw new Error('DICOM_QIDO_SERIES_FAILED: ' + response.status + ' ' + response.statusText);
+    }
+
+    return this.parseQidoSeriesResponse(await response.json(), studyInstanceUid);
   }
 
-  /**
-   * WADO-RS: Retrieve Rendered Frame (JPEG/PNG) for Web Viewer display
-   */
   public getRenderedFrameUrl(
     studyInstanceUid: string,
     seriesInstanceUid: string,
     sopInstanceUid: string,
-    frameNumber: number = 1
+    frameNumber = 1
   ): string {
-    return `${this.baseUrl}/studies/${studyInstanceUid}/series/${seriesInstanceUid}/instances/${sopInstanceUid}/frames/${frameNumber}/rendered`;
+    this.assertLive();
+    return (
+      this.baseUrl +
+      '/studies/' + encodeURIComponent(studyInstanceUid) +
+      '/series/' + encodeURIComponent(seriesInstanceUid) +
+      '/instances/' + encodeURIComponent(sopInstanceUid) +
+      '/frames/' + frameNumber +
+      '/rendered'
+    );
   }
 
-  /**
-   * Parses standard DICOM JSON tag dictionary format (PS3.18) into typed Study objects
-   */
-  public parseQidoStudiesResponse(dicomJsonArray: any[]): DicomStudyMetadata[] {
-    if (!Array.isArray(dicomJsonArray)) return [];
+  public parseQidoStudiesResponse(dicomJsonArray: unknown): DicomStudyMetadata[] {
+    if (!Array.isArray(dicomJsonArray)) {
+      throw new Error('DICOM_INVALID_QIDO_RESPONSE: expected an array.');
+    }
 
-    return dicomJsonArray.map((item) => {
-      const getVal = (tag: string): string => {
-        return item?.[tag]?.Value?.[0] ?? '';
-      };
+    return dicomJsonArray.map((item: any) => {
+      const getVal = (tag: string): string => String(item?.[tag]?.Value?.[0] ?? '');
+      const studyInstanceUid = getVal('0020000D');
+      if (!studyInstanceUid) {
+        throw new Error('DICOM_INVALID_STUDY: StudyInstanceUID is required.');
+      }
 
       return {
-        studyInstanceUid: getVal('0020000D') || `1.2.840.10008.${Date.now()}`,
+        studyInstanceUid,
         patientId: getVal('00100020'),
-        patientName: typeof item?.['00100010']?.Value?.[0] === 'object'
-          ? item['00100010'].Value[0].Alphabetic || 'Unknown'
-          : getVal('00100010') || 'Unknown',
+        patientName:
+          typeof item?.['00100010']?.Value?.[0] === 'object'
+            ? String(item['00100010'].Value[0].Alphabetic || 'Unknown')
+            : getVal('00100010') || 'Unknown',
         studyDate: getVal('00080020'),
         studyTime: getVal('00080030'),
         accessionNumber: getVal('00080050'),
-        modalitiesInStudy: item?.['00080061']?.Value || ['CR'],
-        studyDescription: getVal('00081030') || 'Diagnostic Imaging Study',
-        numberOfStudyRelatedSeries: parseInt(getVal('00201206') || '1', 10),
-        numberOfStudyRelatedInstances: parseInt(getVal('00201208') || '1', 10),
+        modalitiesInStudy: Array.isArray(item?.['00080061']?.Value)
+          ? item['00080061'].Value.map(String)
+          : [],
+        studyDescription: getVal('00081030'),
+        numberOfStudyRelatedSeries: Number.parseInt(getVal('00201206') || '0', 10),
+        numberOfStudyRelatedInstances: Number.parseInt(getVal('00201208') || '0', 10),
         referringPhysicianName: getVal('00080090'),
       };
     });
   }
 
-  private parseQidoSeriesResponse(dicomJsonArray: any[], studyUid: string): DicomSeriesMetadata[] {
-    if (!Array.isArray(dicomJsonArray)) return [];
-    return dicomJsonArray.map((item) => {
-      const getVal = (tag: string) => item?.[tag]?.Value?.[0] ?? '';
+  private parseQidoSeriesResponse(
+    dicomJsonArray: unknown,
+    studyUid: string
+  ): DicomSeriesMetadata[] {
+    if (!Array.isArray(dicomJsonArray)) {
+      throw new Error('DICOM_INVALID_QIDO_RESPONSE: expected an array.');
+    }
+
+    return dicomJsonArray.map((item: any) => {
+      const getVal = (tag: string): string => String(item?.[tag]?.Value?.[0] ?? '');
+      const seriesInstanceUid = getVal('0020000E');
+      if (!seriesInstanceUid) {
+        throw new Error('DICOM_INVALID_SERIES: SeriesInstanceUID is required.');
+      }
+
       return {
         studyInstanceUid: studyUid,
-        seriesInstanceUid: getVal('0020000E') || `${studyUid}.1`,
-        modality: getVal('00080060') || 'CR',
-        seriesNumber: parseInt(getVal('00200011') || '1', 10),
-        seriesDescription: getVal('0008103E') || 'Series 1',
-        numberOfInstances: parseInt(getVal('00201209') || '1', 10),
+        seriesInstanceUid,
+        modality: getVal('00080060'),
+        seriesNumber: Number.parseInt(getVal('00200011') || '0', 10),
+        seriesDescription: getVal('0008103E'),
+        numberOfInstances: Number.parseInt(getVal('00201209') || '0', 10),
         bodyPartExamined: getVal('00180015'),
       };
     });
-  }
-
-  private getMockStudies(patientId?: string): DicomStudyMetadata[] {
-    return [
-      {
-        studyInstanceUid: '1.2.840.113619.2.55.3.2831174.192.1',
-        patientId: patientId || 'p-1001',
-        patientName: 'Elena Rostova',
-        studyDate: '20260813',
-        studyTime: '101500',
-        accessionNumber: 'ACC-2026-9912',
-        modalitiesInStudy: ['CT', 'XR'],
-        studyDescription: 'CT Chest Angiography with Contrast',
-        numberOfStudyRelatedSeries: 3,
-        numberOfStudyRelatedInstances: 142,
-        referringPhysicianName: 'Dr. Sarah Jenkins, MD',
-      },
-      {
-        studyInstanceUid: '1.2.840.113619.2.55.3.2831174.192.2',
-        patientId: patientId || 'p-1001',
-        patientName: 'Elena Rostova',
-        studyDate: '20260812',
-        studyTime: '083000',
-        accessionNumber: 'ACC-2026-9801',
-        modalitiesInStudy: ['XR'],
-        studyDescription: 'Chest 2 Views Posteroanterior and Lateral',
-        numberOfStudyRelatedSeries: 1,
-        numberOfStudyRelatedInstances: 2,
-        referringPhysicianName: 'Dr. David Rodriguez, MD',
-      },
-    ];
-  }
-
-  private getMockSeries(studyInstanceUid: string): DicomSeriesMetadata[] {
-    return [
-      {
-        studyInstanceUid,
-        seriesInstanceUid: `${studyInstanceUid}.1`,
-        modality: 'CT',
-        seriesNumber: 1,
-        seriesDescription: 'Axial 0.625mm Pulmonary Artery Angio',
-        numberOfInstances: 120,
-        bodyPartExamined: 'CHEST',
-      },
-      {
-        studyInstanceUid,
-        seriesInstanceUid: `${studyInstanceUid}.2`,
-        modality: 'CT',
-        seriesNumber: 2,
-        seriesDescription: 'Coronal Reformat MIP',
-        numberOfInstances: 22,
-        bodyPartExamined: 'CHEST',
-      },
-    ];
   }
 }

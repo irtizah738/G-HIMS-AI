@@ -9,6 +9,7 @@ export interface Bed {
   room: string;
   status: BedStatus;
   patientId?: string;
+  currentPatientId?: string;
   patientName?: string;
   patientMRN?: string;
   currentEncounterId?: string;

@@ -370,7 +370,7 @@ describe('G-HIMS CI-4 authoritative Patient 360 projection', () => {
     expect(timeline.every((item) => item.timelineItemId.includes('patient-a'))).toBe(true);
   });
 
-  test('zero canonical facts remain UNKNOWN rather than being inferred as known-none', () => {
+  test('zero canonical facts remain NOT_ASSESSED rather than being inferred as known-none', () => {
     const sources = baseSources();
     const { projection } = Patient360Projector.project({
       ...sources,
@@ -379,10 +379,10 @@ describe('G-HIMS CI-4 authoritative Patient 360 projection', () => {
       medicationOrders: [],
     });
 
-    expect(projection.dataQuality.allergyKnowledge).toBe('UNKNOWN');
-    expect(projection.dataQuality.problemListKnowledge).toBe('UNKNOWN');
-    expect(projection.dataQuality.medicationKnowledge).toBe('UNKNOWN');
-    expect(projection.dataQuality.missingCanonicalFacts).toContain('ALLERGY_STATUS_UNKNOWN');
+    expect(projection.dataQuality.allergyKnowledge).toBe('NOT_ASSESSED');
+    expect(projection.dataQuality.problemListKnowledge).toBe('NOT_ASSESSED');
+    expect(projection.dataQuality.medicationKnowledge).toBe('NOT_ASSESSED');
+    expect(projection.dataQuality.missingCanonicalFacts).toContain('ALLERGY_STATUS_NOT_ASSESSED');
   });
 
   test('durable Patient 360 service is tenant scoped, checkpointed, sanitized and idempotent', async () => {

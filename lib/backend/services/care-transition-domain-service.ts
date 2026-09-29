@@ -215,10 +215,31 @@ export class CareTransitionDomainService {
       correlationId: context.correlationId,
       domainState: inpatientEncounter,
       additionalStateWrites: [
-        { entityType: 'HOSPITAL_BED', entityId: bed.id, domainState: bedState },
-        { entityType: 'PATIENT_MPI', entityId: patient.id, domainState: patientState },
-        ...(sourceEncounterState
-          ? [{ entityType: 'ENCOUNTER', entityId: sourceEncounterState.encounterId, domainState: sourceEncounterState }]
+        {
+          entityType: 'HOSPITAL_BED',
+          entityId: bed.id,
+          domainState: bedState,
+          expectedServerVersion: Number(
+            (bed as Bed & { _serverVersion?: number })._serverVersion || 0
+          ),
+        },
+        {
+          entityType: 'PATIENT_MPI',
+          entityId: patient.id,
+          domainState: patientState,
+          expectedServerVersion: Number(
+            (patient as PatientMPI & { _serverVersion?: number })._serverVersion || 0
+          ),
+        },
+        ...(sourceEncounterState && sourceEncounter
+          ? [{
+              entityType: 'ENCOUNTER',
+              entityId: sourceEncounterState.encounterId,
+              domainState: sourceEncounterState,
+              expectedServerVersion: Number(
+                (sourceEncounter as PersistedEncounter & { _serverVersion?: number })._serverVersion || 0
+              ),
+            }]
           : []),
       ],
     });
@@ -438,9 +459,26 @@ export class CareTransitionDomainService {
       commandId,
       correlationId: context.correlationId,
       domainState: sourceState,
+      expectedPrimaryServerVersion: Number(
+        (sourceBed as Bed & { _serverVersion?: number })._serverVersion || 0
+      ),
       additionalStateWrites: [
-        { entityType: 'HOSPITAL_BED', entityId: targetBed.id, domainState: targetState },
-        { entityType: 'PATIENT_MPI', entityId: patient.id, domainState: patientState },
+        {
+          entityType: 'HOSPITAL_BED',
+          entityId: targetBed.id,
+          domainState: targetState,
+          expectedServerVersion: Number(
+            (targetBed as Bed & { _serverVersion?: number })._serverVersion || 0
+          ),
+        },
+        {
+          entityType: 'PATIENT_MPI',
+          entityId: patient.id,
+          domainState: patientState,
+          expectedServerVersion: Number(
+            (patient as PatientMPI & { _serverVersion?: number })._serverVersion || 0
+          ),
+        },
         { entityType: 'BED_TRANSFER', entityId: transferId, domainState: transferRecord },
       ],
     });
@@ -796,9 +834,26 @@ export class CareTransitionDomainService {
       commandId,
       correlationId: context.correlationId,
       domainState: dischargedEncounter,
+      expectedPrimaryServerVersion: Number(
+        (encounter as PersistedEncounter & { _serverVersion?: number })._serverVersion || 0
+      ),
       additionalStateWrites: [
-        { entityType: 'HOSPITAL_BED', entityId: bed.id, domainState: bedState },
-        { entityType: 'PATIENT_MPI', entityId: patient.id, domainState: patientState },
+        {
+          entityType: 'HOSPITAL_BED',
+          entityId: bed.id,
+          domainState: bedState,
+          expectedServerVersion: Number(
+            (bed as Bed & { _serverVersion?: number })._serverVersion || 0
+          ),
+        },
+        {
+          entityType: 'PATIENT_MPI',
+          entityId: patient.id,
+          domainState: patientState,
+          expectedServerVersion: Number(
+            (patient as PatientMPI & { _serverVersion?: number })._serverVersion || 0
+          ),
+        },
       ],
     });
 

@@ -62,6 +62,7 @@ export class InpatientBedDomainService {
       ...bed,
       status:'occupied',
       patientId:patient.id,
+      currentPatientId:patient.id,
       patientName:patient.fullName,
       admissionDate,
       assignedDoctor:payload.assignedDoctor || bed.assignedDoctor,
@@ -107,7 +108,7 @@ export class InpatientBedDomainService {
 
     const bed = await DomainStateRepository.getById<Bed>(context.tenantId, 'beds', payload.bedId);
     if (!bed) return { success:false, commandId, idempotencyKey, error:{ code:'BED_NOT_FOUND', message:'Target bed does not exist.' } };
-    if (bed.status === 'occupied' || bed.patientId) {
+    if (bed.status === 'occupied' || bed.patientId || bed.currentPatientId) {
       return { success:false, commandId, idempotencyKey, error:{ code:'BED_OCCUPIED', message:'Occupied beds must be discharged or transferred through an inpatient command.' } };
     }
 
@@ -115,6 +116,7 @@ export class InpatientBedDomainService {
       ...bed,
       status:payload.status,
       patientId:undefined,
+      currentPatientId:undefined,
       patientName:undefined,
       ...(payload.notes !== undefined ? { notes:payload.notes } : {}),
     };

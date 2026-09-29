@@ -1,0 +1,273 @@
+import { describe, expect, test } from 'bun:test';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { DischargeReadinessEngine } from '@/lib/clinical/intelligence/discharge-readiness-engine';
+import type { DischargeReadinessSnapshot } from '@/types/discharge-readiness';
+
+const source = (file: string) => readFile(path.join(process.cwd(), file), 'utf8');
+
+function readySnapshot(): DischargeReadinessSnapshot {
+  const now = 1_800_000_000_000;
+  return {
+    tenantId: 'tenant-a',
+    patientId: 'patient-a',
+    encounterId: 'enc-ipd-a',
+    patient360: {
+      revision: 12,
+      sourceCheckpoint: '1800000000000:evt-12',
+      lastEventId: 'evt-12',
+      activeEncounter: {
+        encounterId: 'enc-ipd-a',
+        encounterType: 'IPD',
+        status: 'ACTIVE',
+      },
+      currentMedicationCount: 2,
+      dataQuality: {
+        allergyKnowledge: 'KNOWN',
+        medicationKnowledge: 'KNOWN',
+        problemListKnowledge: 'KNOWN',
+        hasPreliminaryResults: false,
+      },
+    },
+    encounter: {
+      encounterId: 'enc-ipd-a',
+      patientId: 'patient-a',
+      encounterType: 'IPD',
+      status: 'ACTIVE',
+      updatedAt: now,
+    },
+    encounterEvidence: [
+      {
+        evidenceId: 'ev-vitals',
+        evidenceType: 'VITALS',
+        status: 'FINAL',
+        news2Status: 'VERIFIED',
+        news2Score: 0,
+        measuredAt: now - 60_000,
+      },
+      {
+        evidenceId: 'ev-medrec',
+        evidenceType: 'MEDICATION_RECONCILIATION',
+        status: 'FINAL',
+        discrepancyCount: 0,
+        completedAt: now - 30_000,
+      },
+      {
+        evidenceId: 'ev-discharge',
+        evidenceType: 'SIGNED_CLINICAL_NOTE',
+        category: 'DISCHARGE',
+        status: 'FINAL',
+        signedAt: now - 20_000,
+      },
+    ],
+    diagnosticOrders: [],
+    inpatientOrders: [],
+  };
+}
+
+describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
+  test('ready patient becomes READY_FOR_CLINICIAN_REVIEW, never an autonomous discharge decision', () => {
+    const snapshot = readySnapshot();
+    const result = DischargeReadinessEngine.evaluate(snapshot, 1_800_000_000_000);
+
+    expect(result.state).toBe('READY_FOR_CLINICIAN_REVIEW');
+    expect(result.blockers).toHaveLength(0);
+    expect(result.warnings).toHaveLength(0);
+    expect(result.information.some((item) => item.code === 'CLINICIAN_AUTHORIZATION_REQUIRED')).toBe(true);
+    expect(result.rulesetVersion).toBe('CI7-DR-1.0.0');
+  });
+
+  test('missing stability, medication reconciliation, discharge summary and knowledge are explicit blockers', () => {
+    const snapshot = readySnapshot();
+    snapshot.encounterEvidence = [];
+    snapshot.patient360.dataQuality.medicationKnowledge = 'NOT_ASSESSED';
+    snapshot.patient360.dataQuality.allergyKnowledge = 'UNKNOWN';
+
+    const result = DischargeReadinessEngine.evaluate(snapshot, 1_800_000_000_000);
+    const codes = new Set(result.blockers.map((item) => item.code));
+
+    expect(result.state).toBe('BLOCKED');
+    expect(codes.has('NEWS2_NOT_VERIFIED')).toBe(true);
+    expect(codes.has('MEDICATION_RECONCILIATION_REQUIRED')).toBe(true);
+    expect(codes.has('DISCHARGE_SUMMARY_REQUIRED')).toBe(true);
+    expect(codes.has('MEDICATION_HISTORY_UNRESOLVED')).toBe(true);
+    expect(codes.has('ALLERGY_HISTORY_UNRESOLVED')).toBe(true);
+  });
+
+  test('high NEWS2 and unresolved STAT work remain hard blockers with source evidence', () => {
+    const snapshot = readySnapshot();
+    const vitals = snapshot.encounterEvidence.find((item) => item.evidenceType === 'VITALS')!;
+    vitals.news2Score = 6;
+    snapshot.diagnosticOrders = [
+      {
+        orderId: 'ord-stat',
+        orderName: 'Troponin',
+        priority: 'STAT',
+        status: 'PROCESSING',
+      },
+    ];
+
+    const result = DischargeReadinessEngine.evaluate(snapshot, 1_800_000_000_000);
+    const highRisk = result.blockers.find((item) => item.code === 'NEWS2_HIGH_RISK');
+    const stat = result.blockers.find((item) => item.code === 'STAT_ORDER_UNRESOLVED');
+
+    expect(result.state).toBe('BLOCKED');
+    expect(highRisk?.evidence[0].entityId).toBe('ev-vitals');
+    expect(stat?.evidence[0].entityId).toBe('ord-stat');
+  });
+
+  test('non-blocking uncertainty produces REQUIRES_REVIEW rather than false readiness', () => {
+    const snapshot = readySnapshot();
+    const vitals = snapshot.encounterEvidence.find((item) => item.evidenceType === 'VITALS')!;
+    vitals.news2Score = 3;
+    snapshot.patient360.dataQuality.problemListKnowledge = 'UNKNOWN';
+    snapshot.diagnosticOrders = [
+      {
+        orderId: 'ord-routine',
+        orderName: 'Routine chemistry',
+        priority: 'ROUTINE',
+        status: 'PROCESSING',
+      },
+    ];
+
+    const result = DischargeReadinessEngine.evaluate(snapshot, 1_800_000_000_000);
+
+    expect(result.state).toBe('REQUIRES_REVIEW');
+    expect(result.blockers).toHaveLength(0);
+    expect(result.warnings.map((item) => item.code)).toContain('NEWS2_REVIEW');
+    expect(result.warnings.map((item) => item.code)).toContain('DIAGNOSTICS_PENDING');
+    expect(result.warnings.map((item) => item.code)).toContain('PROBLEM_LIST_UNRESOLVED');
+  });
+
+  test('closed or non-IPD encounters are not discharge-intelligence targets', () => {
+    const snapshot = readySnapshot();
+    snapshot.encounter.status = 'DISCHARGED';
+
+    const result = DischargeReadinessEngine.evaluate(snapshot, 1_800_000_000_000);
+
+    expect(result.state).toBe('NOT_APPLICABLE');
+    expect(result.blockers).toHaveLength(0);
+  });
+
+  test('event-driven service persists immutable evaluations, latest projection and checkpoints', async () => {
+    const service = await source(
+      'lib/clinical/intelligence/discharge-readiness-service.ts'
+    );
+    const workers = await source('lib/backend/projections/projection-workers.ts');
+
+    expect(service).toContain("collection('clinicalIntelligenceEvaluations')");
+    expect(service).toContain("collection('dischargeReadinessProjections')");
+    expect(service).toContain("collection('dischargeReadinessCheckpoints')");
+    expect(service).toContain('stableEvaluationId');
+    expect(service).toContain('transaction.create');
+    expect(service).toContain('DischargeReadinessEngine.evaluate');
+    expect(workers).toContain('DischargeReadinessService.refreshFromEvent');
+    expect(workers.indexOf('Patient360ProjectionService.refreshFromEvent')).toBeLessThan(
+      workers.indexOf('DischargeReadinessService.refreshFromEvent')
+    );
+    expect(workers).toContain('DischargeReadinessService.rebuildTenantFromEvents');
+  });
+
+  test('Patient 360 API/UI exposes explainable readiness and offline stale-state warning', async () => {
+    const api = await source('app/api/clinical/patient360/[patientId]/route.ts');
+    const client = await source('lib/clinical/patient360/patient360-client.ts');
+    const view = await source('components/patient360/Patient360View.tsx');
+    const bootstrap = await source('app/api/offline/bootstrap/route.ts');
+
+    expect(api).toContain('DischargeReadinessService.getForPatient');
+    expect(api).toContain('dischargeReadiness,');
+    expect(client).toContain("'dischargeReadinessProjections'");
+    expect(client).toContain('recordDischargeReadinessReview');
+    expect(bootstrap).toContain("'dischargeReadinessProjections'");
+    expect(view).toContain('Discharge Readiness Intelligence');
+    expect(view).toContain('Evidence & provenance');
+    expect(view).toContain('last synchronized discharge-readiness assessment');
+    expect(view).toContain('does not authorize discharge');
+  });
+
+  test('clinician review is governed, immutable and cannot clear blockers', async () => {
+    const service = await source(
+      'lib/backend/services/discharge-readiness-review-domain-service.ts'
+    );
+    const bus = await source('lib/backend/commands/command-bus.ts');
+    const tx = await source('lib/backend/transactions/transaction-manager.ts');
+
+    expect(service).toContain("requiredRoles: ['DOCTOR', 'CONSULTANT', 'SYSTEM_ADMIN']");
+    expect(service).toContain("requiredPrivilege: 'DISCHARGE_INPATIENT'");
+    expect(service).toContain("'DISCHARGE_READINESS_EVALUATION_STALE'");
+    expect(service).toContain("'DISCHARGE_READINESS_BLOCKERS_PRESENT'");
+    expect(service).toContain("eventType: 'DISCHARGE_READINESS_REVIEW_RECORDED'");
+    expect(service).toContain('immutable: true');
+    expect(bus).toContain("'RecordDischargeReadinessReviewCommand'");
+    expect(tx).toContain("DISCHARGE_READINESS_REVIEW: 'dischargeReadinessReviews'");
+  });
+
+  test('Clinical Intelligence Firestore stores remain client-denied', async () => {
+    const rules = await source('firestore.rules');
+
+    expect(rules).toContain('match /dischargeReadinessProjections/{encounterId}');
+    expect(rules).toContain('match /dischargeReadinessCheckpoints/{eventId}');
+    expect(rules).toContain('match /clinicalIntelligenceEvaluations/{evaluationId}');
+    expect(rules).toContain('allow read, write: if false;');
+  });
+
+  test('inpatient orders have an authoritative resolution path so readiness findings are actionable', async () => {
+    const inpatient = await source(
+      'lib/backend/services/inpatient-clinical-domain-service.ts'
+    );
+    const bus = await source('lib/backend/commands/command-bus.ts');
+    const readiness = await source(
+      'lib/clinical/intelligence/discharge-readiness-service.ts'
+    );
+    const workspace = await source('components/clinical/ipd-pathway-modal.tsx');
+
+    expect(inpatient).toContain('ResolveInpatientOrderPayload');
+    expect(inpatient).toContain('public static async resolveOrder');
+    expect(inpatient).toContain("eventType: 'INPATIENT_ORDER_RESOLVED'");
+    expect(inpatient).toContain('expectedPrimaryServerVersion');
+    expect(bus).toContain("'ResolveInpatientOrderCommand'");
+    expect(readiness).toContain("'INPATIENT_ORDER_RESOLVED'");
+    expect(workspace).toContain("'ResolveInpatientOrderCommand'");
+    expect(workspace).toContain("handleResolveOrder(ord.id, 'COMPLETED')");
+    expect(workspace).toContain("handleResolveOrder(ord.id, 'DISCONTINUED')");
+  });
+
+  test('immutable Clinical Intelligence evaluation history is preserved across destructive projection rebuilds', async () => {
+    const workers = await source('lib/backend/projections/projection-workers.ts');
+    const recovery = await source(
+      'lib/backend/recovery/projection-recovery-service.ts'
+    );
+
+    const clearListStart = workers.indexOf("for (const collectionName of [");
+    const clearListEnd = workers.indexOf("]) {", clearListStart);
+    const clearList = workers.slice(clearListStart, clearListEnd);
+
+    expect(clearList).toContain("'dischargeReadinessProjections'");
+    expect(clearList).toContain("'dischargeReadinessCheckpoints'");
+    expect(clearList).not.toContain("'clinicalIntelligenceEvaluations'");
+    expect(recovery).toContain("'dischargeReadinessProjections'");
+    expect(recovery).not.toContain("'clinicalIntelligenceEvaluations'");
+  });
+
+  test('safety-critical discharge scans are paged to completion and fail closed on pathological volume', async () => {
+    const repository = await source(
+      'server/repositories/domain-state-repository.ts'
+    );
+    const readiness = await source(
+      'lib/clinical/intelligence/discharge-readiness-service.ts'
+    );
+    const discharge = await source(
+      'lib/backend/services/care-transition-domain-service.ts'
+    );
+
+    expect(repository).toContain('queryAllEqual<T>');
+    expect(repository).toContain('orderBy(FieldPath.documentId())');
+    expect(repository).toContain('DOMAIN_QUERY_LIMIT_EXCEEDED');
+    expect(readiness).toContain(
+      'DomainStateRepository.queryAllEqual<Record<string, unknown>>'
+    );
+    expect(discharge).toContain(
+      'DomainStateRepository.queryAllEqual<Record<string, unknown>>'
+    );
+  });
+});

@@ -79,6 +79,7 @@ export function IpdPathwayModal({
   const [newOrderText, setNewOrderText] = useState('');
   const [newOrderType, setNewOrderType] = useState<IpdPhysicianOrder['orderType']>('MEDICATION');
   const [eMarSuccessMessage, setEmarSuccessMessage] = useState<string | null>(null);
+  const [orderResolutionMessage, setOrderResolutionMessage] = useState<string | null>(null);
 
   const completedCount = useMemo(() => {
     return Object.values(pathwayData.stageStatuses).filter((s) => s === 'COMPLETED').length;
@@ -184,6 +185,60 @@ export function IpdPathwayModal({
       stageStatuses: { ...prev.stageStatuses, PHYSICIAN_ORDERS: 'COMPLETED' },
     }));
     setNewOrderText('');
+  };
+
+  const handleResolveOrder = async (
+    orderId: string,
+    status: 'COMPLETED' | 'DISCONTINUED'
+  ) => {
+    const encounterId = requireActiveInpatientEncounter();
+    const order = pathwayData.orders.find((item) => item.id === orderId);
+    if (!order) throw new Error('INPATIENT_ORDER_NOT_FOUND');
+
+    try {
+      setOrderResolutionMessage(null);
+      const result = await executeActiveTenantCommand<Record<string, unknown>>(
+        'ResolveInpatientOrderCommand',
+        {
+          encounterId,
+          patientId: pathwayData.patientId,
+          orderId,
+          status,
+          reason:
+            status === 'COMPLETED'
+              ? 'Order completed from the inpatient clinical workspace.'
+              : 'Order discontinued by the treating clinician.',
+        },
+        {
+          idempotencyKey:
+            `ipd-order-resolution:${encounterId}:${orderId}:${status}`,
+        }
+      );
+
+      if (!result.success) {
+        throw new Error(
+          result.error?.message || 'Inpatient order resolution failed.'
+        );
+      }
+
+      setPathwayData((prev) => ({
+        ...prev,
+        orders: prev.orders.map((item) =>
+          item.id === orderId ? { ...item, status } : item
+        ),
+      }));
+      setOrderResolutionMessage(
+        status === 'COMPLETED'
+          ? 'Inpatient order completed authoritatively.'
+          : 'Inpatient order discontinued authoritatively.'
+      );
+    } catch (error) {
+      setOrderResolutionMessage(
+        error instanceof Error
+          ? error.message
+          : 'Inpatient order resolution failed.'
+      );
+    }
   };
 
   const handleAddSoapNote = async (e: React.FormEvent) => {
@@ -646,6 +701,12 @@ export function IpdPathwayModal({
                 </button>
               </form>
 
+              {orderResolutionMessage && (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                  {orderResolutionMessage}
+                </div>
+              )}
+
               <div className="space-y-2">
                 {pathwayData.orders.map((ord) => (
                   <div
@@ -666,9 +727,29 @@ export function IpdPathwayModal({
                       </p>
                     </div>
 
-                    <span className="px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
-                      {ord.status}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                        {ord.status}
+                      </span>
+                      {['ACTIVE', 'PENDING'].includes(ord.status) && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => void handleResolveOrder(ord.id, 'COMPLETED')}
+                            className="rounded-lg bg-emerald-600 px-2.5 py-1.5 text-[10px] font-bold text-white hover:bg-emerald-700"
+                          >
+                            Complete
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleResolveOrder(ord.id, 'DISCONTINUED')}
+                            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+                          >
+                            Discontinue
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

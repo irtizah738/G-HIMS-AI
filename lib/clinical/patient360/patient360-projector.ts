@@ -206,6 +206,8 @@ function eventSummary(event: Patient360SourceEvent): string {
       return 'Allergy or intolerance recorded';
     case 'PATIENT_CLINICAL_KNOWLEDGE_STATUS_UPDATED':
       return `${asString(payload.domain, 'clinical')} knowledge status reviewed: ${asString(payload.status, 'updated')}`;
+    case 'DISCHARGE_READINESS_REVIEW_RECORDED':
+      return `Discharge readiness reviewed: ${asString(payload.outcome, 'acknowledged').replace(/_/g, ' ').toLowerCase()}`;
     case 'PATIENT_ADMITTED_TO_INPATIENT_CARE':
     case 'PATIENT_ADMITTED_TO_BED':
       return 'Patient admitted to inpatient care';

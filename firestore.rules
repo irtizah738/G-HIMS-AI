@@ -230,6 +230,21 @@ service cloud.firestore {
         allow read, write: if false;
       }
 
+      // Clinical Intelligence is derived PHI. Clients consume bounded projections
+      // only through authenticated server APIs / encrypted offline hydration.
+      match /dischargeReadinessProjections/{encounterId} {
+        allow read, write: if false;
+      }
+      match /dischargeReadinessCheckpoints/{eventId} {
+        allow read, write: if false;
+      }
+      match /clinicalIntelligenceEvaluations/{evaluationId} {
+        allow read, write: if false;
+      }
+      match /dischargeReadinessReviews/{reviewId} {
+        allow read, write: if false;
+      }
+
       // Projection checkpoints are internal idempotency state and server-only.
       match /projectionCheckpoints/{eventId} {
         allow read, write: if false;

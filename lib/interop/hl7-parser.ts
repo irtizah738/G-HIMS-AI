@@ -36,6 +36,7 @@ export interface ORU_R01_ObservationResult {
   status: string; // e.g. 'F' (Final), 'P' (Preliminary), 'C' (Corrected)
   observationDateTime?: string;
   producerId?: string;
+  codingSystem?: string;
 }
 
 export interface ORU_R01_Data {
@@ -52,6 +53,8 @@ export interface ORU_R01_Data {
   placerOrderNumber?: string;
   fillerOrderNumber: string;
   diagnosticService?: string;
+  diagnosticServiceCode?: string;
+  diagnosticServiceCodingSystem?: string;
   observationDateTime: string;
   results: ORU_R01_ObservationResult[];
 }
@@ -194,7 +197,9 @@ export function extractORU_R01(parsed: HL7Message): ORU_R01_Data {
   const orderControl = parsed.getFieldValue('ORC', 1, 0) || 'RE';
   const placerOrderNumber = parsed.getFieldValue('OBR', 2, 0);
   const fillerOrderNumber = parsed.getFieldValue('OBR', 3, 0) || `LIS-${Date.now()}`;
-  const diagnosticService = parsed.getFieldValue('OBR', 4, 1) || parsed.getFieldValue('OBR', 4, 0) || 'Diagnostic Observation';
+  const diagnosticServiceCode = parsed.getFieldValue('OBR', 4, 0);
+  const diagnosticService = parsed.getFieldValue('OBR', 4, 1) || diagnosticServiceCode || 'Diagnostic Observation';
+  const diagnosticServiceCodingSystem = parsed.getFieldValue('OBR', 4, 2) || undefined;
   const observationDateTime = parsed.getFieldValue('OBR', 7, 0) || messageDateTime || new Date().toISOString();
 
   // OBX Segments (Observation / Results)
@@ -208,6 +213,7 @@ export function extractORU_R01(parsed: HL7Message): ORU_R01_Data {
     // OBX-11: Observation Result Status (F=Final, P=Preliminary)
     const testCode = obx.fields[3]?.[0]?.[0] || 'TEST';
     const testName = obx.fields[3]?.[0]?.[1] || testCode;
+    const codingSystem = obx.fields[3]?.[0]?.[2] || undefined;
     const resultValue = obx.fields[5]?.[0]?.[0] || '';
     const units = obx.fields[6]?.[0]?.[0] || '';
     const referenceRange = obx.fields[7]?.[0]?.[0] || '';
@@ -224,6 +230,7 @@ export function extractORU_R01(parsed: HL7Message): ORU_R01_Data {
       abnormalFlags,
       status,
       observationDateTime: obsTime,
+      codingSystem,
     };
   });
 
@@ -241,6 +248,8 @@ export function extractORU_R01(parsed: HL7Message): ORU_R01_Data {
     placerOrderNumber,
     fillerOrderNumber,
     diagnosticService,
+    diagnosticServiceCode,
+    diagnosticServiceCodingSystem,
     observationDateTime,
     results,
   };

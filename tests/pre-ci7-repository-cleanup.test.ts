@@ -35,4 +35,14 @@ describe('pre-CI7 repository cleanup regressions', () => {
     expect(source).toContain("collection('inventoryBalances')");
     expect(source).toContain("item.itemType === 'MEDICATION'");
   });
+
+  test('cash receipts accumulate invoice settlement inside an atomic read-modify-write transaction', () => {
+    const transactionManager = read('lib/backend/transactions/transaction-manager.ts');
+    const cashReceipt = read('lib/backend/services/cash-receipt-domain-service.ts');
+    expect(transactionManager).toContain('executeAtomicReadModifyMutation');
+    expect(transactionManager).toContain("INVOICE_SETTLEMENT: 'invoiceSettlements'");
+    expect(cashReceipt).toContain('executeAtomicReadModifyMutation');
+    expect(cashReceipt).toContain('cumulativeCashReceivedMinorUnits');
+    expect(cashReceipt).toContain("entityType: 'INVOICE_SETTLEMENT'");
+  });
 });

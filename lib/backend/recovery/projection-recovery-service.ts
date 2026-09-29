@@ -14,6 +14,9 @@ export interface ProjectionRecoveryManifest {
   status: 'SUCCESS';
   eventCount: number;
   checkpointCount: number;
+  patient360CheckpointCount: number;
+  patient360ProjectionCount: number;
+  patient360TimelineCount: number;
   eventTypeCounts: Record<string, number>;
   eventStreamSha256: string;
   projectionSha256: string;
@@ -61,6 +64,8 @@ async function projectionFingerprint(tenantId: string): Promise<string> {
     'timelineProjections',
     'clinicalQueues',
     'generalLedgerProjections',
+    'patient360Projections',
+    'patient360Timeline',
   ];
 
   const snapshot: Record<string, unknown[]> = {};
@@ -182,8 +187,11 @@ export class ProjectionRecoveryService {
           eventId: event.eventId,
           tenantId: event.tenantId,
           eventType: event.eventType,
+          aggregateType: event.aggregateType,
+          aggregateId: event.aggregateId,
           payload: event.payload,
           occurredAt: event.occurredAt,
+          recordedAt: event.recordedAt,
         })
       );
 
@@ -195,19 +203,31 @@ export class ProjectionRecoveryService {
         }
       );
 
-      const checkpointSnapshot = await db
-        .collection('tenants')
-        .doc(tenantId)
-        .collection('projectionCheckpoints')
-        .get();
+      const tenantRef = db.collection('tenants').doc(tenantId);
+      const [
+        checkpointSnapshot,
+        patient360CheckpointSnapshot,
+        patient360ProjectionSnapshot,
+        patient360TimelineSnapshot,
+      ] = await Promise.all([
+        tenantRef.collection('projectionCheckpoints').get(),
+        tenantRef.collection('patient360ProjectionCheckpoints').get(),
+        tenantRef.collection('patient360Projections').get(),
+        tenantRef.collection('patient360Timeline').get(),
+      ]);
+
       const checkpointCount = checkpointSnapshot.size;
+      const patient360CheckpointCount = patient360CheckpointSnapshot.size;
+      const patient360ProjectionCount = patient360ProjectionSnapshot.size;
+      const patient360TimelineCount = patient360TimelineSnapshot.size;
 
       if (
         rebuilt.rebuiltCount !== authoritativeEvents.length ||
-        checkpointCount !== authoritativeEvents.length
+        checkpointCount !== authoritativeEvents.length ||
+        patient360CheckpointCount !== authoritativeEvents.length
       ) {
         throw new Error(
-          `PROJECTION_REBUILD_INCOMPLETE: events=${authoritativeEvents.length} rebuilt=${rebuilt.rebuiltCount} checkpoints=${checkpointCount}`
+          `PROJECTION_REBUILD_INCOMPLETE: events=${authoritativeEvents.length} rebuilt=${rebuilt.rebuiltCount} checkpoints=${checkpointCount} patient360Checkpoints=${patient360CheckpointCount}`
         );
       }
 
@@ -221,6 +241,9 @@ export class ProjectionRecoveryService {
         status: 'SUCCESS',
         eventCount: authoritativeEvents.length,
         checkpointCount,
+        patient360CheckpointCount,
+        patient360ProjectionCount,
+        patient360TimelineCount,
         eventTypeCounts,
         eventStreamSha256,
         projectionSha256,

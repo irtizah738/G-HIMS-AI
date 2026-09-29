@@ -10,7 +10,6 @@ import {
   ShieldCheck,
   LayoutGrid,
   HeartPulse,
-  GitFork,
   Users,
   Stethoscope,
   ShieldAlert,
@@ -137,16 +136,6 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         icon: HeartPulse,
         action: () => {
           setActiveTab('disease-intake');
-          onClose();
-        },
-      },
-      {
-        id: 'workflow-runtime',
-        title: 'OPD Consultations — Workflow DAG Engine (Backend Orchestrator)',
-        category: 'Clinical & EHR',
-        icon: GitFork,
-        action: () => {
-          setActiveTab('opd');
           onClose();
         },
       },

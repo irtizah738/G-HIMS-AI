@@ -3,6 +3,7 @@ import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative
 import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
 import { assertPatient360ReadAccess } from '@/lib/clinical/patient360/patient360-access';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
+import { DischargeReadinessService } from '@/lib/clinical/intelligence/discharge-readiness-service';
 
 interface RouteContext {
   params: Promise<{ patientId: string }>;
@@ -69,6 +70,12 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
       );
     }
 
+    const dischargeReadiness =
+      await DischargeReadinessService.getForPatient(
+        context.tenantId,
+        normalizedPatientId
+      );
+
     return NextResponse.json(
       {
         success: true,
@@ -76,6 +83,7 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
         patientId: normalizedPatientId,
         projection,
         timeline,
+        dischargeReadiness,
         freshness: {
           projectionVersion: projection.projectionVersion,
           revision: projection.revision,

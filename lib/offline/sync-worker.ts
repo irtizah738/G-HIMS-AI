@@ -1,5 +1,6 @@
-import { getSyncConflicts } from './db';
 import { syncEngine, SyncEngineState } from './sync-engine';
+import { getCachedAuthSession } from '@/lib/offline/auth-storage';
+import { getSecureConflicts } from '@/lib/offline/secure-store';
 import { MutationAction } from '@/types/offline';
 
 export interface SyncWorkerState {
@@ -38,7 +39,10 @@ class GovernedSyncCompatibilityCoordinator {
   }
 
   private async toWorkerState(state: SyncEngineState): Promise<SyncWorkerState> {
-    const conflicts = await getSyncConflicts();
+    const cached = await getCachedAuthSession();
+    const conflicts = cached
+      ? await getSecureConflicts(cached.user.tenantId, cached.user.uid)
+      : [];
     return {
       isOnline: state.isOnline,
       isSyncing: state.isSyncing,
@@ -54,7 +58,10 @@ class GovernedSyncCompatibilityCoordinator {
   ): Promise<{ pending: number; conflicts: number }> {
     if (!syncEngine) return { pending: 0, conflicts: 0 };
     const pending = await syncEngine.refreshPendingCount(tenantId);
-    const conflicts = (await getSyncConflicts(tenantId)).length;
+    const cached = await getCachedAuthSession();
+    const conflicts = cached
+      ? (await getSecureConflicts(tenantId || cached.user.tenantId, cached.user.uid)).length
+      : 0;
     return { pending, conflicts };
   }
 

@@ -234,6 +234,33 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(tx).toContain("incrementClock(");
   });
 
+  test('P6F clinical edge persistence encrypts PHI with non-extractable AES-GCM keys',async()=>{
+    const cryptoSource=await source('lib/offline/crypto.ts');
+    const db=await source('lib/offline/db.ts');
+    const hydration=await source('lib/offline/hydration.ts');
+
+    expect(cryptoSource).toContain("name: 'AES-GCM'");
+    expect(cryptoSource).toContain('length: 256');
+    expect(cryptoSource).toContain('false,');
+    expect(cryptoSource).toContain("['encrypt', 'decrypt']");
+    expect(cryptoSource).toContain("ghims_edge_key_vault_db");
+    expect(cryptoSource).toContain('additionalData');
+    expect(cryptoSource).toContain('EDGE_ENCRYPTION_SCOPE_MISMATCH');
+
+    expect(db).toContain('encryptedPayload');
+    expect(db).toContain('encryptedData');
+    expect(db).toContain('encryptEdgeJson');
+    expect(db).toContain('decryptEdgeJson');
+    expect(db).toContain("payload: {}");
+    expect(db).toContain("data: {}");
+    expect(db).toContain('secureLegacyMutationsForCurrentUser');
+    expect(db).toContain("this.version(3)");
+    expect(db).toContain("transaction.table('edge_entities').clear()");
+    expect(db).toContain("transaction.table('offline_cache').clear()");
+
+    expect(hydration).toContain('secureLegacyMutationsForCurrentUser');
+  });
+
   test('clinical AI requires explicit activation and has no diagnostic fallback synthesis',async()=>{
     const gateway=await source('lib/ai/gateway.ts');
     const soap=await source('lib/ai/flows/soap-drafter.ts');

@@ -6,6 +6,8 @@ import {
   deleteMutation,
   saveToOfflineCache,
   recordSyncConflict,
+  applyCanonicalEntityMappings,
+  putEdgeEntity,
   OfflineMutation,
   MutationAction,
 } from './db';
@@ -392,6 +394,7 @@ class ClinicalSyncEngine {
     let conflictCount = 0;
     const batchIds: string[] = [];
     const processingMutationIds = new Set<string>();
+    let needsFollowupReplay = false;
     let eventTenantId: string | null = tenantId || null;
 
     try {
@@ -433,9 +436,18 @@ class ClinicalSyncEngine {
         const actorOwned = mutations.filter(
           (mutation) => mutation.actorId === cached.user.uid
         );
-        const replayable = actorOwned.filter(
+        const allReplayable = actorOwned.filter(
           (mutation) => mutation.commandType && mutation.idempotencyKey
         );
+        const registrationMutation = allReplayable.find(
+          (mutation) => mutation.commandType === 'RegisterPatientAndEncounterCommand'
+        );
+        const replayable = registrationMutation ? [registrationMutation] : allReplayable;
+        if (registrationMutation && allReplayable.length > 1) {
+          // Canonical patient/encounter IDs must be known before dependent commands
+          // are replayed. A follow-up pass runs after the registration mapping commits.
+          needsFollowupReplay = true;
+        }
         const legacy = actorOwned.filter(
           (mutation) => !mutation.commandType || !mutation.idempotencyKey
         );
@@ -513,11 +525,53 @@ class ClinicalSyncEngine {
           returnedMutationIds.add(mutation.id);
 
           if (result.status === 'accepted') {
+            const idMappings = Array.isArray(result.data?.idMappings)
+              ? result.data.idMappings.filter(
+                  (mapping: any) => mapping?.localId && mapping?.canonicalId && mapping?.entityType
+                )
+              : [];
+
+            if (idMappings.length > 0) {
+              await applyCanonicalEntityMappings(mutation.tenantId, idMappings);
+
+              if (result.data?.patient?.id) {
+                await putEdgeEntity(
+                  mutation.tenantId,
+                  'patients',
+                  result.data.patient.id,
+                  result.data.patient,
+                  Number(result.serverVersion || result.data.patient.version || 1)
+                );
+              }
+              if (result.data?.encounter?.id) {
+                await putEdgeEntity(
+                  mutation.tenantId,
+                  'encounters',
+                  result.data.encounter.id,
+                  result.data.encounter,
+                  Number(result.serverVersion || 1)
+                );
+              }
+              if (result.data?.queueToken?.id) {
+                await putEdgeEntity(
+                  mutation.tenantId,
+                  'opd_queue',
+                  result.data.queueToken.id,
+                  result.data.queueToken,
+                  Number(result.serverVersion || 1)
+                );
+              }
+
+              needsFollowupReplay = true;
+            }
+
             await deleteMutation(mutation.id);
             await saveToOfflineCache(
               mutation.tenantId,
               mutation.collection,
-              mutation.resourceId || mutation.docId,
+              idMappings.find((mapping: any) => mapping.localId === mutation.resourceId)?.canonicalId ||
+                mutation.resourceId ||
+                mutation.docId,
               result.data || mutation.payload
             );
             syncedCount += 1;
@@ -609,6 +663,12 @@ class ClinicalSyncEngine {
     } finally {
       this.isProcessing = false;
       this.updateState({ isSyncing: false, activeProcessingId: null });
+    }
+
+    if (needsFollowupReplay && this.state.isOnline && !this.forcedOffline) {
+      queueMicrotask(() => {
+        void this.processSyncQueue(tenantId);
+      });
     }
 
     return { syncedCount, conflictCount };

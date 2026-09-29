@@ -128,38 +128,90 @@ export class CashReceiptDomainService {
       };
     }
 
-    const tx = await TransactionManager.executeAtomicMutation({
+    const tx = await TransactionManager.executeAtomicReadModifyMutation({
       tenantId: context.tenantId,
       actorId: context.actorId,
       actorRole: context.roles[0] || 'BILLING_CLERK',
       aggregateType: 'CASH_RECEIPT',
       aggregateId: payload.receiptId,
       eventType: 'CASH_RECEIPT_CAPTURED',
-      eventPayload: {
-        receiptId: payload.receiptId,
-        invoiceId: payload.invoiceId,
-        encounterId: payload.encounterId,
-        patientId: payload.patientId,
-        amountMinorUnits: payload.amountMinorUnits,
-        currency,
-        journalId,
-      },
       auditAction: 'CASH_RECEIPT_CAPTURED',
       auditResourceType: 'CASH_RECEIPT',
       auditResourceId: payload.receiptId,
-      auditReason: `Captured cash receipt ${payload.referenceNumber} for ${payload.amountMinorUnits / 100} ${currency}`,
       outboxTopic: 'g-hims-finance-events',
       idempotencyKey,
       commandId,
       correlationId: context.correlationId,
-      domainState: receiptState,
-      additionalStateWrites: [
+      readTargets: [
         {
-          entityType: 'JOURNAL_ENTRY',
-          entityId: journalId,
-          domainState: journalState,
+          key: 'settlement',
+          entityType: 'INVOICE_SETTLEMENT',
+          entityId: payload.invoiceId,
+          required: false,
         },
       ],
+      prepare: (current) => {
+        const previousSettlement = current.settlement || {};
+        const previousReceived = Number(
+          previousSettlement.cashReceivedMinorUnits || 0
+        );
+        if (!Number.isSafeInteger(previousReceived) || previousReceived < 0) {
+          throw new Error('INVALID_INVOICE_SETTLEMENT_STATE');
+        }
+
+        const priorReceiptIds = Array.isArray(previousSettlement.receiptIds)
+          ? previousSettlement.receiptIds.map(String)
+          : [];
+        const settlementState = {
+          invoiceId: payload.invoiceId,
+          tenantId: context.tenantId,
+          encounterId: payload.encounterId,
+          patientId: payload.patientId,
+          currency,
+          cashReceivedMinorUnits: previousReceived + payload.amountMinorUnits,
+          receiptIds: Array.from(
+            new Set([...priorReceiptIds, payload.receiptId])
+          ),
+          paymentStatus: 'PAYMENT_RECORDED',
+          lastReceiptId: payload.receiptId,
+          lastPaymentAt: payload.collectedAt,
+          updatedAt: Date.now(),
+          createdAt: Number(previousSettlement.createdAt || Date.now()),
+        };
+
+        return {
+          domainState: receiptState,
+          additionalStateWrites: [
+            {
+              entityType: 'JOURNAL_ENTRY',
+              entityId: journalId,
+              domainState: journalState,
+            },
+            {
+              entityType: 'INVOICE_SETTLEMENT',
+              entityId: payload.invoiceId,
+              domainState: settlementState,
+            },
+          ],
+          eventPayload: {
+            receiptId: payload.receiptId,
+            invoiceId: payload.invoiceId,
+            encounterId: payload.encounterId,
+            patientId: payload.patientId,
+            amountMinorUnits: payload.amountMinorUnits,
+            cumulativeCashReceivedMinorUnits:
+              settlementState.cashReceivedMinorUnits,
+            currency,
+            journalId,
+          },
+          auditReason: `Captured cash receipt ${payload.referenceNumber} for ${payload.amountMinorUnits / 100} ${currency}`,
+          resultData: {
+            receipt: receiptState,
+            journal: journalState,
+            settlement: settlementState,
+          },
+        };
+      },
     });
 
     return {
@@ -170,9 +222,10 @@ export class CashReceiptDomainService {
       eventId: tx.eventId,
       auditId: tx.auditId,
       outboxId: tx.outboxId,
-      data: {
-        receipt: receiptState,
-        journal: journalState,
+      data: tx.resultData as {
+        receipt: typeof receiptState;
+        journal: typeof journalState;
+        settlement: Record<string, unknown>;
       },
     };
   }

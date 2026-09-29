@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Pill,
   ShieldCheck,
@@ -19,6 +19,7 @@ import {
   ComprehensiveOpdEncounter,
   PharmacyPrescriptionItem,
 } from '@/types/opd-domain';
+import { AuthClient } from '@/lib/auth/auth-client';
 
 interface OpdPharmacyPrescriptionsProps {
   encounter: ComprehensiveOpdEncounter;
@@ -27,7 +28,7 @@ interface OpdPharmacyPrescriptionsProps {
   onDispensePrescription: (prescriptionId: string, dispensedBy: string) => void;
 }
 
-const FORMULARY_DB = [
+const DEMO_FORMULARY = [
   { code: 'RX-FUROS-40', drugName: 'Furosemide', formulation: 'Tablet', strength: '40 mg', defaultRoute: 'Oral', defaultFreq: 'OD (Once Daily Morning)', defaultDays: 14, unitCost: 15, stock: 450, batch: 'BTH-2026-088', expiry: '2027-11-30', isPenicillin: false },
   { code: 'RX-LISIN-10', drugName: 'Lisinopril', formulation: 'Tablet', strength: '10 mg', defaultRoute: 'Oral', defaultFreq: 'OD (Once Daily)', defaultDays: 30, unitCost: 22, stock: 320, batch: 'BTH-2026-142', expiry: '2028-04-15', isPenicillin: false },
   { code: 'RX-METFOR-500', drugName: 'Metformin HCl', formulation: 'Tablet', strength: '500 mg', defaultRoute: 'Oral', defaultFreq: 'BD (Twice Daily with meals)', defaultDays: 30, unitCost: 12, stock: 800, batch: 'BTH-2026-009', expiry: '2027-09-20', isPenicillin: false },
@@ -36,13 +37,44 @@ const FORMULARY_DB = [
   { code: 'RX-ATORV-20', drugName: 'Atorvastatin', formulation: 'Tablet', strength: '20 mg', defaultRoute: 'Oral', defaultFreq: 'HS (At Bedtime)', defaultDays: 30, unitCost: 35, stock: 540, batch: 'BTH-2026-512', expiry: '2028-02-18', isPenicillin: false },
 ];
 
+
+interface FormularyDrug {
+  code: string;
+  itemId?: string;
+  drugName: string;
+  genericName?: string;
+  formulation: string;
+  strength: string;
+  defaultRoute: string;
+  defaultFreq: string;
+  defaultDays: number;
+  unitCost: number;
+  stock: number;
+  nextFefoBatch?: {
+    batchNumber: string;
+    expiryDate: string;
+    available: number;
+    locationId: string;
+    locationName: string;
+  } | null;
+  isPenicillin?: boolean;
+}
+
+const IS_DEMO_RUNTIME = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
+
 export function OpdPharmacyPrescriptions({
   encounter,
   prescriptions,
   onAddPrescription,
   onDispensePrescription,
 }: OpdPharmacyPrescriptionsProps) {
-  const [selectedFormularyCode, setSelectedFormularyCode] = useState<string>(FORMULARY_DB[0].code);
+  const [formulary, setFormulary] = useState<FormularyDrug[]>(() =>
+    IS_DEMO_RUNTIME ? DEMO_FORMULARY : []
+  );
+  const [formularyError, setFormularyError] = useState<string | null>(null);
+  const [selectedFormularyCode, setSelectedFormularyCode] = useState<string>(() =>
+    IS_DEMO_RUNTIME ? DEMO_FORMULARY[0].code : ''
+  );
   const [dosage, setDosage] = useState<string>('40 mg');
   const [route, setRoute] = useState<string>('Oral');
   const [frequency, setFrequency] = useState<string>('OD (Once Daily Morning)');
@@ -55,15 +87,75 @@ export function OpdPharmacyPrescriptions({
   const [dispenseModalItem, setDispenseModalItem] = useState<PharmacyPrescriptionItem | null>(null);
   const [pharmacistName, setPharmacistName] = useState<string>('Pharm. Tariq Bilal (R.Ph)');
 
-  // Selected drug allergen collision check
-  const selectedDrug = FORMULARY_DB.find((f) => f.code === selectedFormularyCode) || FORMULARY_DB[0];
+  useEffect(() => {
+    if (IS_DEMO_RUNTIME) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const tenantId = await AuthClient.getActiveTenantId();
+        const response = await AuthClient.authorizedFetch(
+          `/api/pharmacy/formulary?tenantId=${encodeURIComponent(tenantId)}`,
+          { method: 'GET' },
+          tenantId
+        );
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload?.message || payload?.error || 'Authoritative formulary unavailable.');
+        }
+
+        const mapped: FormularyDrug[] = (payload.medications || []).map((item: any) => ({
+          code: String(item.itemCode),
+          itemId: String(item.itemId),
+          drugName: String(item.drugName),
+          genericName: item.genericName ? String(item.genericName) : undefined,
+          formulation: String(item.unitOfMeasure || 'Unit'),
+          strength: '',
+          defaultRoute: 'Oral',
+          defaultFreq: 'As directed',
+          defaultDays: 1,
+          unitCost: Number(item.sellingPrice || 0),
+          stock: Number(item.totalAvailable || 0),
+          nextFefoBatch: item.nextFefoBatch || null,
+        }));
+
+        if (cancelled) return;
+        setFormulary(mapped);
+        setFormularyError(null);
+        if (mapped[0]) {
+          setSelectedFormularyCode(mapped[0].code);
+          setRoute(mapped[0].defaultRoute);
+          setFrequency(mapped[0].defaultFreq);
+          setDurationDays(mapped[0].defaultDays);
+          setQuantity(mapped[0].defaultDays);
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setFormulary([]);
+        setFormularyError(
+          error instanceof Error ? error.message : 'Authoritative formulary unavailable.'
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Prescription-time warning is advisory only. The server remains authoritative
+  // for dispense allocation; authoritative clinical allergy evidence remains server-owned.
+  const selectedDrug = useMemo(
+    () => formulary.find((item) => item.code === selectedFormularyCode) || formulary[0],
+    [formulary, selectedFormularyCode]
+  );
   const hasAllergyConflict =
-    selectedDrug.isPenicillin &&
+    !!selectedDrug?.isPenicillin &&
     (encounter.knownAllergies?.some((a) => a.toLowerCase().includes('penicillin')) || false);
 
   const handleFormularyChange = (code: string) => {
     setSelectedFormularyCode(code);
-    const drug = FORMULARY_DB.find((f) => f.code === code);
+    const drug = formulary.find((item) => item.code === code);
     if (drug) {
       setDosage(drug.strength);
       setRoute(drug.defaultRoute);
@@ -83,6 +175,11 @@ export function OpdPharmacyPrescriptions({
       if (!proceed) return;
     }
 
+    if (!selectedDrug) {
+      alert('No authoritative formulary medication is available.');
+      return;
+    }
+
     const newPrescription: PharmacyPrescriptionItem = {
       id: `rx-${Date.now()}`,
       medicationCode: selectedDrug.code,
@@ -99,14 +196,7 @@ export function OpdPharmacyPrescriptions({
       substitutionAllowed: allowGeneric,
       status: 'PRESCRIBED',
       prescribedAt: Date.now(),
-      prescribedBy: 'Dr. Sarah Jenkins (Cardiology)',
-      batchAllocation: {
-        batchNumber: selectedDrug.batch,
-        expiryDate: selectedDrug.expiry,
-        locationBin: 'Shelf B-12 (Climate Controlled)',
-        quantityAllocated: quantity,
-        fefoVerified: true,
-      },
+      prescribedBy: 'Authenticated Clinician',
     };
 
     onAddPrescription(newPrescription);
@@ -133,9 +223,20 @@ export function OpdPharmacyPrescriptions({
             <div>
               <strong className="block font-bold">CRITICAL DRUG-ALLERGY COLLISION DETECTED</strong>
               <span>
-                {selectedDrug.drugName} is a Penicillin-class derivative. Patient has documented allergy: {encounter.knownAllergies?.join(', ')}.
+                {selectedDrug?.drugName || 'Selected medication'} is a Penicillin-class derivative. Patient has documented allergy: {encounter.knownAllergies?.join(', ')}.
               </span>
             </div>
+          </div>
+        )}
+
+        {!IS_DEMO_RUNTIME && formularyError && (
+          <div className="p-3 rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-950/40 text-xs text-amber-800 dark:text-amber-200">
+            {formularyError}
+          </div>
+        )}
+        {!IS_DEMO_RUNTIME && formulary.length === 0 && !formularyError && (
+          <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 dark:bg-slate-800 text-xs text-slate-500">
+            No active stocked medications are available from the authoritative formulary.
           </div>
         )}
 
@@ -150,9 +251,9 @@ export function OpdPharmacyPrescriptions({
                 onChange={(e) => handleFormularyChange(e.target.value)}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
               >
-                {FORMULARY_DB.map((drug) => (
+                {formulary.map((drug) => (
                   <option key={drug.code} value={drug.code}>
-                    {drug.drugName} {drug.strength} ({drug.formulation}) — Stock: {drug.stock} units
+                    {drug.drugName} {drug.strength} ({drug.formulation}) — Available: {drug.stock} units
                   </option>
                 ))}
               </select>
@@ -223,10 +324,13 @@ export function OpdPharmacyPrescriptions({
 
           <div className="flex justify-between items-center pt-2 border-t border-slate-100 dark:border-slate-800">
             <div className="text-xs text-slate-500 font-mono">
-              FEFO Allocation: Batch <strong>{selectedDrug.batch}</strong> (Exp: {selectedDrug.expiry}) • Bin: Shelf B-12
+              {selectedDrug?.nextFefoBatch
+                ? <>Inventory preview: next FEFO batch <strong>{selectedDrug.nextFefoBatch.batchNumber}</strong> (Exp: {selectedDrug.nextFefoBatch.expiryDate}). Allocation is revalidated atomically at dispense.</>
+                : 'FEFO allocation is resolved server-side at dispense time.'}
             </div>
             <button
               type="submit"
+              disabled={!selectedDrug}
               className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
             >
               <Plus className="w-4 h-4" />
@@ -341,7 +445,7 @@ export function OpdPharmacyPrescriptions({
                 <strong>Sig / Direction:</strong> {dispenseModalItem.frequency} x {dispenseModalItem.durationDays} days
               </p>
               <p>
-                <strong>FEFO Batch:</strong> {dispenseModalItem.batchAllocation?.batchNumber} (Expires: {dispenseModalItem.batchAllocation?.expiryDate})
+                <strong>FEFO:</strong> Authoritative batch allocation will be selected and revalidated by the server when you confirm dispensing.
               </p>
               <p>
                 <strong>Counseling:</strong> {dispenseModalItem.specialInstructions}

@@ -1,3 +1,4 @@
+import { FieldPath, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import { getAdminFirestore } from '@/server/firebase/admin';
 
 export class DomainStateRepository {
@@ -60,5 +61,50 @@ export class DomainStateRepository {
       .get();
 
     return snapshot.docs.map((document) => document.data() as T);
+  }
+
+  public static async queryAllEqual<T>(
+    tenantId: string,
+    collectionName: string,
+    field: string,
+    value: unknown,
+    options: { pageSize?: number; maxRows?: number } = {}
+  ): Promise<T[]> {
+    const db = getAdminFirestore();
+    if (!db) return [];
+
+    const pageSize = Math.max(1, Math.min(500, options.pageSize || 500));
+    const maxRows = Math.max(pageSize, options.maxRows || 50000);
+    const collection = db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection(collectionName);
+
+    const rows: T[] = [];
+    let lastDocument: QueryDocumentSnapshot | null = null;
+
+    while (true) {
+      let query = collection
+        .where(field, '==', value)
+        .orderBy(FieldPath.documentId())
+        .limit(pageSize);
+
+      if (lastDocument) query = query.startAfter(lastDocument);
+
+      const snapshot = await query.get();
+      rows.push(...snapshot.docs.map((document) => document.data() as T));
+
+      if (rows.length > maxRows) {
+        throw new Error(
+          `DOMAIN_QUERY_LIMIT_EXCEEDED:${collectionName}:${field}:${maxRows}`
+        );
+      }
+
+      if (snapshot.size < pageSize) break;
+      lastDocument = snapshot.docs[snapshot.docs.length - 1] || null;
+      if (!lastDocument) break;
+    }
+
+    return rows;
   }
 }

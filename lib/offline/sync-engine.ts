@@ -577,6 +577,25 @@ class ClinicalSyncEngine {
                   : result.data;
 
             if (
+              mutation.commandType === 'RecordStockTransactionCommand' &&
+              result.data?.balance &&
+              mutation.resourceId &&
+              result.serverVersion
+            ) {
+              await putEdgeEntity(
+                mutation.tenantId,
+                'inventoryBalances',
+                mutation.resourceId,
+                {
+                  ...(result.data.balance as Record<string, unknown>),
+                  _serverVersion: result.serverVersion,
+                  ...(result.serverVectorClock
+                    ? { _vectorClock: result.serverVectorClock }
+                    : {}),
+                },
+                result.serverVersion
+              );
+            } else if (
               authoritativeData &&
               typeof authoritativeData === 'object' &&
               mutation.resourceId &&

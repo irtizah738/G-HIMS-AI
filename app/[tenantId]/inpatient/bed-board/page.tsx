@@ -348,10 +348,6 @@ export default function InpatientBedBoardPage() {
           assignedDoctor: admitForm.assignedDoctor || undefined,
           assignedNurse: admitForm.assignedNurse || undefined,
           priority: admitForm.priority,
-        },
-        {
-          idempotencyKey:
-            `ipd-admission:${admitForm.patientId.trim()}:${selectedBed.id}`,
         }
       );
 
@@ -410,10 +406,6 @@ export default function InpatientBedBoardPage() {
           targetBedId: transferForm.targetBedId,
           reason: transferForm.reason,
           clinicalIndication: transferForm.clinicalIndication,
-        },
-        {
-          idempotencyKey:
-            `ipd-bed-transfer:${selectedBed.currentEncounterId}:${selectedBed.id}:${transferForm.targetBedId}`,
         }
       );
 

@@ -137,6 +137,15 @@ export class CommandBus {
           );
           break;
 
+        case 'DispensePrescriptionCommand':
+          result = await ClinicalOrderDomainService.dispenseMedication(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
         case 'RecordVitalsCommand':
           result = await ClinicalDocumentationDomainService.recordVitals(
             context,

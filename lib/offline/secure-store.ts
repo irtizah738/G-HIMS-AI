@@ -179,6 +179,66 @@ export async function listSecureEdgeEntities<T extends Record<string, unknown> =
   return decoded;
 }
 
+export async function putSecureEdgeEntities(
+  tenantId: string,
+  actorId: string,
+  collection: string,
+  entities: Array<Record<string, unknown>>
+): Promise<void> {
+  const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
+  if (!normalizedTenantId || !actorId) throw new Error('EDGE_CRYPTO_CONTEXT_REQUIRED');
+
+  const rows: EdgeEntityRecord[] = [];
+  for (const entity of entities) {
+    const entityId = String(
+      (entity as any).id ||
+      (entity as any).patientId ||
+      (entity as any).encounterId ||
+      (entity as any).orderId ||
+      (entity as any).tokenId ||
+      (entity as any).evidenceId ||
+      ''
+    ).trim();
+    if (!entityId) continue;
+    rows.push({
+      key: `${normalizedTenantId}:${collection}:${entityId}`,
+      tenantId: normalizedTenantId,
+      collection,
+      entityId,
+      data: {},
+      encryptedData: await encryptEdgeJson(normalizedTenantId, actorId, entity),
+      actorId,
+      updatedAt: Date.now(),
+      serverVersion: Number((entity as any).version || 0) || undefined,
+      vectorClock: ((entity as any).vectorClock || undefined) as VectorClock | undefined,
+    });
+  }
+  if (rows.length) await localDb.edge_entities.bulkPut(rows);
+}
+
+export async function putLocalEntityMappings(
+  tenantId: string,
+  mappings: Array<{
+    localId: string;
+    entityType: string;
+    sourceMutationId?: string;
+  }>
+): Promise<void> {
+  const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
+  const now = Date.now();
+  const rows: EdgeEntityMapping[] = mappings.map((mapping) => ({
+    key: `${normalizedTenantId}:${mapping.entityType}:${mapping.localId}`,
+    tenantId: normalizedTenantId,
+    localId: mapping.localId,
+    entityType: mapping.entityType,
+    status: 'LOCAL_ONLY',
+    sourceMutationId: mapping.sourceMutationId,
+    createdAt: now,
+    updatedAt: now,
+  }));
+  if (rows.length) await localDb.entity_map.bulkPut(rows);
+}
+
 export async function putEntityMappings(
   tenantId: string,
   mappings: Array<{

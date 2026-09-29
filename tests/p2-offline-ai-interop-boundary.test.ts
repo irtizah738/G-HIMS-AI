@@ -175,6 +175,35 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(hospital).not.toContain("subscribeToPatients");
   });
 
+  test('P6C offline registration remaps provisional identities before dependent replay',async()=>{
+    const client=await source('lib/api/command-client.ts');
+    const db=await source('lib/offline/db.ts');
+    const engine=await source('lib/offline/sync-engine.ts');
+    const reconciliation=await source('lib/backend/services/offline-reconciliation-domain-service.ts');
+
+    expect(client).toContain('local_pat_');
+    expect(client).toContain('local_enc_');
+    expect(client).toContain('local_opd_');
+    expect(client).toContain("RegisterPatientAndEncounterCommand");
+    expect(client).toContain('putEntityMapping');
+    expect(client).toContain('putEdgeEntity');
+
+    expect(db).toContain('applyCanonicalEntityMappings');
+    expect(db).toContain('replaceMappedIds');
+    expect(db).toContain("status: 'MAPPED'");
+    expect(db).toContain("localDb.mutations.update");
+
+    expect(reconciliation).toContain("mutation.commandType === 'RegisterPatientAndEncounterCommand'");
+    expect(reconciliation).toContain('registerPatientAndEncounter');
+    expect(reconciliation).toContain('idMappings');
+    expect(reconciliation).toContain("requiredRoles: ['RECEPTIONIST', 'REGISTRAR', 'SYSTEM_ADMIN', 'ADMINISTRATOR']");
+
+    expect(engine).toContain("RegisterPatientAndEncounterCommand");
+    expect(engine).toContain('applyCanonicalEntityMappings');
+    expect(engine).toContain('needsFollowupReplay');
+    expect(engine).toContain('queueMicrotask');
+  });
+
   test('clinical AI requires explicit activation and has no diagnostic fallback synthesis',async()=>{
     const gateway=await source('lib/ai/gateway.ts');
     const soap=await source('lib/ai/flows/soap-drafter.ts');

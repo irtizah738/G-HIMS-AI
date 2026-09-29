@@ -8,6 +8,7 @@ import { getAdminFirestore } from '@/server/firebase/admin';
 import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
 import { sanitizeForFirestore } from '@/lib/firestore/sanitize';
 import { IdempotencyService } from '../idempotency/idempotency-service';
+import { incrementClock, mergeClocks } from '@/lib/offline/vector-clock';
 
 export interface TransactionPayload<TState = unknown> {
   entityType: string;
@@ -55,6 +56,8 @@ export interface AtomicMutationParams {
   correlationId?: string;
   domainState?: unknown;
   additionalStateWrites?: AdditionalStateWrite[];
+  causalVectorClock?: Record<string, number>;
+  causalBaseEntityVersion?: number;
   /** @deprecated State must be represented by domainState/additionalStateWrites. */
   stateWrite?: () => Promise<void> | void;
 }
@@ -81,6 +84,32 @@ function toDocumentData(value: unknown, label: string): Record<string, unknown> 
     throw new Error(`INVALID_DOMAIN_STATE: ${label} must be a Firestore document object.`);
   }
   return sanitizeForFirestore(value as Record<string, unknown>);
+}
+
+function toVersionedDocumentData(
+  value: unknown,
+  label: string,
+  existing: Record<string, unknown> | undefined,
+  incomingClock?: Record<string, number>
+): Record<string, unknown> {
+  const base = toDocumentData(value, label);
+  const currentVersion = Number(existing?._serverVersion || 0);
+  const currentClock =
+    existing?._vectorClock && typeof existing._vectorClock === 'object'
+      ? existing._vectorClock as Record<string, number>
+      : {};
+  const mergedClock = mergeClocks(currentClock, incomingClock);
+  const authoritativeClock = incrementClock(
+    mergedClock,
+    'server'
+  );
+
+  return sanitizeForFirestore({
+    ...base,
+    _serverVersion: currentVersion + 1,
+    _vectorClock: authoritativeClock,
+    _edgeUpdatedAt: Date.now(),
+  });
 }
 
 function collectionForEntityType(entityType: string): string {
@@ -229,9 +258,24 @@ export class TransactionManager {
     const auditRef = tenantRef.collection('audit_logs').doc(audit.auditId);
     const outboxRef = tenantRef.collection('outbox').doc(outbox.outboxId);
     const idempotencyRef = tenantRef.collection('idempotency').doc(IdempotencyService.getDocumentId(idempotencyKey));
+    const primaryStateRef = params.domainState !== undefined
+      ? tenantRef.collection(collectionForEntityType(params.aggregateType)).doc(params.aggregateId)
+      : null;
+    const additionalStateRefs = (params.additionalStateWrites || []).map((write) => ({
+      write,
+      ref: tenantRef.collection(collectionForEntityType(write.entityType)).doc(write.entityId),
+    }));
 
     await db.runTransaction(async (transaction) => {
-      const idempotencySnapshot = await transaction.get(idempotencyRef);
+      const snapshots = await Promise.all([
+        transaction.get(idempotencyRef),
+        ...(primaryStateRef ? [transaction.get(primaryStateRef)] : []),
+        ...additionalStateRefs.map(({ ref }) => transaction.get(ref)),
+      ]);
+      const idempotencySnapshot = snapshots[0];
+      let snapshotCursor = 1;
+      const primaryStateSnapshot = primaryStateRef ? snapshots[snapshotCursor++] : null;
+      const additionalSnapshots = additionalStateRefs.map(() => snapshots[snapshotCursor++]);
       if (!idempotencySnapshot.exists) {
         throw new Error('IDEMPOTENCY_RESERVATION_MISSING');
       }
@@ -240,16 +284,31 @@ export class TransactionManager {
         throw new Error('IDEMPOTENCY_RESERVATION_INVALID');
       }
 
-      if (params.domainState !== undefined) {
-        const stateRef = tenantRef.collection(collectionForEntityType(params.aggregateType)).doc(params.aggregateId);
+      if (params.domainState !== undefined && primaryStateRef) {
         // domainState is an authoritative aggregate snapshot, not a patch.
-        // Replace the document so removed/undefined fields do not survive from prior state.
-        transaction.set(stateRef, toDocumentData(params.domainState, params.aggregateType));
+        transaction.set(
+          primaryStateRef,
+          toVersionedDocumentData(
+            params.domainState,
+            params.aggregateType,
+            primaryStateSnapshot?.exists ? primaryStateSnapshot.data() : undefined,
+            params.causalVectorClock
+          )
+        );
       }
 
-      for (const write of params.additionalStateWrites || []) {
-        const stateRef = tenantRef.collection(collectionForEntityType(write.entityType)).doc(write.entityId);
-        transaction.set(stateRef, toDocumentData(write.domainState, write.entityType));
+      for (let index = 0; index < additionalStateRefs.length; index += 1) {
+        const { write, ref } = additionalStateRefs[index];
+        const existing = additionalSnapshots[index];
+        transaction.set(
+          ref,
+          toVersionedDocumentData(
+            write.domainState,
+            write.entityType,
+            existing?.exists ? existing.data() : undefined,
+            params.causalVectorClock
+          )
+        );
       }
 
       transaction.create(eventRef, sanitizeForFirestore(event));
@@ -320,7 +379,7 @@ export class TransactionManager {
       this.inMemoryEventStore.push(event);
       this.inMemoryAuditStore.push(audit);
       this.inMemoryOutboxStore.push(outbox);
-      return { success: true, entityId: payload.entityId, domainState: payload.domainState, event, audit, outbox, committedAt: timestamp };
+      return { success: true, entityId: payload.entityId, domainState: committedDomainState, event, audit, outbox, committedAt: timestamp };
     }
 
     const tenantRef = db.collection('tenants').doc(context.tenantId);
@@ -329,9 +388,13 @@ export class TransactionManager {
     const auditRef = tenantRef.collection('audit_logs').doc(audit.auditId);
     const outboxRef = tenantRef.collection('outbox').doc(outbox.outboxId);
     const idempotencyRef = tenantRef.collection('idempotency').doc(IdempotencyService.getDocumentId(idempotencyKey));
+    let committedDomainState = payload.domainState as TState;
 
     await db.runTransaction(async (transaction) => {
-      const idempotencySnapshot = await transaction.get(idempotencyRef);
+      const [idempotencySnapshot, stateSnapshot] = await Promise.all([
+        transaction.get(idempotencyRef),
+        transaction.get(stateRef),
+      ]);
       if (!idempotencySnapshot.exists) {
         throw new Error('IDEMPOTENCY_RESERVATION_MISSING');
       }
@@ -341,7 +404,14 @@ export class TransactionManager {
       }
 
       // Authoritative snapshot replacement is required to clear stale clinical fields.
-      transaction.set(stateRef, toDocumentData(payload.domainState, payload.entityType));
+      const versionedDomainState = toVersionedDocumentData(
+        payload.domainState,
+        payload.entityType,
+        stateSnapshot.exists ? stateSnapshot.data() : undefined,
+        context.offlineVectorClock
+      );
+      committedDomainState = versionedDomainState as TState;
+      transaction.set(stateRef, versionedDomainState);
       transaction.create(eventRef, sanitizeForFirestore(event));
       transaction.create(auditRef, sanitizeForFirestore(audit));
       transaction.create(outboxRef, sanitizeForFirestore(outbox));

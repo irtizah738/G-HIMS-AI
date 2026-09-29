@@ -21,6 +21,7 @@ function conflictCategory(commandType: string): ConflictCategory {
   if (
     [
       'PrescribeMedicationCommand',
+      'DispensePrescriptionCommand',
       'AdmitPatientToBedCommand',
       'DischargePatientFromBedCommand',
       'MergePatientCommand',

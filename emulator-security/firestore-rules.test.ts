@@ -100,6 +100,23 @@ beforeAll(async () => {
       id: 'audit-a',
       action: 'TEST',
     });
+    await setDoc(doc(db, 'tenants', 'tenant-a', 'patient360Projections', 'pat-a'), {
+      tenantId: 'tenant-a',
+      patientId: 'pat-a',
+      revision: 1,
+      projectionVersion: 1,
+    });
+    await setDoc(doc(db, 'tenants', 'tenant-a', 'patient360Timeline', 'pat-a__evt-1'), {
+      tenantId: 'tenant-a',
+      patientId: 'pat-a',
+      eventId: 'evt-1',
+      occurredAt: 1700000000000,
+    });
+    await setDoc(doc(db, 'tenants', 'tenant-a', 'patient360ProjectionCheckpoints', 'evt-1'), {
+      tenantId: 'tenant-a',
+      eventId: 'evt-1',
+      status: 'PROCESSED',
+    });
 
     await setDoc(doc(db, 'patients', 'legacy-pat'), {
       id: 'legacy-pat',
@@ -267,6 +284,31 @@ describe('Firestore P0 tenant isolation and server-authoritative writes', () => 
 
     await assertSucceeds(getDoc(doc(db, 'tenants', 'tenant-a', 'patients', 'pat-a')));
     await assertFails(getDoc(doc(db, 'tenants', 'tenant-a', 'invoices', 'inv-a')));
+  });
+
+  test('Patient 360 PHI projections are server-only even for clinical and admin users', async () => {
+    const doctorDb = testEnv.authenticatedContext('user-a', {
+      tenantId: 'tenant-a',
+      accessibleTenants: ['tenant-a'],
+      roles: ['doctor'],
+    }).firestore();
+    const adminDb = testEnv.authenticatedContext('user-admin', {
+      tenantId: 'tenant-a',
+      accessibleTenants: ['tenant-a'],
+      roles: ['administrator'],
+    }).firestore();
+
+    for (const db of [doctorDb, adminDb]) {
+      await assertFails(
+        getDoc(doc(db, 'tenants', 'tenant-a', 'patient360Projections', 'pat-a'))
+      );
+      await assertFails(
+        getDoc(doc(db, 'tenants', 'tenant-a', 'patient360Timeline', 'pat-a__evt-1'))
+      );
+      await assertFails(
+        getDoc(doc(db, 'tenants', 'tenant-a', 'patient360ProjectionCheckpoints', 'evt-1'))
+      );
+    }
   });
 
   test('audit logs are administrator-only', async () => {

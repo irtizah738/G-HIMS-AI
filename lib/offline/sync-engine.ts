@@ -14,7 +14,7 @@ import {
 import { auth } from '@/lib/firebase/client';
 import { getCachedAuthSession } from '@/lib/offline/auth-storage';
 import { probeApplicationConnectivity, ConnectivityProbeResult } from '@/lib/offline/connectivity';
-import { incrementClock } from '@/lib/offline/vector-clock';
+import { incrementClock, mergeClocks } from '@/lib/offline/vector-clock';
 
 export interface LastReplicationEvent {
   at: Date;
@@ -53,6 +53,7 @@ export interface QueueMutationParams {
   idempotencyKey?: string;
   schemaVersion?: number;
   baseEntityVersion?: number;
+  baseVectorClock?: Record<string, number>;
   optimisticCache?: boolean;
   mutationId?: string;
 }
@@ -321,8 +322,9 @@ class ClinicalSyncEngine {
     }
 
     const currentClock = await getPendingVectorClock(params.tenantId);
+    const causalBaseClock = mergeClocks(params.baseVectorClock, currentClock);
     const clockNodeId = cached.session.deviceId || cached.user.uid;
-    const vectorClock = incrementClock(currentClock, clockNodeId);
+    const vectorClock = incrementClock(causalBaseClock, clockNodeId);
 
     const mutation = await addMutation({
       id: params.mutationId,

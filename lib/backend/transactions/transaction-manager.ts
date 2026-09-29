@@ -123,6 +123,7 @@ function collectionForEntityType(entityType: string): string {
     DIAGNOSTIC_RESULT: 'diagnosticResults',
     CARE_PLAN: 'carePlans',
     CLINICAL_PROVENANCE: 'clinicalProvenance',
+    PATIENT_CLINICAL_KNOWLEDGE_STATUS: 'patientClinicalKnowledgeStatus',
     OPD_QUEUE_TOKEN: 'opd_queue',
     DIAGNOSTIC_ORDER: 'orders',
     PRESCRIPTION: 'prescriptions',

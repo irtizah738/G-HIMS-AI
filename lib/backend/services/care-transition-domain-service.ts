@@ -9,6 +9,7 @@ import { AuthorizationPipeline } from '../auth/authorization-pipeline';
 import { TransactionManager } from '../transactions/transaction-manager';
 import type { CommandContext, CommandResult } from '../types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
+import { PatientClinicalKnowledgeDomainService } from './patient-clinical-knowledge-domain-service';
 import type { Bed } from '@/lib/types/ghims';
 import type { PatientMPI } from '@/types/mpi';
 import type {
@@ -281,7 +282,16 @@ export class CareTransitionDomainService {
       return { success: false, commandId, idempotencyKey, error: { code: 'PATIENT_CENSUS_STATE_CONFLICT', message: 'Patient active encounter/bed does not match the discharge target.' } };
     }
 
-    const [dischargeEvidence, statOrders, encounterEvidence] = await Promise.all([
+    const [
+      dischargeEvidence,
+      diagnosticOrders,
+      encounterEvidence,
+      inpatientOrders,
+      allergyFacts,
+      medicationFacts,
+      allergyKnowledge,
+      medicationKnowledge,
+    ] = await Promise.all([
       DomainStateRepository.getById<Record<string, unknown>>(
         context.tenantId,
         'encounterEvidence',
@@ -299,14 +309,45 @@ export class CareTransitionDomainService {
         'encounterId',
         encounter.encounterId
       ),
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        context.tenantId,
+        'inpatientOrders',
+        'encounterId',
+        encounter.encounterId
+      ),
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        context.tenantId,
+        'clinicalAllergies',
+        'patientId',
+        encounter.patientId
+      ),
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        context.tenantId,
+        'medicationOrders',
+        'patientId',
+        encounter.patientId
+      ),
+      PatientClinicalKnowledgeDomainService.getDomainRecord(
+        context.tenantId,
+        encounter.patientId,
+        'ALLERGIES'
+      ),
+      PatientClinicalKnowledgeDomainService.getDomainRecord(
+        context.tenantId,
+        encounter.patientId,
+        'MEDICATIONS'
+      ),
     ]);
 
     if (
       !dischargeEvidence ||
       dischargeEvidence.encounterId !== encounter.encounterId ||
       dischargeEvidence.patientId !== encounter.patientId ||
+      dischargeEvidence.evidenceType !== 'SIGNED_CLINICAL_NOTE' ||
       dischargeEvidence.category !== 'DISCHARGE' ||
-      dischargeEvidence.status !== 'FINAL'
+      dischargeEvidence.status !== 'FINAL' ||
+      !String(dischargeEvidence.signedBy || '').trim() ||
+      !Number.isFinite(Number(dischargeEvidence.signedAt))
     ) {
       return {
         success: false,
@@ -319,7 +360,7 @@ export class CareTransitionDomainService {
       };
     }
 
-    const unresolvedStatOrders = statOrders.filter((order) => {
+    const unresolvedStatOrders = diagnosticOrders.filter((order) => {
       const priority = String(order.priority || '').toUpperCase();
       const status = String(order.status || '').toUpperCase();
       return priority === 'STAT' && !['COMPLETED', 'CANCELLED', 'RESULTS_READY', 'FINALIZED'].includes(status);
@@ -333,6 +374,67 @@ export class CareTransitionDomainService {
           code: 'UNRESOLVED_STAT_ORDERS',
           message: 'Outstanding STAT diagnostic orders must be completed, cancelled, or formally handed off before discharge.',
           details: unresolvedStatOrders.map((order) => order.orderId || order.id),
+        },
+      };
+    }
+
+    const unresolvedStatInpatientOrders = inpatientOrders.filter((order) => {
+      const priority = String(order.priority || '').toUpperCase();
+      const status = String(order.status || '').toUpperCase();
+      return (
+        priority === 'STAT' &&
+        !['COMPLETED', 'CANCELLED', 'DISCONTINUED'].includes(status)
+      );
+    });
+    if (unresolvedStatInpatientOrders.length > 0) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'UNRESOLVED_STAT_INPATIENT_ORDERS',
+          message:
+            'Active STAT inpatient orders must be completed or discontinued before routine discharge.',
+          details: unresolvedStatInpatientOrders.map(
+            (order) => order.orderId || order.id
+          ),
+        },
+      };
+    }
+
+    const resolvedKnowledgeStatuses = new Set(['KNOWN', 'KNOWN_NONE']);
+    const allergyKnowledgeResolved =
+      allergyFacts.length > 0 ||
+      resolvedKnowledgeStatuses.has(
+        String(allergyKnowledge?.status || '').toUpperCase()
+      );
+    if (!allergyKnowledgeResolved) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'ALLERGY_HISTORY_UNRESOLVED',
+          message:
+            'Allergy history must be reviewed or explicitly documented as known-none before inpatient discharge.',
+        },
+      };
+    }
+
+    const medicationKnowledgeResolved =
+      medicationFacts.length > 0 ||
+      resolvedKnowledgeStatuses.has(
+        String(medicationKnowledge?.status || '').toUpperCase()
+      );
+    if (!medicationKnowledgeResolved) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'MEDICATION_HISTORY_UNRESOLVED',
+          message:
+            'Medication history must be reviewed or explicitly documented as known-none before inpatient discharge.',
         },
       };
     }
@@ -357,7 +459,11 @@ export class CareTransitionDomainService {
       .filter((item) => item.evidenceType === 'VITALS' && item.status === 'FINAL')
       .sort((a, b) => Number(b.measuredAt || b.createdAt || 0) - Number(a.measuredAt || a.createdAt || 0))[0];
 
-    if (!latestVitals || !Number.isFinite(Number(latestVitals.news2Score))) {
+    if (
+      !latestVitals ||
+      String(latestVitals.news2Status || '').toUpperCase() !== 'VERIFIED' ||
+      !Number.isFinite(Number(latestVitals.news2Score))
+    ) {
       return {
         success: false,
         commandId,

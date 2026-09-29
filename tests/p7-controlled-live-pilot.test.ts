@@ -23,7 +23,7 @@ describe('G-HIMS P7 controlled live pilot qualification', () => {
     expect(rehearsal).toContain('accounts:signInWithPassword');
     expect(rehearsal).toContain("request('/api/auth/session'");
     expect(rehearsal).toContain("request('/api/health/ready')");
-    expect(rehearsal).toContain("'/api/offline/bootstrap");
+    expect(rehearsal).toContain('/api/offline/bootstrap');
     expect(rehearsal).toContain("request('/api/clinical/encounter/create'");
     expect(rehearsal).toContain("request('/api/commands/execute'");
     expect(rehearsal).toContain("'RecordVitalsCommand'");

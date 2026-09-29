@@ -7,6 +7,7 @@ import { emitOperationalEvent, operationalTimer } from '@/lib/observability/serv
 import { CommandBus } from '@/lib/backend/commands/command-bus';
 import type { BaseCommand, CommandContext } from '@/lib/backend/types';
 import { TerminologyService } from '@/lib/clinical/terminology/terminology-service';
+import type { DocumentReference, Firestore } from 'firebase-admin/firestore';
 
 function safeEqual(provided: string, expected: string): boolean {
   const a = Buffer.from(provided);
@@ -93,7 +94,7 @@ function integrationContext(input: {
 }
 
 async function resolveOrder(input: {
-  db: NonNullable<ReturnType<typeof getAdminFirestore>>;
+  db: Firestore;
   tenantId: string;
   patientId: string;
   placerOrderNumber?: string;
@@ -138,7 +139,7 @@ async function resolveOrder(input: {
 }
 
 async function writeReconciliationInbox(input: {
-  inboxRef: FirebaseFirestore.DocumentReference;
+  inboxRef: DocumentReference;
   tenantId: string;
   messageType: string;
   sendingApplication: string;

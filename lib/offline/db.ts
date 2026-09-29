@@ -7,6 +7,9 @@ import {
   SurgicalCaseEntity,
   MutationAction,
   MutationStatus,
+  EdgeEntityRecord,
+  EdgeEntityMapping,
+  EdgeSyncMetadata,
 } from '@/types/offline';
 import { mergeClocks } from '@/lib/offline/vector-clock';
 
@@ -16,6 +19,9 @@ export class GHIMSDatabase extends Dexie {
   clinical_patients!: Table<ClinicalPatientEntity, string>;
   bed_occupancy!: Table<BedOccupancyEntity, string>;
   surgical_cases!: Table<SurgicalCaseEntity, string>;
+  edge_entities!: Table<EdgeEntityRecord, string>;
+  entity_map!: Table<EdgeEntityMapping, string>;
+  sync_metadata!: Table<EdgeSyncMetadata, string>;
 
   constructor() {
     super('ghims_clinical_dexie_db');
@@ -26,6 +32,17 @@ export class GHIMSDatabase extends Dexie {
       clinical_patients: 'id, tenantId, mrn, name, bedId, acuityScore',
       bed_occupancy: 'id, tenantId, wardId, bedNumber, status',
       surgical_cases: 'id, tenantId, patientId, theaterId, status',
+    });
+
+    this.version(2).stores({
+      mutations: 'id, tenantId, collection, docId, status, timestamp',
+      offline_cache: 'key, tenantId, collection, updatedAt',
+      clinical_patients: 'id, tenantId, mrn, name, bedId, acuityScore',
+      bed_occupancy: 'id, tenantId, wardId, bedNumber, status',
+      surgical_cases: 'id, tenantId, patientId, theaterId, status',
+      edge_entities: 'key, [tenantId+collection], tenantId, collection, entityId, updatedAt',
+      entity_map: 'key, tenantId, localId, canonicalId, entityType, status, updatedAt',
+      sync_metadata: 'key, tenantId, scope, lastHydratedAt',
     });
   }
 }
@@ -749,6 +766,115 @@ export async function clearOfflineReadModelsForTenant(tenantId: string): Promise
       await localDb.clinical_patients.where('tenantId').equals(normalizedTenantId).delete();
       await localDb.bed_occupancy.where('tenantId').equals(normalizedTenantId).delete();
       await localDb.surgical_cases.where('tenantId').equals(normalizedTenantId).delete();
+    }
+  );
+}
+
+
+export async function replaceTenantEdgeSnapshot(
+  tenantId: string,
+  collections: Record<string, Array<Record<string, unknown>>>,
+  metadata: Omit<EdgeSyncMetadata, 'key' | 'tenantId' | 'scope'> & { scope?: string }
+): Promise<void> {
+  const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
+  if (!normalizedTenantId) throw new Error('EDGE_TENANT_REQUIRED');
+
+  const records: EdgeEntityRecord[] = [];
+  for (const [collection, entities] of Object.entries(collections || {})) {
+    for (const entity of entities || []) {
+      const entityId = String(
+        (entity as any).id ||
+        (entity as any).patientId ||
+        (entity as any).encounterId ||
+        (entity as any).orderId ||
+        (entity as any).tokenId ||
+        (entity as any).evidenceId ||
+        (entity as any).findingId ||
+        ''
+      ).trim();
+      if (!entityId) continue;
+      records.push({
+        key: `${normalizedTenantId}:${collection}:${entityId}`,
+        tenantId: normalizedTenantId,
+        collection,
+        entityId,
+        data: entity,
+        updatedAt: Date.now(),
+        serverVersion: Number((entity as any).version || (entity as any).serverVersion || 0) || undefined,
+      });
+    }
+  }
+
+  const collectionNames = Object.keys(collections || {});
+  await localDb.transaction(
+    'rw',
+    localDb.edge_entities,
+    localDb.sync_metadata,
+    async () => {
+      for (const collection of collectionNames) {
+        await localDb.edge_entities
+          .where('[tenantId+collection]')
+          .equals([normalizedTenantId, collection])
+          .delete();
+      }
+      if (records.length > 0) await localDb.edge_entities.bulkPut(records);
+      const scope = metadata.scope || 'clinical-core';
+      await localDb.sync_metadata.put({
+        key: `${normalizedTenantId}:${scope}`,
+        tenantId: normalizedTenantId,
+        scope,
+        snapshotVersion: metadata.snapshotVersion,
+        lastHydratedAt: metadata.lastHydratedAt,
+        serverGeneratedAt: metadata.serverGeneratedAt,
+      });
+    }
+  );
+}
+
+export async function listEdgeEntities<T extends Record<string, unknown> = Record<string, unknown>>(
+  tenantId: string,
+  collection: string
+): Promise<T[]> {
+  const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
+  if (!normalizedTenantId || !collection) return [];
+  const rows = await localDb.edge_entities
+    .where('[tenantId+collection]')
+    .equals([normalizedTenantId, collection])
+    .toArray();
+  return rows
+    .filter((row) => !row.deleted)
+    .sort((a, b) => a.updatedAt - b.updatedAt)
+    .map((row) => row.data as T);
+}
+
+export async function getEdgeEntity<T extends Record<string, unknown> = Record<string, unknown>>(
+  tenantId: string,
+  collection: string,
+  entityId: string
+): Promise<T | null> {
+  const key = `${String(tenantId || '').trim().toLowerCase()}:${collection}:${entityId}`;
+  const row = await localDb.edge_entities.get(key);
+  return row && !row.deleted ? (row.data as T) : null;
+}
+
+export async function getEdgeSyncMetadata(
+  tenantId: string,
+  scope = 'clinical-core'
+): Promise<EdgeSyncMetadata | null> {
+  const key = `${String(tenantId || '').trim().toLowerCase()}:${scope}`;
+  return (await localDb.sync_metadata.get(key)) || null;
+}
+
+export async function clearTenantEdgeEntities(tenantId: string): Promise<void> {
+  const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
+  if (!normalizedTenantId) return;
+  await localDb.transaction(
+    'rw',
+    localDb.edge_entities,
+    localDb.sync_metadata,
+    async () => {
+      await localDb.edge_entities.where('tenantId').equals(normalizedTenantId).delete();
+      await localDb.sync_metadata.where('tenantId').equals(normalizedTenantId).delete();
     }
   );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import {
   Bed,
   Patient,
@@ -30,6 +30,9 @@ import {
 import { DischargedCensusRecord, initialDischargedCensus } from '@/lib/clinical/ipd-service';
 import { executeActiveTenantCommand, registerActiveTenantPatient } from '@/lib/api/command-client';
 import { syncEngine } from '@/lib/offline/sync-engine';
+import { useAuth } from '@/lib/auth/auth-context';
+import { hydrateEdgeSnapshot, loadLocalEdgeSnapshot } from '@/lib/offline/hydration';
+import { adaptEdgeSnapshot } from '@/lib/offline/read-model-adapter';
 
 const initialTelehealthSessions: TelehealthSession[] = [
   {
@@ -1020,22 +1023,78 @@ interface HospitalContextType {
 const HospitalContext = createContext<HospitalContextType | undefined>(undefined);
 
 export function HospitalProvider({ children }: { children: React.ReactNode }) {
-  const [beds, setBeds] = useState<Bed[]>(initialBeds);
-  const [patients, setPatients] = useState<Patient[]>(initialPatients);
-  const [staff, setStaff] = useState<StaffMember[]>(initialStaff);
-  const [opdQueue, setOpdQueue] = useState<OpdQueueToken[]>(initialOpdQueue);
-  const [mismatches, setMismatches] = useState<BillingAuditMismatch[]>(initialMismatches);
-  const [hl7Messages, setHl7Messages] = useState<Hl7Message[]>(initialHl7Messages);
-  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(initialAuditLogs);
+  const { user, activeTenant, loading: authLoading } = useAuth();
+  const runtimeMode = String(process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE || '').trim().toUpperCase();
+  const isDemoRuntime = runtimeMode === 'DEMO';
+
+  const [beds, setBeds] = useState<Bed[]>(() => isDemoRuntime ? initialBeds : []);
+  const [patients, setPatients] = useState<Patient[]>(() => isDemoRuntime ? initialPatients : []);
+  const [staff, setStaff] = useState<StaffMember[]>(() => isDemoRuntime ? initialStaff : []);
+  const [opdQueue, setOpdQueue] = useState<OpdQueueToken[]>(() => isDemoRuntime ? initialOpdQueue : []);
+  const [mismatches, setMismatches] = useState<BillingAuditMismatch[]>(() => isDemoRuntime ? initialMismatches : []);
+  const [hl7Messages, setHl7Messages] = useState<Hl7Message[]>(() => isDemoRuntime ? initialHl7Messages : []);
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(() => isDemoRuntime ? initialAuditLogs : []);
   const [offlineMutations, setOfflineMutations] = useState<OfflineMutation[]>([]);
-  const [telehealthSessions, setTelehealthSessions] = useState<TelehealthSession[]>(initialTelehealthSessions);
-  const [dischargedCensus, setDischargedCensus] = useState<DischargedCensusRecord[]>(initialDischargedCensus);
+  const [telehealthSessions, setTelehealthSessions] = useState<TelehealthSession[]>(() => isDemoRuntime ? initialTelehealthSessions : []);
+  const [dischargedCensus, setDischargedCensus] = useState<DischargedCensusRecord[]>(() => isDemoRuntime ? initialDischargedCensus : []);
   const [activeTelehealthSession, setActiveTelehealthSession] = useState<TelehealthSession | null>(null);
   const [activeTab, setActiveTab] = useState<string>('command');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [networkMode, setNetworkMode] = useState<'online' | 'offline' | 'degraded_sync'>('online');
   const [copilotOpen, setCopilotOpen] = useState<boolean>(false);
-  const [selectedPatientId, setSelectedPatientId] = useState<string | null>('p-1001');
+  const [selectedPatientId, setSelectedPatientId] = useState<string | null>(() => isDemoRuntime ? 'p-1001' : null);
+
+  useEffect(() => {
+    if (isDemoRuntime || authLoading) return;
+
+    const tenantId = String(activeTenant?.tenantId || user?.tenantId || '').trim().toLowerCase();
+    if (!tenantId) {
+      setBeds([]);
+      setPatients([]);
+      setOpdQueue([]);
+      setMismatches([]);
+      setTelehealthSessions([]);
+      setSelectedPatientId(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const applySnapshot = (snapshot: Awaited<ReturnType<typeof loadLocalEdgeSnapshot>>) => {
+      if (cancelled || snapshot.tenantId !== tenantId) return;
+      const models = adaptEdgeSnapshot(snapshot);
+      setBeds(models.beds);
+      setPatients(models.patients);
+      setOpdQueue(models.opdQueue);
+      setMismatches(models.mismatches);
+      setTelehealthSessions(models.telehealthSessions);
+      setSelectedPatientId((current) =>
+        current && models.patients.some((patient) => patient.id === current)
+          ? current
+          : models.patients[0]?.id || null
+      );
+    };
+
+    void loadLocalEdgeSnapshot(tenantId)
+      .then(applySnapshot)
+      .catch((error) => console.warn('EDGE_LOCAL_READ_MODEL_LOAD_FAILED', error));
+
+    if (user) {
+      void hydrateEdgeSnapshot(tenantId)
+        .then(applySnapshot)
+        .catch((error) => console.warn('EDGE_SERVER_HYDRATION_FAILED', error));
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeTenant?.tenantId,
+    user?.tenantId,
+    user?.uid,
+    authLoading,
+    isDemoRuntime,
+  ]);
 
   // Legacy root-level Firestore listeners were retired at the P0/P5C trust boundary.
   // Those collections are intentionally denied by firestore.rules. Authoritative
@@ -1048,7 +1107,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
   const occupiedBeds = beds.filter((b) => b.status === 'occupied').length;
   const availableBeds = beds.filter((b) => b.status === 'available').length;
   const maintenanceBeds = beds.filter((b) => b.status === 'maintenance' || b.status === 'cleaning').length;
-  const occupancyRate = Math.round((occupiedBeds / totalBeds) * 100);
+  const occupancyRate = totalBeds > 0 ? Math.round((occupiedBeds / totalBeds) * 100) : 0;
   
   const pendingMismatches = mismatches.filter(m => m.status === 'pending_review');
   const unbilledChargesPending = pendingMismatches.reduce((sum, m) => sum + m.estimatedRecoverableRevenue, 0);

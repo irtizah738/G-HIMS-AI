@@ -139,6 +139,42 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(banner).not.toContain('Apply Client Overwrite');
   });
 
+  test('P6A hospital read models are local-first and server-hydrated outside DEMO',async()=>{
+    const db=await source('lib/offline/db.ts');
+    const hydration=await source('lib/offline/hydration.ts');
+    const adapter=await source('lib/offline/read-model-adapter.ts');
+    const bootstrap=await source('app/api/offline/bootstrap/route.ts');
+    const hospital=await source('lib/context/hospital-context.tsx');
+
+    expect(db).toContain("edge_entities");
+    expect(db).toContain("entity_map");
+    expect(db).toContain("sync_metadata");
+    expect(db).toContain("replaceTenantEdgeSnapshot");
+    expect(db).toContain("listEdgeEntities");
+
+    expect(hydration).toContain("loadLocalEdgeSnapshot");
+    expect(hydration).toContain("hydrateEdgeSnapshot");
+    expect(hydration).toContain("/api/offline/bootstrap?tenantId=");
+    expect(hydration).toContain("replaceTenantEdgeSnapshot");
+    expect(hydration).not.toContain("firebase/firestore");
+
+    expect(bootstrap).toContain("deriveAuthoritativeContext");
+    expect(bootstrap).toContain("getAdminFirestore");
+    expect(bootstrap).toContain("Cache-Control");
+    expect(bootstrap).toContain("no-store");
+    expect(bootstrap).toContain("authorizedCollections");
+
+    expect(adapter).toContain("adaptEdgeSnapshot");
+    expect(adapter).toContain("encounterEvidence");
+    expect(adapter).toContain("billingMismatches");
+
+    expect(hospital).toContain("isDemoRuntime ? initialBeds : []");
+    expect(hospital).toContain("loadLocalEdgeSnapshot");
+    expect(hospital).toContain("hydrateEdgeSnapshot");
+    expect(hospital).toContain("adaptEdgeSnapshot");
+    expect(hospital).not.toContain("subscribeToPatients");
+  });
+
   test('clinical AI requires explicit activation and has no diagnostic fallback synthesis',async()=>{
     const gateway=await source('lib/ai/gateway.ts');
     const soap=await source('lib/ai/flows/soap-drafter.ts');

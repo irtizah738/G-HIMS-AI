@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { QRCodeSVG } from 'qrcode.react';
 import { useHospital } from '@/lib/context/hospital-context';
 import { Patient, Encounter, Vitals, ClinicalNote } from '@/lib/types/ghims';
@@ -37,6 +38,7 @@ import { useRBAC } from '@/lib/auth/rbac-context';
 import { AuthClient } from '@/lib/auth/auth-client';
 
 export function PatientMpiView() {
+  const router = useRouter();
   const { patients, selectedPatientId, setSelectedPatientId, registerNewPatient, mergePatients, addClinicalNote, addVitals, beds } = useHospital();
   const { currentRole, hasPermission, activePatientId, roleDefinition } = useRBAC();
   
@@ -137,6 +139,14 @@ export function PatientMpiView() {
   const currentPatient = scopedPatients.find((p) => p.id === selectedPatientId) || scopedPatients[0] || patients[0];
   const activeEncounter = currentPatient?.encounters?.[0];
   const assignedBed = beds.find((b) => b.id === currentPatient?.activeBedId);
+
+  const handleOpenPatient360 = async () => {
+    if (!currentPatient?.id) return;
+    const tenantId = await AuthClient.getActiveTenantId();
+    router.push(
+      `/${encodeURIComponent(tenantId)}/patients/${encodeURIComponent(currentPatient.id)}/360`
+    );
+  };
 
   const handleCreatePatient = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -451,6 +461,14 @@ export function PatientMpiView() {
                     title="Merge duplicate patient record"
                   >
                     <GitMerge className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" /> Merge Record
+                  </button>
+                  <button
+                    id="btn-open-patient360"
+                    type="button"
+                    onClick={() => void handleOpenPatient360()}
+                    className="px-3 py-1.5 text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                  >
+                    <Stethoscope className="w-3.5 h-3.5" /> Patient 360
                   </button>
                   <button
                     id="btn-route-specialist"

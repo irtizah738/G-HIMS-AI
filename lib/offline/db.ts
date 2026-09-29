@@ -143,12 +143,20 @@ export async function getPendingMutationsFromDb(tenantId?: string): Promise<Sync
       const rows = await localDb.mutations
         .where('tenantId')
         .equals(tenantId)
-        .filter((m) => m.status === 'pending' || m.status === 'failed')
+        .filter(
+          (m) =>
+            m.status === 'pending' ||
+            (m.status === 'failed' && (!m.nextRetryAt || m.nextRetryAt <= Date.now()))
+        )
         .sortBy('timestamp');
       return Promise.all(rows.map(decryptStoredMutation));
     }
     const rows = await localDb.mutations
-      .filter((m) => m.status === 'pending' || m.status === 'failed')
+      .filter(
+        (m) =>
+          m.status === 'pending' ||
+          (m.status === 'failed' && (!m.nextRetryAt || m.nextRetryAt <= Date.now()))
+      )
       .sortBy('timestamp');
     return Promise.all(rows.map(decryptStoredMutation));
   } catch (error) {
@@ -737,6 +745,7 @@ export async function addMutation(
     timestamp: (mutationOrParams as any).timestamp || now,
     clientTimestamp: (mutationOrParams as any).clientTimestamp || now,
     retryCount: (mutationOrParams as any).retryCount || 0,
+    nextRetryAt: (mutationOrParams as any).nextRetryAt,
     status: (mutationOrParams as any).status || 'pending',
     errorMessage: (mutationOrParams as any).errorMessage,
     conflictDetails: (mutationOrParams as any).conflictDetails,
@@ -753,10 +762,18 @@ export async function updateMutationStatus(
 ): Promise<void> {
   const existing = await localDb.mutations.get(id);
   if (existing) {
+    const retryCount =
+      (existing.retryCount || 0) + (status === 'failed' ? 1 : 0);
+    const backoffMs =
+      status === 'failed'
+        ? Math.min(5 * 60 * 1000, 1000 * Math.pow(2, Math.min(retryCount, 8)))
+        : 0;
+
     await localDb.mutations.update(id, {
       status,
       errorMessage: error || existing.errorMessage,
-      retryCount: (existing.retryCount || 0) + (status === 'failed' ? 1 : 0),
+      retryCount,
+      nextRetryAt: status === 'failed' ? Date.now() + backoffMs : undefined,
     });
   }
 }

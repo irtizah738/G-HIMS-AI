@@ -261,6 +261,33 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(hydration).toContain('secureLegacyMutationsForCurrentUser');
   });
 
+  test('P6G offline durability survives quota pressure multi-tab replay and interrupted sync',async()=>{
+    const durability=await source('lib/offline/durability.ts');
+    const db=await source('lib/offline/db.ts');
+    const engine=await source('lib/offline/sync-engine.ts');
+    const types=await source('types/offline.ts');
+
+    expect(durability).toContain('navigator.storage.persist');
+    expect(durability).toContain('navigator.storage.estimate');
+    expect(durability).toContain('HIGH_WATERMARK');
+    expect(durability).toContain('pruneDisposableEdgeReadModels');
+    expect(durability).not.toContain('localDb.mutations.bulkDelete');
+
+    expect(types).toContain('nextRetryAt?: number');
+    expect(types).toContain('statusUpdatedAt?: number');
+    expect(db).toContain('recoverStuckSyncingMutations');
+    expect(db).toContain('SYNC_RECOVERY_REQUEUED');
+    expect(db).toContain('Math.pow(2');
+    expect(db).toContain('nextRetryAt');
+
+    expect(engine).toContain("BroadcastChannel('ghims-clinical-sync')");
+    expect(engine).toContain("ghims-sync:");
+    expect(engine).toContain('{ ifAvailable: true }');
+    expect(engine).toContain('processSyncQueueUnlocked');
+    expect(engine).toContain('initializeEdgeDurability');
+    expect(engine).toContain('recoverStuckSyncingMutations');
+  });
+
   test('clinical AI requires explicit activation and has no diagnostic fallback synthesis',async()=>{
     const gateway=await source('lib/ai/gateway.ts');
     const soap=await source('lib/ai/flows/soap-drafter.ts');

@@ -678,156 +678,311 @@ export function OpdMasterWorkspace() {
     setActiveTab('QUEUE');
   };
 
-  // HANDLER: Save Triage Vitals
-  const handleSaveVitals = (vitals: ComprehensiveVitals) => {
-    setEncounters((prev) =>
-      prev.map((e) => {
-        if (e.id === activeEncounter.id) {
-          return {
-            ...e,
-            vitalsAssessment: vitals,
-            currentStage: 'SPECIALTY_CONSULTATION',
-            status: 'IN_CONSULTATION',
-            stageProgress: {
-              ...e.stageProgress,
-              NURSING_INTAKE: { status: 'COMPLETED', enteredAt: Date.now() - 600000, completedAt: Date.now(), completedBy: 'Nurse R. Chen' },
-              SPECIALTY_CONSULTATION: { status: 'ACTIVE', enteredAt: Date.now() },
-            },
-          };
-        }
-        return e;
-      })
+  // HANDLER: Save Triage Vitals through authoritative encounter evidence.
+  const handleSaveVitals = async (vitals: ComprehensiveVitals) => {
+    const vitalsResult = await executeActiveTenantCommand<Record<string, unknown>>(
+      'RecordVitalsCommand',
+      {
+        encounterId: activeEncounter.id,
+        patientId: activeEncounter.patientId,
+        heartRate: vitals.heartRate,
+        bloodPressure: `${vitals.systolicBp}/${vitals.diastolicBp}`,
+        temperature: vitals.temperatureCelsius,
+        respiratoryRate: vitals.respiratoryRate,
+        oxygenSaturation: vitals.spo2Percent,
+        onSupplementalOxygen: vitals.onSupplementalOxygen,
+        gcsScore: vitals.gcsScore,
+        consciousness:
+          vitals.consciousnessAvpu === 'ALERT'
+            ? 'Alert'
+            : vitals.consciousnessAvpu === 'VOICE'
+              ? 'Voice'
+              : vitals.consciousnessAvpu === 'PAIN'
+                ? 'Pain'
+                : vitals.consciousnessAvpu === 'UNRESPONSIVE'
+                  ? 'Unresponsive'
+                  : undefined,
+        measuredAt: vitals.measuredAt,
+      },
+      {
+        idempotencyKey: `opd-vitals:${activeEncounter.id}:${vitals.measuredAt}`,
+        offlineQueue: {
+          enabled: true,
+          collection: 'encounterEvidence',
+          resourceId: `vitals-${activeEncounter.id}-${vitals.measuredAt}`,
+          action: 'CREATE',
+          optimisticCache: true,
+        },
+      }
     );
-    recordEvent('TRIAGE_VITALS_RECORDED', `NEWS2 Score: ${vitals.news2Score} (${vitals.news2Risk}). BP: ${vitals.systolicBp}/${vitals.diastolicBp}, HR: ${vitals.heartRate}.`, vitals);
+    if (!vitalsResult.success) {
+      throw new Error(vitalsResult.error?.message || 'Vitals recording failed.');
+    }
+
+    const transition = await executeActiveTenantCommand(
+      'AdvanceStageCommand',
+      {
+        encounterId: activeEncounter.id,
+        currentStage: 'TRIAGE',
+        targetStage: 'CONSULTATION',
+        evidenceId: vitalsResult.entityId,
+      },
+      { idempotencyKey: `opd-stage-triage-consult:${activeEncounter.id}` }
+    );
+    if (!transition.success) {
+      throw new Error(transition.error?.message || 'Triage stage transition failed.');
+    }
+
+    setEncounters((prev) =>
+      prev.map((e) =>
+        e.id === activeEncounter.id
+          ? {
+              ...e,
+              vitalsAssessment: vitals,
+              currentStage: 'SPECIALTY_CONSULTATION',
+              status: 'IN_CONSULTATION',
+              stageProgress: {
+                ...e.stageProgress,
+                NURSING_INTAKE: {
+                  status: 'COMPLETED',
+                  enteredAt: Date.now() - 600000,
+                  completedAt: Date.now(),
+                  completedBy: 'Authoritative Clinical Documentation',
+                },
+                SPECIALTY_CONSULTATION: { status: 'ACTIVE', enteredAt: Date.now() },
+              },
+            }
+          : e
+      )
+    );
+    recordEvent('TRIAGE_VITALS_RECORDED', `Vitals committed for encounter ${activeEncounter.id}.`, vitals);
     setActiveTab('CONSULTATION');
   };
 
-  // HANDLER: Save Consultation SOAP
-  const handleSaveConsultation = (soap: SoapDocumentation) => {
-    setEncounters((prev) =>
-      prev.map((e) => {
-        if (e.id === activeEncounter.id) {
-          return {
-            ...e,
-            soap,
-            currentStage: 'DIAGNOSTIC_ORDERS',
-            stageProgress: {
-              ...e.stageProgress,
-              SPECIALTY_CONSULTATION: { status: 'COMPLETED', enteredAt: Date.now() - 1200000, completedAt: Date.now(), completedBy: 'Dr. Sarah Jenkins' },
-              DIAGNOSTIC_ORDERS: { status: 'ACTIVE', enteredAt: Date.now() },
-            },
-          };
-        }
-        return e;
-      })
+  // HANDLER: Save Consultation SOAP as signed encounter evidence.
+  const handleSaveConsultation = async (soap: SoapDocumentation) => {
+    const noteContent = [
+      `Subjective: ${soap.subjective || ''}`,
+      `Objective: ${soap.objective || ''}`,
+      `Assessment: ${soap.assessment || ''}`,
+      `Plan: ${soap.plan || ''}`,
+    ].join('\n\n');
+
+    const noteResult = await executeActiveTenantCommand<Record<string, unknown>>(
+      'SignClinicalNoteCommand',
+      {
+        encounterId: activeEncounter.id,
+        patientId: activeEncounter.patientId,
+        category: 'SOAP',
+        content: noteContent,
+        acceptedStructuredData: {
+          diagnoses: soap.diagnoses || [],
+          specialtyTemplate: soap.specialtyTemplate,
+          specialtyData: soap.specialtyData || soap.specialtySpecificData,
+        },
+      },
+      {
+        idempotencyKey: `opd-soap:${activeEncounter.id}:${soap.completedAt || Date.now()}`,
+        offlineQueue: {
+          enabled: true,
+          collection: 'encounterEvidence',
+          resourceId: `soap-${activeEncounter.id}-${soap.completedAt || Date.now()}`,
+          action: 'CREATE',
+          optimisticCache: true,
+        },
+      }
     );
-    recordEvent('CONSULTATION_COMMITTED', `SOAP Signed by Dr. Sarah Jenkins. Primary Diagnosis: ${soap.diagnoses?.[0]?.code || 'N/A'} (${soap.diagnoses?.[0]?.description || 'Clinical assessment'}).`, soap);
+    if (!noteResult.success) {
+      throw new Error(noteResult.error?.message || 'Clinical note signing failed.');
+    }
+
+    const transition = await executeActiveTenantCommand(
+      'AdvanceStageCommand',
+      {
+        encounterId: activeEncounter.id,
+        currentStage: 'CONSULTATION',
+        targetStage: 'DIAGNOSTICS',
+        evidenceId: noteResult.entityId,
+      },
+      { idempotencyKey: `opd-stage-consult-diagnostics:${activeEncounter.id}` }
+    );
+    if (!transition.success) {
+      throw new Error(transition.error?.message || 'Consultation stage transition failed.');
+    }
+
+    setEncounters((prev) =>
+      prev.map((e) =>
+        e.id === activeEncounter.id
+          ? {
+              ...e,
+              soap,
+              currentStage: 'DIAGNOSTIC_ORDERS',
+              stageProgress: {
+                ...e.stageProgress,
+                SPECIALTY_CONSULTATION: {
+                  status: 'COMPLETED',
+                  enteredAt: Date.now() - 1200000,
+                  completedAt: Date.now(),
+                  completedBy: 'Signed Clinical Evidence',
+                },
+                DIAGNOSTIC_ORDERS: { status: 'ACTIVE', enteredAt: Date.now() },
+              },
+            }
+          : e
+      )
+    );
+    recordEvent('CONSULTATION_COMMITTED', `Signed SOAP evidence ${noteResult.entityId || ''}.`, soap);
     setActiveTab('DIAGNOSTICS');
   };
 
-  // HANDLER: Add Diagnostic Order
-  const handleAddDiagnosticOrder = (order: DiagnosticOrderItem) => {
-    setEncounters((prev) =>
-      prev.map((e) => {
-        if (e.id === activeEncounter.id) {
-          const updatedOrders = [...e.diagnosticOrders, order];
-          // Update Invoice Line Items
-          const newLineItem = {
-            id: `li-${Date.now()}`,
-            serviceCode: order.testCode,
-            description: order.testName,
-            category: order.category as any,
-            quantity: 1,
-            unitPriceMinorUnits: order.costAmountMinorUnits,
-            totalMinorUnits: order.costAmountMinorUnits,
-          };
-          const updatedLines = [...(e.invoice?.lineItems || []), newLineItem];
-          const newTotal = updatedLines.reduce((acc, l) => acc + l.totalMinorUnits, 0);
-          const payerPct = e.insuranceDetails?.coveragePercent || 0;
-          const payerAmt = Math.round((newTotal * payerPct) / 100);
-          const copayAmt = newTotal - payerAmt;
-
-          return {
-            ...e,
-            diagnosticOrders: updatedOrders,
-            invoice: {
-              ...e.invoice!,
-              lineItems: updatedLines,
-              totalAmountMinorUnits: newTotal,
-              payerCoverageAmountMinorUnits: payerAmt,
-              patientCopayAmountMinorUnits: copayAmt,
-              balanceDueMinorUnits: copayAmt - (e.invoice?.amountPaidMinorUnits || 0),
-            },
-          };
-        }
-        return e;
-      })
+  // HANDLER: Add Diagnostic Order through the clinical order domain.
+  const handleAddDiagnosticOrder = async (order: DiagnosticOrderItem) => {
+    const orderResult = await executeActiveTenantCommand<Record<string, unknown>>(
+      'PlaceDiagnosticOrderCommand',
+      {
+        encounterId: activeEncounter.id,
+        patientId: activeEncounter.patientId,
+        orderType:
+          order.type === 'RADIOLOGY'
+            ? 'RADIOLOGY'
+            : order.type === 'PROCEDURE'
+              ? 'PROCEDURE'
+              : 'LAB',
+        catalogCode: order.testCode || order.code || order.id,
+        orderName: order.testName,
+        priority:
+          String(order.urgency || '').toUpperCase().includes('STAT')
+            ? 'STAT'
+            : String(order.urgency || '').toUpperCase() === 'URGENT'
+              ? 'URGENT'
+              : 'ROUTINE',
+        clinicalIndication: order.clinicalIndication || order.reasonForOrder || 'Clinical evaluation',
+        estimatedCostMinorUnits: order.costAmountMinorUnits || Math.round((order.price || 0) * 100),
+      },
+      {
+        idempotencyKey: `opd-diagnostic:${activeEncounter.id}:${order.id}`,
+        offlineQueue: {
+          enabled: true,
+          collection: 'orders',
+          resourceId: order.id,
+          action: 'CREATE',
+          optimisticCache: true,
+        },
+      }
     );
-    recordEvent('DIAGNOSTIC_ORDERED', `Ordered: ${order.testName} (${order.category}) — Urgency: ${order.urgency}`, order);
+    if (!orderResult.success) {
+      throw new Error(orderResult.error?.message || 'Diagnostic order failed.');
+    }
+
+    const governedOrder: DiagnosticOrderItem = {
+      ...order,
+      id: orderResult.entityId || order.id,
+      encounterId: activeEncounter.id,
+      patientId: activeEncounter.patientId,
+      status: 'ORDERED',
+    };
+
+    setEncounters((prev) =>
+      prev.map((e) =>
+        e.id === activeEncounter.id
+          ? { ...e, diagnosticOrders: [...e.diagnosticOrders, governedOrder] }
+          : e
+      )
+    );
+    recordEvent('DIAGNOSTIC_ORDERED', `Ordered: ${order.testName}.`, governedOrder);
   };
 
-  // HANDLER: Add Prescription Item
-  const handleAddPrescription = (item: PharmacyPrescriptionItem) => {
-    setEncounters((prev) =>
-      prev.map((e) => {
-        if (e.id === activeEncounter.id) {
-          const updatedRx = [...e.prescriptions, item];
-          // Update Invoice Line Items
-          const newLineItem = {
-            id: `li-rx-${Date.now()}`,
-            serviceCode: item.medicationCode,
-            description: `${item.drugName} ${item.dosage} (${item.quantity} ${item.formulation}s)`,
-            category: 'PHARMACY' as const,
-            quantity: 1,
-            unitPriceMinorUnits: item.totalAmountMinorUnits,
-            totalMinorUnits: item.totalAmountMinorUnits,
-          };
-          const updatedLines = [...(e.invoice?.lineItems || []), newLineItem];
-          const newTotal = updatedLines.reduce((acc, l) => acc + l.totalMinorUnits, 0);
-          const payerPct = e.insuranceDetails?.coveragePercent || 0;
-          const payerAmt = Math.round((newTotal * payerPct) / 100);
-          const copayAmt = newTotal - payerAmt;
-
-          return {
-            ...e,
-            prescriptions: updatedRx,
-            invoice: {
-              ...e.invoice!,
-              lineItems: updatedLines,
-              totalAmountMinorUnits: newTotal,
-              payerCoverageAmountMinorUnits: payerAmt,
-              patientCopayAmountMinorUnits: copayAmt,
-              balanceDueMinorUnits: copayAmt - (e.invoice?.amountPaidMinorUnits || 0),
-            },
-          };
-        }
-        return e;
-      })
+  // HANDLER: Add Prescription Item through credential-gated prescribing.
+  const handleAddPrescription = async (item: PharmacyPrescriptionItem) => {
+    const result = await executeActiveTenantCommand<Record<string, unknown>>(
+      'PrescribeMedicationCommand',
+      {
+        encounterId: activeEncounter.id,
+        patientId: activeEncounter.patientId,
+        drugCode: item.medicationCode || item.id,
+        drugName: item.drugName,
+        dosage: item.dosage,
+        route: item.route,
+        frequency: item.frequency,
+        durationDays: item.durationDays,
+        instructions: item.instructions || item.specialInstructions,
+      },
+      {
+        idempotencyKey: `opd-rx:${activeEncounter.id}:${item.id}`,
+        offlineQueue: {
+          enabled: true,
+          collection: 'prescriptions',
+          resourceId: item.id,
+          action: 'CREATE',
+          optimisticCache: true,
+        },
+      }
     );
-    recordEvent('PRESCRIPTION_ISSUED', `e-Prescribed: ${item.drugName} ${item.dosage} — ${item.frequency} x ${item.durationDays}d`, item);
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Prescription failed.');
+    }
+
+    const governedPrescription: PharmacyPrescriptionItem = {
+      ...item,
+      id: result.entityId || item.id,
+      encounterId: activeEncounter.id,
+      status: 'PRESCRIBED',
+    };
+    setEncounters((prev) =>
+      prev.map((e) =>
+        e.id === activeEncounter.id
+          ? { ...e, prescriptions: [...e.prescriptions, governedPrescription] }
+          : e
+      )
+    );
+    recordEvent('PRESCRIPTION_ISSUED', `Prescription ${governedPrescription.id} committed.`, governedPrescription);
   };
 
-  // HANDLER: Dispense Prescription
-  const handleDispensePrescription = (rxId: string, dispensedBy: string) => {
-    setEncounters((prev) =>
-      prev.map((e) => {
-        if (e.id === activeEncounter.id) {
-          const updatedRx = e.prescriptions.map((rx) =>
-            rx.id === rxId
-              ? {
-                  ...rx,
-                  status: 'DISPENSED' as const,
-                  dispensedAt: Date.now(),
-                  dispensedBy,
-                }
-              : rx
-          );
-          return { ...e, prescriptions: updatedRx };
-        }
-        return e;
-      })
+  // HANDLER: Dispense Prescription through the pharmacy domain.
+  // CI-0D will extend this command to atomic inventory/consumption charging.
+  const handleDispensePrescription = async (rxId: string, dispensedBy: string) => {
+    const prescription = activeEncounter.prescriptions.find((rx) => rx.id === rxId);
+    if (!prescription) throw new Error('PRESCRIPTION_NOT_FOUND');
+
+    const result = await executeActiveTenantCommand(
+      'DispensePrescriptionCommand',
+      {
+        prescriptionId: rxId,
+        quantityDispensed: prescription.quantity || prescription.quantityPrescribed || 1,
+        batchNumber: prescription.batchAllocation?.batchNumber || prescription.allocatedBatch?.batchNumber,
+        expiryDate: prescription.batchAllocation?.expiryDate || prescription.allocatedBatch?.expiryDate,
+        dispensedByName: dispensedBy,
+      },
+      {
+        idempotencyKey: `opd-dispense:${rxId}`,
+        offlineQueue: {
+          enabled: true,
+          collection: 'prescriptions',
+          resourceId: rxId,
+          action: 'UPDATE',
+          optimisticCache: true,
+        },
+      }
     );
-    recordEvent('MEDICATION_DISPENSED', `Medication dispensed with FEFO batch verification by ${dispensedBy}.`);
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Medication dispensing failed.');
+    }
+
+    setEncounters((prev) =>
+      prev.map((e) =>
+        e.id === activeEncounter.id
+          ? {
+              ...e,
+              prescriptions: e.prescriptions.map((rx) =>
+                rx.id === rxId
+                  ? { ...rx, status: 'DISPENSED', dispensedAt: Date.now(), dispensedBy }
+                  : rx
+              ),
+            }
+          : e
+      )
+    );
+    recordEvent('MEDICATION_DISPENSED', `Medication ${rxId} dispensed by ${dispensedBy}.`);
   };
 
   // HANDLER: Cash settlement — the pilot is intentionally cash-only.
@@ -914,29 +1069,62 @@ export function OpdMasterWorkspace() {
     setActiveTab('DISPOSITION');
   };
 
-  // HANDLER: Commit Disposition & Seal Encounter
-  const handleCommitDisposition = (disposition: EncounterDisposition) => {
-    setEncounters((prev) =>
-      prev.map((e) => {
-        if (e.id === activeEncounter.id) {
-          return {
-            ...e,
-            disposition,
-            currentStage: 'TIMELINE_AUDIT',
-            status: 'COMPLETED',
-            completedAt: Date.now(),
-            stageProgress: {
-              ...e.stageProgress,
-              DISPOSITION_CLOSURE: { status: 'COMPLETED', enteredAt: Date.now() - 300000, completedAt: Date.now(), completedBy: disposition.completedBy },
-              TIMELINE_AUDIT: { status: 'COMPLETED', enteredAt: Date.now(), completedAt: Date.now(), completedBy: 'System Audit Engine' },
-            },
-          };
-        }
-        return e;
-      })
+  // HANDLER: Commit Disposition through the encounter lifecycle service.
+  const handleCommitDisposition = async (disposition: EncounterDisposition) => {
+    const result = await executeActiveTenantCommand(
+      'CommitEncounterDispositionCommand',
+      {
+        encounterId: activeEncounter.id,
+        dispositionType: disposition.type,
+        patientInstructions: disposition.patientInstructions,
+        warningSignsRedFlags: disposition.warningSignsRedFlags,
+        followUpScheduledDate: disposition.followUpScheduledDate,
+        followUpDepartment: disposition.followUpDepartment,
+        inpatientAdmissionRequest: disposition.inpatientAdmissionRequest,
+      },
+      { idempotencyKey: `opd-disposition:${activeEncounter.id}` }
     );
-    recordEvent('ENCOUNTER_CLOSED', `Encounter finalized with disposition: ${disposition.type}. Cryptographically sealed.`, disposition);
-    setActiveTab('AUDIT');
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Encounter disposition failed.');
+    }
+
+    const awaitingAdmission = disposition.type === 'INPATIENT_ADMISSION_RECOMMENDED';
+    setEncounters((prev) =>
+      prev.map((e) =>
+        e.id === activeEncounter.id
+          ? {
+              ...e,
+              disposition,
+              currentStage: awaitingAdmission ? 'DISPOSITION_REFERRAL' : 'TIMELINE_AUDIT',
+              status: awaitingAdmission ? 'AWAITING_INPATIENT_ADMISSION' : 'COMPLETED',
+              completedAt: awaitingAdmission ? undefined : Date.now(),
+              stageProgress: {
+                ...e.stageProgress,
+                DISPOSITION_CLOSURE: {
+                  status: awaitingAdmission ? 'ACTIVE' : 'COMPLETED',
+                  enteredAt: Date.now() - 300000,
+                  completedAt: awaitingAdmission ? undefined : Date.now(),
+                  completedBy: disposition.completedBy,
+                },
+                TIMELINE_AUDIT: awaitingAdmission
+                  ? { status: 'PENDING' }
+                  : {
+                      status: 'COMPLETED',
+                      enteredAt: Date.now(),
+                      completedAt: Date.now(),
+                      completedBy: 'Server Audit Pipeline',
+                    },
+              },
+            }
+          : e
+      )
+    );
+    recordEvent(
+      awaitingAdmission ? 'INPATIENT_ADMISSION_REQUESTED' : 'ENCOUNTER_CLOSED',
+      `Encounter disposition committed: ${disposition.type}.`,
+      disposition
+    );
+    setActiveTab(awaitingAdmission ? 'DISPOSITION' : 'AUDIT');
   };
 
   // Navigation Items

@@ -275,7 +275,7 @@ export class TransactionManager {
         : null;
       const additionalStateSnapshots: Array<{
         write: AdditionalStateWrite;
-        ref: typeof additionalStateRefs[number]['ref'];
+        ref: (typeof additionalStateRefs)[number]['ref'];
         data: Record<string, unknown> | null;
       }> = [];
       for (const item of additionalStateRefs) {

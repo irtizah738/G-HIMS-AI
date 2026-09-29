@@ -209,4 +209,42 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
     expect(rules).toContain('match /clinicalIntelligenceEvaluations/{evaluationId}');
     expect(rules).toContain('allow read, write: if false;');
   });
+
+  test('inpatient orders have an authoritative resolution path so readiness findings are actionable', async () => {
+    const inpatient = await source(
+      'lib/backend/services/inpatient-clinical-domain-service.ts'
+    );
+    const bus = await source('lib/backend/commands/command-bus.ts');
+    const readiness = await source(
+      'lib/clinical/intelligence/discharge-readiness-service.ts'
+    );
+    const workspace = await source('components/clinical/ipd-pathway-modal.tsx');
+
+    expect(inpatient).toContain('ResolveInpatientOrderPayload');
+    expect(inpatient).toContain('public static async resolveOrder');
+    expect(inpatient).toContain("eventType: 'INPATIENT_ORDER_RESOLVED'");
+    expect(inpatient).toContain('expectedPrimaryServerVersion');
+    expect(bus).toContain("'ResolveInpatientOrderCommand'");
+    expect(readiness).toContain("'INPATIENT_ORDER_RESOLVED'");
+    expect(workspace).toContain("'ResolveInpatientOrderCommand'");
+    expect(workspace).toContain("handleResolveOrder(ord.id, 'COMPLETED')");
+    expect(workspace).toContain("handleResolveOrder(ord.id, 'DISCONTINUED')");
+  });
+
+  test('immutable Clinical Intelligence evaluation history is preserved across destructive projection rebuilds', async () => {
+    const workers = await source('lib/backend/projections/projection-workers.ts');
+    const recovery = await source(
+      'lib/backend/recovery/projection-recovery-service.ts'
+    );
+
+    const clearListStart = workers.indexOf("for (const collectionName of [");
+    const clearListEnd = workers.indexOf("]) {", clearListStart);
+    const clearList = workers.slice(clearListStart, clearListEnd);
+
+    expect(clearList).toContain("'dischargeReadinessProjections'");
+    expect(clearList).toContain("'dischargeReadinessCheckpoints'");
+    expect(clearList).not.toContain("'clinicalIntelligenceEvaluations'");
+    expect(recovery).toContain("'dischargeReadinessProjections'");
+    expect(recovery).not.toContain("'clinicalIntelligenceEvaluations'");
+  });
 });

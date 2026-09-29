@@ -91,6 +91,91 @@ function toSourceEvent(event: DomainEventEnvelope): Patient360SourceEvent {
 }
 
 export class Patient360ProjectionService {
+  public static async getProjection(
+    tenantId: string,
+    patientId: string
+  ): Promise<Patient360Projection | null> {
+    const db = getAdminFirestore();
+    if (!db) {
+      throw new Error('PATIENT360_PROJECTION_STORE_UNAVAILABLE');
+    }
+
+    const snapshot = await db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection('patient360Projections')
+      .doc(patientId)
+      .get();
+
+    return snapshot.exists
+      ? (snapshot.data() as Patient360Projection)
+      : null;
+  }
+
+  public static async getTimeline(
+    tenantId: string,
+    patientId: string,
+    limit = 200
+  ): Promise<Patient360TimelineItem[]> {
+    const db = getAdminFirestore();
+    if (!db) {
+      throw new Error('PATIENT360_PROJECTION_STORE_UNAVAILABLE');
+    }
+
+    const safeLimit = Math.max(1, Math.min(500, limit));
+    const snapshot = await db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection('patient360Timeline')
+      .where('patientId', '==', patientId)
+      .limit(safeLimit)
+      .get();
+
+    return snapshot.docs
+      .map((document) => document.data() as Patient360TimelineItem)
+      .sort(
+        (left, right) =>
+          Number(right.occurredAt || 0) - Number(left.occurredAt || 0) ||
+          right.eventId.localeCompare(left.eventId)
+      )
+      .slice(0, safeLimit);
+  }
+
+  public static async readClinicalView(
+    tenantId: string,
+    patientId: string,
+    timelineLimit = 200
+  ): Promise<{
+    projection: Patient360Projection | null;
+    timeline: Patient360TimelineItem[];
+  }> {
+    const projection = await this.getProjection(tenantId, patientId);
+    if (!projection) {
+      return { projection: null, timeline: [] };
+    }
+
+    if (
+      projection.tenantId !== tenantId ||
+      projection.patientId !== patientId
+    ) {
+      throw new Error('PATIENT360_PROJECTION_SCOPE_MISMATCH');
+    }
+
+    const timeline = await this.getTimeline(
+      tenantId,
+      patientId,
+      timelineLimit
+    );
+
+    if (timeline.some((item) =>
+      item.tenantId !== tenantId || item.patientId !== patientId
+    )) {
+      throw new Error('PATIENT360_TIMELINE_SCOPE_MISMATCH');
+    }
+
+    return { projection, timeline };
+  }
+
   private static async loadPatientEvents(
     tenantId: string,
     patientId: string

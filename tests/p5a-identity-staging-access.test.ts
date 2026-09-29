@@ -111,11 +111,16 @@ describe('G-HIMS P5A identity and staging access boundary',()=>{
 
   test('offline commands are UID-bound and only PHI-free navigation shells may be cached',async()=>{
     const sync=await source('lib/offline/sync-engine.ts');
+    const secure=await source('lib/offline/secure-store.ts');
     const sw=await source('public/sw.js');
     const db=await source('lib/offline/db.ts');
 
     expect(sync).toContain('actorId: cached.user.uid');
-    expect(sync).toContain('OFFLINE_ACTOR_MISMATCH');
+    expect(sync).toContain('getSecurePendingMutations(activeTenantId, cached.user.uid)');
+    expect(secure).toContain('item.actorId === normalizedActorId');
+    expect(secure.indexOf('item.actorId === normalizedActorId')).toBeLessThan(
+      secure.indexOf('rows.map(decryptMutation)')
+    );
     expect(sw).toContain("url.pathname === '/' || url.pathname === '/login'");
     expect(sw).toContain('Never cache rendered clinical/deep-link HTML');
     expect(sw).toContain("caches.match('/')");

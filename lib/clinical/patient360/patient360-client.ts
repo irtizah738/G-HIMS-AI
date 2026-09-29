@@ -49,11 +49,12 @@ async function loadLocalPatient360(
     return null;
   }
 
-  const projections = await listSecureEdgeEntities<Patient360Projection>(
+  const projectionRows = await listSecureEdgeEntities<Record<string, unknown>>(
     tenantId,
     cached.user.uid,
     'patient360Projections'
   );
+  const projections = projectionRows as unknown as Patient360Projection[];
 
   const projection =
     projections.find((item) => item.patientId === patientId) || null;

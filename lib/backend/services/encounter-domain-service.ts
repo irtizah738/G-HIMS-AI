@@ -80,7 +80,7 @@ interface EncounterState {
   operationalState: OperationalQueueState;
   financialClearanceState: FinancialClearanceState;
   resourceAssignmentState: ResourceAssignmentState;
-  priority: 'STAT' | 'URGENT' | 'ROUTINE';
+  priority: 'STAT' | 'URGENT' | 'ROUTINE' | 'EMERGENCY';
   assignedProviderId: string;
   createdAt: number;
   updatedAt: number;
@@ -100,16 +100,58 @@ export class EncounterDomainService {
     const key = this.cacheKey(tenantId, encounterId);
 
     if (DomainStateRepository.isAvailable()) {
-      const persisted = await DomainStateRepository.getById<EncounterState>(
+      const persisted = await DomainStateRepository.getById<Record<string, unknown>>(
         tenantId,
         'encounters',
         encounterId
       );
 
-      if (persisted) this.encounterCache.set(key, persisted);
-      else this.encounterCache.delete(key);
+      if (!persisted) {
+        this.encounterCache.delete(key);
+        return null;
+      }
 
-      return persisted;
+      const encounterType = String(
+        persisted.encounterType || persisted.type || 'OPD'
+      ).toUpperCase() as CreateEncounterPayload['encounterType'];
+      const rawStage = String(
+        persisted.currentStage || persisted.currentStageId || 'REGISTERED'
+      );
+      const clinicalState =
+        (persisted.clinicalState as ClinicalEncounterState | undefined) ||
+        normalizeClinicalEncounterState(rawStage) ||
+        'REGISTERED';
+
+      const normalized: EncounterState = {
+        encounterId: String(persisted.encounterId || persisted.id || encounterId),
+        tenantId: String(persisted.tenantId || tenantId),
+        patientId: String(persisted.patientId || ''),
+        encounterType,
+        chiefComplaint: String(persisted.chiefComplaint || ''),
+        departmentId: String(persisted.departmentId || persisted.department || ''),
+        status:
+          String(persisted.status || 'ACTIVE').toUpperCase() === 'IN_PROGRESS'
+            ? 'ACTIVE'
+            : String(persisted.status || 'ACTIVE').toUpperCase(),
+        currentStage: clinicalState,
+        clinicalState,
+        operationalState:
+          (persisted.operationalState as OperationalQueueState | undefined) || 'NOT_QUEUED',
+        financialClearanceState:
+          (persisted.financialClearanceState as FinancialClearanceState | undefined) ||
+          (encounterType === 'EMERGENCY' || encounterType === 'IPD'
+            ? 'NOT_REQUIRED'
+            : 'CONSULTATION_PAYMENT_PENDING'),
+        resourceAssignmentState:
+          (persisted.resourceAssignmentState as ResourceAssignmentState | undefined) || 'NONE',
+        priority: String(persisted.priority || 'ROUTINE').toUpperCase() as EncounterState['priority'],
+        assignedProviderId: String(persisted.assignedProviderId || persisted.assignedDoctor || ''),
+        createdAt: Number(persisted.createdAt || persisted.startedAt || Date.now()),
+        updatedAt: Number(persisted.updatedAt || persisted.startedAt || Date.now()),
+      };
+
+      this.encounterCache.set(key, normalized);
+      return normalized;
     }
 
     return this.encounterCache.get(key) || null;

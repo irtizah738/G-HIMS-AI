@@ -193,6 +193,7 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
     const tx = await source('lib/backend/transactions/transaction-manager.ts');
 
     expect(service).toContain("requiredRoles: ['DOCTOR', 'CONSULTANT', 'SYSTEM_ADMIN']");
+    expect(service).toContain("requiredPrivilege: 'DISCHARGE_INPATIENT'");
     expect(service).toContain("'DISCHARGE_READINESS_EVALUATION_STALE'");
     expect(service).toContain("'DISCHARGE_READINESS_BLOCKERS_PRESENT'");
     expect(service).toContain("eventType: 'DISCHARGE_READINESS_REVIEW_RECORDED'");

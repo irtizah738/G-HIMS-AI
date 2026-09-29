@@ -417,7 +417,7 @@ class ClinicalSyncEngine {
         throw new Error('AUTHENTICATION_REQUIRED: offline replay requires an active authenticated session.');
       }
 
-      const pending = await getPendingMutations(tenantId);
+      const pending = await getSecurePendingMutations(tenantId);
       const byTenant = new Map<string, OfflineMutation[]>();
       for (const mutation of pending) {
         const list = byTenant.get(mutation.tenantId) || [];

@@ -23,6 +23,7 @@ import { ScmOfflineDomainService } from '../services/scm-offline-domain-service'
 import { CashReceiptDomainService } from '../services/cash-receipt-domain-service';
 import { DiagnosticResultDomainService } from '../services/diagnostic-result-domain-service';
 import { PatientClinicalKnowledgeDomainService } from '../services/patient-clinical-knowledge-domain-service';
+import { DischargeReadinessReviewDomainService } from '../services/discharge-readiness-review-domain-service';
 import { IdempotencyService } from '../idempotency/idempotency-service';
 import { emitOperationalEvent, operationalTimer } from '@/lib/observability/server-telemetry';
 
@@ -224,6 +225,15 @@ export class CommandBus {
 
         case 'ReviewPatientClinicalKnowledgeCommand':
           result = await PatientClinicalKnowledgeDomainService.review(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecordDischargeReadinessReviewCommand':
+          result = await DischargeReadinessReviewDomainService.record(
             context,
             command.commandId,
             command.idempotencyKey,

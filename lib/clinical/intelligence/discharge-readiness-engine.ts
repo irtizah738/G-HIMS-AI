@@ -7,8 +7,8 @@ import type {
   DischargeReadinessState,
 } from '@/types/discharge-readiness';
 
-export const DISCHARGE_READINESS_RULESET_VERSION = 'CI7-DR-1.0.0';
-export const DISCHARGE_READINESS_ENGINE_VERSION = 1;
+export const DISCHARGE_READINESS_RULESET_VERSION = 'CI7-DR-1.1.0';
+export const DISCHARGE_READINESS_ENGINE_VERSION = 2;
 const VITALS_WARNING_AGE_MS = 8 * 60 * 60 * 1000;
 
 function text(value: unknown): string {

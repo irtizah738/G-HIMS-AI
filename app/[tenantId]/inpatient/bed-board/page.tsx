@@ -123,9 +123,10 @@ export default function InpatientBedBoardPage() {
     patientMRN: '',
     patientAge: 45,
     patientGender: 'Male' as 'Male' | 'Female' | 'Other',
-    primaryDiagnosis: 'Community Acquired Pneumonia',
-    assignedDoctor: 'Dr. Sarah Jenkins, FACS',
-    assignedNurse: 'Nurse Clara Oswald, RN',
+    primaryDiagnosis: '',
+    priority: 'ROUTINE' as 'ROUTINE' | 'URGENT' | 'STAT',
+    assignedDoctor: '',
+    assignedNurse: '',
     isolationType: 'none' as IsolationType,
     oxygenPort: true,
     telemetryEnabled: false,
@@ -136,10 +137,10 @@ export default function InpatientBedBoardPage() {
   // Transfer Form State
   const [transferForm, setTransferForm] = useState({
     targetBedId: '',
-    requestedBy: 'Dr. David Rodriguez, MD',
-    approvedBy: 'Charge Nurse Maya Patel, BSN',
-    reason: 'Clinical condition escalation requiring continuous ICU telemetry & ventilation support',
-    clinicalIndication: 'Step-up care / Post-op hemodynamic instability',
+    requestedBy: '',
+    approvedBy: '',
+    reason: '',
+    clinicalIndication: '',
   });
 
   // Discharge Form State
@@ -296,9 +297,10 @@ export default function InpatientBedBoardPage() {
       patientMRN: '',
       patientAge: 52,
       patientGender: 'Male',
-      primaryDiagnosis: 'Acute Exacerbation / Inpatient Care',
-      assignedDoctor: bed.assignedDoctor || 'Dr. Sarah Jenkins, FACS',
-      assignedNurse: bed.assignedNurse || 'Nurse Clara Oswald, RN',
+      primaryDiagnosis: '',
+      priority: 'ROUTINE',
+      assignedDoctor: bed.assignedDoctor || '',
+      assignedNurse: bed.assignedNurse || '',
       isolationType: bed.isolationType || 'none',
       oxygenPort: bed.oxygenPort,
       telemetryEnabled: bed.telemetryEnabled,
@@ -345,8 +347,7 @@ export default function InpatientBedBoardPage() {
           targetWard: selectedBed.wardName || selectedBed.wardId,
           assignedDoctor: admitForm.assignedDoctor || undefined,
           assignedNurse: admitForm.assignedNurse || undefined,
-          priority:
-            calculatedAdmissionNEWS2.score >= 5 ? 'URGENT' : 'ROUTINE',
+          priority: admitForm.priority,
         },
         {
           idempotencyKey:
@@ -376,10 +377,10 @@ export default function InpatientBedBoardPage() {
     const firstAvail = availableTargetBeds[0]?.id || '';
     setTransferForm({
       targetBedId: firstAvail,
-      requestedBy: bed.assignedDoctor || 'Dr. David Rodriguez, MD',
-      approvedBy: 'Charge Nurse Maya Patel, BSN',
-      reason: 'Clinical step-down / ward reallocation',
-      clinicalIndication: 'Patient condition stabilized under treatment protocol',
+      requestedBy: '',
+      approvedBy: '',
+      reason: '',
+      clinicalIndication: '',
     });
     setTransferModalOpen(true);
   };
@@ -1275,7 +1276,7 @@ export default function InpatientBedBoardPage() {
                                           <span className="truncate max-w-[130px]">{bed.patientName}</span>
                                         </div>
                                         <div className="text-[11px] text-slate-500 font-mono dark:text-slate-400">
-                                          {bed.patientMRN} • {bed.patientAge || 54}y • {bed.patientGender || 'Male'}
+                                          {bed.patientMRN || 'MRN not loaded'} • {bed.patientAge ? `${bed.patientAge}y` : 'Age not loaded'} • {bed.patientGender || 'Gender not loaded'}
                                         </div>
                                       </div>
 
@@ -1300,11 +1301,11 @@ export default function InpatientBedBoardPage() {
                                     <div className="mt-2.5 space-y-1 text-[11px] text-slate-600 border-t border-slate-100 pt-2 dark:border-slate-700 dark:text-slate-300">
                                       <div className="flex items-center justify-between">
                                         <span className="text-slate-400">Doctor:</span>
-                                        <span className="font-medium truncate max-w-[130px]">{bed.assignedDoctor || 'Dr. S. Jenkins'}</span>
+                                        <span className="font-medium truncate max-w-[130px]">{bed.assignedDoctor || '—'}</span>
                                       </div>
                                       <div className="flex items-center justify-between">
                                         <span className="text-slate-400">Nurse:</span>
-                                        <span className="font-medium truncate max-w-[130px]">{bed.assignedNurse || 'Nurse Clara O.'}</span>
+                                        <span className="font-medium truncate max-w-[130px]">{bed.assignedNurse || '—'}</span>
                                       </div>
                                       {bed.admissionDate && (
                                         <div className="flex items-center justify-between">
@@ -1725,6 +1726,25 @@ export default function InpatientBedBoardPage() {
                       <option value="Male">Male</option>
                       <option value="Female">Female</option>
                       <option value="Other">Other</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">Admission Priority *</label>
+                    <select
+                      required
+                      value={admitForm.priority}
+                      onChange={(e) =>
+                        setAdmitForm({
+                          ...admitForm,
+                          priority: e.target.value as 'ROUTINE' | 'URGENT' | 'STAT',
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    >
+                      <option value="ROUTINE">Routine</option>
+                      <option value="URGENT">Urgent</option>
+                      <option value="STAT">STAT</option>
                     </select>
                   </div>
 

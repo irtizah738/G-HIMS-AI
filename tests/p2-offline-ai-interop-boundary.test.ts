@@ -51,7 +51,7 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(indicator).not.toContain("setTimeout(() =>");
 
     expect(hook).toContain("measureLocalStoreLatency");
-    expect(hook).toContain("getPendingVectorClock");
+    expect(hook).toContain("getSecurePendingVectorClock");
     expect(hook).toContain("replicaReachable");
     expect(hook).toContain("lastReplicationEvent");
 

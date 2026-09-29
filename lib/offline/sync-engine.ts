@@ -1,5 +1,4 @@
 import {
-  getPendingVectorClock,
   updateMutationStatus,
   deleteMutation,
   OfflineMutation,
@@ -7,6 +6,7 @@ import {
 } from './db';
 import {
   getSecurePendingMutations,
+  getSecurePendingVectorClock,
   putSecureMutation,
   putEntityMappings,
   remapEdgeEntityIds,
@@ -299,10 +299,19 @@ class ClinicalSyncEngine {
 
   public async refreshPendingCount(tenantId?: string): Promise<number> {
     try {
-      const pending = await getSecurePendingMutations(tenantId);
+      const cached = await getCachedAuthSession();
+      const activeTenantId = String(tenantId || cached?.user?.tenantId || '').trim().toLowerCase();
+      const actorId = String(cached?.user?.uid || '').trim();
+      if (!activeTenantId || !actorId) {
+        this.updateState({ pendingCount: 0 });
+        return 0;
+      }
+
+      const pending = await getSecurePendingMutations(activeTenantId, actorId);
       this.updateState({ pendingCount: pending.length });
       return pending.length;
     } catch {
+      this.updateState({ pendingCount: 0 });
       return 0;
     }
   }
@@ -326,7 +335,7 @@ class ClinicalSyncEngine {
       throw new Error('SESSION_EXPIRED: offline command capture requires a still-valid cached session.');
     }
 
-    const currentClock = await getPendingVectorClock(params.tenantId);
+    const currentClock = await getSecurePendingVectorClock(params.tenantId, cached.user.uid);
     const clockNodeId = cached.session.deviceId || cached.user.uid;
     const vectorClock = incrementClock(currentClock, clockNodeId);
 
@@ -417,7 +426,8 @@ class ClinicalSyncEngine {
         throw new Error('AUTHENTICATION_REQUIRED: offline replay requires an active authenticated session.');
       }
 
-      const pending = await getSecurePendingMutations(tenantId);
+      const activeTenantId = String(tenantId || cached.user.tenantId).trim().toLowerCase();
+      const pending = await getSecurePendingMutations(activeTenantId, cached.user.uid);
       const byTenant = new Map<string, OfflineMutation[]>();
       for (const mutation of pending) {
         const list = byTenant.get(mutation.tenantId) || [];
@@ -433,26 +443,10 @@ class ClinicalSyncEngine {
           continue;
         }
 
-        const wrongActor = mutations.filter(
-          (mutation) => !mutation.actorId || mutation.actorId !== cached.user.uid
-        );
-        for (const mutation of wrongActor) {
-          await updateMutationStatus(
-            mutation.id,
-            'failed',
-            mutation.actorId
-              ? 'OFFLINE_ACTOR_MISMATCH: queued command belongs to a different authenticated user.'
-              : 'OFFLINE_ACTOR_MISSING: legacy queued command has no authoritative originating user.'
-          );
-        }
-
-        const actorOwned = mutations.filter(
-          (mutation) => mutation.actorId === cached.user.uid
-        );
-        const replayable = actorOwned.filter(
+        const replayable = mutations.filter(
           (mutation) => mutation.commandType && mutation.idempotencyKey
         );
-        const legacy = actorOwned.filter(
+        const legacy = mutations.filter(
           (mutation) => !mutation.commandType || !mutation.idempotencyKey
         );
 

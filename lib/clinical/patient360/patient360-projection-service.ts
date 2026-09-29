@@ -343,7 +343,11 @@ export class Patient360ProjectionService {
         processedAt: Date.now(),
         status: 'IGNORED',
       };
-      await checkpointRef.create(sanitizeForFirestore(ignored));
+      await db.runTransaction(async (transaction) => {
+        const existing = await transaction.get(checkpointRef);
+        if (existing.exists) return;
+        transaction.create(checkpointRef, sanitizeForFirestore(ignored));
+      });
       return {
         status: 'IGNORED',
         tenantId,

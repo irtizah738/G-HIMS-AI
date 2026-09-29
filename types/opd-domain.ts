@@ -482,6 +482,7 @@ export interface EncounterDisposition {
   externalReferral?: ExternalReferral;
   inpatientAdmissionRequest?: {
     targetWard: string;
+    targetBedId?: string;
     clinicalIndication: string;
     admittingService?: string;
   };

@@ -15,6 +15,7 @@ import { ResourceCapacityDomainService } from '../services/resource-capacity-dom
 import { PatientIdentityDomainService } from '../services/patient-identity-domain-service';
 import { PatientMergeDomainService } from '../services/patient-merge-domain-service';
 import { InpatientBedDomainService } from '../services/inpatient-bed-domain-service';
+import { InpatientClinicalDomainService } from '../services/inpatient-clinical-domain-service';
 import { CareTransitionDomainService } from '../services/care-transition-domain-service';
 import { TelehealthDomainService } from '../services/telehealth-domain-service';
 import { RevenueIntegrityDomainService } from '../services/revenue-integrity-domain-service';
@@ -203,6 +204,24 @@ export class CommandBus {
 
         case 'AdmitPatientToInpatientCareCommand':
           result = await CareTransitionDomainService.admitToInpatientCare(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'PlaceInpatientOrderCommand':
+          result = await InpatientClinicalDomainService.placeOrder(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecordMedicationAdministrationCommand':
+          result = await InpatientClinicalDomainService.recordMedicationAdministration(
             context,
             command.commandId,
             command.idempotencyKey,

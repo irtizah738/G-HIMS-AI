@@ -905,6 +905,10 @@ export function OpdMasterWorkspace() {
         route: item.route,
         frequency: item.frequency,
         durationDays: item.durationDays,
+        quantityPrescribed: item.quantity || item.quantityPrescribed,
+        unitOfMeasure: item.formulation || 'UNIT',
+        unitPriceMinorUnits: item.unitPriceMinorUnits,
+        inventoryItemId: item.medicationCode || item.id,
         instructions: item.instructions || item.specialInstructions,
       },
       {
@@ -1071,7 +1075,7 @@ export function OpdMasterWorkspace() {
 
   // HANDLER: Commit Disposition through the encounter lifecycle service.
   const handleCommitDisposition = async (disposition: EncounterDisposition) => {
-    const result = await executeActiveTenantCommand(
+    const dispositionResult = await executeActiveTenantCommand(
       'CommitEncounterDispositionCommand',
       {
         encounterId: activeEncounter.id,
@@ -1084,47 +1088,114 @@ export function OpdMasterWorkspace() {
       },
       { idempotencyKey: `opd-disposition:${activeEncounter.id}` }
     );
-    if (!result.success) {
-      throw new Error(result.error?.message || 'Encounter disposition failed.');
+    if (!dispositionResult.success) {
+      throw new Error(dispositionResult.error?.message || 'Encounter disposition failed.');
     }
 
-    const awaitingAdmission = disposition.type === 'INPATIENT_ADMISSION_RECOMMENDED';
+    const inpatientRequest = disposition.inpatientAdmissionRequest;
+    const directAdmission = disposition.type === 'INPATIENT_ADMISSION_RECOMMENDED';
+
+    if (directAdmission) {
+      if (!inpatientRequest?.targetBedId) {
+        throw new Error(
+          'TARGET_BED_REQUIRED: direct inpatient admission requires an authoritative available bed.'
+        );
+      }
+
+      const admissionResult = await executeActiveTenantCommand<{
+        encounter: { encounterId: string };
+        sourceEncounter?: { encounterId: string; status: string } | null;
+      }>(
+        'AdmitPatientToInpatientCareCommand',
+        {
+          patientId: activeEncounter.patientId,
+          bedId: inpatientRequest.targetBedId,
+          sourceEncounterId: activeEncounter.id,
+          admittingDiagnosis: inpatientRequest.clinicalIndication,
+          targetWard: inpatientRequest.targetWard,
+          assignedDoctor: activeEncounter.attendingDoctorId,
+          priority: 'URGENT',
+        },
+        { idempotencyKey: `opd-ipd-admission:${activeEncounter.id}` }
+      );
+      if (!admissionResult.success) {
+        throw new Error(
+          admissionResult.error?.message ||
+            'OPD disposition was recorded, but inpatient admission could not be completed.'
+        );
+      }
+
+      setEncounters((prev) =>
+        prev.map((encounter) =>
+          encounter.id === activeEncounter.id
+            ? {
+                ...encounter,
+                disposition,
+                currentStage: 'TIMELINE_AUDIT',
+                status: 'TRANSFERRED_TO_INPATIENT',
+                completedAt: Date.now(),
+                stageProgress: {
+                  ...encounter.stageProgress,
+                  DISPOSITION_CLOSURE: {
+                    status: 'COMPLETED',
+                    enteredAt: Date.now() - 300000,
+                    completedAt: Date.now(),
+                    completedBy: disposition.completedBy,
+                  },
+                  TIMELINE_AUDIT: {
+                    status: 'COMPLETED',
+                    enteredAt: Date.now(),
+                    completedAt: Date.now(),
+                    completedBy: 'Server Care Transition Pipeline',
+                  },
+                },
+              }
+            : encounter
+        )
+      );
+      recordEvent(
+        'INPATIENT_ADMISSION_REQUESTED',
+        `OPD encounter transferred to inpatient encounter ${admissionResult.data?.encounter?.encounterId || ''}.`,
+        disposition
+      );
+      setActiveTab('AUDIT');
+      return;
+    }
+
     setEncounters((prev) =>
-      prev.map((e) =>
-        e.id === activeEncounter.id
+      prev.map((encounter) =>
+        encounter.id === activeEncounter.id
           ? {
-              ...e,
+              ...encounter,
               disposition,
-              currentStage: awaitingAdmission ? 'DISPOSITION_REFERRAL' : 'TIMELINE_AUDIT',
-              status: awaitingAdmission ? 'AWAITING_INPATIENT_ADMISSION' : 'COMPLETED',
-              completedAt: awaitingAdmission ? undefined : Date.now(),
+              currentStage: 'TIMELINE_AUDIT',
+              status: 'COMPLETED',
+              completedAt: Date.now(),
               stageProgress: {
-                ...e.stageProgress,
+                ...encounter.stageProgress,
                 DISPOSITION_CLOSURE: {
-                  status: awaitingAdmission ? 'ACTIVE' : 'COMPLETED',
+                  status: 'COMPLETED',
                   enteredAt: Date.now() - 300000,
-                  completedAt: awaitingAdmission ? undefined : Date.now(),
+                  completedAt: Date.now(),
                   completedBy: disposition.completedBy,
                 },
-                TIMELINE_AUDIT: awaitingAdmission
-                  ? { status: 'PENDING' }
-                  : {
-                      status: 'COMPLETED',
-                      enteredAt: Date.now(),
-                      completedAt: Date.now(),
-                      completedBy: 'Server Audit Pipeline',
-                    },
+                TIMELINE_AUDIT: {
+                  status: 'COMPLETED',
+                  enteredAt: Date.now(),
+                  completedAt: Date.now(),
+                  completedBy: 'Server Audit Pipeline',
+                },
               },
             }
-          : e
+          : encounter
       )
     );
     recordEvent(
-      awaitingAdmission ? 'INPATIENT_ADMISSION_REQUESTED' : 'ENCOUNTER_CLOSED',
+      'ENCOUNTER_CLOSED',
       `Encounter disposition committed: ${disposition.type}.`,
       disposition
     );
-    setActiveTab(awaitingAdmission ? 'DISPOSITION' : 'AUDIT');
+    setActiveTab('AUDIT');
   };
 
   // Navigation Items

@@ -431,6 +431,10 @@ const prescription = await command(
     route: 'PO',
     frequency: 'BID',
     durationDays: 3,
+    quantityPrescribed: 6,
+    unitOfMeasure: 'TABLET',
+    unitPriceMinorUnits: 1000,
+    inventoryItemId: 'P7-PARA-500',
     instructions: 'Synthetic qualification only',
   },
   `p7-rx-${encounterId}`

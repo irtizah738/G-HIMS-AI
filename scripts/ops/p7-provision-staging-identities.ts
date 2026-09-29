@@ -119,6 +119,46 @@ const users: Array<{
   identityCreated: boolean;
 }> = [];
 
+const syntheticPharmacyBalanceId = `${tenantId}_P7H0_loc-pharmacy_P7-PARA-500_p7-batch`;
+await db
+  .collection('tenants')
+  .doc(tenantId)
+  .collection('inventoryBalances')
+  .doc(syntheticPharmacyBalanceId)
+  .set(
+    {
+      balanceId: syntheticPharmacyBalanceId,
+      tenantId,
+      facilityId: 'P7H0',
+      locationId: 'loc-pharmacy',
+      locationName: 'P7 Synthetic Pharmacy',
+      itemId: 'P7-PARA-500',
+      itemCode: 'P7-PARA-500',
+      itemName: 'Synthetic Paracetamol',
+      itemType: 'MEDICATION',
+      batchId: 'p7-batch',
+      batchNumber: 'P7-SYNTHETIC-BATCH',
+      expiryDate: '2030-01-01',
+      onHand: 500,
+      reserved: 0,
+      quarantined: 0,
+      damaged: 0,
+      expired: 0,
+      inTransit: 0,
+      available: 500,
+      uom: 'TABLET',
+      minimumStock: 20,
+      maximumStock: 1000,
+      reorderPoint: 100,
+      unitCost: 500,
+      totalValuation: 250000,
+      lastMovementAt: new Date().toISOString(),
+      version: 1,
+      syntheticQualificationInventory: true,
+    },
+    { merge: true }
+  );
+
 for (const persona of personas) {
   const email = String(persona.email).trim().toLowerCase();
   let uid = '';

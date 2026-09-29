@@ -102,6 +102,8 @@ export const ED_WORKFLOW_STAGES: {
 
 export interface EDOptimizedCase {
   id: string;
+  patientId?: string;
+  encounterId?: string;
   mrn: string;
   patientName: string;
   age: number;

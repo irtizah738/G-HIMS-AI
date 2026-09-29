@@ -42,7 +42,6 @@ const SurgeryTheaterView = dynamic(() => import('@/components/views/surgery-thea
 const BloodBankView = dynamic(() => import('@/components/views/blood-bank-view').then(m => m.BloodBankView), { loading: ViewSkeleton, ssr: false });
 const TelehealthView = dynamic(() => import('@/components/views/telehealth-view').then(m => m.TelehealthView), { loading: ViewSkeleton, ssr: false });
 const ClaimsPreAuthView = dynamic(() => import('@/components/views/claims-preauth-view').then(m => m.ClaimsPreAuthView), { loading: ViewSkeleton, ssr: false });
-const WorkflowRuntimeView = dynamic(() => import('@/components/views/workflow-runtime-view').then(m => m.WorkflowRuntimeView), { loading: ViewSkeleton, ssr: false });
 const AllModulesDirectory = dynamic(() => import('@/components/views/all-modules-directory').then(m => m.AllModulesDirectory), { loading: ViewSkeleton, ssr: false });
 const ModuleReadinessMatrixView = dynamic(() => import('@/components/views/module-readiness-matrix-view').then(m => m.ModuleReadinessMatrixView), { loading: ViewSkeleton, ssr: false });
 const GoogleSheetsView = dynamic(() => import('@/components/views/google-sheets-view').then(m => m.GoogleSheetsView), { loading: ViewSkeleton, ssr: false });
@@ -242,11 +241,6 @@ export function TenantDashboard() {
                 <ModuleReadinessMatrixView />
               </RbacModuleGate>
             )}
-            {activeTab === 'workflow-runtime' && (
-              <RbacModuleGate moduleId="workflow-runtime" moduleName="Clinical Workflow Runtime">
-                <WorkflowRuntimeView />
-              </RbacModuleGate>
-            )}
             {activeTab === 'disease-intake' && (
               <RbacModuleGate moduleId="disease-intake" moduleName="Disease Intake Protocols">
                 <DiseaseCentricIntakeView />
@@ -267,9 +261,9 @@ export function TenantDashboard() {
                 <ClaimsPreAuthView />
               </RbacModuleGate>
             )}
-            {activeTab === 'opd' && (
+            {(activeTab === 'opd' || activeTab === 'workflow-runtime') && (
               <RbacModuleGate moduleId="opd" moduleName="OPD Encounters & Consultations">
-                <OpdEncountersView />
+                <OpdEncountersView initialViewMode={activeTab === 'workflow-runtime' ? 'dag_backend' : undefined} />
               </RbacModuleGate>
             )}
             {activeTab === 'emergency' && (

@@ -26,6 +26,7 @@
     "test:p5a": "bun test tests/p5a-identity-staging-access.test.ts",
     "test:p5a:emulator": "firebase emulators:exec --project ghims-p5a-ci --only auth,firestore \"bun test emulator-security/p5a-auth-iam.test.ts\"",
     "ops:bootstrap-admin": "bun scripts/ops/bootstrap-admin.ts",
+    "ops:sync-users": "bun scripts/ops/sync-auth-users.ts",
     "demo:provision-identities": "bun scripts/demo/provision-demo-identities.ts",
     "validate:p5a": "bun run typecheck && bun run lint && bun run test:p5a && bun run test:unit && bun run test:security && bun run test:rules && bun run test:p5a:emulator && bun run build && bun run test:e2e",
     "ops:staging-smoke": "bun scripts/ops/staging-smoke.ts",

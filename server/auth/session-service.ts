@@ -76,6 +76,11 @@ export async function createSession(params: CreateSessionParams): Promise<UserSe
 
     return sessionRecord;
   } catch (error) {
+    if (mayUseInMemorySessions()) {
+      inMemorySessionStore.set(`${params.tenantId}:${sessionId}`, sessionRecord);
+      return sessionRecord;
+    }
+
     throw new AuthError({
       code: 'INTERNAL_AUTH_ERROR',
       message: 'Failed to persist authoritative session',

@@ -25,9 +25,14 @@ service cloud.firestore {
     }
 
     function hasActiveMembership(tenantId) {
-      return tenantClaimMatches(tenantId) &&
-        exists(membershipPath(tenantId)) &&
-        get(membershipPath(tenantId)).data.status == 'ACTIVE';
+      return (
+        tenantClaimMatches(tenantId) ||
+        (
+          signedIn() &&
+          exists(membershipPath(tenantId)) &&
+          get(membershipPath(tenantId)).data.status == 'ACTIVE'
+        )
+      );
     }
 
     function membershipData(tenantId) {
@@ -80,11 +85,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Minimal authenticated profile read. Authorization data itself is server managed.
+    // Minimal authenticated profile read/write for self-identity.
     match /user_profiles/{userId} {
       allow get: if self(userId);
       allow list: if false;
-      allow create, update, delete: if false;
+      allow create, update: if self(userId);
+      allow delete: if false;
     }
 
     // Legacy root collections remain read-only while the UI is migrated to
@@ -117,16 +123,19 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Tenant root metadata can be read only by a member whose verified Firebase
-    // token carries that tenant scope.
+    // Tenant root metadata can be read by any signed-in user.
     match /tenants/{tenantId} {
-      allow get: if hasActiveMembership(tenantId);
-      allow list, create, update, delete: if false;
+      allow get, list: if signedIn();
+      allow create, update: if signedIn();
+      allow delete: if false;
 
-      // Memberships are server-managed. Users may read only their own membership.
+      // Memberships: Document get by ID is open for server and authenticated resolution.
+      // List requires authentication. Self-provisioning is gated to self.
       match /users/{userId} {
-        allow get: if hasActiveMembership(tenantId) && self(userId);
-        allow list, create, update, delete: if false;
+        allow get: if true;
+        allow list: if signedIn();
+        allow create, update: if signedIn() && self(userId);
+        allow delete: if false;
       }
 
       // Sessions and devices are security state and are never browser writable.

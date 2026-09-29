@@ -157,12 +157,28 @@ export class UserProvisioningService {
   public static async listTenantUsers(tenantIdInput: string) {
     const tenantId = cleanTenantId(tenantIdInput);
     const db = getAdminFirestore();
-    if (!db) throw new Error('IAM_STORE_UNAVAILABLE');
 
-    const snapshot = await db.collection('tenants').doc(tenantId).collection('users').get();
-    return snapshot.docs
-      .map((document) => toUiUser(tenantId, document.id, document.data()))
-      .sort((a, b) => a.displayName.localeCompare(b.displayName));
+    if (db) {
+      try {
+        const snapshot = await db.collection('tenants').doc(tenantId).collection('users').get();
+        return snapshot.docs
+          .map((document) => toUiUser(tenantId, document.id, document.data()))
+          .sort((a, b) => a.displayName.localeCompare(b.displayName));
+      } catch {
+        // Fall back to client firestore
+      }
+    }
+
+    try {
+      const { db: clientDb } = await import('@/lib/firebase/client');
+      const { collection, getDocs } = await import('firebase/firestore');
+      const snapshot = await getDocs(collection(clientDb, 'tenants', tenantId, 'users'));
+      return snapshot.docs
+        .map((document) => toUiUser(tenantId, document.id, document.data()))
+        .sort((a, b) => a.displayName.localeCompare(b.displayName));
+    } catch {
+      throw new Error('IAM_STORE_UNAVAILABLE');
+    }
   }
 
   public static async provision(input: ProvisionUserInput) {

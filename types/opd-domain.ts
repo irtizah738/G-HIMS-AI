@@ -717,6 +717,7 @@ export interface ComprehensiveOpdEncounter {
   gender: 'Male' | 'Female' | 'Other';
   age: number;
   tokenNumber?: string;
+  chiefComplaint?: string;
   encounterType: 'OPD' | 'EMERGENCY' | 'TELEHEALTH' | 'DAY_CARE' | 'OPD_SPECIALIST' | string;
   currentStage: ExtendedOpdStageId | string;
   department?: SpecialtyDepartment | string;

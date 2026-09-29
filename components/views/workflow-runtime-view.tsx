@@ -45,22 +45,52 @@ import {
   HeartPulse,
 } from 'lucide-react';
 
-export function WorkflowRuntimeView() {
+export interface WorkflowRuntimeViewProps {
+  embeddedInOpd?: boolean;
+  activePatient?: {
+    firstName?: string;
+    lastName?: string;
+    dob?: string;
+    gender?: 'Male' | 'Female' | 'Other';
+    phone?: string;
+    nationalId?: string;
+    chiefComplaint?: string;
+    department?: string;
+    mrn?: string;
+  };
+  onClose?: () => void;
+}
+
+export function WorkflowRuntimeView({ embeddedInOpd = false, activePatient, onClose }: WorkflowRuntimeViewProps = {}) {
   const [activeSubTab, setActiveSubTab] = useState<'specialty_pipeline' | 'dag' | 'intake' | 'resolver' | 'timeline' | 'outbox'>('specialty_pipeline');
 
   // Intake Form State
-  const [firstName, setFirstName] = useState('Eleanor');
-  const [lastName, setLastName] = useState('Vance');
-  const [dob, setDob] = useState('1984-06-12');
-  const [gender, setGender] = useState<'Male' | 'Female' | 'Other'>('Female');
-  const [phone, setPhone] = useState('+1 (555) 234-8901');
-  const [nationalId, setNationalId] = useState('NAT-8492041');
-  const [chiefComplaint, setChiefComplaint] = useState('Persistent thoracic pain and shortness of breath upon mild exertion');
-  const [department, setDepartment] = useState('Cardiology OPD');
+  const [firstName, setFirstName] = useState(activePatient?.firstName || 'Eleanor');
+  const [lastName, setLastName] = useState(activePatient?.lastName || 'Vance');
+  const [dob, setDob] = useState(activePatient?.dob || '1984-06-12');
+  const [gender, setGender] = useState<'Male' | 'Female' | 'Other'>(activePatient?.gender || 'Female');
+  const [phone, setPhone] = useState(activePatient?.phone || '+1 (555) 234-8901');
+  const [nationalId, setNationalId] = useState(activePatient?.nationalId || 'NAT-8492041');
+  const [chiefComplaint, setChiefComplaint] = useState(activePatient?.chiefComplaint || 'Persistent thoracic pain and shortness of breath upon mild exertion');
+  const [department, setDepartment] = useState(activePatient?.department || 'Cardiology OPD');
   const [priority, setPriority] = useState<'ROUTINE' | 'URGENT' | 'EMERGENCY'>('URGENT');
   const [selectedPhysician, setSelectedPhysician] = useState('Dr. Sarah Jenkins, MD (Cardiologist)');
   const [tariffPlan, setTariffPlan] = useState('Commercial PPO Tier-1');
   const [copayPercent, setCopayPercent] = useState(15);
+
+  // Sync if activePatient changes
+  useEffect(() => {
+    if (activePatient) {
+      if (activePatient.firstName) setFirstName(activePatient.firstName);
+      if (activePatient.lastName) setLastName(activePatient.lastName);
+      if (activePatient.dob) setDob(activePatient.dob);
+      if (activePatient.gender) setGender(activePatient.gender);
+      if (activePatient.phone) setPhone(activePatient.phone);
+      if (activePatient.nationalId) setNationalId(activePatient.nationalId);
+      if (activePatient.chiefComplaint) setChiefComplaint(activePatient.chiefComplaint);
+      if (activePatient.department) setDepartment(activePatient.department);
+    }
+  }, [activePatient]);
 
   // Transition Resolver State
   const [currentStage, setCurrentStage] = useState<ClinicalStageType>('TRIAGE');
@@ -281,14 +311,15 @@ export function WorkflowRuntimeView() {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-xl font-black text-slate-900 dark:text-slate-100 tracking-tight">
-                Clinical Workflow Runtime Studio
+                {embeddedInOpd ? 'OPD Backend — Clinical Workflow Runtime Studio' : 'Clinical Workflow Runtime Studio'}
               </h1>
               <span className="text-xs px-2.5 py-0.5 rounded-full font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-                v1.2.0 DAG Engine
+                v1.2.0 DAG Engine {embeddedInOpd ? '• OPD Backend Orchestrator' : ''}
               </span>
             </div>
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
               General OPD Directed Acyclic Graph (DAG), Deterministic MPI Deduplication, Atomic Transactions & Outbox Orchestration
+              {embeddedInOpd ? ' (Powering Outpatient Consultations Stage Machine)' : ''}
             </p>
           </div>
         </div>
@@ -301,6 +332,14 @@ export function WorkflowRuntimeView() {
             </p>
           </div>
           <div className="h-8 w-px bg-slate-200 dark:bg-slate-800 mx-2 hidden sm:block" />
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="h-10 px-3.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all"
+            >
+              <span>Back to Desk</span>
+            </button>
+          )}
           <button
             onClick={() => setActiveSubTab('intake')}
             className="h-10 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center gap-2 shadow-xs cursor-pointer active:scale-95 transition-all"

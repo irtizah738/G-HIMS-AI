@@ -142,11 +142,11 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
       },
       {
         id: 'workflow-runtime',
-        title: 'Clinical Workflow Runtime & DAG Protocol Engine',
+        title: 'OPD Consultations — Workflow DAG Engine (Backend Orchestrator)',
         category: 'Clinical & EHR',
         icon: GitFork,
         action: () => {
-          setActiveTab('workflow-runtime');
+          setActiveTab('opd');
           onClose();
         },
       },

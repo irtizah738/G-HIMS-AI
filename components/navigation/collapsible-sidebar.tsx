@@ -229,12 +229,6 @@ export function CollapsibleSidebar({
           icon: HeartPulse,
         },
         {
-          id: 'workflow-runtime',
-          name: 'Clinical Workflow Runtime',
-          shortName: 'Workflow DAG',
-          icon: GitFork,
-        },
-        {
           id: 'telehealth',
           name: 'Telehealth & Virtual Care',
           shortName: 'Telehealth',

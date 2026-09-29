@@ -76,9 +76,30 @@ function canUseApplicationDefaultCredentials(): boolean {
   return Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS) && !process.env.VERCEL;
 }
 
+function getAdminCredentials(): { clientEmail: string | null; privateKey: string | null } {
+  const clientEmail = (
+    process.env.FIREBASE_CLIENT_EMAIL ||
+    process.env.client_email ||
+    ''
+  )
+    .replace(/^['"]|['"]$/g, '')
+    .trim();
+
+  const rawKey =
+    process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_PRIVATE_KEY.includes('BEGIN')
+      ? process.env.FIREBASE_PRIVATE_KEY
+      : process.env.private_key || process.env.FIREBASE_PRIVATE_KEY;
+
+  const privateKey = formatPrivateKey(rawKey);
+
+  return {
+    clientEmail: clientEmail || null,
+    privateKey: privateKey || null,
+  };
+}
+
 export function hasAdminCredentials(): boolean {
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim();
-  const privateKey = formatPrivateKey(process.env.FIREBASE_PRIVATE_KEY);
+  const { clientEmail, privateKey } = getAdminCredentials();
 
   return Boolean(
     (clientEmail && privateKey) ||
@@ -110,8 +131,7 @@ export function getAdminApp(): App | null {
     return adminApp;
   }
 
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim();
-  const privateKey = formatPrivateKey(process.env.FIREBASE_PRIVATE_KEY);
+  const { clientEmail, privateKey } = getAdminCredentials();
 
   if (canUseFirebaseEmulator()) {
     adminApp = initializeApp({ projectId: projectId || 'ghims-p1-ci' });

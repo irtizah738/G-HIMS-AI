@@ -34,7 +34,6 @@ export function SyncStatusBanner({ tenantId = 'central-metro-hospital', classNam
     networkType,
     lastSyncedAt,
     triggerSync,
-    resolveConflict,
   } = useOfflineStatus(tenantId);
 
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -43,7 +42,11 @@ export function SyncStatusBanner({ tenantId = 'central-metro-hospital', classNam
   const handleManualSync = async () => {
     setSyncFeedback('Synchronizing offline queue with Firestore...');
     const result = await triggerSync(tenantId);
-    setSyncFeedback(`Synced ${result.syncedCount} records (${result.conflictCount} conflicts resolved)`);
+    setSyncFeedback(
+      result.conflictCount > 0
+        ? `Synced ${result.syncedCount} records; ${result.conflictCount} conflict(s) require server review`
+        : `Synced ${result.syncedCount} records; no conflicts`
+    );
     setTimeout(() => setSyncFeedback(null), 4000);
   };
 
@@ -198,7 +201,7 @@ export function SyncStatusBanner({ tenantId = 'central-metro-hospital', classNam
                     <h3 className="text-xs font-black uppercase tracking-wider text-rose-700 flex items-center gap-1.5">
                       <AlertTriangle className="w-4 h-4" /> Detected Clinical Conflicts
                     </h3>
-                    <span className="text-[11px] text-slate-500 font-mono">Vector Clock LWW Ready</span>
+                    <span className="text-[11px] text-slate-500 font-mono">Server Review Required</span>
                   </div>
 
                   <div className="space-y-3">
@@ -233,22 +236,9 @@ export function SyncStatusBanner({ tenantId = 'central-metro-hospital', classNam
                           </div>
                         </div>
 
-                        {/* Resolution Actions */}
-                        <div className="flex items-center justify-end gap-2 pt-1 border-t border-rose-200/60">
-                          <button
-                            type="button"
-                            onClick={() => resolveConflict(c.id, 'LWW_SERVER', 'Physician Review')}
-                            className="px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-[11px] font-bold cursor-pointer"
-                          >
-                            Accept Server (LWW)
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => resolveConflict(c.id, 'OVERWRITE_CLIENT', 'Physician Review')}
-                            className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold cursor-pointer"
-                          >
-                            Apply Client Overwrite
-                          </button>
+                        <div className="pt-2 border-t border-rose-200/60 text-[10px] text-rose-700 leading-relaxed">
+                          This conflict is retained locally for review. Browser-side overwrite/LWW controls are disabled;
+                          resolution must be performed through a server-authoritative reconciliation workflow.
                         </div>
                       </div>
                     ))}
@@ -271,7 +261,7 @@ export function SyncStatusBanner({ tenantId = 'central-metro-hospital', classNam
                 </p>
                 <div className="grid grid-cols-2 gap-2 text-[10px] font-mono text-slate-300 pt-2 border-t border-slate-800">
                   <div>
-                    <span className="text-slate-500 block">Conflict Strategy:</span>
+                    <span className="text-slate-500 block">Conflict Policy:</span>
                     <span className="text-emerald-400 font-bold">LWW + Physician Audit Log</span>
                   </div>
                   <div>

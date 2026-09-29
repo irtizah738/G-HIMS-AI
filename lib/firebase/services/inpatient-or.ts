@@ -173,7 +173,6 @@ export function subscribeToWardsAndBeds(
 export async function assignBedToPatient(
   tenantId: string,
   params: {
-  assertDemoOnlyMutation('assignBedToPatient');
     bedId: string;
     patientId: string;
     patientName: string;
@@ -189,6 +188,7 @@ export async function assignBedToPatient(
     expectedDischargeDate?: string;
   }
 ): Promise<void> {
+  assertDemoOnlyMutation('assignBedToPatient');
   const bedPath = `tenants/${tenantId}/beds/${params.bedId}`;
   try {
     await runTransaction(db, async (transaction) => {
@@ -251,7 +251,6 @@ export async function assignBedToPatient(
 export async function transferPatientBed(
   tenantId: string,
   params: {
-  assertDemoOnlyMutation('transferPatientBed');
     sourceBedId: string;
     targetBedId: string;
     requestedBy: string;
@@ -260,6 +259,7 @@ export async function transferPatientBed(
     clinicalIndication?: string;
   }
 ): Promise<BedTransfer> {
+  assertDemoOnlyMutation('transferPatientBed');
   const path = `tenants/${tenantId}/beds`;
   try {
     let transferRecord: BedTransfer | null = null;

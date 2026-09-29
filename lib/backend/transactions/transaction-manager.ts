@@ -198,6 +198,7 @@ function collectionForEntityType(entityType: string): string {
     CASH_RECEIPT: 'cashReceipts',
     INVOICE_SETTLEMENT: 'invoiceSettlements',
     DISCHARGE_READINESS_REVIEW: 'dischargeReadinessReviews',
+    BED_TRANSFER: 'bedTransfers',
   };
 
   const collection = map[entityType];

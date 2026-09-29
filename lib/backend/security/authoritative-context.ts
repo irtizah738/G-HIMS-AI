@@ -27,9 +27,18 @@ export interface AuthoritativeUserDirectoryRecord {
  * Resolve an authoritative CommandContext from a verified Firebase ID token,
  * an existing ACTIVE tenant membership and an existing server session.
  */
+export interface DeriveAuthoritativeContextOptions {
+  /**
+   * Background status probes may validate an existing session without extending
+   * clinician inactivity. Normal protected commands keep the default true.
+   */
+  touchSessionActivity?: boolean;
+}
+
 export async function deriveAuthoritativeContext(
   req: NextRequest,
-  clientDeclaredTenantId?: string
+  clientDeclaredTenantId?: string,
+  options: DeriveAuthoritativeContextOptions = {}
 ): Promise<{ context: CommandContext; userProfile: AuthoritativeUserDirectoryRecord }> {
   const token = extractBearerToken(req.headers.get('authorization'));
   const verifiedToken = await verifyFirebaseToken(token, true);
@@ -56,7 +65,12 @@ export async function deriveAuthoritativeContext(
     });
   }
 
-  const session = await validateSession(targetTenant, sessionId, verifiedToken.uid);
+  const session = await validateSession(
+    targetTenant,
+    sessionId,
+    verifiedToken.uid,
+    { touchActivity: options.touchSessionActivity !== false }
+  );
   const requestedDeviceId = String(req.headers.get('x-ghims-device-id') || '').trim();
 
   if (requestedDeviceId && session.deviceId && requestedDeviceId !== session.deviceId) {

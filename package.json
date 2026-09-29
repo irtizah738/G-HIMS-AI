@@ -38,7 +38,9 @@
     "ops:p7:rehearsal": "bun scripts/ops/p7-hospital-day-rehearsal.ts",
     "ops:p7:evidence": "bun scripts/ops/p7-evidence-manifest.ts",
     "test:p7": "bun test tests/p7-controlled-live-pilot.test.ts",
-    "validate:p7": "bun run typecheck && bun run lint && bun run test:p7 && bun run test:p6 && bun run test:security && bun run build"
+    "validate:p7": "bun run typecheck && bun run lint && bun run test:p7 && bun run test:p6 && bun run test:security && bun run build",
+    "test:ci-foundation": "bun test tests/ci-patient360-foundation.test.ts",
+    "validate:ci-foundation": "bun run typecheck && bun run lint && bun run test:ci-foundation && bun run test:p7 && bun run test:p6 && bun run test:security && bun run build"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

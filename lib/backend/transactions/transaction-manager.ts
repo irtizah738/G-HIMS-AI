@@ -73,6 +73,49 @@ export interface AtomicMutationResult {
   committedAt: number;
 }
 
+export interface AtomicReadTarget {
+  key: string;
+  entityType: string;
+  entityId: string;
+  required?: boolean;
+}
+
+export interface PreparedAtomicMutation {
+  domainState?: unknown;
+  additionalStateWrites?: AdditionalStateWrite[];
+  eventPayload: Record<string, unknown>;
+  auditReason?: string;
+  auditMetadata?: Record<string, unknown>;
+  resultData?: unknown;
+}
+
+export interface AtomicReadModifyMutationParams
+  extends Omit<
+    AtomicMutationParams,
+    'domainState' | 'additionalStateWrites' | 'eventPayload' | 'auditReason' | 'auditMetadata'
+  > {
+  readTargets: AtomicReadTarget[];
+  prepare: (
+    current: Record<string, Record<string, unknown> | null>
+  ) => PreparedAtomicMutation;
+}
+
+export interface AtomicReadModifyMutationResult extends AtomicMutationResult {
+  resultData?: unknown;
+}
+
+export class AtomicMutationRejectedError extends Error {
+  public readonly code: string;
+  public readonly details?: unknown;
+
+  constructor(code: string, message: string, details?: unknown) {
+    super(message);
+    this.name = 'AtomicMutationRejectedError';
+    this.code = code;
+    this.details = details;
+  }
+}
+
 function generateUuid(prefix: string): string {
   return `${prefix}_${crypto.randomUUID()}`;
 }
@@ -153,6 +196,7 @@ function collectionForEntityType(entityType: string): string {
     PATIENT_CONSUMPTION: 'patientConsumptions',
     PURCHASE_REQUISITION: 'purchaseRequisitions',
     CASH_RECEIPT: 'cashReceipts',
+    INVOICE_SETTLEMENT: 'invoiceSettlements',
   };
 
   const collection = map[entityType];
@@ -184,11 +228,15 @@ export class TransactionManager {
     commandId: string;
     correlationId: string;
     domainState?: unknown;
+    timestamp?: number;
+    eventId?: string;
+    auditId?: string;
+    outboxId?: string;
   }) {
-    const timestamp = Date.now();
-    const eventId = generateUuid('evt');
-    const auditId = generateUuid('aud');
-    const outboxId = generateUuid('obx');
+    const timestamp = params.timestamp ?? Date.now();
+    const eventId = params.eventId || generateUuid('evt');
+    const auditId = params.auditId || generateUuid('aud');
+    const outboxId = params.outboxId || generateUuid('obx');
 
     const event: DomainEventEnvelope = {
       eventId,
@@ -372,6 +420,204 @@ export class TransactionManager {
     });
 
     return { success: true, eventId: event.eventId, auditId: audit.auditId, outboxId: outbox.outboxId, committedAt: timestamp };
+  }
+
+  /**
+   * Atomically reads authoritative state, derives next state, then persists
+   * state + event + audit + outbox under the existing idempotency reservation.
+   * Use this when writes depend on current authoritative values.
+   */
+  public static async executeAtomicReadModifyMutation(
+    params: AtomicReadModifyMutationParams
+  ): Promise<AtomicReadModifyMutationResult> {
+    const correlationId = params.correlationId || generateUuid('corr');
+    const commandId = params.commandId || generateUuid('cmd');
+    const idempotencyKey = params.idempotencyKey || generateUuid('idemp');
+    const timestamp = Date.now();
+    const eventId = generateUuid('evt');
+    const auditId = generateUuid('aud');
+    const outboxId = generateUuid('obx');
+
+    const db = getAdminFirestore();
+    if (!db) {
+      if (!canUseEphemeralPersistence()) {
+        throw new Error('TRANSACTION_STORE_UNAVAILABLE: durable Firestore transaction store is required.');
+      }
+
+      const prepared = params.prepare(
+        Object.fromEntries(params.readTargets.map((target) => [target.key, null]))
+      );
+      const { event, audit, outbox } = this.buildRecords({
+        ...params,
+        eventPayload: prepared.eventPayload,
+        auditReason: prepared.auditReason,
+        auditMetadata: prepared.auditMetadata,
+        domainState: prepared.domainState,
+        correlationId,
+        commandId,
+        idempotencyKey,
+        timestamp,
+        eventId,
+        auditId,
+        outboxId,
+      });
+      this.inMemoryEventStore.push(event);
+      this.inMemoryAuditStore.push(audit);
+      this.inMemoryOutboxStore.push(outbox);
+      return {
+        success: true,
+        eventId,
+        auditId,
+        outboxId,
+        committedAt: timestamp,
+        resultData: prepared.resultData,
+      };
+    }
+
+    const tenantRef = db.collection('tenants').doc(params.tenantId);
+    const idempotencyRef = tenantRef
+      .collection('idempotency')
+      .doc(IdempotencyService.getDocumentId(idempotencyKey));
+    const readRefs = params.readTargets.map((target) => ({
+      target,
+      ref: tenantRef
+        .collection(collectionForEntityType(target.entityType))
+        .doc(target.entityId),
+    }));
+
+    let committedResultData: unknown;
+
+    await db.runTransaction(async (transaction) => {
+      const idempotencySnapshot = await transaction.get(idempotencyRef);
+      if (!idempotencySnapshot.exists) {
+        throw new Error('IDEMPOTENCY_RESERVATION_MISSING');
+      }
+      const reservation = idempotencySnapshot.data() as {
+        status?: string;
+        commandId?: string;
+      };
+      if (reservation.status !== 'PENDING' || reservation.commandId !== commandId) {
+        throw new Error('IDEMPOTENCY_RESERVATION_INVALID');
+      }
+
+      const current: Record<string, Record<string, unknown> | null> = {};
+      for (const item of readRefs) {
+        const snapshot = await transaction.get(item.ref);
+        if (!snapshot.exists && item.target.required) {
+          throw new AtomicMutationRejectedError(
+            'REQUIRED_STATE_NOT_FOUND',
+            `Required authoritative state '${item.target.key}' does not exist.`,
+            {
+              entityType: item.target.entityType,
+              entityId: item.target.entityId,
+            }
+          );
+        }
+        current[item.target.key] = snapshot.exists
+          ? (snapshot.data() as Record<string, unknown>)
+          : null;
+      }
+
+      const prepared = params.prepare(current);
+      committedResultData = prepared.resultData;
+      const { event, audit, outbox } = this.buildRecords({
+        ...params,
+        eventPayload: prepared.eventPayload,
+        auditReason: prepared.auditReason,
+        auditMetadata: prepared.auditMetadata,
+        domainState: prepared.domainState,
+        correlationId,
+        commandId,
+        idempotencyKey,
+        timestamp,
+        eventId,
+        auditId,
+        outboxId,
+      });
+
+      const primaryRef =
+        prepared.domainState !== undefined
+          ? tenantRef
+              .collection(collectionForEntityType(params.aggregateType))
+              .doc(params.aggregateId)
+          : null;
+      const primaryRead = params.readTargets.find(
+        (target) =>
+          target.entityType === params.aggregateType &&
+          target.entityId === params.aggregateId
+      );
+      const primaryExisting = primaryRead ? current[primaryRead.key] : null;
+
+      if (primaryRef && prepared.domainState !== undefined) {
+        transaction.set(
+          primaryRef,
+          toVersionedDocumentData(
+            prepared.domainState,
+            params.aggregateType,
+            primaryExisting
+          )
+        );
+      }
+
+      for (const write of prepared.additionalStateWrites || []) {
+        const ref = tenantRef
+          .collection(collectionForEntityType(write.entityType))
+          .doc(write.entityId);
+        const readTarget = params.readTargets.find(
+          (target) =>
+            target.entityType === write.entityType &&
+            target.entityId === write.entityId
+        );
+        const existing = readTarget ? current[readTarget.key] : null;
+        transaction.set(
+          ref,
+          toVersionedDocumentData(write.domainState, write.entityType, existing)
+        );
+      }
+
+      transaction.create(
+        tenantRef.collection('events').doc(eventId),
+        sanitizeForFirestore(event)
+      );
+      transaction.create(
+        tenantRef.collection('audit_logs').doc(auditId),
+        sanitizeForFirestore(audit)
+      );
+      transaction.create(
+        tenantRef.collection('outbox').doc(outboxId),
+        sanitizeForFirestore(outbox)
+      );
+      transaction.set(
+        idempotencyRef,
+        sanitizeForFirestore({
+          ...idempotencySnapshot.data(),
+          status: 'COMPLETED',
+          completedAt: timestamp,
+          lastUpdatedAt: timestamp,
+          leaseExpiresAt: 0,
+          result: {
+            success: true,
+            commandId,
+            idempotencyKey,
+            entityId: params.aggregateId,
+            eventType: params.eventType,
+            eventId,
+            auditId,
+            outboxId,
+          },
+        }),
+        { merge: true }
+      );
+    });
+
+    return {
+      success: true,
+      eventId,
+      auditId,
+      outboxId,
+      committedAt: timestamp,
+      resultData: committedResultData,
+    };
   }
 
   public static async executeAtomicWrite<TState = unknown>(

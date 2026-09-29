@@ -54,6 +54,14 @@ export interface AdmitPatientToInpatientCarePayload {
   priority?: 'STAT' | 'URGENT' | 'ROUTINE';
 }
 
+export interface TransferInpatientBedPayload {
+  encounterId: string;
+  sourceBedId: string;
+  targetBedId: string;
+  reason: string;
+  clinicalIndication?: string;
+}
+
 export interface DischargeInpatientEncounterPayload {
   encounterId: string;
   bedId: string;
@@ -153,6 +161,8 @@ export class CareTransitionDomainService {
       status: 'occupied',
       patientId: patient.id,
       patientName: patient.fullName,
+      patientMRN: patient.mrn,
+      currentEncounterId: encounterId,
       admissionDate,
       assignedDoctor: payload.assignedDoctor || bed.assignedDoctor,
       assignedNurse: payload.assignedNurse || bed.assignedNurse,
@@ -226,6 +236,228 @@ export class CareTransitionDomainService {
         patient: patientState,
         bed: bedState,
         sourceEncounter: sourceEncounterState,
+      },
+    };
+  }
+
+  public static async transferInpatientBed(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: TransferInpatientBedPayload
+  ): Promise<CommandResult> {
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: ['DOCTOR', 'CONSULTANT', 'NURSE', 'ADMISSION_OFFICER', 'SYSTEM_ADMIN'],
+    });
+    if (!auth.authorized) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Inpatient transfer authority required.',
+        },
+      };
+    }
+
+    if (
+      !payload.encounterId ||
+      !payload.sourceBedId ||
+      !payload.targetBedId ||
+      payload.sourceBedId === payload.targetBedId ||
+      !payload.reason?.trim()
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INVALID_INPATIENT_BED_TRANSFER',
+          message:
+            'Encounter, distinct source/target beds, and a transfer reason are required.',
+        },
+      };
+    }
+
+    const [encounter, sourceBed, targetBed] = await Promise.all([
+      DomainStateRepository.getById<PersistedEncounter>(
+        context.tenantId,
+        'encounters',
+        payload.encounterId
+      ),
+      DomainStateRepository.getById<Bed>(
+        context.tenantId,
+        'beds',
+        payload.sourceBedId
+      ),
+      DomainStateRepository.getById<Bed>(
+        context.tenantId,
+        'beds',
+        payload.targetBedId
+      ),
+    ]);
+
+    if (
+      !encounter ||
+      String(encounter.encounterType).toUpperCase() !== 'IPD' ||
+      !activeEncounterStatus(encounter.status)
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'ACTIVE_INPATIENT_ENCOUNTER_REQUIRED',
+          message: 'An active inpatient encounter is required for bed transfer.',
+        },
+      };
+    }
+
+    if (
+      !sourceBed ||
+      sourceBed.status !== 'occupied' ||
+      sourceBed.patientId !== encounter.patientId ||
+      (sourceBed.currentEncounterId &&
+        sourceBed.currentEncounterId !== encounter.encounterId)
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'SOURCE_BED_CENSUS_CONFLICT',
+          message: 'Source bed does not match the active inpatient encounter.',
+        },
+      };
+    }
+
+    if (!targetBed || targetBed.status !== 'available' || targetBed.patientId) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'TARGET_BED_UNAVAILABLE',
+          message: 'Target bed is not available for inpatient transfer.',
+        },
+      };
+    }
+
+    const patient = await DomainStateRepository.getById<PatientMPI>(
+      context.tenantId,
+      'patients',
+      encounter.patientId
+    );
+    if (
+      !patient ||
+      patient.activeEncounterId !== encounter.encounterId ||
+      patient.activeBedId !== sourceBed.id
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'PATIENT_CENSUS_STATE_CONFLICT',
+          message:
+            'Patient active encounter/bed does not match the requested transfer.',
+        },
+      };
+    }
+
+    const now = Date.now();
+    const transferId = `trf_${crypto.randomUUID()}`;
+    const sourceState: Bed = {
+      ...sourceBed,
+      status: 'cleaning',
+      patientId: undefined,
+      patientName: undefined,
+      patientMRN: undefined,
+      currentEncounterId: undefined,
+      notes: `Transferred to ${targetBed.bedNumber || targetBed.id}: ${payload.reason.trim()}`,
+    };
+    const targetState: Bed = {
+      ...targetBed,
+      status: 'occupied',
+      patientId: patient.id,
+      patientName: patient.fullName,
+      patientMRN: patient.mrn,
+      currentEncounterId: encounter.encounterId,
+      admissionDate: sourceBed.admissionDate,
+      assignedDoctor: sourceBed.assignedDoctor || targetBed.assignedDoctor,
+      assignedNurse: targetBed.assignedNurse || sourceBed.assignedNurse,
+      notes: `Transferred from ${sourceBed.bedNumber || sourceBed.id}: ${payload.reason.trim()}`,
+    };
+    const patientState: PatientMPI = {
+      ...patient,
+      activeBedId: targetBed.id,
+      updatedAt: now,
+    };
+    const transferRecord = {
+      id: transferId,
+      tenantId: context.tenantId,
+      encounterId: encounter.encounterId,
+      patientId: patient.id,
+      patientName: patient.fullName,
+      patientMRN: patient.mrn,
+      sourceBedId: sourceBed.id,
+      sourceBedNumber: sourceBed.bedNumber,
+      targetBedId: targetBed.id,
+      targetBedNumber: targetBed.bedNumber,
+      requestedBy: context.actorId,
+      approvedBy: context.actorId,
+      reason: payload.reason.trim(),
+      clinicalIndication: String(payload.clinicalIndication || '').trim(),
+      status: 'completed',
+      timestamp: new Date(now).toISOString(),
+      completedAt: new Date(now).toISOString(),
+    };
+
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'CLINICIAN',
+      aggregateType: 'HOSPITAL_BED',
+      aggregateId: sourceBed.id,
+      eventType: 'INPATIENT_BED_TRANSFERRED',
+      eventPayload: {
+        transferId,
+        encounterId: encounter.encounterId,
+        patientId: patient.id,
+        sourceBedId: sourceBed.id,
+        targetBedId: targetBed.id,
+        reason: payload.reason.trim(),
+      },
+      auditAction: 'TRANSFER_INPATIENT_BED',
+      auditResourceType: 'ENCOUNTER',
+      auditResourceId: encounter.encounterId,
+      auditReason: `Transferred inpatient encounter ${encounter.encounterId} from bed ${sourceBed.id} to ${targetBed.id}.`,
+      outboxTopic: 'g-hims-inpatient-events',
+      idempotencyKey,
+      commandId,
+      correlationId: context.correlationId,
+      domainState: sourceState,
+      additionalStateWrites: [
+        { entityType: 'HOSPITAL_BED', entityId: targetBed.id, domainState: targetState },
+        { entityType: 'PATIENT_MPI', entityId: patient.id, domainState: patientState },
+        { entityType: 'BED_TRANSFER', entityId: transferId, domainState: transferRecord },
+      ],
+    });
+
+    return {
+      success: true,
+      commandId,
+      idempotencyKey,
+      entityId: transferId,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
+      data: {
+        transfer: transferRecord,
+        sourceBed: sourceState,
+        targetBed: targetState,
+        patient: patientState,
       },
     };
   }
@@ -508,6 +740,8 @@ export class CareTransitionDomainService {
       status: 'cleaning',
       patientId: undefined,
       patientName: undefined,
+      patientMRN: undefined,
+      currentEncounterId: undefined,
       notes: payload.notes || 'Sanitizing protocol in progress (Discharged)',
     };
 

@@ -392,7 +392,9 @@ describe('G-HIMS CI-4 authoritative Patient 360 projection', () => {
     expect(service).toContain("collection('patient360ProjectionCheckpoints')");
     expect(service).toContain("collection('patient360Timeline')");
     expect(service).toContain("where('patientId', '==', patientId)");
-    expect(service).toContain("where('payload.patientId', '==', patientId)");
+    expect(service).toContain("queryEventsByField(eventsRef, 'payload.patientId', patientId)");
+    expect(service).toContain("orderBy(FieldPath.documentId())");
+    expect(service).toContain('PATIENT360_SOURCE_MAX');
     expect(service).toContain('sanitizeForFirestore');
     expect(service).toContain("status: 'SKIPPED'");
     expect(service).toContain("status: 'IGNORED'");

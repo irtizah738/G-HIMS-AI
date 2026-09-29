@@ -397,10 +397,19 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
     expect(board).toContain(
       'Never infer NEWS2 from bed class, isolation status'
     );
-    expect(board).not.toContain("if (bed.class === 'icu')");
-    expect(board).not.toContain(
-      "bed.isolationType && bed.isolationType !== 'none'"
+    const resolverStart = board.indexOf(
+      'const getBedNEWS2 = (bed: Bed) =>'
     );
+    const resolverEnd = board.indexOf(
+      'const hasHighRecordedNEWS2',
+      resolverStart
+    );
+    const resolver = board.slice(resolverStart, resolverEnd);
+
+    expect(resolver).not.toContain("bed.class === 'icu'");
+    expect(resolver).not.toContain('bed.isolationType');
+    expect(resolver).not.toContain('vitalAlert');
+    expect(resolver).toContain("return { score: null, riskLevel: null }");
   });
 
   test('governed inpatient discharge requires explicit disposition and follow-up', async () => {

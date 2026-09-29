@@ -183,7 +183,7 @@ const SEED_APPOINTMENTS: AppointmentRecord[] = [
 const SEED_ENCOUNTERS: ComprehensiveOpdEncounter[] = [
   {
     id: 'enc-101',
-    tenantId: 'ghims-metropolitan-hospital',
+    tenantId: 'demo-ghims-metropolitan-hospital',
     patientId: 'pat-101',
     mrn: 'MRN-20260901-8842',
     patientName: 'Eleanor Vance',

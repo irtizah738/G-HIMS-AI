@@ -48,6 +48,7 @@ export interface CommitEncounterDispositionPayload {
   followUpDepartment?: string;
   inpatientAdmissionRequest?: {
     targetWard: string;
+    targetBedId?: string;
     clinicalIndication: string;
     admittingService?: string;
   };

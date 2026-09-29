@@ -40,7 +40,9 @@
     "test:p7": "bun test tests/p7-controlled-live-pilot.test.ts",
     "validate:p7": "bun run typecheck && bun run lint && bun run test:p7 && bun run test:p6 && bun run test:security && bun run build",
     "test:ci-foundation": "bun test tests/ci-patient360-foundation.test.ts",
-    "validate:ci-foundation": "bun run typecheck && bun run lint && bun run test:ci-foundation && bun run test:p7 && bun run test:p6 && bun run test:security && bun run build"
+    "validate:ci-foundation": "bun run typecheck && bun run lint && bun run test:ci-foundation && bun run test:p7 && bun run test:p6 && bun run test:security && bun run build",
+    "test:ci1": "bun test tests/ci1-canonical-clinical-model.test.ts",
+    "validate:ci1": "bun run typecheck && bun run lint && bun run test:ci-foundation && bun run test:ci1 && bun run test:p7 && bun run test:p6 && bun run test:security && bun run build"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

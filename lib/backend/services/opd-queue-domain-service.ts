@@ -8,11 +8,14 @@ import { TransactionManager } from '../transactions/transaction-manager';
 import { CommandContext, CommandResult } from '../types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 
-export type OpdQueueStatus = 'waiting' | 'in_consultation' | 'completed' | 'no_show';
+export type OpdQueueStatus = 'waiting' | 'called' | 'in_consultation' | 'completed' | 'no_show' | 'transferred';
 
 export interface UpdateOpdQueueStatusPayload {
   tokenId: string;
   targetStatus: Exclude<OpdQueueStatus, 'waiting'>;
+  targetDepartment?: string;
+  assignedDoctorName?: string;
+  assignedRoomOrBay?: string;
 }
 
 interface OpdQueueState {
@@ -31,10 +34,12 @@ interface OpdQueueState {
 }
 
 const ALLOWED_TRANSITIONS: Record<OpdQueueStatus, OpdQueueStatus[]> = {
-  waiting: ['in_consultation', 'no_show'],
-  in_consultation: ['completed'],
+  waiting: ['called', 'in_consultation', 'no_show', 'transferred'],
+  called: ['in_consultation', 'no_show', 'transferred'],
+  in_consultation: ['completed', 'transferred'],
   completed: [],
   no_show: [],
+  transferred: [],
 };
 
 export class OpdQueueDomainService {
@@ -93,6 +98,9 @@ export class OpdQueueDomainService {
     const updated: OpdQueueState = {
       ...token,
       status: payload.targetStatus,
+      ...(payload.targetDepartment ? { department: payload.targetDepartment } : {}),
+      ...(payload.assignedDoctorName ? { assignedDoctorName: payload.assignedDoctorName } : {}),
+      ...(payload.assignedRoomOrBay ? { assignedRoomOrBay: payload.assignedRoomOrBay } : {}),
       updatedAt: Date.now(),
     };
 
@@ -104,11 +112,15 @@ export class OpdQueueDomainService {
         entityType: 'OPD_QUEUE_TOKEN',
         entityId: token.id,
         eventType:
-          payload.targetStatus === 'in_consultation'
+          payload.targetStatus === 'called'
             ? 'OPD_PATIENT_CALLED'
-            : payload.targetStatus === 'completed'
-              ? 'OPD_CONSULTATION_COMPLETED'
-              : 'OPD_PATIENT_NO_SHOW',
+            : payload.targetStatus === 'in_consultation'
+              ? 'OPD_SERVICE_STARTED'
+              : payload.targetStatus === 'completed'
+                ? 'OPD_CONSULTATION_COMPLETED'
+                : payload.targetStatus === 'transferred'
+                  ? 'OPD_QUEUE_TRANSFERRED'
+                  : 'OPD_PATIENT_NO_SHOW',
         domainState: updated,
         eventPayload: {
           tokenId: token.id,

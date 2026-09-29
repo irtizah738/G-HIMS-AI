@@ -8,6 +8,7 @@ import {
   MutationAction,
   MutationStatus,
 } from '@/types/offline';
+import { mergeClocks } from '@/lib/offline/vector-clock';
 
 export class GHIMSDatabase extends Dexie {
   mutations!: Table<SyncMutation, string>;
@@ -66,6 +67,48 @@ export async function getPendingMutationsFromDb(tenantId?: string): Promise<Sync
   } catch (error) {
     console.warn('Failed to retrieve pending mutations from Dexie:', error);
     return [];
+  }
+}
+
+export async function getPendingVectorClock(
+  tenantId?: string
+): Promise<Record<string, number>> {
+  try {
+    const mutations = tenantId
+      ? await localDb.mutations.where('tenantId').equals(tenantId).toArray()
+      : await localDb.mutations.toArray();
+
+    return mutations
+      .filter((mutation) => mutation.status !== 'syncing' || Boolean(mutation.vectorClock))
+      .reduce<Record<string, number>>(
+        (clock, mutation) => mergeClocks(clock, mutation.vectorClock),
+        {}
+      );
+  } catch (error) {
+    console.warn('Failed to derive pending vector clock from Dexie:', error);
+    return {};
+  }
+}
+
+export async function measureLocalStoreLatency(
+  tenantId?: string
+): Promise<number | null> {
+  const now = () =>
+    typeof performance !== 'undefined' && typeof performance.now === 'function'
+      ? performance.now()
+      : Date.now();
+
+  const startedAt = now();
+  try {
+    if (tenantId) {
+      await localDb.mutations.where('tenantId').equals(tenantId).count();
+    } else {
+      await localDb.mutations.count();
+    }
+    return Math.max(0, Number((now() - startedAt).toFixed(2)));
+  } catch (error) {
+    console.warn('Failed to measure local IndexedDB latency:', error);
+    return null;
   }
 }
 

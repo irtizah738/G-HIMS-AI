@@ -209,6 +209,8 @@ export class RevenueIntegrityDomainService {
       idempotencyKey,
       commandId,
       correlationId: context.correlationId,
+      causalVectorClock: context.offlineVectorClock,
+      causalBaseEntityVersion: context.offlineBaseEntityVersion,
       domainState: reconciledFinding,
       additionalStateWrites: [
         {

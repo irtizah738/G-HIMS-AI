@@ -62,6 +62,9 @@ function readySnapshot(): DischargeReadinessSnapshot {
       },
     ],
     diagnosticOrders: [],
+    diagnosticResults: [],
+    clinicalObservations: [],
+    diagnosticAcknowledgements: [],
     inpatientOrders: [],
   };
 }
@@ -75,7 +78,7 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
     expect(result.blockers).toHaveLength(0);
     expect(result.warnings).toHaveLength(0);
     expect(result.information.some((item) => item.code === 'CLINICIAN_AUTHORIZATION_REQUIRED')).toBe(true);
-    expect(result.rulesetVersion).toBe('CI7-DR-1.1.0');
+    expect(result.rulesetVersion).toBe('CI7-DR-1.2.0');
   });
 
   test('missing stability, medication reconciliation, discharge summary and knowledge are explicit blockers', () => {
@@ -133,6 +136,68 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
     expect(result.state).toBe('BLOCKED');
     expect(highRisk?.evidence[0].entityId).toBe('ev-vitals');
     expect(stat?.evidence[0].entityId).toBe('ord-stat');
+  });
+
+  test('unacknowledged final critical diagnostic result is a blocker and exact-report acknowledgement clears it', () => {
+    const snapshot = readySnapshot();
+    snapshot.clinicalObservations = [
+      {
+        observationId: 'obs-critical-k',
+        status: 'FINAL',
+        interpretation: [
+          {
+            codings: [
+              {
+                system: 'LOCAL',
+                code: 'INTERP_HH',
+                display: 'Critical high',
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    snapshot.diagnosticResults = [
+      {
+        diagnosticResultId: 'diagrep-critical-k',
+        reportId: 'diagrep-critical-k',
+        patientId: snapshot.patientId,
+        encounterId: snapshot.encounterId,
+        status: 'FINAL',
+        reportDisplay: 'Potassium',
+        resultObservationIds: ['obs-critical-k'],
+      },
+    ];
+
+    const blocked = DischargeReadinessEngine.evaluate(
+      snapshot,
+      1_800_000_000_000
+    );
+    expect(blocked.state).toBe('BLOCKED');
+    const critical = blocked.blockers.find(
+      (item) => item.code === 'CRITICAL_RESULT_UNACKNOWLEDGED'
+    );
+    expect(critical?.evidence[0].entityId).toBe('diagrep-critical-k');
+
+    snapshot.diagnosticAcknowledgements = [
+      {
+        acknowledgementId: 'diagack_diagrep-critical-k',
+        reportId: 'diagrep-critical-k',
+        patientId: snapshot.patientId,
+        encounterId: snapshot.encounterId,
+        acknowledgedBy: 'doctor-a',
+        acknowledgedAt: 1_799_999_990_000,
+        immutable: true,
+      },
+    ];
+
+    const acknowledged = DischargeReadinessEngine.evaluate(
+      snapshot,
+      1_800_000_000_000
+    );
+    expect(
+      acknowledged.blockers.map((item) => item.code)
+    ).not.toContain('CRITICAL_RESULT_UNACKNOWLEDGED');
   });
 
   test('non-blocking uncertainty produces REQUIRES_REVIEW rather than false readiness', () => {
@@ -221,12 +286,46 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
     expect(tx).toContain("DISCHARGE_READINESS_REVIEW: 'dischargeReadinessReviews'");
   });
 
+  test('critical diagnostic acknowledgement is governed, immutable, event-driven and enforced at discharge', async () => {
+    const diagnostic = await source(
+      'lib/backend/services/diagnostic-result-domain-service.ts'
+    );
+    const bus = await source('lib/backend/commands/command-bus.ts');
+    const tx = await source('lib/backend/transactions/transaction-manager.ts');
+    const readiness = await source(
+      'lib/clinical/intelligence/discharge-readiness-service.ts'
+    );
+    const discharge = await source(
+      'lib/backend/services/care-transition-domain-service.ts'
+    );
+
+    expect(diagnostic).toContain('AcknowledgeCriticalDiagnosticResultPayload');
+    expect(diagnostic).toContain('public static async acknowledgeCriticalResult');
+    expect(diagnostic).toContain(
+      "eventType: 'CRITICAL_DIAGNOSTIC_RESULT_ACKNOWLEDGED'"
+    );
+    expect(diagnostic).toContain('immutable: true');
+    expect(bus).toContain("'AcknowledgeCriticalDiagnosticResultCommand'");
+    expect(tx).toContain(
+      "DIAGNOSTIC_RESULT_ACKNOWLEDGEMENT: 'diagnosticResultAcknowledgements'"
+    );
+    expect(readiness).toContain(
+      "'CRITICAL_DIAGNOSTIC_RESULT_ACKNOWLEDGED'"
+    );
+    expect(discharge).toContain(
+      "'UNACKNOWLEDGED_CRITICAL_DIAGNOSTIC_RESULT'"
+    );
+  });
+
   test('Clinical Intelligence Firestore stores remain client-denied', async () => {
     const rules = await source('firestore.rules');
 
     expect(rules).toContain('match /dischargeReadinessProjections/{encounterId}');
     expect(rules).toContain('match /dischargeReadinessCheckpoints/{eventId}');
     expect(rules).toContain('match /clinicalIntelligenceEvaluations/{evaluationId}');
+    expect(rules).toContain(
+      'match /diagnosticResultAcknowledgements/{acknowledgementId}'
+    );
     expect(rules).toContain('allow read, write: if false;');
   });
 

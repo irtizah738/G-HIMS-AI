@@ -27,6 +27,7 @@ import {
   clearCachedAuthSession,
   getCachedAuthSession,
 } from '@/lib/offline/auth-storage';
+import { migrateLegacyEdgeStorage } from '@/lib/offline/migration';
 
 export interface SignInOptions {
   tenantId?: string;
@@ -126,6 +127,10 @@ export class AuthClient {
 
     try {
       await saveCachedAuthSession(authUser, sessionRecord);
+      await migrateLegacyEdgeStorage({
+        tenantId: authUser.tenantId,
+        actorId: authUser.uid,
+      });
     } catch (cacheErr) {
       console.warn('Notice: Local session caching warning:', cacheErr);
     }
@@ -253,6 +258,10 @@ export class AuthClient {
       };
 
       await saveCachedAuthSession(authUser, sessionRecord);
+      await migrateLegacyEdgeStorage({
+        tenantId: authUser.tenantId,
+        actorId: authUser.uid,
+      });
 
       return loginPayload;
     } catch (err) {
@@ -273,6 +282,10 @@ export class AuthClient {
       const connectivity = await probeApplicationConnectivity();
       if (!connectivity.isOnline) {
         if (!cached) return null;
+        await migrateLegacyEdgeStorage({
+          tenantId: cached.user.tenantId,
+          actorId: cached.user.uid,
+        }).catch(() => {});
         return {
           authenticated: true,
           user: {
@@ -529,6 +542,10 @@ export class AuthClient {
     };
 
     await saveCachedAuthSession(authUser, sessionRecord);
+    await migrateLegacyEdgeStorage({
+      tenantId: authUser.tenantId,
+      actorId: authUser.uid,
+    });
     return data;
   }
 

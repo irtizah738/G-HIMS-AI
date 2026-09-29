@@ -22,7 +22,11 @@ export async function GET(req: NextRequest) {
     ).trim().toLowerCase();
 
     const startedAt = performance.now();
-    const { context } = await deriveAuthoritativeContext(req, requestedTenantId);
+    const { context } = await deriveAuthoritativeContext(
+      req,
+      requestedTenantId,
+      { touchSessionActivity: false }
+    );
 
     const db = getAdminFirestore();
     if (!db) {

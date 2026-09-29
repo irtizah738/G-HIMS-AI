@@ -54,6 +54,8 @@ import { OpdDispositionReferrals } from './OpdDispositionReferrals';
 import { OpdPatientTimelineAudit } from './OpdPatientTimelineAudit';
 import { OpdOfflineSyncManager } from './OpdOfflineSyncManager';
 import { executeActiveTenantCommand } from '@/lib/api/command-client';
+import { useAuth } from '@/lib/auth/auth-context';
+import { useOfflineStatus } from '@/hooks/useOfflineStatus';
 
 // Initial Mock Seed Data
 const SEED_PATIENTS: PatientDemographics[] = [
@@ -399,8 +401,14 @@ export function OpdMasterWorkspace() {
   const [selectedEncounterId, setSelectedEncounterId] = useState<string>('enc-101');
   const [activeTab, setActiveTab] = useState<string>('DASHBOARD');
   const [activeRole, setActiveRole] = useState<OpdRole>('SPECIALIST_CONSULTANT');
-  const [isOnline, setIsOnline] = useState<boolean>(true);
-  const [pendingSyncCount, setPendingSyncCount] = useState<number>(0);
+  const { activeTenant } = useAuth();
+  const {
+    isOnline,
+    pendingSyncCount,
+    triggerSync,
+    setOfflineSimulation,
+    offlineSimulationActive,
+  } = useOfflineStatus(activeTenant?.tenantId);
 
   // Selected encounter object
   const activeEncounter = useMemo(() => {
@@ -430,9 +438,6 @@ export function OpdMasterWorkspace() {
       hash: `SHA256:${Math.random().toString(36).substring(2, 12)}`,
     };
     setEvents((prev) => [newEvt, ...prev]);
-    if (!isOnline) {
-      setPendingSyncCount((c) => c + 1);
-    }
   };
 
   // HANDLER: Register new patient and start encounter
@@ -960,10 +965,11 @@ export function OpdMasterWorkspace() {
         activeRole={activeRole}
         onRoleChange={(role) => setActiveRole(role)}
         onTriggerManualSync={() => {
-          setPendingSyncCount(0);
-          alert('Offline IndexedDB outbox batch synced to Firestore with zero conflict exceptions.');
+          void triggerSync(activeTenant?.tenantId);
         }}
-        onToggleOnlineStatus={() => setIsOnline(!isOnline)}
+        onToggleOnlineStatus={() => {
+          void setOfflineSimulation(!offlineSimulationActive);
+        }}
       />
 
       {/* Primary OPD Workspace Navigation Bar */}

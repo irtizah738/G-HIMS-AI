@@ -614,7 +614,7 @@ describe('G-HIMS P1 durable command infrastructure', () => {
     expect(checkpoints.size).toBe(1);
   });
 
-  test('AdmitPatientToBedCommand atomically commits bed occupancy and patient active-bed state', async () => {
+  test('legacy bed-only admit command fails closed without mutating census state', async () => {
     const db = getAdminFirestore();
     expect(db).not.toBeNull();
     if (!db) throw new Error('Firestore emulator Admin connection unavailable');
@@ -635,17 +635,14 @@ describe('G-HIMS P1 durable command infrastructure', () => {
       mrn: 'MRN-IPD-001',
       fullName: 'P1 Inpatient',
       dateOfBirth: '1985-01-01',
-      age: 41,
-      gender: 'Female',
-      bloodGroup: 'O+',
-      contactNumber: '+10000000000',
-      email: '',
+      gender: 'female',
+      identifiers: [],
+      contactPhone: '+10000000000',
       address: 'P1 Test',
-      emergencyContact: { name: 'Test', relationship: 'Other', phone: '+10000000001' },
-      allergies: [],
-      chronicConditions: [],
-      encounters: [],
-      registeredAt: '2026-01-01',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      createdById: 'test',
+      version: 1,
     });
 
     const clinicalContext: CommandContext = {
@@ -662,28 +659,31 @@ describe('G-HIMS P1 durable command infrastructure', () => {
       payload: {
         bedId,
         patientId,
-        assignedDoctor: 'Dr Test',
-        assignedNurse: 'Nurse Test',
       },
     });
 
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('CARE_TRANSITION_COMMAND_REQUIRED');
 
     const [bed, patient] = await Promise.all([
       db.collection('tenants').doc(tenantId).collection('beds').doc(bedId).get(),
       db.collection('tenants').doc(tenantId).collection('patients').doc(patientId).get(),
     ]);
 
-    expect(bed.data()?.status).toBe('occupied');
-    expect(bed.data()?.patientId).toBe(patientId);
-    expect(patient.data()?.activeBedId).toBe(bedId);
+    expect(bed.data()?.status).toBe('available');
+    expect(bed.data()?.patientId).toBeUndefined();
+    expect(patient.data()?.activeBedId).toBeUndefined();
 
-    const event = await db.collection('tenants').doc(tenantId).collection('events').doc(result.eventId!).get();
-    expect(event.exists).toBe(true);
-    expect(event.data()?.eventType).toBe('PATIENT_ADMITTED_TO_BED');
+    const events = await db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection('events')
+      .where('aggregateId', '==', bedId)
+      .get();
+    expect(events.size).toBe(0);
   });
 
-  test('DischargePatientFromBedCommand is idempotent and clears bed/patient census state once', async () => {
+  test('legacy bed-only discharge command fails closed without releasing census state', async () => {
     const db = getAdminFirestore();
     expect(db).not.toBeNull();
     if (!db) throw new Error('Firestore emulator Admin connection unavailable');
@@ -707,70 +707,54 @@ describe('G-HIMS P1 durable command infrastructure', () => {
       mrn: 'MRN-IPD-002',
       fullName: 'P1 Discharge',
       dateOfBirth: '1980-01-01',
-      age: 46,
-      gender: 'Male',
-      bloodGroup: 'A+',
-      contactNumber: '+10000000002',
-      email: '',
+      gender: 'male',
+      identifiers: [],
+      contactPhone: '+10000000002',
       address: 'P1 Test',
-      emergencyContact: { name: 'Test', relationship: 'Other', phone: '+10000000003' },
-      allergies: [],
-      chronicConditions: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      createdById: 'test',
+      version: 1,
       activeBedId: bedId,
-      encounters: [],
-      registeredAt: '2026-01-01',
     });
 
     const clinicalContext: CommandContext = {
       ...context(tenantId),
       clinicalPrivileges: ['ADMIT_INPATIENT', 'DISCHARGE_INPATIENT'],
     };
-    const idempotencyKey = unique('idem');
 
-    const first = await CommandBus.dispatch(clinicalContext, {
+    const result = await CommandBus.dispatch(clinicalContext, {
       commandId: unique('cmd'),
-      idempotencyKey,
+      idempotencyKey: unique('idem'),
       tenantId,
       commandType: 'DischargePatientFromBedCommand',
       schemaVersion: 1,
       payload: {
         bedId,
-        notes: 'Clinical discharge completed.',
-        disposition: 'Home',
-      },
-    });
-    expect(first.success).toBe(true);
-
-    const replay = await CommandBus.dispatch(clinicalContext, {
-      commandId: unique('cmd'),
-      idempotencyKey,
-      tenantId,
-      commandType: 'DischargePatientFromBedCommand',
-      schemaVersion: 1,
-      payload: {
-        bedId,
-        notes: 'Clinical discharge completed.',
-        disposition: 'Home',
+        notes: 'Attempted legacy discharge.',
+        disposition: 'HOME_OR_SELF_CARE',
       },
     });
 
-    expect(replay.success).toBe(true);
-    expect(replay.replayedFromCache).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('CARE_TRANSITION_COMMAND_REQUIRED');
 
     const [bed, patient] = await Promise.all([
       db.collection('tenants').doc(tenantId).collection('beds').doc(bedId).get(),
       db.collection('tenants').doc(tenantId).collection('patients').doc(patientId).get(),
     ]);
 
-    expect(bed.data()?.status).toBe('cleaning');
-    expect(bed.data()?.patientId).toBeUndefined();
-    expect(patient.data()?.activeBedId).toBeUndefined();
+    expect(bed.data()?.status).toBe('occupied');
+    expect(bed.data()?.patientId).toBe(patientId);
+    expect(patient.data()?.activeBedId).toBe(bedId);
 
-    const eventSnapshot = await db.collection('tenants').doc(tenantId).collection('events')
+    const events = await db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection('events')
       .where('aggregateId', '==', bedId)
-      .where('eventType', '==', 'PATIENT_DISCHARGED_FROM_BED')
       .get();
-    expect(eventSnapshot.size).toBe(1);
+    expect(events.size).toBe(0);
   });
 
 

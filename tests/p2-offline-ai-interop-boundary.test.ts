@@ -70,6 +70,36 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(statusRoute).toContain("Cache-Control");
   });
 
+  test('governed clinical commands use the real IndexedDB outbox on transport failure',async()=>{
+    const client=await source('lib/api/command-client.ts');
+    const engine=await source('lib/offline/sync-engine.ts');
+    const hospital=await source('lib/context/hospital-context.tsx');
+    const types=await source('lib/backend/types.ts');
+
+    expect(client).toContain('queueGovernedOfflineCommand');
+    expect(client).toContain('syncEngine.queueMutation');
+    expect(client).toContain('offlineSimulationActive');
+    expect(client).toContain('isTransientServerStatus');
+    expect(client).toContain('status === 502 || status === 503 || status === 504');
+    expect(client).toContain('mutationId: commandId');
+    expect(client).not.toContain("response.status === 401");
+    expect(client).not.toContain("response.status === 403");
+
+    expect(engine).toContain('getPendingVectorClock');
+    expect(engine).toContain('incrementClock');
+    expect(engine).toContain('clockNodeId = cached.session.deviceId || cached.user.uid');
+    expect(engine).toContain('mutationId: commandId');
+
+    expect(types).toContain('queuedOffline?: boolean');
+
+    expect(hospital).toContain("collection: 'clinical_notes'");
+    expect(hospital).toContain("collection: 'clinical_orders'");
+    expect(hospital).toContain("collection: 'vitals'");
+    expect(hospital).toContain("collection: 'opd_queue'");
+    expect(hospital).toContain("collection: 'beds'");
+    expect(hospital).toContain('result.queuedOffline');
+  });
+
   test('clinical AI requires explicit activation and has no diagnostic fallback synthesis',async()=>{
     const gateway=await source('lib/ai/gateway.ts');
     const soap=await source('lib/ai/flows/soap-drafter.ts');

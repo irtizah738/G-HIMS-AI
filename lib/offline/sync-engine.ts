@@ -8,6 +8,7 @@ import {
   recordSyncConflict,
   applyCanonicalEntityMappings,
   putEdgeEntity,
+  recoverStuckSyncingMutations,
   OfflineMutation,
   MutationAction,
 } from './db';
@@ -15,6 +16,7 @@ import { auth } from '@/lib/firebase/client';
 import { getCachedAuthSession } from '@/lib/offline/auth-storage';
 import { probeApplicationConnectivity, ConnectivityProbeResult } from '@/lib/offline/connectivity';
 import { incrementClock, mergeClocks } from '@/lib/offline/vector-clock';
+import { initializeEdgeDurability } from '@/lib/offline/durability';
 
 export interface LastReplicationEvent {
   at: Date;
@@ -79,11 +81,30 @@ class ClinicalSyncEngine {
   };
   private autoSyncInterval: any = null;
   private forcedOffline = false;
+  private syncChannel: BroadcastChannel | null = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
       this.initNetworkListeners();
-      void this.refreshPendingCount();
+      void initializeEdgeDurability().catch((error) => {
+        console.warn('Edge storage persistence initialization failed:', error);
+      });
+      void recoverStuckSyncingMutations()
+        .then(() => this.refreshPendingCount())
+        .catch((error) => console.warn('Stuck sync recovery failed:', error));
+
+      if ('BroadcastChannel' in window) {
+        this.syncChannel = new BroadcastChannel('ghims-clinical-sync');
+        this.syncChannel.addEventListener('message', (event) => {
+          if (event.data?.type === 'QUEUE_CHANGED') {
+            void this.refreshPendingCount(event.data?.tenantId);
+            if (this.state.isOnline && !this.state.isSyncing) {
+              void this.processSyncQueue(event.data?.tenantId);
+            }
+          }
+        });
+      }
+
       void this.refreshConnectivity(false).then((result) => {
         if (result.isOnline) void this.refreshReplicaStatus();
       });
@@ -352,6 +373,11 @@ class ClinicalSyncEngine {
     }
 
     await this.refreshPendingCount(params.tenantId);
+    this.syncChannel?.postMessage({
+      type: 'QUEUE_CHANGED',
+      tenantId: params.tenantId,
+      mutationId: mutation.id,
+    });
 
     if (this.state.isOnline) void this.processSyncQueue(params.tenantId);
     else void this.registerBackgroundSync();
@@ -375,7 +401,38 @@ class ClinicalSyncEngine {
    * Replays queued domain commands through the authenticated server sync endpoint.
    * No browser Firestore write or client-side LWW resolution is permitted.
    */
-  public async processSyncQueue(tenantId?: string): Promise<{ syncedCount: number; conflictCount: number }> {
+  public async processSyncQueue(
+    tenantId?: string
+  ): Promise<{ syncedCount: number; conflictCount: number }> {
+    const locks = (navigator as Navigator & {
+      locks?: {
+        request: (
+          name: string,
+          options: { ifAvailable: boolean },
+          callback: (lock: unknown | null) => Promise<void>
+        ) => Promise<void>;
+      };
+    }).locks;
+
+    if (!locks?.request) {
+      return this.processSyncQueueUnlocked(tenantId);
+    }
+
+    let outcome = { syncedCount: 0, conflictCount: 0 };
+    await locks.request(
+      `ghims-sync:${tenantId || 'active-tenant'}`,
+      { ifAvailable: true },
+      async (lock) => {
+        if (!lock) return;
+        outcome = await this.processSyncQueueUnlocked(tenantId);
+      }
+    );
+    return outcome;
+  }
+
+  private async processSyncQueueUnlocked(
+    tenantId?: string
+  ): Promise<{ syncedCount: number; conflictCount: number }> {
     if (this.isProcessing) return { syncedCount: 0, conflictCount: 0 };
 
     if (this.forcedOffline) {
@@ -674,6 +731,12 @@ class ClinicalSyncEngine {
       }
 
       await this.refreshPendingCount(tenantId);
+      this.syncChannel?.postMessage({
+        type: 'QUEUE_REPLAY_COMPLETED',
+        tenantId,
+        syncedCount,
+        conflictCount,
+      });
       const completedAt = new Date();
       this.updateState({
         lastSyncedAt: completedAt,

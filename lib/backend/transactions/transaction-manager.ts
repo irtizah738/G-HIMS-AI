@@ -34,6 +34,11 @@ export interface AdditionalStateWrite {
   entityType: string;
   entityId: string;
   domainState: unknown;
+  /**
+   * Optional optimistic concurrency precondition. When supplied, the mutation
+   * aborts if the authoritative server version changed after domain validation.
+   */
+  expectedServerVersion?: number;
 }
 
 export interface AtomicMutationParams {
@@ -54,6 +59,7 @@ export interface AtomicMutationParams {
   commandId?: string;
   correlationId?: string;
   domainState?: unknown;
+  expectedPrimaryServerVersion?: number;
   additionalStateWrites?: AdditionalStateWrite[];
   /** @deprecated State must be represented by domainState/additionalStateWrites. */
   stateWrite?: () => Promise<void> | void;
@@ -275,6 +281,13 @@ export class TransactionManager {
       const primaryStateSnapshot = primaryStateRef
         ? await transaction.get(primaryStateRef)
         : null;
+
+      if (
+        params.expectedPrimaryServerVersion !== undefined &&
+        Number(primaryStateSnapshot?.data()?._serverVersion || 0) !== params.expectedPrimaryServerVersion
+      ) {
+        throw new Error('DOMAIN_STATE_VERSION_CONFLICT: primary state changed during command execution.');
+      }
       const additionalStateSnapshots: Array<{
         write: AdditionalStateWrite;
         ref: (typeof additionalStateRefs)[number]['ref'];
@@ -282,9 +295,18 @@ export class TransactionManager {
       }> = [];
       for (const item of additionalStateRefs) {
         const snapshot = await transaction.get(item.ref);
+        const data = snapshot.exists ? snapshot.data() as Record<string, unknown> : null;
+        if (
+          item.write.expectedServerVersion !== undefined &&
+          Number(data?._serverVersion || 0) !== item.write.expectedServerVersion
+        ) {
+          throw new Error(
+            `DOMAIN_STATE_VERSION_CONFLICT: ${item.write.entityType}/${item.write.entityId} changed during command execution.`
+          );
+        }
         additionalStateSnapshots.push({
           ...item,
-          data: snapshot.exists ? snapshot.data() as Record<string, unknown> : null,
+          data,
         });
       }
 

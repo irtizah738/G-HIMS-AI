@@ -1,8 +1,15 @@
 // ============================================================================
-// G-HIMS SCM: Offline-First IndexedDB Cache & Transactional Sync Queue
+// G-HIMS SCM: Unified Edge Cache & Governed Transactional Sync Queue
 // ============================================================================
 
-import { StockTransaction, InventoryBalance, ItemMaster } from '@/types/scm-domain';
+import type { InventoryBalance } from '@/types/scm-domain';
+import {
+  deleteMutation,
+  getLocalMutations,
+  listEdgeEntities,
+  putEdgeEntity,
+} from '@/lib/offline/db';
+import { syncEngine } from '@/lib/offline/sync-engine';
 
 export interface PendingSyncMutation {
   id: string;
@@ -15,132 +22,102 @@ export interface PendingSyncMutation {
   lastError?: string;
 }
 
-const DB_NAME = 'GHIMS_SCM_OFFLINE_DB';
-const DB_VERSION = 1;
-const STORE_BALANCES = 'inventory_balances';
-const STORE_ITEMS = 'items_catalog';
-const STORE_QUEUE = 'sync_queue';
+const SCM_COLLECTION = 'scm_commands';
 
-function openSCMDatabase(): Promise<IDBDatabase | null> {
-  if (typeof window === 'undefined' || !window.indexedDB) {
-    return Promise.resolve(null);
+function commandTypeForMutation(type: PendingSyncMutation['mutationType']): string {
+  switch (type) {
+    case 'RECORD_STOCK_TRANSACTION':
+      return 'RecordStockTransactionCommand';
+    case 'RECORD_PATIENT_CONSUMPTION':
+      return 'RecordPatientConsumptionCommand';
+    case 'SUBMIT_REQUISITION':
+      return 'SubmitInventoryRequisitionCommand';
+    default:
+      throw new Error('SCM_OFFLINE_COMMAND_UNSUPPORTED');
   }
-
-  return new Promise((resolve) => {
-    try {
-      const req = window.indexedDB.open(DB_NAME, DB_VERSION);
-      req.onupgradeneeded = (e) => {
-        const db = (e.target as IDBOpenDBRequest).result;
-        if (!db.objectStoreNames.contains(STORE_BALANCES)) {
-          db.createObjectStore(STORE_BALANCES, { keyPath: 'balanceId' });
-        }
-        if (!db.objectStoreNames.contains(STORE_ITEMS)) {
-          db.createObjectStore(STORE_ITEMS, { keyPath: 'itemId' });
-        }
-        if (!db.objectStoreNames.contains(STORE_QUEUE)) {
-          db.createObjectStore(STORE_QUEUE, { keyPath: 'id' });
-        }
-      };
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => {
-        console.warn('Could not open SCM IndexedDB, falling back to in-memory');
-        resolve(null);
-      };
-    } catch {
-      resolve(null);
-    }
-  });
 }
 
-// In-memory fallback
-const memoryBalances: Map<string, InventoryBalance> = new Map();
-const memoryQueue: PendingSyncMutation[] = [];
+function resourceIdForMutation(mutation: PendingSyncMutation): string {
+  const payload = mutation.payload as Record<string, any>;
+  return String(
+    payload.balanceId ||
+    payload.transactionId ||
+    payload.consumptionId ||
+    payload.requisitionId ||
+    mutation.id
+  );
+}
 
 export async function cacheBalancesLocally(balances: InventoryBalance[]): Promise<void> {
-  const db = await openSCMDatabase();
-  if (!db) {
-    balances.forEach((b) => memoryBalances.set(b.balanceId, b));
-    return;
-  }
-
-  try {
-    const tx = db.transaction(STORE_BALANCES, 'readwrite');
-    const store = tx.objectStore(STORE_BALANCES);
-    for (const b of balances) {
-      store.put(b);
-    }
-  } catch (err) {
-    console.warn('Failed writing balances to IndexedDB', err);
-  }
+  await Promise.all(
+    balances.map((balance) =>
+      putEdgeEntity(
+        balance.tenantId,
+        'inventoryBalances',
+        balance.balanceId,
+        balance as unknown as Record<string, unknown>,
+        balance.version
+      )
+    )
+  );
 }
 
-export async function getLocalBalances(): Promise<InventoryBalance[]> {
-  const db = await openSCMDatabase();
-  if (!db) {
-    return Array.from(memoryBalances.values());
+export async function getLocalBalances(tenantId?: string): Promise<InventoryBalance[]> {
+  if (tenantId) {
+    return listEdgeEntities<InventoryBalance & Record<string, unknown>>(
+      tenantId,
+      'inventoryBalances'
+    ) as Promise<InventoryBalance[]>;
   }
 
-  return new Promise((resolve) => {
-    try {
-      const tx = db.transaction(STORE_BALANCES, 'readonly');
-      const store = tx.objectStore(STORE_BALANCES);
-      const req = store.getAll();
-      req.onsuccess = () => resolve(req.result || []);
-      req.onerror = () => resolve(Array.from(memoryBalances.values()));
-    } catch {
-      resolve(Array.from(memoryBalances.values()));
-    }
-  });
+  // A cross-tenant browser inventory listing is deliberately unsupported.
+  // Callers must bind SCM reads to the active authenticated tenant.
+  return [];
 }
 
 export async function enqueueOfflineMutation(mutation: PendingSyncMutation): Promise<void> {
-  const db = await openSCMDatabase();
-  if (!db) {
-    memoryQueue.push(mutation);
-    return;
+  if (!syncEngine) {
+    throw new Error('SCM_EDGE_QUEUE_UNAVAILABLE');
   }
 
-  try {
-    const tx = db.transaction(STORE_QUEUE, 'readwrite');
-    const store = tx.objectStore(STORE_QUEUE);
-    store.put(mutation);
-  } catch {
-    memoryQueue.push(mutation);
-  }
-}
-
-export async function getPendingSyncQueue(): Promise<PendingSyncMutation[]> {
-  const db = await openSCMDatabase();
-  if (!db) {
-    return [...memoryQueue];
-  }
-
-  return new Promise((resolve) => {
-    try {
-      const tx = db.transaction(STORE_QUEUE, 'readonly');
-      const store = tx.objectStore(STORE_QUEUE);
-      const req = store.getAll();
-      req.onsuccess = () => resolve(req.result || []);
-      req.onerror = () => resolve([...memoryQueue]);
-    } catch {
-      resolve([...memoryQueue]);
-    }
+  await syncEngine.queueMutation({
+    tenantId: mutation.tenantId,
+    collection: SCM_COLLECTION,
+    action: 'CREATE',
+    resourceId: resourceIdForMutation(mutation),
+    commandType: commandTypeForMutation(mutation.mutationType),
+    payload: {
+      ...mutation.payload,
+      scmMutationType: mutation.mutationType,
+      scmCreatedAt: mutation.createdAt,
+    },
+    idempotencyKey: mutation.idempotencyKey,
+    schemaVersion: 1,
+    mutationId: mutation.id,
   });
 }
 
-export async function removePendingSyncMutation(id: string): Promise<void> {
-  const db = await openSCMDatabase();
-  if (!db) {
-    const idx = memoryQueue.findIndex((m) => m.id === id);
-    if (idx >= 0) memoryQueue.splice(idx, 1);
-    return;
-  }
+export async function getPendingSyncQueue(tenantId?: string): Promise<PendingSyncMutation[]> {
+  const rows = await getLocalMutations(tenantId);
+  return rows
+    .filter((mutation) => mutation.collection === SCM_COLLECTION)
+    .map((mutation) => ({
+      id: mutation.id,
+      tenantId: mutation.tenantId,
+      mutationType: String(
+        (mutation.payload as any).scmMutationType || ''
+      ) as PendingSyncMutation['mutationType'],
+      payload: mutation.payload,
+      idempotencyKey: mutation.idempotencyKey || '',
+      createdAt: String(
+        (mutation.payload as any).scmCreatedAt ||
+        new Date(mutation.clientTimestamp || mutation.timestamp).toISOString()
+      ),
+      retryCount: mutation.retryCount || 0,
+      lastError: mutation.errorMessage,
+    }));
+}
 
-  try {
-    const tx = db.transaction(STORE_QUEUE, 'readwrite');
-    tx.objectStore(STORE_QUEUE).delete(id);
-  } catch {
-    const idx = memoryQueue.findIndex((m) => m.id === id);
-    if (idx >= 0) memoryQueue.splice(idx, 1);
-  }
+export async function removePendingSyncMutation(id: string): Promise<void> {
+  await deleteMutation(id);
 }

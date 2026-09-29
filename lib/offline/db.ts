@@ -1078,6 +1078,31 @@ function replaceMappedIds(
   return value;
 }
 
+export async function secureLegacyMutationsForCurrentUser(
+  tenantId: string
+): Promise<number> {
+  const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
+  const ownerUid = currentOwnerUid();
+  const rows = await localDb.mutations.where('tenantId').equals(normalizedTenantId).toArray();
+  let migrated = 0;
+
+  for (const row of rows) {
+    if (row.actorId !== ownerUid || row.encryptedPayload) continue;
+    const encryptedPayload = await encryptEdgeJson(
+      normalizedTenantId,
+      ownerUid,
+      row.payload || {}
+    );
+    await localDb.mutations.update(row.id, {
+      payload: {},
+      encryptedPayload,
+    });
+    migrated += 1;
+  }
+
+  return migrated;
+}
+
 export async function applyCanonicalEntityMappings(
   tenantId: string,
   mappings: Array<{
@@ -1090,9 +1115,116 @@ export async function applyCanonicalEntityMappings(
   const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
   if (!normalizedTenantId || mappings.length === 0) return;
 
+  const ownerUid = currentOwnerUid();
   const replacementMap = new Map(
     mappings.map((mapping) => [mapping.localId, mapping.canonicalId])
   );
+
+  const preparedEdgeMoves: Array<{
+    oldKey: string;
+    record: EdgeEntityRecord;
+  }> = [];
+
+  for (const mapping of mappings) {
+    if (!mapping.collection) continue;
+    const oldKey = `${normalizedTenantId}:${mapping.collection}:${mapping.localId}`;
+    const existing = await localDb.edge_entities.get(oldKey);
+    if (!existing || existing.ownerUid !== ownerUid) continue;
+
+    const decrypted = await decryptStoredEdgeEntity(existing);
+    const rewrittenData = replaceMappedIds(
+      decrypted.data,
+      replacementMap
+    ) as Record<string, unknown>;
+    const encryptedData = await encryptEdgeJson(
+      normalizedTenantId,
+      ownerUid,
+      rewrittenData
+    );
+
+    preparedEdgeMoves.push({
+      oldKey,
+      record: {
+        ...existing,
+        key: `${normalizedTenantId}:${mapping.collection}:${mapping.canonicalId}`,
+        entityId: mapping.canonicalId,
+        ownerUid,
+        data: {},
+        encryptedData,
+        updatedAt: Date.now(),
+      },
+    });
+  }
+
+  const mutationUpdates: Array<{
+    id: string;
+    docId: string;
+    resourceId?: string;
+    encryptedPayload: EncryptedEdgeEnvelope;
+  }> = [];
+
+  const tenantMutations = await localDb.mutations
+    .where('tenantId')
+    .equals(normalizedTenantId)
+    .toArray();
+
+  for (const stored of tenantMutations) {
+    if (stored.actorId !== ownerUid) continue;
+    const mutation = await decryptStoredMutation(stored);
+    const rewrittenPayload = replaceMappedIds(
+      mutation.payload,
+      replacementMap
+    ) as Record<string, unknown>;
+    const rewrittenDocId = replacementMap.get(mutation.docId) || mutation.docId;
+    const rewrittenResourceId = mutation.resourceId
+      ? replacementMap.get(mutation.resourceId) || mutation.resourceId
+      : mutation.resourceId;
+
+    if (
+      rewrittenDocId !== mutation.docId ||
+      rewrittenResourceId !== mutation.resourceId ||
+      JSON.stringify(rewrittenPayload) !== JSON.stringify(mutation.payload)
+    ) {
+      mutationUpdates.push({
+        id: mutation.id,
+        docId: rewrittenDocId,
+        resourceId: rewrittenResourceId,
+        encryptedPayload: await encryptEdgeJson(
+          normalizedTenantId,
+          ownerUid,
+          rewrittenPayload
+        ),
+      });
+    }
+  }
+
+  const cacheUpdates: Array<{
+    key: string;
+    encryptedData: EncryptedEdgeEnvelope;
+  }> = [];
+  const cached = await localDb.offline_cache
+    .where('tenantId')
+    .equals(normalizedTenantId)
+    .toArray();
+
+  for (const stored of cached) {
+    if (stored.ownerUid !== ownerUid) continue;
+    const entry = await decryptStoredCacheEntry(stored);
+    const rewrittenData = replaceMappedIds(
+      entry.data,
+      replacementMap
+    ) as Record<string, unknown>;
+    if (JSON.stringify(rewrittenData) !== JSON.stringify(entry.data)) {
+      cacheUpdates.push({
+        key: entry.key,
+        encryptedData: await encryptEdgeJson(
+          normalizedTenantId,
+          ownerUid,
+          rewrittenData
+        ),
+      });
+    }
+  }
 
   await localDb.transaction(
     'rw',
@@ -1114,52 +1246,28 @@ export async function applyCanonicalEntityMappings(
           createdAt: previous?.createdAt || Date.now(),
           updatedAt: Date.now(),
         });
-
-        if (mapping.collection) {
-          const localKey = `${normalizedTenantId}:${mapping.collection}:${mapping.localId}`;
-          const existing = await localDb.edge_entities.get(localKey);
-          if (existing) {
-            await localDb.edge_entities.delete(localKey);
-            await localDb.edge_entities.put({
-              ...existing,
-              key: `${normalizedTenantId}:${mapping.collection}:${mapping.canonicalId}`,
-              entityId: mapping.canonicalId,
-              data: replaceMappedIds(existing.data, replacementMap) as Record<string, unknown>,
-              updatedAt: Date.now(),
-            });
-          }
-        }
       }
 
-      const tenantMutations = await localDb.mutations.where('tenantId').equals(normalizedTenantId).toArray();
-      for (const mutation of tenantMutations) {
-        const rewrittenPayload = replaceMappedIds(mutation.payload, replacementMap) as Record<string, unknown>;
-        const rewrittenDocId = replacementMap.get(mutation.docId) || mutation.docId;
-        const rewrittenResourceId = mutation.resourceId
-          ? replacementMap.get(mutation.resourceId) || mutation.resourceId
-          : mutation.resourceId;
-        if (
-          rewrittenDocId !== mutation.docId ||
-          rewrittenResourceId !== mutation.resourceId ||
-          JSON.stringify(rewrittenPayload) !== JSON.stringify(mutation.payload)
-        ) {
-          await localDb.mutations.update(mutation.id, {
-            docId: rewrittenDocId,
-            resourceId: rewrittenResourceId,
-            payload: rewrittenPayload,
-          });
-        }
+      for (const move of preparedEdgeMoves) {
+        await localDb.edge_entities.delete(move.oldKey);
+        await localDb.edge_entities.put(move.record);
       }
 
-      const cached = await localDb.offline_cache.where('tenantId').equals(normalizedTenantId).toArray();
-      for (const entry of cached) {
-        const rewrittenData = replaceMappedIds(entry.data, replacementMap) as Record<string, unknown>;
-        if (JSON.stringify(rewrittenData) !== JSON.stringify(entry.data)) {
-          await localDb.offline_cache.update(entry.key, {
-            data: rewrittenData,
-            updatedAt: Date.now(),
-          });
-        }
+      for (const update of mutationUpdates) {
+        await localDb.mutations.update(update.id, {
+          docId: update.docId,
+          resourceId: update.resourceId,
+          payload: {},
+          encryptedPayload: update.encryptedPayload,
+        });
+      }
+
+      for (const update of cacheUpdates) {
+        await localDb.offline_cache.update(update.key, {
+          data: {},
+          encryptedData: update.encryptedData,
+          updatedAt: Date.now(),
+        });
       }
     }
   );

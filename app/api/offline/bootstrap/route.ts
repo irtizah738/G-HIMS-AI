@@ -33,6 +33,13 @@ const SCM_COLLECTIONS = [
   'stockTransactions',
   'patientConsumptions',
   'purchaseRequisitions',
+  'inventoryLocations',
+  'scmPurchaseOrders',
+  'goodsReceiptNotes',
+  'stockTransfers',
+  'recallCases',
+  'suppliers',
+  'threeWayMatches',
 ] as const;
 
 const EDGE_PAGE_SIZE = 500;

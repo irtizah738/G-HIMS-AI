@@ -90,7 +90,7 @@ export class ClinicalDocumentationDomainService {
       Number.isFinite(systolicBloodPressure) &&
       (payload.spO2Scale === 1 || payload.spO2Scale === 2) &&
       typeof payload.onSupplementalOxygen === 'boolean' &&
-      (!!payload.consciousness || Number.isFinite(payload.gcsScore));
+      (!!payload.consciousness || typeof payload.gcsScore === 'number');
 
     const news2 = canCalculateNews2
       ? calculateNEWS2({

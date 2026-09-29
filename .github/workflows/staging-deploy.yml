@@ -20,6 +20,8 @@ jobs:
     name: Deploy current main to STAGING and verify
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    # Hobby has no Vercel Custom Environments. This guarded Preview deployment
+    # is the G-HIMS STAGING trust domain; application runtime remains STAGING.
     env:
       VERCEL_ORG_ID: team_0S9QQkyN4yTIj7QUZ9BVKsVV
       VERCEL_PROJECT_ID: prj_a0TEuNNMAE61UziOoLNTok6Wbp1v
@@ -74,21 +76,28 @@ jobs:
             exit 1
           fi
 
-      - name: Pull STAGING project configuration
+      - name: Pull Preview configuration for G-HIMS STAGING
         shell: bash
         run: |
           set -euo pipefail
-          vercel pull --yes --environment=staging --token="$VERCEL_TOKEN"
+          vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
 
-      - name: Deploy exact main commit to Vercel STAGING
+      - name: Build exact main with G-HIMS STAGING configuration
         id: deploy
         shell: bash
         run: |
           set -euo pipefail
-          vercel deploy --target=staging --yes --token="$VERCEL_TOKEN" 2>&1 | tee /tmp/vercel-staging-deploy.log
+          vercel build --yes --token="$VERCEL_TOKEN"
+
+      - name: Deploy prebuilt artifact as guarded Preview
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          vercel deploy --prebuilt --yes --token="$VERCEL_TOKEN" 2>&1 | tee /tmp/vercel-staging-deploy.log
           DEPLOY_URL="$(grep -Eo 'https://[A-Za-z0-9.-]+\.vercel\.app' /tmp/vercel-staging-deploy.log | tail -n 1 || true)"
           if [ -z "$DEPLOY_URL" ]; then
-            echo "Could not resolve the STAGING deployment URL from Vercel output." >&2
+            echo "Could not resolve the guarded STAGING Preview URL from Vercel output." >&2
             exit 1
           fi
           echo "deployment_url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
@@ -110,7 +119,7 @@ jobs:
           {
             echo "main_sha=$MAIN_SHA"
             echo "deployment_url=$DEPLOYMENT_URL"
-            echo "target=staging"
+            echo "vercel_environment=preview"\n            echo "ghims_runtime=STAGING"
             echo "verified_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           } > staging-deployment-evidence.txt
 

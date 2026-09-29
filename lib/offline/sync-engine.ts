@@ -2,8 +2,6 @@ import {
   getPendingVectorClock,
   updateMutationStatus,
   deleteMutation,
-  saveToOfflineCache,
-  recordSyncConflict,
   OfflineMutation,
   MutationAction,
 } from './db';
@@ -13,6 +11,8 @@ import {
   putEntityMappings,
   remapEdgeEntityIds,
   resolveMappedReferences,
+  putSecureEdgeEntities,
+  recordSecureConflict,
 } from '@/lib/offline/secure-store';
 import { withEdgeSyncLeadership } from '@/lib/offline/sync-leader';
 import { ensurePersistentEdgeStorage } from '@/lib/offline/storage-manager';
@@ -348,11 +348,11 @@ class ClinicalSyncEngine {
     });
 
     if (params.optimisticCache !== false && params.action !== 'DELETE') {
-      await saveToOfflineCache(
+      await putSecureEdgeEntities(
         params.tenantId,
+        cached.user.uid,
         params.collection,
-        params.resourceId,
-        params.payload
+        [{ id: params.resourceId, ...params.payload }]
       );
     }
 
@@ -546,11 +546,18 @@ class ClinicalSyncEngine {
               await remapEdgeEntityIds(mutation.tenantId, mappings);
             }
             await deleteMutation(mutation.id);
-            await saveToOfflineCache(
+            const authoritativeData =
+              result.data && typeof result.data === 'object'
+                ? result.data as Record<string, unknown>
+                : mutation.payload;
+            await putSecureEdgeEntities(
               mutation.tenantId,
+              cached.user.uid,
               mutation.collection,
-              mutation.resourceId || mutation.docId,
-              result.data || mutation.payload
+              [{
+                id: mutation.resourceId || mutation.docId,
+                ...authoritativeData,
+              }]
             );
             syncedCount += 1;
           } else if (result.status === 'conflict' || result.status === 'requires_review') {
@@ -560,16 +567,20 @@ class ClinicalSyncEngine {
               'conflict',
               result.reason || 'Server reconciliation required.'
             );
-            await recordSyncConflict({
-              id: mutation.id,
-              mutationId: mutation.id,
-              tenantId: mutation.tenantId,
-              collection: mutation.collection,
-              resourceId: mutation.resourceId || mutation.docId,
-              clientData: mutation.payload,
-              conflictType: result.conflictCategory || 'STATE_CONFLICT',
-              reason: result.reason,
-            });
+            await recordSecureConflict(
+              mutation.tenantId,
+              cached.user.uid,
+              {
+                id: mutation.id,
+                mutationId: mutation.id,
+                tenantId: mutation.tenantId,
+                collection: mutation.collection,
+                resourceId: mutation.resourceId || mutation.docId,
+                clientData: mutation.payload,
+                conflictType: result.conflictCategory || 'STATE_CONFLICT',
+                reason: result.reason,
+              }
+            );
           } else {
             await updateMutationStatus(
               mutation.id,

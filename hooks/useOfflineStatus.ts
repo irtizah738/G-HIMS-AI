@@ -172,7 +172,9 @@ export function useOfflineStatus(tenantId?: string): OfflineStatusResult {
     // Browser online/offline events are hints only. Confirm them against the
     // G-HIMS application origin before changing clinical connectivity state.
     const handleOnlineHint = () => {
-      void refreshConnectivity(true);
+      void refreshConnectivity(true).then(() => {
+        if (syncEngine) void syncEngine.refreshReplicaStatus(tenantId);
+      });
     };
 
     const handleOfflineHint = () => {
@@ -206,10 +208,10 @@ export function useOfflineStatus(tenantId?: string): OfflineStatusResult {
       });
     }
 
+    // The singleton sync engine owns periodic network/replica probes. This hook
+    // only refreshes local queue telemetry so multiple UI consumers do not create
+    // duplicate authenticated Firestore status traffic.
     const interval = window.setInterval(() => {
-      void refreshConnectivity(false).then(() => {
-        if (syncEngine) void syncEngine.refreshReplicaStatus(tenantId);
-      });
       void refreshCounts();
     }, 15000);
 

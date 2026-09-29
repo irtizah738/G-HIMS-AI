@@ -158,6 +158,19 @@ export class EncounterDomainService {
     return this.encounterCache.get(key) || null;
   }
   /**
+   * Resolves the authoritative encounter snapshot using durable state when
+   * available and the service's transaction-backed in-memory fallback in tests.
+   * Domain services should use this instead of inventing parallel encounter caches.
+   */
+  public static async getAuthoritativeEncounter(
+    tenantId: string,
+    encounterId: string
+  ): Promise<Record<string, unknown> | null> {
+    const encounter = await this.loadEncounter(tenantId, encounterId);
+    return encounter ? { ...encounter } : null;
+  }
+
+  /**
    * Creates a new clinical encounter with atomic transaction.
    */
   public static async createEncounter(

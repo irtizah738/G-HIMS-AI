@@ -7,6 +7,7 @@ import { CommandContext, CommandResult } from '../types';
 import { AuthorizationPipeline } from '../auth/authorization-pipeline';
 import { TransactionManager } from '../transactions/transaction-manager';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
+import { OpdWorkflowRuntimeService } from './opd-workflow-runtime-service';
 import {
   type ClinicalEncounterState,
   type FinancialClearanceState,
@@ -650,6 +651,30 @@ export class EncounterDomainService {
           message: `Canonical clinical transition ${persistedClinicalState} -> ${targetClinicalState} is not allowed.`,
         },
       };
+    }
+
+    // OPD transitions must also satisfy the server-owned compiled v1.2 DAG.
+    // The client never gets to decide or manually resolve the graph.
+    if (encounter.encounterType === 'OPD') {
+      const dagCheck = OpdWorkflowRuntimeService.validateTransition({
+        currentStage: persistedClinicalState,
+        targetStage: targetClinicalState,
+        evidenceId: payload.evidenceId,
+      });
+
+      if (!dagCheck.allowed) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: dagCheck.code || 'OPD_WORKFLOW_TRANSITION_BLOCKED',
+            message:
+              dagCheck.message ||
+              'OPD workflow runtime rejected the requested stage transition.',
+          },
+        };
+      }
     }
 
     const transitionedAt = Date.now();

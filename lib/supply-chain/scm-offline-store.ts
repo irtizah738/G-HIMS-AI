@@ -102,7 +102,7 @@ export async function enqueueOfflineMutation(mutation: PendingSyncMutation): Pro
 export async function getPendingSyncQueue(): Promise<PendingSyncMutation[]> {
   const cached = await getCachedAuthSession();
   if (!cached) return [];
-  const rows = await getSecurePendingMutations(cached.user.tenantId);
+  const rows = await getSecurePendingMutations(cached.user.tenantId, cached.user.uid);
 
   return rows
     .filter((row) =>

@@ -125,11 +125,23 @@ export interface Patient360Projection {
     diagnosticReports: number;
     documents: number;
   };
+  /** Projection schema version. Increment only for a read-model contract change. */
   projectionVersion: number;
+  /** Deterministic monotonic revision derived from patient-scoped authoritative events. */
+  revision: number;
+  /** Durable event cursor used for incremental replay/recovery. */
+  eventCheckpoint?: {
+    eventId: string;
+    recordedAt: number;
+  };
+  /** Stable fingerprint of the canonical source records used to build this projection. */
+  sourceFingerprint: string;
+  /** Human/debug-friendly checkpoint cursor: <recordedAt>:<eventId>. */
   sourceCheckpoint: string;
   contentHash: string;
   projectedAt: number;
   lastEventId?: string;
+  lastEventRecordedAt?: number;
 }
 
 export interface Patient360TimelineItem {

@@ -42,6 +42,12 @@ export async function loadLocalEdgeSnapshot(tenantId: string): Promise<EdgeSnaps
     'journalEntries',
     'telehealthSessions',
     'employees',
+    'items',
+    'inventoryBalances',
+    'batches',
+    'stockTransactions',
+    'patientConsumptions',
+    'purchaseRequisitions',
   ];
 
   const entries = await Promise.all(

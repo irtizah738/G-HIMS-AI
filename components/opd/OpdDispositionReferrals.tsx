@@ -63,6 +63,7 @@ export function OpdDispositionReferrals({
 
   // Inpatient Admission
   const [admissionWard, setAdmissionWard] = useState<string>('General Medical Inpatient Ward (Ward 4B)');
+  const [admissionBedId, setAdmissionBedId] = useState<string>('');
   const [admissionReason, setAdmissionReason] = useState<string>('IV Inotropic titration & close hemodynamic monitoring');
 
   const [signingDoctor, setSigningDoctor] = useState<string>('Dr. Sarah Jenkins (Cardiology Specialist)');
@@ -110,6 +111,7 @@ export function OpdDispositionReferrals({
         dispositionType === 'INPATIENT_ADMISSION_RECOMMENDED'
           ? {
               targetWard: admissionWard,
+              targetBedId: admissionBedId.trim() || undefined,
               clinicalIndication: admissionReason,
               admittingService: 'Cardiology Services',
             }
@@ -340,6 +342,20 @@ export function OpdDispositionReferrals({
                   onChange={(e) => setAdmissionWard(e.target.value)}
                   className="w-full px-3 py-1.5 text-xs rounded-lg border border-amber-200 dark:border-amber-700 bg-white dark:bg-slate-900"
                 />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold mb-1">Target Bed ID *</label>
+                <input
+                  type="text"
+                  required={dispositionType === 'INPATIENT_ADMISSION_RECOMMENDED'}
+                  value={admissionBedId}
+                  onChange={(e) => setAdmissionBedId(e.target.value)}
+                  placeholder="e.g. bed-gen-201"
+                  className="w-full px-3 py-1.5 text-xs rounded-lg border border-amber-200 dark:border-amber-700 bg-white dark:bg-slate-900"
+                />
+                <p className="text-[10px] text-amber-700 dark:text-amber-300 mt-1">
+                  Admission executes only against an authoritative available bed identifier.
+                </p>
               </div>
               <div>
                 <label className="block text-[11px] font-semibold mb-1">Admission Clinical Indication</label>

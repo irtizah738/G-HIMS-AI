@@ -8,6 +8,7 @@ import { CommandContext, CommandResult } from '../types';
 import { AuthorizationPipeline } from '../auth/authorization-pipeline';
 import { TransactionManager } from '../transactions/transaction-manager';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
+import { EncounterDomainService } from './encounter-domain-service';
 import type { InventoryBalance } from '@/types/scm-domain';
 
 export interface PlaceOrderPayload {
@@ -73,9 +74,8 @@ export class ClinicalOrderDomainService {
       };
     }
 
-    const encounter = await DomainStateRepository.getById<Record<string, unknown>>(
+    const encounter = await EncounterDomainService.getAuthoritativeEncounter(
       context.tenantId,
-      'encounters',
       payload.encounterId
     );
     if (!encounter || String(encounter.patientId || '') !== payload.patientId) {
@@ -235,7 +235,7 @@ export class ClinicalOrderDomainService {
 
     const [patient, encounter, balances] = await Promise.all([
       DomainStateRepository.getById<Record<string, unknown>>(context.tenantId, 'patients', patientId),
-      DomainStateRepository.getById<Record<string, unknown>>(context.tenantId, 'encounters', encounterId),
+      EncounterDomainService.getAuthoritativeEncounter(context.tenantId, encounterId),
       DomainStateRepository.queryEqual<VersionedInventoryBalance>(
         context.tenantId,
         'inventoryBalances',

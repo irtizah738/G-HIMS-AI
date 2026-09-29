@@ -138,10 +138,14 @@ export interface OfflineMutationItem {
   mutationId: string;
   occurredAt: number;
   commandType: string;
+  collection: string;
   payload: Record<string, unknown>;
   idempotencyKey: string;
   entityId?: string;
   schemaVersion: number;
+  baseEntityVersion?: number;
+  vectorClock?: Record<string, number>;
+  baseVectorClock?: Record<string, number>;
 }
 
 export interface OfflineSyncBatch {
@@ -159,8 +163,14 @@ export interface SyncBatchResultItem {
   conflictCategory?: ConflictCategory;
   serverEventId?: string;
   serverVersion?: number;
+  vectorClock?: Record<string, number>;
   reason?: string;
   data?: unknown;
+  entityMappings?: Array<{
+    localId: string;
+    canonicalId: string;
+    entityType: string;
+  }>;
 }
 
 export interface OfflineSyncResponse {

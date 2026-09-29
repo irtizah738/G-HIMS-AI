@@ -3,6 +3,14 @@ export type VectorClock = Record<string, number>;
 export type MutationAction = 'CREATE' | 'UPDATE' | 'DELETE';
 export type MutationStatus = 'pending' | 'syncing' | 'failed' | 'conflict';
 
+export interface EncryptedEdgePayload {
+  v: 1;
+  alg: 'AES-GCM';
+  keyId: string;
+  iv: string;
+  ciphertext: string;
+}
+
 export interface SyncMutation {
   id: string;
   tenantId: string;
@@ -17,7 +25,10 @@ export interface SyncMutation {
   schemaVersion?: number;
   baseEntityVersion?: number;
   payload: Record<string, any>;
+  /** AES-GCM envelope used for IndexedDB persistence. Public DB helpers decrypt transparently. */
+  encryptedPayload?: EncryptedEdgePayload;
   vectorClock: VectorClock;
+  baseVectorClock?: VectorClock;
   timestamp: number;
   clientTimestamp?: number;
   retryCount: number;
@@ -34,6 +45,8 @@ export interface OfflineCacheEntry {
   tenantId: string;
   collection: string;
   data: Record<string, unknown>;
+  encryptedData?: EncryptedEdgePayload;
+  actorId?: string;
   updatedAt: number;
   vectorClock: VectorClock;
 }
@@ -187,8 +200,11 @@ export interface EdgeEntityRecord {
   collection: string;
   entityId: string;
   data: Record<string, unknown>;
+  encryptedData?: EncryptedEdgePayload;
+  actorId?: string;
   updatedAt: number;
   serverVersion?: number;
+  vectorClock?: VectorClock;
   deleted?: boolean;
 }
 
@@ -199,6 +215,7 @@ export interface EdgeEntityMapping {
   canonicalId?: string;
   entityType: string;
   status: 'LOCAL_ONLY' | 'MAPPED' | 'FAILED';
+  sourceMutationId?: string;
   createdAt: number;
   updatedAt: number;
 }

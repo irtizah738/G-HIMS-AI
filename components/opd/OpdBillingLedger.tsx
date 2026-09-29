@@ -25,7 +25,7 @@ import {
 interface OpdBillingLedgerProps {
   encounter: ComprehensiveOpdEncounter;
   invoice: OpdInvoice;
-  onSettlePayment: (payment: PaymentTransaction) => void;
+  onSettlePayment: (payment: PaymentTransaction) => void | Promise<void>;
 }
 
 export function OpdBillingLedger({
@@ -48,7 +48,7 @@ export function OpdBillingLedger({
   const glCredits = grossTotal;
   const isGlBalanced = glDebits === glCredits;
 
-  const handleSettle = (e: React.FormEvent) => {
+  const handleSettle = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const payment: PaymentTransaction = {
@@ -63,7 +63,11 @@ export function OpdBillingLedger({
       glJournalEntryId: `JE-OPD-GL-${Date.now().toString().slice(-6)}`,
     };
 
-    onSettlePayment(payment);
+    try {
+      await onSettlePayment(payment);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Cash settlement failed.');
+    }
   };
 
   return (
@@ -207,11 +211,7 @@ export function OpdBillingLedger({
                 onChange={(e) => setSelectedPaymentMode(e.target.value as any)}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
               >
-                <option value="CASH">Cash Over Counter</option>
-                <option value="CREDIT_CARD">Credit / Debit Card Terminal</option>
-                <option value="MOBILE_MONEY">Raast Instant / Digital Wallet (QR)</option>
-                <option value="CORPORATE_CREDIT">Corporate Sponsor Pre-Auth</option>
-                <option value="SEHAT_CARD">Universal Health Card (Sehat Sahulat)</option>
+                <option value="CASH">Cash Over Counter — Offline Capable</option>
               </select>
             </div>
 
@@ -256,7 +256,7 @@ export function OpdBillingLedger({
               className="w-full py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-all"
             >
               <CheckCircle2 className="w-4 h-4" />
-              Collect Payment & Post General Ledger
+              Collect Cash & Post Balanced General Ledger
             </button>
           </form>
 

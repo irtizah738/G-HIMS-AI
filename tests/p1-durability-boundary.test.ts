@@ -16,15 +16,17 @@ describe('G-HIMS P1 durability boundary regression guards', () => {
   test('authoritative aggregate snapshots are document replacements, not merge patches', async () => {
     const tx = await source('lib/backend/transactions/transaction-manager.ts');
 
-    expect(tx).toContain('transaction.set(stateRef, toDocumentData(params.domainState, params.aggregateType));');
-    expect(tx).toContain('transaction.set(stateRef, toDocumentData(write.domainState, write.entityType));');
-    expect(tx).toContain('transaction.set(stateRef, toDocumentData(payload.domainState, payload.entityType));');
+    expect(tx).toContain('toVersionedDocumentData');
+    expect(tx).toContain('_serverVersion: currentVersion + 1');
+    expect(tx).toContain('transaction.set(');
+    expect(tx).toContain('primaryStateRef');
+    expect(tx).toContain('stateRef');
 
     expect(tx).not.toContain(
-      'transaction.set(stateRef, toDocumentData(params.domainState, params.aggregateType), { merge: true })'
+      'toVersionedDocumentData(params.domainState, params.aggregateType), { merge: true }'
     );
     expect(tx).not.toContain(
-      'transaction.set(stateRef, toDocumentData(payload.domainState, payload.entityType), { merge: true })'
+      'toVersionedDocumentData(payload.domainState, payload.entityType), { merge: true }'
     );
   });
 

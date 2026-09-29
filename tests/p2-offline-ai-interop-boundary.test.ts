@@ -51,7 +51,7 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(indicator).not.toContain("setTimeout(() =>");
 
     expect(hook).toContain("measureLocalStoreLatency");
-    expect(hook).toContain("getPendingVectorClock");
+    expect(hook).toContain("getSecurePendingVectorClock");
     expect(hook).toContain("replicaReachable");
     expect(hook).toContain("lastReplicationEvent");
 
@@ -85,7 +85,7 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(client).not.toContain("response.status === 401");
     expect(client).not.toContain("response.status === 403");
 
-    expect(engine).toContain('getPendingVectorClock');
+    expect(engine).toContain('getSecurePendingVectorClock');
     expect(engine).toContain('incrementClock');
     expect(engine).toContain('clockNodeId = cached.session.deviceId || cached.user.uid');
     expect(engine).toContain('id: params.mutationId');
@@ -149,13 +149,14 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(db).toContain("edge_entities");
     expect(db).toContain("entity_map");
     expect(db).toContain("sync_metadata");
-    expect(db).toContain("replaceTenantEdgeSnapshot");
-    expect(db).toContain("listEdgeEntities");
+    expect(db).toContain("edge_entities");
+    expect(db).toContain("entity_map");
 
     expect(hydration).toContain("loadLocalEdgeSnapshot");
     expect(hydration).toContain("hydrateEdgeSnapshot");
     expect(hydration).toContain("/api/offline/bootstrap?tenantId=");
-    expect(hydration).toContain("replaceTenantEdgeSnapshot");
+    expect(hydration).toContain("replaceSecureTenantEdgeSnapshot");
+    expect(hydration).toContain("listSecureEdgeEntities");
     expect(hydration).not.toContain("firebase/firestore");
 
     expect(bootstrap).toContain("deriveAuthoritativeContext");

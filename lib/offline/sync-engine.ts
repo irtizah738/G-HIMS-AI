@@ -1,18 +1,27 @@
 import {
-  addMutation,
-  getPendingMutations,
-  getPendingVectorClock,
   updateMutationStatus,
   deleteMutation,
-  saveToOfflineCache,
-  recordSyncConflict,
   OfflineMutation,
   MutationAction,
 } from './db';
+import {
+  getSecurePendingMutations,
+  getSecurePendingVectorClock,
+  getSecureEdgeEntityMetadata,
+  updateSecureEdgeEntityVersion,
+  putSecureMutation,
+  putEntityMappings,
+  remapEdgeEntityIds,
+  resolveMappedReferences,
+  putSecureEdgeEntities,
+  recordSecureConflict,
+} from '@/lib/offline/secure-store';
+import { withEdgeSyncLeadership } from '@/lib/offline/sync-leader';
+import { ensurePersistentEdgeStorage } from '@/lib/offline/storage-manager';
 import { auth } from '@/lib/firebase/client';
 import { getCachedAuthSession } from '@/lib/offline/auth-storage';
 import { probeApplicationConnectivity, ConnectivityProbeResult } from '@/lib/offline/connectivity';
-import { incrementClock } from '@/lib/offline/vector-clock';
+import { incrementClock, mergeClocks } from '@/lib/offline/vector-clock';
 
 export interface LastReplicationEvent {
   at: Date;
@@ -80,6 +89,7 @@ class ClinicalSyncEngine {
   constructor() {
     if (typeof window !== 'undefined') {
       this.initNetworkListeners();
+      void ensurePersistentEdgeStorage().catch(() => {});
       void this.refreshPendingCount();
       void this.refreshConnectivity(false).then((result) => {
         if (result.isOnline) void this.refreshReplicaStatus();
@@ -291,10 +301,19 @@ class ClinicalSyncEngine {
 
   public async refreshPendingCount(tenantId?: string): Promise<number> {
     try {
-      const pending = await getPendingMutations(tenantId);
+      const cached = await getCachedAuthSession();
+      const activeTenantId = String(tenantId || cached?.user?.tenantId || '').trim().toLowerCase();
+      const actorId = String(cached?.user?.uid || '').trim();
+      if (!activeTenantId || !actorId) {
+        this.updateState({ pendingCount: 0 });
+        return 0;
+      }
+
+      const pending = await getSecurePendingMutations(activeTenantId, actorId);
       this.updateState({ pendingCount: pending.length });
       return pending.length;
     } catch {
+      this.updateState({ pendingCount: 0 });
       return 0;
     }
   }
@@ -318,12 +337,22 @@ class ClinicalSyncEngine {
       throw new Error('SESSION_EXPIRED: offline command capture requires a still-valid cached session.');
     }
 
-    const currentClock = await getPendingVectorClock(params.tenantId);
+    const [pendingClock, entityMetadata] = await Promise.all([
+      getSecurePendingVectorClock(params.tenantId, cached.user.uid),
+      getSecureEdgeEntityMetadata(
+        params.tenantId,
+        cached.user.uid,
+        params.collection,
+        params.resourceId
+      ),
+    ]);
+    const baseVectorClock = entityMetadata?.vectorClock || {};
+    const currentClock = mergeClocks(baseVectorClock, pendingClock);
     const clockNodeId = cached.session.deviceId || cached.user.uid;
     const vectorClock = incrementClock(currentClock, clockNodeId);
 
-    const mutation = await addMutation({
-      id: params.mutationId,
+    const mutation = await putSecureMutation({
+      id: params.mutationId || `mut_${crypto.randomUUID()}`,
       tenantId: params.tenantId,
       actorId: cached.user.uid,
       collection: params.collection,
@@ -332,18 +361,19 @@ class ClinicalSyncEngine {
       commandType: params.commandType,
       idempotencyKey: params.idempotencyKey || `offline_${crypto.randomUUID()}`,
       schemaVersion: params.schemaVersion || 1,
-      baseEntityVersion: params.baseEntityVersion,
+      baseEntityVersion: params.baseEntityVersion ?? entityMetadata?.serverVersion,
+      baseVectorClock,
       payload: params.payload,
       vectorClock,
       clientTimestamp: Date.now(),
     });
 
     if (params.optimisticCache !== false && params.action !== 'DELETE') {
-      await saveToOfflineCache(
+      await putSecureEdgeEntities(
         params.tenantId,
+        cached.user.uid,
         params.collection,
-        params.resourceId,
-        params.payload
+        [{ id: params.resourceId, ...params.payload }]
       );
     }
 
@@ -372,6 +402,13 @@ class ClinicalSyncEngine {
    * No browser Firestore write or client-side LWW resolution is permitted.
    */
   public async processSyncQueue(tenantId?: string): Promise<{ syncedCount: number; conflictCount: number }> {
+    return withEdgeSyncLeadership(
+      () => this.processSyncQueueAsLeader(tenantId),
+      { syncedCount: 0, conflictCount: 0 }
+    );
+  }
+
+  private async processSyncQueueAsLeader(tenantId?: string): Promise<{ syncedCount: number; conflictCount: number }> {
     if (this.isProcessing) return { syncedCount: 0, conflictCount: 0 };
 
     if (this.forcedOffline) {
@@ -401,7 +438,8 @@ class ClinicalSyncEngine {
         throw new Error('AUTHENTICATION_REQUIRED: offline replay requires an active authenticated session.');
       }
 
-      const pending = await getPendingMutations(tenantId);
+      const activeTenantId = String(tenantId || cached.user.tenantId).trim().toLowerCase();
+      const pending = await getSecurePendingMutations(activeTenantId, cached.user.uid);
       const byTenant = new Map<string, OfflineMutation[]>();
       for (const mutation of pending) {
         const list = byTenant.get(mutation.tenantId) || [];
@@ -417,26 +455,10 @@ class ClinicalSyncEngine {
           continue;
         }
 
-        const wrongActor = mutations.filter(
-          (mutation) => !mutation.actorId || mutation.actorId !== cached.user.uid
-        );
-        for (const mutation of wrongActor) {
-          await updateMutationStatus(
-            mutation.id,
-            'failed',
-            mutation.actorId
-              ? 'OFFLINE_ACTOR_MISMATCH: queued command belongs to a different authenticated user.'
-              : 'OFFLINE_ACTOR_MISSING: legacy queued command has no authoritative originating user.'
-          );
-        }
-
-        const actorOwned = mutations.filter(
-          (mutation) => mutation.actorId === cached.user.uid
-        );
-        const replayable = actorOwned.filter(
+        const replayable = mutations.filter(
           (mutation) => mutation.commandType && mutation.idempotencyKey
         );
-        const legacy = actorOwned.filter(
+        const legacy = mutations.filter(
           (mutation) => !mutation.commandType || !mutation.idempotencyKey
         );
 
@@ -483,15 +505,22 @@ class ClinicalSyncEngine {
                 actorId: cached.user.uid,
                 batchId,
                 submittedAt: Date.now(),
-                mutations: replayable.map((mutation) => ({
+                mutations: await Promise.all(replayable.map(async (mutation) => ({
                   mutationId: mutation.id,
                   occurredAt: mutation.clientTimestamp || mutation.timestamp,
                   commandType: mutation.commandType,
-                  payload: mutation.payload,
+                  collection: mutation.collection,
+                  payload: await resolveMappedReferences(mutationTenantId, mutation.payload),
                   idempotencyKey: mutation.idempotencyKey,
-                  entityId: mutation.resourceId || mutation.docId,
+                  entityId: await resolveMappedReferences(
+                    mutationTenantId,
+                    mutation.resourceId || mutation.docId
+                  ),
                   schemaVersion: mutation.schemaVersion || 1,
-                })),
+                  baseEntityVersion: mutation.baseEntityVersion,
+                  vectorClock: mutation.vectorClock,
+                  baseVectorClock: mutation.baseVectorClock,
+                }))),
               },
             }),
           });
@@ -513,12 +542,29 @@ class ClinicalSyncEngine {
           returnedMutationIds.add(mutation.id);
 
           if (result.status === 'accepted') {
+            if (Array.isArray(result.entityMappings) && result.entityMappings.length > 0) {
+              const mappings = result.entityMappings.map((mapping: any) => ({
+                localId: String(mapping.localId),
+                canonicalId: String(mapping.canonicalId),
+                entityType: String(mapping.entityType || 'ENTITY'),
+                sourceMutationId: mutation.id,
+              }));
+              await putEntityMappings(mutation.tenantId, mappings);
+              await remapEdgeEntityIds(mutation.tenantId, mappings);
+            }
             await deleteMutation(mutation.id);
-            await saveToOfflineCache(
+            const authoritativeData =
+              result.data && typeof result.data === 'object'
+                ? result.data as Record<string, unknown>
+                : mutation.payload;
+            await putSecureEdgeEntities(
               mutation.tenantId,
+              cached.user.uid,
               mutation.collection,
-              mutation.resourceId || mutation.docId,
-              result.data || mutation.payload
+              [{
+                id: mutation.resourceId || mutation.docId,
+                ...authoritativeData,
+              }]
             );
             syncedCount += 1;
           } else if (result.status === 'conflict' || result.status === 'requires_review') {
@@ -528,16 +574,20 @@ class ClinicalSyncEngine {
               'conflict',
               result.reason || 'Server reconciliation required.'
             );
-            await recordSyncConflict({
-              id: mutation.id,
-              mutationId: mutation.id,
-              tenantId: mutation.tenantId,
-              collection: mutation.collection,
-              resourceId: mutation.resourceId || mutation.docId,
-              clientData: mutation.payload,
-              conflictType: result.conflictCategory || 'STATE_CONFLICT',
-              reason: result.reason,
-            });
+            await recordSecureConflict(
+              mutation.tenantId,
+              cached.user.uid,
+              {
+                id: mutation.id,
+                mutationId: mutation.id,
+                tenantId: mutation.tenantId,
+                collection: mutation.collection,
+                resourceId: mutation.resourceId || mutation.docId,
+                clientData: mutation.payload,
+                conflictType: result.conflictCategory || 'STATE_CONFLICT',
+                reason: result.reason,
+              }
+            );
           } else {
             await updateMutationStatus(
               mutation.id,
@@ -581,6 +631,18 @@ class ClinicalSyncEngine {
         },
       });
       void this.refreshReplicaStatus(eventTenantId || undefined);
+      if (typeof window !== 'undefined' && eventTenantId && syncedCount > 0) {
+        window.dispatchEvent(
+          new CustomEvent('ghims:edge-sync-complete', {
+            detail: {
+              tenantId: eventTenantId,
+              syncedCount,
+              conflictCount,
+              batchIds,
+            },
+          })
+        );
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Sync loop failed';
 

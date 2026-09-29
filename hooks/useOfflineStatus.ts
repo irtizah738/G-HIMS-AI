@@ -3,13 +3,16 @@
 import { useState, useEffect, useCallback } from 'react';
 import { syncEngine, SyncEngineState } from '@/lib/offline/sync-engine';
 import {
-  getPendingMutations,
-  getPendingVectorClock,
-  getSyncConflicts,
   measureLocalStoreLatency,
   resolveSyncConflict,
   SyncConflict,
 } from '@/lib/offline/db';
+import {
+  getSecureConflicts,
+  getSecurePendingMutations,
+  getSecurePendingVectorClock,
+} from '@/lib/offline/secure-store';
+import { getCachedAuthSession } from '@/lib/offline/auth-storage';
 import { probeApplicationConnectivity } from '@/lib/offline/connectivity';
 
 export interface OfflineStatusResult {
@@ -80,8 +83,13 @@ export function useOfflineStatus(tenantId?: string): OfflineStatusResult {
 
   const refreshConflicts = useCallback(async () => {
     try {
-      const activeConflicts = await getSyncConflicts(tenantId);
-      setConflicts(activeConflicts);
+      const cached = await getCachedAuthSession();
+      if (!cached?.user?.uid || !tenantId) {
+        setConflicts([]);
+        return;
+      }
+      const activeConflicts = await getSecureConflicts(tenantId, cached.user.uid);
+      setConflicts(activeConflicts as SyncConflict[]);
     } catch (err) {
       console.warn('Failed to load sync conflicts:', err);
     }
@@ -89,9 +97,18 @@ export function useOfflineStatus(tenantId?: string): OfflineStatusResult {
 
   const refreshCounts = useCallback(async () => {
     try {
+      const cached = await getCachedAuthSession();
+      if (!cached?.user?.uid || !tenantId) {
+        setPendingSyncCount(0);
+        setVectorClock({});
+        setLocalStoreLatencyMs(await measureLocalStoreLatency(tenantId));
+        await refreshConflicts();
+        return;
+      }
+
       const [pending, clock, localLatency] = await Promise.all([
-        getPendingMutations(tenantId),
-        getPendingVectorClock(tenantId),
+        getSecurePendingMutations(tenantId, cached.user.uid),
+        getSecurePendingVectorClock(tenantId, cached.user.uid),
         measureLocalStoreLatency(tenantId),
       ]);
       setPendingSyncCount(pending.length);

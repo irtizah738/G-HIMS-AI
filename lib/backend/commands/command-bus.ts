@@ -17,6 +17,8 @@ import { PatientMergeDomainService } from '../services/patient-merge-domain-serv
 import { InpatientBedDomainService } from '../services/inpatient-bed-domain-service';
 import { TelehealthDomainService } from '../services/telehealth-domain-service';
 import { RevenueIntegrityDomainService } from '../services/revenue-integrity-domain-service';
+import { ScmOfflineDomainService } from '../services/scm-offline-domain-service';
+import { CashReceiptDomainService } from '../services/cash-receipt-domain-service';
 import { IdempotencyService } from '../idempotency/idempotency-service';
 import { emitOperationalEvent, operationalTimer } from '@/lib/observability/server-telemetry';
 
@@ -128,6 +130,15 @@ export class CommandBus {
 
         case 'PrescribeMedicationCommand':
           result = await ClinicalOrderDomainService.prescribeMedication(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'DispensePrescriptionCommand':
+          result = await ClinicalOrderDomainService.dispenseMedication(
             context,
             command.commandId,
             command.idempotencyKey,
@@ -268,6 +279,43 @@ export class CommandBus {
 
         case 'DismissRevenueIntegrityFindingCommand':
           result = await RevenueIntegrityDomainService.dismiss(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        // --- Supply Chain / Pharmacy Domain ---
+        case 'RecordStockTransactionCommand':
+          result = await ScmOfflineDomainService.recordStockTransaction(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecordPatientConsumptionCommand':
+          result = await ScmOfflineDomainService.recordPatientConsumption(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'SubmitPurchaseRequisitionCommand':
+          result = await ScmOfflineDomainService.submitPurchaseRequisition(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecordCashReceiptCommand':
+          result = await CashReceiptDomainService.record(
             context,
             command.commandId,
             command.idempotencyKey,

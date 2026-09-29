@@ -1079,14 +1079,26 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       .then(applySnapshot)
       .catch((error) => console.warn('EDGE_LOCAL_READ_MODEL_LOAD_FAILED', error));
 
-    if (user) {
+    const refreshAuthoritativeSnapshot = () => {
+      if (!user) return;
       void hydrateEdgeSnapshot(tenantId)
         .then(applySnapshot)
         .catch((error) => console.warn('EDGE_SERVER_HYDRATION_FAILED', error));
-    }
+    };
+
+    refreshAuthoritativeSnapshot();
+
+    const handleSyncComplete = (event: Event) => {
+      const detail = (event as CustomEvent<{ tenantId?: string }>).detail;
+      if (String(detail?.tenantId || '').trim().toLowerCase() !== tenantId) return;
+      refreshAuthoritativeSnapshot();
+    };
+
+    window.addEventListener('ghims:edge-sync-complete', handleSyncComplete);
 
     return () => {
       cancelled = true;
+      window.removeEventListener('ghims:edge-sync-complete', handleSyncComplete);
     };
   }, [
     activeTenant?.tenantId,

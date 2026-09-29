@@ -757,15 +757,24 @@ export async function clearOfflineReadModelsForTenant(tenantId: string): Promise
 
   await localDb.transaction(
     'rw',
-    localDb.offline_cache,
-    localDb.clinical_patients,
-    localDb.bed_occupancy,
-    localDb.surgical_cases,
+    [
+      localDb.offline_cache,
+      localDb.clinical_patients,
+      localDb.bed_occupancy,
+      localDb.surgical_cases,
+      localDb.edge_entities,
+      localDb.sync_metadata,
+    ],
     async () => {
       await localDb.offline_cache.where('tenantId').equals(normalizedTenantId).delete();
       await localDb.clinical_patients.where('tenantId').equals(normalizedTenantId).delete();
       await localDb.bed_occupancy.where('tenantId').equals(normalizedTenantId).delete();
       await localDb.surgical_cases.where('tenantId').equals(normalizedTenantId).delete();
+      await localDb.edge_entities.where('tenantId').equals(normalizedTenantId).delete();
+      await localDb.sync_metadata.where('tenantId').equals(normalizedTenantId).delete();
+      // Do not delete encrypted pending mutations or entity_map here. They are
+      // actor-bound and are required to complete safe replay after the same user
+      // re-authenticates on the device.
     }
   );
 }

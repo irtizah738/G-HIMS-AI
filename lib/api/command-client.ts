@@ -5,6 +5,10 @@ import { getCachedAuthSession } from '@/lib/offline/auth-storage';
 import { CommandResult } from '@/lib/backend/types';
 import { syncEngine } from '@/lib/offline/sync-engine';
 import type { MutationAction } from '@/types/offline';
+import {
+  putLocalEntityMappings,
+  putSecureEdgeEntities,
+} from '@/lib/offline/secure-store';
 
 export interface OfflineQueuePolicy {
   enabled: boolean;
@@ -203,6 +207,119 @@ export interface RegistrationRequest {
   idempotencyKey?: string;
 }
 
+async function queueOfflineRegistration<TData>(
+  request: RegistrationRequest,
+  cached: NonNullable<Awaited<ReturnType<typeof getCachedAuthSession>>>
+): Promise<TData> {
+  if (!syncEngine) {
+    throw new Error('OFFLINE_QUEUE_UNAVAILABLE: registration requires the edge sync engine.');
+  }
+
+  const commandId = request.commandId || `cmd_${crypto.randomUUID()}`;
+  const idempotencyKey = request.idempotencyKey || `idem_${crypto.randomUUID()}`;
+  const localPatientId = `local-patient-${crypto.randomUUID()}`;
+  const localEncounterId = `local-encounter-${crypto.randomUUID()}`;
+  const localQueueTokenId = `local-opd-${crypto.randomUUID()}`;
+  const localMrn = `LOCAL-${(cached.session.deviceId || cached.user.uid).slice(-6).toUpperCase()}-${Date.now().toString().slice(-6)}`;
+  const now = Date.now();
+
+  const registrationPayload = {
+    ...request,
+    localPatientId,
+    localEncounterId,
+    localQueueTokenId,
+  };
+
+  await syncEngine.queueMutation({
+    tenantId: cached.user.tenantId,
+    collection: 'patients',
+    action: 'CREATE',
+    resourceId: localPatientId,
+    commandType: 'RegisterPatientAndEncounterCommand',
+    payload: registrationPayload,
+    idempotencyKey,
+    schemaVersion: 1,
+    optimisticCache: false,
+    mutationId: commandId,
+  });
+
+  await putLocalEntityMappings(cached.user.tenantId, [
+    { localId: localPatientId, entityType: 'PATIENT_MPI', sourceMutationId: commandId },
+    { localId: localEncounterId, entityType: 'ENCOUNTER', sourceMutationId: commandId },
+    { localId: localQueueTokenId, entityType: 'OPD_QUEUE_TOKEN', sourceMutationId: commandId },
+  ]);
+
+  const patient = {
+    id: localPatientId,
+    tenantId: cached.user.tenantId,
+    mrn: localMrn,
+    fullName: request.fullName,
+    gender: String(request.gender || 'other').toLowerCase(),
+    dateOfBirth: request.dateOfBirth,
+    identifiers: request.identifiers || [],
+    contactPhone: request.contactPhone,
+    address: request.address,
+    bloodGroup: request.bloodGroup || 'O+',
+    allergies: request.allergies || [],
+    chronicConditions: request.chronicConditions || [],
+    createdAt: now,
+    updatedAt: now,
+    createdById: cached.user.uid,
+    version: 0,
+    status: 'LOCAL_PENDING_SYNC',
+    activeEncounterId: localEncounterId,
+  };
+
+  const encounter = {
+    id: localEncounterId,
+    tenantId: cached.user.tenantId,
+    patientId: localPatientId,
+    type: request.encounterType || 'OPD',
+    status: 'IN_PROGRESS',
+    currentStageId: 'REGISTRATION',
+    workflowSnapshotId: `local-workflow-${localEncounterId}`,
+    startedAt: now,
+    department: request.department || 'General OPD',
+    priority: request.priority || 'ROUTINE',
+    chiefComplaint: request.chiefComplaint || '',
+    assignedDoctor: request.assignedDoctor || '',
+    tokenNumber: `LOCAL-${String(now).slice(-4)}`,
+  };
+
+  const queueToken = {
+    id: localQueueTokenId,
+    encounterId: localEncounterId,
+    patientId: localPatientId,
+    patientName: request.fullName,
+    mrn: localMrn,
+    tokenNumber: encounter.tokenNumber,
+    department: encounter.department,
+    priority: String(encounter.priority).toLowerCase(),
+    status: 'waiting',
+    arrivalTime: new Date(now).toISOString(),
+    createdAt: now,
+  };
+
+  await Promise.all([
+    putSecureEdgeEntities(cached.user.tenantId, cached.user.uid, 'patients', [patient]),
+    putSecureEdgeEntities(cached.user.tenantId, cached.user.uid, 'encounters', [encounter]),
+    putSecureEdgeEntities(cached.user.tenantId, cached.user.uid, 'opd_queue', [queueToken]),
+  ]);
+
+  return {
+    success: true,
+    patient,
+    encounter,
+    queueToken,
+    initialStage: {
+      id: 'REGISTRATION',
+      stageType: 'REGISTRATION',
+      status: 'ACTIVE',
+    },
+    queuedOffline: true,
+  } as TData;
+}
+
 export async function registerActiveTenantPatient<TData = unknown>(
   request: RegistrationRequest
 ): Promise<TData> {
@@ -213,23 +330,67 @@ export async function registerActiveTenantPatient<TData = unknown>(
     throw new Error('AUTHENTICATION_REQUIRED: active G-HIMS session is required.');
   }
 
-  const idToken = await currentUser.getIdToken(false);
-  const response = await fetch('/api/clinical/encounter/create', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${idToken}`,
-      'x-ghims-tenant-id': cached.user.tenantId,
-      'x-ghims-session-id': cached.session.sessionId,
-      ...(cached.session.deviceId ? { 'x-ghims-device-id': cached.session.deviceId } : {}),
-    },
-    body: JSON.stringify({
-      ...request,
-      tenantId: cached.user.tenantId,
-      commandId: request.commandId || `cmd_${crypto.randomUUID()}`,
-      idempotencyKey: request.idempotencyKey || `idem_${crypto.randomUUID()}`,
-    }),
-  });
+  if (!syncEngine.getState().isOnline || syncEngine.getState().offlineSimulationActive) {
+    return queueOfflineRegistration<TData>(request, cached);
+  }
+
+  const commandId = request.commandId || `cmd_${crypto.randomUUID()}`;
+  const idempotencyKey = request.idempotencyKey || `idem_${crypto.randomUUID()}`;
+
+  let idToken: string;
+  try {
+    idToken = await currentUser.getIdToken(false);
+  } catch (error) {
+    if (isNetworkLikeError(error)) {
+      return queueOfflineRegistration<TData>(
+        { ...request, commandId, idempotencyKey },
+        cached
+      );
+    }
+    throw error;
+  }
+
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 12000);
+  let response: Response;
+
+  try {
+    response = await fetch('/api/clinical/encounter/create', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+        'x-ghims-tenant-id': cached.user.tenantId,
+        'x-ghims-session-id': cached.session.sessionId,
+        'idempotency-key': idempotencyKey,
+        ...(cached.session.deviceId ? { 'x-ghims-device-id': cached.session.deviceId } : {}),
+      },
+      body: JSON.stringify({
+        ...request,
+        tenantId: cached.user.tenantId,
+        commandId,
+        idempotencyKey,
+      }),
+    });
+  } catch (error) {
+    if (isNetworkLikeError(error)) {
+      return queueOfflineRegistration<TData>(
+        { ...request, commandId, idempotencyKey },
+        cached
+      );
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+
+  if (isTransientServerStatus(response.status)) {
+    return queueOfflineRegistration<TData>(
+      { ...request, commandId, idempotencyKey },
+      cached
+    );
+  }
 
   const payload = await response.json();
   if (!response.ok || !payload.success) {

@@ -160,6 +160,7 @@ export class CareTransitionDomainService {
       ...bed,
       status: 'occupied',
       patientId: patient.id,
+      currentPatientId: patient.id,
       patientName: patient.fullName,
       patientMRN: patient.mrn,
       currentEncounterId: encounterId,
@@ -393,6 +394,7 @@ export class CareTransitionDomainService {
       ...sourceBed,
       status: 'cleaning',
       patientId: undefined,
+      currentPatientId: undefined,
       patientName: undefined,
       patientMRN: undefined,
       currentEncounterId: undefined,
@@ -402,6 +404,7 @@ export class CareTransitionDomainService {
       ...targetBed,
       status: 'occupied',
       patientId: patient.id,
+      currentPatientId: patient.id,
       patientName: patient.fullName,
       patientMRN: patient.mrn,
       currentEncounterId: encounter.encounterId,
@@ -510,6 +513,18 @@ export class CareTransitionDomainService {
       requiredRoles: ['DOCTOR', 'CONSULTANT', 'SYSTEM_ADMIN'],
       requiredPrivilege: 'DISCHARGE_INPATIENT',
     });
+    if (!auth.authorized) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Inpatient discharge authority required.',
+        },
+      };
+    }
+
     if (
       !payload.encounterId ||
       !payload.bedId ||
@@ -525,18 +540,6 @@ export class CareTransitionDomainService {
           code: 'INVALID_INPATIENT_DISCHARGE_INPUT',
           message:
             'Encounter, bed, signed discharge summary, disposition, and follow-up instructions are required.',
-        },
-      };
-    }
-
-    if (!auth.authorized) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: {
-          code: auth.code || 'UNAUTHORIZED',
-          message: auth.reason || 'Inpatient discharge authority required.',
         },
       };
     }
@@ -796,6 +799,7 @@ export class CareTransitionDomainService {
       ...bed,
       status: 'cleaning',
       patientId: undefined,
+      currentPatientId: undefined,
       patientName: undefined,
       patientMRN: undefined,
       currentEncounterId: undefined,

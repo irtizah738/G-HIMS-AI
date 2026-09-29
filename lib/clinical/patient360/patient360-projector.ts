@@ -6,6 +6,7 @@ import type {
   ClinicalObservation,
   DiagnosticReport,
   MedicationOrder,
+  PatientClinicalKnowledgeStatus,
 } from '@/types/clinical-canonical';
 import type {
   Patient360AllergySummary,
@@ -40,6 +41,7 @@ export interface Patient360ProjectionSources {
   diagnosticReports: DiagnosticReport[];
   documents: ClinicalDocument[];
   events: Patient360SourceEvent[];
+  knowledgeStatus?: PatientClinicalKnowledgeStatus;
 }
 
 export interface Patient360ProjectedResult {
@@ -202,6 +204,8 @@ function eventSummary(event: Patient360SourceEvent): string {
       return 'Clinical condition recorded';
     case 'CLINICAL_ALLERGY_RECORDED':
       return 'Allergy or intolerance recorded';
+    case 'PATIENT_CLINICAL_KNOWLEDGE_STATUS_UPDATED':
+      return `${asString(payload.domain, 'clinical')} knowledge status reviewed: ${asString(payload.status, 'updated')}`;
     case 'PATIENT_ADMITTED_TO_INPATIENT_CARE':
     case 'PATIENT_ADMITTED_TO_BED':
       return 'Patient admitted to inpatient care';
@@ -362,6 +366,7 @@ export class Patient360Projector {
       observations: observations.map((item) => sourceVersion(item as unknown as Record<string, unknown>)).sort(),
       diagnosticReports: diagnosticReports.map((item) => sourceVersion(item as unknown as Record<string, unknown>)).sort(),
       documents: documents.map((item) => sourceVersion(item as unknown as Record<string, unknown>)).sort(),
+      knowledgeStatus: sources.knowledgeStatus || null,
       eventIds: patientEvents.map((event) => event.eventId).sort(),
     });
 
@@ -391,9 +396,22 @@ export class Patient360Projector {
       recentResults,
       recentDocuments,
       dataQuality: {
-        allergyKnowledge: allergies.length > 0 ? 'KNOWN' as const : 'UNKNOWN' as const,
-        problemListKnowledge: conditions.length > 0 ? 'KNOWN' as const : 'UNKNOWN' as const,
-        medicationKnowledge: medicationOrders.length > 0 ? 'KNOWN' as const : 'UNKNOWN' as const,
+        allergyKnowledge:
+          allergies.length > 0
+            ? 'KNOWN'
+            : sources.knowledgeStatus?.allergyStatus || 'NOT_ASSESSED',
+        problemListKnowledge:
+          conditions.length > 0
+            ? 'KNOWN'
+            : sources.knowledgeStatus?.problemListStatus || 'NOT_ASSESSED',
+        medicationKnowledge:
+          medicationOrders.length > 0
+            ? 'KNOWN'
+            : sources.knowledgeStatus?.medicationStatus || 'NOT_ASSESSED',
+        lastAllergyReviewAt: sources.knowledgeStatus?.lastAllergyReviewAt,
+        lastProblemListReviewAt: sources.knowledgeStatus?.lastProblemListReviewAt,
+        lastMedicationReconciliationAt:
+          sources.knowledgeStatus?.lastMedicationReconciliationAt,
         hasUnverifiedAllergies: allergies.some((item) => item.verificationStatus !== 'CONFIRMED'),
         hasUnverifiedProblems: conditions.some((item) =>
           !['CONFIRMED', 'REFUTED'].includes(item.verificationStatus)
@@ -402,9 +420,42 @@ export class Patient360Projector {
           ['REGISTERED', 'PARTIAL', 'PRELIMINARY'].includes(item.status)
         ),
         missingCanonicalFacts: [
-          ...(allergies.length === 0 ? ['ALLERGY_STATUS_UNKNOWN'] : []),
-          ...(conditions.length === 0 ? ['PROBLEM_LIST_NOT_ESTABLISHED'] : []),
-          ...(medicationOrders.length === 0 ? ['MEDICATION_HISTORY_UNKNOWN'] : []),
+          ...((allergies.length === 0 &&
+              (sources.knowledgeStatus?.allergyStatus || 'NOT_ASSESSED') === 'UNKNOWN')
+            ? ['ALLERGY_STATUS_UNKNOWN']
+            : []),
+          ...((allergies.length === 0 &&
+              (sources.knowledgeStatus?.allergyStatus || 'NOT_ASSESSED') === 'NOT_ASSESSED')
+            ? ['ALLERGY_STATUS_NOT_ASSESSED']
+            : []),
+          ...((allergies.length === 0 &&
+              (sources.knowledgeStatus?.allergyStatus || 'NOT_ASSESSED') === 'PATIENT_UNABLE_TO_REPORT')
+            ? ['ALLERGY_STATUS_PATIENT_UNABLE_TO_REPORT']
+            : []),
+          ...((conditions.length === 0 &&
+              (sources.knowledgeStatus?.problemListStatus || 'NOT_ASSESSED') === 'UNKNOWN')
+            ? ['PROBLEM_LIST_UNKNOWN']
+            : []),
+          ...((conditions.length === 0 &&
+              (sources.knowledgeStatus?.problemListStatus || 'NOT_ASSESSED') === 'NOT_ASSESSED')
+            ? ['PROBLEM_LIST_NOT_ASSESSED']
+            : []),
+          ...((conditions.length === 0 &&
+              (sources.knowledgeStatus?.problemListStatus || 'NOT_ASSESSED') === 'PATIENT_UNABLE_TO_REPORT')
+            ? ['PROBLEM_LIST_PATIENT_UNABLE_TO_REPORT']
+            : []),
+          ...((medicationOrders.length === 0 &&
+              (sources.knowledgeStatus?.medicationStatus || 'NOT_ASSESSED') === 'UNKNOWN')
+            ? ['MEDICATION_HISTORY_UNKNOWN']
+            : []),
+          ...((medicationOrders.length === 0 &&
+              (sources.knowledgeStatus?.medicationStatus || 'NOT_ASSESSED') === 'NOT_ASSESSED')
+            ? ['MEDICATION_HISTORY_NOT_ASSESSED']
+            : []),
+          ...((medicationOrders.length === 0 &&
+              (sources.knowledgeStatus?.medicationStatus || 'NOT_ASSESSED') === 'PATIENT_UNABLE_TO_REPORT')
+            ? ['MEDICATION_HISTORY_PATIENT_UNABLE_TO_REPORT']
+            : []),
         ],
       },
       counts: {

@@ -86,35 +86,58 @@ async function readCollectionSnapshot(
 
 function authorizedCollections(roles: string[]): string[] {
   const normalized = new Set(roles.map((role) => String(role || '').trim().toUpperCase()));
-  if (normalized.has('SYSTEM_ADMIN') || normalized.has('ADMINISTRATOR') || normalized.has('ADMIN')) {
-    return [...CLINICAL_COLLECTIONS, ...BILLING_COLLECTIONS, ...ADMIN_COLLECTIONS, ...SCM_COLLECTIONS];
+
+  if (
+    normalized.has('SYSTEM_ADMIN') ||
+    normalized.has('ADMINISTRATOR') ||
+    normalized.has('ADMIN')
+  ) {
+    return [
+      ...CLINICAL_COLLECTIONS,
+      ...BILLING_COLLECTIONS,
+      ...ADMIN_COLLECTIONS,
+      ...SCM_COLLECTIONS,
+    ];
   }
 
   const selected = new Set<string>();
-  if (
-    ['DOCTOR', 'CONSULTANT', 'NURSE', 'ADMISSION_OFFICER', 'RECEPTIONIST', 'LAB_TECHNICIAN', 'PHARMACIST']
-      .some((role) => normalized.has(role))
-  ) {
-    CLINICAL_COLLECTIONS.forEach((collection) => selected.add(collection));
+  const add = (...collections: readonly string[]) =>
+    collections.forEach((collection) => selected.add(collection));
+
+  // Clinicians need the complete clinical working set while disconnected.
+  if (['DOCTOR', 'CONSULTANT', 'NURSE'].some((role) => normalized.has(role))) {
+    add(...CLINICAL_COLLECTIONS);
+  }
+
+  // Front desk/admissions should not receive notes, prescriptions or results.
+  if (['RECEPTIONIST', 'REGISTRAR', 'ADMISSION_OFFICER'].some((role) => normalized.has(role))) {
+    add('patients', 'encounters', 'opd_queue', 'beds');
+  }
+
+  // Diagnostics need identity/encounter/order context, not the whole chart.
+  if (['LAB_TECHNICIAN', 'LAB_TECH'].some((role) => normalized.has(role))) {
+    add('patients', 'encounters', 'orders');
+  }
+
+  // Pharmacy needs prescription + patient context and its stock working set.
+  if (normalized.has('PHARMACIST')) {
+    add('patients', 'encounters', 'prescriptions');
+    add(...SCM_COLLECTIONS);
   }
 
   if (
     ['BILLING_CLERK', 'BILLING_ADMIN', 'FINANCE', 'REVENUE_CYCLE']
       .some((role) => normalized.has(role))
   ) {
-    BILLING_COLLECTIONS.forEach((collection) => selected.add(collection));
-    selected.add('patients');
-    selected.add('encounters');
+    add(...BILLING_COLLECTIONS);
+    add('patients', 'encounters');
   }
 
   if (
-    ['PHARMACIST', 'SCM_MANAGER', 'INVENTORY_OFFICER', 'STORE_KEEPER', 'PROCUREMENT']
+    ['SCM_MANAGER', 'INVENTORY_OFFICER', 'STORE_KEEPER', 'PROCUREMENT']
       .some((role) => normalized.has(role))
   ) {
-    SCM_COLLECTIONS.forEach((collection) => selected.add(collection));
-    selected.add('patients');
-    selected.add('encounters');
-    selected.add('prescriptions');
+    add(...SCM_COLLECTIONS);
   }
 
   return [...selected];

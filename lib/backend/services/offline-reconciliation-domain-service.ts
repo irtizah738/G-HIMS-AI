@@ -14,7 +14,7 @@ import { CommandBus } from '../commands/command-bus';
 import { AuthorizationPipeline } from '../auth/authorization-pipeline';
 import { registerPatientAndEncounter } from '@/server/runtime/registration-orchestrator';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
-import { compareClocks } from '@/lib/offline/vector-clock';
+import { compareClocks, incrementClock, mergeClocks } from '@/lib/offline/vector-clock';
 
 function stateCollectionForCommand(commandType: string): string | null {
   const map: Record<string, string> = {
@@ -93,6 +93,7 @@ export class OfflineReconciliationDomainService {
 
         const stateCollection = stateCollectionForCommand(mutation.commandType);
         let causalServerVersion = 0;
+        let causalServerClock: Record<string, number> = {};
 
         if (
           stateCollection &&
@@ -106,6 +107,7 @@ export class OfflineReconciliationDomainService {
           );
           const causal = serverCausalMetadata(serverState);
           causalServerVersion = causal.version;
+          causalServerClock = causal.vectorClock;
 
           if (serverState && mutation.baseEntityVersion == null) {
             conflicted += 1;
@@ -272,6 +274,9 @@ export class OfflineReconciliationDomainService {
             conflictCategory: category,
             serverEventId: result.eventId,
             serverVersion: stateCollection ? causalServerVersion + 1 : 1,
+            serverVectorClock: stateCollection
+              ? incrementClock(mergeClocks(causalServerClock, mutation.vectorClock), 'server')
+              : undefined,
             data: result.data,
           });
           continue;

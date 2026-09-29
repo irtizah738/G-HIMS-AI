@@ -1,5 +1,6 @@
 import type { CollectionReference, DocumentData } from 'firebase-admin/firestore';
 import { getAdminFirestore } from '@/server/firebase/admin';
+import { sanitizeForFirestore } from '@/lib/firestore/sanitize';
 import type {
   ClinicalAllergy,
   ClinicalCondition,
@@ -227,7 +228,7 @@ export class Patient360ProjectionService {
       const batch = db.batch();
       for (const item of chunk) {
         const documentId = `${patientId}__${item.eventId}`;
-        batch.set(collection.doc(documentId), item);
+        batch.set(collection.doc(documentId), sanitizeForFirestore(item));
         written += 1;
       }
       await batch.commit();
@@ -270,7 +271,7 @@ export class Patient360ProjectionService {
         return;
       }
 
-      transaction.set(projectionRef, projection);
+      transaction.set(projectionRef, sanitizeForFirestore(projection));
     });
 
     if (options.checkpointEventId) {
@@ -289,7 +290,7 @@ export class Patient360ProjectionService {
           processedAt: Date.now(),
           status: 'PROCESSED',
         };
-        transaction.create(checkpointRef, checkpoint);
+        transaction.create(checkpointRef, sanitizeForFirestore(checkpoint));
       });
     }
 
@@ -342,7 +343,7 @@ export class Patient360ProjectionService {
         processedAt: Date.now(),
         status: 'IGNORED',
       };
-      await checkpointRef.create(ignored);
+      await checkpointRef.create(sanitizeForFirestore(ignored));
       return {
         status: 'IGNORED',
         tenantId,
@@ -369,7 +370,7 @@ export class Patient360ProjectionService {
         processedAt: Date.now(),
         status: 'PROCESSED',
       };
-      transaction.create(checkpointRef, processed);
+      transaction.create(checkpointRef, sanitizeForFirestore(processed));
     });
 
     return {
@@ -427,7 +428,7 @@ export class Patient360ProjectionService {
         .doc(tenantId)
         .collection('patient360Projections')
         .doc(patientId)
-        .set(projected.projection);
+        .set(sanitizeForFirestore(projected.projection));
       projectionCount += 1;
     }
 
@@ -445,15 +446,16 @@ export class Patient360ProjectionService {
             ? event.aggregateId
             : undefined,
         ]);
+        const checkpoint = {
+          eventId: event.eventId,
+          tenantId,
+          patientIds: ids,
+          processedAt: Date.now(),
+          status: ids.length > 0 ? 'PROCESSED' : 'IGNORED',
+        } satisfies Patient360ProjectionCheckpoint;
         batch.set(
           tenantRef.collection('patient360ProjectionCheckpoints').doc(event.eventId),
-          {
-            eventId: event.eventId,
-            tenantId,
-            patientIds: ids,
-            processedAt: Date.now(),
-            status: ids.length > 0 ? 'PROCESSED' : 'IGNORED',
-          } satisfies Patient360ProjectionCheckpoint
+          sanitizeForFirestore(checkpoint)
         );
         checkpointCount += 1;
       }

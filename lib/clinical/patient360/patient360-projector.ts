@@ -335,7 +335,7 @@ export class Patient360Projector {
       : undefined;
 
     const timeline: Patient360TimelineItem[] = patientEvents.slice(0, 500).map((event) => ({
-      timelineItemId: `p360tl_${event.eventId}`,
+      timelineItemId: `p360tl_${patientId}_${event.eventId}`,
       tenantId: sources.tenantId,
       patientId,
       encounterId: asString(event.payload?.encounterId) || undefined,

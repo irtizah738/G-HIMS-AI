@@ -18,7 +18,6 @@ export interface ProjectionRecoveryManifest {
   patient360ProjectionCount: number;
   patient360TimelineCount: number;
   dischargeReadinessProjectionCount: number;
-  clinicalIntelligenceEvaluationCount: number;
   eventTypeCounts: Record<string, number>;
   eventStreamSha256: string;
   projectionSha256: string;
@@ -69,7 +68,6 @@ async function projectionFingerprint(tenantId: string): Promise<string> {
     'patient360Projections',
     'patient360Timeline',
     'dischargeReadinessProjections',
-    'clinicalIntelligenceEvaluations',
   ];
 
   const snapshot: Record<string, unknown[]> = {};
@@ -214,14 +212,12 @@ export class ProjectionRecoveryService {
         patient360ProjectionSnapshot,
         patient360TimelineSnapshot,
         dischargeReadinessProjectionSnapshot,
-        clinicalIntelligenceEvaluationSnapshot,
       ] = await Promise.all([
         tenantRef.collection('projectionCheckpoints').get(),
         tenantRef.collection('patient360ProjectionCheckpoints').get(),
         tenantRef.collection('patient360Projections').get(),
         tenantRef.collection('patient360Timeline').get(),
         tenantRef.collection('dischargeReadinessProjections').get(),
-        tenantRef.collection('clinicalIntelligenceEvaluations').get(),
       ]);
 
       const checkpointCount = checkpointSnapshot.size;
@@ -230,8 +226,6 @@ export class ProjectionRecoveryService {
       const patient360TimelineCount = patient360TimelineSnapshot.size;
       const dischargeReadinessProjectionCount =
         dischargeReadinessProjectionSnapshot.size;
-      const clinicalIntelligenceEvaluationCount =
-        clinicalIntelligenceEvaluationSnapshot.size;
 
       if (
         rebuilt.rebuiltCount !== authoritativeEvents.length ||
@@ -257,7 +251,6 @@ export class ProjectionRecoveryService {
         patient360ProjectionCount,
         patient360TimelineCount,
         dischargeReadinessProjectionCount,
-        clinicalIntelligenceEvaluationCount,
         eventTypeCounts,
         eventStreamSha256,
         projectionSha256,

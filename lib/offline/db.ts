@@ -718,12 +718,13 @@ export async function getSyncConflicts(tenantId?: string): Promise<SyncConflict[
 }
 
 export async function resolveSyncConflict(
-  conflictId: string,
-  strategy?: 'LWW_SERVER' | 'OVERWRITE_CLIENT' | 'MANUAL_MERGE',
-  resolvedBy?: string
+  _conflictId: string,
+  _strategy?: 'LWW_SERVER' | 'OVERWRITE_CLIENT' | 'MANUAL_MERGE',
+  _resolvedBy?: string
 ): Promise<void> {
-  const key = conflictId.startsWith('conflict_') ? conflictId : `conflict_${conflictId}`;
-  await localDb.offline_cache.delete(key);
+  throw new Error(
+    'SERVER_RECONCILIATION_REQUIRED: clinical sync conflicts cannot be resolved or discarded by the browser.'
+  );
 }
 
 

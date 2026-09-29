@@ -132,26 +132,23 @@ export class DischargeReadinessService {
 
     const [encounterEvidence, diagnosticOrders, inpatientOrders] =
       await Promise.all([
-        DomainStateRepository.queryEqual<Record<string, unknown>>(
+        DomainStateRepository.queryAllEqual<Record<string, unknown>>(
           tenantId,
           'encounterEvidence',
           'encounterId',
-          encounterId,
-          1000
+          encounterId
         ),
-        DomainStateRepository.queryEqual<Record<string, unknown>>(
+        DomainStateRepository.queryAllEqual<Record<string, unknown>>(
           tenantId,
           'orders',
           'encounterId',
-          encounterId,
-          1000
+          encounterId
         ),
-        DomainStateRepository.queryEqual<Record<string, unknown>>(
+        DomainStateRepository.queryAllEqual<Record<string, unknown>>(
           tenantId,
           'inpatientOrders',
           'encounterId',
-          encounterId,
-          1000
+          encounterId
         ),
       ]);
 

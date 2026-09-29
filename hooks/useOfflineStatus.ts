@@ -2,7 +2,13 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { syncEngine, SyncEngineState } from '@/lib/offline/sync-engine';
-import { getPendingMutations, getSyncConflicts, resolveSyncConflict, SyncConflict } from '@/lib/offline/db';
+import {
+  getPendingMutations,
+  getSyncConflicts,
+  resolveSyncConflict,
+  SyncConflict,
+} from '@/lib/offline/db';
+import { probeApplicationConnectivity } from '@/lib/offline/connectivity';
 
 export interface OfflineStatusResult {
   isOnline: boolean;
@@ -24,9 +30,9 @@ export interface OfflineStatusResult {
 }
 
 export function useOfflineStatus(tenantId?: string): OfflineStatusResult {
-  const [isOnline, setIsOnline] = useState<boolean>(
-    typeof navigator !== 'undefined' ? navigator.onLine : true
-  );
+  // Default optimistic-online until the real application-origin probe completes.
+  // This avoids false offline mode in sandboxed preview environments.
+  const [isOnline, setIsOnline] = useState<boolean>(true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [pendingSyncCount, setPendingSyncCount] = useState<number>(0);
   const [conflicts, setConflicts] = useState<SyncConflict[]>([]);
@@ -35,27 +41,20 @@ export function useOfflineStatus(tenantId?: string): OfflineStatusResult {
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
 
-  // Measure network latency
-  const measureLatency = useCallback(async () => {
-    if (typeof window === 'undefined' || !navigator.onLine) {
-      setLatencyMs(null);
-      return;
-    }
+  const refreshConnectivity = useCallback(
+    async (processQueueWhenOnline = false) => {
+      if (typeof window === 'undefined') return;
 
-    try {
-      const startTime = performance.now();
-      // Fetch small header
-      const res = await fetch('/favicon.ico', { method: 'HEAD', cache: 'no-store' });
-      if (res.ok) {
-        const endTime = performance.now();
-        setLatencyMs(Math.round(endTime - startTime));
-      }
-    } catch {
-      setLatencyMs(null);
-    }
-  }, []);
+      const result = syncEngine
+        ? await syncEngine.refreshConnectivity(processQueueWhenOnline)
+        : await probeApplicationConnectivity();
 
-  // Fetch active conflicts
+      setIsOnline(result.isOnline);
+      setLatencyMs(result.latencyMs);
+    },
+    []
+  );
+
   const refreshConflicts = useCallback(async () => {
     try {
       const activeConflicts = await getSyncConflicts(tenantId);
@@ -65,7 +64,6 @@ export function useOfflineStatus(tenantId?: string): OfflineStatusResult {
     }
   }, [tenantId]);
 
-  // Refresh pending mutation count
   const refreshCounts = useCallback(async () => {
     try {
       const pending = await getPendingMutations(tenantId);
@@ -79,56 +77,85 @@ export function useOfflineStatus(tenantId?: string): OfflineStatusResult {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    // 1. Register Service Worker
     if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
       navigator.serviceWorker
         .register('/sw.js')
         .then((reg) => {
-          // Check for background sync support
-          // @ts-ignore
-          if (reg.sync) {
-            // @ts-ignore
-            reg.sync.register('sync-clinical-queue').catch(() => {});
-          }
+          const registration = reg as ServiceWorkerRegistration & {
+            sync?: { register: (tag: string) => Promise<void> };
+          };
+          registration.sync?.register('sync-clinical-queue').catch(() => {});
         })
         .catch((err) => {
           console.warn('Service worker registration failed:', err);
         });
     }
 
-    // 2. Network connection info
-    // @ts-ignore
-    const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
-    if (connection) {
-      setNetworkType(connection.effectiveType || connection.type || 'wifi');
-      const updateConn = () => {
-        setNetworkType(connection.effectiveType || connection.type || 'wifi');
-      };
-      connection.addEventListener('change', updateConn);
-    }
-
-    // 3. Online/Offline Listeners
-    const handleOnline = () => {
-      setIsOnline(true);
-      measureLatency();
-      if (syncEngine) {
-        syncEngine.processSyncQueue(tenantId);
+    const connection = (
+      navigator as Navigator & {
+        connection?: {
+          effectiveType?: string;
+          type?: string;
+          addEventListener?: (event: string, cb: () => void) => void;
+          removeEventListener?: (event: string, cb: () => void) => void;
+        };
+        mozConnection?: {
+          effectiveType?: string;
+          type?: string;
+          addEventListener?: (event: string, cb: () => void) => void;
+          removeEventListener?: (event: string, cb: () => void) => void;
+        };
+        webkitConnection?: {
+          effectiveType?: string;
+          type?: string;
+          addEventListener?: (event: string, cb: () => void) => void;
+          removeEventListener?: (event: string, cb: () => void) => void;
+        };
       }
+    ).connection || (
+      navigator as Navigator & {
+        mozConnection?: {
+          effectiveType?: string;
+          type?: string;
+          addEventListener?: (event: string, cb: () => void) => void;
+          removeEventListener?: (event: string, cb: () => void) => void;
+        };
+      }
+    ).mozConnection || (
+      navigator as Navigator & {
+        webkitConnection?: {
+          effectiveType?: string;
+          type?: string;
+          addEventListener?: (event: string, cb: () => void) => void;
+          removeEventListener?: (event: string, cb: () => void) => void;
+        };
+      }
+    ).webkitConnection;
+
+    const updateConnectionType = () => {
+      if (!connection) return;
+      setNetworkType(connection.effectiveType || connection.type || 'wifi');
     };
 
-    const handleOffline = () => {
-      setIsOnline(false);
-      setLatencyMs(null);
+    updateConnectionType();
+    connection?.addEventListener?.('change', updateConnectionType);
+
+    // Browser online/offline events are hints only. Confirm them against the
+    // G-HIMS application origin before changing clinical connectivity state.
+    const handleOnlineHint = () => {
+      void refreshConnectivity(true);
     };
 
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
+    const handleOfflineHint = () => {
+      void refreshConnectivity(false);
+    };
 
-    // Initial checks
-    measureLatency();
-    refreshCounts();
+    window.addEventListener('online', handleOnlineHint);
+    window.addEventListener('offline', handleOfflineHint);
 
-    // 4. Subscribe to SyncEngine
+    void refreshConnectivity(false);
+    void refreshCounts();
+
     let unsubscribe: (() => void) | undefined;
     if (syncEngine) {
       unsubscribe = syncEngine.subscribe((engineState: SyncEngineState) => {
@@ -140,19 +167,19 @@ export function useOfflineStatus(tenantId?: string): OfflineStatusResult {
       });
     }
 
-    // Periodic ping & queue check
-    const interval = setInterval(() => {
-      measureLatency();
-      refreshCounts();
+    const interval = window.setInterval(() => {
+      void refreshConnectivity(false);
+      void refreshCounts();
     }, 15000);
 
     return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-      if (unsubscribe) unsubscribe();
-      clearInterval(interval);
+      window.removeEventListener('online', handleOnlineHint);
+      window.removeEventListener('offline', handleOfflineHint);
+      connection?.removeEventListener?.('change', updateConnectionType);
+      unsubscribe?.();
+      window.clearInterval(interval);
     };
-  }, [tenantId, measureLatency, refreshCounts]);
+  }, [tenantId, refreshConnectivity, refreshCounts]);
 
   const triggerSync = useCallback(
     async (overrideTenantId?: string) => {

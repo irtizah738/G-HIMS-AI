@@ -14,6 +14,21 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(worker).toContain('syncEngine.queueMutation');
   });
 
+  test('offline state is based on application reachability, not navigator.onLine alone',async()=>{
+    const connectivity=await source('lib/offline/connectivity.ts');
+    const engine=await source('lib/offline/sync-engine.ts');
+    const hook=await source('hooks/useOfflineStatus.ts');
+
+    expect(connectivity).toContain('/api/health?connectivityProbe=');
+    expect(connectivity).toContain("cache: 'no-store'");
+    expect(connectivity).toContain('AbortController');
+
+    expect(engine).toContain('probeApplicationConnectivity');
+    expect(engine).not.toContain('navigator.onLine');
+    expect(hook).toContain('refreshConnectivity');
+    expect(hook).not.toContain('navigator.onLine');
+  });
+
   test('clinical AI requires explicit activation and has no diagnostic fallback synthesis',async()=>{
     const gateway=await source('lib/ai/gateway.ts');
     const soap=await source('lib/ai/flows/soap-drafter.ts');

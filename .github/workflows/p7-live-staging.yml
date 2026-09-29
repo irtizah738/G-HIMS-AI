@@ -1,0 +1,141 @@
+name: P7 Live STAGING Qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type P7-STAGING to run live qualification against STAGING'
+        required: true
+        type: string
+      staging_base_url:
+        description: 'Exact HTTPS URL of the qualified STAGING deployment'
+        required: true
+        type: string
+      tenant_id:
+        description: 'Synthetic P7 tenant ID'
+        required: true
+        default: 'p7-hospital-zero'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ghims-p7-live-staging
+  cancel-in-progress: false
+
+jobs:
+  live-staging:
+    name: Provision synthetic roles and run P7 hospital-day rehearsal
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: staging
+    env:
+      GHIMS_RUNTIME_MODE: STAGING
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: STAGING
+      GHIMS_P7_BASE_URL: ${{ inputs.staging_base_url }}
+      GHIMS_P7_TENANT_ID: ${{ inputs.tenant_id }}
+      GHIMS_P7_ALLOW_STAGING_PROVISION: "true"
+
+      FIREBASE_PROJECT_ID: ${{ secrets.GHIMS_P7_STAGING_FIREBASE_PROJECT_ID }}
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${{ secrets.GHIMS_P7_STAGING_FIREBASE_PROJECT_ID }}
+      GHIMS_FIREBASE_PROJECT_ID_STAGING: ${{ secrets.GHIMS_P7_STAGING_FIREBASE_PROJECT_ID }}
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING: ${{ secrets.GHIMS_P7_STAGING_FIREBASE_PROJECT_ID }}
+      GHIMS_P7_CONFIRM_PROJECT: ${{ secrets.GHIMS_P7_STAGING_FIREBASE_PROJECT_ID }}
+
+      FIREBASE_CLIENT_EMAIL: ${{ secrets.GHIMS_P7_FIREBASE_CLIENT_EMAIL }}
+      FIREBASE_PRIVATE_KEY: ${{ secrets.GHIMS_P7_FIREBASE_PRIVATE_KEY }}
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIREBASE_API_KEY: ${{ secrets.GHIMS_P7_FIREBASE_WEB_API_KEY }}
+      GHIMS_P7_BOOTSTRAP_PASSWORD: ${{ secrets.GHIMS_P7_BOOTSTRAP_PASSWORD }}
+
+      GHIMS_P7_BYPASS_HEADER_NAME: x-vercel-protection-bypass
+      GHIMS_P7_BYPASS_HEADER_VALUE: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      GHIMS_INTEGRATION_HL7_STATE: DISABLED
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_INTEGRATION_DICOMWEB_STATE: DISABLED
+      GHIMS_INTEGRATION_DEVICE_TELEMETRY_STATE: DISABLED
+      GHIMS_INTEGRATION_EDI_X12_STATE: DISABLED
+
+    steps:
+      - name: Require explicit P7-STAGING confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.confirm }}" != "P7-STAGING" ]; then
+            echo "Refusing live qualification: confirmation must be exactly P7-STAGING." >&2
+            exit 1
+          fi
+
+      - name: Checkout current branch
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Validate required secrets without printing them
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(
+            FIREBASE_PROJECT_ID
+            FIREBASE_CLIENT_EMAIL
+            FIREBASE_PRIVATE_KEY
+            NEXT_PUBLIC_FIREBASE_API_KEY
+            GHIMS_P7_BOOTSTRAP_PASSWORD
+          )
+          for key in "${required[@]}"; do
+            if [ -z "${!key:-}" ]; then
+              echo "Missing required P7 STAGING secret/environment: $key" >&2
+              exit 1
+            fi
+          done
+
+      - name: Provision synthetic P7 identities
+        run: bun run ops:p7:provision > p7-provisioning-evidence.json
+
+      - name: Run live P7 hospital-day rehearsal
+        run: bun run ops:p7:rehearsal > p7-hospital-day-evidence.json
+
+      - name: Build evidence directory and manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/p7
+          cp p7-hospital-day-evidence.json artifacts/p7/p7-hospital-day-evidence.json
+          bun run ops:p7:evidence > p7-live-evidence-manifest.json
+
+      - name: Upload live P7 qualification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghims-p7-live-staging-${{ github.sha }}
+          path: |
+            p7-provisioning-evidence.json
+            p7-hospital-day-evidence.json
+            p7-live-evidence-manifest.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish live qualification summary
+        shell: bash
+        run: |
+          {
+            echo "## G-HIMS P7 live STAGING qualification"
+            echo ""
+            echo "- Commit: `${GITHUB_SHA}`"
+            echo "- STAGING base URL: `${GHIMS_P7_BASE_URL}`"
+            echo "- Tenant: `${GHIMS_P7_TENANT_ID}`"
+            echo "- Synthetic role provisioning: PASS"
+            echo "- Hospital-day rehearsal: PASS"
+            echo "- Evidence artifact: uploaded"
+            echo ""
+            echo "P7B, P7D, P7E, P7F and final P7G remain separate evidence gates."
+          } >> "$GITHUB_STEP_SUMMARY"

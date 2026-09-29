@@ -22,6 +22,8 @@ import type {
 export interface Patient360SourceEvent {
   eventId: string;
   eventType: string;
+  aggregateType?: string;
+  aggregateId?: string;
   payload: Record<string, unknown>;
   occurredAt?: number;
   recordedAt?: number;
@@ -307,7 +309,14 @@ export class Patient360Projector {
       .map(documentSummary);
 
     const patientEvents = sources.events
-      .filter((event) => asString(event.payload?.patientId) === patientId)
+      .filter((event) => {
+        const payloadPatientId = asString(event.payload?.patientId);
+        const patientAggregateId =
+          asString(event.aggregateType).toUpperCase().includes('PATIENT')
+            ? asString(event.aggregateId)
+            : '';
+        return payloadPatientId === patientId || patientAggregateId === patientId;
+      })
       .sort((a, b) =>
         Number(b.recordedAt || b.occurredAt || 0) -
         Number(a.recordedAt || a.occurredAt || 0) ||

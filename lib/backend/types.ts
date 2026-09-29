@@ -21,6 +21,10 @@ export interface CommandContext {
   breakGlassGrantId?: string;
   breakGlassPatientId?: string;
   breakGlassEncounterId?: string;
+  /** Causal metadata supplied only by authenticated offline replay. */
+  offlineVectorClock?: Record<string, number>;
+  offlineBaseEntityVersion?: number;
+  offlineMutationId?: string;
 }
 
 export interface BaseCommand<TPayload = Record<string, unknown>> {
@@ -142,6 +146,8 @@ export interface OfflineMutationItem {
   idempotencyKey: string;
   entityId?: string;
   schemaVersion: number;
+  baseEntityVersion?: number;
+  vectorClock?: Record<string, number>;
 }
 
 export interface OfflineSyncBatch {

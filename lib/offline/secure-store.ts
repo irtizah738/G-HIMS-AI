@@ -308,26 +308,87 @@ export async function resolveMappedReferences<T>(
   return rewrite(value) as T;
 }
 
+export interface SecureSyncConflict {
+  id: string;
+  mutationId: string;
+  tenantId: string;
+  collection: string;
+  resourceId?: string;
+  clientData: Record<string, unknown>;
+  conflictType: string;
+  reason?: string;
+  timestamp: number;
+}
+
+export async function recordSecureConflict(
+  tenantId: string,
+  actorId: string,
+  conflict: Omit<SecureSyncConflict, 'timestamp'>
+): Promise<void> {
+  const row = {
+    id: conflict.id,
+    ...conflict,
+    timestamp: Date.now(),
+  };
+  await putSecureEdgeEntities(tenantId, actorId, 'conflicts', [row]);
+}
+
+export async function getSecureConflicts(
+  tenantId: string,
+  actorId: string
+): Promise<SecureSyncConflict[]> {
+  return listSecureEdgeEntities<SecureSyncConflict & Record<string, unknown>>(
+    tenantId,
+    actorId,
+    'conflicts'
+  ) as Promise<SecureSyncConflict[]>;
+}
+
 export async function remapEdgeEntityIds(
   tenantId: string,
   mappings: Array<{ localId: string; canonicalId: string }>
 ): Promise<void> {
   const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
-  for (const mapping of mappings) {
-    const rows = await localDb.edge_entities
-      .where('tenantId')
-      .equals(normalizedTenantId)
-      .filter((row) => row.entityId === mapping.localId)
-      .toArray();
+  const lookup = new Map(mappings.map((mapping) => [mapping.localId, mapping.canonicalId]));
 
-    for (const row of rows) {
-      await localDb.edge_entities.delete(row.key);
-      await localDb.edge_entities.put({
-        ...row,
-        key: `${normalizedTenantId}:${row.collection}:${mapping.canonicalId}`,
-        entityId: mapping.canonicalId,
-        updatedAt: Date.now(),
-      });
+  const rewrite = (input: unknown): unknown => {
+    if (typeof input === 'string') return lookup.get(input) || input;
+    if (Array.isArray(input)) return input.map(rewrite);
+    if (input && typeof input === 'object') {
+      return Object.fromEntries(
+        Object.entries(input as Record<string, unknown>).map(([key, item]) => [key, rewrite(item)])
+      );
     }
+    return input;
+  };
+
+  const rows = await localDb.edge_entities
+    .where('tenantId')
+    .equals(normalizedTenantId)
+    .toArray();
+
+  for (const row of rows) {
+    let data = row.data as Record<string, unknown>;
+    if (row.encryptedData && isEncryptedEdgeEnvelope(row.encryptedData)) {
+      data = await decryptEdgeJson<Record<string, unknown>>(row.encryptedData);
+    }
+    const rewritten = rewrite(data) as Record<string, unknown>;
+    const nextEntityId = lookup.get(row.entityId) || row.entityId;
+    const nextKey = `${normalizedTenantId}:${row.collection}:${nextEntityId}`;
+
+    if (!row.actorId) {
+      throw new Error('EDGE_CACHE_ACTOR_REQUIRED_FOR_REMAP');
+    }
+
+    const encryptedData = await encryptEdgeJson(normalizedTenantId, row.actorId, rewritten);
+    if (nextKey !== row.key) await localDb.edge_entities.delete(row.key);
+    await localDb.edge_entities.put({
+      ...row,
+      key: nextKey,
+      entityId: nextEntityId,
+      data: {},
+      encryptedData,
+      updatedAt: Date.now(),
+    });
   }
 }

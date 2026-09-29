@@ -30,7 +30,7 @@ export function cleanFirestoreData<T>(obj: T): T {
  *
  * Do not probe Firestore from the unauthenticated application shell. Production
  * rules intentionally deny arbitrary root documents, so a client-side
- * getDocFromServer('test/connection') is not a valid connectivity test. Real
+ * direct read of a synthetic root document is not a valid connectivity test. Real
  * Firebase Auth/Firestore readiness is verified server-side by /api/health/ready.
  */
 export async function testConnection(): Promise<boolean> {

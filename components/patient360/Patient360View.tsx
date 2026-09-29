@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import {
   loadPatient360ClinicalView,
+  recordDischargeReadinessReview,
   type Patient360ClinicalView,
 } from '@/lib/clinical/patient360/patient360-client';
 import type { Patient360ObservationSummary } from '@/types/patient360-projection';
@@ -150,6 +151,9 @@ export function Patient360View({
   const [view, setView] = useState<Patient360ClinicalView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [reviewReason, setReviewReason] = useState('');
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [reviewMessage, setReviewMessage] = useState<string | null>(null);
 
   const load = async () => {
     try {
@@ -173,6 +177,48 @@ export function Patient360View({
     // tenantId/patientId are the identity boundary for this clinical view.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId, patientId]);
+
+  const submitReadinessReview = async (
+    outcome: 'ACKNOWLEDGED' | 'ESCALATE' | 'PROCEED_WITH_WARNINGS'
+  ) => {
+    if (!view?.dischargeReadiness || view.source === 'LOCAL_EDGE') return;
+    if (outcome === 'ESCALATE' && !reviewReason.trim()) {
+      setReviewMessage('A clinical reason is required for escalation.');
+      return;
+    }
+
+    try {
+      setReviewSubmitting(true);
+      setReviewMessage(null);
+      const findings = [
+        ...view.dischargeReadiness.blockers,
+        ...view.dischargeReadiness.warnings,
+        ...view.dischargeReadiness.information,
+      ];
+      await recordDischargeReadinessReview(tenantId, {
+        patientId,
+        encounterId: view.dischargeReadiness.encounterId,
+        evaluationId: view.dischargeReadiness.evaluationId,
+        outcome,
+        reviewedFindingIds: findings.map((item) => item.findingId),
+        reason: reviewReason.trim() || undefined,
+      });
+      setReviewMessage(
+        outcome === 'ESCALATE'
+          ? 'Escalation review recorded in the immutable audit trail.'
+          : 'Clinician review recorded in the immutable audit trail.'
+      );
+      setReviewReason('');
+    } catch (caught) {
+      setReviewMessage(
+        caught instanceof Error
+          ? caught.message
+          : 'Unable to record clinician review.'
+      );
+    } finally {
+      setReviewSubmitting(false);
+    }
+  };
 
   const latestResultAt = useMemo(() => {
     const timestamps =
@@ -449,6 +495,52 @@ export function Patient360View({
                       </div>
                     </details>
                   ))}
+                </div>
+
+                <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+                  <div className="text-xs font-bold text-slate-800">Clinician review</div>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Recording a review does not clear blockers or discharge the patient. Emergency override remains a separate governed pathway.
+                  </p>
+                  <textarea
+                    value={reviewReason}
+                    onChange={(event) => setReviewReason(event.target.value)}
+                    disabled={offline || reviewSubmitting}
+                    placeholder="Optional review note; required for escalation"
+                    className="mt-3 min-h-20 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs outline-none focus:border-slate-400 disabled:opacity-50"
+                  />
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={offline || reviewSubmitting}
+                      onClick={() => void submitReadinessReview('ACKNOWLEDGED')}
+                      className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                    >
+                      Record clinician review
+                    </button>
+                    {view.dischargeReadiness.blockers.length === 0 &&
+                      view.dischargeReadiness.warnings.length > 0 && (
+                        <button
+                          type="button"
+                          disabled={offline || reviewSubmitting}
+                          onClick={() => void submitReadinessReview('PROCEED_WITH_WARNINGS')}
+                          className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900 disabled:opacity-50"
+                        >
+                          Acknowledge warnings
+                        </button>
+                      )}
+                    <button
+                      type="button"
+                      disabled={offline || reviewSubmitting}
+                      onClick={() => void submitReadinessReview('ESCALATE')}
+                      className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800 disabled:opacity-50"
+                    >
+                      Escalate
+                    </button>
+                  </div>
+                  {reviewMessage && (
+                    <div className="mt-3 text-xs text-slate-600">{reviewMessage}</div>
+                  )}
                 </div>
 
                 <div className="mt-4 text-[10px] text-slate-400">

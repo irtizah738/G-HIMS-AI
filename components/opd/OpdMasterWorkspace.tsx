@@ -1318,29 +1318,82 @@ export function OpdMasterWorkspace() {
       {activeTab === 'QUEUE' && (
         <OpdQueueEngine
           queue={queue}
-          onCallToken={(token, room) => {
-            setQueue((prev) =>
-              prev.map((q) => (q.tokenNumber === token ? { ...q, status: 'CALLED' as const, calledAt: Date.now() } : q))
+          onCallToken={async (token, room) => {
+            const item = queue.find((q) => q.tokenNumber === token);
+            if (!item) return;
+            const result = await executeActiveTenantCommand(
+              'UpdateOpdQueueStatusCommand',
+              { tokenId: item.id, targetStatus: 'called', assignedRoomOrBay: room },
+              { idempotencyKey: `opd-queue-call:${item.id}` }
             );
-            recordEvent('QUEUE_CALLED', `Token ${token} called to ${room}. Simulated audio announcement dispatched.`);
+            if (!result.success) throw new Error(result.error?.message || 'Queue call failed.');
+            setQueue((prev) =>
+              prev.map((q) => (q.id === item.id ? { ...q, status: 'CALLED' as const, calledAt: Date.now(), assignedRoomOrBay: room } : q))
+            );
+            recordEvent('QUEUE_CALLED', `Token ${token} called to ${room}.`);
           }}
-          onStartService={(tokenId) => {
+          onStartService={async (tokenId) => {
+            const item = queue.find((q) => q.id === tokenId);
+            if (!item) return;
+            const queueResult = await executeActiveTenantCommand(
+              'UpdateOpdQueueStatusCommand',
+              { tokenId, targetStatus: 'in_consultation' },
+              { idempotencyKey: `opd-queue-start:${tokenId}` }
+            );
+            if (!queueResult.success) throw new Error(queueResult.error?.message || 'Queue service start failed.');
+
+            const transition = await executeActiveTenantCommand(
+              'AdvanceStageCommand',
+              {
+                encounterId: item.encounterId,
+                currentStage: 'REGISTERED',
+                targetStage: 'TRIAGE',
+              },
+              { idempotencyKey: `opd-stage-registration-triage:${item.encounterId}` }
+            );
+            if (!transition.success) throw new Error(transition.error?.message || 'Encounter triage transition failed.');
+
             setQueue((prev) =>
               prev.map((q) => (q.id === tokenId ? { ...q, status: 'IN_SERVICE' as const } : q))
             );
+            setSelectedEncounterId(item.encounterId);
             setActiveTab('TRIAGE');
           }}
-          onCompleteService={(tokenId) => {
+          onCompleteService={async (tokenId) => {
+            const result = await executeActiveTenantCommand(
+              'UpdateOpdQueueStatusCommand',
+              { tokenId, targetStatus: 'completed' },
+              { idempotencyKey: `opd-queue-complete:${tokenId}` }
+            );
+            if (!result.success) throw new Error(result.error?.message || 'Queue completion failed.');
             setQueue((prev) =>
               prev.map((q) => (q.id === tokenId ? { ...q, status: 'COMPLETED' as const } : q))
             );
           }}
-          onSkipToken={(tokenId) => {
+          onSkipToken={async (tokenId) => {
+            const result = await executeActiveTenantCommand(
+              'UpdateOpdQueueStatusCommand',
+              { tokenId, targetStatus: 'no_show' },
+              { idempotencyKey: `opd-queue-noshow:${tokenId}` }
+            );
+            if (!result.success) throw new Error(result.error?.message || 'Queue no-show failed.');
             setQueue((prev) =>
               prev.map((q) => (q.id === tokenId ? { ...q, status: 'SKIPPED' as const } : q))
             );
           }}
-          onTransferQueue={(tokenId, targetDept, targetDoc, targetRoom) => {
+          onTransferQueue={async (tokenId, targetDept, targetDoc, targetRoom) => {
+            const result = await executeActiveTenantCommand(
+              'UpdateOpdQueueStatusCommand',
+              {
+                tokenId,
+                targetStatus: 'transferred',
+                targetDepartment: targetDept,
+                assignedDoctorName: targetDoc,
+                assignedRoomOrBay: targetRoom,
+              },
+              { idempotencyKey: `opd-queue-transfer:${tokenId}` }
+            );
+            if (!result.success) throw new Error(result.error?.message || 'Queue transfer failed.');
             setQueue((prev) =>
               prev.map((q) =>
                 q.id === tokenId
@@ -1349,7 +1402,7 @@ export function OpdMasterWorkspace() {
                       department: targetDept,
                       assignedDoctorName: targetDoc,
                       assignedRoomOrBay: targetRoom || q.assignedRoomOrBay,
-                      status: 'WAITING' as const,
+                      status: 'TRANSFERRED' as const,
                     }
                   : q
               )
@@ -1357,6 +1410,10 @@ export function OpdMasterWorkspace() {
             recordEvent('QUEUE_TRANSFERRED', `Token transferred to ${targetDept} (${targetRoom}).`);
           }}
           onOverridePriority={(tokenId, newPriority, reason) => {
+            if (!IS_DEMO_RUNTIME) {
+              alert('Priority override requires the upcoming governed triage-priority command.');
+              return;
+            }
             setQueue((prev) =>
               prev.map((q) => (q.id === tokenId ? { ...q, triagePriority: newPriority } : q))
             );

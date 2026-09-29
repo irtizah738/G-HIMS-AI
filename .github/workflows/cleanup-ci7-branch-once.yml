@@ -1,0 +1,33 @@
+name: One-shot CI-7 branch cleanup
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    name: Delete merged CI-7 branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Delete CI-7 branch if present
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch="ci/ci7-discharge-readiness"
+          encoded=${branch//\//%2F}
+
+          if gh api "repos/${GH_REPO}/git/ref/heads/${encoded}" >/dev/null 2>&1; then
+            gh api --method DELETE "repos/${GH_REPO}/git/refs/heads/${encoded}"
+            echo "Deleted merged branch: ${branch}"
+          else
+            echo "Branch already absent: ${branch}"
+          fi

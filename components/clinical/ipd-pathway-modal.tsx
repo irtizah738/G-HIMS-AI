@@ -13,9 +13,11 @@ import {
   IpdProgressNote,
 } from '@/lib/types/ipd';
 import {
+  createAuthoritativeIpdPathwaySkeleton,
   createDefaultIpdPathway,
   DischargedCensusRecord,
 } from '@/lib/clinical/ipd-service';
+import { executeActiveTenantCommand } from '@/lib/api/command-client';
 import { DischargeCompletedSummary } from '@/components/clinical/inpatient-discharge-modal';
 import {
   CheckCircle2,
@@ -44,6 +46,8 @@ import {
   HeartPulse,
 } from 'lucide-react';
 
+const IS_DEMO_RUNTIME = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
+
 interface IpdPathwayModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -64,7 +68,9 @@ export function IpdPathwayModal({
   onDischargePatient,
 }: IpdPathwayModalProps) {
   const [pathwayData, setPathwayData] = useState<IpdPathwayData>(() =>
-    createDefaultIpdPathway(bed, patient)
+    IS_DEMO_RUNTIME
+      ? createDefaultIpdPathway(bed, patient)
+      : createAuthoritativeIpdPathwaySkeleton(bed, patient)
   );
 
   const [activeStage, setActiveStage] = useState<IpdStageKey>('DISCHARGE_PLANNING');
@@ -95,7 +101,37 @@ export function IpdPathwayModal({
     }));
   };
 
-  const handleAdministerMed = (medId: string) => {
+  const requireActiveInpatientEncounter = (): string => {
+    const encounterId = patient?.activeEncounterId;
+    if (!encounterId) {
+      throw new Error('ACTIVE_INPATIENT_ENCOUNTER_REQUIRED');
+    }
+    return encounterId;
+  };
+
+  const handleAdministerMed = async (medId: string) => {
+    const encounterId = requireActiveInpatientEncounter();
+    const medication = pathwayData.medications.find((item) => item.id === medId);
+    if (!medication) throw new Error('MEDICATION_NOT_FOUND');
+
+    const result = await executeActiveTenantCommand(
+      'RecordMedicationAdministrationCommand',
+      {
+        encounterId,
+        patientId: pathwayData.patientId,
+        medicationId: medication.id,
+        medicationName: medication.name,
+        dose: medication.dose,
+        route: medication.route,
+        status: 'GIVEN',
+        administeredAt: Date.now(),
+      },
+      { idempotencyKey: `ipd-emar:${encounterId}:${medication.id}:${Date.now()}` }
+    );
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Medication administration failed.');
+    }
+
     setPathwayData((prev) => ({
       ...prev,
       medications: prev.medications.map((m) =>
@@ -103,25 +139,41 @@ export function IpdPathwayModal({
           ? {
               ...m,
               status: 'GIVEN',
-              lastAdministered: 'Just now (Verified via Barcode eMAR)',
+              lastAdministered: 'Recorded in authoritative eMAR',
             }
           : m
       ),
     }));
-    setEmarSuccessMessage('Barcode scanned & 5-Rights verified. Medication logged in eMAR.');
+    setEmarSuccessMessage('Medication administration committed to the authoritative eMAR.');
     setTimeout(() => setEmarSuccessMessage(null), 3000);
   };
 
-  const handleAddOrder = (e: React.FormEvent) => {
+  const handleAddOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newOrderText.trim()) return;
+    const encounterId = requireActiveInpatientEncounter();
+
+    const result = await executeActiveTenantCommand<Record<string, unknown>>(
+      'PlaceInpatientOrderCommand',
+      {
+        encounterId,
+        patientId: pathwayData.patientId,
+        orderType: newOrderType,
+        description: newOrderText.trim(),
+        priority: 'ROUTINE',
+      },
+      { idempotencyKey: `ipd-order:${encounterId}:${crypto.randomUUID()}` }
+    );
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Inpatient order failed.');
+    }
 
     const newOrd: IpdPhysicianOrder = {
-      id: `ord-${Date.now()}`,
+      id: result.entityId || `ipd-order-${Date.now()}`,
       orderType: newOrderType,
       description: newOrderText.trim(),
-      prescribedBy: pathwayData.attendingPhysician,
-      orderedAt: 'Just now',
+      prescribedBy: pathwayData.attendingPhysician || 'Authenticated clinician',
+      orderedAt: new Date().toISOString(),
       status: 'ACTIVE',
       priority: 'ROUTINE',
     };
@@ -129,24 +181,47 @@ export function IpdPathwayModal({
     setPathwayData((prev) => ({
       ...prev,
       orders: [newOrd, ...prev.orders],
+      stageStatuses: { ...prev.stageStatuses, PHYSICIAN_ORDERS: 'COMPLETED' },
     }));
     setNewOrderText('');
   };
 
-  const handleAddSoapNote = (e: React.FormEvent) => {
+  const handleAddSoapNote = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSoapAssessment.trim()) return;
+    const encounterId = requireActiveInpatientEncounter();
+
+    const subjective = newSoapSubjective.trim();
+    const assessment = newSoapAssessment.trim();
+    const content = [
+      subjective ? `Subjective: ${subjective}` : '',
+      `Assessment: ${assessment}`,
+    ].filter(Boolean).join('\n\n');
+
+    const result = await executeActiveTenantCommand<Record<string, unknown>>(
+      'SignClinicalNoteCommand',
+      {
+        encounterId,
+        patientId: pathwayData.patientId,
+        category: 'PROGRESS',
+        content,
+      },
+      { idempotencyKey: `ipd-progress:${encounterId}:${crypto.randomUUID()}` }
+    );
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Inpatient progress note signing failed.');
+    }
 
     const newNote: IpdProgressNote = {
-      id: `soap-${Date.now()}`,
-      timestamp: 'Today, Just now',
-      author: pathwayData.attendingPhysician,
+      id: result.entityId || `ipd-note-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      author: pathwayData.attendingPhysician || 'Authenticated clinician',
       role: 'Attending Physician',
       soap: {
-        subjective: newSoapSubjective.trim() || 'Patient resting comfortably. Vitals stable.',
-        objective: 'Vitals verified: BP 120/80, HR 72, SpO2 99%, Afebrile. Physical exam unremarkable.',
-        assessment: newSoapAssessment.trim(),
-        plan: 'Continue clinical care pathway. Advance oral intake. Prepare for discharge transition.',
+        subjective,
+        objective: '',
+        assessment,
+        plan: '',
       },
       news2Score: 0,
     };
@@ -154,47 +229,121 @@ export function IpdPathwayModal({
     setPathwayData((prev) => ({
       ...prev,
       progressNotes: [newNote, ...prev.progressNotes],
+      stageStatuses: { ...prev.stageStatuses, DAILY_PROGRESS: 'COMPLETED' },
     }));
     setNewSoapSubjective('');
     setNewSoapAssessment('');
   };
 
-  const handleFinalDischarge = () => {
+  const handleCompleteMedicationReconciliation = async () => {
+    const encounterId = requireActiveInpatientEncounter();
+    const result = await executeActiveTenantCommand<Record<string, unknown>>(
+      'CompleteMedicationReconciliationCommand',
+      {
+        encounterId,
+        patientId: pathwayData.patientId,
+        reconciledMedicationIds: pathwayData.medications.map((medication) => medication.id),
+        discrepancyCount: 0,
+        unresolvedDiscrepancies: [],
+        notes: 'Medication reconciliation explicitly confirmed from the IPD transition workspace.',
+      },
+      { idempotencyKey: `ipd-medrec:${encounterId}` }
+    );
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Medication reconciliation failed.');
+    }
+
+    setPathwayData((prev) => ({
+      ...prev,
+      medicationReconciliation: {
+        pharmacistName: 'Authenticated clinician',
+        reconciliationDate: new Date().toISOString().slice(0, 10),
+        reconciledCount: prev.medications.length,
+        discrepanciesResolved: true,
+      },
+      stageStatuses: { ...prev.stageStatuses, MEDICATION_RECONCILIATION: 'COMPLETED' },
+    }));
+  };
+
+  const handleFinalDischarge = async () => {
+    const encounterId = requireActiveInpatientEncounter();
     const dischargeDate = new Date().toISOString().split('T')[0];
-    const gatePassCode = pathwayData.dischargeExecution.gatePassId || `GP-${Date.now().toString().slice(-6)}`;
-    const disposition = pathwayData.dischargeExecution.disposition || 'Home with Self-Care';
+    const disposition = pathwayData.dischargeExecution.disposition || 'HOME_OR_SELF_CARE';
+    const followUpInstructions = pathwayData.followUp.instructions || 'Follow-up instructions documented by discharging clinician.';
+
+    const summaryText = [
+      pathwayData.primaryDiagnosis ? `Primary diagnosis: ${pathwayData.primaryDiagnosis}` : '',
+      `Disposition: ${disposition}`,
+      `Follow-up: ${followUpInstructions}`,
+    ].filter(Boolean).join('\n');
+
+    const summaryResult = await executeActiveTenantCommand<Record<string, unknown>>(
+      'SignClinicalNoteCommand',
+      {
+        encounterId,
+        patientId: pathwayData.patientId,
+        category: 'DISCHARGE',
+        content: summaryText,
+      },
+      { idempotencyKey: `ipd-discharge-summary:${encounterId}` }
+    );
+    if (!summaryResult.success || !summaryResult.entityId) {
+      throw new Error(summaryResult.error?.message || 'Signed discharge summary is required.');
+    }
+
+    const dischargeResult = await executeActiveTenantCommand(
+      'DischargeInpatientEncounterCommand',
+      {
+        encounterId,
+        bedId: bed.id,
+        disposition,
+        dischargeSummaryEvidenceId: summaryResult.entityId,
+        followUpInstructions,
+      },
+      { idempotencyKey: `ipd-discharge:${encounterId}` }
+    );
+    if (!dischargeResult.success) {
+      throw new Error(dischargeResult.error?.message || 'Inpatient discharge failed.');
+    }
+
+    const gatePassCode = pathwayData.dischargeExecution.gatePassId || `GP-${encounterId.slice(-8).toUpperCase()}`;
+    const admissionMs = Date.parse(pathwayData.admissionDate);
+    const lengthOfStayDays = Number.isFinite(admissionMs)
+      ? Math.max(0, Math.ceil((Date.now() - admissionMs) / 86400000))
+      : 0;
+    const financialClearance = pathwayData.financialReconciliation.billingCleared;
 
     const censusRecord: DischargedCensusRecord = {
-      id: `dc-${Date.now()}`,
+      id: `dc-${encounterId}`,
       patientId: pathwayData.patientId,
       patientName: pathwayData.patientName,
       mrn: pathwayData.mrn,
-      age: patient?.age || 50,
+      age: patient?.age || 0,
       gender: patient?.gender || 'Other',
       bedId: bed.id,
       bedNumber: bed.bedNumber,
       ward: bed.ward,
       admissionDate: pathwayData.admissionDate,
       dischargeDate,
-      lengthOfStayDays: 4,
+      lengthOfStayDays,
       primaryDiagnosis: pathwayData.primaryDiagnosis,
-      dischargingDoctor: pathwayData.attendingPhysician,
+      dischargingDoctor: pathwayData.attendingPhysician || 'Authenticated clinician',
       dischargeDisposition: disposition,
       gatePassCode,
       medicationReconciliationCompleted: true,
-      financialClearanceCompleted: true,
-      followUpDate: pathwayData.followUp.clinicAppointmentDate || 'In 7 days',
-      dischargeSummaryNote: `Discharge finalized via 15-stage IPD protocol. Gate Pass ${gatePassCode} issued. All ${completedCount}/15 stages reconciled.`,
+      financialClearanceCompleted: financialClearance,
+      followUpDate: pathwayData.followUp.clinicAppointmentDate || '',
+      dischargeSummaryNote: summaryText,
     };
 
     const summary: DischargeCompletedSummary = {
       dischargedAt: new Date().toISOString(),
       disposition,
-      dischargingPhysician: pathwayData.attendingPhysician,
+      dischargingPhysician: pathwayData.attendingPhysician || 'Authenticated clinician',
       reconciledMedicationsCount: pathwayData.medications.length,
-      dischargeSummaryNote: censusRecord.dischargeSummaryNote,
-      followUpInstructions: pathwayData.followUp.instructions || 'Routine follow-up in clinic.',
-      financialClearanceApproved: true,
+      dischargeSummaryNote: summaryText,
+      followUpInstructions,
+      financialClearanceApproved: financialClearance,
       gatePassId: gatePassCode,
     };
 
@@ -784,11 +933,23 @@ export function IpdPathwayModal({
                     <ShieldCheck className="w-4 h-4 text-emerald-600" />
                     Clinical Pharmacist Discharge Med Rec
                   </span>
-                  <span className="font-bold text-emerald-700">Audit Status: 100% Reconciled</span>
+                  <span className="font-bold text-emerald-700">
+                    Audit Status: {pathwayData.medicationReconciliation.discrepanciesResolved ? 'Reconciled' : 'Pending'}
+                  </span>
                 </div>
                 <p className="text-emerald-700 dark:text-emerald-300">
-                  Pre-admission chronic medications, active inpatient medications, and new discharge prescriptions cross-checked for therapeutic duplicates, dosing accuracy, and contraindications.
+                  Medication reconciliation is not assumed from the UI. An authorized clinician or pharmacist must explicitly commit the reconciliation evidence before discharge.
                 </p>
+                <button
+                  type="button"
+                  onClick={() => void handleCompleteMedicationReconciliation()}
+                  disabled={pathwayData.medicationReconciliation.discrepanciesResolved}
+                  className="px-3 py-2 rounded-lg bg-emerald-700 text-white text-xs font-bold disabled:opacity-50"
+                >
+                  {pathwayData.medicationReconciliation.discrepanciesResolved
+                    ? 'Medication Reconciliation Committed'
+                    : 'Commit Medication Reconciliation'}
+                </button>
                 <div className="pt-2 flex items-center justify-between text-[11px] text-slate-500">
                   <span>Pharmacist: <strong>{pathwayData.medicationReconciliation.pharmacistName}</strong></span>
                   <span>Date: <strong>{pathwayData.medicationReconciliation.reconciliationDate}</strong></span>

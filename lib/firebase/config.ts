@@ -1,6 +1,4 @@
 import { app, db, auth } from '@/lib/firebase/client';
-import firebaseConfig from '@/firebase-applet-config.json';
-import { doc, getDocFromServer } from 'firebase/firestore';
 
 export { app, db, auth };
 
@@ -27,38 +25,21 @@ export function cleanFirestoreData<T>(obj: T): T {
   return result as T;
 }
 
-// Connectivity test helper adhering strictly to firebase-skill validation requirement
-export async function testConnection(maxRetries = 3, delayMs = 600) {
-  if (typeof window === 'undefined') return;
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      await getDocFromServer(doc(db, 'test', 'connection'));
-      return; // Connected successfully
-    } catch (error) {
-      const isOffline = error instanceof Error && error.message.includes('the client is offline');
-      if (isOffline) {
-        if (attempt < maxRetries) {
-          await new Promise((res) => setTimeout(res, delayMs * attempt));
-          continue;
-        }
-        console.error('Please check your Firebase configuration.');
-      } else {
-        // Other errors (e.g. non-blocking or already handled)
-        break;
-      }
-    }
-  }
-}
+/**
+ * Browser initialization sanity check only.
+ *
+ * Do not probe Firestore from the unauthenticated application shell. Production
+ * rules intentionally deny arbitrary root documents, so a client-side
+ * direct read of a synthetic root document is not a valid connectivity test. Real
+ * Firebase Auth/Firestore readiness is verified server-side by /api/health/ready.
+ */
+export async function testConnection(): Promise<boolean> {
+  if (typeof window === 'undefined') return true;
 
-// Initial boot connection test - schedule after microtask so network stack finishes initializing
-if (typeof window !== 'undefined') {
-  if (document.readyState === 'loading') {
-    window.addEventListener('DOMContentLoaded', () => {
-      setTimeout(() => { testConnection(); }, 300);
-    });
-  } else {
-    setTimeout(() => { testConnection(); }, 300);
-  }
+  const appProjectId = String(app.options.projectId || '').trim();
+  const authProjectId = String(auth.app.options.projectId || '').trim();
+
+  return Boolean(appProjectId && authProjectId && appProjectId === authProjectId);
 }
 
 export default app;

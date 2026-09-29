@@ -244,6 +244,25 @@ describe('G-HIMS P0 Core Trust Boundary regression guards', () => {
     expect(unprotected).toEqual([]);
   });
 
+  test('legacy browser Firestore adapter cannot touch denied root collections', async () => {
+    const legacy = await source('lib/firebase/firestore-service.ts');
+    const config = await source('lib/firebase/config.ts');
+    const sso = await source('lib/auth/sso-service.ts');
+
+    expect(legacy).not.toContain("from 'firebase/firestore'");
+    expect(legacy).not.toContain('collection(');
+    expect(legacy).not.toContain('onSnapshot(');
+    expect(legacy).not.toContain('setDoc(');
+    expect(legacy).toContain('LEGACY_CLIENT_FIRESTORE_RETIRED');
+
+    expect(config).not.toContain('getDocFromServer');
+    expect(config).not.toContain("doc(db, 'test', 'connection')");
+    expect(config).toContain('/api/health/ready');
+
+    expect(sso).not.toContain("from 'firebase/firestore'");
+    expect(sso).not.toContain('getDoc(');
+  });
+
   test('Cloud Function authorization has no default admin identity', async () => {
     const functions = await source('functions/src/index.ts');
 

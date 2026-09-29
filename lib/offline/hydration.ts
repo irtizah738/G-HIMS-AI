@@ -2,11 +2,11 @@
 
 import { auth } from '@/lib/firebase/client';
 import { getCachedAuthSession } from '@/lib/offline/auth-storage';
+import { getEdgeSyncMetadata } from '@/lib/offline/db';
 import {
-  listEdgeEntities,
-  replaceTenantEdgeSnapshot,
-  getEdgeSyncMetadata,
-} from '@/lib/offline/db';
+  listSecureEdgeEntities,
+  replaceSecureTenantEdgeSnapshot,
+} from '@/lib/offline/secure-store';
 
 export interface EdgeSnapshot {
   tenantId: string;
@@ -17,6 +17,18 @@ export interface EdgeSnapshot {
 }
 
 export async function loadLocalEdgeSnapshot(tenantId: string): Promise<EdgeSnapshot> {
+  const cached = await getCachedAuthSession();
+  const actorId = cached?.user?.uid || '';
+  if (!actorId) {
+    return {
+      tenantId,
+      generatedAt: 0,
+      snapshotVersion: 'local-locked',
+      collections: {},
+      source: 'LOCAL',
+    };
+  }
+
   const collectionsToLoad = [
     'patients',
     'encounters',
@@ -35,7 +47,7 @@ export async function loadLocalEdgeSnapshot(tenantId: string): Promise<EdgeSnaps
   const entries = await Promise.all(
     collectionsToLoad.map(async (collection) => [
       collection,
-      await listEdgeEntities(tenantId, collection),
+      await listSecureEdgeEntities(tenantId, actorId, collection),
     ] as const)
   );
   const metadata = await getEdgeSyncMetadata(tenantId);
@@ -102,8 +114,9 @@ export async function hydrateEdgeSnapshot(tenantId: string): Promise<EdgeSnapsho
       throw new Error('EDGE_HYDRATION_INVALID_SNAPSHOT');
     }
 
-    await replaceTenantEdgeSnapshot(
+    await replaceSecureTenantEdgeSnapshot(
       normalizedTenantId,
+      cached.user.uid,
       payload.collections || {},
       {
         snapshotVersion: String(payload.snapshotVersion || `${normalizedTenantId}:${Date.now()}`),

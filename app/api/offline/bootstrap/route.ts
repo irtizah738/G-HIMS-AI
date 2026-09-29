@@ -51,6 +51,37 @@ function authorizedCollections(roles: string[]): string[] {
   return [...selected];
 }
 
+async function readCollectionFully(
+  tenantRef: FirebaseFirestore.DocumentReference,
+  collection: string,
+  pageSize = 500
+): Promise<Array<Record<string, unknown>>> {
+  const results: Array<Record<string, unknown>> = [];
+  let cursor: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+
+  while (true) {
+    let query: FirebaseFirestore.Query = tenantRef
+      .collection(collection)
+      .orderBy('__name__')
+      .limit(pageSize);
+
+    if (cursor) query = query.startAfter(cursor);
+
+    const snapshot = await query.get();
+    for (const document of snapshot.docs) {
+      results.push({
+        id: document.id,
+        ...document.data(),
+      });
+    }
+
+    if (snapshot.docs.length < pageSize) break;
+    cursor = snapshot.docs[snapshot.docs.length - 1];
+  }
+
+  return results;
+}
+
 export async function GET(req: NextRequest) {
   try {
     const requestedTenantId = String(
@@ -73,16 +104,10 @@ export async function GET(req: NextRequest) {
     const generatedAt = Date.now();
 
     const entries = await Promise.all(
-      collections.map(async (collection) => {
-        const snapshot = await tenantRef.collection(collection).limit(1000).get();
-        return [
-          collection,
-          snapshot.docs.map((document) => ({
-            id: document.id,
-            ...document.data(),
-          })),
-        ] as const;
-      })
+      collections.map(async (collection) => [
+        collection,
+        await readCollectionFully(tenantRef, collection),
+      ] as const)
     );
 
     const snapshotVersion = `${context.tenantId}:${generatedAt}`;

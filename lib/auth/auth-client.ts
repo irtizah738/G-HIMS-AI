@@ -13,6 +13,7 @@ import {
   User as FirebaseUser,
 } from 'firebase/auth';
 import { auth } from '@/lib/firebase/client';
+import { probeApplicationConnectivity } from '@/lib/offline/connectivity';
 import {
   AuthenticatedUser,
   LoginResponsePayload,
@@ -402,7 +403,8 @@ export class AuthClient {
     init: RequestInit = {},
     tenantId?: string
   ): Promise<Response> {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    const connectivity = await probeApplicationConnectivity();
+    if (!connectivity.isOnline) {
       throw new AuthError({
         code: 'NETWORK_UNAVAILABLE',
         message: 'Protected server actions require an online authoritative session',

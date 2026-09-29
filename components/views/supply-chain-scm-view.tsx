@@ -18,29 +18,18 @@ import {
   AISCMRecommendation,
 } from '@/types/scm-domain';
 import {
-  getItems,
-  getLocations,
-  getBatches,
-  getInventoryBalances,
-  getStockTransactions,
-  getPurchaseRequisitions,
-  getPurchaseOrders,
-  getGoodsReceiptNotes,
-  getStockTransfersList,
-  getPatientConsumptions,
-  getRecallCases,
-  getSuppliers,
-  getThreeWayMatches,
-  recordStockTransaction,
-  createPurchaseRequisition,
   updateRequisitionStatus,
   createGoodsReceiptNote,
   completeStockTransfer,
-  recordPatientConsumption,
   executeBatchRecall,
-  seedRealisticHospitalSCMData,
   updateBalanceReorderParameters,
 } from '@/lib/firebase/services/scm-firestore-service';
+import {
+  hydrateScmEdgeData,
+  loadLocalScmEdgeData,
+  recordStockTransactionEdge,
+  submitPurchaseRequisitionEdge,
+} from '@/lib/supply-chain/scm-edge-adapter';
 import { ScmExpiryDashboard } from '@/components/supply-chain/scm-expiry-dashboard';
 import { ScmAuditComplianceView } from '@/components/supply-chain/scm-audit-compliance-view';
 import { ScmProcurementModule } from '@/components/supply-chain/scm-procurement-module';
@@ -182,55 +171,31 @@ export function SupplyChainScmView({ tenantId = 'metro-health' }: SupplyChainScm
     setIsQrModalOpen(true);
   };
 
-  // Fetch all SCM domain collections
+  // Local-first SCM read model: render encrypted IndexedDB immediately,
+  // then refresh from the authenticated server snapshot when connectivity exists.
+  const applyScmData = (data: Awaited<ReturnType<typeof loadLocalScmEdgeData>>) => {
+    setItems(data.items || []);
+    setLocations(data.locations || []);
+    setBatches(data.batches || []);
+    setBalances(data.balances || []);
+    setTransactions((data.transactions || []).slice(0, 50));
+    setRequisitions(data.requisitions || []);
+    setPurchaseOrders(data.purchaseOrders || []);
+    setGrns(data.goodsReceiptNotes || []);
+    setTransfers(data.stockTransfers || []);
+    setConsumptions(data.consumptions || []);
+    setRecallCases(data.recalls || []);
+    setSuppliers(data.suppliers || []);
+    setThreeWayMatches(data.threeWayMatches || []);
+  };
+
   const loadData = async () => {
     setLoading(true);
     try {
-      const [
-        itms,
-        locs,
-        btchs,
-        bals,
-        txns,
-        reqs,
-        pos,
-        grnList,
-        trfs,
-        cns,
-        recs,
-        sups,
-        matches,
-      ] = await Promise.all([
-        getItems(tenantId),
-        getLocations(tenantId),
-        getBatches(tenantId),
-        getInventoryBalances(tenantId),
-        getStockTransactions(tenantId, 50),
-        getPurchaseRequisitions(tenantId),
-        getPurchaseOrders(tenantId),
-        getGoodsReceiptNotes(tenantId),
-        getStockTransfersList(tenantId),
-        getPatientConsumptions(tenantId),
-        getRecallCases(tenantId),
-        getSuppliers(tenantId),
-        getThreeWayMatches(tenantId),
-      ]);
-
-      setItems(itms || []);
-      setLocations(locs || []);
-      setBatches(btchs || []);
-      setBalances(bals || []);
-      setTransactions(txns || []);
-      setRequisitions(reqs || []);
-      setPurchaseOrders(pos || []);
-      setGrns(grnList || []);
-      setTransfers(trfs || []);
-      setConsumptions(cns || []);
-      setRecallCases(recs || []);
-      setSuppliers(sups || []);
-      setThreeWayMatches(matches || []);
+      applyScmData(await loadLocalScmEdgeData(tenantId));
+      applyScmData(await hydrateScmEdgeData(tenantId));
     } catch (err) {
-      console.error('Failed loading SCM domain data:', err);
+      console.error('Failed loading SCM edge data:', err);
     } finally {
       setLoading(false);
     }
@@ -360,7 +325,7 @@ export function SupplyChainScmView({ tenantId = 'metro-health' }: SupplyChainScm
       updatedAt: new Date().toISOString(),
     };
 
-    await createPurchaseRequisition(tenantId, newReq);
+    await submitPurchaseRequisitionEdge(newReq);
     setIsNewRequisitionOpen(false);
     setReqJustification('');
     await loadData();
@@ -393,7 +358,7 @@ export function SupplyChainScmView({ tenantId = 'metro-health' }: SupplyChainScm
     for (const alloc of fefoResult.allocations) {
       const txnId = `txn_iss_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       const targetBatch = batches.find((b) => b.batchId === alloc.batchId);
-      await recordStockTransaction(tenantId, {
+      await recordStockTransactionEdge({
         transactionId: txnId,
         tenantId,
         facilityId: 'FAC-MAIN',

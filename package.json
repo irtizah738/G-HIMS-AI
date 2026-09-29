@@ -31,7 +31,9 @@
     "ops:staging-smoke": "bun scripts/ops/staging-smoke.ts",
     "test:p5b": "bun test tests/p5b-staging-verification.test.ts",
     "test:p5c": "bun test tests/p5c-pilot-readiness.test.ts",
-    "validate:p5c": "bun run typecheck && bun run lint && bun run test:p5c && bun run test:unit && bun run test:security && bun run test:rules && bun run test:p5a:emulator && bun run test:p4:emulator && bun run build && bun run test:e2e"
+    "validate:p5c": "bun run typecheck && bun run lint && bun run test:p5c && bun run test:unit && bun run test:security && bun run test:rules && bun run test:p5a:emulator && bun run test:p4:emulator && bun run build && bun run test:e2e",
+    "test:p6": "bun test tests/p6-offline-first-completion.test.ts",
+    "validate:p6": "bun run typecheck && bun run lint && bun run test:p6 && bun run test:unit && bun run test:security && bun run test:rules && bun run test:p5a:emulator && bun run test:p4:emulator && bun run build && bun run test:e2e"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

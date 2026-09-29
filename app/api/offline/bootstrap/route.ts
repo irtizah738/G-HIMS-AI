@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
 import { getAdminFirestore } from '@/server/firebase/admin';
-import { FieldPath } from 'firebase-admin/firestore';
+import {
+  FieldPath,
+  type DocumentReference,
+  type QueryDocumentSnapshot,
+} from 'firebase-admin/firestore';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,11 +50,11 @@ const EDGE_PAGE_SIZE = 500;
 const EDGE_COLLECTION_MAX = 10000;
 
 async function readCollectionSnapshot(
-  tenantRef: FirebaseFirestore.DocumentReference,
+  tenantRef: DocumentReference,
   collection: string
 ): Promise<Array<Record<string, unknown>>> {
   const rows: Array<Record<string, unknown>> = [];
-  let lastDocument: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+  let lastDocument: QueryDocumentSnapshot | null = null;
 
   while (true) {
     let query = tenantRef

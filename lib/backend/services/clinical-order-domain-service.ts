@@ -9,6 +9,7 @@ import { AuthorizationPipeline } from '../auth/authorization-pipeline';
 import { TransactionManager } from '../transactions/transaction-manager';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import { EncounterDomainService } from './encounter-domain-service';
+import { PatientClinicalKnowledgeDomainService } from './patient-clinical-knowledge-domain-service';
 import type { InventoryBalance } from '@/types/scm-domain';
 import {
   buildCanonicalDiagnosticOrder,
@@ -659,6 +660,18 @@ export class ClinicalOrderDomainService {
       authoredAt: domainState.createdAt,
     });
 
+    const knowledgeRecord =
+      PatientClinicalKnowledgeDomainService.buildRecord({
+        tenantId: context.tenantId,
+        patientId: payload.patientId,
+        domain: 'MEDICATIONS',
+        status: 'KNOWN',
+        actorId: context.actorId,
+        reviewedAt: domainState.createdAt,
+        encounterId: payload.encounterId,
+        reason: 'Medication prescribed',
+      });
+
     const tx = await TransactionManager.executeAtomicMutation({
       tenantId: context.tenantId,
       actorId: context.actorId,
@@ -674,6 +687,7 @@ export class ClinicalOrderDomainService {
         drugName: payload.drugName,
         quantityPrescribed: payload.quantityPrescribed,
         canonicalMedicationOrderId: canonicalMedicationOrder.medicationOrderId,
+        medicationKnowledgeStatus: 'KNOWN',
       },
       auditAction: 'PRESCRIBE_MEDICATION',
       auditResourceType: 'PRESCRIPTION',
@@ -689,6 +703,14 @@ export class ClinicalOrderDomainService {
           entityType: 'MEDICATION_ORDER',
           entityId: canonicalMedicationOrder.medicationOrderId,
           domainState: canonicalMedicationOrder,
+        },
+        {
+          entityType: 'PATIENT_CLINICAL_KNOWLEDGE_STATUS',
+          entityId: PatientClinicalKnowledgeDomainService.documentId(
+            payload.patientId,
+            'MEDICATIONS'
+          ),
+          domainState: knowledgeRecord,
         },
       ],
     });

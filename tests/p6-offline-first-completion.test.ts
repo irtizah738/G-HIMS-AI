@@ -109,6 +109,27 @@ describe('G-HIMS P6 full offline-first completion', () => {
     expect(reconcile).not.toContain('resolveVectorConflict');
   });
 
+  test('online and offline writes share the same authoritative entity version', async () => {
+    const tx = await source('lib/backend/transactions/transaction-manager.ts');
+    const secure = await source('lib/offline/secure-store.ts');
+    const engine = await source('lib/offline/sync-engine.ts');
+    const reconcile = await source('lib/backend/services/offline-reconciliation-domain-service.ts');
+    const versions = await source('server/repositories/edge-version-repository.ts');
+
+    expect(tx).toContain('_serverVersion: currentVersion + 1');
+    expect(tx).toContain('await transaction.get(stateRef)');
+    expect(tx).toContain('toVersionedDocumentData');
+    expect(secure).toContain('(entity as any)._serverVersion');
+    expect(secure).toContain('getSecureEdgeEntityMetadata');
+    expect(engine).toContain('entityMetadata?.serverVersion');
+    expect(engine).toContain('baseVectorClock');
+    expect(reconcile).toContain('getAuthoritativeEntityVersion');
+    expect(reconcile).toContain('compareAuthoritativeEntityVersion');
+    expect(reconcile).not.toContain('EdgeVersionRepository.recordAccepted');
+    expect(versions).toContain("collection(collection)");
+    expect(versions).toContain('data._serverVersion');
+  });
+
   test('SCM shares the same encrypted edge store and governed CommandBus', async () => {
     const offlineStore = await source('lib/supply-chain/scm-offline-store.ts');
     const edge = await source('lib/supply-chain/scm-edge-adapter.ts');

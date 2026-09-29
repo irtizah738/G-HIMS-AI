@@ -341,4 +341,118 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
       'DISCHARGE_SUMMARY_REQUIRED'
     );
   });
+
+  test('legacy Bed Board census bypasses are retired outside DEMO', async () => {
+    const bus = await source('lib/backend/commands/command-bus.ts');
+    const board = await source(
+      'app/[tenantId]/inpatient/bed-board/page.tsx'
+    );
+    const legacyClient = await source(
+      'lib/firebase/services/inpatient-or.ts'
+    );
+
+    expect(bus).toContain("'TransferInpatientBedCommand'");
+    expect(bus).toContain("'CARE_TRANSITION_COMMAND_REQUIRED'");
+    expect(bus).toContain(
+      'Inpatient admission must use AdmitPatientToInpatientCareCommand'
+    );
+    expect(bus).toContain(
+      'Inpatient discharge must use DischargeInpatientEncounterCommand'
+    );
+
+    expect(board).toContain("'AdmitPatientToInpatientCareCommand'");
+    expect(board).toContain("'TransferInpatientBedCommand'");
+    expect(board).toContain("'DischargeInpatientEncounterCommand'");
+    expect(board).toContain("'UpdateBedStatusCommand'");
+    expect(board).not.toContain('saveClinicalDataOptimistic');
+    expect(board).not.toContain('assignBedToPatient(');
+    expect(board).not.toContain('transferPatientBed(');
+    expect(board).not.toContain('dischargePatientBed(');
+    expect(board).not.toContain('markBedCleaned(');
+    expect(board).not.toContain('updateBedStatus(');
+
+    expect(legacyClient).toContain(
+      "assertDemoOnlyMutation('assignBedToPatient')"
+    );
+    expect(legacyClient).toContain(
+      "assertDemoOnlyMutation('transferPatientBed')"
+    );
+    expect(legacyClient).toContain(
+      "assertDemoOnlyMutation('dischargePatientBed')"
+    );
+    expect(legacyClient).toContain(
+      "assertDemoOnlyMutation('updateBedStatus')"
+    );
+    expect(legacyClient).toContain(
+      "assertDemoOnlyMutation('seedInitialInpatientORData')"
+    );
+  });
+
+  test('Bed Board never fabricates NEWS2 from bed class or isolation metadata', async () => {
+    const board = await source(
+      'app/[tenantId]/inpatient/bed-board/page.tsx'
+    );
+
+    expect(board).toContain('NEWS2: Not recorded');
+    expect(board).toContain(
+      'Never infer NEWS2 from bed class, isolation status'
+    );
+    expect(board).not.toContain("if (bed.class === 'icu')");
+    expect(board).not.toContain(
+      "bed.isolationType && bed.isolationType !== 'none'"
+    );
+  });
+
+  test('governed inpatient discharge requires explicit disposition and follow-up', async () => {
+    const discharge = await source(
+      'lib/backend/services/care-transition-domain-service.ts'
+    );
+    const modal = await source(
+      'components/inpatient/DischargeConfirmationModal.tsx'
+    );
+
+    expect(discharge).toContain("'INVALID_INPATIENT_DISCHARGE_INPUT'");
+    expect(discharge).toContain(
+      "!String(payload.followUpInstructions || '').trim()"
+    );
+    expect(modal).toContain('Discharge Disposition *');
+    expect(modal).toContain('Follow-Up Instructions *');
+    expect(modal).toContain('review prompts only');
+    expect(modal).toContain(
+      'Financial status is tracked separately from clinical discharge safety'
+    );
+  });
+
+  test('inpatient census transitions reject stale bed and patient versions', async () => {
+    const care = await source(
+      'lib/backend/services/care-transition-domain-service.ts'
+    );
+    const bedService = await source(
+      'lib/backend/services/inpatient-bed-domain-service.ts'
+    );
+    const tx = await source(
+      'lib/backend/transactions/transaction-manager.ts'
+    );
+
+    expect(care).toContain('expectedPrimaryServerVersion');
+    expect(care).toContain('expectedServerVersion');
+    expect(care).toContain("entityType: 'BED_TRANSFER'");
+    expect(bedService).toContain('expectedPrimaryServerVersion');
+    expect(tx).toContain("BED_TRANSFER: 'bedTransfers'");
+  });
+
+  test('Hobby deployment path disables automatic previews and avoids Pro-only staging target', async () => {
+    const vercel = JSON.parse(await source('vercel.json'));
+    const workflow = await source('.github/workflows/staging-deploy.yml');
+
+    expect(vercel.git?.deploymentEnabled).toBe(false);
+    expect(workflow).toContain(
+      'vercel pull --yes --environment=preview'
+    );
+    expect(workflow).toContain(
+      'vercel deploy --prebuilt --yes --token="$VERCEL_TOKEN"'
+    );
+    expect(workflow).not.toContain('--target=staging');
+    expect(workflow).toContain('G-HIMS runtime: STAGING');
+  });
 });

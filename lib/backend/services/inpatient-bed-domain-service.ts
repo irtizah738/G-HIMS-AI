@@ -85,6 +85,8 @@ export class InpatientBedDomainService {
       idempotencyKey,
       commandId,
       correlationId:context.correlationId,
+      causalVectorClock: context.offlineVectorClock,
+      causalBaseEntityVersion: context.offlineBaseEntityVersion,
       domainState:bedState,
       additionalStateWrites:[{ entityType:'PATIENT_MPI', entityId:patient.id, domainState:patientState }],
     });
@@ -183,6 +185,8 @@ export class InpatientBedDomainService {
       idempotencyKey,
       commandId,
       correlationId:context.correlationId,
+      causalVectorClock: context.offlineVectorClock,
+      causalBaseEntityVersion: context.offlineBaseEntityVersion,
       domainState:bedState,
       additionalStateWrites:[{ entityType:'PATIENT_MPI', entityId:patient.id, domainState:patientState }],
     });

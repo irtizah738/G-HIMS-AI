@@ -268,6 +268,15 @@ export class CommandBus {
           );
           break;
 
+        case 'ResolveInpatientOrderCommand':
+          result = await InpatientClinicalDomainService.resolveOrder(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
         case 'RecordMedicationAdministrationCommand':
           result = await InpatientClinicalDomainService.recordMedicationAdministration(
             context,

@@ -263,7 +263,7 @@ export function TenantDashboard() {
             )}
             {(activeTab === 'opd' || activeTab === 'workflow-runtime') && (
               <RbacModuleGate moduleId="opd" moduleName="OPD Encounters & Consultations">
-                <OpdEncountersView initialViewMode={activeTab === 'workflow-runtime' ? 'dag_backend' : undefined} />
+                <OpdEncountersView initialViewMode="master_suite" />
               </RbacModuleGate>
             )}
             {activeTab === 'emergency' && (

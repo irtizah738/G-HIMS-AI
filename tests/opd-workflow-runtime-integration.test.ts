@@ -11,6 +11,7 @@ describe('OPD clinical workflow runtime integration', () => {
     const opdView = await source('components/views/opd-encounters-view.tsx');
     const workspace = await source('components/opd/OpdMasterWorkspace.tsx');
     const directory = await source('components/views/all-modules-directory.tsx');
+    const commandPalette = await source('components/navigation/command-palette.tsx');
 
     expect(opdView).not.toContain('Clinical Workflow Runtime Studio');
     expect(opdView).not.toContain('Backend Workflow DAG Engine');
@@ -20,6 +21,8 @@ describe('OPD clinical workflow runtime integration', () => {
     expect(workspace).not.toContain('DAG_ENGINE');
     expect(workspace).not.toContain('WorkflowRuntimeView');
     expect(directory).not.toContain("id: 'workflow-runtime'");
+    expect(commandPalette).not.toContain("id: 'workflow-runtime'");
+    expect(commandPalette).not.toContain('Workflow DAG Engine (Backend Orchestrator)');
   });
 
   test('OPD stage changes remain governed by the server-owned compiled DAG', async () => {

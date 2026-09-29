@@ -60,6 +60,18 @@ function isTransientServerStatus(status: number): boolean {
   return status === 502 || status === 503 || status === 504;
 }
 
+function isNetworkLikeError(error: unknown): boolean {
+  const code = String((error as any)?.code || '').toLowerCase();
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error || '').toLowerCase();
+  return (
+    code === 'auth/network-request-failed' ||
+    message.includes('failed to fetch') ||
+    message.includes('networkerror') ||
+    message.includes('network request failed') ||
+    message.includes('aborted')
+  );
+}
+
 export async function executeCommand<TData = unknown>(
   input: ExecuteCommandInput
 ): Promise<CommandResult<TData>> {
@@ -85,12 +97,24 @@ export async function executeCommand<TData = unknown>(
     return queueGovernedOfflineCommand<TData>(input, commandId, idempotencyKey);
   }
 
-  const idToken = await currentUser.getIdToken(false);
+  let idToken: string;
+  try {
+    idToken = await currentUser.getIdToken(false);
+  } catch (error) {
+    if (input.offlineQueue?.enabled && isNetworkLikeError(error)) {
+      return queueGovernedOfflineCommand<TData>(input, commandId, idempotencyKey);
+    }
+    throw error;
+  }
+
   let response: Response;
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 12000);
 
   try {
     response = await fetch('/api/commands/execute', {
       method: 'POST',
+      signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${idToken}`,
@@ -111,10 +135,12 @@ export async function executeCommand<TData = unknown>(
       }),
     });
   } catch (error) {
-    if (input.offlineQueue?.enabled) {
+    if (input.offlineQueue?.enabled && isNetworkLikeError(error)) {
       return queueGovernedOfflineCommand<TData>(input, commandId, idempotencyKey);
     }
     throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
   }
 
   if (input.offlineQueue?.enabled && isTransientServerStatus(response.status)) {

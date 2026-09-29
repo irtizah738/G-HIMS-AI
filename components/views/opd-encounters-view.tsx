@@ -21,7 +21,6 @@ import {
   ChevronRight,
   ShieldCheck,
   Layers,
-  GitFork,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { OpdQueueToken } from '@/lib/types/ghims';
@@ -29,14 +28,13 @@ import { OpdMasterWorkspace } from '@/components/opd/OpdMasterWorkspace';
 import { PatientConsultantRoutingModal, ConsultantDoctor } from '@/components/clinical/patient-consultant-routing-modal';
 import { StandardPatientBanner } from '@/components/clinical/standard-patient-banner';
 import { ConfirmPatientModal } from '@/components/clinical/confirm-patient-modal';
-import { WorkflowRuntimeView } from '@/components/views/workflow-runtime-view';
 
 export interface OpdEncountersViewProps {
-  initialViewMode?: 'master_suite' | 'consultation_desk' | 'dag_backend';
+  initialViewMode?: 'master_suite' | 'consultation_desk';
 }
 
 export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncountersViewProps = {}) {
-  const [viewMode, setViewMode] = useState<'master_suite' | 'consultation_desk' | 'dag_backend'>(initialViewMode);
+  const [viewMode, setViewMode] = useState<'master_suite' | 'consultation_desk'>(initialViewMode);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const {
     opdQueue,
@@ -197,42 +195,11 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
             <Stethoscope className="w-4 h-4" />
             Single-Bay Clinical Consultation Desk
           </button>
-          <button
-            onClick={() => setViewMode('dag_backend')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
-              viewMode === 'dag_backend'
-                ? 'bg-emerald-600 text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-            }`}
-          >
-            <GitFork className="w-4 h-4 text-emerald-500" />
-            Backend Workflow DAG Engine
-          </button>
         </div>
       </div>
 
       {viewMode === 'master_suite' ? (
         <OpdMasterWorkspace />
-      ) : viewMode === 'dag_backend' ? (
-        <WorkflowRuntimeView
-          embeddedInOpd={true}
-          activePatient={
-            patient
-              ? {
-                  firstName: patient.fullName?.split(' ')[0] || 'Eleanor',
-                  lastName: patient.fullName?.split(' ').slice(1).join(' ') || 'Vance',
-                  gender: (patient.gender as any) || 'Female',
-                  dob: patient.dateOfBirth || '1984-06-12',
-                  phone: patient.contactNumber || '+1 (555) 234-8901',
-                  nationalId: (patient as { nationalId?: string }).nationalId || 'NAT-8492041',
-                  chiefComplaint: selectedToken?.chiefComplaint || 'Thoracic evaluation',
-                  department: selectedToken?.department || 'Cardiology OPD',
-                  mrn: patient.mrn,
-                }
-              : undefined
-          }
-          onClose={() => setViewMode('master_suite')}
-        />
       ) : (
         <>
           {/* OPD Header & Stats Banner */}
@@ -250,15 +217,6 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
             </div>
 
             <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => setViewMode('dag_backend')}
-                className="bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 font-bold text-emerald-800 dark:text-emerald-300 transition-all cursor-pointer"
-                title="View active OPD Directed Acyclic Graph engine state"
-              >
-                <GitFork className="w-3.5 h-3.5" />
-                <span>v1.2.0 DAG Engine Active</span>
-              </button>
               <div className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-xl text-xs">
                 <span className="text-slate-500 dark:text-slate-400">Queue Waiting:</span>{' '}
                 <strong className="text-slate-900 dark:text-slate-100">{opdQueue.filter(t => t.status === 'waiting').length} Patients</strong>

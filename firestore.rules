@@ -25,14 +25,9 @@ service cloud.firestore {
     }
 
     function hasActiveMembership(tenantId) {
-      return (
-        tenantClaimMatches(tenantId) ||
-        (
-          signedIn() &&
-          exists(membershipPath(tenantId)) &&
-          get(membershipPath(tenantId)).data.status == 'ACTIVE'
-        )
-      );
+      return tenantClaimMatches(tenantId) &&
+        exists(membershipPath(tenantId)) &&
+        get(membershipPath(tenantId)).data.status == 'ACTIVE';
     }
 
     function membershipData(tenantId) {
@@ -85,12 +80,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Minimal authenticated profile read/write for self-identity.
+    // Minimal authenticated profile read. Authorization data itself is server managed.
     match /user_profiles/{userId} {
       allow get: if self(userId);
       allow list: if false;
-      allow create, update: if self(userId);
-      allow delete: if false;
+      allow create, update, delete: if false;
     }
 
     // Legacy root collections remain read-only while the UI is migrated to
@@ -123,19 +117,18 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Tenant root metadata can be read by any signed-in user.
+    // Tenant metadata is visible only inside an active tenant membership.
+    // Tenant and membership authority are server-managed; browser clients cannot
+    // self-provision, widen roles, or browse another tenant's membership graph.
     match /tenants/{tenantId} {
-      allow get, list: if signedIn();
-      allow create, update: if signedIn();
-      allow delete: if false;
+      allow get: if hasActiveMembership(tenantId);
+      allow list, create, update, delete: if false;
 
-      // Memberships: Document get by ID is open for server and authenticated resolution.
-      // List requires authentication. Self-provisioning is gated to self.
+      // Users may read only their own active membership. Provisioning and role
+      // changes must occur through trusted server/Admin SDK paths.
       match /users/{userId} {
-        allow get: if true;
-        allow list: if signedIn();
-        allow create, update: if signedIn() && self(userId);
-        allow delete: if false;
+        allow get: if hasActiveMembership(tenantId) && self(userId);
+        allow list, create, update, delete: if false;
       }
 
       // Sessions and devices are security state and are never browser writable.

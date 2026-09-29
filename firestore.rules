@@ -25,14 +25,9 @@ service cloud.firestore {
     }
 
     function hasActiveMembership(tenantId) {
-      return (
-        tenantClaimMatches(tenantId) ||
-        (
-          signedIn() &&
-          exists(membershipPath(tenantId)) &&
-          get(membershipPath(tenantId)).data.status == 'ACTIVE'
-        )
-      );
+      return tenantClaimMatches(tenantId) &&
+        exists(membershipPath(tenantId)) &&
+        get(membershipPath(tenantId)).data.status == 'ACTIVE';
     }
 
     function membershipData(tenantId) {
@@ -85,12 +80,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Minimal authenticated profile read/write for self-identity.
+    // Minimal authenticated profile read. Authorization data itself is server managed.
     match /user_profiles/{userId} {
       allow get: if self(userId);
       allow list: if false;
-      allow create, update: if self(userId);
-      allow delete: if false;
+      allow create, update, delete: if false;
     }
 
     // Legacy root collections remain read-only while the UI is migrated to

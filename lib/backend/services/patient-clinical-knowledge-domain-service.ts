@@ -9,6 +9,17 @@ import type {
 
 export type ClinicalKnowledgeDomain = 'ALLERGIES' | 'MEDICATIONS' | 'PROBLEM_LIST';
 
+export interface PatientClinicalKnowledgeDomainRecord {
+  tenantId: string;
+  patientId: string;
+  domain: ClinicalKnowledgeDomain;
+  status: KnownStatus;
+  reviewedBy: string;
+  reviewedAt: number;
+  encounterId?: string;
+  reason?: string;
+}
+
 export interface ReviewPatientClinicalKnowledgePayload {
   patientId: string;
   encounterId?: string;
@@ -25,10 +36,14 @@ const ALLOWED_STATUSES: KnownStatus[] = [
   'PATIENT_UNABLE_TO_REPORT',
 ];
 
-function defaultState(
+function domainDocumentId(patientId: string, domain: ClinicalKnowledgeDomain): string {
+  return `${patientId}__${domain}`;
+}
+
+function defaultAggregate(
   tenantId: string,
   patientId: string,
-  now: number
+  now = Date.now()
 ): PatientClinicalKnowledgeStatus {
   return {
     patientId,
@@ -52,43 +67,76 @@ export class PatientClinicalKnowledgeDomainService {
     }
   }
 
-  public static async getOrDefault(
-    tenantId: string,
+  public static documentId(
     patientId: string,
-    now = Date.now()
-  ): Promise<PatientClinicalKnowledgeStatus> {
-    const existing =
-      await DomainStateRepository.getById<PatientClinicalKnowledgeStatus>(
-        tenantId,
-        'patientClinicalKnowledgeStatus',
-        patientId
-      );
-    return existing || defaultState(tenantId, patientId, now);
+    domain: ClinicalKnowledgeDomain
+  ): string {
+    return domainDocumentId(patientId, domain);
   }
 
-  public static withDomainStatus(
-    current: PatientClinicalKnowledgeStatus,
-    domain: ClinicalKnowledgeDomain,
-    status: KnownStatus,
-    reviewedAt: number
-  ): PatientClinicalKnowledgeStatus {
-    const next: PatientClinicalKnowledgeStatus = {
-      ...current,
-      updatedAt: reviewedAt,
+  public static buildRecord(input: {
+    tenantId: string;
+    patientId: string;
+    domain: ClinicalKnowledgeDomain;
+    status: KnownStatus;
+    actorId: string;
+    reviewedAt: number;
+    encounterId?: string;
+    reason?: string;
+  }): PatientClinicalKnowledgeDomainRecord {
+    return {
+      tenantId: input.tenantId,
+      patientId: input.patientId,
+      domain: input.domain,
+      status: input.status,
+      reviewedBy: input.actorId,
+      reviewedAt: input.reviewedAt,
+      encounterId: input.encounterId,
+      reason: input.reason,
     };
+  }
 
-    if (domain === 'ALLERGIES') {
-      next.allergyStatus = status;
-      next.lastAllergyReviewAt = reviewedAt;
-    } else if (domain === 'MEDICATIONS') {
-      next.medicationStatus = status;
-      next.lastMedicationReconciliationAt = reviewedAt;
-    } else {
-      next.problemListStatus = status;
-      next.lastProblemListReviewAt = reviewedAt;
+  public static async getDomainRecord(
+    tenantId: string,
+    patientId: string,
+    domain: ClinicalKnowledgeDomain
+  ): Promise<PatientClinicalKnowledgeDomainRecord | null> {
+    return DomainStateRepository.getById<PatientClinicalKnowledgeDomainRecord>(
+      tenantId,
+      'patientClinicalKnowledgeStatus',
+      domainDocumentId(patientId, domain)
+    );
+  }
+
+  public static async getAggregate(
+    tenantId: string,
+    patientId: string
+  ): Promise<PatientClinicalKnowledgeStatus> {
+    const records =
+      await DomainStateRepository.queryEqual<PatientClinicalKnowledgeDomainRecord>(
+        tenantId,
+        'patientClinicalKnowledgeStatus',
+        'patientId',
+        patientId,
+        10
+      );
+
+    const aggregate = defaultAggregate(tenantId, patientId);
+    for (const record of records) {
+      aggregate.updatedAt = Math.max(aggregate.updatedAt, record.reviewedAt);
+      if (record.domain === 'ALLERGIES') {
+        aggregate.allergyStatus = record.status;
+        aggregate.lastAllergyReviewAt = record.reviewedAt;
+      } else if (record.domain === 'MEDICATIONS') {
+        aggregate.medicationStatus = record.status;
+        aggregate.lastMedicationReconciliationAt = record.reviewedAt;
+      } else if (record.domain === 'PROBLEM_LIST') {
+        aggregate.problemListStatus = record.status;
+        aggregate.lastProblemListReviewAt = record.reviewedAt;
+      }
     }
 
-    return next;
+    return aggregate;
   }
 
   public static async review(
@@ -165,17 +213,17 @@ export class PatientClinicalKnowledgeDomainService {
     }
 
     const reviewedAt = Date.now();
-    const current = await this.getOrDefault(
-      context.tenantId,
-      payload.patientId,
-      reviewedAt
-    );
-    const next = this.withDomainStatus(
-      current,
-      payload.domain,
-      payload.status,
-      reviewedAt
-    );
+    const record = this.buildRecord({
+      tenantId: context.tenantId,
+      patientId: payload.patientId,
+      domain: payload.domain,
+      status: payload.status,
+      actorId: context.actorId,
+      reviewedAt,
+      encounterId: payload.encounterId,
+      reason: payload.reason,
+    });
+    const entityId = domainDocumentId(payload.patientId, payload.domain);
 
     const tx = await TransactionManager.executeAtomicWrite(
       context,
@@ -183,9 +231,9 @@ export class PatientClinicalKnowledgeDomainService {
       idempotencyKey,
       {
         entityType: 'PATIENT_CLINICAL_KNOWLEDGE_STATUS',
-        entityId: payload.patientId,
+        entityId,
         eventType: 'PATIENT_CLINICAL_KNOWLEDGE_STATUS_UPDATED',
-        domainState: next,
+        domainState: record,
         eventPayload: {
           patientId: payload.patientId,
           encounterId: payload.encounterId,
@@ -203,11 +251,11 @@ export class PatientClinicalKnowledgeDomainService {
       success: true,
       commandId,
       idempotencyKey,
-      entityId: payload.patientId,
+      entityId,
       eventId: tx.event.eventId,
       auditId: tx.audit.auditId,
       outboxId: tx.outbox.outboxId,
-      data: next,
+      data: record,
     };
   }
 }

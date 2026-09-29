@@ -56,6 +56,7 @@ describe('G-HIMS CI-5 Patient 360 clinical read surface', () => {
     expect(client).toContain("'patient360Projections'");
     expect(client).toContain("source: 'SERVER'");
     expect(client).toContain("source: 'LOCAL_EDGE'");
+    expect(client).toContain('[400, 401, 403, 404, 409, 422].includes(serverResponseStatus)');
     expect(client).not.toContain("'patient360Timeline'");
   });
 

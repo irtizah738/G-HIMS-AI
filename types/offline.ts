@@ -17,6 +17,14 @@ export interface SyncMutation {
   schemaVersion?: number;
   baseEntityVersion?: number;
   payload: Record<string, any>;
+  /** Ciphertext envelope used for durable storage. Public helpers decrypt before returning. */
+  encryptedPayload?: {
+    algorithm: 'AES-GCM';
+    version: 1;
+    keyId: string;
+    iv: string;
+    ciphertext: string;
+  };
   vectorClock: VectorClock;
   timestamp: number;
   clientTimestamp?: number;
@@ -34,6 +42,14 @@ export interface OfflineCacheEntry {
   tenantId: string;
   collection: string;
   data: Record<string, unknown>;
+  ownerUid?: string;
+  encryptedData?: {
+    algorithm: 'AES-GCM';
+    version: 1;
+    keyId: string;
+    iv: string;
+    ciphertext: string;
+  };
   updatedAt: number;
   vectorClock: VectorClock;
 }
@@ -187,6 +203,14 @@ export interface EdgeEntityRecord {
   collection: string;
   entityId: string;
   data: Record<string, unknown>;
+  ownerUid?: string;
+  encryptedData?: {
+    algorithm: 'AES-GCM';
+    version: 1;
+    keyId: string;
+    iv: string;
+    ciphertext: string;
+  };
   updatedAt: number;
   serverVersion?: number;
   deleted?: boolean;

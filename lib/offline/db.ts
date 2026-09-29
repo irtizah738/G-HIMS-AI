@@ -746,6 +746,7 @@ export async function addMutation(
     clientTimestamp: (mutationOrParams as any).clientTimestamp || now,
     retryCount: (mutationOrParams as any).retryCount || 0,
     nextRetryAt: (mutationOrParams as any).nextRetryAt,
+    statusUpdatedAt: (mutationOrParams as any).statusUpdatedAt || now,
     status: (mutationOrParams as any).status || 'pending',
     errorMessage: (mutationOrParams as any).errorMessage,
     conflictDetails: (mutationOrParams as any).conflictDetails,
@@ -774,12 +775,36 @@ export async function updateMutationStatus(
       errorMessage: error || existing.errorMessage,
       retryCount,
       nextRetryAt: status === 'failed' ? Date.now() + backoffMs : undefined,
+      statusUpdatedAt: Date.now(),
     });
   }
 }
 
 export async function deleteMutation(id: string): Promise<void> {
   await localDb.mutations.delete(id);
+}
+
+export async function recoverStuckSyncingMutations(
+  staleAfterMs = 60_000
+): Promise<number> {
+  const cutoff = Date.now() - staleAfterMs;
+  const stuck = await localDb.mutations
+    .filter(
+      (mutation) =>
+        mutation.status === 'syncing' &&
+        (!mutation.statusUpdatedAt || mutation.statusUpdatedAt <= cutoff)
+    )
+    .toArray();
+
+  for (const mutation of stuck) {
+    await updateMutationStatus(
+      mutation.id,
+      'failed',
+      'SYNC_RECOVERY_REQUEUED: interrupted sync attempt recovered after browser/process restart.'
+    );
+  }
+
+  return stuck.length;
 }
 
 export async function saveToOfflineCache(

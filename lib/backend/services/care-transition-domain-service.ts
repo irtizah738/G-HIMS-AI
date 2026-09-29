@@ -10,6 +10,10 @@ import { TransactionManager } from '../transactions/transaction-manager';
 import type { CommandContext, CommandResult } from '../types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import { PatientClinicalKnowledgeDomainService } from './patient-clinical-knowledge-domain-service';
+import {
+  criticalObservationIds,
+  isCriticalDiagnosticResult,
+} from '@/lib/clinical/diagnostics/critical-result';
 import type { Bed } from '@/lib/types/ghims';
 import type { PatientMPI } from '@/types/mpi';
 import type {
@@ -582,6 +586,9 @@ export class CareTransitionDomainService {
     const [
       dischargeEvidence,
       diagnosticOrders,
+      diagnosticResults,
+      clinicalObservations,
+      diagnosticAcknowledgements,
       encounterEvidence,
       inpatientOrders,
       allergyFacts,
@@ -597,6 +604,24 @@ export class CareTransitionDomainService {
       DomainStateRepository.queryAllEqual<Record<string, unknown>>(
         context.tenantId,
         'orders',
+        'encounterId',
+        encounter.encounterId
+      ),
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        context.tenantId,
+        'diagnosticResults',
+        'encounterId',
+        encounter.encounterId
+      ),
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        context.tenantId,
+        'clinicalObservations',
+        'encounterId',
+        encounter.encounterId
+      ),
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        context.tenantId,
+        'diagnosticResultAcknowledgements',
         'encounterId',
         encounter.encounterId
       ),
@@ -671,6 +696,39 @@ export class CareTransitionDomainService {
           code: 'UNRESOLVED_STAT_ORDERS',
           message: 'Outstanding STAT diagnostic orders must be completed, cancelled, or formally handed off before discharge.',
           details: unresolvedStatOrders.map((order) => order.orderId || order.id),
+        },
+      };
+    }
+
+    const criticalIds = criticalObservationIds(clinicalObservations);
+    const acknowledgedReportIds = new Set(
+      diagnosticAcknowledgements
+        .map((item) =>
+          String(item.reportId || '').trim()
+        )
+        .filter(Boolean)
+    );
+    const unacknowledgedCriticalResults = diagnosticResults.filter((result) => {
+      const reportId = String(
+        result.reportId || result.diagnosticResultId || ''
+      ).trim();
+      return (
+        isCriticalDiagnosticResult(result, criticalIds) &&
+        !acknowledgedReportIds.has(reportId)
+      );
+    });
+    if (unacknowledgedCriticalResults.length > 0) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'UNACKNOWLEDGED_CRITICAL_DIAGNOSTIC_RESULT',
+          message:
+            'All final critical diagnostic results must be acknowledged by an authorized clinician before routine discharge.',
+          details: unacknowledgedCriticalResults.map(
+            (result) => result.reportId || result.diagnosticResultId
+          ),
         },
       };
     }

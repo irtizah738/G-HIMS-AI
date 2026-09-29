@@ -353,3 +353,86 @@ export function createDefaultIpdPathway(bed: Bed, patient?: Patient): IpdPathway
     },
   };
 }
+
+
+/**
+ * Production/STAGING-safe IPD pathway read-model skeleton.
+ *
+ * Unlike createDefaultIpdPathway(), this function never fabricates clinical
+ * notes, medications, results, procedures, consultations, reconciliation, or
+ * financial clearance. Those facts must arrive from authoritative projections.
+ */
+export function createAuthoritativeIpdPathwaySkeleton(
+  bed: Bed,
+  patient?: Patient
+): IpdPathwayData {
+  const patientId = bed.patientId || patient?.id || '';
+  const patientName = bed.patientName || patient?.fullName || '';
+  const mrn = patient?.mrn || '';
+  const admissionDate = bed.admissionDate || '';
+  const attendingPhysician = bed.assignedDoctor || '';
+  const primaryNurse = bed.assignedNurse || '';
+
+  const stageStatuses: Record<IpdStageKey, 'PENDING' | 'IN_PROGRESS' | 'COMPLETED'> = {
+    ADMISSION: patient?.activeEncounterId ? 'COMPLETED' : 'PENDING',
+    BED_ALLOCATION: bed.status === 'occupied' && !!bed.patientId ? 'COMPLETED' : 'PENDING',
+    NURSING: 'PENDING',
+    PHYSICIAN_ORDERS: 'PENDING',
+    MEDICATION: 'PENDING',
+    LABS: 'PENDING',
+    IMAGING: 'PENDING',
+    DAILY_PROGRESS: 'PENDING',
+    PROCEDURES: 'PENDING',
+    CONSULTATIONS: 'PENDING',
+    DISCHARGE_PLANNING: 'PENDING',
+    MEDICATION_RECONCILIATION: 'PENDING',
+    FINANCIAL_RECONCILIATION: 'PENDING',
+    DISCHARGE: 'PENDING',
+    FOLLOW_UP: 'PENDING',
+  };
+
+  return {
+    patientId,
+    patientName,
+    mrn,
+    bedId: bed.id,
+    bedNumber: bed.bedNumber,
+    ward: bed.ward,
+    admissionDate,
+    attendingPhysician,
+    primaryNurse,
+    primaryDiagnosis: '',
+    allergies: patient?.allergies || [],
+    currentStage: 'ADMISSION',
+    stageStatuses,
+    orders: [],
+    medications: [],
+    labs: [],
+    imaging: [],
+    progressNotes: [],
+    procedures: [],
+    consultations: [],
+    dischargePlanning: {
+      estimatedDischargeDate: '',
+      transportNeeded: false,
+      homeCareOrdered: false,
+      socialWorkCleared: false,
+      patientEducationDone: false,
+    },
+    medicationReconciliation: {
+      pharmacistName: '',
+      reconciliationDate: '',
+      reconciledCount: 0,
+      discrepanciesResolved: false,
+    },
+    financialReconciliation: {
+      totalEstimatedCharges: 0,
+      insuranceApprovedAmount: 0,
+      patientCoPaySettled: false,
+      billingCleared: false,
+      clearedBy: '',
+    },
+    dischargeExecution: {},
+    followUp: {},
+  };
+}

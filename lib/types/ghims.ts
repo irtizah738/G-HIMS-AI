@@ -10,6 +10,8 @@ export interface Bed {
   status: BedStatus;
   patientId?: string;
   patientName?: string;
+  patientMRN?: string;
+  currentEncounterId?: string;
   admissionDate?: string;
   expectedDischarge?: string;
   assignedNurse?: string;

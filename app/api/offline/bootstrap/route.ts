@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
 import { getAdminFirestore } from '@/server/firebase/admin';
+import { FieldPath } from 'firebase-admin/firestore';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,6 +34,43 @@ const SCM_COLLECTIONS = [
   'patientConsumptions',
   'purchaseRequisitions',
 ] as const;
+
+const EDGE_PAGE_SIZE = 500;
+const EDGE_COLLECTION_MAX = 10000;
+
+async function readCollectionSnapshot(
+  tenantRef: FirebaseFirestore.DocumentReference,
+  collection: string
+): Promise<Array<Record<string, unknown>>> {
+  const rows: Array<Record<string, unknown>> = [];
+  let lastDocument: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+
+  while (true) {
+    let query = tenantRef
+      .collection(collection)
+      .orderBy(FieldPath.documentId())
+      .limit(EDGE_PAGE_SIZE);
+
+    if (lastDocument) query = query.startAfter(lastDocument);
+
+    const snapshot = await query.get();
+    for (const document of snapshot.docs) {
+      rows.push({ id: document.id, ...document.data() });
+    }
+
+    if (rows.length > EDGE_COLLECTION_MAX) {
+      throw new Error(
+        `EDGE_SNAPSHOT_COLLECTION_LIMIT_EXCEEDED:${collection}:${EDGE_COLLECTION_MAX}`
+      );
+    }
+
+    if (snapshot.size < EDGE_PAGE_SIZE) break;
+    lastDocument = snapshot.docs[snapshot.docs.length - 1] || null;
+    if (!lastDocument) break;
+  }
+
+  return rows;
+}
 
 function authorizedCollections(roles: string[]): string[] {
   const normalized = new Set(roles.map((role) => String(role || '').trim().toUpperCase()));
@@ -92,16 +130,10 @@ export async function GET(req: NextRequest) {
     const generatedAt = Date.now();
 
     const entries = await Promise.all(
-      collections.map(async (collection) => {
-        const snapshot = await tenantRef.collection(collection).limit(1000).get();
-        return [
-          collection,
-          snapshot.docs.map((document) => ({
-            id: document.id,
-            ...document.data(),
-          })),
-        ] as const;
-      })
+      collections.map(async (collection) => [
+        collection,
+        await readCollectionSnapshot(tenantRef, collection),
+      ] as const)
     );
 
     const snapshotVersion = `${context.tenantId}:${generatedAt}`;

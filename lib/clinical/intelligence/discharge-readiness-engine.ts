@@ -1,4 +1,8 @@
 import crypto from 'node:crypto';
+import {
+  criticalObservationIds,
+  isCriticalDiagnosticResult,
+} from '@/lib/clinical/diagnostics/critical-result';
 import type {
   DischargeEvidenceReference,
   DischargeReadinessFinding,
@@ -7,8 +11,8 @@ import type {
   DischargeReadinessState,
 } from '@/types/discharge-readiness';
 
-export const DISCHARGE_READINESS_RULESET_VERSION = 'CI7-DR-1.1.0';
-export const DISCHARGE_READINESS_ENGINE_VERSION = 2;
+export const DISCHARGE_READINESS_RULESET_VERSION = 'CI7-DR-1.2.0';
+export const DISCHARGE_READINESS_ENGINE_VERSION = 3;
 const VITALS_WARNING_AGE_MS = 8 * 60 * 60 * 1000;
 
 function text(value: unknown): string {
@@ -50,6 +54,10 @@ function evidence(
     entityType,
     entityId: text(
       entity.evidenceId ||
+      entity.reportId ||
+      entity.diagnosticResultId ||
+      entity.observationId ||
+      entity.acknowledgementId ||
       entity.orderId ||
       entity.encounterId ||
       entity.id ||
@@ -235,6 +243,62 @@ export class DischargeReadinessEngine {
       }));
     }
 
+    const criticalIds = criticalObservationIds(
+      snapshot.clinicalObservations
+    );
+    const acknowledgedReportIds = new Set(
+      snapshot.diagnosticAcknowledgements
+        .map((item) => text(item.reportId).trim())
+        .filter(Boolean)
+    );
+    const unacknowledgedCriticalResults = snapshot.diagnosticResults.filter(
+      (result) =>
+        isCriticalDiagnosticResult(result, criticalIds) &&
+        !acknowledgedReportIds.has(text(result.reportId || result.diagnosticResultId).trim())
+    );
+
+    for (const result of unacknowledgedCriticalResults) {
+      const reportId = text(
+        result.reportId || result.diagnosticResultId
+      ).trim();
+      const resultObservationIds = Array.isArray(result.resultObservationIds)
+        ? result.resultObservationIds.map((id) => text(id).trim()).filter(Boolean)
+        : [];
+      const criticalObservations = snapshot.clinicalObservations.filter(
+        (item) =>
+          criticalIds.has(text(item.observationId || item.id).trim()) &&
+          resultObservationIds.includes(text(item.observationId || item.id).trim())
+      );
+
+      findings.push(finding({
+        severity: 'BLOCKER',
+        domain: 'DIAGNOSTICS',
+        code: 'CRITICAL_RESULT_UNACKNOWLEDGED',
+        title: 'Critical diagnostic result requires clinician acknowledgement',
+        explanation:
+          'A final critical diagnostic result is present without an authoritative clinician acknowledgement. It must be reviewed and acknowledged before routine discharge.',
+        ruleId: 'DR-DIAG-003',
+        evidence: [
+          evidence(
+            'DIAGNOSTIC_RESULT',
+            'DIAGNOSTIC_RESULT',
+            result,
+            reportId || 'critical-result',
+            text(result.reportDisplay || result.reportCode) || 'Critical diagnostic result'
+          ),
+          ...criticalObservations.slice(0, 10).map((observation) =>
+            evidence(
+              'CLINICAL_OBSERVATION',
+              'CLINICAL_OBSERVATION',
+              observation,
+              text(observation.observationId) || 'critical-observation',
+              'Critical interpretation'
+            )
+          ),
+        ],
+      }));
+    }
+
     if (snapshot.patient360.dataQuality.hasPreliminaryResults) {
       findings.push(finding({
         severity: 'WARNING',
@@ -243,7 +307,7 @@ export class DischargeReadinessEngine {
         title: 'Preliminary diagnostic results are present',
         explanation:
           'Patient 360 contains diagnostic information that is not yet final. The clinician should confirm whether follow-up is required.',
-        ruleId: 'DR-DIAG-003',
+        ruleId: 'DR-DIAG-004',
         evidence: [{
           source: 'PATIENT360',
           entityType: 'PATIENT360_PROJECTION',

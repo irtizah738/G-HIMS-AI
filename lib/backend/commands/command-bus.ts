@@ -160,6 +160,15 @@ export class CommandBus {
           );
           break;
 
+        case 'AcknowledgeCriticalDiagnosticResultCommand':
+          result = await DiagnosticResultDomainService.acknowledgeCriticalResult(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
         case 'PrescribeMedicationCommand':
           result = await ClinicalOrderDomainService.prescribeMedication(
             context,

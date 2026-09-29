@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
 import { getAdminFirestore } from '@/server/firebase/admin';
+import type {
+  DocumentReference,
+  Query,
+  QueryDocumentSnapshot,
+} from 'firebase-admin/firestore';
 
 export const dynamic = 'force-dynamic';
 
@@ -52,15 +57,15 @@ function authorizedCollections(roles: string[]): string[] {
 }
 
 async function readCollectionFully(
-  tenantRef: FirebaseFirestore.DocumentReference,
+  tenantRef: DocumentReference,
   collection: string,
   pageSize = 500
 ): Promise<Array<Record<string, unknown>>> {
   const results: Array<Record<string, unknown>> = [];
-  let cursor: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+  let cursor: QueryDocumentSnapshot | null = null;
 
   while (true) {
-    let query: FirebaseFirestore.Query = tenantRef
+    let query: Query = tenantRef
       .collection(collection)
       .orderBy('__name__')
       .limit(pageSize);

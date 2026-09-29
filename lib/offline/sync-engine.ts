@@ -503,6 +503,8 @@ class ClinicalSyncEngine {
                   idempotencyKey: mutation.idempotencyKey,
                   entityId: mutation.resourceId || mutation.docId,
                   schemaVersion: mutation.schemaVersion || 1,
+                  baseEntityVersion: mutation.baseEntityVersion,
+                  vectorClock: mutation.vectorClock,
                 })),
               },
             }),

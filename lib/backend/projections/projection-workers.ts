@@ -432,7 +432,6 @@ export class ProjectionWorkers {
       'patient360Timeline',
       'dischargeReadinessCheckpoints',
       'dischargeReadinessProjections',
-      'clinicalIntelligenceEvaluations',
     ]) {
       await this.clearCollection(tenantId, collectionName);
     }

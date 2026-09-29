@@ -119,6 +119,9 @@ describe('G-HIMS P5C pilot readiness guards', () => {
 
     expect(proxy).toContain('export function proxy(request: NextRequest)');
     expect(proxy).toContain('x-ghims-tenant-id');
+    expect(proxy).toContain("'forgot-password'");
+    expect(proxy).toContain("'tenant-selection'");
+    expect(proxy).toContain("'dashboard'");
   });
 
 });

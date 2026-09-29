@@ -287,19 +287,17 @@ export class CareTransitionDomainService {
         'encounterEvidence',
         payload.dischargeSummaryEvidenceId
       ),
-      DomainStateRepository.queryEqual<Record<string, unknown>>(
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
         context.tenantId,
         'orders',
         'encounterId',
-        encounter.encounterId,
-        200
+        encounter.encounterId
       ),
-      DomainStateRepository.queryEqual<Record<string, unknown>>(
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
         context.tenantId,
         'encounterEvidence',
         'encounterId',
-        encounter.encounterId,
-        500
+        encounter.encounterId
       ),
     ]);
 

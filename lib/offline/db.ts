@@ -858,11 +858,15 @@ export async function clearOfflineReadModelsForTenant(tenantId: string): Promise
   await localDb.transaction(
     'rw',
     localDb.offline_cache,
+    localDb.edge_entities,
+    localDb.sync_metadata,
     localDb.clinical_patients,
     localDb.bed_occupancy,
     localDb.surgical_cases,
     async () => {
       await localDb.offline_cache.where('tenantId').equals(normalizedTenantId).delete();
+      await localDb.edge_entities.where('tenantId').equals(normalizedTenantId).delete();
+      await localDb.sync_metadata.where('tenantId').equals(normalizedTenantId).delete();
       await localDb.clinical_patients.where('tenantId').equals(normalizedTenantId).delete();
       await localDb.bed_occupancy.where('tenantId').equals(normalizedTenantId).delete();
       await localDb.surgical_cases.where('tenantId').equals(normalizedTenantId).delete();

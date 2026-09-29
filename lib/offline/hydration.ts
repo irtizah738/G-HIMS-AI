@@ -6,6 +6,7 @@ import {
   listEdgeEntities,
   replaceTenantEdgeSnapshot,
   getEdgeSyncMetadata,
+  secureLegacyMutationsForCurrentUser,
 } from '@/lib/offline/db';
 
 export interface EdgeSnapshot {
@@ -17,6 +18,10 @@ export interface EdgeSnapshot {
 }
 
 export async function loadLocalEdgeSnapshot(tenantId: string): Promise<EdgeSnapshot> {
+  if (auth.currentUser?.uid && tenantId) {
+    await secureLegacyMutationsForCurrentUser(tenantId);
+  }
+
   const collectionsToLoad = [
     'patients',
     'encounters',

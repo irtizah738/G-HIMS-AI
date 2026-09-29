@@ -7,6 +7,7 @@ import {
   EDOptimizedCase,
 } from '@/lib/types/emergency';
 import { useHospital } from '@/lib/context/hospital-context';
+import { executeActiveTenantCommand } from '@/lib/api/command-client';
 import {
   Zap,
   Activity,
@@ -47,7 +48,7 @@ export function EDEmergencyEngineModal({
   edCase,
   onUpdateCase,
 }: EDEmergencyEngineModalProps) {
-  const { addAuditLog } = useHospital();
+  const { addAuditLog, patients, beds } = useHospital();
   const [currentStage, setCurrentStage] = useState<EDWorkflowStage>(edCase.currentStage || 'TREATMENT');
   const [activeTab, setActiveTab] = useState<'WORKFLOW' | 'STAT_ORDERS' | 'DIAGNOSTICS' | 'TREATMENT' | 'SBAR' | 'DISPOSITION'>('WORKFLOW');
 
@@ -74,7 +75,8 @@ export function EDEmergencyEngineModal({
 
   // Disposition
   const [dispositionType, setDispositionType] = useState<string>('ADMIT_ICU');
-  const [dispositionDestination, setDispositionDestination] = useState<string>('Cardiac ICU - Bed 104');
+  const [dispositionDestination, setDispositionDestination] = useState<string>('Cardiac ICU');
+  const [selectedDispositionBedId, setSelectedDispositionBedId] = useState<string>('');
 
   // Alert Toast
   const [statusNotification, setStatusNotification] = useState<string | null>(null);
@@ -303,13 +305,97 @@ export function EDEmergencyEngineModal({
     triggerAuditNotification(`Physician handoff completed to ${updated.sbar.handoffToDoctor}`);
   };
 
-  // Complete Disposition
-  const handleSaveDisposition = (e: React.FormEvent) => {
-    e.preventDefault();
-    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const availableDispositionBeds = beds.filter(
+    (candidate) => candidate.status === 'available' && !candidate.patientId
+  );
 
+  // Complete Disposition through the authoritative care-transition domain.
+  const handleSaveDisposition = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const patient =
+      patients.find((candidate) => candidate.id === edCase.patientId) ||
+      patients.find((candidate) => candidate.mrn === edCase.mrn);
+    const patientId = edCase.patientId || patient?.id;
+    const sourceEncounterId = edCase.encounterId || patient?.activeEncounterId;
+    const requiresInpatientAdmission =
+      dispositionType === 'ADMIT_ICU' || dispositionType === 'ADMIT_WARD';
+
+    let authoritativeDestination = dispositionDestination;
+
+    if (requiresInpatientAdmission) {
+      if (!patientId || !sourceEncounterId) {
+        throw new Error(
+          'ED_AUTHORITATIVE_LINK_REQUIRED: emergency admission requires patient and source encounter identity.'
+        );
+      }
+      if (!selectedDispositionBedId) {
+        throw new Error('TARGET_BED_REQUIRED: select an authoritative available inpatient bed.');
+      }
+
+      const targetBed = availableDispositionBeds.find(
+        (candidate) => candidate.id === selectedDispositionBedId
+      );
+      if (!targetBed) {
+        throw new Error('BED_UNAVAILABLE: selected inpatient bed is no longer available.');
+      }
+
+      const admissionResult = await executeActiveTenantCommand<{
+        encounter: { encounterId: string };
+      }>(
+        'AdmitPatientToInpatientCareCommand',
+        {
+          patientId,
+          bedId: targetBed.id,
+          sourceEncounterId,
+          admittingDiagnosis: edCase.chiefComplaint,
+          targetWard: targetBed.ward,
+          assignedDoctor: edCase.attendingPhysician,
+          priority: edCase.esiLevel <= 2 ? 'STAT' : 'URGENT',
+        },
+        { idempotencyKey: `ed-ipd-admission:${sourceEncounterId}` }
+      );
+
+      if (!admissionResult.success) {
+        throw new Error(
+          admissionResult.error?.message || 'Emergency inpatient admission failed.'
+        );
+      }
+
+      authoritativeDestination = `${targetBed.ward} — ${targetBed.bedNumber}`;
+    } else if (sourceEncounterId) {
+      const dispositionTypeForEncounter =
+        dispositionType === 'TRANSFER_EXTERNAL'
+          ? 'EXTERNAL_REFERRAL'
+          : dispositionType === 'DISCHARGE_HOME'
+            ? 'DISCHARGED_HOME'
+            : 'EMERGENCY_TRANSFER';
+
+      const dispositionResult = await executeActiveTenantCommand(
+        'CommitEncounterDispositionCommand',
+        {
+          encounterId: sourceEncounterId,
+          dispositionType: dispositionTypeForEncounter,
+          patientInstructions:
+            dispositionType === 'DISCHARGE_HOME'
+              ? edCase.disposition?.dischargeInstructions || 'Emergency safety-net instructions provided.'
+              : undefined,
+        },
+        { idempotencyKey: `ed-disposition:${sourceEncounterId}:${dispositionType}` }
+      );
+
+      if (!dispositionResult.success) {
+        throw new Error(
+          dispositionResult.error?.message || 'Emergency disposition could not be committed.'
+        );
+      }
+    }
+
+    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const updated: EDOptimizedCase = {
       ...edCase,
+      patientId,
+      encounterId: sourceEncounterId,
       currentStage: 'DISPOSITION',
       stageStatuses: {
         ...edCase.stageStatuses,
@@ -317,8 +403,8 @@ export function EDEmergencyEngineModal({
       },
       disposition: {
         type: dispositionType as any,
-        destinationBedOrFacility: dispositionDestination,
-        authorizedBy: 'Dr. Sarah Jenkins',
+        destinationBedOrFacility: authoritativeDestination,
+        authorizedBy: 'Authenticated Emergency Clinician',
         decidedAt: timestamp,
         transportMode: 'STAT Critical Care Transport Team',
       },
@@ -328,9 +414,11 @@ export function EDEmergencyEngineModal({
     addAuditLog(
       'ED_DEFINITIVE_DISPOSITION',
       `Patient ${edCase.mrn}`,
-      `Definitive ED Disposition executed: ${dispositionType} to ${dispositionDestination} by Dr. Sarah Jenkins. All emergency overrides finalized.`
+      `Definitive ED disposition committed: ${dispositionType} to ${authoritativeDestination}.`
     );
-    triggerAuditNotification(`Disposition finalized: ${dispositionType} (${dispositionDestination})`);
+    triggerAuditNotification(
+      `Disposition finalized: ${dispositionType} (${authoritativeDestination})`
+    );
   };
 
   return (
@@ -968,14 +1056,32 @@ export function EDEmergencyEngineModal({
                 </div>
                 <div>
                   <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">
-                    Destination Unit / Target Bed
+                    {dispositionType === 'ADMIT_ICU' || dispositionType === 'ADMIT_WARD'
+                      ? 'Authoritative Available Bed'
+                      : 'Destination Unit / Facility'}
                   </label>
-                  <input
-                    type="text"
-                    value={dispositionDestination}
-                    onChange={(e) => setDispositionDestination(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white"
-                  />
+                  {dispositionType === 'ADMIT_ICU' || dispositionType === 'ADMIT_WARD' ? (
+                    <select
+                      required
+                      value={selectedDispositionBedId}
+                      onChange={(e) => setSelectedDispositionBedId(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white"
+                    >
+                      <option value="">Select available bed...</option>
+                      {availableDispositionBeds.map((candidate) => (
+                        <option key={candidate.id} value={candidate.id}>
+                          {candidate.ward} — {candidate.bedNumber} ({candidate.id})
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={dispositionDestination}
+                      onChange={(e) => setDispositionDestination(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white"
+                    />
+                  )}
                 </div>
               </div>
 

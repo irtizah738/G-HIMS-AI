@@ -1,6 +1,7 @@
 import {
   addMutation,
   getPendingMutations,
+  getPendingVectorClock,
   updateMutationStatus,
   deleteMutation,
   saveToOfflineCache,
@@ -11,6 +12,7 @@ import {
 import { auth } from '@/lib/firebase/client';
 import { getCachedAuthSession } from '@/lib/offline/auth-storage';
 import { probeApplicationConnectivity, ConnectivityProbeResult } from '@/lib/offline/connectivity';
+import { incrementClock } from '@/lib/offline/vector-clock';
 
 export interface LastReplicationEvent {
   at: Date;
@@ -50,6 +52,7 @@ export interface QueueMutationParams {
   schemaVersion?: number;
   baseEntityVersion?: number;
   optimisticCache?: boolean;
+  mutationId?: string;
 }
 
 class ClinicalSyncEngine {
@@ -303,7 +306,12 @@ class ClinicalSyncEngine {
       throw new Error('TENANT_MISMATCH: offline command tenant must match the active session.');
     }
 
+    const currentClock = await getPendingVectorClock(params.tenantId);
+    const clockNodeId = cached.session.deviceId || cached.user.uid;
+    const vectorClock = incrementClock(currentClock, clockNodeId);
+
     const mutation = await addMutation({
+      id: params.mutationId,
       tenantId: params.tenantId,
       actorId: cached.user.uid,
       collection: params.collection,
@@ -314,6 +322,8 @@ class ClinicalSyncEngine {
       schemaVersion: params.schemaVersion || 1,
       baseEntityVersion: params.baseEntityVersion,
       payload: params.payload,
+      vectorClock,
+      clientTimestamp: Date.now(),
     });
 
     if (params.optimisticCache !== false && params.action !== 'DELETE') {

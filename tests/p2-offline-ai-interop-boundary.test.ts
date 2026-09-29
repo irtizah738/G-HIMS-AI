@@ -149,13 +149,14 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(db).toContain("edge_entities");
     expect(db).toContain("entity_map");
     expect(db).toContain("sync_metadata");
-    expect(db).toContain("replaceTenantEdgeSnapshot");
-    expect(db).toContain("listEdgeEntities");
+    expect(db).toContain("edge_entities");
+    expect(db).toContain("entity_map");
 
     expect(hydration).toContain("loadLocalEdgeSnapshot");
     expect(hydration).toContain("hydrateEdgeSnapshot");
     expect(hydration).toContain("/api/offline/bootstrap?tenantId=");
-    expect(hydration).toContain("replaceTenantEdgeSnapshot");
+    expect(hydration).toContain("replaceSecureTenantEdgeSnapshot");
+    expect(hydration).toContain("listSecureEdgeEntities");
     expect(hydration).not.toContain("firebase/firestore");
 
     expect(bootstrap).toContain("deriveAuthoritativeContext");

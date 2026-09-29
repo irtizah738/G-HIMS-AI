@@ -97,6 +97,58 @@ describe('G-HIMS Clinical Intelligence Patient 360 foundation', () => {
       'CompleteMedicationReconciliationCommand',
       'AdmitPatientToInpatientCareCommand',
       'DischargeInpatientEncounterCommand',
+      'PlaceInpatientOrderCommand',
+      'RecordMedicationAdministrationCommand',
     ]) expect(bus).toContain(command);
+  });
+
+  test('non-DEMO IPD pathway never fabricates clinical facts', async () => {
+    const service = await source('lib/clinical/ipd-service.ts');
+    const modal = await source('components/clinical/ipd-pathway-modal.tsx');
+
+    expect(service).toContain('createAuthoritativeIpdPathwaySkeleton');
+    expect(service).toContain('orders: []');
+    expect(service).toContain('medications: []');
+    expect(service).toContain('labs: []');
+    expect(service).toContain('imaging: []');
+    expect(service).toContain('progressNotes: []');
+    expect(service).toContain('discrepanciesResolved: false');
+    expect(service).toContain('billingCleared: false');
+    expect(modal).toContain('IS_DEMO_RUNTIME');
+    expect(modal).toContain('createAuthoritativeIpdPathwaySkeleton');
+    expect(modal).toContain("'PlaceInpatientOrderCommand'");
+    expect(modal).toContain("'RecordMedicationAdministrationCommand'");
+    expect(modal).toContain("'CompleteMedicationReconciliationCommand'");
+    expect(modal).toContain("'DischargeInpatientEncounterCommand'");
+    expect(modal).not.toContain('lengthOfStayDays: 4');
+    expect(modal).not.toContain('financialClearanceApproved: true');
+  });
+
+  test('OPD and ED direct admissions use authoritative inpatient care transition', async () => {
+    const opd = await source('components/opd/OpdMasterWorkspace.tsx');
+    const disposition = await source('components/opd/OpdDispositionReferrals.tsx');
+    const emergency = await source('components/clinical/er-emergency-care-engine-modal.tsx');
+
+    expect(opd).toContain("'AdmitPatientToInpatientCareCommand'");
+    expect(disposition).toContain('targetBedId');
+    expect(emergency).toContain("'AdmitPatientToInpatientCareCommand'");
+    expect(emergency).toContain('availableDispositionBeds');
+    expect(emergency).toContain('sourceEncounterId');
+    expect(emergency).toContain('selectedDispositionBedId');
+  });
+
+  test('pharmacy dispense resolves FEFO and atomically links inventory, patient consumption and charge', async () => {
+    const orders = await source('lib/backend/services/clinical-order-domain-service.ts');
+    const tx = await source('lib/backend/transactions/transaction-manager.ts');
+
+    expect(orders).toContain('PHARMACY_STOCK_NOT_AVAILABLE');
+    expect(orders).toContain('FEFO_BATCH_MISMATCH');
+    expect(orders).toContain("entityType: 'INVENTORY_BALANCE'");
+    expect(orders).toContain("entityType: 'STOCK_TRANSACTION'");
+    expect(orders).toContain("entityType: 'PATIENT_CONSUMPTION'");
+    expect(orders).toContain("entityType: 'ENCOUNTER_CHARGE'");
+    expect(orders).toContain('expectedPrimaryServerVersion');
+    expect(orders).toContain('expectedServerVersion');
+    expect(tx).toContain('DOMAIN_STATE_VERSION_CONFLICT');
   });
 });

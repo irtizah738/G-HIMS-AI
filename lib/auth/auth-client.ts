@@ -268,7 +268,9 @@ export class AuthClient {
       const currentUser = auth.currentUser;
 
       // Offline cache is a continuity aid only; it is never used to mint new authority.
-      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      // navigator.onLine is not authoritative in sandboxed/managed browsers.
+      const connectivity = await probeApplicationConnectivity();
+      if (!connectivity.isOnline) {
         if (!cached) return null;
         return {
           authenticated: true,

@@ -67,6 +67,30 @@ function patientIdsFromEvent(event: DomainEventEnvelope): string[] {
   ]);
 }
 
+function comparePatient360Cursor(
+  left: Patient360Projection,
+  right: Patient360Projection
+): number {
+  const leftRecordedAt = Number(
+    left.eventCheckpoint?.recordedAt ?? left.lastEventRecordedAt ?? 0
+  );
+  const rightRecordedAt = Number(
+    right.eventCheckpoint?.recordedAt ?? right.lastEventRecordedAt ?? 0
+  );
+
+  if (leftRecordedAt !== rightRecordedAt) {
+    return leftRecordedAt > rightRecordedAt ? 1 : -1;
+  }
+
+  const leftEventId = String(
+    left.eventCheckpoint?.eventId || left.lastEventId || ''
+  );
+  const rightEventId = String(
+    right.eventCheckpoint?.eventId || right.lastEventId || ''
+  );
+  return leftEventId.localeCompare(rightEventId);
+}
+
 const PATIENT360_PAGE_SIZE = 500;
 const PATIENT360_SOURCE_MAX = 50000;
 
@@ -413,13 +437,29 @@ export class Patient360ProjectionService {
         ? (current.data() as Patient360Projection)
         : null;
 
-      // No-op rebuilds preserve projectedAt to keep repeated rebuild output stable.
-      if (
-        currentProjection &&
-        currentProjection.contentHash === projection.contentHash &&
-        currentProjection.sourceCheckpoint === projection.sourceCheckpoint
-      ) {
-        return;
+      if (currentProjection) {
+        const cursorComparison = comparePatient360Cursor(
+          projection,
+          currentProjection
+        );
+
+        // Concurrent outbox workers may rebuild the same patient at once. Never
+        // let an older source cursor overwrite a newer Patient 360 projection.
+        if (cursorComparison < 0) {
+          return;
+        }
+
+        if (cursorComparison === 0) {
+          // No-op rebuilds preserve projectedAt to keep repeated rebuild output
+          // stable. A different content hash at the exact same authoritative
+          // event cursor would violate deterministic projection semantics.
+          if (currentProjection.contentHash === projection.contentHash) {
+            return;
+          }
+          throw new Error(
+            `PATIENT360_CURSOR_CONTENT_CONFLICT:${patientId}:${projection.sourceCheckpoint}`
+          );
+        }
       }
 
       transaction.set(projectionRef, sanitizeForFirestore(projection));

@@ -33,6 +33,7 @@ const RELEVANT_EVENTS = new Set([
   'INVESTIGATION_ORDERED',
   'DIAGNOSTIC_RESULT_RECORDED',
   'DIAGNOSTIC_RESULT_VERIFIED',
+  'CRITICAL_DIAGNOSTIC_RESULT_ACKNOWLEDGED',
   'INPATIENT_ORDER_PLACED',
   'INPATIENT_ORDER_RESOLVED',
   'MEDICATION_PRESCRIBED',
@@ -63,6 +64,34 @@ function stableEvaluationId(
     .digest('hex')
     .slice(0, 32);
   return `dreval_${hash}`;
+}
+
+function compareReadinessCursor(
+  left: DischargeReadinessProjection,
+  right: DischargeReadinessProjection
+): number {
+  if (left.patient360Revision !== right.patient360Revision) {
+    return left.patient360Revision > right.patient360Revision ? 1 : -1;
+  }
+
+  const parse = (value: string) => {
+    const separator = value.indexOf(':');
+    const recordedAt = Number(
+      separator >= 0 ? value.slice(0, separator) : value
+    );
+    const eventId = separator >= 0 ? value.slice(separator + 1) : '';
+    return {
+      recordedAt: Number.isFinite(recordedAt) ? recordedAt : 0,
+      eventId,
+    };
+  };
+
+  const leftCursor = parse(left.patient360SourceCheckpoint);
+  const rightCursor = parse(right.patient360SourceCheckpoint);
+  if (leftCursor.recordedAt !== rightCursor.recordedAt) {
+    return leftCursor.recordedAt > rightCursor.recordedAt ? 1 : -1;
+  }
+  return leftCursor.eventId.localeCompare(rightCursor.eventId);
 }
 
 function isActiveInpatientEncounter(encounter: Record<string, unknown> | null): boolean {
@@ -130,27 +159,51 @@ export class DischargeReadinessService {
     );
     if (!isActiveInpatientEncounter(encounter)) return null;
 
-    const [encounterEvidence, diagnosticOrders, inpatientOrders] =
-      await Promise.all([
-        DomainStateRepository.queryAllEqual<Record<string, unknown>>(
-          tenantId,
-          'encounterEvidence',
-          'encounterId',
-          encounterId
-        ),
-        DomainStateRepository.queryAllEqual<Record<string, unknown>>(
-          tenantId,
-          'orders',
-          'encounterId',
-          encounterId
-        ),
-        DomainStateRepository.queryAllEqual<Record<string, unknown>>(
-          tenantId,
-          'inpatientOrders',
-          'encounterId',
-          encounterId
-        ),
-      ]);
+    const [
+      encounterEvidence,
+      diagnosticOrders,
+      diagnosticResults,
+      clinicalObservations,
+      diagnosticAcknowledgements,
+      inpatientOrders,
+    ] = await Promise.all([
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        tenantId,
+        'encounterEvidence',
+        'encounterId',
+        encounterId
+      ),
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        tenantId,
+        'orders',
+        'encounterId',
+        encounterId
+      ),
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        tenantId,
+        'diagnosticResults',
+        'encounterId',
+        encounterId
+      ),
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        tenantId,
+        'clinicalObservations',
+        'encounterId',
+        encounterId
+      ),
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        tenantId,
+        'diagnosticResultAcknowledgements',
+        'encounterId',
+        encounterId
+      ),
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        tenantId,
+        'inpatientOrders',
+        'encounterId',
+        encounterId
+      ),
+    ]);
 
     return {
       tenantId,
@@ -177,6 +230,9 @@ export class DischargeReadinessService {
       encounter: encounter || {},
       encounterEvidence,
       diagnosticOrders,
+      diagnosticResults,
+      clinicalObservations,
+      diagnosticAcknowledgements,
       inpatientOrders,
     };
   }
@@ -224,13 +280,43 @@ export class DischargeReadinessService {
       .doc(snapshot.encounterId);
 
     await db.runTransaction(async (transaction) => {
-      const existingEvaluation = await transaction.get(evaluationRef);
+      // All reads precede writes so Firestore can retry this transaction safely.
+      const [existingEvaluation, currentProjectionSnapshot] = await Promise.all([
+        transaction.get(evaluationRef),
+        transaction.get(projectionRef),
+      ]);
+
       if (!existingEvaluation.exists) {
         transaction.create(
           evaluationRef,
           sanitizeForFirestore(immutableEvaluation)
         );
       }
+
+      const currentProjection = currentProjectionSnapshot.exists
+        ? (currentProjectionSnapshot.data() as DischargeReadinessProjection)
+        : null;
+
+      if (currentProjection) {
+        const cursorComparison = compareReadinessCursor(
+          projection,
+          currentProjection
+        );
+
+        // Concurrent workers may finish out of order. Preserve the newest
+        // Patient 360-derived assessment as the current projection.
+        if (cursorComparison < 0) {
+          return;
+        }
+
+        if (
+          cursorComparison === 0 &&
+          currentProjection.evaluationId === projection.evaluationId
+        ) {
+          return;
+        }
+      }
+
       transaction.set(projectionRef, sanitizeForFirestore(projection));
     });
 

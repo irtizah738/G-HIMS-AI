@@ -63,8 +63,8 @@ describe('G-HIMS Clinical Intelligence Patient 360 foundation', () => {
     const service = await source('lib/backend/services/care-transition-domain-service.ts');
     expect(service).toContain('AdmitPatientToInpatientCarePayload');
     expect(service).toContain("aggregateType: 'ENCOUNTER'");
-    expect(service).toContain("{ entityType: 'HOSPITAL_BED'");
-    expect(service).toContain("{ entityType: 'PATIENT_MPI'");
+    expect(service).toContain("entityType: 'HOSPITAL_BED'");
+    expect(service).toContain("entityType: 'PATIENT_MPI'");
     expect(service).toContain("eventType: 'INPATIENT_ADMISSION_CREATED'");
     expect(service).toContain("status: 'DISCHARGED'");
     expect(service).toContain("resourceAssignmentState: 'RELEASED'");

@@ -185,3 +185,49 @@ export async function recordDischargeReadinessReview(
   }
   return payload as Record<string, unknown>;
 }
+
+
+export async function acknowledgeCriticalDiagnosticResult(
+  tenantId: string,
+  input: {
+    patientId: string;
+    encounterId: string;
+    reportId: string;
+    note?: string;
+  }
+): Promise<Record<string, unknown>> {
+  const commandId = `cmd_diag_ack_${crypto.randomUUID()}`;
+  const idempotencyKey = `idem_diag_ack_${crypto.randomUUID()}`;
+
+  const response = await AuthClient.authorizedFetch(
+    '/api/commands/execute',
+    {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        command: {
+          commandId,
+          idempotencyKey,
+          tenantId,
+          commandType: 'AcknowledgeCriticalDiagnosticResultCommand',
+          payload: input,
+          clientTimestamp: Date.now(),
+          schemaVersion: 1,
+        },
+      }),
+    },
+    tenantId
+  );
+
+  const payload = await response.json();
+  if (!response.ok || !payload?.success) {
+    throw new Error(
+      payload?.error?.message ||
+      payload?.error ||
+      'Critical diagnostic result acknowledgement could not be recorded.'
+    );
+  }
+
+  return payload as Record<string, unknown>;
+}

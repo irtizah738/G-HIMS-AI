@@ -1,13 +1,12 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   BedDouble,
   Building2,
   CheckCircle2,
-  AlertTriangle,
   Sparkles,
   ArrowRightLeft,
   UserPlus,
@@ -53,26 +52,23 @@ import {
 } from '@/types/inpatient-or';
 import {
   subscribeToWardsAndBeds,
-  assignBedToPatient,
-  transferPatientBed,
-  dischargePatientBed,
-  markBedCleaned,
-  updateBedStatus,
   subscribeToBedTransfers,
   seedInitialInpatientORData,
 } from '@/lib/firebase/services/inpatient-or';
 import { calculateNEWS2, getNEWS2BadgeClasses, VitalSignsInput, NEWS2CalculationResult } from '@/lib/clinical/news2';
 import { useOfflineSync } from '@/hooks/useOfflineSync';
-import { localDb, seedDefaultBedOccupancy } from '@/lib/offline/db';
+import { seedDefaultBedOccupancy } from '@/lib/offline/db';
 import { WardOccupancyChart } from '@/components/inpatient/WardOccupancyChart';
 import { HospitalCensusTrendChart } from '@/components/inpatient/HospitalCensusTrendChart';
 import { OfflineActivityStreamDrawer } from '@/components/offline/OfflineActivityStreamDrawer';
 import { DischargeConfirmationModal } from '@/components/inpatient/DischargeConfirmationModal';
 import { MRNQuickLookup } from '@/components/inpatient/MRNQuickLookup';
+import { executeActiveTenantCommand } from '@/lib/api/command-client';
+
+const IS_DEMO_RUNTIME = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
 
 export default function InpatientBedBoardPage() {
   const params = useParams();
-  const router = useRouter();
   const tenantId = (params?.tenantId as string) || 'metro-health';
 
   const {
@@ -81,7 +77,6 @@ export default function InpatientBedBoardPage() {
     pendingMutationsCount,
     conflictCount,
     triggerSync,
-    saveClinicalDataOptimistic,
   } = useOfflineSync(tenantId);
 
   const [wards, setWards] = useState<Ward[]>([]);
@@ -127,9 +122,10 @@ export default function InpatientBedBoardPage() {
     patientMRN: '',
     patientAge: 45,
     patientGender: 'Male' as 'Male' | 'Female' | 'Other',
-    primaryDiagnosis: 'Community Acquired Pneumonia',
-    assignedDoctor: 'Dr. Sarah Jenkins, FACS',
-    assignedNurse: 'Nurse Clara Oswald, RN',
+    primaryDiagnosis: '',
+    priority: 'ROUTINE' as 'ROUTINE' | 'URGENT' | 'STAT',
+    assignedDoctor: '',
+    assignedNurse: '',
     isolationType: 'none' as IsolationType,
     oxygenPort: true,
     telemetryEnabled: false,
@@ -140,16 +136,10 @@ export default function InpatientBedBoardPage() {
   // Transfer Form State
   const [transferForm, setTransferForm] = useState({
     targetBedId: '',
-    requestedBy: 'Dr. David Rodriguez, MD',
-    approvedBy: 'Charge Nurse Maya Patel, BSN',
-    reason: 'Clinical condition escalation requiring continuous ICU telemetry & ventilation support',
-    clinicalIndication: 'Step-up care / Post-op hemodynamic instability',
-  });
-
-  // Discharge Form State
-  const [dischargeForm, setDischargeForm] = useState({
-    dischargedBy: 'Dr. Sarah Jenkins, FACS',
-    notes: 'Patient clinically stable for discharge to home. Follow-up clinic appointment in 7 days.',
+    requestedBy: '',
+    approvedBy: '',
+    reason: '',
+    clinicalIndication: '',
   });
 
   // Compute live NEWS2 score for Admission Modal
@@ -161,8 +151,10 @@ export default function InpatientBedBoardPage() {
   useEffect(() => {
     setLoading(true);
 
-    // First seed local Dexie cache if empty
-    seedDefaultBedOccupancy(tenantId).catch(console.warn);
+    // Demo fixtures never populate STAGING/PRODUCTION census state.
+    if (IS_DEMO_RUNTIME) {
+      seedDefaultBedOccupancy(tenantId).catch(console.warn);
+    }
 
     const unsubscribe = subscribeToWardsAndBeds(tenantId, ({ wards: wList, beds: bList }) => {
       setWards(wList);
@@ -188,32 +180,29 @@ export default function InpatientBedBoardPage() {
     }
   }, [successMsg]);
 
-  // Helper to compute simulated or actual NEWS2 score for a bed
+  // Bed-board acuity is display-only and may only show an explicitly stored score.
+  // Never infer NEWS2 from bed class, isolation status, or other non-vital metadata.
   const getBedNEWS2 = (bed: Bed) => {
-    if (typeof bed.acuityScore === 'number') {
+    if (typeof bed.acuityScore === 'number' && Number.isFinite(bed.acuityScore)) {
       const score = bed.acuityScore;
       let riskLevel: 'Low' | 'Low-Medium' | 'Medium' | 'High' = 'Low';
       if (score >= 7) riskLevel = 'High';
       else if (score >= 5) riskLevel = 'Medium';
       else if (score >= 3) riskLevel = 'Low-Medium';
-      return { score, riskLevel, hasRedTrigger: score >= 5 || !!bed.vitalAlert };
+      return { score, riskLevel };
     }
-    if (bed.vitalAlert) {
-      return { score: 7, riskLevel: 'High' as const, hasRedTrigger: true };
-    }
-    if (bed.class === 'icu') {
-      return { score: 5, riskLevel: 'Medium' as const, hasRedTrigger: false };
-    }
-    if (bed.isolationType && bed.isolationType !== 'none') {
-      return { score: 3, riskLevel: 'Low-Medium' as const, hasRedTrigger: true };
-    }
-    return { score: 1, riskLevel: 'Low' as const, hasRedTrigger: false };
+    return { score: null, riskLevel: null };
   };
 
-  // Occupied beds with high NEWS2 score requiring immediate clinical attention (NEWS2 >= 5)
-  const criticalNEWS2Beds = useMemo(() => {
-    return beds.filter((b) => b.status === 'occupied' && getBedNEWS2(b).score >= 5);
-  }, [beds]);
+  const hasHighRecordedNEWS2 = (bed: Bed): boolean => {
+    const score = getBedNEWS2(bed).score;
+    return bed.status === 'occupied' && typeof score === 'number' && score >= 5;
+  };
+
+  const criticalNEWS2Beds = useMemo(
+    () => beds.filter(hasHighRecordedNEWS2),
+    [beds]
+  );
 
   // Statistics Calculations
   const stats = useMemo(() => {
@@ -224,7 +213,7 @@ export default function InpatientBedBoardPage() {
     const maintenance = beds.filter((b) => b.status === 'maintenance').length;
     const reserved = beds.filter((b) => b.status === 'reserved').length;
     const occupancyRate = total > 0 ? Math.round((occupied / total) * 100) : 0;
-    const criticalAlerts = beds.filter((b) => b.status === 'occupied' && getBedNEWS2(b).score >= 5).length;
+    const criticalAlerts = beds.filter(hasHighRecordedNEWS2).length;
 
     return {
       total,
@@ -244,7 +233,7 @@ export default function InpatientBedBoardPage() {
       if (selectedWardId !== 'all' && bed.wardId !== selectedWardId) return false;
       if (selectedStatus !== 'all' && bed.status !== selectedStatus) return false;
       if (selectedClass !== 'all' && bed.class !== selectedClass) return false;
-      if (filterCriticalOnly && (bed.status !== 'occupied' || getBedNEWS2(bed).score < 5)) return false;
+      if (filterCriticalOnly && !hasHighRecordedNEWS2(bed)) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchBed = bed.bedNumber.toLowerCase().includes(q) || bed.roomNumber.toLowerCase().includes(q);
@@ -296,14 +285,15 @@ export default function InpatientBedBoardPage() {
   const handleOpenAdmit = (bed: Bed) => {
     setSelectedBed(bed);
     setAdmitForm({
-      patientId: `pat-${Math.floor(1000 + Math.random() * 9000)}`,
+      patientId: '',
       patientName: '',
-      patientMRN: `GH-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+      patientMRN: '',
       patientAge: 52,
       patientGender: 'Male',
-      primaryDiagnosis: 'Acute Exacerbation / Inpatient Care',
-      assignedDoctor: bed.assignedDoctor || 'Dr. Sarah Jenkins, FACS',
-      assignedNurse: bed.assignedNurse || 'Nurse Clara Oswald, RN',
+      primaryDiagnosis: '',
+      priority: 'ROUTINE',
+      assignedDoctor: bed.assignedDoctor || '',
+      assignedNurse: bed.assignedNurse || '',
       isolationType: bed.isolationType || 'none',
       oxygenPort: bed.oxygenPort,
       telemetryEnabled: bed.telemetryEnabled,
@@ -323,69 +313,46 @@ export default function InpatientBedBoardPage() {
     setAdmitModalOpen(true);
   };
 
-  // Execute Patient Admission with NEWS2 calculation and Optimistic Sync
+  // Execute authoritative inpatient admission. Patient identity must already exist in MPI.
   const handleExecuteAdmission = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedBed || !admitForm.patientName) return;
+    if (!selectedBed) return;
+
+    if (!admitForm.patientId.trim()) {
+      setErrorMsg('Existing registered Patient ID is required. Register the patient before inpatient admission.');
+      return;
+    }
+    if (!admitForm.primaryDiagnosis.trim()) {
+      setErrorMsg('Admitting diagnosis is required.');
+      return;
+    }
 
     try {
       setIsSubmitting(true);
       setErrorMsg(null);
 
-      const newsResult = calculatedAdmissionNEWS2;
-
-      // 1. Optimistic Write to local Dexie database & sync queue
-      await saveClinicalDataOptimistic(
-        tenantId,
-        'beds',
-        selectedBed.id,
-        'UPDATE',
+      const result = await executeActiveTenantCommand<Record<string, unknown>>(
+        'AdmitPatientToInpatientCareCommand',
         {
-          ...selectedBed,
-          status: 'occupied',
-          currentPatientId: admitForm.patientId,
-          patientName: admitForm.patientName,
-          patientMRN: admitForm.patientMRN,
-          patientAge: Number(admitForm.patientAge),
-          patientGender: admitForm.patientGender,
-          primaryDiagnosis: admitForm.primaryDiagnosis,
-          assignedDoctor: admitForm.assignedDoctor,
-          assignedNurse: admitForm.assignedNurse,
-          isolationType: admitForm.isolationType,
-          oxygenPort: admitForm.oxygenPort,
-          telemetryEnabled: admitForm.telemetryEnabled,
-          admissionDate: new Date().toISOString(),
-          expectedDischargeDate: admitForm.expectedDischargeDate,
-          vitalAlert: newsResult.score >= 5 || newsResult.hasRedTrigger,
-          acuityScore: newsResult.score,
-          acuityLevel: newsResult.riskLevel,
-          notes: admitForm.notes ? `${admitForm.notes} | NEWS2: ${newsResult.score} (${newsResult.riskLevel})` : `NEWS2: ${newsResult.score} (${newsResult.riskLevel})`,
-          updatedAt: new Date().toISOString(),
+          patientId: admitForm.patientId.trim(),
+          bedId: selectedBed.id,
+          admittingDiagnosis: admitForm.primaryDiagnosis.trim(),
+          targetWard: selectedBed.wardName || selectedBed.wardId,
+          priority: admitForm.priority,
         }
       );
 
-      // 2. Cloud Firestore Call
-      await assignBedToPatient(tenantId, {
-        bedId: selectedBed.id,
-        patientId: admitForm.patientId,
-        patientName: admitForm.patientName,
-        patientMRN: admitForm.patientMRN,
-        patientAge: Number(admitForm.patientAge),
-        patientGender: admitForm.patientGender,
-        assignedDoctor: admitForm.assignedDoctor,
-        assignedNurse: admitForm.assignedNurse,
-        isolationType: admitForm.isolationType,
-        oxygenPort: admitForm.oxygenPort,
-        telemetryEnabled: admitForm.telemetryEnabled,
-        expectedDischargeDate: admitForm.expectedDischargeDate,
-        notes: `NEWS2 Initial Score: ${newsResult.score} (${newsResult.riskLevel}) - ${admitForm.primaryDiagnosis}. ${admitForm.notes || ''}`,
-      });
+      if (!result.success) {
+        throw new Error(result.error?.message || 'Inpatient admission failed.');
+      }
 
-      setSuccessMsg(`Patient ${admitForm.patientName} admitted to Bed ${selectedBed.bedNumber} (NEWS2 Score: ${newsResult.score} - ${newsResult.riskLevel} Risk).`);
+      setSuccessMsg(
+        `Patient admitted authoritatively to Bed ${selectedBed.bedNumber}. The NEWS2 calculator shown during admission is a preview only; record authoritative vitals in the inpatient clinical workflow for CI-7.`
+      );
       setAdmitModalOpen(false);
       setSelectedBed(null);
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Failed to assign patient to bed.');
+      setErrorMsg(err?.message || 'Failed to create inpatient admission.');
     } finally {
       setIsSubmitting(false);
     }
@@ -397,62 +364,49 @@ export default function InpatientBedBoardPage() {
     const firstAvail = availableTargetBeds[0]?.id || '';
     setTransferForm({
       targetBedId: firstAvail,
-      requestedBy: bed.assignedDoctor || 'Dr. David Rodriguez, MD',
-      approvedBy: 'Charge Nurse Maya Patel, BSN',
-      reason: 'Clinical step-down / ward reallocation',
-      clinicalIndication: 'Patient condition stabilized under treatment protocol',
+      requestedBy: '',
+      approvedBy: '',
+      reason: '',
+      clinicalIndication: '',
     });
     setTransferModalOpen(true);
   };
 
-  // Execute Atomic Bed Transfer with Optimistic Persistence
+  // Execute authoritative inpatient bed transfer.
   const handleExecuteTransfer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedBed || !transferForm.targetBedId) return;
+
+    if (!selectedBed.currentEncounterId) {
+      setErrorMsg(
+        'Active inpatient encounter identity is missing for this bed. Refresh from the authoritative census before transfer.'
+      );
+      return;
+    }
 
     try {
       setIsSubmitting(true);
       setErrorMsg(null);
 
       const target = beds.find((b) => b.id === transferForm.targetBedId);
+      const result = await executeActiveTenantCommand<Record<string, unknown>>(
+        'TransferInpatientBedCommand',
+        {
+          encounterId: selectedBed.currentEncounterId,
+          sourceBedId: selectedBed.id,
+          targetBedId: transferForm.targetBedId,
+          reason: transferForm.reason,
+          clinicalIndication: transferForm.clinicalIndication,
+        }
+      );
 
-      // Optimistic local mutations for both source and destination beds
-      await saveClinicalDataOptimistic(tenantId, 'beds', selectedBed.id, 'UPDATE', {
-        ...selectedBed,
-        status: 'cleaning',
-        currentPatientId: null,
-        patientName: null,
-        patientMRN: null,
-        notes: `Transferred to ${target?.bedNumber || 'destination'}. Sanitization initiated.`,
-        updatedAt: new Date().toISOString(),
-      });
-
-      if (target) {
-        await saveClinicalDataOptimistic(tenantId, 'beds', target.id, 'UPDATE', {
-          ...target,
-          status: 'occupied',
-          currentPatientId: selectedBed.currentPatientId,
-          patientName: selectedBed.patientName,
-          patientMRN: selectedBed.patientMRN,
-          patientAge: selectedBed.patientAge,
-          patientGender: selectedBed.patientGender,
-          assignedDoctor: selectedBed.assignedDoctor,
-          assignedNurse: selectedBed.assignedNurse,
-          admissionDate: selectedBed.admissionDate,
-          updatedAt: new Date().toISOString(),
-        });
+      if (!result.success) {
+        throw new Error(result.error?.message || 'Inpatient bed transfer failed.');
       }
 
-      await transferPatientBed(tenantId, {
-        sourceBedId: selectedBed.id,
-        targetBedId: transferForm.targetBedId,
-        requestedBy: transferForm.requestedBy,
-        approvedBy: transferForm.approvedBy,
-        reason: transferForm.reason,
-        clinicalIndication: transferForm.clinicalIndication,
-      });
-
-      setSuccessMsg(`Atomic Bed Transfer Complete: ${selectedBed.patientName} moved from ${selectedBed.bedNumber} to ${target?.bedNumber || 'destination bed'}. Source bed queued for sanitization.`);
+      setSuccessMsg(
+        `Authoritative transfer completed from ${selectedBed.bedNumber} to ${target?.bedNumber || transferForm.targetBedId}. Source bed moved to cleaning.`
+      );
       setTransferModalOpen(false);
       setSelectedBed(null);
     } catch (err: any) {
@@ -465,40 +419,75 @@ export default function InpatientBedBoardPage() {
   // Discharge Modal Trigger
   const handleOpenDischarge = (bed: Bed) => {
     setSelectedBed(bed);
-    setDischargeForm({
-      dischargedBy: bed.assignedDoctor || 'Dr. Sarah Jenkins, FACS',
-      notes: 'Discharge criteria fulfilled. Vitals stable. Follow-up prescriptions and outpatient instructions provided.',
-    });
     setDischargeModalOpen(true);
   };
 
-  // Execute Discharge and Transition to Housekeeping for Sanitization (with full billing & chart clearances verification)
+  // Bed Board never releases census directly. It creates the signed summary
+  // then submits the governed encounter discharge; the server re-checks all CI-7
+  // safety evidence regardless of UI review prompts.
   const handleConfirmDischargeModal = async (formData: {
     dischargedBy: string;
+    disposition: string;
     notes: string;
+    followUpInstructions: string;
     clearanceChecks: Record<string, boolean>;
   }) => {
     if (!selectedBed) return;
+
+    if (!selectedBed.currentEncounterId || !selectedBed.currentPatientId) {
+      setErrorMsg(
+        'Authoritative inpatient encounter/patient identity is missing for this bed. Refresh the census before discharge.'
+      );
+      return;
+    }
 
     try {
       setIsSubmitting(true);
       setErrorMsg(null);
 
-      // Optimistic update: Transition to Housekeeping
-      await saveClinicalDataOptimistic(tenantId, 'beds', selectedBed.id, 'UPDATE', {
-        ...selectedBed,
-        status: 'cleaning',
-        currentPatientId: null,
-        patientName: null,
-        patientMRN: null,
-        notes: `Patient discharged by ${formData.dischargedBy}. All billing folio & clinical chart clearance requirements verified. UV-C disinfection & housekeeping turnaround active.`,
-        updatedAt: new Date().toISOString(),
-      });
+      const summary = await executeActiveTenantCommand<Record<string, unknown>>(
+        'SignClinicalNoteCommand',
+        {
+          encounterId: selectedBed.currentEncounterId,
+          patientId: selectedBed.currentPatientId,
+          category: 'DISCHARGE',
+          content: formData.notes,
+        }
+      );
+      if (!summary.success) {
+        throw new Error(summary.error?.message || 'Discharge summary signing failed.');
+      }
 
-      await dischargePatientBed(tenantId, selectedBed.id, formData.dischargedBy, formData.notes);
+      const dischargeSummaryEvidenceId = String(
+        summary.entityId ||
+          (summary.data as Record<string, unknown> | undefined)?.evidenceId ||
+          ''
+      );
+      if (!dischargeSummaryEvidenceId) {
+        throw new Error('SIGNED_DISCHARGE_SUMMARY_ID_MISSING');
+      }
+
+      const discharge = await executeActiveTenantCommand<Record<string, unknown>>(
+        'DischargeInpatientEncounterCommand',
+        {
+          encounterId: selectedBed.currentEncounterId,
+          bedId: selectedBed.id,
+          disposition: formData.disposition,
+          dischargeSummaryEvidenceId,
+          followUpInstructions: formData.followUpInstructions,
+          notes: formData.notes,
+        },
+        {
+          idempotencyKey:
+            `ipd-discharge:${selectedBed.currentEncounterId}:${dischargeSummaryEvidenceId}`,
+        }
+      );
+      if (!discharge.success) {
+        throw new Error(discharge.error?.message || 'Governed inpatient discharge failed.');
+      }
 
       setSuccessMsg(
-        `Patient ${selectedBed.patientName} discharged from Bed ${selectedBed.bedNumber}. All billing and clinical chart clearances confirmed. Bed transitioned to Housekeeping for terminal sanitization.`
+        `Patient ${selectedBed.patientName || selectedBed.currentPatientId} discharged through the governed encounter workflow. Bed ${selectedBed.bedNumber} is now queued for cleaning.`
       );
       setDischargeModalOpen(false);
       setSelectedBed(null);
@@ -509,72 +498,77 @@ export default function InpatientBedBoardPage() {
     }
   };
 
-  // Quick Sanitize Action for Occupied Beds (Bypassing manual status updates)
+  const updateOperationalBedStatus = async (
+    bed: Bed,
+    status: 'available' | 'cleaning' | 'reserved' | 'maintenance',
+    notes: string
+  ) => {
+    const result = await executeActiveTenantCommand<Record<string, unknown>>(
+      'UpdateBedStatusCommand',
+      { bedId: bed.id, status, notes },
+      {
+        idempotencyKey:
+          `bed-status:${bed.id}:${status}:${Date.now()}`,
+      }
+    );
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Bed status update failed.');
+    }
+  };
+
   const handleQuickSanitize = async (bed: Bed) => {
+    if (bed.status === 'occupied' || bed.currentPatientId) {
+      setErrorMsg(
+        'Occupied beds cannot enter cleaning directly. Transfer or discharge the active inpatient encounter first.'
+      );
+      return;
+    }
     try {
       setErrorMsg(null);
-      const patientName = bed.patientName || 'Prior Patient';
-
-      // 1. Optimistic write to local Dexie & sync queue
-      await saveClinicalDataOptimistic(tenantId, 'beds', bed.id, 'UPDATE', {
-        ...bed,
-        status: 'cleaning',
-        currentPatientId: null,
-        patientName: null,
-        patientMRN: null,
-        notes: `Quick Sanitize initiated. Housekeeping UV-C terminal disinfection & sterile linen prep in progress.`,
-        updatedAt: new Date().toISOString(),
-      });
-
-      // 2. Cloud Firestore update
-      await updateBedStatus(
-        tenantId,
-        bed.id,
+      await updateOperationalBedStatus(
+        bed,
         'cleaning',
-        `Quick Sanitize requested for Bed ${bed.bedNumber} (patient: ${patientName}). Transferred immediately to Cleaning status.`
+        `Quick sanitize initiated for Bed ${bed.bedNumber}.`
       );
-
-      setSuccessMsg(`Bed ${bed.bedNumber} moved immediately to Housekeeping Cleaning for Quick Sanitization.`);
+      setSuccessMsg(
+        `Bed ${bed.bedNumber} moved to Housekeeping Cleaning.`
+      );
     } catch (err: any) {
       setErrorMsg(err?.message || 'Failed to initiate Quick Sanitize.');
     }
   };
 
-  // Mark Bed Cleaned & Ready
   const handleMarkCleaned = async (bed: Bed) => {
     try {
       setErrorMsg(null);
-      await saveClinicalDataOptimistic(tenantId, 'beds', bed.id, 'UPDATE', {
-        ...bed,
-        status: 'available',
-        notes: 'Sanitization & UV-C disinfection certified. Ready for admission.',
-        updatedAt: new Date().toISOString(),
-      });
-      await markBedCleaned(tenantId, bed.id, 'EVS Lead Specialist (Sanitation Certified)');
-      setSuccessMsg(`Bed ${bed.bedNumber} sanitization certified. Now immediately available for admissions.`);
+      await updateOperationalBedStatus(
+        bed,
+        'available',
+        'Sanitization and disinfection certified. Ready for admission.'
+      );
+      setSuccessMsg(
+        `Bed ${bed.bedNumber} sanitization certified and available.`
+      );
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Failed to update bed status.');
+      setErrorMsg(err?.message || 'Failed to certify bed sanitization.');
     }
   };
 
-  // Toggle Maintenance Hold
   const handleToggleMaintenance = async (bed: Bed) => {
     try {
       setErrorMsg(null);
-      const newStatus = bed.status === 'maintenance' ? 'available' : 'maintenance';
-      await saveClinicalDataOptimistic(tenantId, 'beds', bed.id, 'UPDATE', {
-        ...bed,
-        status: newStatus,
-        notes: newStatus === 'maintenance' ? 'Bio-Medical Engineering Maintenance Hold' : 'Maintenance completed and cleared',
-        updatedAt: new Date().toISOString(),
-      });
-      await updateBedStatus(
-        tenantId,
-        bed.id,
+      const newStatus =
+        bed.status === 'maintenance' ? 'available' : 'maintenance';
+      await updateOperationalBedStatus(
+        bed,
         newStatus,
-        newStatus === 'maintenance' ? 'Bio-Medical Engineering Maintenance Hold' : 'Maintenance completed and cleared'
+        newStatus === 'maintenance'
+          ? 'Bio-Medical Engineering maintenance hold.'
+          : 'Maintenance completed and cleared.'
       );
-      setSuccessMsg(`Bed ${bed.bedNumber} status updated to ${newStatus.toUpperCase()}.`);
+      setSuccessMsg(
+        `Bed ${bed.bedNumber} status updated to ${newStatus.toUpperCase()}.`
+      );
     } catch (err: any) {
       setErrorMsg(err?.message || 'Failed to update bed maintenance status.');
     }
@@ -716,9 +710,16 @@ export default function InpatientBedBoardPage() {
               </Link>
 
               <button
-                onClick={() => seedInitialInpatientORData(tenantId)}
+                onClick={() => {
+                  if (IS_DEMO_RUNTIME) void seedInitialInpatientORData(tenantId);
+                }}
+                disabled={!IS_DEMO_RUNTIME}
                 className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-medium text-slate-700 shadow-xs transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
-                title="Reset or re-seed sample beds & wards"
+                title={
+                  IS_DEMO_RUNTIME
+                    ? 'Reset or re-seed sample beds & wards'
+                    : 'Demo seeding is disabled in STAGING/PRODUCTION'
+                }
               >
                 <RefreshCw className="h-4 w-4 text-slate-500" />
                 <span>Re-Sync Wards</span>
@@ -1175,8 +1176,13 @@ export default function InpatientBedBoardPage() {
                           const statusInfo = getStatusBadge(bed.status);
                           const classBadge = getClassBadge(bed.class);
                           const news = getBedNEWS2(bed);
-                          const newsClasses = getNEWS2BadgeClasses(news.score, news.riskLevel);
-                          const isHighNEWS2Acuity = bed.status === 'occupied' && news.score >= 5;
+                          const newsClasses =
+                            typeof news.score === 'number' && news.riskLevel
+                              ? getNEWS2BadgeClasses(news.score, news.riskLevel)
+                              : {
+                                  bg: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
+                                };
+                          const isHighNEWS2Acuity = hasHighRecordedNEWS2(bed);
 
                           return (
                             <div
@@ -1203,7 +1209,7 @@ export default function InpatientBedBoardPage() {
                                     <span>NEWS2: {news.score} • IMMEDIATE ATTENTION</span>
                                   </div>
                                   <span className="rounded bg-rose-800/80 px-1.5 py-0.2 text-[9px] font-extrabold uppercase">
-                                    {news.riskLevel}
+                                    {news.riskLevel || 'Not recorded'}
                                   </span>
                                 </div>
                               )}
@@ -1245,7 +1251,7 @@ export default function InpatientBedBoardPage() {
                                           <span className="truncate max-w-[130px]">{bed.patientName}</span>
                                         </div>
                                         <div className="text-[11px] text-slate-500 font-mono dark:text-slate-400">
-                                          {bed.patientMRN} • {bed.patientAge || 54}y • {bed.patientGender || 'Male'}
+                                          {bed.patientMRN || 'MRN not loaded'} • {bed.patientAge ? `${bed.patientAge}y` : 'Age not loaded'} • {bed.patientGender || 'Gender not loaded'}
                                         </div>
                                       </div>
 
@@ -1253,13 +1259,15 @@ export default function InpatientBedBoardPage() {
                                       <div className="flex flex-col items-end">
                                         <span
                                           className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-bold shadow-2xs ${newsClasses.bg}`}
-                                          title={`NEWS2 Score: ${news.score} (${news.riskLevel} Acuity Risk)`}
+                                          title={`NEWS2 Score: ${news.score} (${news.riskLevel || 'Not recorded'} Acuity Risk)`}
                                         >
                                           <HeartPulse className="h-3 w-3" />
-                                          <span>NEWS2: {news.score}</span>
+                                          <span>
+                                            NEWS2: {typeof news.score === 'number' ? news.score : 'Not recorded'}
+                                          </span>
                                         </span>
                                         <span className="text-[9px] font-semibold text-slate-400 mt-0.5">
-                                          {news.riskLevel} Risk
+                                          {news.riskLevel ? `${news.riskLevel} Risk` : 'No authoritative score'}
                                         </span>
                                       </div>
                                     </div>
@@ -1268,11 +1276,11 @@ export default function InpatientBedBoardPage() {
                                     <div className="mt-2.5 space-y-1 text-[11px] text-slate-600 border-t border-slate-100 pt-2 dark:border-slate-700 dark:text-slate-300">
                                       <div className="flex items-center justify-between">
                                         <span className="text-slate-400">Doctor:</span>
-                                        <span className="font-medium truncate max-w-[130px]">{bed.assignedDoctor || 'Dr. S. Jenkins'}</span>
+                                        <span className="font-medium truncate max-w-[130px]">{bed.assignedDoctor || '—'}</span>
                                       </div>
                                       <div className="flex items-center justify-between">
                                         <span className="text-slate-400">Nurse:</span>
-                                        <span className="font-medium truncate max-w-[130px]">{bed.assignedNurse || 'Nurse Clara O.'}</span>
+                                        <span className="font-medium truncate max-w-[130px]">{bed.assignedNurse || '—'}</span>
                                       </div>
                                       {bed.admissionDate && (
                                         <div className="flex items-center justify-between">
@@ -1446,9 +1454,14 @@ export default function InpatientBedBoardPage() {
                   {filteredBeds.map((b) => {
                     const statusInfo = getStatusBadge(b.status);
                     const news = getBedNEWS2(b);
-                    const newsClasses = getNEWS2BadgeClasses(news.score, news.riskLevel);
+                    const newsClasses =
+                            typeof news.score === 'number' && news.riskLevel
+                              ? getNEWS2BadgeClasses(news.score, news.riskLevel)
+                              : {
+                                  bg: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
+                                };
 
-                    const isCriticalNEWS2 = b.status === 'occupied' && news.score >= 5;
+                    const isCriticalNEWS2 = hasHighRecordedNEWS2(b);
 
                     return (
                       <tr
@@ -1489,7 +1502,11 @@ export default function InpatientBedBoardPage() {
                           {b.status === 'occupied' ? (
                             <span className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-bold ${newsClasses.bg}`}>
                               <HeartPulse className="h-3 w-3" />
-                              <span>NEWS2: {news.score} ({news.riskLevel})</span>
+                              <span>
+                                {typeof news.score === 'number'
+                                  ? `NEWS2: ${news.score} (${news.riskLevel})`
+                                  : 'NEWS2: Not recorded'}
+                              </span>
                             </span>
                           ) : (
                             <span className="text-slate-400">—</span>
@@ -1627,11 +1644,25 @@ export default function InpatientBedBoardPage() {
                   1. Patient Demographics & Registration
                 </h4>
                 <div className="mt-2.5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <div className="sm:col-span-2">
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">Patient Full Name *</label>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">Existing Patient ID *</label>
                     <input
                       type="text"
                       required
+                      value={admitForm.patientId}
+                      onChange={(e) =>
+                        setAdmitForm({ ...admitForm, patientId: e.target.value })
+                      }
+                      placeholder="pat_..."
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    />
+                  
+                    <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">Server resolves authoritative identity from Patient ID. Name/MRN fields below are reference-only and cannot override MPI.</p></div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">Patient Name (reference only)</label>
+                    <input
+                      type="text"
                       value={admitForm.patientName}
                       onChange={(e) => setAdmitForm({ ...admitForm, patientName: e.target.value })}
                       placeholder="e.g. Eleanor Vance"
@@ -1640,10 +1671,9 @@ export default function InpatientBedBoardPage() {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">MRN *</label>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">MRN (reference only)</label>
                     <input
                       type="text"
-                      required
                       value={admitForm.patientMRN}
                       onChange={(e) => setAdmitForm({ ...admitForm, patientMRN: e.target.value })}
                       className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
@@ -1674,6 +1704,25 @@ export default function InpatientBedBoardPage() {
                   </div>
 
                   <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">Admission Priority *</label>
+                    <select
+                      required
+                      value={admitForm.priority}
+                      onChange={(e) =>
+                        setAdmitForm({
+                          ...admitForm,
+                          priority: e.target.value as 'ROUTINE' | 'URGENT' | 'STAT',
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    >
+                      <option value="ROUTINE">Routine</option>
+                      <option value="URGENT">Urgent</option>
+                      <option value="STAT">STAT</option>
+                    </select>
+                  </div>
+
+                  <div>
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">Isolation Precaution</label>
                     <select
                       value={admitForm.isolationType}
@@ -1689,13 +1738,17 @@ export default function InpatientBedBoardPage() {
                 </div>
               </div>
 
+              <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                Authenticated admitting clinician remains the authoritative provider assignment until staff-directory IDs are selected through a governed roster control.
+              </p>
+
               {/* 2. Interactive NEWS2 Clinical Acuity Calculator */}
               <div className="rounded-xl border border-blue-200 bg-blue-50/30 p-4 dark:border-blue-900/60 dark:bg-blue-950/20">
                 <div className="flex items-center justify-between border-b border-blue-100 pb-2 dark:border-blue-900/40">
                   <div className="flex items-center gap-2">
                     <HeartPulse className="h-4 w-4 text-blue-600 dark:text-blue-400" />
                     <span className="text-xs font-bold text-blue-900 uppercase tracking-wider dark:text-blue-300">
-                      2. NEWS2 Acuity Score Engine (RCP UK Guidelines)
+                      2. Pre-Admission NEWS2 Preview (not authoritative until recorded in chart)
                     </span>
                   </div>
                   <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-extrabold shadow-2xs ${getNEWS2BadgeClasses(calculatedAdmissionNEWS2.score, calculatedAdmissionNEWS2.riskLevel).bg}`}>
@@ -1842,7 +1895,7 @@ export default function InpatientBedBoardPage() {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">Assigned Nurse</label>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">Nurse label (reference only)</label>
                     <input
                       type="text"
                       value={admitForm.assignedNurse}

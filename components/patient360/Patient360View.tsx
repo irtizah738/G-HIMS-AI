@@ -19,6 +19,7 @@ import {
   WifiOff,
 } from 'lucide-react';
 import {
+  acknowledgeCriticalDiagnosticResult,
   loadPatient360ClinicalView,
   recordDischargeReadinessReview,
   type Patient360ClinicalView,
@@ -154,6 +155,8 @@ export function Patient360View({
   const [reviewReason, setReviewReason] = useState('');
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const [reviewMessage, setReviewMessage] = useState<string | null>(null);
+  const [criticalAckReportId, setCriticalAckReportId] = useState<string | null>(null);
+  const [criticalAckMessage, setCriticalAckMessage] = useState<string | null>(null);
 
   const load = async () => {
     try {
@@ -217,6 +220,36 @@ export function Patient360View({
       );
     } finally {
       setReviewSubmitting(false);
+    }
+  };
+
+  const acknowledgeCriticalResult = async (
+    reportId: string,
+    encounterId: string
+  ) => {
+    if (!reportId || !encounterId || view?.source === 'LOCAL_EDGE') return;
+
+    try {
+      setCriticalAckReportId(reportId);
+      setCriticalAckMessage(null);
+      await acknowledgeCriticalDiagnosticResult(tenantId, {
+        patientId,
+        encounterId,
+        reportId,
+      });
+      setCriticalAckMessage(
+        'Critical result acknowledgement recorded. CI-7 will update after the authoritative event is projected.'
+      );
+      // Never clear a safety blocker optimistically.
+      await load();
+    } catch (caught) {
+      setCriticalAckMessage(
+        caught instanceof Error
+          ? caught.message
+          : 'Unable to acknowledge the critical diagnostic result.'
+      );
+    } finally {
+      setCriticalAckReportId(null);
     }
   };
 
@@ -492,10 +525,39 @@ export function Patient360View({
                             </div>
                           ))}
                         </div>
+                        {finding.code === 'CRITICAL_RESULT_UNACKNOWLEDGED' && (() => {
+                          const reportId =
+                            finding.evidence.find(
+                              (item) => item.source === 'DIAGNOSTIC_RESULT'
+                            )?.entityId || '';
+                          return reportId ? (
+                            <button
+                              type="button"
+                              disabled={offline || criticalAckReportId === reportId}
+                              onClick={() =>
+                                void acknowledgeCriticalResult(
+                                  reportId,
+                                  view.dischargeReadiness!.encounterId
+                                )
+                              }
+                              className="mt-3 inline-flex items-center rounded-lg bg-rose-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                            >
+                              {criticalAckReportId === reportId
+                                ? 'Recording acknowledgement…'
+                                : 'Acknowledge reviewed critical result'}
+                            </button>
+                          ) : null;
+                        })()}
                       </div>
                     </details>
                   ))}
                 </div>
+
+                {criticalAckMessage && (
+                  <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+                    {criticalAckMessage}
+                  </div>
+                )}
 
                 <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
                   <div className="text-xs font-bold text-slate-800">Clinician review</div>

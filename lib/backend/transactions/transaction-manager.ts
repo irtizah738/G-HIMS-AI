@@ -164,6 +164,7 @@ function collectionForEntityType(entityType: string): string {
     CANONICAL_DIAGNOSTIC_ORDER: 'canonicalDiagnosticOrders',
     DIAGNOSTIC_REPORT: 'diagnosticReports',
     DIAGNOSTIC_RESULT: 'diagnosticResults',
+    DIAGNOSTIC_RESULT_ACKNOWLEDGEMENT: 'diagnosticResultAcknowledgements',
     CARE_PLAN: 'carePlans',
     CLINICAL_PROVENANCE: 'clinicalProvenance',
     PATIENT_CLINICAL_KNOWLEDGE_STATUS: 'patientClinicalKnowledgeStatus',
@@ -198,6 +199,7 @@ function collectionForEntityType(entityType: string): string {
     CASH_RECEIPT: 'cashReceipts',
     INVOICE_SETTLEMENT: 'invoiceSettlements',
     DISCHARGE_READINESS_REVIEW: 'dischargeReadinessReviews',
+    BED_TRANSFER: 'bedTransfers',
   };
 
   const collection = map[entityType];

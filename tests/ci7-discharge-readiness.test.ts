@@ -57,10 +57,14 @@ function readySnapshot(): DischargeReadinessSnapshot {
         evidenceType: 'SIGNED_CLINICAL_NOTE',
         category: 'DISCHARGE',
         status: 'FINAL',
+        signedBy: 'doctor-a',
         signedAt: now - 20_000,
       },
     ],
     diagnosticOrders: [],
+    diagnosticResults: [],
+    clinicalObservations: [],
+    diagnosticAcknowledgements: [],
     inpatientOrders: [],
   };
 }
@@ -74,7 +78,7 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
     expect(result.blockers).toHaveLength(0);
     expect(result.warnings).toHaveLength(0);
     expect(result.information.some((item) => item.code === 'CLINICIAN_AUTHORIZATION_REQUIRED')).toBe(true);
-    expect(result.rulesetVersion).toBe('CI7-DR-1.0.0');
+    expect(result.rulesetVersion).toBe('CI7-DR-1.2.0');
   });
 
   test('missing stability, medication reconciliation, discharge summary and knowledge are explicit blockers', () => {
@@ -92,6 +96,24 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
     expect(codes.has('DISCHARGE_SUMMARY_REQUIRED')).toBe(true);
     expect(codes.has('MEDICATION_HISTORY_UNRESOLVED')).toBe(true);
     expect(codes.has('ALLERGY_HISTORY_UNRESOLVED')).toBe(true);
+  });
+
+  test('verified NEWS2 without a finite score is a blocker rather than false readiness', () => {
+    const snapshot = readySnapshot();
+    const vitals = snapshot.encounterEvidence.find(
+      (item) => item.evidenceType === 'VITALS'
+    )!;
+    delete vitals.news2Score;
+
+    const result = DischargeReadinessEngine.evaluate(
+      snapshot,
+      1_800_000_000_000
+    );
+
+    expect(result.state).toBe('BLOCKED');
+    expect(result.blockers.map((item) => item.code)).toContain(
+      'NEWS2_SCORE_MISSING'
+    );
   });
 
   test('high NEWS2 and unresolved STAT work remain hard blockers with source evidence', () => {
@@ -114,6 +136,68 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
     expect(result.state).toBe('BLOCKED');
     expect(highRisk?.evidence[0].entityId).toBe('ev-vitals');
     expect(stat?.evidence[0].entityId).toBe('ord-stat');
+  });
+
+  test('unacknowledged final critical diagnostic result is a blocker and exact-report acknowledgement clears it', () => {
+    const snapshot = readySnapshot();
+    snapshot.clinicalObservations = [
+      {
+        observationId: 'obs-critical-k',
+        status: 'FINAL',
+        interpretation: [
+          {
+            codings: [
+              {
+                system: 'LOCAL',
+                code: 'INTERP_HH',
+                display: 'Critical high',
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    snapshot.diagnosticResults = [
+      {
+        diagnosticResultId: 'diagrep-critical-k',
+        reportId: 'diagrep-critical-k',
+        patientId: snapshot.patientId,
+        encounterId: snapshot.encounterId,
+        status: 'FINAL',
+        reportDisplay: 'Potassium',
+        resultObservationIds: ['obs-critical-k'],
+      },
+    ];
+
+    const blocked = DischargeReadinessEngine.evaluate(
+      snapshot,
+      1_800_000_000_000
+    );
+    expect(blocked.state).toBe('BLOCKED');
+    const critical = blocked.blockers.find(
+      (item) => item.code === 'CRITICAL_RESULT_UNACKNOWLEDGED'
+    );
+    expect(critical?.evidence[0].entityId).toBe('diagrep-critical-k');
+
+    snapshot.diagnosticAcknowledgements = [
+      {
+        acknowledgementId: 'diagack_diagrep-critical-k',
+        reportId: 'diagrep-critical-k',
+        patientId: snapshot.patientId,
+        encounterId: snapshot.encounterId,
+        acknowledgedBy: 'doctor-a',
+        acknowledgedAt: 1_799_999_990_000,
+        immutable: true,
+      },
+    ];
+
+    const acknowledged = DischargeReadinessEngine.evaluate(
+      snapshot,
+      1_800_000_000_000
+    );
+    expect(
+      acknowledged.blockers.map((item) => item.code)
+    ).not.toContain('CRITICAL_RESULT_UNACKNOWLEDGED');
   });
 
   test('non-blocking uncertainty produces REQUIRES_REVIEW rather than false readiness', () => {
@@ -183,6 +267,8 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
     expect(view).toContain('Evidence & provenance');
     expect(view).toContain('last synchronized discharge-readiness assessment');
     expect(view).toContain('does not authorize discharge');
+    expect(client).toContain('acknowledgeCriticalDiagnosticResult');
+    expect(view).toContain('Acknowledge reviewed critical result');
   });
 
   test('clinician review is governed, immutable and cannot clear blockers', async () => {
@@ -202,12 +288,47 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
     expect(tx).toContain("DISCHARGE_READINESS_REVIEW: 'dischargeReadinessReviews'");
   });
 
+  test('critical diagnostic acknowledgement is governed, immutable, event-driven and enforced at discharge', async () => {
+    const diagnostic = await source(
+      'lib/backend/services/diagnostic-result-domain-service.ts'
+    );
+    const bus = await source('lib/backend/commands/command-bus.ts');
+    const tx = await source('lib/backend/transactions/transaction-manager.ts');
+    const readiness = await source(
+      'lib/clinical/intelligence/discharge-readiness-service.ts'
+    );
+    const discharge = await source(
+      'lib/backend/services/care-transition-domain-service.ts'
+    );
+
+    expect(diagnostic).toContain('AcknowledgeCriticalDiagnosticResultPayload');
+    expect(diagnostic).toContain('public static async acknowledgeCriticalResult');
+    expect(diagnostic).toContain("requiredPrivilege: 'DISCHARGE_INPATIENT'");
+    expect(diagnostic).toContain(
+      "eventType: 'CRITICAL_DIAGNOSTIC_RESULT_ACKNOWLEDGED'"
+    );
+    expect(diagnostic).toContain('immutable: true');
+    expect(bus).toContain("'AcknowledgeCriticalDiagnosticResultCommand'");
+    expect(tx).toContain(
+      "DIAGNOSTIC_RESULT_ACKNOWLEDGEMENT: 'diagnosticResultAcknowledgements'"
+    );
+    expect(readiness).toContain(
+      "'CRITICAL_DIAGNOSTIC_RESULT_ACKNOWLEDGED'"
+    );
+    expect(discharge).toContain(
+      "'UNACKNOWLEDGED_CRITICAL_DIAGNOSTIC_RESULT'"
+    );
+  });
+
   test('Clinical Intelligence Firestore stores remain client-denied', async () => {
     const rules = await source('firestore.rules');
 
     expect(rules).toContain('match /dischargeReadinessProjections/{encounterId}');
     expect(rules).toContain('match /dischargeReadinessCheckpoints/{eventId}');
     expect(rules).toContain('match /clinicalIntelligenceEvaluations/{evaluationId}');
+    expect(rules).toContain(
+      'match /diagnosticResultAcknowledgements/{acknowledgementId}'
+    );
     expect(rules).toContain('allow read, write: if false;');
   });
 
@@ -269,5 +390,183 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
     expect(discharge).toContain(
       'DomainStateRepository.queryAllEqual<Record<string, unknown>>'
     );
+  });
+
+  test('projection writes are monotonic under concurrent outbox workers', async () => {
+    const patient360 = await source(
+      'lib/clinical/patient360/patient360-projection-service.ts'
+    );
+    const readiness = await source(
+      'lib/clinical/intelligence/discharge-readiness-service.ts'
+    );
+
+    expect(patient360).toContain('comparePatient360Cursor');
+    expect(patient360).toContain('PATIENT360_CURSOR_CONTENT_CONFLICT');
+    expect(patient360).toContain('if (cursorComparison < 0)');
+    expect(readiness).toContain('compareReadinessCursor');
+    expect(readiness).toContain(
+      'Concurrent workers may finish out of order'
+    );
+    expect(readiness).toContain('if (cursorComparison < 0)');
+  });
+
+  test('authoritative discharge enforces every CI-7 hard safety blocker', async () => {
+    const discharge = await source(
+      'lib/backend/services/care-transition-domain-service.ts'
+    );
+
+    expect(discharge).toContain(
+      "dischargeEvidence.evidenceType !== 'SIGNED_CLINICAL_NOTE'"
+    );
+    expect(discharge).toContain("'UNRESOLVED_STAT_INPATIENT_ORDERS'");
+    expect(discharge).toContain("'ALLERGY_HISTORY_UNRESOLVED'");
+    expect(discharge).toContain("'MEDICATION_HISTORY_UNRESOLVED'");
+    expect(discharge).toContain(
+      "String(latestVitals.news2Status || '').toUpperCase() !== 'VERIFIED'"
+    );
+  });
+
+  test('CI-7 only accepts genuinely signed discharge-summary evidence', () => {
+    const snapshot = readySnapshot();
+    const summary = snapshot.encounterEvidence.find(
+      (item) => item.category === 'DISCHARGE'
+    )!;
+    delete summary.signedBy;
+
+    const result = DischargeReadinessEngine.evaluate(
+      snapshot,
+      1_800_000_000_000
+    );
+
+    expect(result.state).toBe('BLOCKED');
+    expect(result.blockers.map((item) => item.code)).toContain(
+      'DISCHARGE_SUMMARY_REQUIRED'
+    );
+  });
+
+  test('legacy Bed Board census bypasses are retired outside DEMO', async () => {
+    const bus = await source('lib/backend/commands/command-bus.ts');
+    const board = await source(
+      'app/[tenantId]/inpatient/bed-board/page.tsx'
+    );
+    const legacyClient = await source(
+      'lib/firebase/services/inpatient-or.ts'
+    );
+
+    expect(bus).toContain("'TransferInpatientBedCommand'");
+    expect(bus).toContain("'CARE_TRANSITION_COMMAND_REQUIRED'");
+    expect(bus).toContain(
+      'Inpatient admission must use AdmitPatientToInpatientCareCommand'
+    );
+    expect(bus).toContain(
+      'Inpatient discharge must use DischargeInpatientEncounterCommand'
+    );
+
+    expect(board).toContain("'AdmitPatientToInpatientCareCommand'");
+    expect(board).toContain("'TransferInpatientBedCommand'");
+    expect(board).toContain("'DischargeInpatientEncounterCommand'");
+    expect(board).toContain("'UpdateBedStatusCommand'");
+    expect(board).not.toContain('saveClinicalDataOptimistic');
+    expect(board).not.toContain('assignBedToPatient(');
+    expect(board).not.toContain('transferPatientBed(');
+    expect(board).not.toContain('dischargePatientBed(');
+    expect(board).not.toContain('markBedCleaned(');
+    expect(board).not.toContain('updateBedStatus(');
+
+    expect(legacyClient).toContain(
+      "assertDemoOnlyMutation('assignBedToPatient')"
+    );
+    expect(legacyClient).toContain(
+      "assertDemoOnlyMutation('transferPatientBed')"
+    );
+    expect(legacyClient).toContain(
+      "assertDemoOnlyMutation('dischargePatientBed')"
+    );
+    expect(legacyClient).toContain(
+      "assertDemoOnlyMutation('updateBedStatus')"
+    );
+    expect(legacyClient).toContain(
+      "assertDemoOnlyMutation('seedInitialInpatientORData')"
+    );
+  });
+
+  test('Bed Board never fabricates NEWS2 from bed class or isolation metadata', async () => {
+    const board = await source(
+      'app/[tenantId]/inpatient/bed-board/page.tsx'
+    );
+
+    expect(board).toContain('NEWS2: Not recorded');
+    expect(board).toContain(
+      'Never infer NEWS2 from bed class, isolation status'
+    );
+    const resolverStart = board.indexOf(
+      'const getBedNEWS2 = (bed: Bed) =>'
+    );
+    const resolverEnd = board.indexOf(
+      'const hasHighRecordedNEWS2',
+      resolverStart
+    );
+    const resolver = board.slice(resolverStart, resolverEnd);
+
+    expect(resolver).not.toContain("bed.class === 'icu'");
+    expect(resolver).not.toContain('bed.isolationType');
+    expect(resolver).not.toContain('vitalAlert');
+    expect(resolver).toContain("return { score: null, riskLevel: null }");
+  });
+
+  test('governed inpatient discharge requires explicit disposition and follow-up', async () => {
+    const discharge = await source(
+      'lib/backend/services/care-transition-domain-service.ts'
+    );
+    const modal = await source(
+      'components/inpatient/DischargeConfirmationModal.tsx'
+    );
+
+    expect(discharge).toContain("'INVALID_INPATIENT_DISCHARGE_INPUT'");
+    expect(discharge).toContain(
+      "!String(payload.followUpInstructions || '').trim()"
+    );
+    expect(modal).toContain('Discharge Disposition *');
+    expect(modal).toContain('Follow-Up Instructions *');
+    expect(modal).toContain('review prompts only');
+    expect(modal).toContain(
+      'Financial status is tracked separately from clinical discharge safety'
+    );
+  });
+
+  test('inpatient census transitions reject stale bed and patient versions', async () => {
+    const care = await source(
+      'lib/backend/services/care-transition-domain-service.ts'
+    );
+    const bedService = await source(
+      'lib/backend/services/inpatient-bed-domain-service.ts'
+    );
+    const tx = await source(
+      'lib/backend/transactions/transaction-manager.ts'
+    );
+
+    expect(care).toContain('expectedPrimaryServerVersion');
+    expect(care).toContain('expectedServerVersion');
+    expect(care).toContain("entityType: 'BED_TRANSFER'");
+    expect(bedService).toContain('expectedPrimaryServerVersion');
+    expect(bedService).toContain(
+      "bed.status === 'occupied' || bed.patientId || bed.currentPatientId"
+    );
+    expect(tx).toContain("BED_TRANSFER: 'bedTransfers'");
+  });
+
+  test('Hobby deployment path disables automatic previews and avoids Pro-only staging target', async () => {
+    const vercel = JSON.parse(await source('vercel.json'));
+    const workflow = await source('.github/workflows/staging-deploy.yml');
+
+    expect(vercel.git?.deploymentEnabled).toBe(false);
+    expect(workflow).toContain(
+      'vercel pull --yes --environment=preview'
+    );
+    expect(workflow).toContain(
+      'vercel deploy --prebuilt --yes --token="$VERCEL_TOKEN"'
+    );
+    expect(workflow).not.toContain('--target=staging');
+    expect(workflow).toContain('G-HIMS runtime: STAGING');
   });
 });

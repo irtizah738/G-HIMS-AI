@@ -17,9 +17,14 @@ concurrency:
 
 jobs:
   deploy-staging:
-    name: Deploy current main to STAGING and verify
+    name: Deploy current main to G-HIMS STAGING and verify
     runs-on: ubuntu-latest
     timeout-minutes: 35
+
+    # Vercel Hobby does not provide Custom Environments. We therefore use one
+    # guarded Preview deployment as the G-HIMS STAGING trust domain. Automatic
+    # Git deployments are disabled in vercel.json so Preview credentials are not
+    # exposed to arbitrary feature-branch deployments.
     env:
       VERCEL_ORG_ID: team_0S9QQkyN4yTIj7QUZ9BVKsVV
       VERCEL_PROJECT_ID: prj_a0TEuNNMAE61UziOoLNTok6Wbp1v
@@ -74,21 +79,27 @@ jobs:
             exit 1
           fi
 
-      - name: Pull STAGING project configuration
+      - name: Pull Preview configuration for G-HIMS STAGING
         shell: bash
         run: |
           set -euo pipefail
-          vercel pull --yes --environment=staging --token="$VERCEL_TOKEN"
+          vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
 
-      - name: Deploy exact main commit to Vercel STAGING
+      - name: Build exact main with pulled STAGING configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          vercel build --token="$VERCEL_TOKEN"
+
+      - name: Deploy prebuilt artifact as guarded Preview
         id: deploy
         shell: bash
         run: |
           set -euo pipefail
-          vercel deploy --target=staging --yes --token="$VERCEL_TOKEN" 2>&1 | tee /tmp/vercel-staging-deploy.log
+          vercel deploy --prebuilt --yes --token="$VERCEL_TOKEN" 2>&1 | tee /tmp/vercel-staging-deploy.log
           DEPLOY_URL="$(grep -Eo 'https://[A-Za-z0-9.-]+\.vercel\.app' /tmp/vercel-staging-deploy.log | tail -n 1 || true)"
           if [ -z "$DEPLOY_URL" ]; then
-            echo "Could not resolve the STAGING deployment URL from Vercel output." >&2
+            echo "Could not resolve the guarded STAGING Preview URL from Vercel output." >&2
             exit 1
           fi
           echo "deployment_url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
@@ -110,7 +121,8 @@ jobs:
           {
             echo "main_sha=$MAIN_SHA"
             echo "deployment_url=$DEPLOYMENT_URL"
-            echo "target=staging"
+            echo "vercel_environment=preview"
+            echo "ghims_runtime=STAGING"
             echo "verified_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           } > staging-deployment-evidence.txt
 
@@ -132,8 +144,9 @@ jobs:
           {
             echo "## G-HIMS STAGING deployment"
             echo ""
-            echo "- Commit: \`$MAIN_SHA\`"
-            echo "- Target: \`staging\`"
+            echo "- Commit: $MAIN_SHA"
+            echo "- Vercel environment: preview"
+            echo "- G-HIMS runtime: STAGING"
             echo "- Deployment: $DEPLOYMENT_URL"
             echo "- Smoke gate: PASS"
           } >> "$GITHUB_STEP_SUMMARY"

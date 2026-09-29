@@ -9,6 +9,11 @@ import { AuthorizationPipeline } from '../auth/authorization-pipeline';
 import { TransactionManager } from '../transactions/transaction-manager';
 import type { CommandContext, CommandResult } from '../types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
+import { PatientClinicalKnowledgeDomainService } from './patient-clinical-knowledge-domain-service';
+import {
+  criticalObservationIds,
+  isCriticalDiagnosticResult,
+} from '@/lib/clinical/diagnostics/critical-result';
 import type { Bed } from '@/lib/types/ghims';
 import type { PatientMPI } from '@/types/mpi';
 import type {
@@ -53,6 +58,14 @@ export interface AdmitPatientToInpatientCarePayload {
   priority?: 'STAT' | 'URGENT' | 'ROUTINE';
 }
 
+export interface TransferInpatientBedPayload {
+  encounterId: string;
+  sourceBedId: string;
+  targetBedId: string;
+  reason: string;
+  clinicalIndication?: string;
+}
+
 export interface DischargeInpatientEncounterPayload {
   encounterId: string;
   bedId: string;
@@ -64,6 +77,11 @@ export interface DischargeInpatientEncounterPayload {
 
 function activeEncounterStatus(value: unknown): boolean {
   return ['ACTIVE', 'IN_PROGRESS', 'ADMITTED'].includes(String(value || '').toUpperCase());
+}
+
+function bedPatientId(bed: Bed | null | undefined): string | undefined {
+  if (!bed) return undefined;
+  return bed.patientId || bed.currentPatientId;
 }
 
 export class CareTransitionDomainService {
@@ -113,7 +131,7 @@ export class CareTransitionDomainService {
     if (sourceEncounter && sourceEncounter.patientId !== patient.id) {
       return { success: false, commandId, idempotencyKey, error: { code: 'SOURCE_ENCOUNTER_PATIENT_MISMATCH', message: 'Source encounter belongs to a different patient.' } };
     }
-    if (bed.status !== 'available' || bed.patientId) {
+    if (bed.status !== 'available' || bedPatientId(bed)) {
       return { success: false, commandId, idempotencyKey, error: { code: 'BED_UNAVAILABLE', message: `Bed ${bed.bedNumber || bed.id} is not available.` } };
     }
     if (patient.activeBedId) {
@@ -151,7 +169,10 @@ export class CareTransitionDomainService {
       ...bed,
       status: 'occupied',
       patientId: patient.id,
+      currentPatientId: patient.id,
       patientName: patient.fullName,
+      patientMRN: patient.mrn,
+      currentEncounterId: encounterId,
       admissionDate,
       assignedDoctor: payload.assignedDoctor || bed.assignedDoctor,
       assignedNurse: payload.assignedNurse || bed.assignedNurse,
@@ -204,10 +225,31 @@ export class CareTransitionDomainService {
       correlationId: context.correlationId,
       domainState: inpatientEncounter,
       additionalStateWrites: [
-        { entityType: 'HOSPITAL_BED', entityId: bed.id, domainState: bedState },
-        { entityType: 'PATIENT_MPI', entityId: patient.id, domainState: patientState },
-        ...(sourceEncounterState
-          ? [{ entityType: 'ENCOUNTER', entityId: sourceEncounterState.encounterId, domainState: sourceEncounterState }]
+        {
+          entityType: 'HOSPITAL_BED',
+          entityId: bed.id,
+          domainState: bedState,
+          expectedServerVersion: Number(
+            (bed as Bed & { _serverVersion?: number })._serverVersion || 0
+          ),
+        },
+        {
+          entityType: 'PATIENT_MPI',
+          entityId: patient.id,
+          domainState: patientState,
+          expectedServerVersion: Number(
+            (patient as PatientMPI & { _serverVersion?: number })._serverVersion || 0
+          ),
+        },
+        ...(sourceEncounterState && sourceEncounter
+          ? [{
+              entityType: 'ENCOUNTER',
+              entityId: sourceEncounterState.encounterId,
+              domainState: sourceEncounterState,
+              expectedServerVersion: Number(
+                (sourceEncounter as PersistedEncounter & { _serverVersion?: number })._serverVersion || 0
+              ),
+            }]
           : []),
       ],
     });
@@ -225,6 +267,247 @@ export class CareTransitionDomainService {
         patient: patientState,
         bed: bedState,
         sourceEncounter: sourceEncounterState,
+      },
+    };
+  }
+
+  public static async transferInpatientBed(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: TransferInpatientBedPayload
+  ): Promise<CommandResult> {
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: ['DOCTOR', 'CONSULTANT', 'NURSE', 'ADMISSION_OFFICER', 'SYSTEM_ADMIN'],
+    });
+    if (!auth.authorized) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Inpatient transfer authority required.',
+        },
+      };
+    }
+
+    if (
+      !payload.encounterId ||
+      !payload.sourceBedId ||
+      !payload.targetBedId ||
+      payload.sourceBedId === payload.targetBedId ||
+      !payload.reason?.trim()
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INVALID_INPATIENT_BED_TRANSFER',
+          message:
+            'Encounter, distinct source/target beds, and a transfer reason are required.',
+        },
+      };
+    }
+
+    const [encounter, sourceBed, targetBed] = await Promise.all([
+      DomainStateRepository.getById<PersistedEncounter>(
+        context.tenantId,
+        'encounters',
+        payload.encounterId
+      ),
+      DomainStateRepository.getById<Bed>(
+        context.tenantId,
+        'beds',
+        payload.sourceBedId
+      ),
+      DomainStateRepository.getById<Bed>(
+        context.tenantId,
+        'beds',
+        payload.targetBedId
+      ),
+    ]);
+
+    if (
+      !encounter ||
+      String(encounter.encounterType).toUpperCase() !== 'IPD' ||
+      !activeEncounterStatus(encounter.status)
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'ACTIVE_INPATIENT_ENCOUNTER_REQUIRED',
+          message: 'An active inpatient encounter is required for bed transfer.',
+        },
+      };
+    }
+
+    if (
+      !sourceBed ||
+      sourceBed.status !== 'occupied' ||
+      bedPatientId(sourceBed) !== encounter.patientId ||
+      (sourceBed.currentEncounterId &&
+        sourceBed.currentEncounterId !== encounter.encounterId)
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'SOURCE_BED_CENSUS_CONFLICT',
+          message: 'Source bed does not match the active inpatient encounter.',
+        },
+      };
+    }
+
+    if (!targetBed || targetBed.status !== 'available' || bedPatientId(targetBed)) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'TARGET_BED_UNAVAILABLE',
+          message: 'Target bed is not available for inpatient transfer.',
+        },
+      };
+    }
+
+    const patient = await DomainStateRepository.getById<PatientMPI>(
+      context.tenantId,
+      'patients',
+      encounter.patientId
+    );
+    if (
+      !patient ||
+      patient.activeEncounterId !== encounter.encounterId ||
+      patient.activeBedId !== sourceBed.id
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'PATIENT_CENSUS_STATE_CONFLICT',
+          message:
+            'Patient active encounter/bed does not match the requested transfer.',
+        },
+      };
+    }
+
+    const now = Date.now();
+    const transferId = `trf_${crypto.randomUUID()}`;
+    const sourceState: Bed = {
+      ...sourceBed,
+      status: 'cleaning',
+      patientId: undefined,
+      currentPatientId: undefined,
+      patientName: undefined,
+      patientMRN: undefined,
+      currentEncounterId: undefined,
+      notes: `Transferred to ${targetBed.bedNumber || targetBed.id}: ${payload.reason.trim()}`,
+    };
+    const targetState: Bed = {
+      ...targetBed,
+      status: 'occupied',
+      patientId: patient.id,
+      currentPatientId: patient.id,
+      patientName: patient.fullName,
+      patientMRN: patient.mrn,
+      currentEncounterId: encounter.encounterId,
+      admissionDate: sourceBed.admissionDate,
+      assignedDoctor: sourceBed.assignedDoctor || targetBed.assignedDoctor,
+      assignedNurse: targetBed.assignedNurse || sourceBed.assignedNurse,
+      notes: `Transferred from ${sourceBed.bedNumber || sourceBed.id}: ${payload.reason.trim()}`,
+    };
+    const patientState: PatientMPI = {
+      ...patient,
+      activeBedId: targetBed.id,
+      updatedAt: now,
+    };
+    const transferRecord = {
+      id: transferId,
+      tenantId: context.tenantId,
+      encounterId: encounter.encounterId,
+      patientId: patient.id,
+      patientName: patient.fullName,
+      patientMRN: patient.mrn,
+      sourceBedId: sourceBed.id,
+      sourceBedNumber: sourceBed.bedNumber,
+      targetBedId: targetBed.id,
+      targetBedNumber: targetBed.bedNumber,
+      requestedBy: context.actorId,
+      approvedBy: context.actorId,
+      reason: payload.reason.trim(),
+      clinicalIndication: String(payload.clinicalIndication || '').trim(),
+      status: 'completed',
+      timestamp: new Date(now).toISOString(),
+      completedAt: new Date(now).toISOString(),
+    };
+
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'CLINICIAN',
+      aggregateType: 'HOSPITAL_BED',
+      aggregateId: sourceBed.id,
+      eventType: 'INPATIENT_BED_TRANSFERRED',
+      eventPayload: {
+        transferId,
+        encounterId: encounter.encounterId,
+        patientId: patient.id,
+        sourceBedId: sourceBed.id,
+        targetBedId: targetBed.id,
+        reason: payload.reason.trim(),
+      },
+      auditAction: 'TRANSFER_INPATIENT_BED',
+      auditResourceType: 'ENCOUNTER',
+      auditResourceId: encounter.encounterId,
+      auditReason: `Transferred inpatient encounter ${encounter.encounterId} from bed ${sourceBed.id} to ${targetBed.id}.`,
+      outboxTopic: 'g-hims-inpatient-events',
+      idempotencyKey,
+      commandId,
+      correlationId: context.correlationId,
+      domainState: sourceState,
+      expectedPrimaryServerVersion: Number(
+        (sourceBed as Bed & { _serverVersion?: number })._serverVersion || 0
+      ),
+      additionalStateWrites: [
+        {
+          entityType: 'HOSPITAL_BED',
+          entityId: targetBed.id,
+          domainState: targetState,
+          expectedServerVersion: Number(
+            (targetBed as Bed & { _serverVersion?: number })._serverVersion || 0
+          ),
+        },
+        {
+          entityType: 'PATIENT_MPI',
+          entityId: patient.id,
+          domainState: patientState,
+          expectedServerVersion: Number(
+            (patient as PatientMPI & { _serverVersion?: number })._serverVersion || 0
+          ),
+        },
+        { entityType: 'BED_TRANSFER', entityId: transferId, domainState: transferRecord },
+      ],
+    });
+
+    return {
+      success: true,
+      commandId,
+      idempotencyKey,
+      entityId: transferId,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
+      data: {
+        transfer: transferRecord,
+        sourceBed: sourceState,
+        targetBed: targetState,
+        patient: patientState,
       },
     };
   }
@@ -251,6 +534,25 @@ export class CareTransitionDomainService {
       };
     }
 
+    if (
+      !payload.encounterId ||
+      !payload.bedId ||
+      !payload.dischargeSummaryEvidenceId ||
+      !String(payload.disposition || '').trim() ||
+      !String(payload.followUpInstructions || '').trim()
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INVALID_INPATIENT_DISCHARGE_INPUT',
+          message:
+            'Encounter, bed, signed discharge summary, disposition, and follow-up instructions are required.',
+        },
+      };
+    }
+
     const [encounter, bed] = await Promise.all([
       DomainStateRepository.getById<PersistedEncounter>(context.tenantId, 'encounters', payload.encounterId),
       DomainStateRepository.getById<Bed>(context.tenantId, 'beds', payload.bedId),
@@ -265,7 +567,7 @@ export class CareTransitionDomainService {
     if (!activeEncounterStatus(encounter.status)) {
       return { success: false, commandId, idempotencyKey, error: { code: 'ENCOUNTER_ALREADY_CLOSED', message: `Encounter is already ${encounter.status}.` } };
     }
-    if (!bed || bed.status !== 'occupied' || bed.patientId !== encounter.patientId) {
+    if (!bed || bed.status !== 'occupied' || bedPatientId(bed) !== encounter.patientId) {
       return { success: false, commandId, idempotencyKey, error: { code: 'CENSUS_STATE_CONFLICT', message: 'Occupied-bed state does not match the inpatient encounter.' } };
     }
 
@@ -281,7 +583,19 @@ export class CareTransitionDomainService {
       return { success: false, commandId, idempotencyKey, error: { code: 'PATIENT_CENSUS_STATE_CONFLICT', message: 'Patient active encounter/bed does not match the discharge target.' } };
     }
 
-    const [dischargeEvidence, statOrders, encounterEvidence] = await Promise.all([
+    const [
+      dischargeEvidence,
+      diagnosticOrders,
+      diagnosticResults,
+      clinicalObservations,
+      diagnosticAcknowledgements,
+      encounterEvidence,
+      inpatientOrders,
+      allergyFacts,
+      medicationFacts,
+      allergyKnowledge,
+      medicationKnowledge,
+    ] = await Promise.all([
       DomainStateRepository.getById<Record<string, unknown>>(
         context.tenantId,
         'encounterEvidence',
@@ -295,9 +609,55 @@ export class CareTransitionDomainService {
       ),
       DomainStateRepository.queryAllEqual<Record<string, unknown>>(
         context.tenantId,
+        'diagnosticResults',
+        'encounterId',
+        encounter.encounterId
+      ),
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        context.tenantId,
+        'clinicalObservations',
+        'encounterId',
+        encounter.encounterId
+      ),
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        context.tenantId,
+        'diagnosticResultAcknowledgements',
+        'encounterId',
+        encounter.encounterId
+      ),
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        context.tenantId,
         'encounterEvidence',
         'encounterId',
         encounter.encounterId
+      ),
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        context.tenantId,
+        'inpatientOrders',
+        'encounterId',
+        encounter.encounterId
+      ),
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        context.tenantId,
+        'clinicalAllergies',
+        'patientId',
+        encounter.patientId
+      ),
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        context.tenantId,
+        'medicationOrders',
+        'patientId',
+        encounter.patientId
+      ),
+      PatientClinicalKnowledgeDomainService.getDomainRecord(
+        context.tenantId,
+        encounter.patientId,
+        'ALLERGIES'
+      ),
+      PatientClinicalKnowledgeDomainService.getDomainRecord(
+        context.tenantId,
+        encounter.patientId,
+        'MEDICATIONS'
       ),
     ]);
 
@@ -305,8 +665,11 @@ export class CareTransitionDomainService {
       !dischargeEvidence ||
       dischargeEvidence.encounterId !== encounter.encounterId ||
       dischargeEvidence.patientId !== encounter.patientId ||
+      dischargeEvidence.evidenceType !== 'SIGNED_CLINICAL_NOTE' ||
       dischargeEvidence.category !== 'DISCHARGE' ||
-      dischargeEvidence.status !== 'FINAL'
+      dischargeEvidence.status !== 'FINAL' ||
+      !String(dischargeEvidence.signedBy || '').trim() ||
+      !Number.isFinite(Number(dischargeEvidence.signedAt))
     ) {
       return {
         success: false,
@@ -319,7 +682,7 @@ export class CareTransitionDomainService {
       };
     }
 
-    const unresolvedStatOrders = statOrders.filter((order) => {
+    const unresolvedStatOrders = diagnosticOrders.filter((order) => {
       const priority = String(order.priority || '').toUpperCase();
       const status = String(order.status || '').toUpperCase();
       return priority === 'STAT' && !['COMPLETED', 'CANCELLED', 'RESULTS_READY', 'FINALIZED'].includes(status);
@@ -333,6 +696,100 @@ export class CareTransitionDomainService {
           code: 'UNRESOLVED_STAT_ORDERS',
           message: 'Outstanding STAT diagnostic orders must be completed, cancelled, or formally handed off before discharge.',
           details: unresolvedStatOrders.map((order) => order.orderId || order.id),
+        },
+      };
+    }
+
+    const criticalIds = criticalObservationIds(clinicalObservations);
+    const acknowledgedReportIds = new Set(
+      diagnosticAcknowledgements
+        .map((item) =>
+          String(item.reportId || '').trim()
+        )
+        .filter(Boolean)
+    );
+    const unacknowledgedCriticalResults = diagnosticResults.filter((result) => {
+      const reportId = String(
+        result.reportId || result.diagnosticResultId || ''
+      ).trim();
+      return (
+        isCriticalDiagnosticResult(result, criticalIds) &&
+        !acknowledgedReportIds.has(reportId)
+      );
+    });
+    if (unacknowledgedCriticalResults.length > 0) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'UNACKNOWLEDGED_CRITICAL_DIAGNOSTIC_RESULT',
+          message:
+            'All final critical diagnostic results must be acknowledged by an authorized clinician before routine discharge.',
+          details: unacknowledgedCriticalResults.map(
+            (result) => result.reportId || result.diagnosticResultId
+          ),
+        },
+      };
+    }
+
+    const unresolvedStatInpatientOrders = inpatientOrders.filter((order) => {
+      const priority = String(order.priority || '').toUpperCase();
+      const status = String(order.status || '').toUpperCase();
+      return (
+        priority === 'STAT' &&
+        !['COMPLETED', 'CANCELLED', 'DISCONTINUED'].includes(status)
+      );
+    });
+    if (unresolvedStatInpatientOrders.length > 0) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'UNRESOLVED_STAT_INPATIENT_ORDERS',
+          message:
+            'Active STAT inpatient orders must be completed or discontinued before routine discharge.',
+          details: unresolvedStatInpatientOrders.map(
+            (order) => order.orderId || order.id
+          ),
+        },
+      };
+    }
+
+    const resolvedKnowledgeStatuses = new Set(['KNOWN', 'KNOWN_NONE']);
+    const allergyKnowledgeResolved =
+      allergyFacts.length > 0 ||
+      resolvedKnowledgeStatuses.has(
+        String(allergyKnowledge?.status || '').toUpperCase()
+      );
+    if (!allergyKnowledgeResolved) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'ALLERGY_HISTORY_UNRESOLVED',
+          message:
+            'Allergy history must be reviewed or explicitly documented as known-none before inpatient discharge.',
+        },
+      };
+    }
+
+    const medicationKnowledgeResolved =
+      medicationFacts.length > 0 ||
+      resolvedKnowledgeStatuses.has(
+        String(medicationKnowledge?.status || '').toUpperCase()
+      );
+    if (!medicationKnowledgeResolved) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'MEDICATION_HISTORY_UNRESOLVED',
+          message:
+            'Medication history must be reviewed or explicitly documented as known-none before inpatient discharge.',
         },
       };
     }
@@ -357,7 +814,11 @@ export class CareTransitionDomainService {
       .filter((item) => item.evidenceType === 'VITALS' && item.status === 'FINAL')
       .sort((a, b) => Number(b.measuredAt || b.createdAt || 0) - Number(a.measuredAt || a.createdAt || 0))[0];
 
-    if (!latestVitals || !Number.isFinite(Number(latestVitals.news2Score))) {
+    if (
+      !latestVitals ||
+      String(latestVitals.news2Status || '').toUpperCase() !== 'VERIFIED' ||
+      !Number.isFinite(Number(latestVitals.news2Score))
+    ) {
       return {
         success: false,
         commandId,
@@ -401,7 +862,10 @@ export class CareTransitionDomainService {
       ...bed,
       status: 'cleaning',
       patientId: undefined,
+      currentPatientId: undefined,
       patientName: undefined,
+      patientMRN: undefined,
+      currentEncounterId: undefined,
       notes: payload.notes || 'Sanitizing protocol in progress (Discharged)',
     };
 
@@ -437,9 +901,26 @@ export class CareTransitionDomainService {
       commandId,
       correlationId: context.correlationId,
       domainState: dischargedEncounter,
+      expectedPrimaryServerVersion: Number(
+        (encounter as PersistedEncounter & { _serverVersion?: number })._serverVersion || 0
+      ),
       additionalStateWrites: [
-        { entityType: 'HOSPITAL_BED', entityId: bed.id, domainState: bedState },
-        { entityType: 'PATIENT_MPI', entityId: patient.id, domainState: patientState },
+        {
+          entityType: 'HOSPITAL_BED',
+          entityId: bed.id,
+          domainState: bedState,
+          expectedServerVersion: Number(
+            (bed as Bed & { _serverVersion?: number })._serverVersion || 0
+          ),
+        },
+        {
+          entityType: 'PATIENT_MPI',
+          entityId: patient.id,
+          domainState: patientState,
+          expectedServerVersion: Number(
+            (patient as PatientMPI & { _serverVersion?: number })._serverVersion || 0
+          ),
+        },
       ],
     });
 

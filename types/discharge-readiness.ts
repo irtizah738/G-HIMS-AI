@@ -16,7 +16,15 @@ export type DischargeReadinessDomain =
   | 'OPERATIONAL';
 
 export interface DischargeEvidenceReference {
-  source: 'PATIENT360' | 'ENCOUNTER' | 'ENCOUNTER_EVIDENCE' | 'ORDER' | 'INPATIENT_ORDER';
+  source:
+    | 'PATIENT360'
+    | 'ENCOUNTER'
+    | 'ENCOUNTER_EVIDENCE'
+    | 'ORDER'
+    | 'INPATIENT_ORDER'
+    | 'DIAGNOSTIC_RESULT'
+    | 'CLINICAL_OBSERVATION'
+    | 'DIAGNOSTIC_ACKNOWLEDGEMENT';
   entityType: string;
   entityId: string;
   eventId?: string;
@@ -84,5 +92,8 @@ export interface DischargeReadinessSnapshot {
   encounter: Record<string, unknown>;
   encounterEvidence: Array<Record<string, unknown>>;
   diagnosticOrders: Array<Record<string, unknown>>;
+  diagnosticResults: Array<Record<string, unknown>>;
+  clinicalObservations: Array<Record<string, unknown>>;
+  diagnosticAcknowledgements: Array<Record<string, unknown>>;
   inpatientOrders: Array<Record<string, unknown>>;
 }

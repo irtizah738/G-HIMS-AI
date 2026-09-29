@@ -62,6 +62,7 @@ export class InpatientBedDomainService {
       ...bed,
       status:'occupied',
       patientId:patient.id,
+      currentPatientId:patient.id,
       patientName:patient.fullName,
       admissionDate,
       assignedDoctor:payload.assignedDoctor || bed.assignedDoctor,
@@ -107,7 +108,7 @@ export class InpatientBedDomainService {
 
     const bed = await DomainStateRepository.getById<Bed>(context.tenantId, 'beds', payload.bedId);
     if (!bed) return { success:false, commandId, idempotencyKey, error:{ code:'BED_NOT_FOUND', message:'Target bed does not exist.' } };
-    if (bed.status === 'occupied' || bed.patientId) {
+    if (bed.status === 'occupied' || bed.patientId || bed.currentPatientId) {
       return { success:false, commandId, idempotencyKey, error:{ code:'BED_OCCUPIED', message:'Occupied beds must be discharged or transferred through an inpatient command.' } };
     }
 
@@ -115,21 +116,47 @@ export class InpatientBedDomainService {
       ...bed,
       status:payload.status,
       patientId:undefined,
+      currentPatientId:undefined,
       patientName:undefined,
       ...(payload.notes !== undefined ? { notes:payload.notes } : {}),
     };
 
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType:'HOSPITAL_BED',
-      entityId:payload.bedId,
-      eventType:'BED_STATUS_UPDATED',
-      domainState:bedState,
-      eventPayload:{ bedId:payload.bedId, previousStatus:bed.status, status:payload.status },
-      auditReason:`Bed ${bed.bedNumber || bed.id} status changed from ${bed.status} to ${payload.status}.`,
-      outboxTopic:'g-hims-inpatient-events',
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'NURSE',
+      aggregateType: 'HOSPITAL_BED',
+      aggregateId: payload.bedId,
+      eventType: 'BED_STATUS_UPDATED',
+      eventPayload: {
+        bedId: payload.bedId,
+        previousStatus: bed.status,
+        status: payload.status,
+      },
+      auditAction: 'UPDATE_BED_STATUS',
+      auditResourceType: 'BED',
+      auditResourceId: payload.bedId,
+      auditReason: `Bed ${bed.bedNumber || bed.id} status changed from ${bed.status} to ${payload.status}.`,
+      outboxTopic: 'g-hims-inpatient-events',
+      idempotencyKey,
+      commandId,
+      correlationId: context.correlationId,
+      domainState: bedState,
+      expectedPrimaryServerVersion: Number(
+        (bed as Bed & { _serverVersion?: number })._serverVersion || 0
+      ),
     });
 
-    return { success:true, commandId, idempotencyKey, entityId:payload.bedId, eventId:tx.event.eventId, auditId:tx.audit.auditId, outboxId:tx.outbox.outboxId, data:{ bed:bedState } };
+    return {
+      success: true,
+      commandId,
+      idempotencyKey,
+      entityId: payload.bedId,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
+      data: { bed: bedState },
+    };
   }
 
   public static async discharge(

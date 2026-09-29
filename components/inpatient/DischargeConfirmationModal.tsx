@@ -1,11 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   LogOut,
   X,
-  AlertTriangle,
-  CheckCircle2,
   FileCheck,
   Receipt,
   Pill,
@@ -15,7 +13,6 @@ import {
   ShieldCheck,
   Building2,
   User,
-  HeartPulse,
 } from 'lucide-react';
 import { Bed } from '@/types/inpatient-or';
 
@@ -25,7 +22,9 @@ interface DischargeConfirmationModalProps {
   bed: Bed | null;
   onConfirmDischarge: (formData: {
     dischargedBy: string;
+    disposition: string;
     notes: string;
+    followUpInstructions: string;
     clearanceChecks: Record<string, boolean>;
   }) => Promise<void>;
   isSubmitting: boolean;
@@ -38,19 +37,34 @@ export const DischargeConfirmationModal: React.FC<DischargeConfirmationModalProp
   onConfirmDischarge,
   isSubmitting,
 }) => {
-  const [dischargedBy, setDischargedBy] = useState(bed?.assignedDoctor || 'Dr. Sarah Jenkins, FACS');
-  const [notes, setNotes] = useState(
-    'Clinical discharge criteria fulfilled. Vital signs stable. Patient education and outpatient prescription package provided.'
-  );
+  const [disposition, setDisposition] = useState('');
+  const [notes, setNotes] = useState('');
+  const [followUpInstructions, setFollowUpInstructions] = useState('');
 
   // Billing and chart clearance checklist requirements
   const [clearances, setClearances] = useState({
-    chartSummarySigned: true,
-    billingFolioReconciled: true,
-    medRecDelivered: true,
-    diagnosticsReviewed: true,
-    nursingHandoverComplete: true,
+    chartSummarySigned: false,
+    billingFolioReconciled: false,
+    medRecDelivered: false,
+    diagnosticsReviewed: false,
+    nursingHandoverComplete: false,
   });
+
+  useEffect(() => {
+    if (!isOpen || !bed) return;
+
+    // Never carry discharge inputs or review prompts across patients/encounters.
+    setDisposition('');
+    setNotes('');
+    setFollowUpInstructions('');
+    setClearances({
+      chartSummarySigned: false,
+      billingFolioReconciled: false,
+      medRecDelivered: false,
+      diagnosticsReviewed: false,
+      nursingHandoverComplete: false,
+    });
+  }, [isOpen, bed?.id]);
 
   if (!isOpen || !bed) return null;
 
@@ -72,11 +86,13 @@ export const DischargeConfirmationModal: React.FC<DischargeConfirmationModalProp
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!allCleared) return;
+    if (!disposition || !notes.trim() || !followUpInstructions.trim()) return;
 
     await onConfirmDischarge({
-      dischargedBy,
-      notes,
+      dischargedBy: bed.assignedDoctor || '',
+      disposition,
+      notes: notes.trim(),
+      followUpInstructions: followUpInstructions.trim(),
       clearanceChecks: clearances,
     });
   };
@@ -136,13 +152,13 @@ export const DischargeConfirmationModal: React.FC<DischargeConfirmationModalProp
             </div>
           </div>
 
-          {/* Mandatory Billing & Chart Clearance Checklist */}
+          {/* Clinical & Operational Review Prompts */}
           <div className="rounded-xl border border-amber-200/80 bg-amber-50/40 p-4 dark:border-amber-900/60 dark:bg-amber-950/20">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <ShieldCheck className="h-4 w-4 text-amber-600 dark:text-amber-400" />
                 <h4 className="text-xs font-bold uppercase tracking-wider text-amber-900 dark:text-amber-200">
-                  Mandatory Discharge Requirements Checklist
+                  Pre-Discharge Review Prompts
                 </h4>
               </div>
               <button
@@ -155,7 +171,7 @@ export const DischargeConfirmationModal: React.FC<DischargeConfirmationModalProp
             </div>
 
             <p className="mt-1 text-[11px] text-amber-800/80 dark:text-amber-300/80">
-              Confirm that all clinical chart documentation, billing reconciliation, and pharmacy protocols have been verified before patient release.
+              These checkboxes are review prompts only. They do not authorize discharge. The server verifies clinical evidence, credentials, medication reconciliation, diagnostics, and deterioration risk independently. Financial status is tracked separately from clinical discharge safety.
             </p>
 
             <div className="mt-3 space-y-2 text-xs">
@@ -255,37 +271,59 @@ export const DischargeConfirmationModal: React.FC<DischargeConfirmationModalProp
               </label>
             </div>
 
-            {!allCleared && (
-              <div className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-rose-700 dark:text-rose-400">
-                <AlertTriangle className="h-4 w-4 shrink-0" />
-                <span>All 5 clearance requirements must be satisfied before completing discharge.</span>
-              </div>
-            )}
+            <div className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-blue-700 dark:text-blue-300">
+              <ShieldCheck className="h-4 w-4 shrink-0" />
+              <span>Authoritative discharge safety is enforced by the server even if these prompts are checked.</span>
+            </div>
           </div>
 
           {/* Discharging Staff & Notes */}
           <div className="space-y-3">
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Discharging Attending Physician *
+                Discharge Disposition *
               </label>
-              <input
-                type="text"
+              <select
                 required
-                value={dischargedBy}
-                onChange={(e) => setDischargedBy(e.target.value)}
+                value={disposition}
+                onChange={(e) => setDisposition(e.target.value)}
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-rose-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              >
+                <option value="">Select disposition</option>
+                <option value="HOME_OR_SELF_CARE">Home / Self Care</option>
+                <option value="TRANSFER_TO_FACILITY">Transfer to Another Facility</option>
+                <option value="HOSPICE">Hospice / Palliative Facility</option>
+                <option value="LEFT_AGAINST_MEDICAL_ADVICE">Left Against Medical Advice</option>
+                <option value="OTHER">Other</option>
+              </select>
+            </div>
+            <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 text-[11px] text-blue-900 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-200">
+              The authenticated clinician submitting this command is recorded by the server as the discharge actor. Displayed staff names cannot override audit provenance.
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Discharge Summary *
+              </label>
+              <textarea
+                required
+                rows={3}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:border-rose-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Discharge Summary & Outpatient Instructions
+                Follow-Up Instructions *
               </label>
               <textarea
+                required
                 rows={2}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
+                value={followUpInstructions}
+                onChange={(e) => setFollowUpInstructions(e.target.value)}
+                placeholder="Follow-up appointment, pending-result ownership, medication/return precautions..."
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:border-rose-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
             </div>
@@ -311,11 +349,16 @@ export const DischargeConfirmationModal: React.FC<DischargeConfirmationModalProp
 
             <button
               type="submit"
-              disabled={isSubmitting || !allCleared}
+              disabled={
+                isSubmitting ||
+                !disposition ||
+                !notes.trim() ||
+                !followUpInstructions.trim()
+              }
               className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-5 py-2 text-xs font-semibold text-white shadow-xs hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-all"
             >
               <LogOut className="h-4 w-4" />
-              <span>{isSubmitting ? 'Finalizing Discharge...' : 'Verify & Complete Patient Discharge'}</span>
+              <span>{isSubmitting ? 'Finalizing Discharge...' : 'Submit Governed Discharge'}</span>
             </button>
           </div>
         </form>

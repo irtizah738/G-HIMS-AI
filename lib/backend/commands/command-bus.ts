@@ -160,6 +160,15 @@ export class CommandBus {
           );
           break;
 
+        case 'AcknowledgeCriticalDiagnosticResultCommand':
+          result = await DiagnosticResultDomainService.acknowledgeCriticalResult(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
         case 'PrescribeMedicationCommand':
           result = await ClinicalOrderDomainService.prescribeMedication(
             context,
@@ -287,7 +296,20 @@ export class CommandBus {
           break;
 
         case 'AdmitPatientToBedCommand':
-          result = await InpatientBedDomainService.admit(
+          result = {
+            success: false,
+            commandId: command.commandId,
+            idempotencyKey: command.idempotencyKey,
+            error: {
+              code: 'CARE_TRANSITION_COMMAND_REQUIRED',
+              message:
+                'Inpatient admission must use AdmitPatientToInpatientCareCommand so the encounter lifecycle and bed assignment are committed together.',
+            },
+          };
+          break;
+
+        case 'UpdateBedStatusCommand':
+          result = await InpatientBedDomainService.updateStatus(
             context,
             command.commandId,
             command.idempotencyKey,
@@ -295,8 +317,8 @@ export class CommandBus {
           );
           break;
 
-        case 'UpdateBedStatusCommand':
-          result = await InpatientBedDomainService.updateStatus(
+        case 'TransferInpatientBedCommand':
+          result = await CareTransitionDomainService.transferInpatientBed(
             context,
             command.commandId,
             command.idempotencyKey,
@@ -314,12 +336,16 @@ export class CommandBus {
           break;
 
         case 'DischargePatientFromBedCommand':
-          result = await InpatientBedDomainService.discharge(
-            context,
-            command.commandId,
-            command.idempotencyKey,
-            command.payload as any
-          );
+          result = {
+            success: false,
+            commandId: command.commandId,
+            idempotencyKey: command.idempotencyKey,
+            error: {
+              code: 'CARE_TRANSITION_COMMAND_REQUIRED',
+              message:
+                'Inpatient discharge must use DischargeInpatientEncounterCommand so clinical safety gates, encounter closure, patient census, and bed release are atomic.',
+            },
+          };
           break;
 
         case 'CreateTelehealthSessionCommand':

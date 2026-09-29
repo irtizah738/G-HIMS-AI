@@ -29,6 +29,14 @@ export interface PlaceInpatientOrderPayload {
   priority?: 'ROUTINE' | 'URGENT' | 'STAT';
 }
 
+export interface ResolveInpatientOrderPayload {
+  encounterId: string;
+  patientId: string;
+  orderId: string;
+  status: 'COMPLETED' | 'DISCONTINUED';
+  reason?: string;
+}
+
 export interface RecordMedicationAdministrationPayload {
   encounterId: string;
   patientId: string;
@@ -150,6 +158,153 @@ export class InpatientClinicalDomainService {
       eventId: tx.event.eventId,
       auditId: tx.audit.auditId,
       outboxId: tx.outbox.outboxId,
+      data: domainState,
+    };
+  }
+
+  public static async resolveOrder(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: ResolveInpatientOrderPayload
+  ): Promise<CommandResult> {
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: ['DOCTOR', 'CONSULTANT', 'SYSTEM_ADMIN'],
+    });
+    if (!auth.authorized) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Inpatient order resolution authority required.',
+        },
+      };
+    }
+
+    if (
+      !payload.encounterId ||
+      !payload.patientId ||
+      !payload.orderId ||
+      !['COMPLETED', 'DISCONTINUED'].includes(payload.status)
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INVALID_INPATIENT_ORDER_RESOLUTION',
+          message:
+            'Encounter, patient, order and COMPLETED/DISCONTINUED resolution are required.',
+        },
+      };
+    }
+
+    const [encounter, order] = await Promise.all([
+      DomainStateRepository.getById<PersistedEncounter>(
+        context.tenantId,
+        'encounters',
+        payload.encounterId
+      ),
+      DomainStateRepository.getById<Record<string, unknown>>(
+        context.tenantId,
+        'inpatientOrders',
+        payload.orderId
+      ),
+    ]);
+
+    if (!isActiveInpatientEncounter(encounter, payload.patientId)) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INPATIENT_ENCOUNTER_REQUIRED',
+          message:
+            'Inpatient orders may only be resolved against the active inpatient encounter.',
+        },
+      };
+    }
+
+    if (
+      !order ||
+      String(order.encounterId || '') !== payload.encounterId ||
+      String(order.patientId || '') !== payload.patientId
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INPATIENT_ORDER_SCOPE_MISMATCH',
+          message:
+            'The inpatient order was not found or belongs to a different patient/encounter.',
+        },
+      };
+    }
+
+    const currentStatus = String(order.status || '').toUpperCase();
+    if (['COMPLETED', 'DISCONTINUED', 'CANCELLED'].includes(currentStatus)) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INPATIENT_ORDER_ALREADY_RESOLVED',
+          message: `Inpatient order is already ${currentStatus}.`,
+        },
+      };
+    }
+
+    const resolvedAt = Date.now();
+    const domainState = {
+      ...order,
+      status: payload.status,
+      resolutionReason: String(payload.reason || '').trim() || undefined,
+      resolvedBy: context.actorId,
+      resolvedAt,
+      updatedAt: resolvedAt,
+    };
+
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'CLINICIAN',
+      aggregateType: 'INPATIENT_ORDER',
+      aggregateId: payload.orderId,
+      eventType: 'INPATIENT_ORDER_RESOLVED',
+      eventPayload: {
+        orderId: payload.orderId,
+        encounterId: payload.encounterId,
+        patientId: payload.patientId,
+        orderType: String(order.orderType || ''),
+        previousStatus: currentStatus,
+        status: payload.status,
+        resolvedAt,
+      },
+      auditAction: 'RESOLVE_INPATIENT_ORDER',
+      auditResourceType: 'INPATIENT_ORDER',
+      auditResourceId: payload.orderId,
+      auditReason:
+        `Inpatient order ${payload.orderId} ${payload.status.toLowerCase()}` +
+        (payload.reason ? `: ${payload.reason}` : ''),
+      outboxTopic: 'g-hims-clinical-events',
+      idempotencyKey,
+      commandId,
+      correlationId: context.correlationId,
+      domainState,
+      expectedPrimaryServerVersion: Number(order._serverVersion || 0),
+    });
+
+    return {
+      success: true,
+      commandId,
+      idempotencyKey,
+      entityId: payload.orderId,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
       data: domainState,
     };
   }

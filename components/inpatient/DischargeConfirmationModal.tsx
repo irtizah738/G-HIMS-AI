@@ -4,8 +4,6 @@ import React, { useState } from 'react';
 import {
   LogOut,
   X,
-  AlertTriangle,
-  CheckCircle2,
   FileCheck,
   Receipt,
   Pill,
@@ -15,7 +13,6 @@ import {
   ShieldCheck,
   Building2,
   User,
-  HeartPulse,
 } from 'lucide-react';
 import { Bed } from '@/types/inpatient-or';
 
@@ -40,7 +37,6 @@ export const DischargeConfirmationModal: React.FC<DischargeConfirmationModalProp
   onConfirmDischarge,
   isSubmitting,
 }) => {
-  const [dischargedBy, setDischargedBy] = useState(bed?.assignedDoctor || '');
   const [disposition, setDisposition] = useState('');
   const [notes, setNotes] = useState('');
   const [followUpInstructions, setFollowUpInstructions] = useState('');
@@ -77,7 +73,7 @@ export const DischargeConfirmationModal: React.FC<DischargeConfirmationModalProp
     if (!disposition || !notes.trim() || !followUpInstructions.trim()) return;
 
     await onConfirmDischarge({
-      dischargedBy,
+      dischargedBy: bed.assignedDoctor || '',
       disposition,
       notes: notes.trim(),
       followUpInstructions: followUpInstructions.trim(),
@@ -285,17 +281,8 @@ export const DischargeConfirmationModal: React.FC<DischargeConfirmationModalProp
                 <option value="OTHER">Other</option>
               </select>
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Discharging Attending Physician *
-              </label>
-              <input
-                type="text"
-                required
-                value={dischargedBy}
-                onChange={(e) => setDischargedBy(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-rose-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-              />
+            <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 text-[11px] text-blue-900 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-200">
+              The authenticated clinician submitting this command is recorded by the server as the discharge actor. Displayed staff names cannot override audit provenance.
             </div>
 
             <div>

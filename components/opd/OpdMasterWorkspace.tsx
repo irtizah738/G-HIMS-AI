@@ -53,9 +53,11 @@ import { OpdBillingLedger } from './OpdBillingLedger';
 import { OpdDispositionReferrals } from './OpdDispositionReferrals';
 import { OpdPatientTimelineAudit } from './OpdPatientTimelineAudit';
 import { OpdOfflineSyncManager } from './OpdOfflineSyncManager';
-import { executeActiveTenantCommand } from '@/lib/api/command-client';
+import { executeActiveTenantCommand, registerActiveTenantPatient } from '@/lib/api/command-client';
 
-// Initial Mock Seed Data
+const IS_DEMO_RUNTIME = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
+
+// Initial Mock Seed Data (DEMO runtime only)
 const SEED_PATIENTS: PatientDemographics[] = [
   {
     id: 'pat-101',
@@ -388,15 +390,15 @@ const SEED_EVENTS: OpdTimelineEvent[] = [
 
 export function OpdMasterWorkspace() {
   // Global State
-  const [patients, setPatients] = useState<PatientDemographics[]>(SEED_PATIENTS);
-  const [appointments, setAppointments] = useState<AppointmentRecord[]>(SEED_APPOINTMENTS);
+  const [patients, setPatients] = useState<PatientDemographics[]>(() => IS_DEMO_RUNTIME ? SEED_PATIENTS : []);
+  const [appointments, setAppointments] = useState<AppointmentRecord[]>(() => IS_DEMO_RUNTIME ? SEED_APPOINTMENTS : []);
   const [waitlist, setWaitlist] = useState<any[]>([]);
-  const [encounters, setEncounters] = useState<ComprehensiveOpdEncounter[]>(SEED_ENCOUNTERS);
-  const [queue, setQueue] = useState<QueueEntry[]>(SEED_QUEUE);
-  const [events, setEvents] = useState<OpdTimelineEvent[]>(SEED_EVENTS);
+  const [encounters, setEncounters] = useState<ComprehensiveOpdEncounter[]>(() => IS_DEMO_RUNTIME ? SEED_ENCOUNTERS : []);
+  const [queue, setQueue] = useState<QueueEntry[]>(() => IS_DEMO_RUNTIME ? SEED_QUEUE : []);
+  const [events, setEvents] = useState<OpdTimelineEvent[]>(() => IS_DEMO_RUNTIME ? SEED_EVENTS : []);
 
   // Active Context
-  const [selectedEncounterId, setSelectedEncounterId] = useState<string>('enc-101');
+  const [selectedEncounterId, setSelectedEncounterId] = useState<string>(() => IS_DEMO_RUNTIME ? 'enc-101' : '');
   const [activeTab, setActiveTab] = useState<string>('DASHBOARD');
   const [activeRole, setActiveRole] = useState<OpdRole>('SPECIALIST_CONSULTANT');
   const [isOnline, setIsOnline] = useState<boolean>(true);
@@ -407,8 +409,9 @@ export function OpdMasterWorkspace() {
     return encounters.find((e) => e.id === selectedEncounterId) || encounters[0];
   }, [encounters, selectedEncounterId]);
 
-  // Helper to record immutable timeline events
+  // DEMO-only visual event helper. Production audit events are server-generated.
   const recordEvent = (eventType: any, description: string, payload?: any) => {
+    if (!IS_DEMO_RUNTIME) return;
     const newEvt: OpdTimelineEvent = {
       id: `evt-${Date.now()}`,
       encounterId: activeEncounter?.id || 'enc-general',
@@ -427,7 +430,7 @@ export function OpdMasterWorkspace() {
       actorRole: activeRole,
       description,
       payload,
-      hash: `SHA256:${Math.random().toString(36).substring(2, 12)}`,
+      hash: 'DEMO-NON-AUTHORITATIVE',
     };
     setEvents((prev) => [newEvt, ...prev]);
     if (!isOnline) {

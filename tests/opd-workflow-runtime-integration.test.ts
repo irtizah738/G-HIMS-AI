@@ -57,11 +57,12 @@ describe('OPD clinical workflow runtime integration', () => {
     const encounter = await source(
       'lib/backend/services/encounter-domain-service.ts'
     );
-    const registration = await source('lib/runtime/registration-orchestrator.ts');
+    const registration = await source('server/runtime/registration-orchestrator.ts');
 
     expect(commandBus).toContain("'AdvanceStageCommand'");
     expect(encounter).toContain('TransactionManager.executeAtomicMutation');
     expect(encounter).toContain("outboxTopic: 'g-hims-clinical-events'");
-    expect(registration).toContain('register');
+    expect(registration).toContain('MPI_IDENTITY_CONFLICT');
+    expect(registration).toContain('transaction.create(canonicalOutboxRef');
   });
 });

@@ -878,6 +878,7 @@ export async function replaceTenantEdgeSnapshot(
 ): Promise<void> {
   const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
   if (!normalizedTenantId) throw new Error('EDGE_TENANT_REQUIRED');
+  const ownerUid = currentOwnerUid();
 
   const records: EdgeEntityRecord[] = [];
   for (const [collection, entities] of Object.entries(collections || {})) {
@@ -893,12 +894,15 @@ export async function replaceTenantEdgeSnapshot(
         ''
       ).trim();
       if (!entityId) continue;
+      const encryptedData = await encryptEdgeJson(normalizedTenantId, ownerUid, entity);
       records.push({
         key: `${normalizedTenantId}:${collection}:${entityId}`,
         tenantId: normalizedTenantId,
         collection,
         entityId,
-        data: entity,
+        ownerUid,
+        data: {},
+        encryptedData,
         updatedAt: Date.now(),
         serverVersion: Number(
           (entity as any)._serverVersion ??
@@ -946,8 +950,9 @@ export async function listEdgeEntities<T extends Record<string, unknown> = Recor
     .where('[tenantId+collection]')
     .equals([normalizedTenantId, collection])
     .toArray();
-  return rows
-    .filter((row) => !row.deleted)
+  const decrypted = await Promise.all(rows.map(decryptStoredEdgeEntity));
+  return decrypted
+    .filter((row) => !row.deleted && Object.keys(row.data || {}).length > 0)
     .sort((a, b) => a.updatedAt - b.updatedAt)
     .map((row) => row.data as T);
 }
@@ -959,7 +964,9 @@ export async function getEdgeEntity<T extends Record<string, unknown> = Record<s
 ): Promise<T | null> {
   const key = `${String(tenantId || '').trim().toLowerCase()}:${collection}:${entityId}`;
   const row = await localDb.edge_entities.get(key);
-  return row && !row.deleted ? (row.data as T) : null;
+  if (!row || row.deleted) return null;
+  const decrypted = await decryptStoredEdgeEntity(row);
+  return Object.keys(decrypted.data || {}).length > 0 ? (decrypted.data as T) : null;
 }
 
 export async function getEdgeEntityRecord(
@@ -968,7 +975,8 @@ export async function getEdgeEntityRecord(
   entityId: string
 ): Promise<EdgeEntityRecord | null> {
   const key = `${String(tenantId || '').trim().toLowerCase()}:${collection}:${entityId}`;
-  return (await localDb.edge_entities.get(key)) || null;
+  const row = await localDb.edge_entities.get(key);
+  return row ? decryptStoredEdgeEntity(row) : null;
 }
 
 export async function getEdgeSyncMetadata(
@@ -1006,12 +1014,16 @@ export async function putEdgeEntity(
   if (!normalizedTenantId || !collection || !normalizedEntityId) {
     throw new Error('EDGE_ENTITY_IDENTITY_REQUIRED');
   }
+  const ownerUid = currentOwnerUid();
+  const encryptedData = await encryptEdgeJson(normalizedTenantId, ownerUid, data);
   await localDb.edge_entities.put({
     key: `${normalizedTenantId}:${collection}:${normalizedEntityId}`,
     tenantId: normalizedTenantId,
     collection,
     entityId: normalizedEntityId,
-    data,
+    ownerUid,
+    data: {},
+    encryptedData,
     updatedAt: Date.now(),
     serverVersion,
   });

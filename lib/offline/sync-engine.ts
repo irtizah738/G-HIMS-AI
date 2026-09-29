@@ -7,6 +7,8 @@ import {
 import {
   getSecurePendingMutations,
   getSecurePendingVectorClock,
+  getSecureEdgeEntityMetadata,
+  updateSecureEdgeEntityVersion,
   putSecureMutation,
   putEntityMappings,
   remapEdgeEntityIds,
@@ -335,7 +337,17 @@ class ClinicalSyncEngine {
       throw new Error('SESSION_EXPIRED: offline command capture requires a still-valid cached session.');
     }
 
-    const currentClock = await getSecurePendingVectorClock(params.tenantId, cached.user.uid);
+    const [pendingClock, entityMetadata] = await Promise.all([
+      getSecurePendingVectorClock(params.tenantId, cached.user.uid),
+      getSecureEdgeEntityMetadata(
+        params.tenantId,
+        cached.user.uid,
+        params.collection,
+        params.resourceId
+      ),
+    ]);
+    const baseVectorClock = entityMetadata?.vectorClock || {};
+    const currentClock = mergeClocks(baseVectorClock, pendingClock);
     const clockNodeId = cached.session.deviceId || cached.user.uid;
     const vectorClock = incrementClock(currentClock, clockNodeId);
 
@@ -349,8 +361,8 @@ class ClinicalSyncEngine {
       commandType: params.commandType,
       idempotencyKey: params.idempotencyKey || `offline_${crypto.randomUUID()}`,
       schemaVersion: params.schemaVersion || 1,
-      baseEntityVersion: params.baseEntityVersion,
-      baseVectorClock: currentClock,
+      baseEntityVersion: params.baseEntityVersion ?? entityMetadata?.serverVersion,
+      baseVectorClock,
       payload: params.payload,
       vectorClock,
       clientTimestamp: Date.now(),

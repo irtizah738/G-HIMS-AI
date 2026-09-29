@@ -51,7 +51,8 @@ describe('G-HIMS CI-5 Patient 360 clinical read surface', () => {
     );
 
     expect(client).toContain('AuthClient.authorizedFetch');
-    expect(client).toContain("listSecureEdgeEntities<Patient360Projection>");
+    expect(client).toContain("listSecureEdgeEntities<Record<string, unknown>>");
+    expect(client).toContain('as unknown as Patient360Projection[]');
     expect(client).toContain("'patient360Projections'");
     expect(client).toContain("source: 'SERVER'");
     expect(client).toContain("source: 'LOCAL_EDGE'");

@@ -1,6 +1,4 @@
 import {
-  addMutation,
-  getPendingMutations,
   getPendingVectorClock,
   updateMutationStatus,
   deleteMutation,
@@ -9,6 +7,15 @@ import {
   OfflineMutation,
   MutationAction,
 } from './db';
+import {
+  getSecurePendingMutations,
+  putSecureMutation,
+  putEntityMappings,
+  remapEdgeEntityIds,
+  resolveMappedReferences,
+} from '@/lib/offline/secure-store';
+import { withEdgeSyncLeadership } from '@/lib/offline/sync-leader';
+import { ensurePersistentEdgeStorage } from '@/lib/offline/storage-manager';
 import { auth } from '@/lib/firebase/client';
 import { getCachedAuthSession } from '@/lib/offline/auth-storage';
 import { probeApplicationConnectivity, ConnectivityProbeResult } from '@/lib/offline/connectivity';
@@ -80,6 +87,7 @@ class ClinicalSyncEngine {
   constructor() {
     if (typeof window !== 'undefined') {
       this.initNetworkListeners();
+      void ensurePersistentEdgeStorage().catch(() => {});
       void this.refreshPendingCount();
       void this.refreshConnectivity(false).then((result) => {
         if (result.isOnline) void this.refreshReplicaStatus();
@@ -291,7 +299,7 @@ class ClinicalSyncEngine {
 
   public async refreshPendingCount(tenantId?: string): Promise<number> {
     try {
-      const pending = await getPendingMutations(tenantId);
+      const pending = await getSecurePendingMutations(tenantId);
       this.updateState({ pendingCount: pending.length });
       return pending.length;
     } catch {
@@ -322,8 +330,8 @@ class ClinicalSyncEngine {
     const clockNodeId = cached.session.deviceId || cached.user.uid;
     const vectorClock = incrementClock(currentClock, clockNodeId);
 
-    const mutation = await addMutation({
-      id: params.mutationId,
+    const mutation = await putSecureMutation({
+      id: params.mutationId || `mut_${crypto.randomUUID()}`,
       tenantId: params.tenantId,
       actorId: cached.user.uid,
       collection: params.collection,
@@ -333,6 +341,7 @@ class ClinicalSyncEngine {
       idempotencyKey: params.idempotencyKey || `offline_${crypto.randomUUID()}`,
       schemaVersion: params.schemaVersion || 1,
       baseEntityVersion: params.baseEntityVersion,
+      baseVectorClock: currentClock,
       payload: params.payload,
       vectorClock,
       clientTimestamp: Date.now(),
@@ -372,6 +381,13 @@ class ClinicalSyncEngine {
    * No browser Firestore write or client-side LWW resolution is permitted.
    */
   public async processSyncQueue(tenantId?: string): Promise<{ syncedCount: number; conflictCount: number }> {
+    return withEdgeSyncLeadership(
+      () => this.processSyncQueueAsLeader(tenantId),
+      { syncedCount: 0, conflictCount: 0 }
+    );
+  }
+
+  private async processSyncQueueAsLeader(tenantId?: string): Promise<{ syncedCount: number; conflictCount: number }> {
     if (this.isProcessing) return { syncedCount: 0, conflictCount: 0 };
 
     if (this.forcedOffline) {
@@ -483,15 +499,21 @@ class ClinicalSyncEngine {
                 actorId: cached.user.uid,
                 batchId,
                 submittedAt: Date.now(),
-                mutations: replayable.map((mutation) => ({
+                mutations: await Promise.all(replayable.map(async (mutation) => ({
                   mutationId: mutation.id,
                   occurredAt: mutation.clientTimestamp || mutation.timestamp,
                   commandType: mutation.commandType,
-                  payload: mutation.payload,
+                  payload: await resolveMappedReferences(mutationTenantId, mutation.payload),
                   idempotencyKey: mutation.idempotencyKey,
-                  entityId: mutation.resourceId || mutation.docId,
+                  entityId: await resolveMappedReferences(
+                    mutationTenantId,
+                    mutation.resourceId || mutation.docId
+                  ),
                   schemaVersion: mutation.schemaVersion || 1,
-                })),
+                  baseEntityVersion: mutation.baseEntityVersion,
+                  vectorClock: mutation.vectorClock,
+                  baseVectorClock: mutation.baseVectorClock,
+                }))),
               },
             }),
           });
@@ -513,6 +535,16 @@ class ClinicalSyncEngine {
           returnedMutationIds.add(mutation.id);
 
           if (result.status === 'accepted') {
+            if (Array.isArray(result.entityMappings) && result.entityMappings.length > 0) {
+              const mappings = result.entityMappings.map((mapping: any) => ({
+                localId: String(mapping.localId),
+                canonicalId: String(mapping.canonicalId),
+                entityType: String(mapping.entityType || 'ENTITY'),
+                sourceMutationId: mutation.id,
+              }));
+              await putEntityMappings(mutation.tenantId, mappings);
+              await remapEdgeEntityIds(mutation.tenantId, mappings);
+            }
             await deleteMutation(mutation.id);
             await saveToOfflineCache(
               mutation.tenantId,

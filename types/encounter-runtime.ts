@@ -2,6 +2,13 @@
  * Clinical Workflow Runtime Planning & Stage State Interfaces
  */
 
+import type {
+  ClinicalEncounterState,
+  FinancialClearanceState,
+  OperationalQueueState,
+  ResourceAssignmentState,
+} from './clinical-state';
+
 export type EncounterType = 'OPD' | 'IPD' | 'EMERGENCY';
 
 export type StageStatus = 'PENDING' | 'ACTIVE' | 'COMPLETED' | 'SKIPPED' | 'FAILED';
@@ -50,11 +57,19 @@ export interface WorkflowSnapshot {
 
 export interface EncounterRuntime {
   id: string;
+  /** Canonical alias used by server domain services. */
+  encounterId?: string;
   tenantId: string;
   patientId: string;
   type: EncounterType;
-  status: 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+  encounterType?: EncounterType;
+  status: 'PLANNED' | 'IN_PROGRESS' | 'ACTIVE' | 'COMPLETED' | 'DISCHARGED' | 'TRANSFERRED' | 'CANCELLED';
   currentStageId: string;
+  currentStage?: string;
+  clinicalState?: ClinicalEncounterState;
+  operationalState?: OperationalQueueState;
+  financialClearanceState?: FinancialClearanceState;
+  resourceAssignmentState?: ResourceAssignmentState;
   workflowSnapshotId: string;
   startedAt: number;
   endedAt?: number;
@@ -63,4 +78,9 @@ export interface EncounterRuntime {
   chiefComplaint?: string;
   assignedDoctor?: string;
   tokenNumber?: string;
+  disposition?: string;
+  sourceEncounterId?: string;
+  linkedEncounterId?: string;
+  completedAt?: number;
+  dischargedAt?: number;
 }

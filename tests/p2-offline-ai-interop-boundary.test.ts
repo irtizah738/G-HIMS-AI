@@ -88,7 +88,7 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(engine).toContain('getPendingVectorClock');
     expect(engine).toContain('incrementClock');
     expect(engine).toContain('clockNodeId = cached.session.deviceId || cached.user.uid');
-    expect(engine).toContain('mutationId: commandId');
+    expect(engine).toContain('id: params.mutationId');
 
     expect(types).toContain('queuedOffline?: boolean');
 
@@ -110,9 +110,14 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(authoritative).toContain('touchSessionActivity?: boolean');
     expect(authoritative).toContain('touchActivity: options.touchSessionActivity !== false');
     expect(sessionService).toContain('touchActivity?: boolean');
-    expect(sessionService).toContain('if (options.touchActivity === false)');
-    expect(sessionService.indexOf('if (options.touchActivity === false)')).toBeLessThan(
-      sessionService.indexOf('lastActivityAt: now')
+
+    const validateSessionSection=sessionService.slice(
+      sessionService.indexOf('export async function validateSession('),
+      sessionService.indexOf('export function validateSessionRecord(')
+    );
+    expect(validateSessionSection).toContain('if (options.touchActivity === false)');
+    expect(validateSessionSection.indexOf('if (options.touchActivity === false)')).toBeLessThan(
+      validateSessionSection.indexOf('await sessionDocRef.update')
     );
 
     expect(engine).toContain('processingMutationIds');

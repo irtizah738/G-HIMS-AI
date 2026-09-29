@@ -161,8 +161,17 @@ export async function replaceSecureTenantEdgeSnapshot(
         actorId,
         updatedAt: Date.now(),
         serverVersion:
-          Number((entity as any).version || (entity as any).serverVersion || 0) || undefined,
-        vectorClock: ((entity as any).vectorClock || undefined) as VectorClock | undefined,
+          Number(
+            (entity as any)._serverVersion ||
+            (entity as any).serverVersion ||
+            (entity as any).version ||
+            0
+          ) || undefined,
+        vectorClock: (
+          (entity as any)._vectorClock ||
+          (entity as any).vectorClock ||
+          undefined
+        ) as VectorClock | undefined,
       });
     }
   }
@@ -250,11 +259,67 @@ export async function putSecureEdgeEntities(
       encryptedData: await encryptEdgeJson(normalizedTenantId, actorId, entity),
       actorId,
       updatedAt: Date.now(),
-      serverVersion: Number((entity as any).version || 0) || undefined,
-      vectorClock: ((entity as any).vectorClock || undefined) as VectorClock | undefined,
+      serverVersion:
+        Number(
+          (entity as any)._serverVersion ||
+          (entity as any).serverVersion ||
+          (entity as any).version ||
+          0
+        ) || undefined,
+      vectorClock: (
+        (entity as any)._vectorClock ||
+        (entity as any).vectorClock ||
+        undefined
+      ) as VectorClock | undefined,
     });
   }
   if (rows.length) await localDb.edge_entities.bulkPut(rows);
+}
+
+export async function getSecureEdgeEntityMetadata(
+  tenantId: string,
+  actorId: string,
+  collection: string,
+  entityId: string
+): Promise<{ serverVersion?: number; vectorClock?: VectorClock } | null> {
+  const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
+  const normalizedActorId = String(actorId || '').trim();
+  const normalizedCollection = String(collection || '').trim();
+  const normalizedEntityId = String(entityId || '').trim();
+  if (!normalizedTenantId || !normalizedActorId || !normalizedCollection || !normalizedEntityId) {
+    return null;
+  }
+
+  const row = await localDb.edge_entities.get(
+    `${normalizedTenantId}:${normalizedCollection}:${normalizedEntityId}`
+  );
+  if (!row || row.actorId !== normalizedActorId) return null;
+
+  return {
+    serverVersion: row.serverVersion,
+    vectorClock: row.vectorClock,
+  };
+}
+
+export async function updateSecureEdgeEntityVersion(
+  tenantId: string,
+  actorId: string,
+  collection: string,
+  entityId: string,
+  serverVersion?: number,
+  vectorClock?: VectorClock
+): Promise<void> {
+  const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
+  const normalizedActorId = String(actorId || '').trim();
+  const key = `${normalizedTenantId}:${collection}:${entityId}`;
+  const row = await localDb.edge_entities.get(key);
+  if (!row || row.actorId !== normalizedActorId) return;
+
+  await localDb.edge_entities.update(key, {
+    ...(typeof serverVersion === 'number' ? { serverVersion } : {}),
+    ...(vectorClock ? { vectorClock } : {}),
+    updatedAt: Date.now(),
+  });
 }
 
 export async function putLocalEntityMappings(

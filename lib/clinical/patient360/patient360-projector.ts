@@ -309,10 +309,21 @@ export class Patient360Projector {
     const patientEvents = sources.events
       .filter((event) => asString(event.payload?.patientId) === patientId)
       .sort((a, b) =>
-        Number(b.occurredAt || b.recordedAt || 0) -
-        Number(a.occurredAt || a.recordedAt || 0) ||
+        Number(b.recordedAt || b.occurredAt || 0) -
+        Number(a.recordedAt || a.occurredAt || 0) ||
         b.eventId.localeCompare(a.eventId)
       );
+
+    const latestEvent = patientEvents[0];
+    const lastEventRecordedAt = latestEvent
+      ? Number(latestEvent.recordedAt || latestEvent.occurredAt || 0)
+      : undefined;
+    const eventCheckpoint = latestEvent
+      ? {
+          eventId: latestEvent.eventId,
+          recordedAt: Number(lastEventRecordedAt || 0),
+        }
+      : undefined;
 
     const timeline: Patient360TimelineItem[] = patientEvents.slice(0, 500).map((event) => ({
       timelineItemId: `p360tl_${event.eventId}`,
@@ -325,7 +336,7 @@ export class Patient360Projector {
       summary: eventSummary(event),
     }));
 
-    const sourceCheckpoint = hash({
+    const sourceFingerprint = hash({
       patient: sourceVersion(sources.patient),
       encounters: sources.encounters.map(sourceVersion).sort(),
       conditions: conditions.map((item) => sourceVersion(item as unknown as Record<string, unknown>)).sort(),
@@ -336,6 +347,10 @@ export class Patient360Projector {
       documents: documents.map((item) => sourceVersion(item as unknown as Record<string, unknown>)).sort(),
       eventIds: patientEvents.map((event) => event.eventId).sort(),
     });
+
+    const sourceCheckpoint = eventCheckpoint
+      ? `${eventCheckpoint.recordedAt}:${eventCheckpoint.eventId}`
+      : '0:NO_PATIENT_EVENT';
 
     const content = {
       tenantId: sources.tenantId,
@@ -385,8 +400,12 @@ export class Patient360Projector {
         documents: documents.length,
       },
       projectionVersion: 1,
+      revision: patientEvents.length,
+      eventCheckpoint,
+      sourceFingerprint,
       sourceCheckpoint,
-      lastEventId: patientEvents[0]?.eventId,
+      lastEventId: latestEvent?.eventId,
+      lastEventRecordedAt,
     };
 
     const contentHash = hash(content);

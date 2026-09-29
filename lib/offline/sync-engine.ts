@@ -569,6 +569,38 @@ class ClinicalSyncEngine {
               needsFollowupReplay = true;
             }
 
+            const authoritativeData =
+              mutation.collection === 'beds' && result.data?.bed
+                ? result.data.bed
+                : mutation.collection === 'billingMismatches' && result.data?.finding
+                  ? result.data.finding
+                  : result.data;
+
+            if (
+              authoritativeData &&
+              typeof authoritativeData === 'object' &&
+              mutation.resourceId &&
+              result.serverVersion
+            ) {
+              await putEdgeEntity(
+                mutation.tenantId,
+                mutation.collection,
+                String(
+                  (authoritativeData as any).id ||
+                  (authoritativeData as any).findingId ||
+                  mutation.resourceId
+                ),
+                {
+                  ...(authoritativeData as Record<string, unknown>),
+                  _serverVersion: result.serverVersion,
+                  ...(result.serverVectorClock
+                    ? { _vectorClock: result.serverVectorClock }
+                    : {}),
+                },
+                result.serverVersion
+              );
+            }
+
             await deleteMutation(mutation.id);
             await saveToOfflineCache(
               mutation.tenantId,
@@ -593,6 +625,10 @@ class ClinicalSyncEngine {
               collection: mutation.collection,
               resourceId: mutation.resourceId || mutation.docId,
               clientData: mutation.payload,
+              serverData:
+                result.data?.serverState && typeof result.data.serverState === 'object'
+                  ? result.data.serverState
+                  : undefined,
               conflictType: result.conflictCategory || 'STATE_CONFLICT',
               reason: result.reason,
             });

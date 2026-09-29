@@ -97,11 +97,16 @@ describe('G-HIMS P5C pilot readiness guards', () => {
     expect(hospitalContext).toContain('Legacy root-level Firestore listeners were retired');
   });
 
-  test('successful tenant claim forces a fresh Firebase token before tenant reads', async () => {
+  test('tenant UI waits for authoritative G-HIMS session instead of pre-session claim mutation', async () => {
     const tenantContext = await source('lib/tenant/context.tsx');
 
-    expect(tenantContext).toContain('await user.getIdToken(true)');
-    expect(tenantContext).toContain('Array.isArray(data.roles)');
+    expect(tenantContext).toContain("from '@/lib/auth/auth-context'");
+    expect(tenantContext).not.toContain("from '@/lib/firebase/auth-context'");
+    expect(tenantContext).not.toContain("fetch('/api/auth/tenant-claim'");
+    expect(tenantContext).not.toContain('getIdToken(');
+    expect(tenantContext).toContain('activeTenant');
+    expect(tenantContext).toContain('accessibleTenants');
+    expect(tenantContext).toContain('switchAuthoritativeTenant');
     expect(tenantContext).toContain("administrator: 'admin'");
   });
 

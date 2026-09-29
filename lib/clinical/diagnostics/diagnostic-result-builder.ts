@@ -119,16 +119,17 @@ function parseReferenceRange(
   const high = Number(range[2]);
   if (!Number.isFinite(low) || !Number.isFinite(high)) return [{ text: raw }];
 
+  const knownUnit = unitCode ? TerminologyService.lookup('UCUM', unitCode) : null;
   return [{
     low: {
       value: low,
-      unit: unit || '',
-      ...(unitCode ? { system: 'UCUM', code: unitCode } : {}),
+      unit: knownUnit?.display || unit || unitCode || '',
+      ...(knownUnit ? { system: 'UCUM', code: knownUnit.code } : {}),
     },
     high: {
       value: high,
-      unit: unit || '',
-      ...(unitCode ? { system: 'UCUM', code: unitCode } : {}),
+      unit: knownUnit?.display || unit || unitCode || '',
+      ...(knownUnit ? { system: 'UCUM', code: knownUnit.code } : {}),
     },
     text: raw,
   }];
@@ -150,9 +151,7 @@ function valueForResult(result: DiagnosticResultItemInput): ObservationValue {
       quantity: {
         value: numeric,
         unit: knownUnit?.display || result.unit || unitCode || '',
-        ...(knownUnit || unitCode
-          ? { system: 'UCUM', code: knownUnit?.code || unitCode }
-          : {}),
+        ...(knownUnit ? { system: 'UCUM', code: knownUnit.code } : {}),
       },
     };
   }

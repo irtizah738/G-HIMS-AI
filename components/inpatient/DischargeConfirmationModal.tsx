@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   LogOut,
   X,
@@ -49,6 +49,22 @@ export const DischargeConfirmationModal: React.FC<DischargeConfirmationModalProp
     diagnosticsReviewed: false,
     nursingHandoverComplete: false,
   });
+
+  useEffect(() => {
+    if (!isOpen || !bed) return;
+
+    // Never carry discharge inputs or review prompts across patients/encounters.
+    setDisposition('');
+    setNotes('');
+    setFollowUpInstructions('');
+    setClearances({
+      chartSummarySigned: false,
+      billingFolioReconciled: false,
+      medRecDelivered: false,
+      diagnosticsReviewed: false,
+      nursingHandoverComplete: false,
+    });
+  }, [isOpen, bed.id]);
 
   if (!isOpen || !bed) return null;
 

@@ -83,6 +83,22 @@ function toDocumentData(value: unknown, label: string): Record<string, unknown> 
   return sanitizeForFirestore(value as Record<string, unknown>);
 }
 
+function toVersionedDocumentData(
+  value: unknown,
+  label: string,
+  existing?: Record<string, unknown> | null
+): Record<string, unknown> {
+  const document = toDocumentData(value, label);
+  const currentVersion = Number(existing?._serverVersion || 0);
+  return {
+    ...document,
+    _serverVersion: currentVersion + 1,
+    ...(existing?._vectorClock && typeof existing._vectorClock === 'object'
+      ? { _vectorClock: existing._vectorClock }
+      : {}),
+  };
+}
+
 function collectionForEntityType(entityType: string): string {
   const map: Record<string, string> = {
     ENCOUNTER: 'encounters',
@@ -234,6 +250,13 @@ export class TransactionManager {
     const auditRef = tenantRef.collection('audit_logs').doc(audit.auditId);
     const outboxRef = tenantRef.collection('outbox').doc(outbox.outboxId);
     const idempotencyRef = tenantRef.collection('idempotency').doc(IdempotencyService.getDocumentId(idempotencyKey));
+    const primaryStateRef = params.domainState !== undefined
+      ? tenantRef.collection(collectionForEntityType(params.aggregateType)).doc(params.aggregateId)
+      : null;
+    const additionalStateRefs = (params.additionalStateWrites || []).map((write) => ({
+      write,
+      ref: tenantRef.collection(collectionForEntityType(write.entityType)).doc(write.entityId),
+    }));
 
     await db.runTransaction(async (transaction) => {
       const idempotencySnapshot = await transaction.get(idempotencyRef);
@@ -245,16 +268,44 @@ export class TransactionManager {
         throw new Error('IDEMPOTENCY_RESERVATION_INVALID');
       }
 
-      if (params.domainState !== undefined) {
-        const stateRef = tenantRef.collection(collectionForEntityType(params.aggregateType)).doc(params.aggregateId);
-        // domainState is an authoritative aggregate snapshot, not a patch.
-        // Replace the document so removed/undefined fields do not survive from prior state.
-        transaction.set(stateRef, toDocumentData(params.domainState, params.aggregateType));
+      // Read current authoritative versions before any writes so Firestore can
+      // atomically advance _serverVersion with the state transition.
+      const primaryStateSnapshot = primaryStateRef
+        ? await transaction.get(primaryStateRef)
+        : null;
+      const additionalStateSnapshots: Array<{
+        write: AdditionalStateWrite;
+        ref: typeof additionalStateRefs[number]['ref'];
+        data: Record<string, unknown> | null;
+      }> = [];
+      for (const item of additionalStateRefs) {
+        const snapshot = await transaction.get(item.ref);
+        additionalStateSnapshots.push({
+          ...item,
+          data: snapshot.exists ? snapshot.data() as Record<string, unknown> : null,
+        });
       }
 
-      for (const write of params.additionalStateWrites || []) {
-        const stateRef = tenantRef.collection(collectionForEntityType(write.entityType)).doc(write.entityId);
-        transaction.set(stateRef, toDocumentData(write.domainState, write.entityType));
+      if (params.domainState !== undefined && primaryStateRef) {
+        // Authoritative snapshots replace stale fields and advance a monotonic
+        // version in the same transaction as the domain event/audit/outbox.
+        transaction.set(
+          primaryStateRef,
+          toVersionedDocumentData(
+            params.domainState,
+            params.aggregateType,
+            primaryStateSnapshot?.exists
+              ? primaryStateSnapshot.data() as Record<string, unknown>
+              : null
+          )
+        );
+      }
+
+      for (const item of additionalStateSnapshots) {
+        transaction.set(
+          item.ref,
+          toVersionedDocumentData(item.write.domainState, item.write.entityType, item.data)
+        );
       }
 
       transaction.create(eventRef, sanitizeForFirestore(event));
@@ -345,8 +396,18 @@ export class TransactionManager {
         throw new Error('IDEMPOTENCY_RESERVATION_INVALID');
       }
 
-      // Authoritative snapshot replacement is required to clear stale clinical fields.
-      transaction.set(stateRef, toDocumentData(payload.domainState, payload.entityType));
+      const stateSnapshot = await transaction.get(stateRef);
+
+      // Authoritative snapshot replacement is required to clear stale clinical
+      // fields. _serverVersion advances atomically with event/audit/outbox.
+      transaction.set(
+        stateRef,
+        toVersionedDocumentData(
+          payload.domainState,
+          payload.entityType,
+          stateSnapshot.exists ? stateSnapshot.data() as Record<string, unknown> : null
+        )
+      );
       transaction.create(eventRef, sanitizeForFirestore(event));
       transaction.create(auditRef, sanitizeForFirestore(audit));
       transaction.create(outboxRef, sanitizeForFirestore(outbox));

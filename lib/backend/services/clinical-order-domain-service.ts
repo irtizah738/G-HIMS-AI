@@ -10,6 +10,11 @@ import { TransactionManager } from '../transactions/transaction-manager';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import { EncounterDomainService } from './encounter-domain-service';
 import type { InventoryBalance } from '@/types/scm-domain';
+import {
+  buildCanonicalDiagnosticOrder,
+  buildCanonicalMedicationDispense,
+  buildCanonicalMedicationOrder,
+} from '@/lib/clinical/canonical-fact-builders';
 
 export interface PlaceOrderPayload {
   encounterId: string;
@@ -121,20 +126,51 @@ export class ClinicalOrderDomainService {
       createdAt: Date.now(),
     };
 
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'DIAGNOSTIC_ORDER',
-      entityId: orderId,
+    const canonicalOrder = buildCanonicalDiagnosticOrder({
+      tenantId: context.tenantId,
+      patientId: payload.patientId,
+      encounterId: payload.encounterId,
+      orderId,
+      actorId: context.actorId,
+      orderType: payload.orderType,
+      catalogCode: payload.catalogCode,
+      orderName: payload.orderName,
+      priority: payload.priority,
+      clinicalIndication: payload.clinicalIndication,
+      orderedAt: domainState.createdAt,
+    });
+
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'CLINICIAN',
+      aggregateType: 'DIAGNOSTIC_ORDER',
+      aggregateId: orderId,
       eventType: 'INVESTIGATION_ORDERED',
-      domainState,
       eventPayload: {
         orderId,
         encounterId: payload.encounterId,
         patientId: payload.patientId,
         catalogCode: payload.catalogCode,
         priority: payload.priority,
+        canonicalDiagnosticOrderId: canonicalOrder.diagnosticOrderId,
       },
+      auditAction: 'PLACE_DIAGNOSTIC_ORDER',
+      auditResourceType: 'DIAGNOSTIC_ORDER',
+      auditResourceId: orderId,
       auditReason: `Ordered ${payload.orderType} ${payload.orderName} (${payload.priority})`,
       outboxTopic: 'g-hims-clinical-events',
+      idempotencyKey,
+      commandId,
+      correlationId: context.correlationId,
+      domainState,
+      additionalStateWrites: [
+        {
+          entityType: 'CANONICAL_DIAGNOSTIC_ORDER',
+          entityId: canonicalOrder.diagnosticOrderId,
+          domainState: canonicalOrder,
+        },
+      ],
     });
 
     return {
@@ -142,10 +178,13 @@ export class ClinicalOrderDomainService {
       commandId,
       idempotencyKey,
       entityId: orderId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: domainState,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
+      data: {
+        ...domainState,
+        canonicalDiagnosticOrderId: canonicalOrder.diagnosticOrderId,
+      },
     };
   }
 
@@ -416,6 +455,21 @@ export class ClinicalOrderDomainService {
       sourcePrescriptionId: payload.prescriptionId,
     };
 
+    const canonicalDispense = buildCanonicalMedicationDispense({
+      tenantId: context.tenantId,
+      patientId,
+      encounterId,
+      prescriptionId: payload.prescriptionId,
+      actorId: context.actorId,
+      drugCode: String(prescription.drugCode || itemId),
+      drugName: String(prescription.drugName || selectedBalance.itemName),
+      quantityDispensed: quantity,
+      unitOfMeasure: String(prescription.unitOfMeasure || selectedBalance.uom || 'unit'),
+      batchNumber: String(selectedBalance.batchNumber || ''),
+      expiryDate: String(selectedBalance.expiryDate || ''),
+      dispensedAt,
+    });
+
     const chargeState = {
       chargeId,
       tenantId: context.tenantId,
@@ -487,6 +541,11 @@ export class ClinicalOrderDomainService {
           entityId: chargeId,
           domainState: chargeState,
         },
+        {
+          entityType: 'MEDICATION_DISPENSE',
+          entityId: canonicalDispense.medicationDispenseId,
+          domainState: canonicalDispense,
+        },
       ],
     });
 
@@ -504,6 +563,7 @@ export class ClinicalOrderDomainService {
         stockTransaction: stockTransactionState,
         patientConsumption: consumptionState,
         charge: chargeState,
+        canonicalMedicationDispense: canonicalDispense,
       },
     };
   }
@@ -581,11 +641,31 @@ export class ClinicalOrderDomainService {
       createdAt: Date.now(),
     };
 
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'PRESCRIPTION',
-      entityId: prescriptionId,
+    const canonicalMedicationOrder = buildCanonicalMedicationOrder({
+      tenantId: context.tenantId,
+      patientId: payload.patientId,
+      encounterId: payload.encounterId,
+      prescriptionId,
+      actorId: context.actorId,
+      drugCode: payload.drugCode,
+      drugName: payload.drugName,
+      dosage: payload.dosage,
+      route: payload.route,
+      frequency: payload.frequency,
+      durationDays: payload.durationDays,
+      quantityPrescribed: payload.quantityPrescribed,
+      unitOfMeasure: payload.unitOfMeasure,
+      instructions: payload.instructions,
+      authoredAt: domainState.createdAt,
+    });
+
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'CLINICIAN',
+      aggregateType: 'PRESCRIPTION',
+      aggregateId: prescriptionId,
       eventType: 'MEDICATION_PRESCRIBED',
-      domainState,
       eventPayload: {
         prescriptionId,
         encounterId: payload.encounterId,
@@ -593,9 +673,24 @@ export class ClinicalOrderDomainService {
         drugCode: payload.drugCode,
         drugName: payload.drugName,
         quantityPrescribed: payload.quantityPrescribed,
+        canonicalMedicationOrderId: canonicalMedicationOrder.medicationOrderId,
       },
+      auditAction: 'PRESCRIBE_MEDICATION',
+      auditResourceType: 'PRESCRIPTION',
+      auditResourceId: prescriptionId,
       auditReason: `Prescribed ${payload.drugName} ${payload.dosage} (${payload.route})`,
       outboxTopic: 'g-hims-clinical-events',
+      idempotencyKey,
+      commandId,
+      correlationId: context.correlationId,
+      domainState,
+      additionalStateWrites: [
+        {
+          entityType: 'MEDICATION_ORDER',
+          entityId: canonicalMedicationOrder.medicationOrderId,
+          domainState: canonicalMedicationOrder,
+        },
+      ],
     });
 
     return {
@@ -603,10 +698,13 @@ export class ClinicalOrderDomainService {
       commandId,
       idempotencyKey,
       entityId: prescriptionId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: domainState,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
+      data: {
+        ...domainState,
+        canonicalMedicationOrderId: canonicalMedicationOrder.medicationOrderId,
+      },
     };
   }
 }

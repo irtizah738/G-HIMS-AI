@@ -10,6 +10,12 @@ import { DomainStateRepository } from '@/server/repositories/domain-state-reposi
 import type { RevenueIntegrityFinding } from './revenue-integrity-domain-service';
 import { AIDraftRepository, type AIDraftRecord } from '@/server/ai/ai-draft-repository';
 import { calculateNEWS2 } from '@/lib/clinical/news2';
+import {
+  buildCanonicalAllergy,
+  buildCanonicalClinicalDocument,
+  buildCanonicalCondition,
+  buildCanonicalVitalObservations,
+} from '@/lib/clinical/canonical-fact-builders';
 
 export interface RecordVitalsPayload {
   encounterId: string;
@@ -35,6 +41,32 @@ export interface CompleteMedicationReconciliationPayload {
   notes?: string;
 }
 
+export interface RecordClinicalConditionPayload {
+  patientId: string;
+  encounterId?: string;
+  code: string;
+  display: string;
+  codingSystem?: string;
+  category: 'PROBLEM_LIST' | 'ENCOUNTER_DIAGNOSIS' | 'CHRONIC' | 'ACUTE' | 'OTHER';
+  clinicalStatus?: 'ACTIVE' | 'INACTIVE' | 'RESOLVED' | 'COMPLETED' | 'CANCELLED' | 'ENTERED_IN_ERROR';
+  verificationStatus?: 'UNCONFIRMED' | 'PROVISIONAL' | 'DIFFERENTIAL' | 'CONFIRMED' | 'REFUTED' | 'ENTERED_IN_ERROR';
+  onsetAt?: number;
+}
+
+export interface RecordClinicalAllergyPayload {
+  patientId: string;
+  encounterId?: string;
+  substanceCode: string;
+  substanceDisplay: string;
+  codingSystem?: string;
+  type?: 'ALLERGY' | 'INTOLERANCE';
+  category: 'FOOD' | 'MEDICATION' | 'ENVIRONMENT' | 'BIOLOGIC' | 'OTHER';
+  criticality?: 'LOW' | 'HIGH' | 'UNABLE_TO_ASSESS';
+  verificationStatus?: 'UNCONFIRMED' | 'PROVISIONAL' | 'DIFFERENTIAL' | 'CONFIRMED' | 'REFUTED' | 'ENTERED_IN_ERROR';
+  reactionText?: string;
+  reactionSeverity?: 'MILD' | 'MODERATE' | 'SEVERE';
+}
+
 export interface SignClinicalNotePayload {
   encounterId: string;
   patientId: string;
@@ -45,6 +77,240 @@ export interface SignClinicalNotePayload {
 }
 
 export class ClinicalDocumentationDomainService {
+  private static async validatePatientEncounter(
+    tenantId: string,
+    patientId: string,
+    encounterId?: string
+  ): Promise<{ ok: true } | { ok: false; code: string; message: string }> {
+    const patient = await DomainStateRepository.getById<Record<string, unknown>>(
+      tenantId,
+      'patients',
+      patientId
+    );
+    if (!patient) {
+      return { ok: false, code: 'PATIENT_NOT_FOUND', message: 'Patient record was not found.' };
+    }
+    if (!encounterId) return { ok: true };
+
+    const encounter = await DomainStateRepository.getById<Record<string, unknown>>(
+      tenantId,
+      'encounters',
+      encounterId
+    );
+    if (!encounter || String(encounter.patientId || '') !== patientId) {
+      return {
+        ok: false,
+        code: 'ENCOUNTER_PATIENT_MISMATCH',
+        message: 'Encounter was not found or belongs to a different patient.',
+      };
+    }
+    return { ok: true };
+  }
+
+  public static async recordClinicalCondition(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: RecordClinicalConditionPayload
+  ): Promise<CommandResult> {
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: ['DOCTOR', 'CONSULTANT', 'SYSTEM_ADMIN'],
+    });
+    if (!auth.authorized) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Clinical condition recording authority required.',
+        },
+      };
+    }
+
+    if (!payload.patientId || !payload.code?.trim() || !payload.display?.trim()) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INVALID_CLINICAL_CONDITION',
+          message: 'Patient, condition code and condition display are required.',
+        },
+      };
+    }
+
+    const lineage = await this.validatePatientEncounter(
+      context.tenantId,
+      payload.patientId,
+      payload.encounterId
+    );
+    if (!lineage.ok) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: lineage.code, message: lineage.message },
+      };
+    }
+
+    const conditionId = `cond_${crypto.randomUUID()}`;
+    const recordedAt = Date.now();
+    const condition = buildCanonicalCondition({
+      tenantId: context.tenantId,
+      patientId: payload.patientId,
+      encounterId: payload.encounterId,
+      conditionId,
+      actorId: context.actorId,
+      code: payload.code.trim(),
+      display: payload.display.trim(),
+      codingSystem: payload.codingSystem,
+      category: payload.category,
+      clinicalStatus: payload.clinicalStatus,
+      verificationStatus: payload.verificationStatus,
+      onsetAt: payload.onsetAt,
+      recordedAt,
+    });
+
+    const tx = await TransactionManager.executeAtomicWrite(
+      context,
+      commandId,
+      idempotencyKey,
+      {
+        entityType: 'CLINICAL_CONDITION',
+        entityId: conditionId,
+        eventType: 'CLINICAL_CONDITION_RECORDED',
+        domainState: condition,
+        eventPayload: {
+          conditionId,
+          patientId: payload.patientId,
+          encounterId: payload.encounterId,
+          code: payload.code.trim(),
+          clinicalStatus: condition.clinicalStatus,
+          verificationStatus: condition.verificationStatus,
+        },
+        auditReason: `Recorded condition ${payload.display.trim()} for patient ${payload.patientId}`,
+        outboxTopic: 'g-hims-clinical-events',
+      }
+    );
+
+    return {
+      success: true,
+      commandId,
+      idempotencyKey,
+      entityId: conditionId,
+      eventId: tx.event.eventId,
+      auditId: tx.audit.auditId,
+      outboxId: tx.outbox.outboxId,
+      data: condition,
+    };
+  }
+
+  public static async recordClinicalAllergy(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: RecordClinicalAllergyPayload
+  ): Promise<CommandResult> {
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: ['NURSE', 'DOCTOR', 'CONSULTANT', 'PHARMACIST', 'SYSTEM_ADMIN'],
+    });
+    if (!auth.authorized) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Clinical allergy recording authority required.',
+        },
+      };
+    }
+
+    if (
+      !payload.patientId ||
+      !payload.substanceCode?.trim() ||
+      !payload.substanceDisplay?.trim()
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INVALID_CLINICAL_ALLERGY',
+          message: 'Patient, allergy substance code and display are required.',
+        },
+      };
+    }
+
+    const lineage = await this.validatePatientEncounter(
+      context.tenantId,
+      payload.patientId,
+      payload.encounterId
+    );
+    if (!lineage.ok) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: lineage.code, message: lineage.message },
+      };
+    }
+
+    const allergyId = `allergy_${crypto.randomUUID()}`;
+    const recordedAt = Date.now();
+    const allergy = buildCanonicalAllergy({
+      tenantId: context.tenantId,
+      patientId: payload.patientId,
+      encounterId: payload.encounterId,
+      allergyId,
+      actorId: context.actorId,
+      substanceCode: payload.substanceCode.trim(),
+      substanceDisplay: payload.substanceDisplay.trim(),
+      codingSystem: payload.codingSystem,
+      type: payload.type,
+      category: payload.category,
+      criticality: payload.criticality,
+      verificationStatus: payload.verificationStatus,
+      reactionText: payload.reactionText,
+      reactionSeverity: payload.reactionSeverity,
+      recordedAt,
+    });
+
+    const tx = await TransactionManager.executeAtomicWrite(
+      context,
+      commandId,
+      idempotencyKey,
+      {
+        entityType: 'CLINICAL_ALLERGY',
+        entityId: allergyId,
+        eventType: 'CLINICAL_ALLERGY_RECORDED',
+        domainState: allergy,
+        eventPayload: {
+          allergyId,
+          patientId: payload.patientId,
+          encounterId: payload.encounterId,
+          substanceCode: payload.substanceCode.trim(),
+          criticality: allergy.criticality,
+          verificationStatus: allergy.verificationStatus,
+        },
+        auditReason: `Recorded allergy/intolerance ${payload.substanceDisplay.trim()} for patient ${payload.patientId}`,
+        outboxTopic: 'g-hims-clinical-events',
+      }
+    );
+
+    return {
+      success: true,
+      commandId,
+      idempotencyKey,
+      entityId: allergyId,
+      eventId: tx.event.eventId,
+      auditId: tx.audit.auditId,
+      outboxId: tx.outbox.outboxId,
+      data: allergy,
+    };
+  }
+
   public static async recordVitals(
     context: CommandContext,
     commandId: string,
@@ -131,35 +397,62 @@ export class ClinicalDocumentationDomainService {
       status: 'FINAL',
     };
 
-    const tx = await TransactionManager.executeAtomicWrite(
-      context,
-      commandId,
+    const canonicalObservations = buildCanonicalVitalObservations({
+      tenantId: context.tenantId,
+      patientId: payload.patientId,
+      encounterId: payload.encounterId,
+      sourceEvidenceId: evidenceId,
+      actorId: context.actorId,
+      measuredAt,
+      heartRate: payload.heartRate,
+      bloodPressure: payload.bloodPressure,
+      temperature: payload.temperature,
+      respiratoryRate: payload.respiratoryRate,
+      oxygenSaturation: payload.oxygenSaturation,
+    });
+
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'CLINICIAN',
+      aggregateType: 'ENCOUNTER_EVIDENCE',
+      aggregateId: evidenceId,
+      eventType: 'VITALS_RECORDED',
+      eventPayload: {
+        evidenceId,
+        patientId: payload.patientId,
+        encounterId: payload.encounterId,
+        measuredAt,
+        canonicalObservationIds: canonicalObservations.map((item) => item.observationId),
+      },
+      auditAction: 'RECORD_VITALS',
+      auditResourceType: 'ENCOUNTER_EVIDENCE',
+      auditResourceId: evidenceId,
+      auditReason: `Recorded vitals for encounter ${payload.encounterId}`,
+      outboxTopic: 'g-hims-clinical-events',
       idempotencyKey,
-      {
-        entityType: 'ENCOUNTER_EVIDENCE',
-        entityId: evidenceId,
-        eventType: 'VITALS_RECORDED',
-        domainState,
-        eventPayload: {
-          evidenceId,
-          patientId: payload.patientId,
-          encounterId: payload.encounterId,
-          measuredAt,
-        },
-        auditReason: `Recorded vitals for encounter ${payload.encounterId}`,
-        outboxTopic: 'g-hims-clinical-events',
-      }
-    );
+      commandId,
+      correlationId: context.correlationId,
+      domainState,
+      additionalStateWrites: canonicalObservations.map((observation) => ({
+        entityType: 'CLINICAL_OBSERVATION',
+        entityId: observation.observationId,
+        domainState: observation,
+      })),
+    });
 
     return {
       success: true,
       commandId,
       idempotencyKey,
       entityId: evidenceId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: domainState,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
+      data: {
+        ...domainState,
+        canonicalObservationIds: canonicalObservations.map((item) => item.observationId),
+      },
     };
   }
 
@@ -387,6 +680,19 @@ export class ClinicalDocumentationDomainService {
       status: 'FINAL',
     };
 
+    const canonicalDocument = buildCanonicalClinicalDocument({
+      tenantId: context.tenantId,
+      patientId: payload.patientId,
+      encounterId: payload.encounterId,
+      sourceEvidenceId: evidenceId,
+      actorId: context.actorId,
+      category: payload.category,
+      content: payload.content,
+      signedAt,
+      sourceDraftId: payload.sourceDraftId,
+      structuredData: payload.acceptedStructuredData,
+    });
+
     // A signed note may create Revenue Integrity *candidates*, never automatic charges.
     // Only explicitly clinician-accepted structured billing codes are considered.
     const structured = payload.acceptedStructuredData || {};
@@ -445,6 +751,11 @@ export class ClinicalDocumentationDomainService {
       correlationId: context.correlationId,
       domainState,
       additionalStateWrites: [
+        {
+          entityType: 'CLINICAL_DOCUMENT',
+          entityId: canonicalDocument.clinicalDocumentId,
+          domainState: canonicalDocument,
+        },
         ...revenueIntegrityFindings.map((finding) => ({
           entityType: 'REVENUE_INTEGRITY_FINDING',
           entityId: finding.id,
@@ -476,6 +787,7 @@ export class ClinicalDocumentationDomainService {
       outboxId: tx.outboxId,
       data: {
         ...domainState,
+        canonicalDocumentId: canonicalDocument.clinicalDocumentId,
         revenueIntegrityFindings,
       },
     };

@@ -193,6 +193,24 @@ export class CommandBus {
           );
           break;
 
+        case 'RecordClinicalConditionCommand':
+          result = await ClinicalDocumentationDomainService.recordClinicalCondition(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecordClinicalAllergyCommand':
+          result = await ClinicalDocumentationDomainService.recordClinicalAllergy(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
         case 'UpdateOpdQueueStatusCommand':
           result = await OpdQueueDomainService.updateStatus(
             context,

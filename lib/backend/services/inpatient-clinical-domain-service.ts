@@ -10,6 +10,7 @@ import { AuthorizationPipeline } from '../auth/authorization-pipeline';
 import { TransactionManager } from '../transactions/transaction-manager';
 import type { CommandContext, CommandResult } from '../types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
+import { buildCanonicalMedicationAdministration } from '@/lib/clinical/canonical-fact-builders';
 
 interface PersistedEncounter {
   encounterId?: string;
@@ -229,40 +230,71 @@ export class InpatientClinicalDomainService {
       createdAt: Date.now(),
     };
 
-    const tx = await TransactionManager.executeAtomicWrite(
-      context,
-      commandId,
+    const canonicalAdministration = buildCanonicalMedicationAdministration({
+      tenantId: context.tenantId,
+      patientId: payload.patientId,
+      encounterId: payload.encounterId,
+      administrationId,
+      actorId: context.actorId,
+      medicationOrderId: payload.medicationId,
+      medicationCode: payload.medicationId,
+      medicationName: payload.medicationName,
+      doseText: payload.dose,
+      route: payload.route,
+      status,
+      administeredAt,
+      notes: payload.notes,
+    });
+
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'CLINICIAN',
+      aggregateType: 'MEDICATION_ADMINISTRATION',
+      aggregateId: administrationId,
+      eventType:
+        status === 'GIVEN'
+          ? 'MEDICATION_ADMINISTERED'
+          : 'MEDICATION_ADMINISTRATION_HELD',
+      eventPayload: {
+        administrationId,
+        encounterId: payload.encounterId,
+        patientId: payload.patientId,
+        medicationId: payload.medicationId,
+        status,
+        administeredAt,
+        canonicalMedicationAdministrationId: canonicalAdministration.medicationAdministrationId,
+      },
+      auditAction: status === 'GIVEN' ? 'ADMINISTER_MEDICATION' : 'HOLD_MEDICATION',
+      auditResourceType: 'MEDICATION_ADMINISTRATION',
+      auditResourceId: administrationId,
+      auditReason: `${status === 'GIVEN' ? 'Administered' : 'Held'} medication ${payload.medicationName} for inpatient encounter ${payload.encounterId}`,
+      outboxTopic: 'g-hims-clinical-events',
       idempotencyKey,
-      {
-        entityType: 'MEDICATION_ADMINISTRATION',
-        entityId: administrationId,
-        eventType:
-          status === 'GIVEN'
-            ? 'MEDICATION_ADMINISTERED'
-            : 'MEDICATION_ADMINISTRATION_HELD',
-        domainState,
-        eventPayload: {
-          administrationId,
-          encounterId: payload.encounterId,
-          patientId: payload.patientId,
-          medicationId: payload.medicationId,
-          status,
-          administeredAt,
+      commandId,
+      correlationId: context.correlationId,
+      domainState,
+      additionalStateWrites: [
+        {
+          entityType: 'CANONICAL_MEDICATION_ADMINISTRATION',
+          entityId: canonicalAdministration.medicationAdministrationId,
+          domainState: canonicalAdministration,
         },
-        auditReason: `${status === 'GIVEN' ? 'Administered' : 'Held'} medication ${payload.medicationName} for inpatient encounter ${payload.encounterId}`,
-        outboxTopic: 'g-hims-clinical-events',
-      }
-    );
+      ],
+    });
 
     return {
       success: true,
       commandId,
       idempotencyKey,
       entityId: administrationId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: domainState,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
+      data: {
+        ...domainState,
+        canonicalMedicationAdministrationId: canonicalAdministration.medicationAdministrationId,
+      },
     };
   }
 }

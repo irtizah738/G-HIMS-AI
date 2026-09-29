@@ -8,13 +8,21 @@
 
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
+import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
 
 export interface ConsumableEvent {
   eventId: string;
   tenantId: string;
   eventType: string;
+  aggregateType?: string;
+  aggregateId?: string;
   payload: Record<string, unknown>;
   occurredAt?: number;
+  recordedAt?: number;
+}
+
+export interface ProjectionConsumeOptions {
+  skipPatient360?: boolean;
 }
 
 export interface ProjectionRebuildOptions {
@@ -171,7 +179,10 @@ export class ProjectionWorkers {
   /**
    * Persist a single event's read-model effects and checkpoint atomically.
    */
-  public static async consumeEvent(event: ConsumableEvent): Promise<void> {
+  public static async consumeEvent(
+    event: ConsumableEvent,
+    options: ProjectionConsumeOptions = {}
+  ): Promise<void> {
     if (!event.tenantId || !event.eventId) {
       throw new Error('PROJECTION_EVENT_INVALID: tenantId and eventId are required.');
     }
@@ -308,6 +319,13 @@ export class ProjectionWorkers {
         processedAt: now,
       });
     });
+
+    if (!options.skipPatient360) {
+      await Patient360ProjectionService.refreshFromEvent(
+        event.tenantId,
+        event.eventId
+      );
+    }
   }
 
   private static async clearCollection(
@@ -410,13 +428,21 @@ export class ProjectionWorkers {
       'timelineProjections',
       'clinicalQueues',
       'generalLedgerProjections',
+      'patient360ProjectionCheckpoints',
+      'patient360Projections',
+      'patient360Timeline',
     ]) {
       await this.clearCollection(tenantId, collectionName);
     }
 
     for (const event of orderedEvents) {
-      await this.consumeEvent(event);
+      await this.consumeEvent(event, { skipPatient360: true });
     }
+
+    await Patient360ProjectionService.rebuildTenantFromEventStream(
+      tenantId,
+      orderedEvents
+    );
 
     return { rebuiltCount: orderedEvents.length, tenantId };
   }

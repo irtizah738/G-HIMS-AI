@@ -107,6 +107,8 @@ function collectionForEntityType(entityType: string): string {
     OPD_QUEUE_TOKEN: 'opd_queue',
     DIAGNOSTIC_ORDER: 'orders',
     PRESCRIPTION: 'prescriptions',
+    INPATIENT_ORDER: 'inpatientOrders',
+    MEDICATION_ADMINISTRATION: 'medicationAdministrations',
     JOURNAL_ENTRY: 'journalEntries',
     EMPLOYEE_MASTER: 'employees',
     EMPLOYEE_CREDENTIAL: 'clinicalCredentials',

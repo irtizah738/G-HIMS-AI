@@ -22,9 +22,7 @@ import {
   AlertTriangle,
   ArrowRight,
   Flame,
-  GitFork,
 } from 'lucide-react';
-import { WorkflowRuntimeView } from '@/components/views/workflow-runtime-view';
 import {
   ComprehensiveOpdEncounter,
   PatientDemographics,
@@ -1222,7 +1220,6 @@ export function OpdMasterWorkspace() {
     { id: 'BILLING', label: 'Billing / GL', icon: DollarSign },
     { id: 'DISPOSITION', label: 'Disposition', icon: FileCheck },
     { id: 'AUDIT', label: 'Audit Trail', icon: ShieldCheck },
-    { id: 'DAG_ENGINE', label: 'Backend DAG Engine', icon: GitFork },
   ];
 
   return (
@@ -1294,14 +1291,6 @@ export function OpdMasterWorkspace() {
             <span className="px-2.5 py-1 rounded-full text-xs font-extrabold bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
               {activeEncounter.currentStage.replace(/_/g, ' ')}
             </span>
-            <button
-              onClick={() => setActiveTab('DAG_ENGINE')}
-              className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 flex items-center gap-1.5 cursor-pointer transition-all"
-              title="Inspect DAG Workflow Engine and Outbox state for this encounter"
-            >
-              <GitFork className="w-3.5 h-3.5" />
-              <span>DAG Engine</span>
-            </button>
           </div>
         </div>
       )}
@@ -1602,28 +1591,7 @@ export function OpdMasterWorkspace() {
         />
       )}
 
-      {/* 13. Workflow DAG Engine & Outbox Orchestrator (Backend Engine) */}
-      {activeTab === 'DAG_ENGINE' && (
-        <WorkflowRuntimeView
-          embeddedInOpd={true}
-          activePatient={
-            activeEncounter
-              ? {
-                  firstName: activeEncounter.patientName.split(' ')[0] || 'Eleanor',
-                  lastName: activeEncounter.patientName.split(' ').slice(1).join(' ') || 'Vance',
-                  gender: (activeEncounter.gender as any) || 'Female',
-                  dob: '1984-06-12',
-                  phone: '+1 (555) 234-8901',
-                  nationalId: 'NAT-8492041',
-                  chiefComplaint: activeEncounter.chiefComplaint || 'Thoracic evaluation',
-                  department: activeEncounter.department || 'Cardiology OPD',
-                  mrn: activeEncounter.mrn,
-                }
-              : undefined
-          }
-          onClose={() => setActiveTab(activeEncounter ? 'CONSULTATION' : 'DASHBOARD')}
-        />
-      )}
+
     </div>
   );
 }

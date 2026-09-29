@@ -165,6 +165,7 @@ export interface SyncBatchResultItem {
   conflictCategory?: ConflictCategory;
   serverEventId?: string;
   serverVersion?: number;
+  serverVectorClock?: Record<string, number>;
   reason?: string;
   data?: unknown;
 }

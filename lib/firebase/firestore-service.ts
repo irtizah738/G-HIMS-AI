@@ -1,19 +1,4 @@
-import {
-  collection,
-  doc,
-  getDocs,
-  getDoc,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  onSnapshot,
-  query,
-  orderBy,
-  limit,
-} from 'firebase/firestore';
-import { db, cleanFirestoreData } from './config';
-import { handleFirestoreError, OperationType } from './errors';
-import {
+import type {
   Patient,
   Bed,
   BillingAuditMismatch,
@@ -24,287 +9,96 @@ import {
   TelehealthSession,
 } from '@/lib/types/ghims';
 
-// Subscriptions
-export function subscribeToPatients(callback: (patients: Patient[]) => void) {
-  const path = 'patients';
-  try {
-    const q = query(collection(db, path));
-    return onSnapshot(
-      q,
-      (snapshot) => {
-        if (!snapshot.empty) {
-          const items = snapshot.docs.map((d) => d.data() as Patient);
-          callback(items);
-        }
-      },
-      (error) => {
-        if (error?.code === 'unavailable' || error?.message?.includes('offline') || error?.message?.includes('unavailable')) {
-          console.warn(`Firestore subscription [${path}] offline mode:`, error.message);
-          return;
-        }
-        handleFirestoreError(error, OperationType.GET, path);
-      }
-    );
-  } catch (error) {
-    if ((error as any)?.code === 'unavailable' || (error as any)?.message?.includes('offline')) {
-      return () => {};
-    }
-    handleFirestoreError(error, OperationType.GET, path);
-  }
+/**
+ * Legacy browser Firestore adapter.
+ *
+ * Root-level hospital collections were retired at the P0/P5C trust boundary.
+ * firestore.rules intentionally deny those paths. Keeping real client reads/writes
+ * here creates permission-denied storms and tempts callers to bypass tenant/session
+ * authority. The compatibility exports remain temporarily so older UI modules fail
+ * closed while they are migrated to tenant-scoped read models and server commands.
+ */
+
+type Unsubscribe = () => void;
+
+function retiredSubscription(_name: string): Unsubscribe {
+  return () => {};
 }
 
-export function subscribeToBeds(callback: (beds: Bed[]) => void) {
-  const path = 'beds';
-  try {
-    const q = query(collection(db, path));
-    return onSnapshot(
-      q,
-      (snapshot) => {
-        if (!snapshot.empty) {
-          const items = snapshot.docs.map((d) => d.data() as Bed);
-          callback(items);
-        }
-      },
-      (error) => {
-        if (error?.code === 'unavailable' || error?.message?.includes('offline') || error?.message?.includes('unavailable')) {
-          console.warn(`Firestore subscription [${path}] offline mode:`, error.message);
-          return;
-        }
-        handleFirestoreError(error, OperationType.GET, path);
-      }
-    );
-  } catch (error) {
-    if ((error as any)?.code === 'unavailable' || (error as any)?.message?.includes('offline')) {
-      return () => {};
-    }
-    handleFirestoreError(error, OperationType.GET, path);
-  }
+function retiredMutation(name: string): never {
+  throw new Error(
+    'LEGACY_CLIENT_FIRESTORE_RETIRED: ' + name +
+    ' cannot access root Firestore collections. Use tenant-scoped projections or authenticated server commands.'
+  );
 }
 
-export function subscribeToBillingMismatches(callback: (mismatches: BillingAuditMismatch[]) => void) {
-  const path = 'billingMismatches';
-  try {
-    const q = query(collection(db, path));
-    return onSnapshot(
-      q,
-      (snapshot) => {
-        if (!snapshot.empty) {
-          const items = snapshot.docs.map((d) => d.data() as BillingAuditMismatch);
-          callback(items);
-        }
-      },
-      (error) => {
-        if (error?.code === 'unavailable' || error?.message?.includes('offline') || error?.message?.includes('unavailable')) {
-          console.warn(`Firestore subscription [${path}] offline mode:`, error.message);
-          return;
-        }
-        handleFirestoreError(error, OperationType.GET, path);
-      }
-    );
-  } catch (error) {
-    if ((error as any)?.code === 'unavailable' || (error as any)?.message?.includes('offline')) {
-      return () => {};
-    }
-    handleFirestoreError(error, OperationType.GET, path);
-  }
+export function subscribeToPatients(_callback: (patients: Patient[]) => void): Unsubscribe {
+  return retiredSubscription('patients');
 }
 
-export function subscribeToOpdQueue(callback: (tokens: OpdQueueToken[]) => void) {
-  const path = 'opdQueue';
-  try {
-    const q = query(collection(db, path));
-    return onSnapshot(
-      q,
-      (snapshot) => {
-        if (!snapshot.empty) {
-          const items = snapshot.docs.map((d) => d.data() as OpdQueueToken);
-          callback(items);
-        }
-      },
-      (error) => {
-        if (error?.code === 'unavailable' || error?.message?.includes('offline') || error?.message?.includes('unavailable')) {
-          console.warn(`Firestore subscription [${path}] offline mode:`, error.message);
-          return;
-        }
-        handleFirestoreError(error, OperationType.GET, path);
-      }
-    );
-  } catch (error) {
-    if ((error as any)?.code === 'unavailable' || (error as any)?.message?.includes('offline')) {
-      return () => {};
-    }
-    handleFirestoreError(error, OperationType.GET, path);
-  }
+export function subscribeToBeds(_callback: (beds: Bed[]) => void): Unsubscribe {
+  return retiredSubscription('beds');
 }
 
-export function subscribeToAuditLogs(callback: (logs: AuditLogEntry[]) => void) {
-  const path = 'auditLogs';
-  try {
-    const q = query(collection(db, path), limit(50));
-    return onSnapshot(
-      q,
-      (snapshot) => {
-        if (!snapshot.empty) {
-          const items = snapshot.docs.map((d) => d.data() as AuditLogEntry);
-          callback(items);
-        }
-      },
-      (error) => {
-        if (error?.code === 'unavailable' || error?.message?.includes('offline') || error?.message?.includes('unavailable')) {
-          console.warn(`Firestore subscription [${path}] offline mode:`, error.message);
-          return;
-        }
-        handleFirestoreError(error, OperationType.GET, path);
-      }
-    );
-  } catch (error) {
-    if ((error as any)?.code === 'unavailable' || (error as any)?.message?.includes('offline')) {
-      return () => {};
-    }
-    handleFirestoreError(error, OperationType.GET, path);
-  }
+export function subscribeToBillingMismatches(
+  _callback: (mismatches: BillingAuditMismatch[]) => void
+): Unsubscribe {
+  return retiredSubscription('billingMismatches');
 }
 
-export function subscribeToTelehealthSessions(callback: (sessions: TelehealthSession[]) => void) {
-  const path = 'telehealth_sessions';
-  try {
-    const q = query(collection(db, path));
-    return onSnapshot(
-      q,
-      (snapshot) => {
-        if (!snapshot.empty) {
-          const items = snapshot.docs.map((d) => d.data() as TelehealthSession);
-          callback(items);
-        }
-      },
-      (error) => {
-        if (error?.code === 'unavailable' || error?.message?.includes('offline') || error?.message?.includes('unavailable')) {
-          console.warn(`Firestore subscription [${path}] offline mode:`, error.message);
-          return;
-        }
-        handleFirestoreError(error, OperationType.GET, path);
-      }
-    );
-  } catch (error) {
-    if ((error as any)?.code === 'unavailable' || (error as any)?.message?.includes('offline')) {
-      return () => {};
-    }
-    handleFirestoreError(error, OperationType.GET, path);
-  }
+export function subscribeToOpdQueue(_callback: (tokens: OpdQueueToken[]) => void): Unsubscribe {
+  return retiredSubscription('opdQueue');
 }
 
-// Mutations
-export async function syncPatientToFirestore(patient: Patient): Promise<void> {
-  const path = `patients/${patient.id}`;
-  try {
-    await setDoc(doc(db, 'patients', patient.id), cleanFirestoreData(patient), { merge: true });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
-  }
+export function subscribeToAuditLogs(_callback: (logs: AuditLogEntry[]) => void): Unsubscribe {
+  return retiredSubscription('auditLogs');
 }
 
-export async function syncBedToFirestore(bed: Bed): Promise<void> {
-  const path = `beds/${bed.id}`;
-  try {
-    await setDoc(doc(db, 'beds', bed.id), cleanFirestoreData(bed), { merge: true });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
-  }
+export function subscribeToTelehealthSessions(
+  _callback: (sessions: TelehealthSession[]) => void
+): Unsubscribe {
+  return retiredSubscription('telehealthSessions');
 }
 
-export async function syncMismatchToFirestore(mismatch: BillingAuditMismatch): Promise<void> {
-  const path = `billingMismatches/${mismatch.id}`;
-  try {
-    await setDoc(doc(db, 'billingMismatches', mismatch.id), cleanFirestoreData(mismatch), { merge: true });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
-  }
+export async function syncPatientToFirestore(_patient: Patient): Promise<void> {
+  retiredMutation('syncPatientToFirestore');
 }
 
-export async function syncOpdTokenToFirestore(token: OpdQueueToken): Promise<void> {
-  const path = `opdQueue/${token.id}`;
-  try {
-    await setDoc(doc(db, 'opdQueue', token.id), cleanFirestoreData(token), { merge: true });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
-  }
+export async function syncBedToFirestore(_bed: Bed): Promise<void> {
+  retiredMutation('syncBedToFirestore');
 }
 
-export async function syncAuditLogToFirestore(log: AuditLogEntry): Promise<void> {
-  const path = `auditLogs/${log.id}`;
-  try {
-    await setDoc(doc(db, 'auditLogs', log.id), cleanFirestoreData(log));
-  } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, path);
-  }
+export async function syncMismatchToFirestore(_mismatch: BillingAuditMismatch): Promise<void> {
+  retiredMutation('syncMismatchToFirestore');
 }
 
-export async function syncHl7ToFirestore(message: Hl7Message): Promise<void> {
-  const path = `hl7Messages/${message.id}`;
-  try {
-    await setDoc(doc(db, 'hl7Messages', message.id), cleanFirestoreData(message), { merge: true });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
-  }
+export async function syncOpdTokenToFirestore(_token: OpdQueueToken): Promise<void> {
+  retiredMutation('syncOpdTokenToFirestore');
 }
 
-export async function syncTelehealthSessionToFirestore(session: TelehealthSession): Promise<void> {
-  const path = `telehealth_sessions/${session.id}`;
-  try {
-    await setDoc(doc(db, 'telehealth_sessions', session.id), cleanFirestoreData(session), { merge: true });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
-  }
+export async function syncAuditLogToFirestore(_log: AuditLogEntry): Promise<void> {
+  retiredMutation('syncAuditLogToFirestore');
 }
 
-export async function deleteTelehealthSessionFromFirestore(sessionId: string): Promise<void> {
-  const path = `telehealth_sessions/${sessionId}`;
-  try {
-    await deleteDoc(doc(db, 'telehealth_sessions', sessionId));
-  } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
-  }
+export async function syncHl7ToFirestore(_message: Hl7Message): Promise<void> {
+  retiredMutation('syncHl7ToFirestore');
 }
 
-// Seed initial dataset to Firestore if empty
+export async function syncTelehealthSessionToFirestore(_session: TelehealthSession): Promise<void> {
+  retiredMutation('syncTelehealthSessionToFirestore');
+}
+
+export async function deleteTelehealthSessionFromFirestore(_sessionId: string): Promise<void> {
+  retiredMutation('deleteTelehealthSessionFromFirestore');
+}
+
 export async function seedInitialFirestoreData(
-  initialPatients: Patient[],
-  initialBeds: Bed[],
-  initialMismatches: BillingAuditMismatch[],
-  initialTokens: OpdQueueToken[],
-  initialStaff: StaffMember[],
-  initialTelehealth?: TelehealthSession[]
-) {
-  try {
-    const patientsSnap = await getDocs(collection(db, 'patients'));
-    if (patientsSnap.empty) {
-      console.log('Seeding initial clinical data to Firestore...');
-      for (const p of initialPatients) {
-        await setDoc(doc(db, 'patients', p.id), cleanFirestoreData(p));
-      }
-      for (const b of initialBeds) {
-        await setDoc(doc(db, 'beds', b.id), cleanFirestoreData(b));
-      }
-      for (const m of initialMismatches) {
-        await setDoc(doc(db, 'billingMismatches', m.id), cleanFirestoreData(m));
-      }
-      for (const t of initialTokens) {
-        await setDoc(doc(db, 'opdQueue', t.id), cleanFirestoreData(t));
-      }
-      for (const s of initialStaff) {
-        await setDoc(doc(db, 'staff', s.id), cleanFirestoreData(s));
-      }
-    }
-
-    if (initialTelehealth && initialTelehealth.length > 0) {
-      const thSnap = await getDocs(collection(db, 'telehealth_sessions'));
-      if (thSnap.empty) {
-        for (const th of initialTelehealth) {
-          await setDoc(doc(db, 'telehealth_sessions', th.id), cleanFirestoreData(th));
-        }
-      }
-    }
-  } catch (error) {
-    console.warn('Firestore initial seeding deferred or offline:', error);
-  }
+  _initialPatients: Patient[],
+  _initialBeds: Bed[],
+  _initialMismatches: BillingAuditMismatch[],
+  _initialTokens: OpdQueueToken[],
+  _initialStaff: StaffMember[],
+  _initialTelehealth?: TelehealthSession[]
+): Promise<void> {
+  retiredMutation('seedInitialFirestoreData');
 }

@@ -7,7 +7,6 @@ import {
   BedDouble,
   Building2,
   CheckCircle2,
-  AlertTriangle,
   Sparkles,
   ArrowRightLeft,
   UserPlus,
@@ -141,12 +140,6 @@ export default function InpatientBedBoardPage() {
     approvedBy: '',
     reason: '',
     clinicalIndication: '',
-  });
-
-  // Discharge Form State
-  const [dischargeForm, setDischargeForm] = useState({
-    dischargedBy: 'Dr. Sarah Jenkins, FACS',
-    notes: 'Patient clinically stable for discharge to home. Follow-up clinic appointment in 7 days.',
   });
 
   // Compute live NEWS2 score for Admission Modal
@@ -428,10 +421,6 @@ export default function InpatientBedBoardPage() {
   // Discharge Modal Trigger
   const handleOpenDischarge = (bed: Bed) => {
     setSelectedBed(bed);
-    setDischargeForm({
-      dischargedBy: bed.assignedDoctor || 'Dr. Sarah Jenkins, FACS',
-      notes: '',
-    });
     setDischargeModalOpen(true);
   };
 
@@ -465,10 +454,6 @@ export default function InpatientBedBoardPage() {
           patientId: selectedBed.currentPatientId,
           category: 'DISCHARGE',
           content: formData.notes,
-        },
-        {
-          idempotencyKey:
-            `ipd-discharge-summary:${selectedBed.currentEncounterId}`,
         }
       );
       if (!summary.success) {
@@ -1673,13 +1658,13 @@ export default function InpatientBedBoardPage() {
                       placeholder="pat_..."
                       className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     />
-                  </div>
+                  
+                    <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">Server resolves authoritative identity from Patient ID. Name/MRN fields below are reference-only and cannot override MPI.</p></div>
 
                   <div className="sm:col-span-2">
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">Patient Full Name *</label>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">Patient Name (reference only)</label>
                     <input
                       type="text"
-                      required
                       value={admitForm.patientName}
                       onChange={(e) => setAdmitForm({ ...admitForm, patientName: e.target.value })}
                       placeholder="e.g. Eleanor Vance"
@@ -1688,10 +1673,9 @@ export default function InpatientBedBoardPage() {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">MRN *</label>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">MRN (reference only)</label>
                     <input
                       type="text"
-                      required
                       value={admitForm.patientMRN}
                       onChange={(e) => setAdmitForm({ ...admitForm, patientMRN: e.target.value })}
                       className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"

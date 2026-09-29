@@ -283,9 +283,6 @@ class ClinicalSyncEngine {
   public async refreshPendingCount(tenantId?: string): Promise<number> {
     try {
       const pending = await getPendingMutations(tenantId);
-      if (!eventTenantId && pending.length > 0) {
-        eventTenantId = pending[0].tenantId;
-      }
       this.updateState({ pendingCount: pending.length });
       return pending.length;
     } catch {
@@ -379,6 +376,7 @@ class ClinicalSyncEngine {
     let syncedCount = 0;
     let conflictCount = 0;
     const batchIds: string[] = [];
+    const processingMutationIds = new Set<string>();
     let eventTenantId: string | null = tenantId || null;
 
     try {
@@ -445,6 +443,7 @@ class ClinicalSyncEngine {
         for (const mutation of replayable) {
           this.updateState({ activeProcessingId: mutation.id });
           await updateMutationStatus(mutation.id, 'syncing');
+          processingMutationIds.add(mutation.id);
         }
 
         const response = await fetch('/api/sync/batch', {
@@ -481,9 +480,13 @@ class ClinicalSyncEngine {
           throw new Error(payload?.error?.message || 'Offline replay request failed.');
         }
 
+        const returnedMutationIds = new Set<string>();
+
         for (const result of payload.results || []) {
           const mutation = replayable.find((item) => item.id === result.mutationId);
           if (!mutation) continue;
+
+          returnedMutationIds.add(mutation.id);
 
           if (result.status === 'accepted') {
             await deleteMutation(mutation.id);
@@ -496,7 +499,11 @@ class ClinicalSyncEngine {
             syncedCount += 1;
           } else if (result.status === 'conflict' || result.status === 'requires_review') {
             conflictCount += 1;
-            await updateMutationStatus(mutation.id, 'conflict', result.reason || 'Server reconciliation required.');
+            await updateMutationStatus(
+              mutation.id,
+              'conflict',
+              result.reason || 'Server reconciliation required.'
+            );
             await recordSyncConflict({
               id: mutation.id,
               mutationId: mutation.id,
@@ -508,8 +515,24 @@ class ClinicalSyncEngine {
               reason: result.reason,
             });
           } else {
-            await updateMutationStatus(mutation.id, 'failed', result.reason || 'Server rejected offline command.');
+            await updateMutationStatus(
+              mutation.id,
+              'failed',
+              result.reason || 'Server rejected offline command.'
+            );
           }
+
+          processingMutationIds.delete(mutation.id);
+        }
+
+        for (const mutation of replayable) {
+          if (returnedMutationIds.has(mutation.id)) continue;
+          await updateMutationStatus(
+            mutation.id,
+            'failed',
+            'SYNC_RESPONSE_INCOMPLETE: server returned no reconciliation result for this command.'
+          );
+          processingMutationIds.delete(mutation.id);
         }
       }
 
@@ -536,6 +559,17 @@ class ClinicalSyncEngine {
       void this.refreshReplicaStatus(eventTenantId || undefined);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Sync loop failed';
+
+      for (const mutationId of processingMutationIds) {
+        await updateMutationStatus(
+          mutationId,
+          'failed',
+          `SYNC_TRANSPORT_FAILURE: ${message}`
+        ).catch(() => {});
+      }
+      processingMutationIds.clear();
+      await this.refreshPendingCount(tenantId).catch(() => 0);
+
       this.updateState({
         lastError: message,
         lastReplicationEvent: {

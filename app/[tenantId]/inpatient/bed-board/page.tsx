@@ -338,8 +338,6 @@ export default function InpatientBedBoardPage() {
           bedId: selectedBed.id,
           admittingDiagnosis: admitForm.primaryDiagnosis.trim(),
           targetWard: selectedBed.wardName || selectedBed.wardId,
-          assignedDoctor: admitForm.assignedDoctor || undefined,
-          assignedNurse: admitForm.assignedNurse || undefined,
           priority: admitForm.priority,
         }
       );
@@ -1740,6 +1738,10 @@ export default function InpatientBedBoardPage() {
                 </div>
               </div>
 
+              <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                Authenticated admitting clinician remains the authoritative provider assignment until staff-directory IDs are selected through a governed roster control.
+              </p>
+
               {/* 2. Interactive NEWS2 Clinical Acuity Calculator */}
               <div className="rounded-xl border border-blue-200 bg-blue-50/30 p-4 dark:border-blue-900/60 dark:bg-blue-950/20">
                 <div className="flex items-center justify-between border-b border-blue-100 pb-2 dark:border-blue-900/40">
@@ -1893,7 +1895,7 @@ export default function InpatientBedBoardPage() {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">Assigned Nurse</label>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">Nurse label (reference only)</label>
                     <input
                       type="text"
                       value={admitForm.assignedNurse}

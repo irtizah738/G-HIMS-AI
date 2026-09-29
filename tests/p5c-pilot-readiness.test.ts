@@ -67,7 +67,7 @@ describe('G-HIMS P5C pilot readiness guards', () => {
   test('main cannot auto-deploy directly to Vercel production', async () => {
     const config = JSON.parse(await source('vercel.json'));
 
-    expect(config.git?.deploymentEnabled?.main).toBe(false);
+    expect(config.git?.deploymentEnabled).toBe(false);
   });
 
   test('manual staging workflow is pinned to current main and never uses a production target', async () => {
@@ -76,13 +76,16 @@ describe('G-HIMS P5C pilot readiness guards', () => {
     expect(workflow).toContain('workflow_dispatch:');
     expect(workflow).toContain('ref: main');
     expect(workflow).toContain('git rev-parse origin/main');
-    expect(workflow).toContain('vercel pull --yes --environment=staging');
-    expect(workflow).toContain('vercel deploy --target=staging');
+    expect(workflow).toContain('vercel pull --yes --environment=preview');
+    expect(workflow).toContain('vercel build --token="$VERCEL_TOKEN"');
+    expect(workflow).toContain('vercel deploy --prebuilt --yes --token="$VERCEL_TOKEN"');
     expect(workflow).toContain('bun run ops:staging-smoke');
+    expect(workflow).toContain('G-HIMS runtime: STAGING');
     expect(workflow).toContain('VERCEL_TOKEN');
     expect(workflow).not.toContain('vercel --prod');
     expect(workflow).not.toContain('vercel deploy --prod');
     expect(workflow).not.toContain('--target=production');
+    expect(workflow).not.toContain('--target=staging');
   });
   test('dashboard does not mount forbidden legacy root Firestore listeners', async () => {
     const hospitalContext = await source('lib/context/hospital-context.tsx');

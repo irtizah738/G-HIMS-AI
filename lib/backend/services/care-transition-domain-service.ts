@@ -161,7 +161,7 @@ export class CareTransitionDomainService {
       ...patient,
       activeBedId: bed.id,
       activeEncounterId: encounterId,
-      updatedAt: new Date(now).toISOString(),
+      updatedAt: now,
     };
 
     const sourceEncounterState = sourceEncounter
@@ -411,7 +411,7 @@ export class CareTransitionDomainService {
       ...patient,
       activeBedId: undefined,
       activeEncounterId: undefined,
-      updatedAt: new Date(now).toISOString(),
+      updatedAt: now,
     };
 
     const tx = await TransactionManager.executeAtomicMutation({

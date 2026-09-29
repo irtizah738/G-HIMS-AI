@@ -606,6 +606,8 @@ export async function addMutation(
         schemaVersion?: number;
         baseEntityVersion?: number;
         id?: string;
+        vectorClock?: Record<string, number>;
+        clientTimestamp?: number;
       }
 ): Promise<SyncMutation> {
   const docId = mutationOrParams.docId || (mutationOrParams as any).resourceId || `doc_${Date.now()}`;

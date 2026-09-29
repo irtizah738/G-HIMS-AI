@@ -25,6 +25,7 @@ function stateCollectionForCommand(commandType: string): string | null {
     DismissRevenueIntegrityFindingCommand: 'billingMismatches',
     ReconcileRevenueIntegrityFindingCommand: 'billingMismatches',
     AdvanceStageCommand: 'encounters',
+    RecordStockTransactionCommand: 'inventoryBalances',
   };
   return map[commandType] || null;
 }
@@ -45,6 +46,7 @@ function serverCausalMetadata(state: Record<string, unknown> | null): {
 
 function conflictCategory(commandType: string): ConflictCategory {
   if (['PostJournalCommand'].includes(commandType)) return 'FINANCIAL_CONFLICT';
+  if (['RecordStockTransactionCommand'].includes(commandType)) return 'SAFETY_CRITICAL';
   if (
     [
       'PrescribeMedicationCommand',

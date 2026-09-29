@@ -1200,8 +1200,13 @@ export default function InpatientBedBoardPage() {
                           const statusInfo = getStatusBadge(bed.status);
                           const classBadge = getClassBadge(bed.class);
                           const news = getBedNEWS2(bed);
-                          const newsClasses = getNEWS2BadgeClasses(news.score, news.riskLevel);
-                          const isHighNEWS2Acuity = bed.status === 'occupied' && news.score >= 5;
+                          const newsClasses =
+                            typeof news.score === 'number' && news.riskLevel
+                              ? getNEWS2BadgeClasses(news.score, news.riskLevel)
+                              : {
+                                  bg: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
+                                };
+                          const isHighNEWS2Acuity = hasHighRecordedNEWS2(bed);
 
                           return (
                             <div
@@ -1228,7 +1233,7 @@ export default function InpatientBedBoardPage() {
                                     <span>NEWS2: {news.score} • IMMEDIATE ATTENTION</span>
                                   </div>
                                   <span className="rounded bg-rose-800/80 px-1.5 py-0.2 text-[9px] font-extrabold uppercase">
-                                    {news.riskLevel}
+                                    {news.riskLevel || 'Not recorded'}
                                   </span>
                                 </div>
                               )}
@@ -1278,13 +1283,15 @@ export default function InpatientBedBoardPage() {
                                       <div className="flex flex-col items-end">
                                         <span
                                           className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-bold shadow-2xs ${newsClasses.bg}`}
-                                          title={`NEWS2 Score: ${news.score} (${news.riskLevel} Acuity Risk)`}
+                                          title={`NEWS2 Score: ${news.score} (${news.riskLevel || 'Not recorded'} Acuity Risk)`}
                                         >
                                           <HeartPulse className="h-3 w-3" />
-                                          <span>NEWS2: {news.score}</span>
+                                          <span>
+                                            NEWS2: {typeof news.score === 'number' ? news.score : 'Not recorded'}
+                                          </span>
                                         </span>
                                         <span className="text-[9px] font-semibold text-slate-400 mt-0.5">
-                                          {news.riskLevel} Risk
+                                          {news.riskLevel ? `${news.riskLevel} Risk` : 'No authoritative score'}
                                         </span>
                                       </div>
                                     </div>
@@ -1471,9 +1478,14 @@ export default function InpatientBedBoardPage() {
                   {filteredBeds.map((b) => {
                     const statusInfo = getStatusBadge(b.status);
                     const news = getBedNEWS2(b);
-                    const newsClasses = getNEWS2BadgeClasses(news.score, news.riskLevel);
+                    const newsClasses =
+                            typeof news.score === 'number' && news.riskLevel
+                              ? getNEWS2BadgeClasses(news.score, news.riskLevel)
+                              : {
+                                  bg: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
+                                };
 
-                    const isCriticalNEWS2 = b.status === 'occupied' && news.score >= 5;
+                    const isCriticalNEWS2 = hasHighRecordedNEWS2(b);
 
                     return (
                       <tr
@@ -1514,7 +1526,11 @@ export default function InpatientBedBoardPage() {
                           {b.status === 'occupied' ? (
                             <span className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-bold ${newsClasses.bg}`}>
                               <HeartPulse className="h-3 w-3" />
-                              <span>NEWS2: {news.score} ({news.riskLevel})</span>
+                              <span>
+                                {typeof news.score === 'number'
+                                  ? `NEWS2: ${news.score} (${news.riskLevel})`
+                                  : 'NEWS2: Not recorded'}
+                              </span>
                             </span>
                           ) : (
                             <span className="text-slate-400">—</span>

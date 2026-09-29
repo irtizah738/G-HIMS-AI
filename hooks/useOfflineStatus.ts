@@ -4,7 +4,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { syncEngine, SyncEngineState } from '@/lib/offline/sync-engine';
 import {
   getPendingMutations,
+  getPendingVectorClock,
   getSyncConflicts,
+  measureLocalStoreLatency,
   resolveSyncConflict,
   SyncConflict,
 } from '@/lib/offline/db';
@@ -20,7 +22,18 @@ export interface OfflineStatusResult {
   networkType: string;
   lastSyncedAt: Date | null;
   lastError: string | null;
+  localStoreLatencyMs: number | null;
+  vectorClock: Record<string, number>;
+  replicaStatus: SyncEngineState['replicaStatus'];
+  replicaReachable: boolean | null;
+  replicaLatencyMs: number | null;
+  replicaStoreLatencyMs: number | null;
+  replicaCheckedAt: Date | null;
+  replicaError: string | null;
+  lastReplicationEvent: SyncEngineState['lastReplicationEvent'];
+  offlineSimulationActive: boolean;
   triggerSync: (tenantId?: string) => Promise<{ syncedCount: number; conflictCount: number }>;
+  setOfflineSimulation: (active: boolean) => Promise<void>;
   resolveConflict: (
     conflictId: string,
     strategy: 'LWW_SERVER' | 'OVERWRITE_CLIENT' | 'MANUAL_MERGE',
@@ -40,6 +53,16 @@ export function useOfflineStatus(tenantId?: string): OfflineStatusResult {
   const [networkType, setNetworkType] = useState<string>('ethernet/wifi');
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
+  const [localStoreLatencyMs, setLocalStoreLatencyMs] = useState<number | null>(null);
+  const [vectorClock, setVectorClock] = useState<Record<string, number>>({});
+  const [replicaStatus, setReplicaStatus] = useState<SyncEngineState['replicaStatus']>('unknown');
+  const [replicaReachable, setReplicaReachable] = useState<boolean | null>(null);
+  const [replicaLatencyMs, setReplicaLatencyMs] = useState<number | null>(null);
+  const [replicaStoreLatencyMs, setReplicaStoreLatencyMs] = useState<number | null>(null);
+  const [replicaCheckedAt, setReplicaCheckedAt] = useState<Date | null>(null);
+  const [replicaError, setReplicaError] = useState<string | null>(null);
+  const [lastReplicationEvent, setLastReplicationEvent] = useState<SyncEngineState['lastReplicationEvent']>(null);
+  const [offlineSimulationActive, setOfflineSimulationActive] = useState<boolean>(false);
 
   const refreshConnectivity = useCallback(
     async (processQueueWhenOnline = false) => {
@@ -66,8 +89,14 @@ export function useOfflineStatus(tenantId?: string): OfflineStatusResult {
 
   const refreshCounts = useCallback(async () => {
     try {
-      const pending = await getPendingMutations(tenantId);
+      const [pending, clock, localLatency] = await Promise.all([
+        getPendingMutations(tenantId),
+        getPendingVectorClock(tenantId),
+        measureLocalStoreLatency(tenantId),
+      ]);
       setPendingSyncCount(pending.length);
+      setVectorClock(clock);
+      setLocalStoreLatencyMs(localLatency);
       await refreshConflicts();
     } catch (err) {
       console.warn('Error reading offline queue:', err);
@@ -153,7 +182,9 @@ export function useOfflineStatus(tenantId?: string): OfflineStatusResult {
     window.addEventListener('online', handleOnlineHint);
     window.addEventListener('offline', handleOfflineHint);
 
-    void refreshConnectivity(false);
+    void refreshConnectivity(false).then(() => {
+      if (syncEngine) void syncEngine.refreshReplicaStatus(tenantId);
+    });
     void refreshCounts();
 
     let unsubscribe: (() => void) | undefined;
@@ -164,11 +195,21 @@ export function useOfflineStatus(tenantId?: string): OfflineStatusResult {
         setPendingSyncCount(engineState.pendingCount);
         setLastSyncedAt(engineState.lastSyncedAt);
         setLastError(engineState.lastError);
+        setReplicaStatus(engineState.replicaStatus);
+        setReplicaReachable(engineState.replicaReachable);
+        setReplicaLatencyMs(engineState.replicaLatencyMs);
+        setReplicaStoreLatencyMs(engineState.replicaStoreLatencyMs);
+        setReplicaCheckedAt(engineState.replicaCheckedAt);
+        setReplicaError(engineState.replicaError);
+        setLastReplicationEvent(engineState.lastReplicationEvent);
+        setOfflineSimulationActive(engineState.offlineSimulationActive);
       });
     }
 
     const interval = window.setInterval(() => {
-      void refreshConnectivity(false);
+      void refreshConnectivity(false).then(() => {
+        if (syncEngine) void syncEngine.refreshReplicaStatus(tenantId);
+      });
       void refreshCounts();
     }, 15000);
 
@@ -198,6 +239,15 @@ export function useOfflineStatus(tenantId?: string): OfflineStatusResult {
     [tenantId, refreshCounts]
   );
 
+  const handleOfflineSimulation = useCallback(
+    async (active: boolean) => {
+      if (!syncEngine) return;
+      await syncEngine.setOfflineSimulation(active);
+      await refreshCounts();
+    },
+    [refreshCounts]
+  );
+
   const handleResolveConflict = useCallback(
     async (
       conflictId: string,
@@ -220,7 +270,18 @@ export function useOfflineStatus(tenantId?: string): OfflineStatusResult {
     networkType,
     lastSyncedAt,
     lastError,
+    localStoreLatencyMs,
+    vectorClock,
+    replicaStatus,
+    replicaReachable,
+    replicaLatencyMs,
+    replicaStoreLatencyMs,
+    replicaCheckedAt,
+    replicaError,
+    lastReplicationEvent,
+    offlineSimulationActive,
     triggerSync,
+    setOfflineSimulation: handleOfflineSimulation,
     resolveConflict: handleResolveConflict,
     refreshConflicts,
   };

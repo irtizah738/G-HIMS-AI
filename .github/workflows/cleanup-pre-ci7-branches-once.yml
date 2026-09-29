@@ -37,6 +37,7 @@ jobs:
             "ops/p7a-staging-execution"
             "p7/controlled-live-pilot-qualification"
             "ops/pre-ci7-repository-cleanup"
+            "ops/finalize-pre-ci7-cleanup"
           )
 
           for branch in "${branches[@]}"; do
@@ -51,3 +52,14 @@ jobs:
           done
 
           echo "Reviewed branch cleanup complete."
+
+      - name: Remove this one-shot workflow from main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow_path=".github/workflows/cleanup-pre-ci7-branches-once.yml"
+          workflow_sha="$(gh api "repos/${GH_REPO}/contents/${workflow_path}?ref=main" --jq .sha)"
+          gh api             --method DELETE             "repos/${GH_REPO}/contents/${workflow_path}"             -f message="chore: remove completed pre-CI7 cleanup workflow"             -f sha="${workflow_sha}"             -f branch="main"

@@ -5,11 +5,12 @@ import { syncEngine, SyncEngineState } from '@/lib/offline/sync-engine';
 import {
   getPendingMutations,
   getPendingVectorClock,
-  getSyncConflicts,
   measureLocalStoreLatency,
   resolveSyncConflict,
   SyncConflict,
 } from '@/lib/offline/db';
+import { getSecureConflicts } from '@/lib/offline/secure-store';
+import { getCachedAuthSession } from '@/lib/offline/auth-storage';
 import { probeApplicationConnectivity } from '@/lib/offline/connectivity';
 
 export interface OfflineStatusResult {
@@ -80,8 +81,13 @@ export function useOfflineStatus(tenantId?: string): OfflineStatusResult {
 
   const refreshConflicts = useCallback(async () => {
     try {
-      const activeConflicts = await getSyncConflicts(tenantId);
-      setConflicts(activeConflicts);
+      const cached = await getCachedAuthSession();
+      if (!cached?.user?.uid || !tenantId) {
+        setConflicts([]);
+        return;
+      }
+      const activeConflicts = await getSecureConflicts(tenantId, cached.user.uid);
+      setConflicts(activeConflicts as SyncConflict[]);
     } catch (err) {
       console.warn('Failed to load sync conflicts:', err);
     }

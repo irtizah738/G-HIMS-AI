@@ -14,7 +14,10 @@ import {
 import { CommandBus } from '../commands/command-bus';
 import { AuthorizationPipeline } from '../auth/authorization-pipeline';
 import { registerPatientAndEncounter } from '@/server/runtime/registration-orchestrator';
-import { EdgeVersionRepository } from '@/server/repositories/edge-version-repository';
+import {
+  compareAuthoritativeEntityVersion,
+  getAuthoritativeEntityVersion,
+} from '@/server/repositories/edge-version-repository';
 
 function conflictCategory(commandType: string): ConflictCategory {
   if (['PostJournalCommand', 'RecordCashReceiptCommand'].includes(commandType)) return 'FINANCIAL_CONFLICT';
@@ -70,20 +73,6 @@ function entityTypeForCommand(commandType: string): string {
     SubmitPurchaseRequisitionCommand: 'PURCHASE_REQUISITION',
   };
   return map[commandType] || 'ENTITY';
-}
-
-function entityKey(mutation: OfflineMutationItem, payload: Record<string, unknown>): string {
-  const entityId = String(
-    mutation.entityId ||
-    payload.bedId ||
-    payload.tokenId ||
-    payload.patientId ||
-    payload.encounterId ||
-    payload.findingId ||
-    payload.orderId ||
-    mutation.mutationId
-  );
-  return `${mutation.commandType}:${entityId}`;
 }
 
 async function processOfflineRegistration(
@@ -225,12 +214,8 @@ export class OfflineReconciliationDomainService {
             for (const mapping of registration.mappings) {
               canonicalMappings.set(mapping.localId, mapping.canonicalId);
             }
-            await EdgeVersionRepository.recordAccepted(
-              context.tenantId,
-              `PATIENT_MPI:${registration.mappings[0]?.canonicalId || mutation.mutationId}`,
-              mutation.vectorClock,
-              mutation.mutationId
-            );
+            // The registration orchestrator commits versioned authoritative
+            // patient/encounter/queue documents; no replay-only version counter is used.
           } else {
             rejected += 1;
           }
@@ -240,12 +225,25 @@ export class OfflineReconciliationDomainService {
         const resolvedEntityId = String(
           rewriteMappedReferences(mutation.entityId || '', canonicalMappings)
         );
-        const versionKey = entityKey(
-          { ...mutation, entityId: resolvedEntityId || mutation.entityId },
-          payload
-        );
-        const currentVersion = await EdgeVersionRepository.get(context.tenantId, versionKey);
-        const causalState = EdgeVersionRepository.compare(
+        const authoritativeEntityId =
+          resolvedEntityId ||
+          String(
+            payload.bedId ||
+            payload.tokenId ||
+            payload.patientId ||
+            payload.encounterId ||
+            payload.findingId ||
+            payload.orderId ||
+            ''
+          );
+        const currentVersion = authoritativeEntityId
+          ? await getAuthoritativeEntityVersion(
+              context.tenantId,
+              mutation.collection,
+              authoritativeEntityId
+            )
+          : null;
+        const causalState = compareAuthoritativeEntityVersion(
           currentVersion,
           mutation.baseEntityVersion,
           mutation.baseVectorClock
@@ -278,12 +276,13 @@ export class OfflineReconciliationDomainService {
 
         if (result.success) {
           const canonicalEntityId = result.entityId || resolvedEntityId || mutation.mutationId;
-          const version = await EdgeVersionRepository.recordAccepted(
-            context.tenantId,
-            `${mutation.commandType}:${canonicalEntityId}`,
-            mutation.vectorClock,
-            mutation.mutationId
-          );
+          const version = canonicalEntityId
+            ? await getAuthoritativeEntityVersion(
+                context.tenantId,
+                mutation.collection,
+                canonicalEntityId
+              )
+            : null;
 
           const entityMappings =
             mutation.entityId &&
@@ -307,6 +306,7 @@ export class OfflineReconciliationDomainService {
             conflictCategory: category,
             serverEventId: result.eventId,
             serverVersion: version?.serverVersion,
+            vectorClock: version?.vectorClock,
             data: result.data,
             ...(entityMappings.length > 0 ? { entityMappings } : {}),
           });

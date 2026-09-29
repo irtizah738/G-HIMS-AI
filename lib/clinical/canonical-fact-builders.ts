@@ -1,8 +1,11 @@
 import type {
+  ClinicalAllergy,
+  ClinicalCondition,
   ClinicalDocument,
   ClinicalObservation,
   ClinicalProvenance,
   DiagnosticOrder,
+  MedicationAdministration,
   MedicationDispense,
   MedicationOrder,
   Quantity,
@@ -380,5 +383,179 @@ export function buildCanonicalMedicationDispense(input: {
     expiryDate: input.expiryDate,
     dispensedBy: input.actorId,
     dispensedAt: input.dispensedAt,
+  };
+}
+
+
+export function buildCanonicalCondition(input: {
+  tenantId: string;
+  patientId: string;
+  encounterId?: string;
+  conditionId: string;
+  actorId: string;
+  code: string;
+  display: string;
+  codingSystem?: string;
+  category: ClinicalCondition['category'];
+  clinicalStatus?: ClinicalCondition['clinicalStatus'];
+  verificationStatus?: ClinicalCondition['verificationStatus'];
+  onsetAt?: number;
+  recordedAt: number;
+}): ClinicalCondition {
+  return {
+    conditionId: input.conditionId,
+    tenantId: input.tenantId,
+    patientId: input.patientId,
+    encounterId: input.encounterId,
+    sourceEvidenceId: input.conditionId,
+    provenance: provenance({
+      tenantId: input.tenantId,
+      patientId: input.patientId,
+      encounterId: input.encounterId,
+      sourceEvidenceId: input.conditionId,
+      actorId: input.actorId,
+      recordedAt: input.recordedAt,
+      sourceType: 'CLINICIAN',
+    }),
+    createdAt: input.recordedAt,
+    updatedAt: input.recordedAt,
+    version: 1,
+    code: {
+      codings: [{
+        system: input.codingSystem || 'LOCAL',
+        code: input.code,
+        display: input.display,
+      }],
+      text: input.display,
+    },
+    category: input.category,
+    clinicalStatus: input.clinicalStatus || 'ACTIVE',
+    verificationStatus: input.verificationStatus || 'CONFIRMED',
+    onsetAt: input.onsetAt,
+    recordedAt: input.recordedAt,
+    recordedBy: input.actorId,
+    assertedBy: input.actorId,
+  };
+}
+
+export function buildCanonicalAllergy(input: {
+  tenantId: string;
+  patientId: string;
+  encounterId?: string;
+  allergyId: string;
+  actorId: string;
+  substanceCode: string;
+  substanceDisplay: string;
+  codingSystem?: string;
+  type?: ClinicalAllergy['type'];
+  category: ClinicalAllergy['category'];
+  criticality?: ClinicalAllergy['criticality'];
+  verificationStatus?: ClinicalAllergy['verificationStatus'];
+  reactionText?: string;
+  reactionSeverity?: 'MILD' | 'MODERATE' | 'SEVERE';
+  recordedAt: number;
+}): ClinicalAllergy {
+  return {
+    allergyId: input.allergyId,
+    tenantId: input.tenantId,
+    patientId: input.patientId,
+    encounterId: input.encounterId,
+    sourceEvidenceId: input.allergyId,
+    provenance: provenance({
+      tenantId: input.tenantId,
+      patientId: input.patientId,
+      encounterId: input.encounterId,
+      sourceEvidenceId: input.allergyId,
+      actorId: input.actorId,
+      recordedAt: input.recordedAt,
+      sourceType: 'CLINICIAN',
+    }),
+    createdAt: input.recordedAt,
+    updatedAt: input.recordedAt,
+    version: 1,
+    substance: {
+      codings: [{
+        system: input.codingSystem || 'LOCAL',
+        code: input.substanceCode,
+        display: input.substanceDisplay,
+      }],
+      text: input.substanceDisplay,
+    },
+    type: input.type || 'ALLERGY',
+    category: input.category,
+    clinicalStatus: 'ACTIVE',
+    verificationStatus: input.verificationStatus || 'CONFIRMED',
+    criticality: input.criticality || 'UNABLE_TO_ASSESS',
+    reactions: input.reactionText
+      ? [{
+          manifestation: [{
+            codings: [{
+              system: 'LOCAL',
+              code: 'REPORTED_REACTION',
+              display: input.reactionText,
+            }],
+            text: input.reactionText,
+          }],
+          severity: input.reactionSeverity,
+          description: input.reactionText,
+        }]
+      : [],
+    recordedAt: input.recordedAt,
+    recorderId: input.actorId,
+    asserterId: input.actorId,
+  };
+}
+
+export function buildCanonicalMedicationAdministration(input: {
+  tenantId: string;
+  patientId: string;
+  encounterId: string;
+  administrationId: string;
+  actorId: string;
+  medicationOrderId?: string;
+  medicationCode: string;
+  medicationName: string;
+  doseText: string;
+  route: string;
+  status: 'GIVEN' | 'HELD';
+  administeredAt: number;
+  notes?: string;
+}): MedicationAdministration {
+  return {
+    medicationAdministrationId: input.administrationId,
+    medicationOrderId: input.medicationOrderId,
+    tenantId: input.tenantId,
+    patientId: input.patientId,
+    encounterId: input.encounterId,
+    sourceEvidenceId: input.administrationId,
+    provenance: provenance({
+      tenantId: input.tenantId,
+      patientId: input.patientId,
+      encounterId: input.encounterId,
+      sourceEvidenceId: input.administrationId,
+      actorId: input.actorId,
+      recordedAt: input.administeredAt,
+      sourceType: 'NURSE',
+    }),
+    createdAt: input.administeredAt,
+    updatedAt: input.administeredAt,
+    version: 1,
+    medication: {
+      codings: [{
+        system: 'LOCAL',
+        code: input.medicationCode,
+        display: input.medicationName,
+      }],
+      text: input.medicationName,
+    },
+    status: input.status === 'GIVEN' ? 'COMPLETED' : 'NOT_DONE',
+    doseText: input.doseText,
+    route: {
+      codings: [{ system: 'LOCAL', code: input.route.toUpperCase(), display: input.route }],
+      text: input.route,
+    },
+    administeredBy: input.actorId,
+    administeredAt: input.administeredAt,
+    notDoneReason: input.status === 'HELD' ? input.notes || 'Medication held' : undefined,
   };
 }

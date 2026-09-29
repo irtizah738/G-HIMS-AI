@@ -67,6 +67,7 @@ export interface DischargeReadinessSnapshot {
     revision: number;
     sourceCheckpoint: string;
     lastEventId?: string;
+    lastEventRecordedAt?: number;
     activeEncounter?: {
       encounterId: string;
       encounterType: string;

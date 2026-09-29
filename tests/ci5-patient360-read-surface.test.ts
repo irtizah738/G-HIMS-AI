@@ -60,13 +60,13 @@ describe('G-HIMS CI-5 Patient 360 clinical read surface', () => {
     expect(client).not.toContain("'patient360Timeline'");
   });
 
-  test('Patient 360 clinician UI keeps unknown knowledge states explicit', async () => {
+  test('Patient 360 clinician UI keeps reviewed and unresolved knowledge states explicit', async () => {
     const view = await source('components/patient360/Patient360View.tsx');
 
     expect(view).toContain('status is unknown');
-    expect(view).toContain('Problem list has not been established');
-    expect(view).toContain('Allergy status has not been confirmed');
-    expect(view).toContain('Medication history has not been established');
+    expect(view).toContain('status has not been assessed');
+    expect(view).toContain('reviewed: none known');
+    expect(view).toContain('could not be established because the patient was unable to report');
     expect(view).toContain('Encrypted offline snapshot');
     expect(view).toContain('Detailed timeline requires server connectivity');
     expect(view).not.toContain('NKDA');

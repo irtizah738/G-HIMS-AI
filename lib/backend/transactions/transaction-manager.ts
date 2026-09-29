@@ -114,6 +114,7 @@ function collectionForEntityType(entityType: string): string {
     INVENTORY_BALANCE: 'inventoryBalances',
     PATIENT_CONSUMPTION: 'patientConsumptions',
     PURCHASE_REQUISITION: 'purchaseRequisitions',
+    CASH_RECEIPT: 'cashReceipts',
   };
 
   const collection = map[entityType];

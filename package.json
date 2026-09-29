@@ -42,7 +42,9 @@
     "test:ci-foundation": "bun test tests/ci-patient360-foundation.test.ts",
     "validate:ci-foundation": "bun run typecheck && bun run lint && bun run test:ci-foundation && bun run test:p7 && bun run test:p6 && bun run test:security && bun run build",
     "test:ci1": "bun test tests/ci1-canonical-clinical-model.test.ts",
-    "validate:ci1": "bun run typecheck && bun run lint && bun run test:ci-foundation && bun run test:ci1 && bun run test:p7 && bun run test:p6 && bun run test:security && bun run build"
+    "validate:ci1": "bun run typecheck && bun run lint && bun run test:ci-foundation && bun run test:ci1 && bun run test:p7 && bun run test:p6 && bun run test:security && bun run build",
+    "test:ci2": "bun test tests/ci2-terminology-foundation.test.ts",
+    "validate:ci2": "bun run typecheck && bun run lint && bun run test:ci-foundation && bun run test:ci1 && bun run test:ci2 && bun run test:p7 && bun run test:p6 && bun run test:security && bun run build"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

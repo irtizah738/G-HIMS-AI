@@ -29,6 +29,7 @@ export interface SyncMutation {
   timestamp: number;
   clientTimestamp?: number;
   retryCount: number;
+  nextRetryAt?: number;
   status: MutationStatus;
   errorMessage?: string;
   conflictDetails?: {

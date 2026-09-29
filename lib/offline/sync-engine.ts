@@ -12,6 +12,16 @@ import { auth } from '@/lib/firebase/client';
 import { getCachedAuthSession } from '@/lib/offline/auth-storage';
 import { probeApplicationConnectivity, ConnectivityProbeResult } from '@/lib/offline/connectivity';
 
+export interface LastReplicationEvent {
+  at: Date;
+  tenantId: string | null;
+  batchIds: string[];
+  syncedCount: number;
+  conflictCount: number;
+  outcome: 'SYNCED' | 'NO_CHANGES' | 'PARTIAL' | 'FAILED';
+  error: string | null;
+}
+
 export interface SyncEngineState {
   isOnline: boolean;
   isSyncing: boolean;
@@ -19,6 +29,14 @@ export interface SyncEngineState {
   lastSyncedAt: Date | null;
   activeProcessingId: string | null;
   lastError: string | null;
+  replicaStatus: 'unknown' | 'ready' | 'offline' | 'unauthenticated' | 'unavailable';
+  replicaReachable: boolean | null;
+  replicaLatencyMs: number | null;
+  replicaStoreLatencyMs: number | null;
+  replicaCheckedAt: Date | null;
+  replicaError: string | null;
+  lastReplicationEvent: LastReplicationEvent | null;
+  offlineSimulationActive: boolean;
 }
 
 export interface QueueMutationParams {
@@ -44,16 +62,30 @@ class ClinicalSyncEngine {
     lastSyncedAt: null,
     activeProcessingId: null,
     lastError: null,
+    replicaStatus: 'unknown',
+    replicaReachable: null,
+    replicaLatencyMs: null,
+    replicaStoreLatencyMs: null,
+    replicaCheckedAt: null,
+    replicaError: null,
+    lastReplicationEvent: null,
+    offlineSimulationActive: false,
   };
   private autoSyncInterval: any = null;
+  private forcedOffline = false;
 
   constructor() {
     if (typeof window !== 'undefined') {
       this.initNetworkListeners();
       void this.refreshPendingCount();
-      void this.refreshConnectivity(false);
+      void this.refreshConnectivity(false).then((result) => {
+        if (result.isOnline) void this.refreshReplicaStatus();
+      });
       this.autoSyncInterval = setInterval(() => {
-        if (!this.state.isSyncing) void this.refreshConnectivity(true);
+        if (this.state.isSyncing) return;
+        void this.refreshConnectivity(true).then((result) => {
+          if (result.isOnline) void this.refreshReplicaStatus();
+        });
       }, 25000);
     }
   }
@@ -96,6 +128,20 @@ class ClinicalSyncEngine {
   public async refreshConnectivity(
     processQueueWhenOnline = false
   ): Promise<ConnectivityProbeResult> {
+    if (this.forcedOffline) {
+      const forcedResult = { isOnline: false, latencyMs: null };
+      this.updateState({
+        isOnline: false,
+        replicaStatus: 'offline',
+        replicaReachable: false,
+        replicaLatencyMs: null,
+        replicaStoreLatencyMs: null,
+        replicaCheckedAt: new Date(),
+        replicaError: null,
+      });
+      return forcedResult;
+    }
+
     const result = await probeApplicationConnectivity();
     const wasOnline = this.state.isOnline;
 
@@ -113,9 +159,130 @@ class ClinicalSyncEngine {
     return result;
   }
 
+  public async refreshReplicaStatus(tenantId?: string): Promise<void> {
+    if (this.forcedOffline || !this.state.isOnline) {
+      this.updateState({
+        replicaStatus: 'offline',
+        replicaReachable: false,
+        replicaLatencyMs: null,
+        replicaStoreLatencyMs: null,
+        replicaCheckedAt: new Date(),
+        replicaError: null,
+      });
+      return;
+    }
+
+    try {
+      const currentUser = auth.currentUser;
+      const cached = await getCachedAuthSession();
+
+      if (!currentUser || !cached) {
+        this.updateState({
+          replicaStatus: 'unauthenticated',
+          replicaReachable: null,
+          replicaLatencyMs: null,
+          replicaStoreLatencyMs: null,
+          replicaCheckedAt: new Date(),
+          replicaError: null,
+        });
+        return;
+      }
+
+      const activeTenantId = (tenantId || cached.user.tenantId).trim().toLowerCase();
+      if (activeTenantId !== cached.user.tenantId.trim().toLowerCase()) {
+        this.updateState({
+          replicaStatus: 'unavailable',
+          replicaReachable: false,
+          replicaLatencyMs: null,
+          replicaStoreLatencyMs: null,
+          replicaCheckedAt: new Date(),
+          replicaError: 'TENANT_MISMATCH',
+        });
+        return;
+      }
+
+      const idToken = await currentUser.getIdToken(false);
+      const startedAt = performance.now();
+      const response = await fetch(
+        `/api/sync/status?tenantId=${encodeURIComponent(activeTenantId)}&probe=${Date.now()}`,
+        {
+          method: 'GET',
+          cache: 'no-store',
+          credentials: 'same-origin',
+          headers: {
+            Authorization: `Bearer ${idToken}`,
+            'x-ghims-tenant-id': activeTenantId,
+            'x-ghims-session-id': cached.session.sessionId,
+            ...(cached.session.deviceId
+              ? { 'x-ghims-device-id': cached.session.deviceId }
+              : {}),
+          },
+        }
+      );
+      const roundTripLatencyMs = Math.max(0, Math.round(performance.now() - startedAt));
+      const payload = await response.json().catch(() => ({}));
+
+      this.updateState({
+        replicaStatus: response.ok && payload.status === 'ready' ? 'ready' : 'unavailable',
+        replicaReachable: response.ok && payload.status === 'ready',
+        replicaLatencyMs: response.ok ? roundTripLatencyMs : null,
+        replicaStoreLatencyMs:
+          response.ok && Number.isFinite(payload.storeLatencyMs)
+            ? Number(payload.storeLatencyMs)
+            : null,
+        replicaCheckedAt: new Date(),
+        replicaError: response.ok ? null : String(payload.error || `HTTP_${response.status}`),
+      });
+    } catch (error) {
+      this.updateState({
+        replicaStatus: 'unavailable',
+        replicaReachable: false,
+        replicaLatencyMs: null,
+        replicaStoreLatencyMs: null,
+        replicaCheckedAt: new Date(),
+        replicaError: error instanceof Error ? error.message : 'REPLICA_STATUS_FAILED',
+      });
+    }
+  }
+
+  public async setOfflineSimulation(active: boolean): Promise<void> {
+    const runtimeMode = String(process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE || '')
+      .trim()
+      .toUpperCase();
+
+    if (active && runtimeMode === 'PRODUCTION') {
+      throw new Error('OFFLINE_SIMULATION_DISABLED_IN_PRODUCTION');
+    }
+
+    this.forcedOffline = active;
+    this.updateState({ offlineSimulationActive: active });
+
+    if (active) {
+      this.updateState({
+        isOnline: false,
+        replicaStatus: 'offline',
+        replicaReachable: false,
+        replicaLatencyMs: null,
+        replicaStoreLatencyMs: null,
+        replicaCheckedAt: new Date(),
+        replicaError: null,
+      });
+      await this.registerBackgroundSync();
+      return;
+    }
+
+    const connectivity = await this.refreshConnectivity(true);
+    if (connectivity.isOnline) {
+      await this.refreshReplicaStatus();
+    }
+  }
+
   public async refreshPendingCount(tenantId?: string): Promise<number> {
     try {
       const pending = await getPendingMutations(tenantId);
+      if (!eventTenantId && pending.length > 0) {
+        eventTenantId = pending[0].tenantId;
+      }
       this.updateState({ pendingCount: pending.length });
       return pending.length;
     } catch {
@@ -185,6 +352,11 @@ class ClinicalSyncEngine {
   public async processSyncQueue(tenantId?: string): Promise<{ syncedCount: number; conflictCount: number }> {
     if (this.isProcessing) return { syncedCount: 0, conflictCount: 0 };
 
+    if (this.forcedOffline) {
+      this.updateState({ isOnline: false });
+      return { syncedCount: 0, conflictCount: 0 };
+    }
+
     const connectivity = await probeApplicationConnectivity();
     this.updateState({ isOnline: connectivity.isOnline });
     if (!connectivity.isOnline) {
@@ -196,6 +368,8 @@ class ClinicalSyncEngine {
 
     let syncedCount = 0;
     let conflictCount = 0;
+    const batchIds: string[] = [];
+    let eventTenantId: string | null = tenantId || null;
 
     try {
       const currentUser = auth.currentUser;
@@ -255,6 +429,8 @@ class ClinicalSyncEngine {
 
         const idToken = await currentUser.getIdToken(false);
         const batchId = `sync_${crypto.randomUUID()}`;
+        batchIds.push(batchId);
+        eventTenantId = mutationTenantId;
 
         for (const mutation of replayable) {
           this.updateState({ activeProcessingId: mutation.id });
@@ -328,10 +504,40 @@ class ClinicalSyncEngine {
       }
 
       await this.refreshPendingCount(tenantId);
-      this.updateState({ lastSyncedAt: new Date(), activeProcessingId: null });
+      const completedAt = new Date();
+      this.updateState({
+        lastSyncedAt: completedAt,
+        activeProcessingId: null,
+        lastReplicationEvent: {
+          at: completedAt,
+          tenantId: eventTenantId,
+          batchIds,
+          syncedCount,
+          conflictCount,
+          outcome:
+            conflictCount > 0
+              ? 'PARTIAL'
+              : syncedCount > 0
+                ? 'SYNCED'
+                : 'NO_CHANGES',
+          error: null,
+        },
+      });
+      void this.refreshReplicaStatus(eventTenantId || undefined);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Sync loop failed';
-      this.updateState({ lastError: message });
+      this.updateState({
+        lastError: message,
+        lastReplicationEvent: {
+          at: new Date(),
+          tenantId: eventTenantId,
+          batchIds,
+          syncedCount,
+          conflictCount,
+          outcome: 'FAILED',
+          error: message,
+        },
+      });
     } finally {
       this.isProcessing = false;
       this.updateState({ isSyncing: false, activeProcessingId: null });

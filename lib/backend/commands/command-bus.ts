@@ -111,6 +111,15 @@ export class CommandBus {
           );
           break;
 
+        case 'CreateOpdEncounterCommand':
+          result = await EncounterDomainService.createOpdEncounter(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
         case 'AdvanceStageCommand':
           result = await EncounterDomainService.advanceStage(
             context,

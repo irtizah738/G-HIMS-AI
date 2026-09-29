@@ -75,6 +75,8 @@ export async function loadPatient360ClinicalView(
   tenantId: string,
   patientId: string
 ): Promise<Patient360ClinicalView> {
+  let serverResponseStatus: number | null = null;
+
   try {
     const response = await AuthClient.authorizedFetch(
       `/api/clinical/patient360/${encodeURIComponent(patientId)}?tenantId=${encodeURIComponent(tenantId)}`,
@@ -84,6 +86,7 @@ export async function loadPatient360ClinicalView(
       },
       tenantId
     );
+    serverResponseStatus = response.status;
 
     const payload = await response.json();
     if (!response.ok || !payload?.success || !payload?.projection) {
@@ -101,6 +104,16 @@ export async function loadPatient360ClinicalView(
       freshness: payload.freshness || freshness(payload.projection),
     };
   } catch (error) {
+    // A reachable authoritative server denial/conflict must never be hidden by
+    // stale PHI from the edge cache. Local continuity is only for transport or
+    // transient server-availability failures.
+    if (
+      serverResponseStatus !== null &&
+      [400, 401, 403, 404, 409, 422].includes(serverResponseStatus)
+    ) {
+      throw error;
+    }
+
     const local = await loadLocalPatient360(tenantId, patientId);
     if (local) return local;
     throw error;

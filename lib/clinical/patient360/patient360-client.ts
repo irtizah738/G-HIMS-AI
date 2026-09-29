@@ -7,12 +7,14 @@ import type {
   Patient360Projection,
   Patient360TimelineItem,
 } from '@/types/patient360-projection';
+import type { DischargeReadinessProjection } from '@/types/discharge-readiness';
 
 export interface Patient360ClinicalView {
   tenantId: string;
   patientId: string;
   projection: Patient360Projection;
   timeline: Patient360TimelineItem[];
+  dischargeReadiness: DischargeReadinessProjection | null;
   source: 'SERVER' | 'LOCAL_EDGE';
   freshness: {
     projectionVersion: number;
@@ -61,11 +63,26 @@ async function loadLocalPatient360(
 
   if (!projection) return null;
 
+  const readinessRows = await listSecureEdgeEntities<Record<string, unknown>>(
+    tenantId,
+    cached.user.uid,
+    'dischargeReadinessProjections'
+  );
+  const readiness = readinessRows as unknown as DischargeReadinessProjection[];
+  const dischargeReadiness =
+    readiness.find(
+      (item) =>
+        item.patientId === patientId &&
+        (!projection.activeEncounter?.encounterId ||
+          item.encounterId === projection.activeEncounter.encounterId)
+    ) || null;
+
   return {
     tenantId,
     patientId,
     projection,
     timeline: [],
+    dischargeReadiness,
     source: 'LOCAL_EDGE',
     freshness: freshness(projection),
   };
@@ -100,6 +117,8 @@ export async function loadPatient360ClinicalView(
       patientId: payload.patientId,
       projection: payload.projection as Patient360Projection,
       timeline: (payload.timeline || []) as Patient360TimelineItem[],
+      dischargeReadiness:
+        (payload.dischargeReadiness as DischargeReadinessProjection | null) || null,
       source: 'SERVER',
       freshness: payload.freshness || freshness(payload.projection),
     };

@@ -43,6 +43,27 @@ describe('G-HIMS P6 full offline-first completion', () => {
     expect(hook).toContain('getSecurePendingVectorClock(tenantId, cached.user.uid)');
   });
 
+  test('legacy plaintext edge data is migrated or purged at authenticated boundaries', async () => {
+    const migration = await source('lib/offline/migration.ts');
+    const auth = await source('lib/auth/auth-client.ts');
+
+    expect(migration).toContain('migrateLegacyEdgeStorage');
+    expect(migration).toContain('encryptedPayload');
+    expect(migration).toContain('payload: {}');
+    expect(migration).toContain("status: 'failed'");
+    expect(migration).toContain('LEGACY_ACTOR_UNKNOWN');
+    expect(migration).toContain('localDb.offline_cache.where');
+    expect(migration).toContain('localDb.clinical_patients.where');
+    expect(migration).toContain('localDb.bed_occupancy.where');
+    expect(migration).toContain('localDb.surgical_cases.where');
+    expect(migration).toContain('await encryptEdgeJson');
+    expect(migration).not.toContain("localDb.transaction(\n    'rw'");
+
+    expect(auth).toContain('migrateLegacyEdgeStorage');
+    expect(auth).toContain('tenantId: authUser.tenantId');
+    expect(auth).toContain('actorId: authUser.uid');
+  });
+
   test('hospital read models are encrypted local-first and role-scoped', async () => {
     const hydration = await source('lib/offline/hydration.ts');
     const bootstrap = await source('app/api/offline/bootstrap/route.ts');

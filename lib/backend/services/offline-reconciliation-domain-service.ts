@@ -13,6 +13,35 @@ import {
 import { CommandBus } from '../commands/command-bus';
 import { AuthorizationPipeline } from '../auth/authorization-pipeline';
 import { registerPatientAndEncounter } from '@/server/runtime/registration-orchestrator';
+import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
+import { compareClocks } from '@/lib/offline/vector-clock';
+
+function stateCollectionForCommand(commandType: string): string | null {
+  const map: Record<string, string> = {
+    UpdateOpdQueueStatusCommand: 'opd_queue',
+    AdmitPatientToBedCommand: 'beds',
+    UpdateBedStatusCommand: 'beds',
+    DischargePatientFromBedCommand: 'beds',
+    DismissRevenueIntegrityFindingCommand: 'billingMismatches',
+    ReconcileRevenueIntegrityFindingCommand: 'billingMismatches',
+    AdvanceStageCommand: 'encounters',
+  };
+  return map[commandType] || null;
+}
+
+function serverCausalMetadata(state: Record<string, unknown> | null): {
+  version: number;
+  vectorClock: Record<string, number>;
+} {
+  if (!state) return { version: 0, vectorClock: {} };
+  return {
+    version: Number(state._serverVersion || 0),
+    vectorClock:
+      state._vectorClock && typeof state._vectorClock === 'object'
+        ? state._vectorClock as Record<string, number>
+        : {},
+  };
+}
 
 function conflictCategory(commandType: string): ConflictCategory {
   if (['PostJournalCommand'].includes(commandType)) return 'FINANCIAL_CONFLICT';
@@ -60,6 +89,87 @@ export class OfflineReconciliationDomainService {
             reason: 'OFFLINE_COMMAND_INVALID: commandType and idempotencyKey are required.',
           });
           continue;
+        }
+
+        const stateCollection = stateCollectionForCommand(mutation.commandType);
+        let causalServerVersion = 0;
+
+        if (
+          stateCollection &&
+          mutation.entityId &&
+          category !== 'SAFE_APPEND'
+        ) {
+          const serverState = await DomainStateRepository.getById<Record<string, unknown>>(
+            context.tenantId,
+            stateCollection,
+            mutation.entityId
+          );
+          const causal = serverCausalMetadata(serverState);
+          causalServerVersion = causal.version;
+
+          if (serverState && mutation.baseEntityVersion == null) {
+            conflicted += 1;
+            results.push({
+              mutationId: mutation.mutationId,
+              status: 'requires_review',
+              conflictCategory: category,
+              serverVersion: causal.version,
+              reason: 'BASE_ENTITY_VERSION_REQUIRED: stateful offline mutation has no authoritative base version.',
+              data: {
+                serverState,
+                serverVectorClock: causal.vectorClock,
+              },
+            });
+            continue;
+          }
+
+          if (
+            serverState &&
+            mutation.baseEntityVersion != null &&
+            mutation.baseEntityVersion !== causal.version
+          ) {
+            conflicted += 1;
+            results.push({
+              mutationId: mutation.mutationId,
+              status: 'requires_review',
+              conflictCategory: category,
+              serverVersion: causal.version,
+              reason:
+                `STALE_BASE_VERSION: client based on version ${mutation.baseEntityVersion}; server is version ${causal.version}.`,
+              data: {
+                serverState,
+                serverVectorClock: causal.vectorClock,
+              },
+            });
+            continue;
+          }
+
+          if (
+            serverState &&
+            mutation.vectorClock &&
+            Object.keys(causal.vectorClock).length > 0
+          ) {
+            const comparison = compareClocks(mutation.vectorClock, causal.vectorClock);
+            if (comparison === 'LESS' || comparison === 'CONCURRENT') {
+              conflicted += 1;
+              results.push({
+                mutationId: mutation.mutationId,
+                status: 'requires_review',
+                conflictCategory: category,
+                serverVersion: causal.version,
+                reason:
+                  comparison === 'CONCURRENT'
+                    ? 'CAUSAL_CONFLICT: offline and server state advanced concurrently.'
+                    : 'STALE_VECTOR_CLOCK: server state causally dominates the offline mutation.',
+                data: {
+                  serverState,
+                  serverVectorClock: causal.vectorClock,
+                  clockComparison: comparison,
+                },
+              });
+              continue;
+            }
+          }
         }
 
         if (mutation.commandType === 'RegisterPatientAndEncounterCommand') {
@@ -137,7 +247,14 @@ export class OfflineReconciliationDomainService {
           continue;
         }
 
-        const result = await CommandBus.dispatch(context, {
+        const replayContext: CommandContext = {
+          ...context,
+          offlineVectorClock: mutation.vectorClock,
+          offlineBaseEntityVersion: mutation.baseEntityVersion,
+          offlineMutationId: mutation.mutationId,
+        };
+
+        const result = await CommandBus.dispatch(replayContext, {
           commandId: mutation.mutationId,
           idempotencyKey: mutation.idempotencyKey,
           tenantId: context.tenantId,
@@ -154,6 +271,7 @@ export class OfflineReconciliationDomainService {
             status: 'accepted',
             conflictCategory: category,
             serverEventId: result.eventId,
+            serverVersion: stateCollection ? causalServerVersion + 1 : 1,
             data: result.data,
           });
           continue;

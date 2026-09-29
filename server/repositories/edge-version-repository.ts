@@ -83,3 +83,60 @@ export class EdgeVersionRepository {
     });
   }
 }
+
+
+export interface AuthoritativeEntityVersion {
+  serverVersion: number;
+  vectorClock: VectorClock;
+}
+
+export async function getAuthoritativeEntityVersion(
+  tenantId: string,
+  collection: string,
+  entityId: string
+): Promise<AuthoritativeEntityVersion | null> {
+  const db = getAdminFirestore();
+  if (!db) return null;
+
+  const snapshot = await db
+    .collection('tenants')
+    .doc(tenantId)
+    .collection(collection)
+    .doc(entityId)
+    .get();
+
+  if (!snapshot.exists) return null;
+  const data = snapshot.data() as Record<string, unknown>;
+
+  return {
+    serverVersion: Number(data._serverVersion || 0),
+    vectorClock:
+      data._vectorClock && typeof data._vectorClock === 'object'
+        ? data._vectorClock as VectorClock
+        : {},
+  };
+}
+
+export function compareAuthoritativeEntityVersion(
+  current: AuthoritativeEntityVersion | null,
+  baseEntityVersion?: number,
+  baseVectorClock?: VectorClock
+): 'MATCH' | 'STALE' | 'CONCURRENT' {
+  if (!current) return 'MATCH';
+
+  if (
+    typeof baseEntityVersion === 'number' &&
+    baseEntityVersion >= 0 &&
+    baseEntityVersion !== current.serverVersion
+  ) {
+    return 'STALE';
+  }
+
+  if (baseVectorClock && Object.keys(baseVectorClock).length > 0 && Object.keys(current.vectorClock).length > 0) {
+    const relation = compareClocks(baseVectorClock, current.vectorClock);
+    if (relation === 'CONCURRENT') return 'CONCURRENT';
+    if (relation === 'LESS') return 'STALE';
+  }
+
+  return 'MATCH';
+}

@@ -10,6 +10,7 @@ import type {
   MedicationOrder,
   Quantity,
 } from '@/types/clinical-canonical';
+import { TerminologyService } from '@/lib/clinical/terminology/terminology-service';
 
 interface ProvenanceInput {
   tenantId: string;
@@ -37,10 +38,28 @@ function provenance(input: ProvenanceInput): ClinicalProvenance {
   };
 }
 
+function concept(system: string, code: string, display: string) {
+  const resolved = TerminologyService.lookup(system, code);
+  return {
+    codings: [
+      resolved
+        ? {
+            system: resolved.system,
+            code: resolved.code,
+            display: resolved.display,
+            version: resolved.version,
+          }
+        : { system, code, display },
+    ],
+    text: resolved?.display || display,
+  };
+}
+
 function quantity(value: number, unit: string, code: string): Quantity {
+  const resolved = TerminologyService.lookup('UCUM', code);
   return {
     value,
-    unit,
+    unit: resolved?.display || unit,
     system: 'UCUM',
     code,
   };
@@ -96,10 +115,7 @@ export function buildCanonicalVitalObservations(
     {
       ...base,
       observationId: `obs_${input.sourceEvidenceId}_hr`,
-      code: {
-        codings: [{ system: 'LOINC', code: '8867-4', display: 'Heart rate' }],
-        text: 'Heart rate',
-      },
+      code: concept('LOINC', '8867-4', 'Heart rate'),
       value: {
         valueType: 'QUANTITY',
         quantity: quantity(input.heartRate, 'beats/minute', '/min'),
@@ -108,10 +124,7 @@ export function buildCanonicalVitalObservations(
     {
       ...base,
       observationId: `obs_${input.sourceEvidenceId}_rr`,
-      code: {
-        codings: [{ system: 'LOINC', code: '9279-1', display: 'Respiratory rate' }],
-        text: 'Respiratory rate',
-      },
+      code: concept('LOINC', '9279-1', 'Respiratory rate'),
       value: {
         valueType: 'QUANTITY',
         quantity: quantity(input.respiratoryRate, 'breaths/minute', '/min'),
@@ -120,10 +133,7 @@ export function buildCanonicalVitalObservations(
     {
       ...base,
       observationId: `obs_${input.sourceEvidenceId}_temp`,
-      code: {
-        codings: [{ system: 'LOINC', code: '8310-5', display: 'Body temperature' }],
-        text: 'Body temperature',
-      },
+      code: concept('LOINC', '8310-5', 'Body temperature'),
       value: {
         valueType: 'QUANTITY',
         quantity: quantity(input.temperature, '°C', 'Cel'),
@@ -132,10 +142,7 @@ export function buildCanonicalVitalObservations(
     {
       ...base,
       observationId: `obs_${input.sourceEvidenceId}_spo2`,
-      code: {
-        codings: [{ system: 'LOINC', code: '2708-6', display: 'Oxygen saturation in arterial blood' }],
-        text: 'Oxygen saturation',
-      },
+      code: concept('LOINC', '2708-6', 'Oxygen saturation'),
       value: {
         valueType: 'QUANTITY',
         quantity: quantity(input.oxygenSaturation, '%', '%'),
@@ -147,28 +154,19 @@ export function buildCanonicalVitalObservations(
     observations.push({
       ...base,
       observationId: `obs_${input.sourceEvidenceId}_bp`,
-      code: {
-        codings: [{ system: 'LOINC', code: '85354-9', display: 'Blood pressure panel' }],
-        text: 'Blood pressure',
-      },
+      code: concept('LOINC', '85354-9', 'Blood pressure'),
       value: {
         valueType: 'COMPONENTS',
         components: [
           {
-            code: {
-              codings: [{ system: 'LOINC', code: '8480-6', display: 'Systolic blood pressure' }],
-              text: 'Systolic blood pressure',
-            },
+            code: concept('LOINC', '8480-6', 'Systolic blood pressure'),
             value: {
               valueType: 'QUANTITY',
               quantity: quantity(systolic, 'mmHg', 'mm[Hg]'),
             },
           },
           {
-            code: {
-              codings: [{ system: 'LOINC', code: '8462-4', display: 'Diastolic blood pressure' }],
-              text: 'Diastolic blood pressure',
-            },
+            code: concept('LOINC', '8462-4', 'Diastolic blood pressure'),
             value: {
               valueType: 'QUANTITY',
               quantity: quantity(diastolic, 'mmHg', 'mm[Hg]'),
@@ -254,16 +252,7 @@ export function buildCanonicalDiagnosticOrder(input: {
     createdAt: input.orderedAt,
     updatedAt: input.orderedAt,
     version: 1,
-    service: {
-      codings: [
-        {
-          system: 'LOCAL',
-          code: input.catalogCode,
-          display: input.orderName,
-        },
-      ],
-      text: input.orderName,
-    },
+    service: concept('LOCAL', input.catalogCode, input.orderName),
     orderType: input.orderType,
     priority: input.priority,
     status: 'PLACED',
@@ -308,17 +297,11 @@ export function buildCanonicalMedicationOrder(input: {
     createdAt: input.authoredAt,
     updatedAt: input.authoredAt,
     version: 1,
-    medication: {
-      codings: [{ system: 'LOCAL', code: input.drugCode, display: input.drugName }],
-      text: input.drugName,
-    },
+    medication: concept('LOCAL', input.drugCode, input.drugName),
     status: 'ACTIVE',
     intent: 'ORDER',
     dosageText: input.dosage,
-    route: {
-      codings: [{ system: 'LOCAL', code: input.route.toUpperCase(), display: input.route }],
-      text: input.route,
-    },
+    route: concept('LOCAL', input.route.toUpperCase(), input.route),
     frequency: input.frequency,
     durationDays: input.durationDays,
     quantity:
@@ -369,10 +352,7 @@ export function buildCanonicalMedicationDispense(input: {
     createdAt: input.dispensedAt,
     updatedAt: input.dispensedAt,
     version: 1,
-    medication: {
-      codings: [{ system: 'LOCAL', code: input.drugCode, display: input.drugName }],
-      text: input.drugName,
-    },
+    medication: concept('LOCAL', input.drugCode, input.drugName),
     status: 'COMPLETED',
     quantity: quantity(
       input.quantityDispensed,

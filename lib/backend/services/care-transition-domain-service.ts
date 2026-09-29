@@ -75,6 +75,11 @@ function activeEncounterStatus(value: unknown): boolean {
   return ['ACTIVE', 'IN_PROGRESS', 'ADMITTED'].includes(String(value || '').toUpperCase());
 }
 
+function bedPatientId(bed: Bed | null | undefined): string | undefined {
+  if (!bed) return undefined;
+  return bed.patientId || bed.currentPatientId;
+}
+
 export class CareTransitionDomainService {
   public static async admitToInpatientCare(
     context: CommandContext,
@@ -122,7 +127,7 @@ export class CareTransitionDomainService {
     if (sourceEncounter && sourceEncounter.patientId !== patient.id) {
       return { success: false, commandId, idempotencyKey, error: { code: 'SOURCE_ENCOUNTER_PATIENT_MISMATCH', message: 'Source encounter belongs to a different patient.' } };
     }
-    if (bed.status !== 'available' || bed.patientId) {
+    if (bed.status !== 'available' || bedPatientId(bed)) {
       return { success: false, commandId, idempotencyKey, error: { code: 'BED_UNAVAILABLE', message: `Bed ${bed.bedNumber || bed.id} is not available.` } };
     }
     if (patient.activeBedId) {
@@ -339,7 +344,7 @@ export class CareTransitionDomainService {
     if (
       !sourceBed ||
       sourceBed.status !== 'occupied' ||
-      sourceBed.patientId !== encounter.patientId ||
+      bedPatientId(sourceBed) !== encounter.patientId ||
       (sourceBed.currentEncounterId &&
         sourceBed.currentEncounterId !== encounter.encounterId)
     ) {
@@ -354,7 +359,7 @@ export class CareTransitionDomainService {
       };
     }
 
-    if (!targetBed || targetBed.status !== 'available' || targetBed.patientId) {
+    if (!targetBed || targetBed.status !== 'available' || bedPatientId(targetBed)) {
       return {
         success: false,
         commandId,
@@ -558,7 +563,7 @@ export class CareTransitionDomainService {
     if (!activeEncounterStatus(encounter.status)) {
       return { success: false, commandId, idempotencyKey, error: { code: 'ENCOUNTER_ALREADY_CLOSED', message: `Encounter is already ${encounter.status}.` } };
     }
-    if (!bed || bed.status !== 'occupied' || bed.patientId !== encounter.patientId) {
+    if (!bed || bed.status !== 'occupied' || bedPatientId(bed) !== encounter.patientId) {
       return { success: false, commandId, idempotencyKey, error: { code: 'CENSUS_STATE_CONFLICT', message: 'Occupied-bed state does not match the inpatient encounter.' } };
     }
 

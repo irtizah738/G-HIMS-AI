@@ -17,6 +17,7 @@ import { PatientMergeDomainService } from '../services/patient-merge-domain-serv
 import { InpatientBedDomainService } from '../services/inpatient-bed-domain-service';
 import { TelehealthDomainService } from '../services/telehealth-domain-service';
 import { RevenueIntegrityDomainService } from '../services/revenue-integrity-domain-service';
+import { SupplyChainDomainService } from '../services/supply-chain-domain-service';
 import { IdempotencyService } from '../idempotency/idempotency-service';
 import { emitOperationalEvent, operationalTimer } from '@/lib/observability/server-telemetry';
 
@@ -268,6 +269,34 @@ export class CommandBus {
 
         case 'DismissRevenueIntegrityFindingCommand':
           result = await RevenueIntegrityDomainService.dismiss(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        // --- Supply Chain Domain ---
+        case 'RecordStockTransactionCommand':
+          result = await SupplyChainDomainService.recordStockTransaction(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecordPatientConsumptionCommand':
+          result = await SupplyChainDomainService.recordPatientConsumption(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'SubmitInventoryRequisitionCommand':
+          result = await SupplyChainDomainService.submitRequisition(
             context,
             command.commandId,
             command.idempotencyKey,

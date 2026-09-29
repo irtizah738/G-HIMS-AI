@@ -22,6 +22,7 @@ import {
   type Patient360ClinicalView,
 } from '@/lib/clinical/patient360/patient360-client';
 import type { Patient360ObservationSummary } from '@/types/patient360-projection';
+import type { KnownStatus } from '@/types/clinical-canonical';
 
 function valueText(value: Patient360ObservationSummary['value']): string {
   switch (value.valueType) {
@@ -53,22 +54,53 @@ function dateTime(value?: number | string): string {
   return Number.isFinite(date.getTime()) ? date.toLocaleString() : String(value);
 }
 
+function knowledgeStatusText(label: string, status: KnownStatus): string {
+  switch (status) {
+    case 'KNOWN_NONE':
+      return `${label} reviewed: none known.`;
+    case 'UNKNOWN':
+      return `${label} status is unknown.`;
+    case 'NOT_ASSESSED':
+      return `${label} status has not been assessed.`;
+    case 'PATIENT_UNABLE_TO_REPORT':
+      return `${label} status could not be established because the patient was unable to report.`;
+    case 'KNOWN':
+    default:
+      return `${label} status is known.`;
+  }
+}
+
 function KnowledgeBanner({
   label,
   status,
 }: {
   label: string;
-  status: 'KNOWN' | 'UNKNOWN';
+  status: KnownStatus;
 }) {
   if (status === 'KNOWN') return null;
+  const reviewedNone = status === 'KNOWN_NONE';
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+    <div
+      className={
+        reviewedNone
+          ? 'flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900'
+          : 'flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900'
+      }
+    >
       <ShieldAlert className="h-4 w-4 shrink-0" />
-      <span>
-        <strong>{label} status is unknown.</strong> No confirmed canonical record has been established.
-      </span>
+      <span>{knowledgeStatusText(label, status)}</span>
     </div>
   );
+}
+
+function knowledgeEmptyState(label: string, status: KnownStatus): string {
+  if (status === 'KNOWN_NONE') return `No known ${label.toLowerCase()} after clinical review.`;
+  if (status === 'UNKNOWN') return `${label} status is unknown.`;
+  if (status === 'NOT_ASSESSED') return `${label} has not been assessed.`;
+  if (status === 'PATIENT_UNABLE_TO_REPORT') {
+    return `${label} could not be established from the patient.`;
+  }
+  return `No active ${label.toLowerCase()} in the canonical projection.`;
 }
 
 function EmptyState({ children }: { children: React.ReactNode }) {
@@ -303,10 +335,10 @@ export function Patient360View({
                           </div>
                         </div>
                       ))
-                    ) : projection.dataQuality.problemListKnowledge === 'UNKNOWN' ? (
-                      <EmptyState>Problem list has not been established.</EmptyState>
                     ) : (
-                      <EmptyState>No active problems in the canonical projection.</EmptyState>
+                      <EmptyState>
+                        {knowledgeEmptyState('Problem list', projection.dataQuality.problemListKnowledge)}
+                      </EmptyState>
                     )}
                   </div>
                 </div>
@@ -330,10 +362,10 @@ export function Patient360View({
                           </div>
                         </div>
                       ))
-                    ) : projection.dataQuality.allergyKnowledge === 'UNKNOWN' ? (
-                      <EmptyState>Allergy status has not been confirmed.</EmptyState>
                     ) : (
-                      <EmptyState>No active allergies in the canonical projection.</EmptyState>
+                      <EmptyState>
+                        {knowledgeEmptyState('Allergies', projection.dataQuality.allergyKnowledge)}
+                      </EmptyState>
                     )}
                   </div>
                 </div>
@@ -432,10 +464,10 @@ export function Patient360View({
                       </div>
                     </div>
                   ))
-                ) : projection.dataQuality.medicationKnowledge === 'UNKNOWN' ? (
-                  <EmptyState>Medication history has not been established.</EmptyState>
                 ) : (
-                  <EmptyState>No current medications in the canonical projection.</EmptyState>
+                  <EmptyState>
+                    {knowledgeEmptyState('Medication history', projection.dataQuality.medicationKnowledge)}
+                  </EmptyState>
                 )}
               </div>
             </section>

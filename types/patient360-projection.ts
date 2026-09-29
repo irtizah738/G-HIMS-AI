@@ -5,6 +5,7 @@ import type {
   ClinicalObservation,
   DiagnosticReport,
   MedicationOrder,
+  KnownStatus,
 } from '@/types/clinical-canonical';
 
 export interface Patient360IdentitySummary {
@@ -93,9 +94,12 @@ export interface Patient360DocumentSummary {
 }
 
 export interface Patient360DataQuality {
-  allergyKnowledge: 'KNOWN' | 'UNKNOWN';
-  problemListKnowledge: 'KNOWN' | 'UNKNOWN';
-  medicationKnowledge: 'KNOWN' | 'UNKNOWN';
+  allergyKnowledge: KnownStatus;
+  problemListKnowledge: KnownStatus;
+  medicationKnowledge: KnownStatus;
+  lastAllergyReviewAt?: number;
+  lastProblemListReviewAt?: number;
+  lastMedicationReconciliationAt?: number;
   hasUnverifiedAllergies: boolean;
   hasUnverifiedProblems: boolean;
   hasPreliminaryResults: boolean;

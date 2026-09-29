@@ -9,6 +9,7 @@ import { CommandContext, CommandResult } from '../types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import type { RevenueIntegrityFinding } from './revenue-integrity-domain-service';
 import { AIDraftRepository, type AIDraftRecord } from '@/server/ai/ai-draft-repository';
+import { PatientClinicalKnowledgeDomainService } from './patient-clinical-knowledge-domain-service';
 import { calculateNEWS2 } from '@/lib/clinical/news2';
 import {
   buildCanonicalAllergy,
@@ -172,36 +173,63 @@ export class ClinicalDocumentationDomainService {
       recordedAt,
     });
 
-    const tx = await TransactionManager.executeAtomicWrite(
-      context,
-      commandId,
+    const knowledgeRecord =
+      PatientClinicalKnowledgeDomainService.buildRecord({
+        tenantId: context.tenantId,
+        patientId: payload.patientId,
+        domain: 'PROBLEM_LIST',
+        status: 'KNOWN',
+        actorId: context.actorId,
+        reviewedAt: recordedAt,
+        encounterId: payload.encounterId,
+        reason: 'Condition recorded',
+      });
+
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'CLINICIAN',
+      aggregateType: 'CLINICAL_CONDITION',
+      aggregateId: conditionId,
+      eventType: 'CLINICAL_CONDITION_RECORDED',
+      eventPayload: {
+        conditionId,
+        patientId: payload.patientId,
+        encounterId: payload.encounterId,
+        code: payload.code.trim(),
+        clinicalStatus: condition.clinicalStatus,
+        verificationStatus: condition.verificationStatus,
+        problemListKnowledgeStatus: 'KNOWN',
+      },
+      auditAction: 'RECORD_CLINICAL_CONDITION',
+      auditResourceType: 'CLINICAL_CONDITION',
+      auditResourceId: conditionId,
+      auditReason: `Recorded condition ${payload.display.trim()} for patient ${payload.patientId}`,
+      outboxTopic: 'g-hims-clinical-events',
       idempotencyKey,
-      {
-        entityType: 'CLINICAL_CONDITION',
-        entityId: conditionId,
-        eventType: 'CLINICAL_CONDITION_RECORDED',
-        domainState: condition,
-        eventPayload: {
-          conditionId,
-          patientId: payload.patientId,
-          encounterId: payload.encounterId,
-          code: payload.code.trim(),
-          clinicalStatus: condition.clinicalStatus,
-          verificationStatus: condition.verificationStatus,
+      commandId,
+      correlationId: context.correlationId,
+      domainState: condition,
+      additionalStateWrites: [
+        {
+          entityType: 'PATIENT_CLINICAL_KNOWLEDGE_STATUS',
+          entityId: PatientClinicalKnowledgeDomainService.documentId(
+            payload.patientId,
+            'PROBLEM_LIST'
+          ),
+          domainState: knowledgeRecord,
         },
-        auditReason: `Recorded condition ${payload.display.trim()} for patient ${payload.patientId}`,
-        outboxTopic: 'g-hims-clinical-events',
-      }
-    );
+      ],
+    });
 
     return {
       success: true,
       commandId,
       idempotencyKey,
       entityId: conditionId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
       data: condition,
     };
   }
@@ -277,36 +305,63 @@ export class ClinicalDocumentationDomainService {
       recordedAt,
     });
 
-    const tx = await TransactionManager.executeAtomicWrite(
-      context,
-      commandId,
+    const knowledgeRecord =
+      PatientClinicalKnowledgeDomainService.buildRecord({
+        tenantId: context.tenantId,
+        patientId: payload.patientId,
+        domain: 'ALLERGIES',
+        status: 'KNOWN',
+        actorId: context.actorId,
+        reviewedAt: recordedAt,
+        encounterId: payload.encounterId,
+        reason: 'Allergy or intolerance recorded',
+      });
+
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'CLINICIAN',
+      aggregateType: 'CLINICAL_ALLERGY',
+      aggregateId: allergyId,
+      eventType: 'CLINICAL_ALLERGY_RECORDED',
+      eventPayload: {
+        allergyId,
+        patientId: payload.patientId,
+        encounterId: payload.encounterId,
+        substanceCode: payload.substanceCode.trim(),
+        criticality: allergy.criticality,
+        verificationStatus: allergy.verificationStatus,
+        allergyKnowledgeStatus: 'KNOWN',
+      },
+      auditAction: 'RECORD_CLINICAL_ALLERGY',
+      auditResourceType: 'CLINICAL_ALLERGY',
+      auditResourceId: allergyId,
+      auditReason: `Recorded allergy/intolerance ${payload.substanceDisplay.trim()} for patient ${payload.patientId}`,
+      outboxTopic: 'g-hims-clinical-events',
       idempotencyKey,
-      {
-        entityType: 'CLINICAL_ALLERGY',
-        entityId: allergyId,
-        eventType: 'CLINICAL_ALLERGY_RECORDED',
-        domainState: allergy,
-        eventPayload: {
-          allergyId,
-          patientId: payload.patientId,
-          encounterId: payload.encounterId,
-          substanceCode: payload.substanceCode.trim(),
-          criticality: allergy.criticality,
-          verificationStatus: allergy.verificationStatus,
+      commandId,
+      correlationId: context.correlationId,
+      domainState: allergy,
+      additionalStateWrites: [
+        {
+          entityType: 'PATIENT_CLINICAL_KNOWLEDGE_STATUS',
+          entityId: PatientClinicalKnowledgeDomainService.documentId(
+            payload.patientId,
+            'ALLERGIES'
+          ),
+          domainState: knowledgeRecord,
         },
-        auditReason: `Recorded allergy/intolerance ${payload.substanceDisplay.trim()} for patient ${payload.patientId}`,
-        outboxTopic: 'g-hims-clinical-events',
-      }
-    );
+      ],
+    });
 
     return {
       success: true,
       commandId,
       idempotencyKey,
       entityId: allergyId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
       data: allergy,
     };
   }
@@ -545,36 +600,68 @@ export class ClinicalDocumentationDomainService {
       status: 'FINAL',
     };
 
-    const tx = await TransactionManager.executeAtomicWrite(
-      context,
-      commandId,
+    const medicationKnowledgeStatus =
+      payload.reconciledMedicationIds.length > 0 ? 'KNOWN' : 'KNOWN_NONE';
+    const knowledgeRecord =
+      PatientClinicalKnowledgeDomainService.buildRecord({
+        tenantId: context.tenantId,
+        patientId: payload.patientId,
+        domain: 'MEDICATIONS',
+        status: medicationKnowledgeStatus,
+        actorId: context.actorId,
+        reviewedAt: completedAt,
+        encounterId: payload.encounterId,
+        reason: 'Medication reconciliation completed',
+      });
+
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'CLINICIAN',
+      aggregateType: 'ENCOUNTER_EVIDENCE',
+      aggregateId: evidenceId,
+      eventType: 'MEDICATION_RECONCILIATION_COMPLETED',
+      eventPayload: {
+        evidenceId,
+        encounterId: payload.encounterId,
+        patientId: payload.patientId,
+        discrepancyCount: payload.discrepancyCount,
+        reconciledMedicationCount: payload.reconciledMedicationIds.length,
+        medicationKnowledgeStatus,
+      },
+      auditAction: 'COMPLETE_MEDICATION_RECONCILIATION',
+      auditResourceType: 'ENCOUNTER_EVIDENCE',
+      auditResourceId: evidenceId,
+      auditReason: `Completed medication reconciliation for encounter ${payload.encounterId}`,
+      outboxTopic: 'g-hims-clinical-events',
       idempotencyKey,
-      {
-        entityType: 'ENCOUNTER_EVIDENCE',
-        entityId: evidenceId,
-        eventType: 'MEDICATION_RECONCILIATION_COMPLETED',
-        domainState,
-        eventPayload: {
-          evidenceId,
-          encounterId: payload.encounterId,
-          patientId: payload.patientId,
-          discrepancyCount: payload.discrepancyCount,
-          reconciledMedicationCount: payload.reconciledMedicationIds.length,
+      commandId,
+      correlationId: context.correlationId,
+      domainState,
+      additionalStateWrites: [
+        {
+          entityType: 'PATIENT_CLINICAL_KNOWLEDGE_STATUS',
+          entityId: PatientClinicalKnowledgeDomainService.documentId(
+            payload.patientId,
+            'MEDICATIONS'
+          ),
+          domainState: knowledgeRecord,
         },
-        auditReason: `Completed medication reconciliation for encounter ${payload.encounterId}`,
-        outboxTopic: 'g-hims-clinical-events',
-      }
-    );
+      ],
+    });
 
     return {
       success: true,
       commandId,
       idempotencyKey,
       entityId: evidenceId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: domainState,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
+      data: {
+        ...domainState,
+        medicationKnowledgeStatus,
+      },
     };
   }
 

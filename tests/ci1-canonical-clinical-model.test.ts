@@ -199,8 +199,8 @@ describe('G-HIMS CI-1 canonical clinical model', () => {
     expect(docs).toContain('recordClinicalCondition');
     expect(docs).toContain('recordClinicalAllergy');
     expect(docs).toContain('validatePatientEncounter');
-    expect(docs).toContain("entityType: 'CLINICAL_CONDITION'");
-    expect(docs).toContain("entityType: 'CLINICAL_ALLERGY'");
+    expect(docs).toContain("aggregateType: 'CLINICAL_CONDITION'");
+    expect(docs).toContain("aggregateType: 'CLINICAL_ALLERGY'");
     expect(bus).toContain("'RecordClinicalConditionCommand'");
     expect(bus).toContain("'RecordClinicalAllergyCommand'");
   });

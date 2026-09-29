@@ -719,22 +719,21 @@ export function OpdMasterWorkspace() {
       throw new Error(vitalsResult.error?.message || 'Vitals recording failed.');
     }
 
-    try {
-      const transition = await executeActiveTenantCommand(
-        'AdvanceStageCommand',
-        {
-          encounterId: activeEncounter.id,
-          currentStage: activeEncounter.currentStage || 'TRIAGE',
-          targetStage: 'CONSULTATION',
-          evidenceId: vitalsResult.entityId,
-        },
-        { idempotencyKey: `opd-stage-triage-consult:${activeEncounter.id}` }
+    const transition = await executeActiveTenantCommand(
+      'AdvanceStageCommand',
+      {
+        encounterId: activeEncounter.id,
+        currentStage: activeEncounter.currentStage || 'TRIAGE',
+        targetStage: 'CONSULTATION',
+        evidenceId: vitalsResult.entityId,
+      },
+      { idempotencyKey: `opd-stage-triage-consult:${activeEncounter.id}` }
+    );
+    if (!transition.success) {
+      throw new Error(
+        transition.error?.message ||
+          'Clinical workflow runtime blocked transition from triage to consultation.'
       );
-      if (!transition.success) {
-        console.warn('Triage stage transition notice:', transition.error);
-      }
-    } catch (stageErr) {
-      console.warn('Non-blocking stage advance notice:', stageErr);
     }
 
     setEncounters((prev) =>
@@ -800,22 +799,21 @@ export function OpdMasterWorkspace() {
       throw new Error(noteResult.error?.message || 'Clinical note signing failed.');
     }
 
-    try {
-      const transition = await executeActiveTenantCommand(
-        'AdvanceStageCommand',
-        {
-          encounterId: activeEncounter.id,
-          currentStage: activeEncounter.currentStage || 'CONSULTATION',
-          targetStage: 'DIAGNOSTICS',
-          evidenceId: noteResult.entityId,
-        },
-        { idempotencyKey: `opd-stage-consult-diagnostics:${activeEncounter.id}` }
+    const transition = await executeActiveTenantCommand(
+      'AdvanceStageCommand',
+      {
+        encounterId: activeEncounter.id,
+        currentStage: activeEncounter.currentStage || 'CONSULTATION',
+        targetStage: 'DIAGNOSTICS',
+        evidenceId: noteResult.entityId,
+      },
+      { idempotencyKey: `opd-stage-consult-diagnostics:${activeEncounter.id}` }
+    );
+    if (!transition.success) {
+      throw new Error(
+        transition.error?.message ||
+          'Clinical workflow runtime blocked transition from consultation to diagnostics.'
       );
-      if (!transition.success) {
-        console.warn('Consultation stage transition notice:', transition.error);
-      }
-    } catch (stageErr) {
-      console.warn('Non-blocking consultation stage transition notice:', stageErr);
     }
 
     setEncounters((prev) =>

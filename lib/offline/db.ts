@@ -857,6 +857,15 @@ export async function getEdgeEntity<T extends Record<string, unknown> = Record<s
   return row && !row.deleted ? (row.data as T) : null;
 }
 
+export async function getEdgeEntityRecord(
+  tenantId: string,
+  collection: string,
+  entityId: string
+): Promise<EdgeEntityRecord | null> {
+  const key = `${String(tenantId || '').trim().toLowerCase()}:${collection}:${entityId}`;
+  return (await localDb.edge_entities.get(key)) || null;
+}
+
 export async function getEdgeSyncMetadata(
   tenantId: string,
   scope = 'clinical-core'

@@ -24,6 +24,14 @@ export interface CreateEncounterPayload {
   priority?: 'STAT' | 'URGENT' | 'ROUTINE';
 }
 
+export interface CreateOpdEncounterPayload {
+  patientId: string;
+  chiefComplaint: string;
+  departmentId: string;
+  priority?: 'STAT' | 'URGENT' | 'ROUTINE';
+  assignedDoctor?: string;
+}
+
 export interface AdvanceStagePayload {
   encounterId: string;
   currentStage: string;
@@ -160,6 +168,154 @@ export class EncounterDomainService {
       data: domainState,
     };
     return result;
+  }
+
+  public static async createOpdEncounter(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: CreateOpdEncounterPayload
+  ): Promise<CommandResult> {
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: ['RECEPTIONIST', 'REGISTRAR', 'NURSE', 'DOCTOR', 'SYSTEM_ADMIN', 'ADMINISTRATOR'],
+    });
+    if (!auth.authorized) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: auth.code || 'UNAUTHORIZED', message: auth.reason || 'Not authorized to start an OPD encounter.' },
+      };
+    }
+
+    const patient = await DomainStateRepository.getById<Record<string, unknown>>(
+      context.tenantId,
+      'patients',
+      payload.patientId
+    );
+    if (!patient) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: 'PATIENT_NOT_FOUND', message: 'Patient does not exist.' },
+      };
+    }
+    if (['MERGED', 'DECEASED', 'INACTIVE'].includes(String(patient.status || '').toUpperCase())) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: 'PATIENT_NOT_ACTIVE', message: 'Only an active patient can start a new OPD encounter.' },
+      };
+    }
+    if (patient.activeEncounterId) {
+      const active = await DomainStateRepository.getById<Record<string, unknown>>(
+        context.tenantId,
+        'encounters',
+        String(patient.activeEncounterId)
+      );
+      if (active && !['COMPLETED', 'DISCHARGED', 'TRANSFERRED', 'CANCELLED'].includes(String(active.status || '').toUpperCase())) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'PATIENT_ACTIVE_ENCOUNTER_CONFLICT',
+            message: `Patient already has active encounter ${String(patient.activeEncounterId)}.`,
+          },
+        };
+      }
+    }
+
+    const now = Date.now();
+    const encounterId = `enc_opd_${crypto.randomUUID()}`;
+    const tokenId = `opd_${encounterId}`;
+    const tokenNumber = `OPD-${String(now).slice(-6)}`;
+    const fullName = String(patient.fullName || '');
+    const mrn = String(patient.mrn || '');
+
+    const encounterState: EncounterState = {
+      encounterId,
+      tenantId: context.tenantId,
+      patientId: payload.patientId,
+      encounterType: 'OPD',
+      chiefComplaint: payload.chiefComplaint,
+      departmentId: payload.departmentId,
+      status: 'ACTIVE',
+      currentStage: 'REGISTERED',
+      clinicalState: 'REGISTERED',
+      operationalState: 'QUEUED',
+      financialClearanceState: 'CONSULTATION_PAYMENT_PENDING',
+      resourceAssignmentState: 'NONE',
+      priority: payload.priority || 'ROUTINE',
+      assignedProviderId: payload.assignedDoctor || context.actorId,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const patientState = {
+      ...patient,
+      activeEncounterId: encounterId,
+      updatedAt: now,
+    };
+
+    const queueState = {
+      id: tokenId,
+      encounterId,
+      patientId: payload.patientId,
+      patientName: fullName,
+      mrn,
+      tokenNumber,
+      department: payload.departmentId,
+      priority: String(payload.priority || 'ROUTINE').toLowerCase(),
+      status: 'waiting',
+      arrivalTime: new Date(now).toISOString(),
+      createdAt: now,
+    };
+
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'RECEPTIONIST',
+      aggregateType: 'ENCOUNTER',
+      aggregateId: encounterId,
+      eventType: 'OPD_ENCOUNTER_CREATED',
+      eventPayload: {
+        encounterId,
+        patientId: payload.patientId,
+        tokenId,
+        tokenNumber,
+        departmentId: payload.departmentId,
+        priority: payload.priority || 'ROUTINE',
+      },
+      auditAction: 'CREATE_OPD_ENCOUNTER',
+      auditResourceType: 'ENCOUNTER',
+      auditResourceId: encounterId,
+      auditReason: `Created OPD encounter ${encounterId} for patient ${mrn || payload.patientId}.`,
+      outboxTopic: 'g-hims-clinical-events',
+      idempotencyKey,
+      commandId,
+      correlationId: context.correlationId,
+      domainState: encounterState,
+      additionalStateWrites: [
+        { entityType: 'PATIENT_MPI', entityId: payload.patientId, domainState: patientState },
+        { entityType: 'OPD_QUEUE_TOKEN', entityId: tokenId, domainState: queueState },
+      ],
+    });
+
+    this.encounterCache.set(this.cacheKey(context.tenantId, encounterId), encounterState);
+
+    return {
+      success: true,
+      commandId,
+      idempotencyKey,
+      entityId: encounterId,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
+      data: { encounter: encounterState, queueToken: queueState, patient: patientState },
+    };
   }
 
   /**

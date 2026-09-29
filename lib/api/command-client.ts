@@ -52,6 +52,10 @@ async function queueGovernedOfflineCommand<TData>(
     schemaVersion: input.schemaVersion || 1,
     baseEntityVersion:
       input.offlineQueue.baseEntityVersion ?? edgeRecord?.serverVersion,
+    baseVectorClock:
+      edgeRecord?.data?._vectorClock && typeof edgeRecord.data._vectorClock === 'object'
+        ? edgeRecord.data._vectorClock as Record<string, number>
+        : undefined,
     optimisticCache: input.offlineQueue.optimisticCache,
     mutationId: commandId,
   });

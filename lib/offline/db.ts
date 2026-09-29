@@ -708,10 +708,21 @@ export async function addMutation(
   const docId = mutationOrParams.docId || (mutationOrParams as any).resourceId || `doc_${Date.now()}`;
   const resourceId = (mutationOrParams as any).resourceId || docId;
   const now = Date.now();
+  const actorId = String((mutationOrParams as any).actorId || '').trim();
+  if (!actorId) {
+    throw new Error('OFFLINE_MUTATION_ACTOR_REQUIRED');
+  }
+  const plaintextPayload = mutationOrParams.payload || {};
+  const encryptedPayload = await encryptEdgeJson(
+    mutationOrParams.tenantId,
+    actorId,
+    plaintextPayload
+  );
+
   const mutation: SyncMutation = {
     id: mutationOrParams.id || `mut_${now}_${Math.random().toString(36).substring(2, 9)}`,
     tenantId: mutationOrParams.tenantId,
-    actorId: (mutationOrParams as any).actorId,
+    actorId,
     collection: mutationOrParams.collection,
     docId,
     resourceId,
@@ -720,7 +731,8 @@ export async function addMutation(
     idempotencyKey: (mutationOrParams as any).idempotencyKey,
     schemaVersion: (mutationOrParams as any).schemaVersion || 1,
     baseEntityVersion: (mutationOrParams as any).baseEntityVersion,
-    payload: mutationOrParams.payload || {},
+    payload: {},
+    encryptedPayload,
     vectorClock: (mutationOrParams as any).vectorClock || { localNode: 1 },
     timestamp: (mutationOrParams as any).timestamp || now,
     clientTimestamp: (mutationOrParams as any).clientTimestamp || now,
@@ -731,7 +743,7 @@ export async function addMutation(
   };
 
   await localDb.mutations.put(mutation);
-  return mutation;
+  return { ...mutation, payload: plaintextPayload };
 }
 
 export async function updateMutationStatus(
@@ -779,11 +791,15 @@ export async function saveToOfflineCache(
     collection = 'general';
   }
 
+  const ownerUid = currentOwnerUid();
+  const encryptedData = await encryptEdgeJson(tenantId, ownerUid, data);
   await localDb.offline_cache.put({
     key,
     tenantId,
     collection,
-    data,
+    ownerUid,
+    data: {},
+    encryptedData,
     updatedAt: Date.now(),
     vectorClock: {},
   });
@@ -791,11 +807,16 @@ export async function saveToOfflineCache(
 
 export async function recordSyncConflict(conflict: any): Promise<void> {
   const conflictKey = `conflict_${conflict.mutationId || conflict.id || Date.now()}`;
+  const tenantId = String(conflict.tenantId || '').trim().toLowerCase();
+  const ownerUid = currentOwnerUid();
+  const encryptedData = await encryptEdgeJson(tenantId, ownerUid, conflict);
   await localDb.offline_cache.put({
     key: conflictKey,
-    tenantId: conflict.tenantId || 'default',
+    tenantId,
     collection: 'conflicts',
-    data: conflict,
+    ownerUid,
+    data: {},
+    encryptedData,
     updatedAt: Date.now(),
     vectorClock: {},
   });
@@ -806,10 +827,11 @@ export async function getSyncConflicts(tenantId?: string): Promise<SyncConflict[
     .where('collection')
     .equals('conflicts')
     .toArray();
-  if (tenantId) {
-    return entries.filter((e) => e.tenantId === tenantId).map((e) => e.data as SyncConflict);
-  }
-  return entries.map((e) => e.data as SyncConflict);
+  const filtered = tenantId ? entries.filter((e) => e.tenantId === tenantId) : entries;
+  const decrypted = await Promise.all(filtered.map(decryptStoredCacheEntry));
+  return decrypted
+    .filter((entry) => Object.keys(entry.data || {}).length > 0)
+    .map((entry) => entry.data as SyncConflict);
 }
 
 export async function resolveSyncConflict(

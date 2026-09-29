@@ -27,6 +27,22 @@ describe('G-HIMS P6 full offline-first completion', () => {
     expect(engine).not.toContain('saveToOfflineCache(');
   });
 
+  test('encrypted pending commands are actor-scoped before decryption on shared workstations', async () => {
+    const secure = await source('lib/offline/secure-store.ts');
+    const engine = await source('lib/offline/sync-engine.ts');
+    const hook = await source('hooks/useOfflineStatus.ts');
+
+    expect(secure).toContain('item.actorId === normalizedActorId');
+    expect(secure.indexOf('item.actorId === normalizedActorId')).toBeLessThan(
+      secure.indexOf('return Promise.all(rows.map(decryptMutation))')
+    );
+    expect(secure).toContain('getSecurePendingVectorClock');
+    expect(engine).toContain('getSecurePendingMutations(activeTenantId, cached.user.uid)');
+    expect(engine).toContain('getSecurePendingVectorClock(params.tenantId, cached.user.uid)');
+    expect(hook).toContain('getSecurePendingMutations(tenantId, cached.user.uid)');
+    expect(hook).toContain('getSecurePendingVectorClock(tenantId, cached.user.uid)');
+  });
+
   test('hospital read models are encrypted local-first and role-scoped', async () => {
     const hydration = await source('lib/offline/hydration.ts');
     const bootstrap = await source('app/api/offline/bootstrap/route.ts');

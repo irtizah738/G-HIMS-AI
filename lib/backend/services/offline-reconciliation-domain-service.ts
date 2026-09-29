@@ -17,7 +17,7 @@ import { registerPatientAndEncounter } from '@/server/runtime/registration-orche
 import { EdgeVersionRepository } from '@/server/repositories/edge-version-repository';
 
 function conflictCategory(commandType: string): ConflictCategory {
-  if (['PostJournalCommand'].includes(commandType)) return 'FINANCIAL_CONFLICT';
+  if (['PostJournalCommand', 'RecordCashReceiptCommand'].includes(commandType)) return 'FINANCIAL_CONFLICT';
   if (
     [
       'PrescribeMedicationCommand',

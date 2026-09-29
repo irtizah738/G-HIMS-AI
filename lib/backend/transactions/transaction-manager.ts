@@ -120,6 +120,7 @@ function collectionForEntityType(entityType: string): string {
     CLINICAL_PROCEDURE: 'clinicalProcedures',
     CANONICAL_DIAGNOSTIC_ORDER: 'canonicalDiagnosticOrders',
     DIAGNOSTIC_REPORT: 'diagnosticReports',
+    DIAGNOSTIC_RESULT: 'diagnosticResults',
     CARE_PLAN: 'carePlans',
     CLINICAL_PROVENANCE: 'clinicalProvenance',
     OPD_QUEUE_TOKEN: 'opd_queue',

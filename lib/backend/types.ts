@@ -49,6 +49,8 @@ export interface CommandResult<TData = unknown> {
     details?: unknown;
   };
   replayedFromCache?: boolean;
+  /** Command was durably captured in the authenticated IndexedDB outbox for replay. */
+  queuedOffline?: boolean;
 }
 
 export interface DomainEventEnvelope<TPayload = Record<string, unknown>> {

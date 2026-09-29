@@ -29,6 +29,116 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(hook).not.toContain('navigator.onLine');
   });
 
+  test('sync status indicator is driven by real edge and replica telemetry',async()=>{
+    const indicator=await source('components/navigation/sync-status-indicator.tsx');
+    const hook=await source('hooks/useOfflineStatus.ts');
+    const engine=await source('lib/offline/sync-engine.ts');
+    const db=await source('lib/offline/db.ts');
+    const statusRoute=await source('app/api/sync/status/route.ts');
+
+    expect(indicator).toContain("useOfflineStatus");
+    expect(indicator).toContain("activeTenant");
+    expect(indicator).toContain("localStoreLatencyMs");
+    expect(indicator).toContain("replicaLatencyMs");
+    expect(indicator).toContain("replicaStoreLatencyMs");
+    expect(indicator).toContain("vectorClock");
+    expect(indicator).toContain("lastReplicationEvent");
+    expect(indicator).toContain("setOfflineSimulation");
+    expect(indicator).not.toContain("useHospital");
+    expect(indicator).not.toContain("Latency: 1.2ms");
+    expect(indicator).not.toContain("Status: 18ms");
+    expect(indicator).not.toContain("241 +");
+    expect(indicator).not.toContain("setTimeout(() =>");
+
+    expect(hook).toContain("measureLocalStoreLatency");
+    expect(hook).toContain("getPendingVectorClock");
+    expect(hook).toContain("replicaReachable");
+    expect(hook).toContain("lastReplicationEvent");
+
+    expect(engine).toContain("refreshReplicaStatus");
+    expect(engine).toContain("setOfflineSimulation");
+    expect(engine).toContain("OFFLINE_SIMULATION_DISABLED_IN_PRODUCTION");
+    expect(engine).toContain("lastReplicationEvent");
+    expect(engine).toContain("/api/sync/status?tenantId=");
+
+    expect(db).toContain("getPendingVectorClock");
+    expect(db).toContain("measureLocalStoreLatency");
+
+    expect(statusRoute).toContain("deriveAuthoritativeContext");
+    expect(statusRoute).toContain("getAdminFirestore");
+    expect(statusRoute).toContain("storeLatencyMs");
+    expect(statusRoute).toContain("Cache-Control");
+  });
+
+  test('governed clinical commands use the real IndexedDB outbox on transport failure',async()=>{
+    const client=await source('lib/api/command-client.ts');
+    const engine=await source('lib/offline/sync-engine.ts');
+    const hospital=await source('lib/context/hospital-context.tsx');
+    const types=await source('lib/backend/types.ts');
+
+    expect(client).toContain('queueGovernedOfflineCommand');
+    expect(client).toContain('syncEngine.queueMutation');
+    expect(client).toContain('offlineSimulationActive');
+    expect(client).toContain('isTransientServerStatus');
+    expect(client).toContain('status === 502 || status === 503 || status === 504');
+    expect(client).toContain('mutationId: commandId');
+    expect(client).not.toContain("response.status === 401");
+    expect(client).not.toContain("response.status === 403");
+
+    expect(engine).toContain('getPendingVectorClock');
+    expect(engine).toContain('incrementClock');
+    expect(engine).toContain('clockNodeId = cached.session.deviceId || cached.user.uid');
+    expect(engine).toContain('id: params.mutationId');
+
+    expect(types).toContain('queuedOffline?: boolean');
+
+    expect(hospital).toContain("collection: 'clinical_notes'");
+    expect(hospital).toContain("collection: 'clinical_orders'");
+    expect(hospital).toContain("collection: 'vitals'");
+    expect(hospital).toContain("collection: 'opd_queue'");
+    expect(hospital).toContain("collection: 'beds'");
+    expect(hospital).toContain('result.queuedOffline');
+  });
+
+  test('sync telemetry cannot extend session activity or strand in-flight mutations',async()=>{
+    const statusRoute=await source('app/api/sync/status/route.ts');
+    const sessionService=await source('server/auth/session-service.ts');
+    const authoritative=await source('lib/backend/security/authoritative-context.ts');
+    const engine=await source('lib/offline/sync-engine.ts');
+
+    expect(statusRoute).toContain('touchSessionActivity: false');
+    expect(authoritative).toContain('touchSessionActivity?: boolean');
+    expect(authoritative).toContain('touchActivity: options.touchSessionActivity !== false');
+    expect(sessionService).toContain('touchActivity?: boolean');
+
+    const validateSessionSection=sessionService.slice(
+      sessionService.indexOf('export async function validateSession('),
+      sessionService.indexOf('export function validateSessionRecord(')
+    );
+    expect(validateSessionSection).toContain('if (options.touchActivity === false)');
+    expect(validateSessionSection.indexOf('if (options.touchActivity === false)')).toBeLessThan(
+      validateSessionSection.indexOf('await sessionDocRef.update')
+    );
+
+    expect(engine).toContain('processingMutationIds');
+    expect(engine).toContain('SYNC_TRANSPORT_FAILURE');
+    expect(engine).toContain('SYNC_RESPONSE_INCOMPLETE');
+    expect(engine).toContain("updateMutationStatus(\n          mutationId,\n          'failed'");
+    expect(engine).toContain('AbortController');
+  });
+
+  test('clinical sync conflicts are review-only in the browser',async()=>{
+    const db=await source('lib/offline/db.ts');
+    const banner=await source('components/offline/SyncStatusBanner.tsx');
+
+    expect(db).toContain('SERVER_RECONCILIATION_REQUIRED');
+    expect(db).not.toContain("await localDb.offline_cache.delete(key)");
+    expect(banner).toContain('Server Review Required');
+    expect(banner).toContain('server-authoritative reconciliation workflow');
+    expect(banner).not.toContain('Accept Server (LWW)');
+    expect(banner).not.toContain('Apply Client Overwrite');
+  });
+
   test('clinical AI requires explicit activation and has no diagnostic fallback synthesis',async()=>{
     const gateway=await source('lib/ai/gateway.ts');
     const soap=await source('lib/ai/flows/soap-drafter.ts');

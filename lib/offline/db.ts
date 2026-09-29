@@ -8,6 +8,7 @@ import {
   MutationAction,
   MutationStatus,
 } from '@/types/offline';
+import { mergeClocks } from '@/lib/offline/vector-clock';
 
 export class GHIMSDatabase extends Dexie {
   mutations!: Table<SyncMutation, string>;
@@ -66,6 +67,48 @@ export async function getPendingMutationsFromDb(tenantId?: string): Promise<Sync
   } catch (error) {
     console.warn('Failed to retrieve pending mutations from Dexie:', error);
     return [];
+  }
+}
+
+export async function getPendingVectorClock(
+  tenantId?: string
+): Promise<Record<string, number>> {
+  try {
+    const mutations = tenantId
+      ? await localDb.mutations.where('tenantId').equals(tenantId).toArray()
+      : await localDb.mutations.toArray();
+
+    return mutations
+      .filter((mutation) => mutation.status !== 'syncing' || Boolean(mutation.vectorClock))
+      .reduce<Record<string, number>>(
+        (clock, mutation) => mergeClocks(clock, mutation.vectorClock),
+        {}
+      );
+  } catch (error) {
+    console.warn('Failed to derive pending vector clock from Dexie:', error);
+    return {};
+  }
+}
+
+export async function measureLocalStoreLatency(
+  tenantId?: string
+): Promise<number | null> {
+  const now = () =>
+    typeof performance !== 'undefined' && typeof performance.now === 'function'
+      ? performance.now()
+      : Date.now();
+
+  const startedAt = now();
+  try {
+    if (tenantId) {
+      await localDb.mutations.where('tenantId').equals(tenantId).count();
+    } else {
+      await localDb.mutations.count();
+    }
+    return Math.max(0, Number((now() - startedAt).toFixed(2)));
+  } catch (error) {
+    console.warn('Failed to measure local IndexedDB latency:', error);
+    return null;
   }
 }
 
@@ -563,6 +606,8 @@ export async function addMutation(
         schemaVersion?: number;
         baseEntityVersion?: number;
         id?: string;
+        vectorClock?: Record<string, number>;
+        clientTimestamp?: number;
       }
 ): Promise<SyncMutation> {
   const docId = mutationOrParams.docId || (mutationOrParams as any).resourceId || `doc_${Date.now()}`;
@@ -673,12 +718,13 @@ export async function getSyncConflicts(tenantId?: string): Promise<SyncConflict[
 }
 
 export async function resolveSyncConflict(
-  conflictId: string,
-  strategy?: 'LWW_SERVER' | 'OVERWRITE_CLIENT' | 'MANUAL_MERGE',
-  resolvedBy?: string
+  _conflictId: string,
+  _strategy?: 'LWW_SERVER' | 'OVERWRITE_CLIENT' | 'MANUAL_MERGE',
+  _resolvedBy?: string
 ): Promise<void> {
-  const key = conflictId.startsWith('conflict_') ? conflictId : `conflict_${conflictId}`;
-  await localDb.offline_cache.delete(key);
+  throw new Error(
+    'SERVER_RECONCILIATION_REQUIRED: clinical sync conflicts cannot be resolved or discarded by the browser.'
+  );
 }
 
 

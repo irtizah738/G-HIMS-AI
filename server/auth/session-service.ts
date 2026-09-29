@@ -85,10 +85,19 @@ export async function createSession(params: CreateSessionParams): Promise<UserSe
   }
 }
 
+export interface ValidateSessionOptions {
+  /**
+   * Background health/replica probes must not count as clinician activity.
+   * Defaults to true for normal authenticated requests.
+   */
+  touchActivity?: boolean;
+}
+
 export async function validateSession(
   tenantId: string,
   sessionId: string,
-  userId: string
+  userId: string,
+  options: ValidateSessionOptions = {}
 ): Promise<UserSessionRecord> {
   if (!tenantId || !sessionId || !userId) {
     throw new AuthError({
@@ -132,6 +141,11 @@ export async function validateSession(
     }
 
     const sessionData = validateSessionRecord(docSnap.data() as UserSessionRecord, userId);
+
+    if (options.touchActivity === false) {
+      return sessionData;
+    }
+
     const now = new Date().toISOString();
 
     await sessionDocRef.update({

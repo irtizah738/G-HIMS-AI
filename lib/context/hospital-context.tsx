@@ -1111,11 +1111,43 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       throw new Error('BED_STATUS_REJECTED: use admitPatientToBed for occupied beds.');
     }
 
-    const result = await executeActiveTenantCommand<{ bed: Bed }>('UpdateBedStatusCommand', {
-      bedId,
-      status,
-      notes,
-    });
+    const existingBed = beds.find((bed) => bed.id === bedId);
+    if (!existingBed) {
+      throw new Error('BED_NOT_FOUND: target bed is not present in the local read model.');
+    }
+    if (existingBed.status === 'occupied' || existingBed.patientId) {
+      throw new Error('BED_OCCUPIED: occupied beds must use the inpatient discharge/transfer workflow.');
+    }
+
+    const result = await executeActiveTenantCommand<{ bed: Bed }>(
+      'UpdateBedStatusCommand',
+      {
+        bedId,
+        status,
+        notes,
+      },
+      {
+        offlineQueue: {
+          enabled: true,
+          collection: 'beds',
+          resourceId: bedId,
+          action: 'UPDATE',
+          optimisticCache: true,
+        },
+      }
+    );
+
+    if (result.queuedOffline) {
+      const optimisticBed: Bed = {
+        ...existingBed,
+        status,
+        patientId: undefined,
+        patientName: undefined,
+        ...(notes !== undefined ? { notes } : {}),
+      };
+      setBeds((previous) => previous.map((bed) => bed.id === bedId ? optimisticBed : bed));
+      return;
+    }
 
     if (!result.success || !result.data?.bed) {
       throw new Error(result.error?.message || 'Bed-status command failed.');
@@ -1130,12 +1162,57 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
   };
 
   const admitPatientToBed = async (patientId: string, bedId: string, doctor?: string, nurse?: string) => {
-    const result = await executeActiveTenantCommand<{ bed: Bed; patient: Patient }>('AdmitPatientToBedCommand', {
-      patientId,
-      bedId,
-      assignedDoctor: doctor,
-      assignedNurse: nurse,
-    });
+    const existingBed = beds.find((bed) => bed.id === bedId);
+    const existingPatient = patients.find((patient) => patient.id === patientId);
+
+    if (!existingBed) throw new Error('BED_NOT_FOUND: target bed is not present in the local read model.');
+    if (!existingPatient) throw new Error('PATIENT_NOT_FOUND: patient is not present in the local read model.');
+    if (existingBed.status !== 'available' && existingBed.patientId !== patientId) {
+      throw new Error(`BED_UNAVAILABLE: bed ${existingBed.bedNumber || bedId} is currently ${existingBed.status}.`);
+    }
+    if (existingPatient.activeBedId && existingPatient.activeBedId !== bedId) {
+      throw new Error(`PATIENT_ALREADY_ADMITTED: patient is already assigned to bed ${existingPatient.activeBedId}.`);
+    }
+
+    const result = await executeActiveTenantCommand<{ bed: Bed; patient: Patient }>(
+      'AdmitPatientToBedCommand',
+      {
+        patientId,
+        bedId,
+        assignedDoctor: doctor,
+        assignedNurse: nurse,
+      },
+      {
+        offlineQueue: {
+          enabled: true,
+          collection: 'beds',
+          resourceId: bedId,
+          action: 'UPDATE',
+          optimisticCache: false,
+        },
+      }
+    );
+
+    if (result.queuedOffline) {
+      const admissionDate = new Date().toISOString().split('T')[0];
+      const optimisticBed: Bed = {
+        ...existingBed,
+        status: 'occupied',
+        patientId,
+        patientName: existingPatient.fullName,
+        admissionDate,
+        assignedDoctor: doctor || existingBed.assignedDoctor,
+        assignedNurse: nurse || existingBed.assignedNurse,
+      };
+      const optimisticPatient: Patient = {
+        ...existingPatient,
+        activeBedId: bedId,
+      };
+
+      setBeds((previous) => previous.map((bed) => bed.id === bedId ? optimisticBed : bed));
+      setPatients((previous) => previous.map((patient) => patient.id === patientId ? optimisticPatient : patient));
+      return;
+    }
 
     if (!result.success || !result.data?.bed || !result.data?.patient) {
       throw new Error(result.error?.message || 'Inpatient admission command failed.');
@@ -1151,10 +1228,50 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     disposition?: string,
     censusRecord?: DischargedCensusRecord
   ) => {
+    const existingBed = beds.find((bed) => bed.id === bedId);
+    if (!existingBed || existingBed.status !== 'occupied' || !existingBed.patientId) {
+      throw new Error('BED_NOT_OCCUPIED: only an occupied bed can be discharged.');
+    }
+    const existingPatient = patients.find((patient) => patient.id === existingBed.patientId);
+    if (!existingPatient) {
+      throw new Error('PATIENT_NOT_FOUND: assigned patient is not present in the local read model.');
+    }
+
     const result = await executeActiveTenantCommand<{ bed: Bed; patient: Patient; disposition?: string }>(
       'DischargePatientFromBedCommand',
-      { bedId, notes, disposition }
+      { bedId, notes, disposition },
+      {
+        offlineQueue: {
+          enabled: true,
+          collection: 'beds',
+          resourceId: bedId,
+          action: 'UPDATE',
+          optimisticCache: false,
+        },
+      }
     );
+
+    if (result.queuedOffline) {
+      const optimisticBed: Bed = {
+        ...existingBed,
+        status: 'cleaning',
+        patientId: undefined,
+        patientName: undefined,
+        notes: notes || 'Sanitizing protocol in progress (Discharged)',
+      };
+      const optimisticPatient: Patient = {
+        ...existingPatient,
+        activeBedId: undefined,
+      };
+      setBeds((previous) => previous.map((bed) => bed.id === bedId ? optimisticBed : bed));
+      setPatients((previous) => previous.map((patient) =>
+        patient.id === existingPatient.id ? optimisticPatient : patient
+      ));
+      if (censusRecord) {
+        setDischargedCensus((previous) => [censusRecord, ...previous]);
+      }
+      return;
+    }
 
     if (!result.success || !result.data?.bed || !result.data?.patient) {
       throw new Error(result.error?.message || 'Inpatient discharge command failed.');
@@ -1165,8 +1282,6 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       patient.id === result.data!.patient.id ? result.data!.patient : patient
     ));
 
-    // Discharged census remains a UI/read-model projection in P1. It is populated
-    // only after the authoritative discharge command succeeds.
     if (censusRecord) {
       setDischargedCensus((previous) => [censusRecord, ...previous]);
     }
@@ -1377,6 +1492,8 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       Nursing: 'NURSING',
     };
 
+    const offlineNoteId = `offline-note-${crypto.randomUUID()}`;
+
     void executeActiveTenantCommand<{
       evidenceId: string;
       revenueIntegrityFindings?: Array<{
@@ -1398,12 +1515,20 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       category: categoryMap[note.category],
       content: note.content,
       acceptedStructuredData: note.aiStructuredData || {},
+    }, {
+      offlineQueue: {
+        enabled: true,
+        collection: 'clinical_notes',
+        resourceId: offlineNoteId,
+        action: 'CREATE',
+        optimisticCache: true,
+      },
     }).then((result) => {
       if (!result.success) {
         throw new Error(result.error?.message || 'Clinical note command failed.');
       }
 
-      const noteId = result.entityId || `note-${Date.now()}`;
+      const noteId = result.entityId || offlineNoteId;
       const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
       const newNote: ClinicalNote = { ...note, id: noteId, timestamp };
 
@@ -1465,6 +1590,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     }
 
     const orderType = order.category === 'Radiology' ? 'RADIOLOGY' : 'LAB';
+    const offlineOrderId = `offline-order-${crypto.randomUUID()}`;
 
     void executeActiveTenantCommand('PlaceDiagnosticOrderCommand', {
       encounterId,
@@ -1475,6 +1601,14 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       priority: 'ROUTINE',
       clinicalIndication: order.notes || 'Clinician ordered diagnostic investigation',
       estimatedCostMinorUnits: Math.round((order.cost || 0) * 100),
+    }, {
+      offlineQueue: {
+        enabled: true,
+        collection: 'clinical_orders',
+        resourceId: offlineOrderId,
+        action: 'CREATE',
+        optimisticCache: true,
+      },
     }).then((result) => {
       if (!result.success) {
         throw new Error(result.error?.message || 'Diagnostic order command failed.');
@@ -1483,7 +1617,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       const orderedAt = new Date().toISOString().replace('T', ' ').slice(0, 16);
       const newOrder: LabOrder = {
         ...order,
-        id: result.entityId || `lab-ord-${Date.now()}`,
+        id: result.entityId || offlineOrderId,
         orderedAt,
       };
 
@@ -1516,6 +1650,8 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    const offlineVitalsId = `offline-vitals-${crypto.randomUUID()}`;
+
     void executeActiveTenantCommand('RecordVitalsCommand', {
       encounterId,
       patientId,
@@ -1525,6 +1661,14 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       respiratoryRate: vitals.respiratoryRate,
       oxygenSaturation: vitals.oxygenSaturation,
       measuredAt: Date.now(),
+    }, {
+      offlineQueue: {
+        enabled: true,
+        collection: 'vitals',
+        resourceId: offlineVitalsId,
+        action: 'CREATE',
+        optimisticCache: true,
+      },
     }).then((result) => {
       if (!result.success) {
         throw new Error(result.error?.message || 'Vitals command failed.');
@@ -1644,10 +1788,22 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
 
     const result = await executeActiveTenantCommand<{
       finding: { id: string; status: 'DISMISSED' };
-    }>('DismissRevenueIntegrityFindingCommand', {
-      findingId: mismatchId,
-      reason: 'Reviewed by revenue-cycle staff and marked not billable / clinical exception.',
-    });
+    }>(
+      'DismissRevenueIntegrityFindingCommand',
+      {
+        findingId: mismatchId,
+        reason: 'Reviewed by revenue-cycle staff and marked not billable / clinical exception.',
+      },
+      {
+        offlineQueue: {
+          enabled: true,
+          collection: 'billingMismatches',
+          resourceId: mismatchId,
+          action: 'UPDATE',
+          optimisticCache: true,
+        },
+      }
+    );
 
     if (!result.success) {
       throw new Error(result.error?.message || 'Revenue Integrity dismissal failed.');
@@ -1678,10 +1834,22 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     const token = opdQueue.find((item) => item.id === tokenId);
     if (!token) return;
 
-    void executeActiveTenantCommand('UpdateOpdQueueStatusCommand', {
-      tokenId,
-      targetStatus: 'in_consultation',
-    }).then((result) => {
+    void executeActiveTenantCommand(
+      'UpdateOpdQueueStatusCommand',
+      {
+        tokenId,
+        targetStatus: 'in_consultation',
+      },
+      {
+        offlineQueue: {
+          enabled: true,
+          collection: 'opd_queue',
+          resourceId: tokenId,
+          action: 'UPDATE',
+          optimisticCache: true,
+        },
+      }
+    ).then((result) => {
       if (!result.success) {
         throw new Error(result.error?.message || 'Unable to call OPD patient.');
       }
@@ -1699,10 +1867,22 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     const token = opdQueue.find((item) => item.id === tokenId);
     if (!token) return;
 
-    void executeActiveTenantCommand('UpdateOpdQueueStatusCommand', {
-      tokenId,
-      targetStatus: 'completed',
-    }).then((result) => {
+    void executeActiveTenantCommand(
+      'UpdateOpdQueueStatusCommand',
+      {
+        tokenId,
+        targetStatus: 'completed',
+      },
+      {
+        offlineQueue: {
+          enabled: true,
+          collection: 'opd_queue',
+          resourceId: tokenId,
+          action: 'UPDATE',
+          optimisticCache: true,
+        },
+      }
+    ).then((result) => {
       if (!result.success) {
         throw new Error(result.error?.message || 'Unable to complete OPD consultation.');
       }

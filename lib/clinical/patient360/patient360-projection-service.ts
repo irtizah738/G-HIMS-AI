@@ -2,6 +2,7 @@ import type { CollectionReference, DocumentData } from 'firebase-admin/firestore
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { sanitizeForFirestore } from '@/lib/firestore/sanitize';
 import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
+import { PatientClinicalKnowledgeDomainService } from '@/lib/backend/services/patient-clinical-knowledge-domain-service';
 import type {
   ClinicalAllergy,
   ClinicalCondition,
@@ -236,6 +237,7 @@ export class Patient360ProjectionService {
       diagnosticReports,
       documents,
       events,
+      knowledgeStatus,
     ] = await Promise.all([
       queryByPatient<Record<string, unknown>>(
         tenantRef.collection('encounters'),
@@ -273,6 +275,7 @@ export class Patient360ProjectionService {
         1000
       ),
       this.loadPatientEvents(tenantId, patientId),
+      PatientClinicalKnowledgeDomainService.getAggregate(tenantId, patientId),
     ]);
 
     return {
@@ -290,6 +293,7 @@ export class Patient360ProjectionService {
       diagnosticReports,
       documents,
       events,
+      knowledgeStatus,
     };
   }
 

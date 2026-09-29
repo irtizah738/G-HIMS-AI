@@ -39,17 +39,17 @@ export function OpdOfflineSyncManager({
           className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
             isOnline ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-amber-950 text-amber-300 border border-amber-800'
           }`}
-          title="Click to simulate offline / online network toggle"
+          title="Use the real G-HIMS sync-engine offline test mode"
         >
           {isOnline ? (
             <>
               <Wifi className="w-3.5 h-3.5 text-emerald-400" />
-              <span>ONLINE (Cloud Firestore Synced)</span>
+              <span>ONLINE (Connectivity Verified)</span>
             </>
           ) : (
             <>
               <WifiOff className="w-3.5 h-3.5 text-amber-400" />
-              <span>OFFLINE (Local IndexedDB Outbox Active)</span>
+              <span>OFFLINE (Encrypted IndexedDB Outbox Active)</span>
             </>
           )}
         </button>
@@ -62,7 +62,7 @@ export function OpdOfflineSyncManager({
               onClick={onTriggerManualSync}
               className="px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold flex items-center gap-1 cursor-pointer"
             >
-              <RefreshCw className="w-3 h-3 animate-spin" /> Sync Now
+              <RefreshCw className="w-3 h-3" /> Sync Now
             </button>
           )}
         </div>

@@ -204,6 +204,36 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(engine).toContain('queueMicrotask');
   });
 
+  test('P6D offline replay is bound to authoritative versions and vector clocks',async()=>{
+    const types=await source('lib/backend/types.ts');
+    const client=await source('lib/api/command-client.ts');
+    const engine=await source('lib/offline/sync-engine.ts');
+    const tx=await source('lib/backend/transactions/transaction-manager.ts');
+    const reconciliation=await source('lib/backend/services/offline-reconciliation-domain-service.ts');
+
+    expect(types).toContain('baseEntityVersion?: number');
+    expect(types).toContain('vectorClock?: Record<string, number>');
+    expect(types).toContain('serverVectorClock?: Record<string, number>');
+
+    expect(client).toContain('edgeRecord?.serverVersion');
+    expect(client).toContain('edgeRecord?.data?._vectorClock');
+    expect(engine).toContain('baseEntityVersion: mutation.baseEntityVersion');
+    expect(engine).toContain('vectorClock: mutation.vectorClock');
+    expect(engine).toContain('mergeClocks(params.baseVectorClock, currentClock)');
+
+    expect(reconciliation).toContain('STALE_BASE_VERSION');
+    expect(reconciliation).toContain('CAUSAL_CONFLICT');
+    expect(reconciliation).toContain('STALE_VECTOR_CLOCK');
+    expect(reconciliation).toContain('compareClocks');
+    expect(reconciliation).toContain('offlineVectorClock: mutation.vectorClock');
+    expect(reconciliation).toContain('serverVectorClock');
+
+    expect(tx).toContain('_serverVersion');
+    expect(tx).toContain('_vectorClock');
+    expect(tx).toContain('toVersionedDocumentData');
+    expect(tx).toContain("incrementClock(");
+  });
+
   test('clinical AI requires explicit activation and has no diagnostic fallback synthesis',async()=>{
     const gateway=await source('lib/ai/gateway.ts');
     const soap=await source('lib/ai/flows/soap-drafter.ts');

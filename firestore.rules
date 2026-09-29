@@ -218,6 +218,19 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      // Patient 360 is a server-assembled PHI projection. Browsers must use
+      // the authenticated server API so role/session checks and freshness metadata
+      // cannot be bypassed with direct Firestore reads.
+      match /patient360Projections/{patientId} {
+        allow read, write: if false;
+      }
+      match /patient360Timeline/{timelineItemId} {
+        allow read, write: if false;
+      }
+      match /patient360ProjectionCheckpoints/{eventId} {
+        allow read, write: if false;
+      }
+
       // Projection checkpoints are internal idempotency state and server-only.
       match /projectionCheckpoints/{eventId} {
         allow read, write: if false;

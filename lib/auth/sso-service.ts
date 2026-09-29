@@ -1,5 +1,3 @@
-import { db } from '@/lib/firebase/client';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
 import {
   SSOConfiguration,
   SSOTestResult,
@@ -52,74 +50,85 @@ QU1MIFNpZ25lcjCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAL0y3...
 };
 
 /**
- * Loads SSO configuration for a tenant
+ * SSO configuration is server-owned. Browser Firestore access to
+ * tenants/{tenantId}/config is intentionally denied by firestore.rules.
+ *
+ * Until the real OIDC/SAML integration is installed, only DEMO runtime may
+ * expose the local synthetic configuration. TEST/STAGING/PRODUCTION return an
+ * explicit disabled configuration and never probe Firestore from the browser.
+ */
+function isDemoClientRuntime(): boolean {
+  return process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
+}
+
+function disabledSSOConfiguration(tenantId: string): SSOConfiguration {
+  return {
+    ...DEFAULT_SSO_CONFIG,
+    tenantId,
+    enabled: false,
+    enforceSSO: false,
+    autoProvisionUsers: false,
+    status: 'DISABLED',
+    certificate: undefined,
+    clientSecret: undefined,
+    lastVerifiedAt: undefined,
+  };
+}
+
+/**
+ * Loads SSO configuration for a tenant.
  */
 export async function getSSOConfiguration(tenantId: string): Promise<SSOConfiguration> {
   const cleanTenant = tenantId || 'central-metro-hospital';
 
-  // 1. Try Firestore
-  try {
-    if (typeof window !== 'undefined' && navigator.onLine) {
-      const docRef = doc(db, 'tenants', cleanTenant, 'config', 'sso');
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
-        const data = snap.data() as SSOConfiguration;
-        saveSSOToLocalStorage(cleanTenant, data);
-        return data;
-      }
-    }
-  } catch (err) {
-    console.warn('Notice: Could not load SSO config from Firestore:', err);
+  if (!isDemoClientRuntime()) {
+    return disabledSSOConfiguration(cleanTenant);
   }
 
-  // 2. Try LocalStorage
   if (typeof window !== 'undefined') {
     try {
       const cached = localStorage.getItem(`${SSO_STORAGE_KEY_PREFIX}${cleanTenant}`);
       if (cached) {
         const parsed = JSON.parse(cached);
         if (parsed && parsed.providerType) {
-          return parsed;
+          return parsed as SSOConfiguration;
         }
       }
     } catch {
-      // ignore
+      // A missing/corrupt demo cache falls back to the deterministic demo config.
     }
   }
 
-  // 3. Fallback to default
   const config = { ...DEFAULT_SSO_CONFIG, tenantId: cleanTenant };
   saveSSOToLocalStorage(cleanTenant, config);
   return config;
 }
 
 /**
- * Saves SSO configuration for a tenant
+ * Saves SSO configuration for a tenant.
+ *
+ * Live SSO administration is not implemented yet. Keep this fail-closed outside
+ * DEMO instead of attempting a browser write to a server-only Firestore path.
  */
 export async function saveSSOConfiguration(
   tenantId: string,
   config: SSOConfiguration
 ): Promise<SSOConfiguration> {
   const cleanTenant = tenantId || 'central-metro-hospital';
+
+  if (!isDemoClientRuntime()) {
+    throw new Error(
+      'SSO_CONFIG_DISABLED: live SSO configuration is server-owned and not enabled in this runtime.'
+    );
+  }
+
   const updated: SSOConfiguration = {
     ...config,
     tenantId: cleanTenant,
     updatedAt: new Date().toISOString(),
   };
 
-  // 1. Update LocalStorage
   saveSSOToLocalStorage(cleanTenant, updated);
-
-  // 2. Update Firestore
-  try {
-    if (typeof window !== 'undefined' && navigator.onLine) {
-      const docRef = doc(db, 'tenants', cleanTenant, 'config', 'sso');
-      await setDoc(docRef, updated, { merge: true });
-    }
-  } catch (err) {
-    console.warn('Notice: Failed to sync SSO config to Firestore:', err);
-  }
-
   return updated;
 }
 

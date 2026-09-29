@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState } from 'react';
 import {
   Bed,
   Patient,
@@ -27,14 +27,6 @@ import {
   TelehealthSoapNote,
   TelehealthPrescription,
 } from '@/lib/types/ghims';
-import {
-  subscribeToPatients,
-  subscribeToBeds,
-  subscribeToBillingMismatches,
-  subscribeToOpdQueue,
-  subscribeToAuditLogs,
-  subscribeToTelehealthSessions,
-} from '@/lib/firebase/firestore-service';
 import { DischargedCensusRecord, initialDischargedCensus } from '@/lib/clinical/ipd-service';
 import { executeActiveTenantCommand, registerActiveTenantPatient } from '@/lib/api/command-client';
 import { syncEngine } from '@/lib/offline/sync-engine';
@@ -1045,56 +1037,11 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
   const [copilotOpen, setCopilotOpen] = useState<boolean>(false);
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>('p-1001');
 
-  // Sync with Firestore on mount
-  useEffect(() => {
-    // Demo datasets remain in-memory only. Production Firestore is never auto-seeded from a UI mount.
-
-    // Attach real-time Firestore listeners
-    const unsubPatients = subscribeToPatients((remotePatients) => {
-      if (remotePatients && remotePatients.length > 0) {
-        setPatients(remotePatients);
-      }
-    });
-
-    const unsubBeds = subscribeToBeds((remoteBeds) => {
-      if (remoteBeds && remoteBeds.length > 0) {
-        setBeds(remoteBeds);
-      }
-    });
-
-    const unsubMismatches = subscribeToBillingMismatches((remoteMismatches) => {
-      if (remoteMismatches && remoteMismatches.length > 0) {
-        setMismatches(remoteMismatches);
-      }
-    });
-
-    const unsubOpd = subscribeToOpdQueue((remoteTokens) => {
-      if (remoteTokens && remoteTokens.length > 0) {
-        setOpdQueue(remoteTokens);
-      }
-    });
-
-    const unsubAudit = subscribeToAuditLogs((remoteLogs) => {
-      if (remoteLogs && remoteLogs.length > 0) {
-        setAuditLogs(remoteLogs);
-      }
-    });
-
-    const unsubTelehealth = subscribeToTelehealthSessions((remoteSessions) => {
-      if (remoteSessions && remoteSessions.length > 0) {
-        setTelehealthSessions(remoteSessions);
-      }
-    });
-
-    return () => {
-      if (unsubPatients) unsubPatients();
-      if (unsubBeds) unsubBeds();
-      if (unsubMismatches) unsubMismatches();
-      if (unsubOpd) unsubOpd();
-      if (unsubAudit) unsubAudit();
-      if (unsubTelehealth) unsubTelehealth();
-    };
-  }, []);
+  // Legacy root-level Firestore listeners were retired at the P0/P5C trust boundary.
+  // Those collections are intentionally denied by firestore.rules. Authoritative
+  // mutations flow through server commands, while browser read models must use
+  // tenant-scoped projections as they are introduced. Mounting forbidden listeners
+  // before authentication caused repeated permission-denied exceptions on /login.
 
   // Compute live stats
   const totalBeds = beds.length;

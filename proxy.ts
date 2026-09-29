@@ -13,9 +13,14 @@ const RESERVED_ROUTES = new Set([
   'sitemap.xml',
   'login',
   'auth',
+  'forgot-password',
+  'settings',
+  'tenant-selection',
+  'dashboard',
+  '_not-found',
 ]);
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const hostname = request.headers.get('host') || '';
 

@@ -447,6 +447,9 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
     expect(care).toContain('expectedServerVersion');
     expect(care).toContain("entityType: 'BED_TRANSFER'");
     expect(bedService).toContain('expectedPrimaryServerVersion');
+    expect(bedService).toContain(
+      "bed.status === 'occupied' || bed.patientId || bed.currentPatientId"
+    );
     expect(tx).toContain("BED_TRANSFER: 'bedTransfers'");
   });
 

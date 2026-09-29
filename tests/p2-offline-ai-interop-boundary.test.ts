@@ -100,6 +100,40 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(hospital).toContain('result.queuedOffline');
   });
 
+  test('sync telemetry cannot extend session activity or strand in-flight mutations',async()=>{
+    const statusRoute=await source('app/api/sync/status/route.ts');
+    const sessionService=await source('server/auth/session-service.ts');
+    const authoritative=await source('lib/backend/security/authoritative-context.ts');
+    const engine=await source('lib/offline/sync-engine.ts');
+
+    expect(statusRoute).toContain('touchSessionActivity: false');
+    expect(authoritative).toContain('touchSessionActivity?: boolean');
+    expect(authoritative).toContain('touchActivity: options.touchSessionActivity !== false');
+    expect(sessionService).toContain('touchActivity?: boolean');
+    expect(sessionService).toContain('if (options.touchActivity === false)');
+    expect(sessionService.indexOf('if (options.touchActivity === false)')).toBeLessThan(
+      sessionService.indexOf('lastActivityAt: now')
+    );
+
+    expect(engine).toContain('processingMutationIds');
+    expect(engine).toContain('SYNC_TRANSPORT_FAILURE');
+    expect(engine).toContain('SYNC_RESPONSE_INCOMPLETE');
+    expect(engine).toContain("updateMutationStatus(\n          mutationId,\n          'failed'");
+    expect(engine).toContain('AbortController');
+  });
+
+  test('clinical sync conflicts are review-only in the browser',async()=>{
+    const db=await source('lib/offline/db.ts');
+    const banner=await source('components/offline/SyncStatusBanner.tsx');
+
+    expect(db).toContain('SERVER_RECONCILIATION_REQUIRED');
+    expect(db).not.toContain("await localDb.offline_cache.delete(key)");
+    expect(banner).toContain('Server Review Required');
+    expect(banner).toContain('server-authoritative reconciliation workflow');
+    expect(banner).not.toContain('Accept Server (LWW)');
+    expect(banner).not.toContain('Apply Client Overwrite');
+  });
+
   test('clinical AI requires explicit activation and has no diagnostic fallback synthesis',async()=>{
     const gateway=await source('lib/ai/gateway.ts');
     const soap=await source('lib/ai/flows/soap-drafter.ts');

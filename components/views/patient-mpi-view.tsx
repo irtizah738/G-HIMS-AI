@@ -75,8 +75,8 @@ export function PatientMpiView() {
   const [newPhone, setNewPhone] = useState('+1 (555) 000-0000');
   const [newEmail, setNewEmail] = useState('');
   const [newAddress, setNewAddress] = useState('');
-  const [newAllergies, setNewAllergies] = useState('None');
-  const [newConditions, setNewConditions] = useState('None');
+  const [newAllergies, setNewAllergies] = useState('');
+  const [newConditions, setNewConditions] = useState('');
 
   // ABAC patient dataset gating: If user is 'patient', ONLY show their own record
   const scopedPatients = currentRole === 'patient'
@@ -497,7 +497,7 @@ export function PatientMpiView() {
                     </span>
                   ))
                 ) : (
-                  <span className="text-slate-400">No known allergies (NKDA)</span>
+                  <span className="text-amber-700">Allergy status not confirmed</span>
                 )}
 
                 <span className="text-slate-300 mx-2">|</span>
@@ -510,7 +510,7 @@ export function PatientMpiView() {
                     </span>
                   ))
                 ) : (
-                  <span className="text-slate-400">None reported</span>
+                  <span className="text-amber-700">Problem list not confirmed</span>
                 )}
               </div>
             </div>

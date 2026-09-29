@@ -84,6 +84,23 @@ describe('G-HIMS Clinical Safety, Financial & Interoperability Engine', () => {
     });
 
     test('STAT emergency lab orders automatically bypass routine payment locks for patient life safety', async () => {
+      const encounterResult = await CommandBus.dispatch(doctorContext, {
+        commandId: 'cmd_enc_stat_order_01',
+        idempotencyKey: 'idemp_enc_stat_order_01',
+        tenantId,
+        commandType: 'CreateEncounterCommand',
+        schemaVersion: 1,
+        payload: {
+          patientId: 'pat_trauma_victim',
+          encounterType: 'EMERGENCY',
+          chiefComplaint: 'Suspected acute transmural myocardial infarction',
+          departmentId: 'dept_emergency',
+          priority: 'STAT',
+        },
+      });
+      expect(encounterResult.success).toBe(true);
+      expect(encounterResult.entityId).toBeDefined();
+
       const statOrderCmd: BaseCommand = {
         commandId: 'cmd_ord_stat_01',
         idempotencyKey: 'idemp_ord_stat_01',
@@ -91,7 +108,7 @@ describe('G-HIMS Clinical Safety, Financial & Interoperability Engine', () => {
         commandType: 'PlaceDiagnosticOrderCommand',
         schemaVersion: 1,
         payload: {
-          encounterId: 'enc_trauma_bay_1',
+          encounterId: encounterResult.entityId!,
           patientId: 'pat_trauma_victim',
           orderType: 'LAB',
           catalogCode: 'LAB-STAT-TROP',

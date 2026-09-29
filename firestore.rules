@@ -241,6 +241,9 @@ service cloud.firestore {
       match /clinicalIntelligenceEvaluations/{evaluationId} {
         allow read, write: if false;
       }
+      match /dischargeReadinessReviews/{reviewId} {
+        allow read, write: if false;
+      }
 
       // Projection checkpoints are internal idempotency state and server-only.
       match /projectionCheckpoints/{eventId} {

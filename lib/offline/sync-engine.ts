@@ -206,22 +206,31 @@ class ClinicalSyncEngine {
 
       const idToken = await currentUser.getIdToken(false);
       const startedAt = performance.now();
-      const response = await fetch(
-        `/api/sync/status?tenantId=${encodeURIComponent(activeTenantId)}&probe=${Date.now()}`,
-        {
-          method: 'GET',
-          cache: 'no-store',
-          credentials: 'same-origin',
-          headers: {
-            Authorization: `Bearer ${idToken}`,
-            'x-ghims-tenant-id': activeTenantId,
-            'x-ghims-session-id': cached.session.sessionId,
-            ...(cached.session.deviceId
-              ? { 'x-ghims-device-id': cached.session.deviceId }
-              : {}),
-          },
-        }
-      );
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 5000);
+      let response: Response;
+
+      try {
+        response = await fetch(
+          `/api/sync/status?tenantId=${encodeURIComponent(activeTenantId)}&probe=${Date.now()}`,
+          {
+            method: 'GET',
+            cache: 'no-store',
+            credentials: 'same-origin',
+            signal: controller.signal,
+            headers: {
+              Authorization: `Bearer ${idToken}`,
+              'x-ghims-tenant-id': activeTenantId,
+              'x-ghims-session-id': cached.session.sessionId,
+              ...(cached.session.deviceId
+                ? { 'x-ghims-device-id': cached.session.deviceId }
+                : {}),
+            },
+          }
+        );
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
       const roundTripLatencyMs = Math.max(0, Math.round(performance.now() - startedAt));
       const payload = await response.json().catch(() => ({}));
 
@@ -452,34 +461,43 @@ class ClinicalSyncEngine {
           processingMutationIds.add(mutation.id);
         }
 
-        const response = await fetch('/api/sync/batch', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${idToken}`,
-            'x-ghims-tenant-id': mutationTenantId,
-            'x-ghims-session-id': cached.session.sessionId,
-            ...(cached.session.deviceId ? { 'x-ghims-device-id': cached.session.deviceId } : {}),
-          },
-          body: JSON.stringify({
-            batch: {
-              deviceId: cached.session.deviceId || 'unknown-device',
-              tenantId: mutationTenantId,
-              actorId: cached.user.uid,
-              batchId,
-              submittedAt: Date.now(),
-              mutations: replayable.map((mutation) => ({
-                mutationId: mutation.id,
-                occurredAt: mutation.clientTimestamp || mutation.timestamp,
-                commandType: mutation.commandType,
-                payload: mutation.payload,
-                idempotencyKey: mutation.idempotencyKey,
-                entityId: mutation.resourceId || mutation.docId,
-                schemaVersion: mutation.schemaVersion || 1,
-              })),
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+        let response: Response;
+
+        try {
+          response = await fetch('/api/sync/batch', {
+            method: 'POST',
+            signal: controller.signal,
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${idToken}`,
+              'x-ghims-tenant-id': mutationTenantId,
+              'x-ghims-session-id': cached.session.sessionId,
+              ...(cached.session.deviceId ? { 'x-ghims-device-id': cached.session.deviceId } : {}),
             },
-          }),
-        });
+            body: JSON.stringify({
+              batch: {
+                deviceId: cached.session.deviceId || 'unknown-device',
+                tenantId: mutationTenantId,
+                actorId: cached.user.uid,
+                batchId,
+                submittedAt: Date.now(),
+                mutations: replayable.map((mutation) => ({
+                  mutationId: mutation.id,
+                  occurredAt: mutation.clientTimestamp || mutation.timestamp,
+                  commandType: mutation.commandType,
+                  payload: mutation.payload,
+                  idempotencyKey: mutation.idempotencyKey,
+                  entityId: mutation.resourceId || mutation.docId,
+                  schemaVersion: mutation.schemaVersion || 1,
+                })),
+              },
+            }),
+          });
+        } finally {
+          window.clearTimeout(timeoutId);
+        }
 
         const payload = await response.json();
         if (!response.ok) {

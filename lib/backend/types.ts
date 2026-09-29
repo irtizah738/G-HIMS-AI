@@ -142,6 +142,9 @@ export interface OfflineMutationItem {
   idempotencyKey: string;
   entityId?: string;
   schemaVersion: number;
+  baseEntityVersion?: number;
+  vectorClock?: Record<string, number>;
+  baseVectorClock?: Record<string, number>;
 }
 
 export interface OfflineSyncBatch {
@@ -161,6 +164,11 @@ export interface SyncBatchResultItem {
   serverVersion?: number;
   reason?: string;
   data?: unknown;
+  entityMappings?: Array<{
+    localId: string;
+    canonicalId: string;
+    entityType: string;
+  }>;
 }
 
 export interface OfflineSyncResponse {

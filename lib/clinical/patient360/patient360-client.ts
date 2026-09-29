@@ -152,7 +152,7 @@ export async function recordDischargeReadinessReview(
   }
 ): Promise<Record<string, unknown>> {
   const commandId = `cmd_ci7_review_${crypto.randomUUID()}`;
-  const idempotencyKey = `ci7-review:${input.evaluationId}:${input.outcome}:${crypto.randomUUID()}`;
+  const idempotencyKey = `ci7-review:${input.evaluationId}:${input.outcome}`;
 
   const response = await AuthClient.authorizedFetch(
     '/api/commands/execute',

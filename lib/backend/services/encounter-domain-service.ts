@@ -7,6 +7,14 @@ import { CommandContext, CommandResult } from '../types';
 import { AuthorizationPipeline } from '../auth/authorization-pipeline';
 import { TransactionManager } from '../transactions/transaction-manager';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
+import {
+  type ClinicalEncounterState,
+  type FinancialClearanceState,
+  type OperationalQueueState,
+  type ResourceAssignmentState,
+  isClinicalTransitionAllowed,
+  normalizeClinicalEncounterState,
+} from '@/types/clinical-state';
 
 export interface CreateEncounterPayload {
   patientId: string;
@@ -39,6 +47,10 @@ interface EncounterState {
   departmentId: string;
   status: string;
   currentStage: string;
+  clinicalState: ClinicalEncounterState;
+  operationalState: OperationalQueueState;
+  financialClearanceState: FinancialClearanceState;
+  resourceAssignmentState: ResourceAssignmentState;
   priority: 'STAT' | 'URGENT' | 'ROUTINE';
   assignedProviderId: string;
   createdAt: number;
@@ -105,7 +117,14 @@ export class EncounterDomainService {
       chiefComplaint: payload.chiefComplaint,
       departmentId: payload.departmentId,
       status: 'ACTIVE',
-      currentStage: 'TRIAGE',
+      currentStage: payload.encounterType === 'TELEHEALTH' ? 'CONSULTATION' : 'TRIAGE',
+      clinicalState: payload.encounterType === 'TELEHEALTH' ? 'CONSULTATION' : 'TRIAGE',
+      operationalState: 'NOT_QUEUED',
+      financialClearanceState:
+        payload.encounterType === 'EMERGENCY' || payload.encounterType === 'IPD'
+          ? 'NOT_REQUIRED'
+          : 'CONSULTATION_PAYMENT_PENDING',
+      resourceAssignmentState: 'NONE',
       priority: payload.priority || 'ROUTINE',
       assignedProviderId: context.actorId,
       createdAt: Date.now(),
@@ -177,26 +196,43 @@ export class EncounterDomainService {
       };
     }
 
-    if (encounter.currentStage !== payload.currentStage) {
+    const persistedClinicalState =
+      encounter.clinicalState || normalizeClinicalEncounterState(encounter.currentStage);
+    const callerCurrentState = normalizeClinicalEncounterState(payload.currentStage);
+    const targetClinicalState = normalizeClinicalEncounterState(payload.targetStage);
+
+    if (!persistedClinicalState || !callerCurrentState || !targetClinicalState) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'UNKNOWN_CLINICAL_STAGE',
+          message: 'Encounter stage must map to the canonical clinical workflow contract.',
+        },
+      };
+    }
+
+    if (persistedClinicalState !== callerCurrentState) {
       return {
         success: false,
         commandId,
         idempotencyKey,
         error: {
           code: 'STALE_ENCOUNTER_STAGE',
-          message: `Encounter is currently at '${encounter.currentStage}', not caller-declared '${payload.currentStage}'.`,
+          message: `Encounter is currently at canonical state '${persistedClinicalState}', not caller-declared '${callerCurrentState}'.`,
         },
       };
     }
 
-    if (!payload.targetStage || payload.targetStage === payload.currentStage) {
+    if (!isClinicalTransitionAllowed(persistedClinicalState, targetClinicalState)) {
       return {
         success: false,
         commandId,
         idempotencyKey,
         error: {
           code: 'INVALID_STAGE_TRANSITION',
-          message: 'Target stage must differ from the current persisted stage.',
+          message: `Canonical clinical transition ${persistedClinicalState} -> ${targetClinicalState} is not allowed.`,
         },
       };
     }
@@ -205,8 +241,8 @@ export class EncounterDomainService {
     const stageRuntimeId = `stg_${crypto.randomUUID()}`;
     const stageState = {
       encounterId: payload.encounterId,
-      previousStage: encounter.currentStage,
-      newStage: payload.targetStage,
+      previousStage: persistedClinicalState,
+      newStage: targetClinicalState,
       advancedBy: context.actorId,
       evidenceId: payload.evidenceId,
       sbar: payload.handoffSbar,
@@ -216,7 +252,11 @@ export class EncounterDomainService {
 
     const updatedEncounter: EncounterState = {
       ...encounter,
-      currentStage: payload.targetStage,
+      currentStage: targetClinicalState,
+      clinicalState: targetClinicalState,
+      status: targetClinicalState === 'COMPLETED' ? 'COMPLETED' : encounter.status,
+      operationalState:
+        targetClinicalState === 'COMPLETED' ? 'COMPLETED' : encounter.operationalState,
       updatedAt: transitionedAt,
     };
 
@@ -229,11 +269,11 @@ export class EncounterDomainService {
       eventType: 'STAGE_COMPLETED',
       eventPayload: {
         encounterId: payload.encounterId,
-        fromStage: encounter.currentStage,
-        toStage: payload.targetStage,
+        fromStage: persistedClinicalState,
+        toStage: targetClinicalState,
         evidenceId: payload.evidenceId,
       },
-      auditReason: `Transitioned encounter ${payload.encounterId} from ${encounter.currentStage} to ${payload.targetStage}`,
+      auditReason: `Transitioned encounter ${payload.encounterId} from ${persistedClinicalState} to ${targetClinicalState}`,
       outboxTopic: 'g-hims-clinical-events',
       idempotencyKey,
       commandId,

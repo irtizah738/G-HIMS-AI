@@ -22,6 +22,7 @@ export class DischargeReadinessReviewDomainService {
   ): Promise<CommandResult> {
     const auth = AuthorizationPipeline.evaluate(context, {
       requiredRoles: ['DOCTOR', 'CONSULTANT', 'SYSTEM_ADMIN'],
+      requiredPrivilege: 'DISCHARGE_INPATIENT',
     });
 
     if (!auth.authorized) {

@@ -326,7 +326,6 @@ export async function recordSecureConflict(
   conflict: Omit<SecureSyncConflict, 'timestamp'>
 ): Promise<void> {
   const row = {
-    id: conflict.id,
     ...conflict,
     timestamp: Date.now(),
   };

@@ -29,6 +29,28 @@ import {
   AldreteScoreRecord,
 } from '@/types/inpatient-or';
 
+const IS_DEMO_RUNTIME =
+  process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
+
+function assertDemoOnlyMutation(operation: string): void {
+  if (!IS_DEMO_RUNTIME) {
+    throw new Error(
+      `SERVER_COMMAND_REQUIRED: ${operation} is disabled outside DEMO runtime.`
+    );
+  }
+}
+
+function normalizeBedReadModel(raw: Record<string, unknown>): Bed {
+  return {
+    ...(raw as unknown as Bed),
+    currentPatientId: String(
+      raw.currentPatientId || raw.patientId || ''
+    ) || undefined,
+    currentEncounterId: String(raw.currentEncounterId || '') || undefined,
+    patientMRN: String(raw.patientMRN || '') || undefined,
+  };
+}
+
 // ============================================================================
 // 1. WARDS SERVICE
 // ============================================================================
@@ -38,7 +60,7 @@ export async function getWards(tenantId: string): Promise<Ward[]> {
   try {
     const q = query(collection(db, 'tenants', tenantId, 'wards'));
     const snapshot = await getDocs(q);
-    if (snapshot.empty) {
+    if (snapshot.empty && IS_DEMO_RUNTIME) {
       await seedInitialInpatientORData(tenantId);
       const seeded = await getDocs(q);
       return seeded.docs.map((d) => d.data() as Ward);
@@ -59,8 +81,8 @@ export function subscribeToWards(
   return onSnapshot(
     q,
     (snapshot) => {
-      if (snapshot.empty) {
-        // Trigger seed if empty
+      if (snapshot.empty && IS_DEMO_RUNTIME) {
+        // DEMO-only convenience seed. STAGING/PRODUCTION remain read-only here.
         seedInitialInpatientORData(tenantId).catch(console.error);
       }
       const wards = snapshot.docs.map((d) => d.data() as Ward);
@@ -82,12 +104,16 @@ export async function getBeds(tenantId: string): Promise<Bed[]> {
   try {
     const q = query(collection(db, 'tenants', tenantId, 'beds'));
     const snapshot = await getDocs(q);
-    if (snapshot.empty) {
+    if (snapshot.empty && IS_DEMO_RUNTIME) {
       await seedInitialInpatientORData(tenantId);
       const seeded = await getDocs(q);
-      return seeded.docs.map((d) => d.data() as Bed);
+      return seeded.docs.map((d) =>
+        normalizeBedReadModel(d.data() as Record<string, unknown>)
+      );
     }
-    return snapshot.docs.map((d) => d.data() as Bed);
+    return snapshot.docs.map((d) =>
+      normalizeBedReadModel(d.data() as Record<string, unknown>)
+    );
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, path);
   }
@@ -102,7 +128,9 @@ export function subscribeToBeds(
   return onSnapshot(
     q,
     (snapshot) => {
-      const beds = snapshot.docs.map((d) => d.data() as Bed);
+      const beds = snapshot.docs.map((d) =>
+        normalizeBedReadModel(d.data() as Record<string, unknown>)
+      );
       onUpdate(beds);
     },
     (error) => {
@@ -145,6 +173,7 @@ export function subscribeToWardsAndBeds(
 export async function assignBedToPatient(
   tenantId: string,
   params: {
+  assertDemoOnlyMutation('assignBedToPatient');
     bedId: string;
     patientId: string;
     patientName: string;
@@ -222,6 +251,7 @@ export async function assignBedToPatient(
 export async function transferPatientBed(
   tenantId: string,
   params: {
+  assertDemoOnlyMutation('transferPatientBed');
     sourceBedId: string;
     targetBedId: string;
     requestedBy: string;
@@ -350,6 +380,7 @@ export async function dischargePatientBed(
   dischargedBy: string,
   dischargeNotes?: string
 ): Promise<void> {
+  assertDemoOnlyMutation('dischargePatientBed');
   const path = `tenants/${tenantId}/beds/${bedId}`;
   try {
     await runTransaction(db, async (transaction) => {
@@ -405,6 +436,7 @@ export async function markBedCleaned(
   bedId: string,
   sanitizedBy: string
 ): Promise<void> {
+  assertDemoOnlyMutation('markBedCleaned');
   const path = `tenants/${tenantId}/beds/${bedId}`;
   try {
     const bedRef = doc(db, 'tenants', tenantId, 'beds', bedId);
@@ -429,6 +461,7 @@ export async function updateBedStatus(
   status: BedStatus,
   notes?: string
 ): Promise<void> {
+  assertDemoOnlyMutation('updateBedStatus');
   const path = `tenants/${tenantId}/beds/${bedId}`;
   try {
     const bedRef = doc(db, 'tenants', tenantId, 'beds', bedId);
@@ -478,7 +511,7 @@ export async function getORRooms(tenantId: string): Promise<ORRoom[]> {
   try {
     const q = query(collection(db, 'tenants', tenantId, 'orRooms'));
     const snapshot = await getDocs(q);
-    if (snapshot.empty) {
+    if (snapshot.empty && IS_DEMO_RUNTIME) {
       await seedInitialInpatientORData(tenantId);
       const seeded = await getDocs(q);
       return seeded.docs.map((d) => d.data() as ORRoom);
@@ -494,7 +527,7 @@ export async function getSurgicalStaff(tenantId: string): Promise<SurgicalStaff[
   try {
     const q = query(collection(db, 'tenants', tenantId, 'surgicalStaff'));
     const snapshot = await getDocs(q);
-    if (snapshot.empty) {
+    if (snapshot.empty && IS_DEMO_RUNTIME) {
       await seedInitialInpatientORData(tenantId);
       const seeded = await getDocs(q);
       return seeded.docs.map((d) => d.data() as SurgicalStaff);
@@ -510,7 +543,7 @@ export async function getSurgicalCases(tenantId: string): Promise<SurgicalCase[]
   try {
     const q = query(collection(db, 'tenants', tenantId, 'surgicalCases'));
     const snapshot = await getDocs(q);
-    if (snapshot.empty) {
+    if (snapshot.empty && IS_DEMO_RUNTIME) {
       await seedInitialInpatientORData(tenantId);
       const seeded = await getDocs(q);
       return seeded.docs.map((d) => d.data() as SurgicalCase);
@@ -544,7 +577,7 @@ export function subscribeToSurgicalCases(
   return onSnapshot(
     q,
     (snapshot) => {
-      if (snapshot.empty) {
+      if (snapshot.empty && IS_DEMO_RUNTIME) {
         seedInitialInpatientORData(tenantId).catch(console.error);
       }
       const cases = snapshot.docs.map((d) => d.data() as SurgicalCase);
@@ -1096,6 +1129,7 @@ export function subscribeToWHOChecklist(
 // ============================================================================
 
 export async function seedInitialInpatientORData(tenantId: string): Promise<void> {
+  assertDemoOnlyMutation('seedInitialInpatientORData');
   try {
     const batch = writeBatch(db);
 

@@ -236,8 +236,10 @@ export class Patient360Projector {
     const samePatient = <T extends { patientId: string }>(items: T[]) =>
       items.filter((item) => item.patientId === patientId);
 
-    const encounters = sources.encounters
-      .filter((item) => asString(item.patientId) === patientId)
+    const patientEncounterSources = sources.encounters
+      .filter((item) => asString(item.patientId) === patientId);
+
+    const encounters = patientEncounterSources
       .map(encounterSummary)
       .filter((item) => Boolean(item.encounterId))
       .sort((left, right) => {
@@ -259,7 +261,10 @@ export class Patient360Projector {
       encounters.find((item) => !['COMPLETED', 'DISCHARGED', 'TRANSFERRED', 'CANCELLED'].includes(item.status.toUpperCase()));
 
     const activeProblems = conditions
-      .filter((item) => item.clinicalStatus === 'ACTIVE' && item.verificationStatus !== 'REFUTED')
+      .filter((item) =>
+        item.clinicalStatus === 'ACTIVE' &&
+        !['REFUTED', 'ENTERED_IN_ERROR'].includes(item.verificationStatus)
+      )
       .sort((a, b) => Number(b.recordedAt || 0) - Number(a.recordedAt || 0))
       .slice(0, 50)
       .map(conditionSummary);
@@ -271,7 +276,10 @@ export class Patient360Projector {
       .map(conditionSummary);
 
     const activeAllergies = allergies
-      .filter((item) => item.clinicalStatus === 'ACTIVE')
+      .filter((item) =>
+        item.clinicalStatus === 'ACTIVE' &&
+        !['REFUTED', 'ENTERED_IN_ERROR'].includes(item.verificationStatus)
+      )
       .sort((a, b) => Number(b.recordedAt || 0) - Number(a.recordedAt || 0))
       .slice(0, 50)
       .map(allergySummary);
@@ -347,7 +355,7 @@ export class Patient360Projector {
 
     const sourceFingerprint = hash({
       patient: sourceVersion(sources.patient),
-      encounters: sources.encounters.map(sourceVersion).sort(),
+      encounters: patientEncounterSources.map(sourceVersion).sort(),
       conditions: conditions.map((item) => sourceVersion(item as unknown as Record<string, unknown>)).sort(),
       allergies: allergies.map((item) => sourceVersion(item as unknown as Record<string, unknown>)).sort(),
       medicationOrders: medicationOrders.map((item) => sourceVersion(item as unknown as Record<string, unknown>)).sort(),

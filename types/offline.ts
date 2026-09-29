@@ -179,3 +179,35 @@ export interface SurgicalCaseEntity {
   updatedAt: number;
   vectorClock?: VectorClock;
 }
+
+
+export interface EdgeEntityRecord {
+  key: string;
+  tenantId: string;
+  collection: string;
+  entityId: string;
+  data: Record<string, unknown>;
+  updatedAt: number;
+  serverVersion?: number;
+  deleted?: boolean;
+}
+
+export interface EdgeEntityMapping {
+  key: string;
+  tenantId: string;
+  localId: string;
+  canonicalId?: string;
+  entityType: string;
+  status: 'LOCAL_ONLY' | 'MAPPED' | 'FAILED';
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface EdgeSyncMetadata {
+  key: string;
+  tenantId: string;
+  scope: string;
+  snapshotVersion: string;
+  lastHydratedAt: number;
+  serverGeneratedAt?: number;
+}

@@ -321,10 +321,7 @@ export class ProjectionWorkers {
     });
 
     if (!options.skipPatient360) {
-      await Patient360ProjectionService.refreshFromEvent(
-        event.tenantId,
-        event.eventId
-      );
+      await Patient360ProjectionService.refreshFromEvent(event);
     }
   }
 

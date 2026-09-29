@@ -17,6 +17,7 @@ const CLINICAL_COLLECTIONS = [
   'prescriptions',
   'opd_queue',
   'beds',
+  'patient360Projections',
 ] as const;
 
 const BILLING_COLLECTIONS = [

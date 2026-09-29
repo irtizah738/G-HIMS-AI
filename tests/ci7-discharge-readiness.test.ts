@@ -247,4 +247,26 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
     expect(recovery).toContain("'dischargeReadinessProjections'");
     expect(recovery).not.toContain("'clinicalIntelligenceEvaluations'");
   });
+
+  test('safety-critical discharge scans are paged to completion and fail closed on pathological volume', async () => {
+    const repository = await source(
+      'server/repositories/domain-state-repository.ts'
+    );
+    const readiness = await source(
+      'lib/clinical/intelligence/discharge-readiness-service.ts'
+    );
+    const discharge = await source(
+      'lib/backend/services/care-transition-domain-service.ts'
+    );
+
+    expect(repository).toContain('queryAllEqual<T>');
+    expect(repository).toContain('orderBy(FieldPath.documentId())');
+    expect(repository).toContain('DOMAIN_QUERY_LIMIT_EXCEEDED');
+    expect(readiness).toContain(
+      'DomainStateRepository.queryAllEqual<Record<string, unknown>>'
+    );
+    expect(discharge).toContain(
+      'DomainStateRepository.queryAllEqual<Record<string, unknown>>'
+    );
+  });
 });

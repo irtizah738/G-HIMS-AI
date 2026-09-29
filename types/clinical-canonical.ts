@@ -105,16 +105,19 @@ export interface ClinicalFactBase {
   version: number;
 }
 
-export type ObservationValue =
+export type ObservationScalarValue =
   | { valueType: 'QUANTITY'; quantity: Quantity }
   | { valueType: 'STRING'; value: string }
   | { valueType: 'CODED'; value: CodeableConcept }
-  | { valueType: 'BOOLEAN'; value: boolean }
+  | { valueType: 'BOOLEAN'; value: boolean };
+
+export type ObservationValue =
+  | ObservationScalarValue
   | {
       valueType: 'COMPONENTS';
       components: Array<{
         code: CodeableConcept;
-        value: Exclude<ObservationValue, { valueType: 'COMPONENTS' }>;
+        value: ObservationScalarValue;
       }>;
     };
 

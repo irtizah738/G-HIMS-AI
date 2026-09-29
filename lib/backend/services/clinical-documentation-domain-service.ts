@@ -446,9 +446,9 @@ export class ClinicalDocumentationDomainService {
       commandId,
       idempotencyKey,
       entityId: evidenceId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
       data: {
         ...domainState,
         canonicalObservationIds: canonicalObservations.map((item) => item.observationId),

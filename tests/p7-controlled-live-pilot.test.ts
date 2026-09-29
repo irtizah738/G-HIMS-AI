@@ -90,7 +90,7 @@ describe('G-HIMS P7 controlled live pilot qualification', () => {
 
     expect(p6).toContain('Physically disable network access');
     expect(p6).toContain('no duplicate patient/order/note/stock movement');
-    expect(p6).toContain('SERVER_RECONCILIATION_REQUIRED');
+    expect(p6).toContain('requires_review');
     expect(p7).toContain('docs/operations/OFFLINE_FIRST_QUALIFICATION.md');
   });
 });

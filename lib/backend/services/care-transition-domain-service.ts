@@ -472,6 +472,25 @@ export class CareTransitionDomainService {
       requiredRoles: ['DOCTOR', 'CONSULTANT', 'SYSTEM_ADMIN'],
       requiredPrivilege: 'DISCHARGE_INPATIENT',
     });
+    if (
+      !payload.encounterId ||
+      !payload.bedId ||
+      !payload.dischargeSummaryEvidenceId ||
+      !String(payload.disposition || '').trim() ||
+      !String(payload.followUpInstructions || '').trim()
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INVALID_INPATIENT_DISCHARGE_INPUT',
+          message:
+            'Encounter, bed, signed discharge summary, disposition, and follow-up instructions are required.',
+        },
+      };
+    }
+
     if (!auth.authorized) {
       return {
         success: false,

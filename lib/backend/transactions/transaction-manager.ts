@@ -110,6 +110,10 @@ function collectionForEntityType(entityType: string): string {
     REVENUE_INTEGRITY_FINDING: 'billingMismatches',
     ENCOUNTER_CHARGE: 'encounterCharges',
     AI_DRAFT: 'aiDrafts',
+    STOCK_TRANSACTION: 'stockTransactions',
+    INVENTORY_BALANCE: 'inventoryBalances',
+    PATIENT_CONSUMPTION: 'patientConsumptions',
+    PURCHASE_REQUISITION: 'purchaseRequisitions',
   };
 
   const collection = map[entityType];

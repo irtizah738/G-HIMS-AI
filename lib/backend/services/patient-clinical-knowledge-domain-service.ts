@@ -42,8 +42,7 @@ function domainDocumentId(patientId: string, domain: ClinicalKnowledgeDomain): s
 
 function defaultAggregate(
   tenantId: string,
-  patientId: string,
-  now = Date.now()
+  patientId: string
 ): PatientClinicalKnowledgeStatus {
   return {
     patientId,
@@ -51,7 +50,7 @@ function defaultAggregate(
     allergyStatus: 'NOT_ASSESSED',
     medicationStatus: 'NOT_ASSESSED',
     problemListStatus: 'NOT_ASSESSED',
-    updatedAt: now,
+    updatedAt: 0,
   };
 }
 

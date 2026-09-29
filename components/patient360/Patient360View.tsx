@@ -5,6 +5,7 @@ import Link from 'next/link';
 import {
   Activity,
   AlertTriangle,
+  ClipboardCheck,
   ArrowLeft,
   FileText,
   FlaskConical,
@@ -101,6 +102,34 @@ function knowledgeEmptyState(label: string, status: KnownStatus): string {
     return `${label} could not be established from the patient.`;
   }
   return `No active ${label.toLowerCase()} in the canonical projection.`;
+}
+
+function readinessStateText(state: string): string {
+  switch (state) {
+    case 'BLOCKED':
+      return 'Blocked';
+    case 'REQUIRES_REVIEW':
+      return 'Requires review';
+    case 'READY_FOR_CLINICIAN_REVIEW':
+      return 'Ready for clinician review';
+    case 'NOT_APPLICABLE':
+      return 'Not applicable';
+    default:
+      return 'Not evaluated';
+  }
+}
+
+function readinessStateClass(state: string): string {
+  switch (state) {
+    case 'BLOCKED':
+      return 'border-rose-200 bg-rose-50 text-rose-900';
+    case 'REQUIRES_REVIEW':
+      return 'border-amber-200 bg-amber-50 text-amber-900';
+    case 'READY_FOR_CLINICIAN_REVIEW':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-900';
+    default:
+      return 'border-slate-200 bg-slate-50 text-slate-700';
+  }
 }
 
 function EmptyState({ children }: { children: React.ReactNode }) {
@@ -311,6 +340,128 @@ export function Patient360View({
             </div>
           )}
         </section>
+
+        {projection.activeEncounter?.encounterType?.toUpperCase() === 'IPD' && (
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <ClipboardCheck className="h-5 w-5 text-indigo-600" />
+                  <h2 className="text-sm font-bold">Discharge Readiness Intelligence</h2>
+                </div>
+                <p className="mt-1 max-w-3xl text-xs text-slate-500">
+                  Deterministic Patient 360 decision support. CI-7 surfaces unresolved evidence and safety constraints; it does not authorize discharge.
+                </p>
+              </div>
+              {view.dischargeReadiness ? (
+                <span
+                  className={`inline-flex w-fit rounded-full border px-3 py-1 text-xs font-bold ${readinessStateClass(
+                    view.dischargeReadiness.state
+                  )}`}
+                >
+                  {readinessStateText(view.dischargeReadiness.state)}
+                </span>
+              ) : (
+                <span className="inline-flex w-fit rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
+                  Not evaluated
+                </span>
+              )}
+            </div>
+
+            {offline && (
+              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                This is the last synchronized discharge-readiness assessment. New offline clinical events are not authoritative until synchronization and server re-evaluation complete.
+              </div>
+            )}
+
+            {view.dischargeReadiness ? (
+              <>
+                <div className="mt-4 grid gap-2 sm:grid-cols-4">
+                  <div className="rounded-xl bg-rose-50 p-3">
+                    <div className="text-[10px] uppercase tracking-wide text-rose-500">Blockers</div>
+                    <div className="mt-1 text-xl font-bold text-rose-800">{view.dischargeReadiness.blockers.length}</div>
+                  </div>
+                  <div className="rounded-xl bg-amber-50 p-3">
+                    <div className="text-[10px] uppercase tracking-wide text-amber-500">Warnings</div>
+                    <div className="mt-1 text-xl font-bold text-amber-800">{view.dischargeReadiness.warnings.length}</div>
+                  </div>
+                  <div className="rounded-xl bg-slate-50 p-3">
+                    <div className="text-[10px] uppercase tracking-wide text-slate-400">Ruleset</div>
+                    <div className="mt-1 font-mono text-xs font-semibold text-slate-700">{view.dischargeReadiness.rulesetVersion}</div>
+                  </div>
+                  <div className="rounded-xl bg-slate-50 p-3">
+                    <div className="text-[10px] uppercase tracking-wide text-slate-400">Evaluated</div>
+                    <div className="mt-1 text-xs font-semibold text-slate-700">{dateTime(view.dischargeReadiness.evaluatedAt)}</div>
+                  </div>
+                </div>
+
+                <div className="mt-4 space-y-2">
+                  {[
+                    ...view.dischargeReadiness.blockers,
+                    ...view.dischargeReadiness.warnings,
+                    ...view.dischargeReadiness.information,
+                  ].map((finding) => (
+                    <details
+                      key={finding.findingId}
+                      className="group rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3"
+                    >
+                      <summary className="cursor-pointer list-none">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span
+                                className={
+                                  finding.severity === 'BLOCKER'
+                                    ? 'rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-800'
+                                    : finding.severity === 'WARNING'
+                                      ? 'rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800'
+                                      : 'rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700'
+                                }
+                              >
+                                {finding.severity}
+                              </span>
+                              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                                {finding.domain}
+                              </span>
+                            </div>
+                            <div className="mt-1 text-sm font-semibold text-slate-900">{finding.title}</div>
+                            <p className="mt-1 text-xs text-slate-600">{finding.explanation}</p>
+                          </div>
+                          <span className="shrink-0 font-mono text-[10px] text-slate-400">{finding.ruleId}</span>
+                        </div>
+                      </summary>
+                      <div className="mt-3 border-t border-slate-200 pt-3">
+                        <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                          Evidence & provenance
+                        </div>
+                        <div className="mt-2 space-y-1">
+                          {finding.evidence.map((item, index) => (
+                            <div
+                              key={`${finding.findingId}-${item.entityId}-${index}`}
+                              className="rounded-lg bg-white px-3 py-2 font-mono text-[10px] text-slate-600"
+                            >
+                              {item.source} · {item.entityType} · {item.entityId}
+                              {item.label ? ` · ${item.label}` : ''}
+                              {item.occurredAt ? ` · ${dateTime(item.occurredAt)}` : ''}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </details>
+                  ))}
+                </div>
+
+                <div className="mt-4 text-[10px] text-slate-400">
+                  Evaluation {view.dischargeReadiness.evaluationId} · Patient 360 rev {view.dischargeReadiness.patient360Revision}
+                </div>
+              </>
+            ) : (
+              <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
+                No CI-7 assessment is available for this inpatient encounter yet. A relevant authoritative clinical event will trigger evaluation.
+              </div>
+            )}
+          </section>
+        )}
 
         <div className="grid gap-5 xl:grid-cols-3">
           <div className="space-y-5 xl:col-span-2">

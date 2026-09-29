@@ -288,9 +288,9 @@ export class InpatientClinicalDomainService {
       commandId,
       idempotencyKey,
       entityId: administrationId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
       data: {
         ...domainState,
         canonicalMedicationAdministrationId: canonicalAdministration.medicationAdministrationId,

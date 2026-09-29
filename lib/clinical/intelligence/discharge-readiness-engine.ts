@@ -145,7 +145,18 @@ export class DischargeReadinessEngine {
         'latest-vitals',
         `NEWS2 ${score ?? 'unknown'}`
       );
-      if (score !== undefined && score >= 5) {
+      if (score === undefined) {
+        findings.push(finding({
+          severity: 'BLOCKER',
+          domain: 'CLINICAL_STABILITY',
+          code: 'NEWS2_SCORE_MISSING',
+          title: 'Verified NEWS2 score is missing',
+          explanation:
+            'The latest vital-sign evidence is marked verified but does not contain a finite NEWS2 score. This inconsistent safety evidence must be corrected before discharge review.',
+          ruleId: 'DR-STABILITY-002',
+          evidence: [vitalsRef],
+        }));
+      } else if (score >= 5) {
         findings.push(finding({
           severity: 'BLOCKER',
           domain: 'CLINICAL_STABILITY',
@@ -153,10 +164,10 @@ export class DischargeReadinessEngine {
           title: `NEWS2 ${score} requires escalation`,
           explanation:
             'The latest authoritative NEWS2 is at or above the routine-discharge safety threshold. Clinical escalation or an explicitly governed emergency override is required.',
-          ruleId: 'DR-STABILITY-002',
+          ruleId: 'DR-STABILITY-003',
           evidence: [vitalsRef],
         }));
-      } else if (score !== undefined && score >= 3) {
+      } else if (score >= 3) {
         findings.push(finding({
           severity: 'WARNING',
           domain: 'CLINICAL_STABILITY',
@@ -164,7 +175,7 @@ export class DischargeReadinessEngine {
           title: `NEWS2 ${score} requires clinician review`,
           explanation:
             'The patient is not automatically blocked by this rule, but the current deterioration score should be reviewed before discharge authorization.',
-          ruleId: 'DR-STABILITY-003',
+          ruleId: 'DR-STABILITY-004',
           evidence: [vitalsRef],
         }));
       }
@@ -178,7 +189,7 @@ export class DischargeReadinessEngine {
           title: 'Latest discharge-relevant vitals are older than 8 hours',
           explanation:
             'A clinician should confirm that the current physiologic state is represented before authorizing discharge.',
-          ruleId: 'DR-STABILITY-004',
+          ruleId: 'DR-STABILITY-005',
           evidence: [vitalsRef],
         }));
       }
@@ -389,8 +400,11 @@ export class DischargeReadinessEngine {
 
     const dischargeSummary = snapshot.encounterEvidence
       .filter((item) =>
+        text(item.evidenceType).toUpperCase() === 'SIGNED_CLINICAL_NOTE' &&
         text(item.category).toUpperCase() === 'DISCHARGE' &&
-        text(item.status).toUpperCase() === 'FINAL'
+        text(item.status).toUpperCase() === 'FINAL' &&
+        Boolean(text(item.signedBy)) &&
+        num(item.signedAt) !== undefined
       )
       .sort(
         (a, b) =>

@@ -45,4 +45,23 @@ describe('pre-CI7 repository cleanup regressions', () => {
     expect(cashReceipt).toContain('cumulativeCashReceivedMinorUnits');
     expect(cashReceipt).toContain("entityType: 'INVOICE_SETTLEMENT'");
   });
+
+  test('Patient 360 source scans page instead of silently truncating clinical history', () => {
+    const source = read('lib/clinical/patient360/patient360-projection-service.ts');
+    expect(source).toContain('PATIENT360_PAGE_SIZE');
+    expect(source).toContain('PATIENT360_SOURCE_MAX');
+    expect(source).toContain('queryEventsByField');
+    expect(source).toContain("orderBy(FieldPath.documentId())");
+    expect(source).toContain("orderBy('occurredAt', 'desc')");
+    expect(source).toContain("orderBy('eventId', 'desc')");
+  });
+
+  test('Firebase registers the deterministic Patient 360 timeline index', () => {
+    const firebase = read('firebase.json');
+    const indexes = read('firestore.indexes.json');
+    expect(firebase).toContain('"indexes": "firestore.indexes.json"');
+    expect(indexes).toContain('"collectionGroup": "patient360Timeline"');
+    expect(indexes).toContain('"fieldPath": "occurredAt"');
+    expect(indexes).toContain('"fieldPath": "eventId"');
+  });
 });

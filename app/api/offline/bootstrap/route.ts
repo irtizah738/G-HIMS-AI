@@ -23,6 +23,7 @@ const BILLING_COLLECTIONS = [
   'billingMismatches',
   'encounterCharges',
   'journalEntries',
+  'cashReceipts',
 ] as const;
 
 const ADMIN_COLLECTIONS = [

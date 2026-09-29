@@ -10,6 +10,7 @@ import {
 } from './db';
 import { auth } from '@/lib/firebase/client';
 import { getCachedAuthSession } from '@/lib/offline/auth-storage';
+import { probeApplicationConnectivity, ConnectivityProbeResult } from '@/lib/offline/connectivity';
 
 export interface SyncEngineState {
   isOnline: boolean;
@@ -37,7 +38,7 @@ class ClinicalSyncEngine {
   private isProcessing = false;
   private listeners = new Set<(state: SyncEngineState) => void>();
   private state: SyncEngineState = {
-    isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
+    isOnline: true,
     isSyncing: false,
     pendingCount: 0,
     lastSyncedAt: null,
@@ -50,18 +51,23 @@ class ClinicalSyncEngine {
     if (typeof window !== 'undefined') {
       this.initNetworkListeners();
       void this.refreshPendingCount();
+      void this.refreshConnectivity(false);
       this.autoSyncInterval = setInterval(() => {
-        if (this.state.isOnline && !this.state.isSyncing) void this.processSyncQueue();
+        if (!this.state.isSyncing) void this.refreshConnectivity(true);
       }, 25000);
     }
   }
 
   private initNetworkListeners() {
+    // Native browser connectivity events are transport hints only. Sandboxed
+    // previews can report them incorrectly, so always confirm application-origin
+    // reachability before changing the clinical connectivity state.
     window.addEventListener('online', () => {
-      this.updateState({ isOnline: true });
-      void this.processSyncQueue();
+      void this.refreshConnectivity(true);
     });
-    window.addEventListener('offline', () => this.updateState({ isOnline: false }));
+    window.addEventListener('offline', () => {
+      void this.refreshConnectivity(false);
+    });
 
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.addEventListener('message', (event) => {
@@ -85,6 +91,26 @@ class ClinicalSyncEngine {
 
   public getState(): SyncEngineState {
     return { ...this.state };
+  }
+
+  public async refreshConnectivity(
+    processQueueWhenOnline = false
+  ): Promise<ConnectivityProbeResult> {
+    const result = await probeApplicationConnectivity();
+    const wasOnline = this.state.isOnline;
+
+    this.updateState({ isOnline: result.isOnline });
+
+    if (
+      result.isOnline &&
+      processQueueWhenOnline &&
+      !this.isProcessing &&
+      (!wasOnline || this.state.pendingCount > 0)
+    ) {
+      void this.processSyncQueue();
+    }
+
+    return result;
   }
 
   public async refreshPendingCount(tenantId?: string): Promise<number> {
@@ -158,8 +184,10 @@ class ClinicalSyncEngine {
    */
   public async processSyncQueue(tenantId?: string): Promise<{ syncedCount: number; conflictCount: number }> {
     if (this.isProcessing) return { syncedCount: 0, conflictCount: 0 };
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      this.updateState({ isOnline: false });
+
+    const connectivity = await probeApplicationConnectivity();
+    this.updateState({ isOnline: connectivity.isOnline });
+    if (!connectivity.isOnline) {
       return { syncedCount: 0, conflictCount: 0 };
     }
 

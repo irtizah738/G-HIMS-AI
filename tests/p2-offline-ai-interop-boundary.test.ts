@@ -288,6 +288,58 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(engine).toContain('recoverStuckSyncingMutations');
   });
 
+  test('P6E supply chain uses the unified encrypted G-HIMS edge outbox',async()=>{
+    const scmStore=await source('lib/supply-chain/scm-offline-store.ts');
+    const scmService=await source('lib/backend/services/supply-chain-domain-service.ts');
+    const bus=await source('lib/backend/commands/command-bus.ts');
+    const tx=await source('lib/backend/transactions/transaction-manager.ts');
+
+    expect(scmStore).not.toContain('GHIMS_SCM_OFFLINE_DB');
+    expect(scmStore).not.toContain('indexedDB.open');
+    expect(scmStore).toContain('syncEngine.queueMutation');
+    expect(scmStore).toContain('putEdgeEntity');
+    expect(scmStore).toContain("'inventoryBalances'");
+
+    expect(bus).toContain("RecordStockTransactionCommand");
+    expect(bus).toContain("RecordPatientConsumptionCommand");
+    expect(bus).toContain("SubmitInventoryRequisitionCommand");
+    expect(scmService).toContain('calculateDerivedBalance');
+    expect(scmService).toContain('INSUFFICIENT_AVAILABLE_STOCK');
+    expect(scmService).toContain("source: context.offlineMutationId ? 'OFFLINE_SYNC' : 'ONLINE'");
+
+    expect(tx).toContain("STOCK_TRANSACTION: 'stockTransactions'");
+    expect(tx).toContain("INVENTORY_BALANCE: 'inventoryBalances'");
+    expect(tx).toContain("PATIENT_CONSUMPTION: 'patientConsumptions'");
+    expect(tx).toContain("PURCHASE_REQUISITION: 'purchaseRequisitions'");
+  });
+
+  test('core OPD clinical actions use the governed command path and real global sync state',async()=>{
+    const workspace=await source('components/opd/OpdMasterWorkspace.tsx');
+    const syncManager=await source('components/opd/OpdOfflineSyncManager.tsx');
+
+    expect(workspace).toContain("executeActiveTenantCommand");
+    expect(workspace).toContain("'RecordVitalsCommand'");
+    expect(workspace).toContain("'SignClinicalNoteCommand'");
+    expect(workspace).toContain("'PlaceDiagnosticOrderCommand'");
+    expect(workspace).toContain("'PrescribeMedicationCommand'");
+    expect(workspace).toContain('useOfflineStatus');
+    expect(workspace).toContain('setOfflineSimulation');
+    expect(workspace).not.toContain('setPendingSyncCount');
+    expect(workspace).not.toContain("alert('Offline IndexedDB outbox batch synced");
+
+    expect(syncManager).toContain('Connectivity Verified');
+    expect(syncManager).toContain('Encrypted IndexedDB Outbox Active');
+    expect(syncManager).not.toContain('Cloud Firestore Synced');
+  });
+
+  test('edge hydration paginates authoritative collections rather than silently truncating',async()=>{
+    const bootstrap=await source('app/api/offline/bootstrap/route.ts');
+    expect(bootstrap).toContain('readCollectionFully');
+    expect(bootstrap).toContain("orderBy('__name__')");
+    expect(bootstrap).toContain('startAfter(cursor)');
+    expect(bootstrap).not.toContain('.limit(1000).get()');
+  });
+
   test('clinical AI requires explicit activation and has no diagnostic fallback synthesis',async()=>{
     const gateway=await source('lib/ai/gateway.ts');
     const soap=await source('lib/ai/flows/soap-drafter.ts');

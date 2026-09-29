@@ -64,7 +64,7 @@ export const DischargeConfirmationModal: React.FC<DischargeConfirmationModalProp
       diagnosticsReviewed: false,
       nursingHandoverComplete: false,
     });
-  }, [isOpen, bed.id]);
+  }, [isOpen, bed?.id]);
 
   if (!isOpen || !bed) return null;
 

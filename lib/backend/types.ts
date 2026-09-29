@@ -138,6 +138,7 @@ export interface OfflineMutationItem {
   mutationId: string;
   occurredAt: number;
   commandType: string;
+  collection: string;
   payload: Record<string, unknown>;
   idempotencyKey: string;
   entityId?: string;

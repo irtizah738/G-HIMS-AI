@@ -41,6 +41,7 @@ export async function loadLocalEdgeSnapshot(tenantId: string): Promise<EdgeSnaps
     'billingMismatches',
     'encounterCharges',
     'journalEntries',
+    'cashReceipts',
     'telehealthSessions',
     'employees',
     'items',

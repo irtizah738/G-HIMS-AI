@@ -162,6 +162,7 @@ export interface SyncBatchResultItem {
   conflictCategory?: ConflictCategory;
   serverEventId?: string;
   serverVersion?: number;
+  vectorClock?: Record<string, number>;
   reason?: string;
   data?: unknown;
   entityMappings?: Array<{

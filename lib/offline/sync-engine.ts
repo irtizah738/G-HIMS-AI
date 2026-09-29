@@ -302,6 +302,12 @@ class ClinicalSyncEngine {
     if (cached.user.tenantId !== params.tenantId) {
       throw new Error('TENANT_MISMATCH: offline command tenant must match the active session.');
     }
+    if (
+      cached.session.status !== 'ACTIVE' ||
+      Date.now() >= new Date(cached.session.expiresAt).getTime()
+    ) {
+      throw new Error('SESSION_EXPIRED: offline command capture requires a still-valid cached session.');
+    }
 
     const currentClock = await getPendingVectorClock(params.tenantId);
     const clockNodeId = cached.session.deviceId || cached.user.uid;

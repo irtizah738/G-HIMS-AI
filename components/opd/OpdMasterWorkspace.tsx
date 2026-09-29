@@ -905,6 +905,10 @@ export function OpdMasterWorkspace() {
         route: item.route,
         frequency: item.frequency,
         durationDays: item.durationDays,
+        quantityPrescribed: item.quantity || item.quantityPrescribed,
+        unitOfMeasure: item.formulation || 'UNIT',
+        unitPriceMinorUnits: item.unitPriceMinorUnits,
+        inventoryItemId: item.medicationCode || item.id,
         instructions: item.instructions || item.specialInstructions,
       },
       {

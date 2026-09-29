@@ -25,10 +25,19 @@ const ADMIN_COLLECTIONS = [
   'employees',
 ] as const;
 
+const SCM_COLLECTIONS = [
+  'items',
+  'inventoryBalances',
+  'batches',
+  'stockTransactions',
+  'patientConsumptions',
+  'purchaseRequisitions',
+] as const;
+
 function authorizedCollections(roles: string[]): string[] {
   const normalized = new Set(roles.map((role) => String(role || '').trim().toUpperCase()));
   if (normalized.has('SYSTEM_ADMIN') || normalized.has('ADMINISTRATOR') || normalized.has('ADMIN')) {
-    return [...CLINICAL_COLLECTIONS, ...BILLING_COLLECTIONS, ...ADMIN_COLLECTIONS];
+    return [...CLINICAL_COLLECTIONS, ...BILLING_COLLECTIONS, ...ADMIN_COLLECTIONS, ...SCM_COLLECTIONS];
   }
 
   const selected = new Set<string>();
@@ -46,6 +55,16 @@ function authorizedCollections(roles: string[]): string[] {
     BILLING_COLLECTIONS.forEach((collection) => selected.add(collection));
     selected.add('patients');
     selected.add('encounters');
+  }
+
+  if (
+    ['PHARMACIST', 'SCM_MANAGER', 'INVENTORY_OFFICER', 'STORE_KEEPER', 'PROCUREMENT']
+      .some((role) => normalized.has(role))
+  ) {
+    SCM_COLLECTIONS.forEach((collection) => selected.add(collection));
+    selected.add('patients');
+    selected.add('encounters');
+    selected.add('prescriptions');
   }
 
   return [...selected];

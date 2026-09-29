@@ -65,23 +65,64 @@ async function decryptMutation(mutation: SyncMutation): Promise<SyncMutation> {
   return { ...mutation, payload };
 }
 
-export async function getSecurePendingMutations(tenantId?: string): Promise<SyncMutation[]> {
-  const rows = tenantId
-    ? await localDb.mutations
-        .where('tenantId')
-        .equals(tenantId)
-        .filter((item) => item.status === 'pending' || item.status === 'failed')
-        .sortBy('timestamp')
-    : await localDb.mutations
-        .filter((item) => item.status === 'pending' || item.status === 'failed')
-        .sortBy('timestamp');
+export async function getSecurePendingMutations(
+  tenantId: string,
+  actorId: string
+): Promise<SyncMutation[]> {
+  const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
+  const normalizedActorId = String(actorId || '').trim();
+  if (!normalizedTenantId || !normalizedActorId) return [];
+
+  // Shared-workstation boundary: filter ownership before decrypting any PHI.
+  const rows = await localDb.mutations
+    .where('tenantId')
+    .equals(normalizedTenantId)
+    .filter(
+      (item) =>
+        item.actorId === normalizedActorId &&
+        (item.status === 'pending' || item.status === 'failed')
+    )
+    .sortBy('timestamp');
 
   return Promise.all(rows.map(decryptMutation));
 }
 
-export async function getSecureMutation(id: string): Promise<SyncMutation | null> {
+export async function getSecurePendingVectorClock(
+  tenantId: string,
+  actorId: string
+): Promise<VectorClock> {
+  const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
+  const normalizedActorId = String(actorId || '').trim();
+  if (!normalizedTenantId || !normalizedActorId) return {};
+
+  const rows = await localDb.mutations
+    .where('tenantId')
+    .equals(normalizedTenantId)
+    .filter(
+      (item) =>
+        item.actorId === normalizedActorId &&
+        item.status !== 'conflict'
+    )
+    .toArray();
+
+  return rows.reduce<VectorClock>((clock, mutation) => {
+    const next = mutation.vectorClock || {};
+    const nodes = new Set([...Object.keys(clock), ...Object.keys(next)]);
+    const merged: VectorClock = { ...clock };
+    for (const node of nodes) {
+      merged[node] = Math.max(clock[node] || 0, next[node] || 0);
+    }
+    return merged;
+  }, {});
+}
+
+export async function getSecureMutation(
+  id: string,
+  actorId: string
+): Promise<SyncMutation | null> {
   const row = await localDb.mutations.get(id);
-  return row ? decryptMutation(row) : null;
+  if (!row || row.actorId !== actorId) return null;
+  return decryptMutation(row);
 }
 
 export async function replaceSecureTenantEdgeSnapshot(

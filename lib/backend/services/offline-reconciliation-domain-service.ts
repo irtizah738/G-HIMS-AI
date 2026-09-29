@@ -58,6 +58,20 @@ function rewriteMappedReferences(
   return value;
 }
 
+function entityTypeForCommand(commandType: string): string {
+  const map: Record<string, string> = {
+    PlaceDiagnosticOrderCommand: 'DIAGNOSTIC_ORDER',
+    PrescribeMedicationCommand: 'PRESCRIPTION',
+    RecordVitalsCommand: 'ENCOUNTER_EVIDENCE',
+    SignClinicalNoteCommand: 'ENCOUNTER_EVIDENCE',
+    RecordCashReceiptCommand: 'CASH_RECEIPT',
+    RecordStockTransactionCommand: 'STOCK_TRANSACTION',
+    RecordPatientConsumptionCommand: 'PATIENT_CONSUMPTION',
+    SubmitPurchaseRequisitionCommand: 'PURCHASE_REQUISITION',
+  };
+  return map[commandType] || 'ENTITY';
+}
+
 function entityKey(mutation: OfflineMutationItem, payload: Record<string, unknown>): string {
   const entityId = String(
     mutation.entityId ||
@@ -263,12 +277,29 @@ export class OfflineReconciliationDomainService {
         });
 
         if (result.success) {
+          const canonicalEntityId = result.entityId || resolvedEntityId || mutation.mutationId;
           const version = await EdgeVersionRepository.recordAccepted(
             context.tenantId,
-            `${mutation.commandType}:${result.entityId || resolvedEntityId || mutation.mutationId}`,
+            `${mutation.commandType}:${canonicalEntityId}`,
             mutation.vectorClock,
             mutation.mutationId
           );
+
+          const entityMappings =
+            mutation.entityId &&
+            result.entityId &&
+            mutation.entityId !== result.entityId
+              ? [{
+                  localId: mutation.entityId,
+                  canonicalId: result.entityId,
+                  entityType: entityTypeForCommand(mutation.commandType),
+                }]
+              : [];
+
+          for (const mapping of entityMappings) {
+            canonicalMappings.set(mapping.localId, mapping.canonicalId);
+          }
+
           accepted += 1;
           results.push({
             mutationId: mutation.mutationId,
@@ -277,6 +308,7 @@ export class OfflineReconciliationDomainService {
             serverEventId: result.eventId,
             serverVersion: version?.serverVersion,
             data: result.data,
+            ...(entityMappings.length > 0 ? { entityMappings } : {}),
           });
           continue;
         }

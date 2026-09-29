@@ -21,7 +21,7 @@ import { ensurePersistentEdgeStorage } from '@/lib/offline/storage-manager';
 import { auth } from '@/lib/firebase/client';
 import { getCachedAuthSession } from '@/lib/offline/auth-storage';
 import { probeApplicationConnectivity, ConnectivityProbeResult } from '@/lib/offline/connectivity';
-import { incrementClock } from '@/lib/offline/vector-clock';
+import { incrementClock, mergeClocks } from '@/lib/offline/vector-clock';
 
 export interface LastReplicationEvent {
   at: Date;

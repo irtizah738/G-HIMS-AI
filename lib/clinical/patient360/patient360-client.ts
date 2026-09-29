@@ -138,3 +138,50 @@ export async function loadPatient360ClinicalView(
     throw error;
   }
 }
+
+
+export async function recordDischargeReadinessReview(
+  tenantId: string,
+  input: {
+    patientId: string;
+    encounterId: string;
+    evaluationId: string;
+    outcome: 'ACKNOWLEDGED' | 'ESCALATE' | 'PROCEED_WITH_WARNINGS';
+    reviewedFindingIds?: string[];
+    reason?: string;
+  }
+): Promise<Record<string, unknown>> {
+  const commandId = `cmd_ci7_review_${crypto.randomUUID()}`;
+  const idempotencyKey = `ci7-review:${input.evaluationId}:${input.outcome}:${crypto.randomUUID()}`;
+
+  const response = await AuthClient.authorizedFetch(
+    '/api/commands/execute',
+    {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        command: {
+          commandId,
+          idempotencyKey,
+          tenantId,
+          commandType: 'RecordDischargeReadinessReviewCommand',
+          payload: input,
+          clientTimestamp: Date.now(),
+          schemaVersion: 1,
+        },
+      }),
+    },
+    tenantId
+  );
+
+  const payload = await response.json();
+  if (!response.ok || !payload?.success) {
+    throw new Error(
+      payload?.error?.message ||
+      payload?.error ||
+      'Discharge-readiness review could not be recorded.'
+    );
+  }
+  return payload as Record<string, unknown>;
+}

@@ -1,5 +1,7 @@
 'use client';
 
+import { localDb } from '@/lib/offline/db';
+
 export interface EdgeStorageStatus {
   persisted: boolean;
   usageBytes: number | null;
@@ -48,4 +50,49 @@ export function edgeStoragePressure(status: EdgeStorageStatus): 'NORMAL' | 'HIGH
   if (utilization >= 0.9) return 'CRITICAL';
   if (utilization >= 0.75) return 'HIGH';
   return 'NORMAL';
+}
+
+
+const PRUNABLE_COLLECTIONS = new Set([
+  'stockTransactions',
+  'patientConsumptions',
+  'telehealthSessions',
+  'employees',
+]);
+
+export async function pruneNonCriticalEdgeHistory(
+  tenantId: string,
+  maxAgeMs = 30 * 24 * 60 * 60 * 1000
+): Promise<number> {
+  const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
+  if (!normalizedTenantId) return 0;
+
+  const cutoff = Date.now() - maxAgeMs;
+  const stale = await localDb.edge_entities
+    .where('tenantId')
+    .equals(normalizedTenantId)
+    .filter(
+      (row) =>
+        PRUNABLE_COLLECTIONS.has(row.collection) &&
+        row.updatedAt < cutoff
+    )
+    .toArray();
+
+  if (stale.length === 0) return 0;
+  await localDb.edge_entities.bulkDelete(stale.map((row) => row.key));
+  return stale.length;
+}
+
+export async function enforceEdgeStorageBudget(
+  tenantId: string
+): Promise<EdgeStorageStatus & { prunedRecords: number }> {
+  let status = await ensurePersistentEdgeStorage();
+  let prunedRecords = 0;
+
+  if (edgeStoragePressure(status) === 'CRITICAL') {
+    prunedRecords = await pruneNonCriticalEdgeHistory(tenantId);
+    status = await ensurePersistentEdgeStorage();
+  }
+
+  return { ...status, prunedRecords };
 }

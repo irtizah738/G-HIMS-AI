@@ -53,6 +53,7 @@ import { OpdBillingLedger } from './OpdBillingLedger';
 import { OpdDispositionReferrals } from './OpdDispositionReferrals';
 import { OpdPatientTimelineAudit } from './OpdPatientTimelineAudit';
 import { OpdOfflineSyncManager } from './OpdOfflineSyncManager';
+import { executeActiveTenantCommand } from '@/lib/api/command-client';
 
 // Initial Mock Seed Data
 const SEED_PATIENTS: PatientDemographics[] = [
@@ -759,12 +760,57 @@ export function OpdMasterWorkspace() {
     recordEvent('MEDICATION_DISPENSED', `Medication dispensed with FEFO batch verification by ${dispensedBy}.`);
   };
 
-  // HANDLER: Settle Payment
-  const handleSettlePayment = (payment: PaymentTransaction) => {
+  // HANDLER: Cash settlement — the pilot is intentionally cash-only.
+  // The same command is queued offline and posts a balanced journal on replay.
+  const handleSettlePayment = async (payment: PaymentTransaction) => {
+    if (!activeEncounter.invoice) throw new Error('INVOICE_REQUIRED');
+    if (payment.mode !== 'CASH') {
+      throw new Error(
+        'EXTERNAL_PAYMENT_GATEWAY_REQUIRED: only cash settlement is enabled for the offline-first pilot.'
+      );
+    }
+
+    const result = await executeActiveTenantCommand<{
+      receipt: { receiptId: string; journalId: string };
+      journal: { journalId: string };
+    }>(
+      'RecordCashReceiptCommand',
+      {
+        receiptId: payment.id,
+        invoiceId: payment.invoiceId,
+        encounterId: activeEncounter.id,
+        patientId: activeEncounter.patientId,
+        amountMinorUnits: payment.amountMinorUnits,
+        currency: 'PKR',
+        referenceNumber: payment.referenceNumber,
+        collectedAt: payment.processedAt,
+        cashierName: payment.processedBy,
+      },
+      {
+        idempotencyKey: `cash-receipt:${payment.id}`,
+        offlineQueue: {
+          enabled: true,
+          collection: 'cashReceipts',
+          resourceId: payment.id,
+          action: 'CREATE',
+          optimisticCache: true,
+        },
+      }
+    );
+
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Cash receipt command failed.');
+    }
+
+    const governedPayment: PaymentTransaction = {
+      ...payment,
+      glJournalEntryId: `je_cash_${payment.id}`,
+    };
+
     setEncounters((prev) =>
       prev.map((e) => {
         if (e.id === activeEncounter.id && e.invoice) {
-          const updatedPayments = [...e.invoice.payments, payment];
+          const updatedPayments = [...e.invoice.payments, governedPayment];
           const totalPaid = updatedPayments.reduce((acc, p) => acc + p.amountMinorUnits, 0);
           const newBalance = Math.max(0, e.invoice.patientCopayAmountMinorUnits - totalPaid);
           const isSettled = newBalance === 0;
@@ -774,7 +820,12 @@ export function OpdMasterWorkspace() {
             currentStage: 'DISPOSITION_CLOSURE',
             stageProgress: {
               ...e.stageProgress,
-              BILLING_SETTLEMENT: { status: 'COMPLETED', enteredAt: Date.now() - 600000, completedAt: Date.now(), completedBy: payment.processedBy },
+              BILLING_SETTLEMENT: {
+                status: 'COMPLETED',
+                enteredAt: Date.now() - 600000,
+                completedAt: Date.now(),
+                completedBy: governedPayment.processedBy,
+              },
               DISPOSITION_CLOSURE: { status: 'ACTIVE', enteredAt: Date.now() },
             },
             invoice: {

@@ -41,9 +41,8 @@ describe('G-HIMS P6 full offline-first completion', () => {
     expect(bootstrap).toContain('EDGE_PAGE_SIZE');
     expect(bootstrap).toContain('EDGE_COLLECTION_MAX');
     expect(bootstrap).not.toContain('.limit(1000)');
-    expect(hospital.indexOf('loadLocalEdgeSnapshot')).toBeLessThan(
-      hospital.indexOf('hydrateEdgeSnapshot')
-    );
+    expect(hospital).toContain('void loadLocalEdgeSnapshot(tenantId)');
+    expect(hospital).toContain('void hydrateEdgeSnapshot(tenantId)');
     expect(hospital).toContain("window.addEventListener('ghims:edge-sync-complete'");
   });
 

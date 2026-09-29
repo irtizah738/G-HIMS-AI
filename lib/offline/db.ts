@@ -800,7 +800,13 @@ export async function replaceTenantEdgeSnapshot(
         entityId,
         data: entity,
         updatedAt: Date.now(),
-        serverVersion: Number((entity as any).version || (entity as any).serverVersion || 0) || undefined,
+        serverVersion:
+          Number(
+            (entity as any)._serverVersion ||
+            (entity as any).serverVersion ||
+            (entity as any).version ||
+            0
+          ) || undefined,
       });
     }
   }

@@ -2,9 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react';
 import { Tenant, TenantContextType, UserRole } from '@/types/tenant';
-import { useAuth } from '@/lib/firebase/auth-context';
-import { auth, db } from '@/lib/firebase/client';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { useAuth } from '@/lib/auth/auth-context';
 
 export const DEFAULT_TENANTS: Tenant[] = [
   {
@@ -165,139 +163,134 @@ interface TenantProviderProps {
 }
 
 export function TenantProvider({ children, initialTenantId }: TenantProviderProps) {
-  const { user } = useAuth();
-  const [tenantId, setTenantId] = useState<string>(
-    initialTenantId || 'central-metro-hospital'
-  );
-  const [userTenants, setUserTenants] = useState<Tenant[]>(DEFAULT_TENANTS);
-  const [role, setRole] = useState<UserRole>('doctor');
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    user,
+    activeTenant,
+    accessibleTenants,
+    roles,
+    switchTenant: switchAuthoritativeTenant,
+    loading: authLoading,
+    error: authError,
+  } = useAuth();
 
-  // Synchronize initial prop changes
+  const authoritativeTenantId =
+    activeTenant?.tenantId || user?.tenantId || initialTenantId || 'central-metro-hospital';
+
+  const [tenantId, setTenantId] = useState<string>(authoritativeTenantId);
+  const [isSwitchingTenant, setIsSwitchingTenant] = useState(false);
+
+  const roleMap: Record<string, UserRole> = {
+    administrator: 'admin',
+    admin: 'admin',
+    doctor: 'doctor',
+    physician: 'doctor',
+    nurse: 'nurse',
+    receptionist: 'reception',
+    reception: 'reception',
+    pharmacist: 'pharmacy',
+    pharmacy: 'pharmacy',
+    lab_tech: 'lab',
+    lab: 'lab',
+    billing_clerk: 'billing',
+    billing_staff: 'billing',
+    billing: 'billing',
+  };
+
+  const role = useMemo<UserRole>(() => {
+    const canonicalRole = String(roles[0] || user?.roles?.[0] || '').toLowerCase();
+    return roleMap[canonicalRole] || 'doctor';
+  }, [roles, user?.roles]);
+
+  const userTenants = useMemo<Tenant[]>(() => {
+    if (!user) return [];
+
+    return accessibleTenants.map((tenant) => {
+      const known = DEFAULT_TENANTS.find((candidate) => candidate.id === tenant.tenantId);
+      if (known) {
+        return {
+          ...known,
+          name: tenant.name || known.name,
+          facilityCode: tenant.facilityCode || known.facilityCode,
+        };
+      }
+
+      return {
+        id: tenant.tenantId,
+        name: tenant.name || tenant.tenantId.replace(/-/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase()),
+        facilityCode: tenant.facilityCode || tenant.tenantId.substring(0, 4).toUpperCase(),
+        brandColor: '#2563eb',
+        secondaryColor: '#1d4ed8',
+        activeStatus: 'active' as const,
+        region: tenant.region || 'unknown',
+        tier: (tenant.tier as Tenant['tier']) || 'enterprise',
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+      };
+    });
+  }, [accessibleTenants, user]);
+
   useEffect(() => {
-    if (initialTenantId) {
-      setTenantId(initialTenantId);
+    const nextTenantId = activeTenant?.tenantId || user?.tenantId;
+    if (!nextTenantId) {
+      if (initialTenantId) setTenantId(initialTenantId);
+      return;
     }
-  }, [initialTenantId]);
 
-  // Find or construct current tenant profile
+    setTenantId(nextTenantId);
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('ghims_active_tenant_id', nextTenantId);
+      document.cookie = `ghims_tenant_id=${nextTenantId}; path=/; max-age=31536000; SameSite=Lax`;
+    }
+  }, [activeTenant?.tenantId, user?.tenantId, initialTenantId]);
+
   const currentTenant = useMemo(() => {
-    const found = userTenants.find((t) => t.id === tenantId);
-    if (found) return found;
+    const authorized = userTenants.find((tenant) => tenant.id === tenantId);
+    if (authorized) return authorized;
 
-    // Fallback dynamic tenant object for custom tenant routes
+    const known = DEFAULT_TENANTS.find((tenant) => tenant.id === tenantId);
+    if (known) return known;
+
     return {
       id: tenantId,
-      name: tenantId.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+      name: tenantId.replace(/-/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase()),
       facilityCode: tenantId.substring(0, 4).toUpperCase(),
       brandColor: '#2563eb',
       secondaryColor: '#1d4ed8',
       activeStatus: 'active' as const,
-      region: 'asia-east1',
+      region: 'unknown',
       tier: 'enterprise' as const,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
     };
   }, [tenantId, userTenants]);
 
-  // Load / Claim Tenant from Backend
-  const claimedKeyRef = React.useRef<string>('');
-  const userUid = user?.uid;
-
-  const refreshTenantClaims = useCallback(async (targetTenantId: string) => {
-    if (!user) return;
-    try {
-      setIsLoading(true);
-      setError(null);
-      const token = await user.getIdToken().catch(() => '');
-      if (!token) return;
-
-      const res = await fetch('/api/auth/tenant-claim', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ tenantId: targetTenantId }),
-      });
-
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        console.warn('Tenant claim API notice:', errorData);
-      } else {
-        const data = await res.json();
-
-        // setCustomUserClaims updates server-side authority, but the browser keeps
-        // the old ID token until it is explicitly refreshed. Firestore rules read
-        // claims from that token, so force a refresh before any tenant-scoped read.
-        await user.getIdToken(true);
-
-        const canonicalRole = String(
-          Array.isArray(data.roles) && data.roles.length > 0
-            ? data.roles[0]
-            : data.role || ''
-        ).toLowerCase();
-
-        const roleMap: Record<string, UserRole> = {
-          administrator: 'admin',
-          admin: 'admin',
-          doctor: 'doctor',
-          physician: 'doctor',
-          nurse: 'nurse',
-          receptionist: 'reception',
-          reception: 'reception',
-          pharmacist: 'pharmacy',
-          pharmacy: 'pharmacy',
-          lab_tech: 'lab',
-          lab: 'lab',
-          billing_clerk: 'billing',
-          billing_staff: 'billing',
-          billing: 'billing',
-        };
-
-        if (roleMap[canonicalRole]) {
-          setRole(roleMap[canonicalRole]);
-        }
+  const switchTenant = useCallback(
+    async (newTenantId: string) => {
+      if (!user) {
+        throw new Error('AUTHENTICATION_REQUIRED: establish a G-HIMS session before switching tenant.');
       }
-    } catch (err: any) {
-      console.warn('Tenant claims refresh notice:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [user]);
 
-  // Switch Active Tenant
-  const switchTenant = useCallback(async (newTenantId: string) => {
-    setTenantId(newTenantId);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('ghims_active_tenant_id', newTenantId);
-      // Set tenant cookie for SSR/Middleware isolation
-      document.cookie = `ghims_tenant_id=${newTenantId}; path=/; max-age=31536000; SameSite=Lax`;
-    }
-    await refreshTenantClaims(newTenantId);
-  }, [refreshTenantClaims]);
+      const normalizedTenantId = newTenantId.trim().toLowerCase();
+      const authorized = accessibleTenants.some(
+        (tenant) => tenant.tenantId.trim().toLowerCase() === normalizedTenantId
+      );
 
-  // Initialize from storage / cookie
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('ghims_active_tenant_id');
-      if (stored && !initialTenantId) {
-        setTenantId(stored);
+      if (!authorized) {
+        throw new Error('TENANT_ACCESS_DENIED: tenant is not present in the authenticated access list.');
       }
-    }
-  }, [initialTenantId]);
 
-  // Trigger claim when user UID or tenant changes
-  useEffect(() => {
-    if (userUid && tenantId) {
-      const claimKey = `${userUid}:${tenantId}`;
-      if (claimedKeyRef.current !== claimKey) {
-        claimedKeyRef.current = claimKey;
-        refreshTenantClaims(tenantId);
+      setIsSwitchingTenant(true);
+      try {
+        // AuthClient.switchTenant performs the authoritative membership check,
+        // creates the new server session and refreshes Firebase custom claims.
+        await switchAuthoritativeTenant(normalizedTenantId);
+      } finally {
+        setIsSwitchingTenant(false);
       }
-    }
-  }, [userUid, tenantId, refreshTenantClaims]);
+    },
+    [user, accessibleTenants, switchAuthoritativeTenant]
+  );
 
   return (
     <TenantContext.Provider
@@ -306,8 +299,8 @@ export function TenantProvider({ children, initialTenantId }: TenantProviderProp
         tenantId,
         role,
         userTenants,
-        isLoading,
-        error,
+        isLoading: authLoading || isSwitchingTenant,
+        error: authError,
         switchTenant,
       }}
     >

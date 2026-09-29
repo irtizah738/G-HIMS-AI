@@ -267,6 +267,8 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
     expect(view).toContain('Evidence & provenance');
     expect(view).toContain('last synchronized discharge-readiness assessment');
     expect(view).toContain('does not authorize discharge');
+    expect(client).toContain('acknowledgeCriticalDiagnosticResult');
+    expect(view).toContain('Acknowledge reviewed critical result');
   });
 
   test('clinician review is governed, immutable and cannot clear blockers', async () => {
@@ -301,6 +303,7 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
 
     expect(diagnostic).toContain('AcknowledgeCriticalDiagnosticResultPayload');
     expect(diagnostic).toContain('public static async acknowledgeCriticalResult');
+    expect(diagnostic).toContain("requiredPrivilege: 'DISCHARGE_INPATIENT'");
     expect(diagnostic).toContain(
       "eventType: 'CRITICAL_DIAGNOSTIC_RESULT_ACKNOWLEDGED'"
     );

@@ -11,6 +11,8 @@ import {
   ConflictCategory,
 } from '../types';
 import { CommandBus } from '../commands/command-bus';
+import { AuthorizationPipeline } from '../auth/authorization-pipeline';
+import { registerPatientAndEncounter } from '@/server/runtime/registration-orchestrator';
 
 function conflictCategory(commandType: string): ConflictCategory {
   if (['PostJournalCommand'].includes(commandType)) return 'FINANCIAL_CONFLICT';
@@ -56,6 +58,81 @@ export class OfflineReconciliationDomainService {
             status: 'rejected',
             conflictCategory: category,
             reason: 'OFFLINE_COMMAND_INVALID: commandType and idempotencyKey are required.',
+          });
+          continue;
+        }
+
+        if (mutation.commandType === 'RegisterPatientAndEncounterCommand') {
+          const authorization = AuthorizationPipeline.evaluate(context, {
+            requiredRoles: ['RECEPTIONIST', 'REGISTRAR', 'SYSTEM_ADMIN', 'ADMINISTRATOR'],
+          });
+
+          if (!authorization.authorized) {
+            rejected += 1;
+            results.push({
+              mutationId: mutation.mutationId,
+              status: 'rejected',
+              conflictCategory: 'SAFETY_CRITICAL',
+              reason: authorization.reason || 'Front-desk registration authority required.',
+            });
+            continue;
+          }
+
+          const payload = mutation.payload as Record<string, any>;
+          const registration = await registerPatientAndEncounter({
+            tenantId: context.tenantId,
+            commandId: mutation.mutationId,
+            idempotencyKey: mutation.idempotencyKey,
+            fullName: String(payload.fullName || ''),
+            gender:
+              payload.gender === 'male' || payload.gender === 'female' || payload.gender === 'unknown'
+                ? payload.gender
+                : 'other',
+            dateOfBirth: String(payload.dateOfBirth || ''),
+            identifiers: Array.isArray(payload.identifiers) ? payload.identifiers : [],
+            contactPhone: String(payload.contactPhone || ''),
+            address: String(payload.address || ''),
+            encounterType: payload.encounterType || 'OPD',
+            department: payload.department || 'General Medicine',
+            priority: payload.priority || 'ROUTINE',
+            chiefComplaint: payload.chiefComplaint || '',
+            assignedDoctor: payload.assignedDoctor || '',
+            actorId: context.actorId,
+            actorRole: context.roles[0] || 'AUTHENTICATED_USER',
+            actorName: context.actorId,
+            bloodGroup: payload.bloodGroup,
+            allergies: Array.isArray(payload.allergies) ? payload.allergies : [],
+            chronicConditions: Array.isArray(payload.chronicConditions) ? payload.chronicConditions : [],
+          });
+
+          accepted += 1;
+          results.push({
+            mutationId: mutation.mutationId,
+            status: 'accepted',
+            conflictCategory: 'SAFETY_CRITICAL',
+            data: {
+              ...registration,
+              idMappings: [
+                {
+                  entityType: 'PATIENT',
+                  collection: 'patients',
+                  localId: String(payload.clientLocalPatientId || ''),
+                  canonicalId: registration.patient.id,
+                },
+                {
+                  entityType: 'ENCOUNTER',
+                  collection: 'encounters',
+                  localId: String(payload.clientLocalEncounterId || ''),
+                  canonicalId: registration.encounter.id,
+                },
+                {
+                  entityType: 'OPD_QUEUE_TOKEN',
+                  collection: 'opd_queue',
+                  localId: String(payload.clientLocalQueueTokenId || ''),
+                  canonicalId: registration.queueToken.id,
+                },
+              ].filter((mapping) => mapping.localId),
+            },
           });
           continue;
         }

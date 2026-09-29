@@ -32,6 +32,27 @@ export interface CreateOpdEncounterPayload {
   assignedDoctor?: string;
 }
 
+export interface CommitEncounterDispositionPayload {
+  encounterId: string;
+  dispositionType:
+    | 'DISCHARGED_HOME'
+    | 'FOLLOW_UP_SCHEDULED'
+    | 'INTERNAL_REFERRAL'
+    | 'EXTERNAL_REFERRAL'
+    | 'INPATIENT_ADMISSION_RECOMMENDED'
+    | 'EMERGENCY_TRANSFER'
+    | string;
+  patientInstructions?: string;
+  warningSignsRedFlags?: string;
+  followUpScheduledDate?: string;
+  followUpDepartment?: string;
+  inpatientAdmissionRequest?: {
+    targetWard: string;
+    clinicalIndication: string;
+    admittingService?: string;
+  };
+}
+
 export interface AdvanceStagePayload {
   encounterId: string;
   currentStage: string;
@@ -315,6 +336,147 @@ export class EncounterDomainService {
       auditId: tx.auditId,
       outboxId: tx.outboxId,
       data: { encounter: encounterState, queueToken: queueState, patient: patientState },
+    };
+  }
+
+  public static async commitDisposition(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: CommitEncounterDispositionPayload
+  ): Promise<CommandResult> {
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: ['DOCTOR', 'CONSULTANT', 'SYSTEM_ADMIN'],
+    });
+    if (!auth.authorized) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: auth.code || 'UNAUTHORIZED', message: auth.reason || 'Disposition authority required.' },
+      };
+    }
+
+    const encounter = await this.loadEncounter(context.tenantId, payload.encounterId);
+    if (!encounter) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: 'ENCOUNTER_NOT_FOUND', message: 'Encounter does not exist.' },
+      };
+    }
+    if (['COMPLETED', 'DISCHARGED', 'TRANSFERRED', 'CANCELLED'].includes(String(encounter.status).toUpperCase())) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: 'ENCOUNTER_ALREADY_CLOSED', message: `Encounter is already ${encounter.status}.` },
+      };
+    }
+
+    const patient = await DomainStateRepository.getById<Record<string, unknown>>(
+      context.tenantId,
+      'patients',
+      encounter.patientId
+    );
+    if (!patient) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: 'PATIENT_NOT_FOUND', message: 'Encounter patient does not exist.' },
+      };
+    }
+
+    const now = Date.now();
+    const inpatientPending = payload.dispositionType === 'INPATIENT_ADMISSION_RECOMMENDED';
+    if (inpatientPending && !payload.inpatientAdmissionRequest?.targetWard) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INPATIENT_ADMISSION_REQUEST_REQUIRED',
+          message: 'Inpatient disposition requires a target ward and clinical indication.',
+        },
+      };
+    }
+
+    const updatedEncounter: EncounterState & Record<string, unknown> = {
+      ...encounter,
+      currentStage: inpatientPending ? 'DISPOSITION' : 'COMPLETED',
+      clinicalState: inpatientPending ? 'DISPOSITION' : 'COMPLETED',
+      operationalState: inpatientPending ? encounter.operationalState : 'COMPLETED',
+      resourceAssignmentState: inpatientPending ? 'BED_REQUESTED' : 'RELEASED',
+      status: inpatientPending ? 'ACTIVE' : 'COMPLETED',
+      disposition: payload.dispositionType,
+      dispositionData: {
+        patientInstructions: payload.patientInstructions,
+        warningSignsRedFlags: payload.warningSignsRedFlags,
+        followUpScheduledDate: payload.followUpScheduledDate,
+        followUpDepartment: payload.followUpDepartment,
+        inpatientAdmissionRequest: payload.inpatientAdmissionRequest,
+      },
+      ...(inpatientPending ? {} : { completedAt: now }),
+      updatedAt: now,
+    };
+
+    const patientState = inpatientPending
+      ? {
+          ...patient,
+          activeEncounterId: encounter.encounterId,
+          updatedAt: now,
+        }
+      : {
+          ...patient,
+          activeEncounterId:
+            patient.activeEncounterId === encounter.encounterId
+              ? undefined
+              : patient.activeEncounterId,
+          updatedAt: now,
+        };
+
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'DOCTOR',
+      aggregateType: 'ENCOUNTER',
+      aggregateId: encounter.encounterId,
+      eventType: inpatientPending
+        ? 'INPATIENT_ADMISSION_REQUESTED'
+        : 'ENCOUNTER_DISPOSITION_COMMITTED',
+      eventPayload: {
+        encounterId: encounter.encounterId,
+        patientId: encounter.patientId,
+        dispositionType: payload.dispositionType,
+        inpatientAdmissionRequest: payload.inpatientAdmissionRequest,
+      },
+      auditAction: 'COMMIT_ENCOUNTER_DISPOSITION',
+      auditResourceType: 'ENCOUNTER',
+      auditResourceId: encounter.encounterId,
+      auditReason: `Encounter ${encounter.encounterId} disposition set to ${payload.dispositionType}.`,
+      outboxTopic: 'g-hims-clinical-events',
+      idempotencyKey,
+      commandId,
+      correlationId: context.correlationId,
+      domainState: updatedEncounter,
+      additionalStateWrites: [
+        { entityType: 'PATIENT_MPI', entityId: encounter.patientId, domainState: patientState },
+      ],
+    });
+
+    this.encounterCache.set(this.cacheKey(context.tenantId, encounter.encounterId), updatedEncounter);
+
+    return {
+      success: true,
+      commandId,
+      idempotencyKey,
+      entityId: encounter.encounterId,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
+      data: updatedEncounter,
     };
   }
 

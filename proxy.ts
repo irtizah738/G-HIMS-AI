@@ -13,6 +13,11 @@ const RESERVED_ROUTES = new Set([
   'sitemap.xml',
   'login',
   'auth',
+  'forgot-password',
+  'settings',
+  'tenant-selection',
+  'dashboard',
+  '_not-found',
 ]);
 
 export function proxy(request: NextRequest) {

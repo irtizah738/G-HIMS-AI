@@ -53,6 +53,7 @@ import { OpdBillingLedger } from './OpdBillingLedger';
 import { OpdDispositionReferrals } from './OpdDispositionReferrals';
 import { OpdPatientTimelineAudit } from './OpdPatientTimelineAudit';
 import { OpdOfflineSyncManager } from './OpdOfflineSyncManager';
+import { executeActiveTenantCommand } from '@/lib/api/command-client';
 
 // Initial Mock Seed Data
 const SEED_PATIENTS: PatientDemographics[] = [
@@ -608,7 +609,34 @@ export function OpdMasterWorkspace() {
   };
 
   // HANDLER: Save Triage Vitals
-  const handleSaveVitals = (vitals: ComprehensiveVitals) => {
+  const handleSaveVitals = async (vitals: ComprehensiveVitals) => {
+    const offlineVitalsId = `offline-vitals-${crypto.randomUUID()}`;
+    const result = await executeActiveTenantCommand(
+      'RecordVitalsCommand',
+      {
+        encounterId: activeEncounter.id,
+        patientId: activeEncounter.patientId,
+        heartRate: vitals.heartRate,
+        bloodPressure: `${vitals.systolicBp}/${vitals.diastolicBp}`,
+        temperature: vitals.temperatureCelsius,
+        respiratoryRate: vitals.respiratoryRate,
+        oxygenSaturation: vitals.spo2Percent,
+        measuredAt: Date.now(),
+      },
+      {
+        offlineQueue: {
+          enabled: true,
+          collection: 'encounterEvidence',
+          resourceId: offlineVitalsId,
+          action: 'CREATE',
+          optimisticCache: true,
+        },
+      }
+    );
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Vitals command failed.');
+    }
+
     setEncounters((prev) =>
       prev.map((e) => {
         if (e.id === activeEncounter.id) {
@@ -632,7 +660,31 @@ export function OpdMasterWorkspace() {
   };
 
   // HANDLER: Save Consultation SOAP
-  const handleSaveConsultation = (soap: SoapDocumentation) => {
+  const handleSaveConsultation = async (soap: SoapDocumentation) => {
+    const offlineNoteId = `offline-note-${crypto.randomUUID()}`;
+    const result = await executeActiveTenantCommand(
+      'SignClinicalNoteCommand',
+      {
+        encounterId: activeEncounter.id,
+        patientId: activeEncounter.patientId,
+        category: 'SOAP',
+        content: JSON.stringify(soap),
+        acceptedStructuredData: soap as unknown as Record<string, unknown>,
+      },
+      {
+        offlineQueue: {
+          enabled: true,
+          collection: 'encounterEvidence',
+          resourceId: offlineNoteId,
+          action: 'CREATE',
+          optimisticCache: true,
+        },
+      }
+    );
+    if (!result.success) {
+      throw new Error(result.error?.message || 'SOAP signing command failed.');
+    }
+
     setEncounters((prev) =>
       prev.map((e) => {
         if (e.id === activeEncounter.id) {
@@ -655,7 +707,44 @@ export function OpdMasterWorkspace() {
   };
 
   // HANDLER: Add Diagnostic Order
-  const handleAddDiagnosticOrder = (order: DiagnosticOrderItem) => {
+  const handleAddDiagnosticOrder = async (order: DiagnosticOrderItem) => {
+    const localOrderId = order.id || `offline-order-${crypto.randomUUID()}`;
+    const result = await executeActiveTenantCommand(
+      'PlaceDiagnosticOrderCommand',
+      {
+        encounterId: activeEncounter.id,
+        patientId: activeEncounter.patientId,
+        orderType:
+          String(order.type || order.category || '').toUpperCase().includes('RAD')
+            ? 'RADIOLOGY'
+            : String(order.type || order.category || '').toUpperCase().includes('PROC')
+              ? 'PROCEDURE'
+              : 'LAB',
+        catalogCode: order.testCode || order.code || localOrderId,
+        orderName: order.testName,
+        priority:
+          String(order.urgency || 'ROUTINE').toUpperCase().includes('STAT')
+            ? 'STAT'
+            : String(order.urgency || '').toUpperCase().includes('URGENT')
+              ? 'URGENT'
+              : 'ROUTINE',
+        clinicalIndication: order.clinicalIndication || order.reasonForOrder || 'OPD diagnostic evaluation',
+        estimatedCostMinorUnits: order.costAmountMinorUnits || Math.round((order.price || 0) * 100),
+      },
+      {
+        offlineQueue: {
+          enabled: true,
+          collection: 'orders',
+          resourceId: localOrderId,
+          action: 'CREATE',
+          optimisticCache: true,
+        },
+      }
+    );
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Diagnostic order command failed.');
+    }
+
     setEncounters((prev) =>
       prev.map((e) => {
         if (e.id === activeEncounter.id) {
@@ -696,7 +785,35 @@ export function OpdMasterWorkspace() {
   };
 
   // HANDLER: Add Prescription Item
-  const handleAddPrescription = (item: PharmacyPrescriptionItem) => {
+  const handleAddPrescription = async (item: PharmacyPrescriptionItem) => {
+    const localPrescriptionId = item.id || `offline-rx-${crypto.randomUUID()}`;
+    const result = await executeActiveTenantCommand(
+      'PrescribeMedicationCommand',
+      {
+        encounterId: activeEncounter.id,
+        patientId: activeEncounter.patientId,
+        drugCode: item.medicationCode || localPrescriptionId,
+        drugName: item.drugName,
+        dosage: item.dosage,
+        route: item.route,
+        frequency: item.frequency,
+        durationDays: item.durationDays,
+        instructions: item.specialInstructions || item.instructions || '',
+      },
+      {
+        offlineQueue: {
+          enabled: true,
+          collection: 'prescriptions',
+          resourceId: localPrescriptionId,
+          action: 'CREATE',
+          optimisticCache: true,
+        },
+      }
+    );
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Prescription command failed.');
+    }
+
     setEncounters((prev) =>
       prev.map((e) => {
         if (e.id === activeEncounter.id) {

@@ -12,6 +12,12 @@ import {
   EdgeSyncMetadata,
 } from '@/types/offline';
 import { mergeClocks } from '@/lib/offline/vector-clock';
+import { auth } from '@/lib/firebase/client';
+import {
+  decryptEdgeJson,
+  encryptEdgeJson,
+  type EncryptedEdgeEnvelope,
+} from '@/lib/offline/crypto';
 
 export class GHIMSDatabase extends Dexie {
   mutations!: Table<SyncMutation, string>;
@@ -44,6 +50,24 @@ export class GHIMSDatabase extends Dexie {
       entity_map: 'key, tenantId, localId, canonicalId, entityType, status, updatedAt',
       sync_metadata: 'key, tenantId, scope, lastHydratedAt',
     });
+
+    this.version(3)
+      .stores({
+        mutations: 'id, tenantId, collection, docId, status, timestamp, actorId',
+        offline_cache: 'key, tenantId, collection, updatedAt, ownerUid',
+        clinical_patients: 'id, tenantId, mrn, name, bedId, acuityScore',
+        bed_occupancy: 'id, tenantId, wardId, bedNumber, status',
+        surgical_cases: 'id, tenantId, patientId, theaterId, status',
+        edge_entities: 'key, [tenantId+collection], tenantId, collection, entityId, updatedAt, ownerUid',
+        entity_map: 'key, tenantId, localId, canonicalId, entityType, status, updatedAt',
+        sync_metadata: 'key, tenantId, scope, lastHydratedAt',
+      })
+      .upgrade(async (transaction) => {
+        // Legacy read caches were plaintext. They are disposable projections, so
+        // remove them rather than preserving PHI across the encryption migration.
+        await transaction.table('offline_cache').clear();
+        await transaction.table('edge_entities').clear();
+      });
   }
 }
 
@@ -54,15 +78,59 @@ export const localDb = new GHIMSDatabase();
 // Convenience Helpers for Clinical Entities & Mutations
 // ----------------------------------------------------------------------
 
+function currentOwnerUid(): string {
+  const uid = auth.currentUser?.uid;
+  if (!uid) throw new Error('EDGE_ENCRYPTION_AUTH_REQUIRED');
+  return uid;
+}
+
+async function decryptStoredMutation(row: SyncMutation): Promise<SyncMutation> {
+  if (!row.encryptedPayload) return row;
+  const uid = auth.currentUser?.uid;
+  if (!uid || row.actorId !== uid) return { ...row, payload: {} };
+  const payload = await decryptEdgeJson<Record<string, any>>(
+    row.tenantId,
+    uid,
+    row.encryptedPayload as EncryptedEdgeEnvelope
+  );
+  return { ...row, payload };
+}
+
+async function decryptStoredCacheEntry(row: OfflineCacheEntry): Promise<OfflineCacheEntry> {
+  if (!row.encryptedData) return row;
+  const uid = auth.currentUser?.uid;
+  if (!uid || row.ownerUid !== uid) return { ...row, data: {} };
+  const data = await decryptEdgeJson<Record<string, unknown>>(
+    row.tenantId,
+    uid,
+    row.encryptedData as EncryptedEdgeEnvelope
+  );
+  return { ...row, data };
+}
+
+async function decryptStoredEdgeEntity(row: EdgeEntityRecord): Promise<EdgeEntityRecord> {
+  if (!row.encryptedData) return row;
+  const uid = auth.currentUser?.uid;
+  if (!uid || row.ownerUid !== uid) return { ...row, data: {} };
+  const data = await decryptEdgeJson<Record<string, unknown>>(
+    row.tenantId,
+    uid,
+    row.encryptedData as EncryptedEdgeEnvelope
+  );
+  return { ...row, data };
+}
+
 export async function getLocalMutations(tenantId?: string): Promise<SyncMutation[]> {
   try {
     if (tenantId) {
-      return await localDb.mutations
+      const rows = await localDb.mutations
         .where('tenantId')
         .equals(tenantId)
         .sortBy('timestamp');
+      return Promise.all(rows.map(decryptStoredMutation));
     }
-    return await localDb.mutations.orderBy('timestamp').toArray();
+    const rows = await localDb.mutations.orderBy('timestamp').toArray();
+    return Promise.all(rows.map(decryptStoredMutation));
   } catch (error) {
     console.warn('Failed to retrieve mutations from Dexie:', error);
     return [];
@@ -72,15 +140,17 @@ export async function getLocalMutations(tenantId?: string): Promise<SyncMutation
 export async function getPendingMutationsFromDb(tenantId?: string): Promise<SyncMutation[]> {
   try {
     if (tenantId) {
-      return await localDb.mutations
+      const rows = await localDb.mutations
         .where('tenantId')
         .equals(tenantId)
         .filter((m) => m.status === 'pending' || m.status === 'failed')
         .sortBy('timestamp');
+      return Promise.all(rows.map(decryptStoredMutation));
     }
-    return await localDb.mutations
+    const rows = await localDb.mutations
       .filter((m) => m.status === 'pending' || m.status === 'failed')
       .sortBy('timestamp');
+    return Promise.all(rows.map(decryptStoredMutation));
   } catch (error) {
     console.warn('Failed to retrieve pending mutations from Dexie:', error);
     return [];
@@ -130,11 +200,19 @@ export async function measureLocalStoreLatency(
 }
 
 export async function putLocalCacheEntry(entry: OfflineCacheEntry): Promise<string> {
-  return await localDb.offline_cache.put(entry);
+  const ownerUid = currentOwnerUid();
+  const encryptedData = await encryptEdgeJson(entry.tenantId, ownerUid, entry.data);
+  return localDb.offline_cache.put({
+    ...entry,
+    ownerUid,
+    data: {},
+    encryptedData,
+  });
 }
 
 export async function getLocalCacheEntry(key: string): Promise<OfflineCacheEntry | undefined> {
-  return await localDb.offline_cache.get(key);
+  const row = await localDb.offline_cache.get(key);
+  return row ? decryptStoredCacheEntry(row) : undefined;
 }
 
 function assertDemoSeedAllowed(): void {

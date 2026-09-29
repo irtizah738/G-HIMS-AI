@@ -162,6 +162,7 @@ export class DischargeReadinessService {
         revision: patient360.revision,
         sourceCheckpoint: patient360.sourceCheckpoint,
         lastEventId: patient360.lastEventId,
+        lastEventRecordedAt: patient360.lastEventRecordedAt,
         activeEncounter: {
           encounterId,
           encounterType: patient360.activeEncounter.encounterType,
@@ -190,7 +191,10 @@ export class DischargeReadinessService {
     const snapshot = await this.buildSnapshot(tenantId, patientId);
     if (!snapshot) return null;
 
-    const evaluated = DischargeReadinessEngine.evaluate(snapshot);
+    const evaluated = DischargeReadinessEngine.evaluate(
+      snapshot,
+      snapshot.patient360.lastEventRecordedAt || Date.now()
+    );
     const evaluationId = stableEvaluationId(
       tenantId,
       snapshot.encounterId,

@@ -227,8 +227,37 @@ export function TenantProvider({ children, initialTenantId }: TenantProviderProp
         console.warn('Tenant claim API notice:', errorData);
       } else {
         const data = await res.json();
-        if (data.role) {
-          setRole(data.role as UserRole);
+
+        // setCustomUserClaims updates server-side authority, but the browser keeps
+        // the old ID token until it is explicitly refreshed. Firestore rules read
+        // claims from that token, so force a refresh before any tenant-scoped read.
+        await user.getIdToken(true);
+
+        const canonicalRole = String(
+          Array.isArray(data.roles) && data.roles.length > 0
+            ? data.roles[0]
+            : data.role || ''
+        ).toLowerCase();
+
+        const roleMap: Record<string, UserRole> = {
+          administrator: 'admin',
+          admin: 'admin',
+          doctor: 'doctor',
+          physician: 'doctor',
+          nurse: 'nurse',
+          receptionist: 'reception',
+          reception: 'reception',
+          pharmacist: 'pharmacy',
+          pharmacy: 'pharmacy',
+          lab_tech: 'lab',
+          lab: 'lab',
+          billing_clerk: 'billing',
+          billing_staff: 'billing',
+          billing: 'billing',
+        };
+
+        if (roleMap[canonicalRole]) {
+          setRole(roleMap[canonicalRole]);
         }
       }
     } catch (err: any) {

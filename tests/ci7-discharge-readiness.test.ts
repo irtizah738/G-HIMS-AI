@@ -75,7 +75,7 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
     expect(result.blockers).toHaveLength(0);
     expect(result.warnings).toHaveLength(0);
     expect(result.information.some((item) => item.code === 'CLINICIAN_AUTHORIZATION_REQUIRED')).toBe(true);
-    expect(result.rulesetVersion).toBe('CI7-DR-1.0.0');
+    expect(result.rulesetVersion).toBe('CI7-DR-1.1.0');
   });
 
   test('missing stability, medication reconciliation, discharge summary and knowledge are explicit blockers', () => {

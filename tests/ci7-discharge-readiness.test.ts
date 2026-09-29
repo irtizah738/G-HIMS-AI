@@ -57,6 +57,7 @@ function readySnapshot(): DischargeReadinessSnapshot {
         evidenceType: 'SIGNED_CLINICAL_NOTE',
         category: 'DISCHARGE',
         status: 'FINAL',
+        signedBy: 'doctor-a',
         signedAt: now - 20_000,
       },
     ],
@@ -92,6 +93,24 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
     expect(codes.has('DISCHARGE_SUMMARY_REQUIRED')).toBe(true);
     expect(codes.has('MEDICATION_HISTORY_UNRESOLVED')).toBe(true);
     expect(codes.has('ALLERGY_HISTORY_UNRESOLVED')).toBe(true);
+  });
+
+  test('verified NEWS2 without a finite score is a blocker rather than false readiness', () => {
+    const snapshot = readySnapshot();
+    const vitals = snapshot.encounterEvidence.find(
+      (item) => item.evidenceType === 'VITALS'
+    )!;
+    delete vitals.news2Score;
+
+    const result = DischargeReadinessEngine.evaluate(
+      snapshot,
+      1_800_000_000_000
+    );
+
+    expect(result.state).toBe('BLOCKED');
+    expect(result.blockers.map((item) => item.code)).toContain(
+      'NEWS2_SCORE_MISSING'
+    );
   });
 
   test('high NEWS2 and unresolved STAT work remain hard blockers with source evidence', () => {
@@ -268,6 +287,58 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
     );
     expect(discharge).toContain(
       'DomainStateRepository.queryAllEqual<Record<string, unknown>>'
+    );
+  });
+
+  test('projection writes are monotonic under concurrent outbox workers', async () => {
+    const patient360 = await source(
+      'lib/clinical/patient360/patient360-projection-service.ts'
+    );
+    const readiness = await source(
+      'lib/clinical/intelligence/discharge-readiness-service.ts'
+    );
+
+    expect(patient360).toContain('comparePatient360Cursor');
+    expect(patient360).toContain('PATIENT360_CURSOR_CONTENT_CONFLICT');
+    expect(patient360).toContain('if (cursorComparison < 0)');
+    expect(readiness).toContain('compareReadinessCursor');
+    expect(readiness).toContain(
+      'Concurrent workers may finish out of order'
+    );
+    expect(readiness).toContain('if (cursorComparison < 0)');
+  });
+
+  test('authoritative discharge enforces every CI-7 hard safety blocker', async () => {
+    const discharge = await source(
+      'lib/backend/services/care-transition-domain-service.ts'
+    );
+
+    expect(discharge).toContain(
+      "dischargeEvidence.evidenceType !== 'SIGNED_CLINICAL_NOTE'"
+    );
+    expect(discharge).toContain("'UNRESOLVED_STAT_INPATIENT_ORDERS'");
+    expect(discharge).toContain("'ALLERGY_HISTORY_UNRESOLVED'");
+    expect(discharge).toContain("'MEDICATION_HISTORY_UNRESOLVED'");
+    expect(discharge).toContain(
+      "String(latestVitals.news2Status || '').toUpperCase() !== 'VERIFIED'"
+    );
+  });
+
+  test('CI-7 only accepts genuinely signed discharge-summary evidence', () => {
+    const snapshot = readySnapshot();
+    const summary = snapshot.encounterEvidence.find(
+      (item) => item.category === 'DISCHARGE'
+    )!;
+    delete summary.signedBy;
+
+    const result = DischargeReadinessEngine.evaluate(
+      snapshot,
+      1_800_000_000_000
+    );
+
+    expect(result.state).toBe('BLOCKED');
+    expect(result.blockers.map((item) => item.code)).toContain(
+      'DISCHARGE_SUMMARY_REQUIRED'
     );
   });
 });

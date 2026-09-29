@@ -29,6 +29,47 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(hook).not.toContain('navigator.onLine');
   });
 
+  test('sync status indicator is driven by real edge and replica telemetry',async()=>{
+    const indicator=await source('components/navigation/sync-status-indicator.tsx');
+    const hook=await source('hooks/useOfflineStatus.ts');
+    const engine=await source('lib/offline/sync-engine.ts');
+    const db=await source('lib/offline/db.ts');
+    const statusRoute=await source('app/api/sync/status/route.ts');
+
+    expect(indicator).toContain("useOfflineStatus");
+    expect(indicator).toContain("activeTenant");
+    expect(indicator).toContain("localStoreLatencyMs");
+    expect(indicator).toContain("replicaLatencyMs");
+    expect(indicator).toContain("replicaStoreLatencyMs");
+    expect(indicator).toContain("vectorClock");
+    expect(indicator).toContain("lastReplicationEvent");
+    expect(indicator).toContain("setOfflineSimulation");
+    expect(indicator).not.toContain("useHospital");
+    expect(indicator).not.toContain("Latency: 1.2ms");
+    expect(indicator).not.toContain("Status: 18ms");
+    expect(indicator).not.toContain("241 +");
+    expect(indicator).not.toContain("setTimeout(() =>");
+
+    expect(hook).toContain("measureLocalStoreLatency");
+    expect(hook).toContain("getPendingVectorClock");
+    expect(hook).toContain("replicaReachable");
+    expect(hook).toContain("lastReplicationEvent");
+
+    expect(engine).toContain("refreshReplicaStatus");
+    expect(engine).toContain("setOfflineSimulation");
+    expect(engine).toContain("OFFLINE_SIMULATION_DISABLED_IN_PRODUCTION");
+    expect(engine).toContain("lastReplicationEvent");
+    expect(engine).toContain("/api/sync/status?tenantId=");
+
+    expect(db).toContain("getPendingVectorClock");
+    expect(db).toContain("measureLocalStoreLatency");
+
+    expect(statusRoute).toContain("deriveAuthoritativeContext");
+    expect(statusRoute).toContain("getAdminFirestore");
+    expect(statusRoute).toContain("storeLatencyMs");
+    expect(statusRoute).toContain("Cache-Control");
+  });
+
   test('clinical AI requires explicit activation and has no diagnostic fallback synthesis',async()=>{
     const gateway=await source('lib/ai/gateway.ts');
     const soap=await source('lib/ai/flows/soap-drafter.ts');

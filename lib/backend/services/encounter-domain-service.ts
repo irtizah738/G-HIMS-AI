@@ -7,6 +7,14 @@ import { CommandContext, CommandResult } from '../types';
 import { AuthorizationPipeline } from '../auth/authorization-pipeline';
 import { TransactionManager } from '../transactions/transaction-manager';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
+import {
+  type ClinicalEncounterState,
+  type FinancialClearanceState,
+  type OperationalQueueState,
+  type ResourceAssignmentState,
+  isClinicalTransitionAllowed,
+  normalizeClinicalEncounterState,
+} from '@/types/clinical-state';
 
 export interface CreateEncounterPayload {
   patientId: string;
@@ -14,6 +22,35 @@ export interface CreateEncounterPayload {
   chiefComplaint: string;
   departmentId: string;
   priority?: 'STAT' | 'URGENT' | 'ROUTINE';
+}
+
+export interface CreateOpdEncounterPayload {
+  patientId: string;
+  chiefComplaint: string;
+  departmentId: string;
+  priority?: 'STAT' | 'URGENT' | 'ROUTINE';
+  assignedDoctor?: string;
+}
+
+export interface CommitEncounterDispositionPayload {
+  encounterId: string;
+  dispositionType:
+    | 'DISCHARGED_HOME'
+    | 'FOLLOW_UP_SCHEDULED'
+    | 'INTERNAL_REFERRAL'
+    | 'EXTERNAL_REFERRAL'
+    | 'INPATIENT_ADMISSION_RECOMMENDED'
+    | 'EMERGENCY_TRANSFER'
+    | string;
+  patientInstructions?: string;
+  warningSignsRedFlags?: string;
+  followUpScheduledDate?: string;
+  followUpDepartment?: string;
+  inpatientAdmissionRequest?: {
+    targetWard: string;
+    clinicalIndication: string;
+    admittingService?: string;
+  };
 }
 
 export interface AdvanceStagePayload {
@@ -39,7 +76,11 @@ interface EncounterState {
   departmentId: string;
   status: string;
   currentStage: string;
-  priority: 'STAT' | 'URGENT' | 'ROUTINE';
+  clinicalState: ClinicalEncounterState;
+  operationalState: OperationalQueueState;
+  financialClearanceState: FinancialClearanceState;
+  resourceAssignmentState: ResourceAssignmentState;
+  priority: 'STAT' | 'URGENT' | 'ROUTINE' | 'EMERGENCY';
   assignedProviderId: string;
   createdAt: number;
   updatedAt: number;
@@ -59,16 +100,58 @@ export class EncounterDomainService {
     const key = this.cacheKey(tenantId, encounterId);
 
     if (DomainStateRepository.isAvailable()) {
-      const persisted = await DomainStateRepository.getById<EncounterState>(
+      const persisted = await DomainStateRepository.getById<Record<string, unknown>>(
         tenantId,
         'encounters',
         encounterId
       );
 
-      if (persisted) this.encounterCache.set(key, persisted);
-      else this.encounterCache.delete(key);
+      if (!persisted) {
+        this.encounterCache.delete(key);
+        return null;
+      }
 
-      return persisted;
+      const encounterType = String(
+        persisted.encounterType || persisted.type || 'OPD'
+      ).toUpperCase() as CreateEncounterPayload['encounterType'];
+      const rawStage = String(
+        persisted.currentStage || persisted.currentStageId || 'REGISTERED'
+      );
+      const clinicalState =
+        (persisted.clinicalState as ClinicalEncounterState | undefined) ||
+        normalizeClinicalEncounterState(rawStage) ||
+        'REGISTERED';
+
+      const normalized: EncounterState = {
+        encounterId: String(persisted.encounterId || persisted.id || encounterId),
+        tenantId: String(persisted.tenantId || tenantId),
+        patientId: String(persisted.patientId || ''),
+        encounterType,
+        chiefComplaint: String(persisted.chiefComplaint || ''),
+        departmentId: String(persisted.departmentId || persisted.department || ''),
+        status:
+          String(persisted.status || 'ACTIVE').toUpperCase() === 'IN_PROGRESS'
+            ? 'ACTIVE'
+            : String(persisted.status || 'ACTIVE').toUpperCase(),
+        currentStage: clinicalState,
+        clinicalState,
+        operationalState:
+          (persisted.operationalState as OperationalQueueState | undefined) || 'NOT_QUEUED',
+        financialClearanceState:
+          (persisted.financialClearanceState as FinancialClearanceState | undefined) ||
+          (encounterType === 'EMERGENCY' || encounterType === 'IPD'
+            ? 'NOT_REQUIRED'
+            : 'CONSULTATION_PAYMENT_PENDING'),
+        resourceAssignmentState:
+          (persisted.resourceAssignmentState as ResourceAssignmentState | undefined) || 'NONE',
+        priority: String(persisted.priority || 'ROUTINE').toUpperCase() as EncounterState['priority'],
+        assignedProviderId: String(persisted.assignedProviderId || persisted.assignedDoctor || ''),
+        createdAt: Number(persisted.createdAt || persisted.startedAt || Date.now()),
+        updatedAt: Number(persisted.updatedAt || persisted.startedAt || Date.now()),
+      };
+
+      this.encounterCache.set(key, normalized);
+      return normalized;
     }
 
     return this.encounterCache.get(key) || null;
@@ -105,7 +188,14 @@ export class EncounterDomainService {
       chiefComplaint: payload.chiefComplaint,
       departmentId: payload.departmentId,
       status: 'ACTIVE',
-      currentStage: 'TRIAGE',
+      currentStage: payload.encounterType === 'TELEHEALTH' ? 'CONSULTATION' : 'TRIAGE',
+      clinicalState: payload.encounterType === 'TELEHEALTH' ? 'CONSULTATION' : 'TRIAGE',
+      operationalState: 'NOT_QUEUED',
+      financialClearanceState:
+        payload.encounterType === 'EMERGENCY' || payload.encounterType === 'IPD'
+          ? 'NOT_REQUIRED'
+          : 'CONSULTATION_PAYMENT_PENDING',
+      resourceAssignmentState: 'NONE',
       priority: payload.priority || 'ROUTINE',
       assignedProviderId: context.actorId,
       createdAt: Date.now(),
@@ -143,6 +233,295 @@ export class EncounterDomainService {
     return result;
   }
 
+  public static async createOpdEncounter(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: CreateOpdEncounterPayload
+  ): Promise<CommandResult> {
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: ['RECEPTIONIST', 'REGISTRAR', 'NURSE', 'DOCTOR', 'SYSTEM_ADMIN', 'ADMINISTRATOR'],
+    });
+    if (!auth.authorized) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: auth.code || 'UNAUTHORIZED', message: auth.reason || 'Not authorized to start an OPD encounter.' },
+      };
+    }
+
+    const patient = await DomainStateRepository.getById<Record<string, unknown>>(
+      context.tenantId,
+      'patients',
+      payload.patientId
+    );
+    if (!patient) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: 'PATIENT_NOT_FOUND', message: 'Patient does not exist.' },
+      };
+    }
+    if (['MERGED', 'DECEASED', 'INACTIVE'].includes(String(patient.status || '').toUpperCase())) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: 'PATIENT_NOT_ACTIVE', message: 'Only an active patient can start a new OPD encounter.' },
+      };
+    }
+    if (patient.activeEncounterId) {
+      const active = await DomainStateRepository.getById<Record<string, unknown>>(
+        context.tenantId,
+        'encounters',
+        String(patient.activeEncounterId)
+      );
+      if (active && !['COMPLETED', 'DISCHARGED', 'TRANSFERRED', 'CANCELLED'].includes(String(active.status || '').toUpperCase())) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'PATIENT_ACTIVE_ENCOUNTER_CONFLICT',
+            message: `Patient already has active encounter ${String(patient.activeEncounterId)}.`,
+          },
+        };
+      }
+    }
+
+    const now = Date.now();
+    const encounterId = `enc_opd_${crypto.randomUUID()}`;
+    const tokenId = `opd_${encounterId}`;
+    const tokenNumber = `OPD-${String(now).slice(-6)}`;
+    const fullName = String(patient.fullName || '');
+    const mrn = String(patient.mrn || '');
+
+    const encounterState: EncounterState = {
+      encounterId,
+      tenantId: context.tenantId,
+      patientId: payload.patientId,
+      encounterType: 'OPD',
+      chiefComplaint: payload.chiefComplaint,
+      departmentId: payload.departmentId,
+      status: 'ACTIVE',
+      currentStage: 'REGISTERED',
+      clinicalState: 'REGISTERED',
+      operationalState: 'QUEUED',
+      financialClearanceState: 'CONSULTATION_PAYMENT_PENDING',
+      resourceAssignmentState: 'NONE',
+      priority: payload.priority || 'ROUTINE',
+      assignedProviderId: payload.assignedDoctor || context.actorId,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const patientState = {
+      ...patient,
+      activeEncounterId: encounterId,
+      updatedAt: now,
+    };
+
+    const queueState = {
+      id: tokenId,
+      encounterId,
+      patientId: payload.patientId,
+      patientName: fullName,
+      mrn,
+      tokenNumber,
+      department: payload.departmentId,
+      priority: String(payload.priority || 'ROUTINE').toLowerCase(),
+      status: 'waiting',
+      arrivalTime: new Date(now).toISOString(),
+      createdAt: now,
+    };
+
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'RECEPTIONIST',
+      aggregateType: 'ENCOUNTER',
+      aggregateId: encounterId,
+      eventType: 'OPD_ENCOUNTER_CREATED',
+      eventPayload: {
+        encounterId,
+        patientId: payload.patientId,
+        tokenId,
+        tokenNumber,
+        departmentId: payload.departmentId,
+        priority: payload.priority || 'ROUTINE',
+      },
+      auditAction: 'CREATE_OPD_ENCOUNTER',
+      auditResourceType: 'ENCOUNTER',
+      auditResourceId: encounterId,
+      auditReason: `Created OPD encounter ${encounterId} for patient ${mrn || payload.patientId}.`,
+      outboxTopic: 'g-hims-clinical-events',
+      idempotencyKey,
+      commandId,
+      correlationId: context.correlationId,
+      domainState: encounterState,
+      additionalStateWrites: [
+        { entityType: 'PATIENT_MPI', entityId: payload.patientId, domainState: patientState },
+        { entityType: 'OPD_QUEUE_TOKEN', entityId: tokenId, domainState: queueState },
+      ],
+    });
+
+    this.encounterCache.set(this.cacheKey(context.tenantId, encounterId), encounterState);
+
+    return {
+      success: true,
+      commandId,
+      idempotencyKey,
+      entityId: encounterId,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
+      data: { encounter: encounterState, queueToken: queueState, patient: patientState },
+    };
+  }
+
+  public static async commitDisposition(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: CommitEncounterDispositionPayload
+  ): Promise<CommandResult> {
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: ['DOCTOR', 'CONSULTANT', 'SYSTEM_ADMIN'],
+    });
+    if (!auth.authorized) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: auth.code || 'UNAUTHORIZED', message: auth.reason || 'Disposition authority required.' },
+      };
+    }
+
+    const encounter = await this.loadEncounter(context.tenantId, payload.encounterId);
+    if (!encounter) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: 'ENCOUNTER_NOT_FOUND', message: 'Encounter does not exist.' },
+      };
+    }
+    if (['COMPLETED', 'DISCHARGED', 'TRANSFERRED', 'CANCELLED'].includes(String(encounter.status).toUpperCase())) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: 'ENCOUNTER_ALREADY_CLOSED', message: `Encounter is already ${encounter.status}.` },
+      };
+    }
+
+    const patient = await DomainStateRepository.getById<Record<string, unknown>>(
+      context.tenantId,
+      'patients',
+      encounter.patientId
+    );
+    if (!patient) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: 'PATIENT_NOT_FOUND', message: 'Encounter patient does not exist.' },
+      };
+    }
+
+    const now = Date.now();
+    const inpatientPending = payload.dispositionType === 'INPATIENT_ADMISSION_RECOMMENDED';
+    if (inpatientPending && !payload.inpatientAdmissionRequest?.targetWard) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INPATIENT_ADMISSION_REQUEST_REQUIRED',
+          message: 'Inpatient disposition requires a target ward and clinical indication.',
+        },
+      };
+    }
+
+    const updatedEncounter: EncounterState & Record<string, unknown> = {
+      ...encounter,
+      currentStage: inpatientPending ? 'DISPOSITION' : 'COMPLETED',
+      clinicalState: inpatientPending ? 'DISPOSITION' : 'COMPLETED',
+      operationalState: inpatientPending ? encounter.operationalState : 'COMPLETED',
+      resourceAssignmentState: inpatientPending ? 'BED_REQUESTED' : 'RELEASED',
+      status: inpatientPending ? 'ACTIVE' : 'COMPLETED',
+      disposition: payload.dispositionType,
+      dispositionData: {
+        patientInstructions: payload.patientInstructions,
+        warningSignsRedFlags: payload.warningSignsRedFlags,
+        followUpScheduledDate: payload.followUpScheduledDate,
+        followUpDepartment: payload.followUpDepartment,
+        inpatientAdmissionRequest: payload.inpatientAdmissionRequest,
+      },
+      ...(inpatientPending ? {} : { completedAt: now }),
+      updatedAt: now,
+    };
+
+    const patientState = inpatientPending
+      ? {
+          ...patient,
+          activeEncounterId: encounter.encounterId,
+          updatedAt: now,
+        }
+      : {
+          ...patient,
+          activeEncounterId:
+            patient.activeEncounterId === encounter.encounterId
+              ? undefined
+              : patient.activeEncounterId,
+          updatedAt: now,
+        };
+
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'DOCTOR',
+      aggregateType: 'ENCOUNTER',
+      aggregateId: encounter.encounterId,
+      eventType: inpatientPending
+        ? 'INPATIENT_ADMISSION_REQUESTED'
+        : 'ENCOUNTER_DISPOSITION_COMMITTED',
+      eventPayload: {
+        encounterId: encounter.encounterId,
+        patientId: encounter.patientId,
+        dispositionType: payload.dispositionType,
+        inpatientAdmissionRequest: payload.inpatientAdmissionRequest,
+      },
+      auditAction: 'COMMIT_ENCOUNTER_DISPOSITION',
+      auditResourceType: 'ENCOUNTER',
+      auditResourceId: encounter.encounterId,
+      auditReason: `Encounter ${encounter.encounterId} disposition set to ${payload.dispositionType}.`,
+      outboxTopic: 'g-hims-clinical-events',
+      idempotencyKey,
+      commandId,
+      correlationId: context.correlationId,
+      domainState: updatedEncounter,
+      additionalStateWrites: [
+        { entityType: 'PATIENT_MPI', entityId: encounter.patientId, domainState: patientState },
+      ],
+    });
+
+    this.encounterCache.set(this.cacheKey(context.tenantId, encounter.encounterId), updatedEncounter);
+
+    return {
+      success: true,
+      commandId,
+      idempotencyKey,
+      entityId: encounter.encounterId,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
+      data: updatedEncounter,
+    };
+  }
+
   /**
    * Advances an encounter through its governed clinical workflow stage.
    */
@@ -177,26 +556,43 @@ export class EncounterDomainService {
       };
     }
 
-    if (encounter.currentStage !== payload.currentStage) {
+    const persistedClinicalState =
+      encounter.clinicalState || normalizeClinicalEncounterState(encounter.currentStage);
+    const callerCurrentState = normalizeClinicalEncounterState(payload.currentStage);
+    const targetClinicalState = normalizeClinicalEncounterState(payload.targetStage);
+
+    if (!persistedClinicalState || !callerCurrentState || !targetClinicalState) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'UNKNOWN_CLINICAL_STAGE',
+          message: 'Encounter stage must map to the canonical clinical workflow contract.',
+        },
+      };
+    }
+
+    if (persistedClinicalState !== callerCurrentState) {
       return {
         success: false,
         commandId,
         idempotencyKey,
         error: {
           code: 'STALE_ENCOUNTER_STAGE',
-          message: `Encounter is currently at '${encounter.currentStage}', not caller-declared '${payload.currentStage}'.`,
+          message: `Encounter is currently at canonical state '${persistedClinicalState}', not caller-declared '${callerCurrentState}'.`,
         },
       };
     }
 
-    if (!payload.targetStage || payload.targetStage === payload.currentStage) {
+    if (!isClinicalTransitionAllowed(persistedClinicalState, targetClinicalState)) {
       return {
         success: false,
         commandId,
         idempotencyKey,
         error: {
           code: 'INVALID_STAGE_TRANSITION',
-          message: 'Target stage must differ from the current persisted stage.',
+          message: `Canonical clinical transition ${persistedClinicalState} -> ${targetClinicalState} is not allowed.`,
         },
       };
     }
@@ -205,8 +601,8 @@ export class EncounterDomainService {
     const stageRuntimeId = `stg_${crypto.randomUUID()}`;
     const stageState = {
       encounterId: payload.encounterId,
-      previousStage: encounter.currentStage,
-      newStage: payload.targetStage,
+      previousStage: persistedClinicalState,
+      newStage: targetClinicalState,
       advancedBy: context.actorId,
       evidenceId: payload.evidenceId,
       sbar: payload.handoffSbar,
@@ -216,7 +612,11 @@ export class EncounterDomainService {
 
     const updatedEncounter: EncounterState = {
       ...encounter,
-      currentStage: payload.targetStage,
+      currentStage: targetClinicalState,
+      clinicalState: targetClinicalState,
+      status: targetClinicalState === 'COMPLETED' ? 'COMPLETED' : encounter.status,
+      operationalState:
+        targetClinicalState === 'COMPLETED' ? 'COMPLETED' : encounter.operationalState,
       updatedAt: transitionedAt,
     };
 
@@ -229,11 +629,11 @@ export class EncounterDomainService {
       eventType: 'STAGE_COMPLETED',
       eventPayload: {
         encounterId: payload.encounterId,
-        fromStage: encounter.currentStage,
-        toStage: payload.targetStage,
+        fromStage: persistedClinicalState,
+        toStage: targetClinicalState,
         evidenceId: payload.evidenceId,
       },
-      auditReason: `Transitioned encounter ${payload.encounterId} from ${encounter.currentStage} to ${payload.targetStage}`,
+      auditReason: `Transitioned encounter ${payload.encounterId} from ${persistedClinicalState} to ${targetClinicalState}`,
       outboxTopic: 'g-hims-clinical-events',
       idempotencyKey,
       commandId,

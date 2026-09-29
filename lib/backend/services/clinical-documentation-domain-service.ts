@@ -9,6 +9,7 @@ import { CommandContext, CommandResult } from '../types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import type { RevenueIntegrityFinding } from './revenue-integrity-domain-service';
 import { AIDraftRepository, type AIDraftRecord } from '@/server/ai/ai-draft-repository';
+import { calculateNEWS2 } from '@/lib/clinical/news2';
 
 export interface RecordVitalsPayload {
   encounterId: string;
@@ -18,7 +19,20 @@ export interface RecordVitalsPayload {
   temperature: number;
   respiratoryRate: number;
   oxygenSaturation: number;
+  spO2Scale?: 1 | 2;
+  onSupplementalOxygen?: boolean;
+  consciousness?: 'Alert' | 'Voice' | 'Pain' | 'Unresponsive' | 'NewConfusion' | 'A' | 'V' | 'P' | 'U' | 'C';
+  gcsScore?: number;
   measuredAt?: number;
+}
+
+export interface CompleteMedicationReconciliationPayload {
+  encounterId: string;
+  patientId: string;
+  reconciledMedicationIds: string[];
+  discrepancyCount: number;
+  unresolvedDiscrepancies?: string[];
+  notes?: string;
 }
 
 export interface SignClinicalNotePayload {
@@ -71,6 +85,27 @@ export class ClinicalDocumentationDomainService {
 
     const evidenceId = `ev_vitals_${crypto.randomUUID()}`;
     const measuredAt = payload.measuredAt || Date.now();
+    const systolicBloodPressure = Number(String(payload.bloodPressure || '').split('/')[0]);
+    const canCalculateNews2 =
+      Number.isFinite(systolicBloodPressure) &&
+      (payload.spO2Scale === 1 || payload.spO2Scale === 2) &&
+      typeof payload.onSupplementalOxygen === 'boolean' &&
+      (!!payload.consciousness || typeof payload.gcsScore === 'number');
+
+    const news2 = canCalculateNews2
+      ? calculateNEWS2({
+          respirationRate: payload.respiratoryRate,
+          spO2: payload.oxygenSaturation,
+          spO2Scale: payload.spO2Scale!,
+          onSupplementalOxygen: payload.onSupplementalOxygen!,
+          systolicBP: systolicBloodPressure,
+          heartRate: payload.heartRate,
+          consciousness: payload.consciousness || 'Alert',
+          gcsScore: payload.gcsScore,
+          temperature: payload.temperature,
+        })
+      : null;
+
     const domainState = {
       evidenceId,
       evidenceType: 'VITALS',
@@ -82,6 +117,14 @@ export class ClinicalDocumentationDomainService {
       temperature: payload.temperature,
       respiratoryRate: payload.respiratoryRate,
       oxygenSaturation: payload.oxygenSaturation,
+      spO2Scale: payload.spO2Scale,
+      onSupplementalOxygen: payload.onSupplementalOxygen,
+      consciousness: payload.consciousness,
+      gcsScore: payload.gcsScore,
+      news2Score: news2?.score,
+      news2Risk: news2?.riskLevel,
+      news2RedTriggerParameters: news2?.redTriggerParameters,
+      news2Status: news2 ? 'VERIFIED' : 'INCOMPLETE_INPUT',
       measuredAt,
       recordedBy: context.actorId,
       createdAt: Date.now(),
@@ -104,6 +147,128 @@ export class ClinicalDocumentationDomainService {
           measuredAt,
         },
         auditReason: `Recorded vitals for encounter ${payload.encounterId}`,
+        outboxTopic: 'g-hims-clinical-events',
+      }
+    );
+
+    return {
+      success: true,
+      commandId,
+      idempotencyKey,
+      entityId: evidenceId,
+      eventId: tx.event.eventId,
+      auditId: tx.audit.auditId,
+      outboxId: tx.outbox.outboxId,
+      data: domainState,
+    };
+  }
+
+
+  public static async completeMedicationReconciliation(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: CompleteMedicationReconciliationPayload
+  ): Promise<CommandResult> {
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: ['PHARMACIST', 'DOCTOR', 'CONSULTANT', 'SYSTEM_ADMIN'],
+    });
+    if (!auth.authorized) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Medication reconciliation authority required.',
+        },
+      };
+    }
+
+    if (
+      !payload.encounterId ||
+      !payload.patientId ||
+      !Array.isArray(payload.reconciledMedicationIds) ||
+      !Number.isInteger(payload.discrepancyCount) ||
+      payload.discrepancyCount < 0
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INVALID_MEDICATION_RECONCILIATION',
+          message: 'Encounter, patient, reconciled medication list and non-negative discrepancy count are required.',
+        },
+      };
+    }
+
+    const unresolved = (payload.unresolvedDiscrepancies || []).filter(Boolean);
+    if (unresolved.length > 0) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'MEDICATION_RECONCILIATION_INCOMPLETE',
+          message: 'Unresolved medication discrepancies must be resolved before reconciliation can be finalized.',
+          details: unresolved,
+        },
+      };
+    }
+
+    const encounter = await DomainStateRepository.getById<Record<string, unknown>>(
+      context.tenantId,
+      'encounters',
+      payload.encounterId
+    );
+    if (!encounter || encounter.patientId !== payload.patientId) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'ENCOUNTER_PATIENT_MISMATCH',
+          message: 'Encounter was not found or belongs to a different patient.',
+        },
+      };
+    }
+
+    const evidenceId = `ev_medrec_${crypto.randomUUID()}`;
+    const completedAt = Date.now();
+    const domainState = {
+      evidenceId,
+      evidenceType: 'MEDICATION_RECONCILIATION',
+      tenantId: context.tenantId,
+      encounterId: payload.encounterId,
+      patientId: payload.patientId,
+      reconciledMedicationIds: payload.reconciledMedicationIds,
+      discrepancyCount: payload.discrepancyCount,
+      unresolvedDiscrepancies: [],
+      notes: payload.notes,
+      completedBy: context.actorId,
+      completedAt,
+      createdAt: completedAt,
+      status: 'FINAL',
+    };
+
+    const tx = await TransactionManager.executeAtomicWrite(
+      context,
+      commandId,
+      idempotencyKey,
+      {
+        entityType: 'ENCOUNTER_EVIDENCE',
+        entityId: evidenceId,
+        eventType: 'MEDICATION_RECONCILIATION_COMPLETED',
+        domainState,
+        eventPayload: {
+          evidenceId,
+          encounterId: payload.encounterId,
+          patientId: payload.patientId,
+          discrepancyCount: payload.discrepancyCount,
+          reconciledMedicationCount: payload.reconciledMedicationIds.length,
+        },
+        auditReason: `Completed medication reconciliation for encounter ${payload.encounterId}`,
         outboxTopic: 'g-hims-clinical-events',
       }
     );

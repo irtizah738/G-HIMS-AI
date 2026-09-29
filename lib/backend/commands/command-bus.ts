@@ -15,6 +15,7 @@ import { ResourceCapacityDomainService } from '../services/resource-capacity-dom
 import { PatientIdentityDomainService } from '../services/patient-identity-domain-service';
 import { PatientMergeDomainService } from '../services/patient-merge-domain-service';
 import { InpatientBedDomainService } from '../services/inpatient-bed-domain-service';
+import { CareTransitionDomainService } from '../services/care-transition-domain-service';
 import { TelehealthDomainService } from '../services/telehealth-domain-service';
 import { RevenueIntegrityDomainService } from '../services/revenue-integrity-domain-service';
 import { ScmOfflineDomainService } from '../services/scm-offline-domain-service';
@@ -110,8 +111,26 @@ export class CommandBus {
           );
           break;
 
+        case 'CreateOpdEncounterCommand':
+          result = await EncounterDomainService.createOpdEncounter(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
         case 'AdvanceStageCommand':
           result = await EncounterDomainService.advanceStage(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'CommitEncounterDispositionCommand':
+          result = await EncounterDomainService.commitDisposition(
             context,
             command.commandId,
             command.idempotencyKey,
@@ -164,8 +183,26 @@ export class CommandBus {
           );
           break;
 
+        case 'CompleteMedicationReconciliationCommand':
+          result = await ClinicalDocumentationDomainService.completeMedicationReconciliation(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
         case 'UpdateOpdQueueStatusCommand':
           result = await OpdQueueDomainService.updateStatus(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'AdmitPatientToInpatientCareCommand':
+          result = await CareTransitionDomainService.admitToInpatientCare(
             context,
             command.commandId,
             command.idempotencyKey,
@@ -184,6 +221,15 @@ export class CommandBus {
 
         case 'UpdateBedStatusCommand':
           result = await InpatientBedDomainService.updateStatus(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'DischargeInpatientEncounterCommand':
+          result = await CareTransitionDomainService.dischargeInpatientEncounter(
             context,
             command.commandId,
             command.idempotencyKey,

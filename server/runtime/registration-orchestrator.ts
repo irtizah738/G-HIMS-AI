@@ -159,11 +159,21 @@ export async function registerPatientAndEncounter(
 
   const encounterRecord: EncounterRuntime = {
     id: encounterId,
+    encounterId,
     tenantId,
     patientId,
     type: params.encounterType || 'OPD',
+    encounterType: params.encounterType || 'OPD',
     status: 'IN_PROGRESS',
     currentStageId: 'REGISTRATION',
+    currentStage: 'REGISTERED',
+    clinicalState: 'REGISTERED',
+    operationalState: 'QUEUED',
+    financialClearanceState:
+      (params.encounterType || 'OPD') === 'EMERGENCY'
+        ? 'NOT_REQUIRED'
+        : 'CONSULTATION_PAYMENT_PENDING',
+    resourceAssignmentState: 'NONE',
     workflowSnapshotId: '',
     startedAt: now,
     department: params.department || 'General Medicine',

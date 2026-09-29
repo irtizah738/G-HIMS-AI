@@ -33,6 +33,7 @@ const RELEVANT_EVENTS = new Set([
   'INVESTIGATION_ORDERED',
   'DIAGNOSTIC_RESULT_RECORDED',
   'DIAGNOSTIC_RESULT_VERIFIED',
+  'CRITICAL_DIAGNOSTIC_RESULT_ACKNOWLEDGED',
   'INPATIENT_ORDER_PLACED',
   'INPATIENT_ORDER_RESOLVED',
   'MEDICATION_PRESCRIBED',
@@ -158,27 +159,51 @@ export class DischargeReadinessService {
     );
     if (!isActiveInpatientEncounter(encounter)) return null;
 
-    const [encounterEvidence, diagnosticOrders, inpatientOrders] =
-      await Promise.all([
-        DomainStateRepository.queryAllEqual<Record<string, unknown>>(
-          tenantId,
-          'encounterEvidence',
-          'encounterId',
-          encounterId
-        ),
-        DomainStateRepository.queryAllEqual<Record<string, unknown>>(
-          tenantId,
-          'orders',
-          'encounterId',
-          encounterId
-        ),
-        DomainStateRepository.queryAllEqual<Record<string, unknown>>(
-          tenantId,
-          'inpatientOrders',
-          'encounterId',
-          encounterId
-        ),
-      ]);
+    const [
+      encounterEvidence,
+      diagnosticOrders,
+      diagnosticResults,
+      clinicalObservations,
+      diagnosticAcknowledgements,
+      inpatientOrders,
+    ] = await Promise.all([
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        tenantId,
+        'encounterEvidence',
+        'encounterId',
+        encounterId
+      ),
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        tenantId,
+        'orders',
+        'encounterId',
+        encounterId
+      ),
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        tenantId,
+        'diagnosticResults',
+        'encounterId',
+        encounterId
+      ),
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        tenantId,
+        'clinicalObservations',
+        'encounterId',
+        encounterId
+      ),
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        tenantId,
+        'diagnosticResultAcknowledgements',
+        'encounterId',
+        encounterId
+      ),
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        tenantId,
+        'inpatientOrders',
+        'encounterId',
+        encounterId
+      ),
+    ]);
 
     return {
       tenantId,
@@ -205,6 +230,9 @@ export class DischargeReadinessService {
       encounter: encounter || {},
       encounterEvidence,
       diagnosticOrders,
+      diagnosticResults,
+      clinicalObservations,
+      diagnosticAcknowledgements,
       inpatientOrders,
     };
   }

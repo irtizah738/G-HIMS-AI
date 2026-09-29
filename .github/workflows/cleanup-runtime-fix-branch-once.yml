@@ -1,0 +1,42 @@
+name: One-shot runtime-fix branch cleanup
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/cleanup-runtime-fix-branch-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    name: Delete merged runtime-fix branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout main history
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Verify and delete merged branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch="fix/auth-firestore-runtime-errors"
+          git fetch origin --prune
+
+          if ! git show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+            echo "Branch already absent: $branch"
+            exit 0
+          fi
+
+          if ! git merge-base --is-ancestor "origin/$branch" "origin/main"; then
+            echo "Refusing deletion: $branch contains commits not merged into main." >&2
+            exit 1
+          fi
+
+          git push origin --delete "$branch"

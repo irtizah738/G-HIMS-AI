@@ -878,3 +878,163 @@ export async function clearTenantEdgeEntities(tenantId: string): Promise<void> {
     }
   );
 }
+
+
+export async function putEdgeEntity(
+  tenantId: string,
+  collection: string,
+  entityId: string,
+  data: Record<string, unknown>,
+  serverVersion?: number
+): Promise<void> {
+  const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
+  const normalizedEntityId = String(entityId || '').trim();
+  if (!normalizedTenantId || !collection || !normalizedEntityId) {
+    throw new Error('EDGE_ENTITY_IDENTITY_REQUIRED');
+  }
+  await localDb.edge_entities.put({
+    key: `${normalizedTenantId}:${collection}:${normalizedEntityId}`,
+    tenantId: normalizedTenantId,
+    collection,
+    entityId: normalizedEntityId,
+    data,
+    updatedAt: Date.now(),
+    serverVersion,
+  });
+}
+
+export async function putEntityMapping(
+  tenantId: string,
+  entityType: string,
+  localId: string,
+  canonicalId?: string
+): Promise<void> {
+  const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
+  const now = Date.now();
+  await localDb.entity_map.put({
+    key: `${normalizedTenantId}:${entityType}:${localId}`,
+    tenantId: normalizedTenantId,
+    localId,
+    canonicalId,
+    entityType,
+    status: canonicalId ? 'MAPPED' : 'LOCAL_ONLY',
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
+export async function getCanonicalEntityId(
+  tenantId: string,
+  entityType: string,
+  entityId: string
+): Promise<string> {
+  const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
+  const mapping = await localDb.entity_map.get(
+    `${normalizedTenantId}:${entityType}:${entityId}`
+  );
+  return mapping?.canonicalId || entityId;
+}
+
+function replaceMappedIds(
+  value: unknown,
+  mappings: Map<string, string>
+): unknown {
+  if (typeof value === 'string') return mappings.get(value) || value;
+  if (Array.isArray(value)) return value.map((item) => replaceMappedIds(item, mappings));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, nested]) => [
+        key,
+        replaceMappedIds(nested, mappings),
+      ])
+    );
+  }
+  return value;
+}
+
+export async function applyCanonicalEntityMappings(
+  tenantId: string,
+  mappings: Array<{
+    entityType: string;
+    localId: string;
+    canonicalId: string;
+    collection?: string;
+  }>
+): Promise<void> {
+  const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
+  if (!normalizedTenantId || mappings.length === 0) return;
+
+  const replacementMap = new Map(
+    mappings.map((mapping) => [mapping.localId, mapping.canonicalId])
+  );
+
+  await localDb.transaction(
+    'rw',
+    localDb.entity_map,
+    localDb.edge_entities,
+    localDb.mutations,
+    localDb.offline_cache,
+    async () => {
+      for (const mapping of mappings) {
+        const key = `${normalizedTenantId}:${mapping.entityType}:${mapping.localId}`;
+        const previous = await localDb.entity_map.get(key);
+        await localDb.entity_map.put({
+          key,
+          tenantId: normalizedTenantId,
+          localId: mapping.localId,
+          canonicalId: mapping.canonicalId,
+          entityType: mapping.entityType,
+          status: 'MAPPED',
+          createdAt: previous?.createdAt || Date.now(),
+          updatedAt: Date.now(),
+        });
+
+        if (mapping.collection) {
+          const localKey = `${normalizedTenantId}:${mapping.collection}:${mapping.localId}`;
+          const existing = await localDb.edge_entities.get(localKey);
+          if (existing) {
+            await localDb.edge_entities.delete(localKey);
+            await localDb.edge_entities.put({
+              ...existing,
+              key: `${normalizedTenantId}:${mapping.collection}:${mapping.canonicalId}`,
+              entityId: mapping.canonicalId,
+              data: replaceMappedIds(existing.data, replacementMap) as Record<string, unknown>,
+              updatedAt: Date.now(),
+            });
+          }
+        }
+      }
+
+      const tenantMutations = await localDb.mutations.where('tenantId').equals(normalizedTenantId).toArray();
+      for (const mutation of tenantMutations) {
+        const rewrittenPayload = replaceMappedIds(mutation.payload, replacementMap) as Record<string, unknown>;
+        const rewrittenDocId = replacementMap.get(mutation.docId) || mutation.docId;
+        const rewrittenResourceId = mutation.resourceId
+          ? replacementMap.get(mutation.resourceId) || mutation.resourceId
+          : mutation.resourceId;
+        if (
+          rewrittenDocId !== mutation.docId ||
+          rewrittenResourceId !== mutation.resourceId ||
+          JSON.stringify(rewrittenPayload) !== JSON.stringify(mutation.payload)
+        ) {
+          await localDb.mutations.update(mutation.id, {
+            docId: rewrittenDocId,
+            resourceId: rewrittenResourceId,
+            payload: rewrittenPayload,
+          });
+        }
+      }
+
+      const cached = await localDb.offline_cache.where('tenantId').equals(normalizedTenantId).toArray();
+      for (const entry of cached) {
+        const rewrittenData = replaceMappedIds(entry.data, replacementMap) as Record<string, unknown>;
+        if (JSON.stringify(rewrittenData) !== JSON.stringify(entry.data)) {
+          await localDb.offline_cache.update(entry.key, {
+            data: rewrittenData,
+            updatedAt: Date.now(),
+          });
+        }
+      }
+    }
+  );
+}

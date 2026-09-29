@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
 import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
+import { assertPatient360ReadAccess } from '@/lib/clinical/patient360/patient360-access';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 
 interface RouteContext {
@@ -25,6 +26,7 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
     ).trim().toLowerCase();
 
     const { context } = await deriveAuthoritativeContext(req, requestedTenantId);
+    assertPatient360ReadAccess(context);
     const patient = await DomainStateRepository.getById<Record<string, unknown>>(
       context.tenantId,
       'patients',

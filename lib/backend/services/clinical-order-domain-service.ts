@@ -1,12 +1,14 @@
 /**
  * Clinical Order Domain Service
- * Manages Diagnostic Orders (LIS/RIS), Revenue Gating, and Credential-Gated Prescriptions.
+ * Manages diagnostic orders, credential-gated prescriptions, and atomic
+ * prescription-to-inventory dispensing.
  */
 
 import { CommandContext, CommandResult } from '../types';
 import { AuthorizationPipeline } from '../auth/authorization-pipeline';
 import { TransactionManager } from '../transactions/transaction-manager';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
+import type { InventoryBalance } from '@/types/scm-domain';
 
 export interface PlaceOrderPayload {
   encounterId: string;
@@ -28,7 +30,21 @@ export interface PrescribeMedicationPayload {
   route: string;
   frequency: string;
   durationDays: number;
+  quantityPrescribed?: number;
+  unitOfMeasure?: string;
+  unitPriceMinorUnits?: number;
+  inventoryItemId?: string;
   instructions?: string;
+}
+
+interface VersionedInventoryBalance extends InventoryBalance {
+  _serverVersion?: number;
+}
+
+function isClosedEncounter(status: unknown): boolean {
+  return ['COMPLETED', 'DISCHARGED', 'TRANSFERRED', 'CANCELLED'].includes(
+    String(status || '').toUpperCase()
+  );
 }
 
 export class ClinicalOrderDomainService {
@@ -57,8 +73,35 @@ export class ClinicalOrderDomainService {
       };
     }
 
-    const orderId = `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    // Revenue Lock: STAT orders are automatically unlocked; ROUTINE orders require cashier clearance
+    const encounter = await DomainStateRepository.getById<Record<string, unknown>>(
+      context.tenantId,
+      'encounters',
+      payload.encounterId
+    );
+    if (!encounter || String(encounter.patientId || '') !== payload.patientId) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'ENCOUNTER_PATIENT_MISMATCH',
+          message: 'Diagnostic orders require an existing encounter for the same patient.',
+        },
+      };
+    }
+    if (isClosedEncounter(encounter.status)) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'ENCOUNTER_ALREADY_CLOSED',
+          message: 'Diagnostic orders cannot be added to a closed encounter.',
+        },
+      };
+    }
+
+    const orderId = `ord_${crypto.randomUUID()}`;
     const unlockStatus = payload.priority === 'STAT' ? 'UNLOCKED_STAT_OVERRIDE' : 'PENDING_PAYMENT_CLEARANCE';
 
     const domainState = {
@@ -133,7 +176,11 @@ export class ClinicalOrderDomainService {
       };
     }
 
-    if (!payload.prescriptionId || !(payload.quantityDispensed > 0)) {
+    if (
+      !payload.prescriptionId ||
+      !Number.isFinite(payload.quantityDispensed) ||
+      payload.quantityDispensed <= 0
+    ) {
       return {
         success: false,
         commandId,
@@ -171,47 +218,293 @@ export class ClinicalOrderDomainService {
       };
     }
 
+    const patientId = String(prescription.patientId || '');
+    const encounterId = String(prescription.encounterId || '');
+    const itemId = String(prescription.inventoryItemId || prescription.drugCode || '');
+    if (!patientId || !encounterId || !itemId) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'PRESCRIPTION_TRACEABILITY_INCOMPLETE',
+          message: 'Prescription is missing patient, encounter, or inventory item identity.',
+        },
+      };
+    }
+
+    const [patient, encounter, balances] = await Promise.all([
+      DomainStateRepository.getById<Record<string, unknown>>(context.tenantId, 'patients', patientId),
+      DomainStateRepository.getById<Record<string, unknown>>(context.tenantId, 'encounters', encounterId),
+      DomainStateRepository.queryEqual<VersionedInventoryBalance>(
+        context.tenantId,
+        'inventoryBalances',
+        'itemId',
+        itemId,
+        200
+      ),
+    ]);
+
+    if (!patient || !encounter || String(encounter.patientId || '') !== patientId) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'PRESCRIPTION_ENCOUNTER_TRACEABILITY_CONFLICT',
+          message: 'Prescription patient/encounter lineage could not be verified.',
+        },
+      };
+    }
+    if (isClosedEncounter(encounter.status)) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'ENCOUNTER_ALREADY_CLOSED',
+          message: 'Medication cannot be dispensed against a closed encounter.',
+        },
+      };
+    }
+
+    const now = Date.now();
+    const eligibleBalances = balances
+      .filter((balance) => {
+        const expiryMs = Date.parse(balance.expiryDate);
+        return (
+          balance.available >= payload.quantityDispensed &&
+          Number.isFinite(expiryMs) &&
+          expiryMs > now
+        );
+      })
+      .sort((left, right) => {
+        const expiryDelta = Date.parse(left.expiryDate) - Date.parse(right.expiryDate);
+        if (expiryDelta !== 0) return expiryDelta;
+        return String(left.batchNumber || '').localeCompare(String(right.batchNumber || ''));
+      });
+
+    const selectedBalance = eligibleBalances[0];
+    if (!selectedBalance) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'PHARMACY_STOCK_NOT_AVAILABLE',
+          message: `No non-expired FEFO inventory batch has ${payload.quantityDispensed} units available for ${itemId}.`,
+        },
+      };
+    }
+
+    if (
+      payload.batchNumber &&
+      String(payload.batchNumber).trim() !== String(selectedBalance.batchNumber || '').trim()
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'FEFO_BATCH_MISMATCH',
+          message: `Client-selected batch ${payload.batchNumber} is not the authoritative FEFO batch ${selectedBalance.batchNumber}.`,
+        },
+      };
+    }
+    if (
+      payload.expiryDate &&
+      String(payload.expiryDate).slice(0, 10) !== String(selectedBalance.expiryDate).slice(0, 10)
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'FEFO_EXPIRY_MISMATCH',
+          message: 'Client-supplied expiry does not match the authoritative inventory batch.',
+        },
+      };
+    }
+
+    const quantity = payload.quantityDispensed;
     const dispensedAt = Date.now();
-    const domainState = {
+    const stockTransactionId = `stk_dispense_${crypto.randomUUID()}`;
+    const consumptionId = `consume_${crypto.randomUUID()}`;
+    const chargeId = `chg_rx_${crypto.randomUUID()}`;
+    const unitPriceMinorUnits = Math.max(0, Number(prescription.unitPriceMinorUnits || 0));
+    const amountMinorUnits = Math.round(unitPriceMinorUnits * quantity);
+
+    const prescriptionState = {
       ...prescription,
       status: 'DISPENSED',
-      quantityDispensed: payload.quantityDispensed,
-      batchNumber: payload.batchNumber,
-      expiryDate: payload.expiryDate,
+      quantityDispensed: quantity,
+      batchId: selectedBalance.batchId,
+      batchNumber: selectedBalance.batchNumber,
+      expiryDate: selectedBalance.expiryDate,
+      inventoryBalanceId: selectedBalance.balanceId,
       dispensedBy: context.actorId,
       dispensedByName: payload.dispensedByName,
       dispensedAt,
     };
 
-    const tx = await TransactionManager.executeAtomicWrite(
-      context,
-      commandId,
+    const inventoryState: VersionedInventoryBalance = {
+      ...selectedBalance,
+      onHand: Math.max(0, selectedBalance.onHand - quantity),
+      available: Math.max(0, selectedBalance.available - quantity),
+      totalValuation: Math.max(
+        0,
+        (selectedBalance.onHand - quantity) * selectedBalance.unitCost
+      ),
+      lastMovementAt: new Date(dispensedAt).toISOString(),
+      version: Number(selectedBalance.version || 0) + 1,
+    };
+
+    const stockTransactionState = {
+      transactionId: stockTransactionId,
+      tenantId: context.tenantId,
+      facilityId: selectedBalance.facilityId,
+      itemId: selectedBalance.itemId,
+      itemCode: selectedBalance.itemCode,
+      itemName: selectedBalance.itemName,
+      batchId: selectedBalance.batchId,
+      batchNumber: selectedBalance.batchNumber,
+      expirationDate: selectedBalance.expiryDate,
+      fromLocationId: selectedBalance.locationId,
+      fromLocationName: selectedBalance.locationName,
+      quantity,
+      uom: selectedBalance.uom,
+      normalizedQuantity: quantity,
+      unitCost: selectedBalance.unitCost,
+      totalCost: quantity * selectedBalance.unitCost,
+      currency: 'PKR',
+      transactionType: 'DISPENSE',
+      referenceType: 'PRESCRIPTION',
+      referenceId: payload.prescriptionId,
+      patientId,
+      encounterId,
+      performedBy: {
+        userId: context.actorId,
+        userName: payload.dispensedByName || context.actorId,
+        role: context.roles[0] || 'PHARMACIST',
+      },
+      occurredAt: new Date(dispensedAt).toISOString(),
+      recordedAt: new Date(dispensedAt).toISOString(),
       idempotencyKey,
-      {
-        entityType: 'PRESCRIPTION',
-        entityId: payload.prescriptionId,
-        eventType: 'MEDICATION_DISPENSED',
-        domainState,
-        eventPayload: {
-          prescriptionId: payload.prescriptionId,
-          quantityDispensed: payload.quantityDispensed,
-          batchNumber: payload.batchNumber,
-          dispensedAt,
+      source: 'ONLINE',
+    };
+
+    const consumptionState = {
+      consumptionId,
+      tenantId: context.tenantId,
+      patientId,
+      patientMRN: String(patient.mrn || ''),
+      patientName: String(patient.fullName || ''),
+      encounterId,
+      departmentId: String(encounter.departmentId || encounter.department || ''),
+      departmentName: String(encounter.departmentId || encounter.department || ''),
+      itemId: selectedBalance.itemId,
+      itemCode: selectedBalance.itemCode,
+      itemName: selectedBalance.itemName,
+      itemType: selectedBalance.itemType,
+      batchId: selectedBalance.batchId,
+      batchNumber: selectedBalance.batchNumber,
+      quantity,
+      uom: selectedBalance.uom,
+      consumedAt: new Date(dispensedAt).toISOString(),
+      documentedBy: context.actorId,
+      isImplant: false,
+      sourcePrescriptionId: payload.prescriptionId,
+    };
+
+    const chargeState = {
+      chargeId,
+      tenantId: context.tenantId,
+      encounterId,
+      patientId,
+      category: 'PHARMACY',
+      sourceType: 'PRESCRIPTION_DISPENSE',
+      sourceId: payload.prescriptionId,
+      serviceCode: String(prescription.drugCode || itemId),
+      description: `${String(prescription.drugName || selectedBalance.itemName)} dispense`,
+      quantity,
+      unitPriceMinorUnits,
+      amountMinorUnits,
+      status: amountMinorUnits > 0 ? 'UNBILLED' : 'PRICE_PENDING',
+      createdAt: dispensedAt,
+    };
+
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'PHARMACIST',
+      aggregateType: 'PRESCRIPTION',
+      aggregateId: payload.prescriptionId,
+      eventType: 'MEDICATION_DISPENSED',
+      eventPayload: {
+        prescriptionId: payload.prescriptionId,
+        patientId,
+        encounterId,
+        quantityDispensed: quantity,
+        inventoryBalanceId: selectedBalance.balanceId,
+        batchId: selectedBalance.batchId,
+        batchNumber: selectedBalance.batchNumber,
+        expiryDate: selectedBalance.expiryDate,
+        stockTransactionId,
+        consumptionId,
+        chargeId,
+        amountMinorUnits,
+        dispensedAt,
+      },
+      auditAction: 'DISPENSE_MEDICATION',
+      auditResourceType: 'PRESCRIPTION',
+      auditResourceId: payload.prescriptionId,
+      auditReason: `Dispensed prescription ${payload.prescriptionId} from FEFO batch ${selectedBalance.batchNumber}`,
+      outboxTopic: 'g-hims-clinical-events',
+      idempotencyKey,
+      commandId,
+      correlationId: context.correlationId,
+      domainState: prescriptionState,
+      expectedPrimaryServerVersion: Number(prescription._serverVersion || 0),
+      additionalStateWrites: [
+        {
+          entityType: 'INVENTORY_BALANCE',
+          entityId: selectedBalance.balanceId,
+          domainState: inventoryState,
+          expectedServerVersion: Number(selectedBalance._serverVersion || 0),
         },
-        auditReason: `Dispensed prescription ${payload.prescriptionId}`,
-        outboxTopic: 'g-hims-clinical-events',
-      }
-    );
+        {
+          entityType: 'STOCK_TRANSACTION',
+          entityId: stockTransactionId,
+          domainState: stockTransactionState,
+        },
+        {
+          entityType: 'PATIENT_CONSUMPTION',
+          entityId: consumptionId,
+          domainState: consumptionState,
+        },
+        {
+          entityType: 'ENCOUNTER_CHARGE',
+          entityId: chargeId,
+          domainState: chargeState,
+        },
+      ],
+    });
 
     return {
       success: true,
       commandId,
       idempotencyKey,
       entityId: payload.prescriptionId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: domainState,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
+      data: {
+        prescription: prescriptionState,
+        inventoryBalance: inventoryState,
+        stockTransaction: stockTransactionState,
+        patientConsumption: consumptionState,
+        charge: chargeState,
+      },
     };
   }
 
@@ -238,7 +531,35 @@ export class ClinicalOrderDomainService {
       };
     }
 
-    const prescriptionId = `rx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const encounter = await DomainStateRepository.getById<Record<string, unknown>>(
+      context.tenantId,
+      'encounters',
+      payload.encounterId
+    );
+    if (!encounter || String(encounter.patientId || '') !== payload.patientId) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'ENCOUNTER_PATIENT_MISMATCH',
+          message: 'Prescription requires an existing encounter for the same patient.',
+        },
+      };
+    }
+    if (isClosedEncounter(encounter.status)) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'ENCOUNTER_ALREADY_CLOSED',
+          message: 'Medication cannot be prescribed against a closed encounter.',
+        },
+      };
+    }
+
+    const prescriptionId = `rx_${crypto.randomUUID()}`;
     const domainState = {
       prescriptionId,
       tenantId: context.tenantId,
@@ -250,6 +571,10 @@ export class ClinicalOrderDomainService {
       route: payload.route,
       frequency: payload.frequency,
       durationDays: payload.durationDays,
+      quantityPrescribed: payload.quantityPrescribed,
+      unitOfMeasure: payload.unitOfMeasure,
+      unitPriceMinorUnits: payload.unitPriceMinorUnits,
+      inventoryItemId: payload.inventoryItemId || payload.drugCode,
       instructions: payload.instructions,
       prescribedBy: context.actorId,
       status: 'PRESCRIBED',
@@ -267,6 +592,7 @@ export class ClinicalOrderDomainService {
         patientId: payload.patientId,
         drugCode: payload.drugCode,
         drugName: payload.drugName,
+        quantityPrescribed: payload.quantityPrescribed,
       },
       auditReason: `Prescribed ${payload.drugName} ${payload.dosage} (${payload.route})`,
       outboxTopic: 'g-hims-clinical-events',

@@ -5,7 +5,7 @@ import { getCachedAuthSession } from '@/lib/offline/auth-storage';
 import { CommandResult } from '@/lib/backend/types';
 import { syncEngine } from '@/lib/offline/sync-engine';
 import type { MutationAction } from '@/types/offline';
-import { putEdgeEntity, putEntityMapping } from '@/lib/offline/db';
+import { getEdgeEntityRecord, putEdgeEntity, putEntityMapping } from '@/lib/offline/db';
 
 export interface OfflineQueuePolicy {
   enabled: boolean;
@@ -35,6 +35,12 @@ async function queueGovernedOfflineCommand<TData>(
     throw new Error('OFFLINE_QUEUE_UNAVAILABLE: command is not enabled for governed offline replay.');
   }
 
+  const edgeRecord = await getEdgeEntityRecord(
+    input.tenantId,
+    input.offlineQueue.collection,
+    input.offlineQueue.resourceId
+  );
+
   await syncEngine.queueMutation({
     tenantId: input.tenantId,
     collection: input.offlineQueue.collection,
@@ -44,7 +50,8 @@ async function queueGovernedOfflineCommand<TData>(
     payload: input.payload,
     idempotencyKey,
     schemaVersion: input.schemaVersion || 1,
-    baseEntityVersion: input.offlineQueue.baseEntityVersion,
+    baseEntityVersion:
+      input.offlineQueue.baseEntityVersion ?? edgeRecord?.serverVersion,
     optimisticCache: input.offlineQueue.optimisticCache,
     mutationId: commandId,
   });

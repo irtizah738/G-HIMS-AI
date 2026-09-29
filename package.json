@@ -48,7 +48,9 @@
     "test:ci3": "bun test tests/ci3-diagnostics-pipeline.test.ts",
     "validate:ci3": "bun run typecheck && bun run lint && bun run test:ci-foundation && bun run test:ci1 && bun run test:ci2 && bun run test:ci3 && bun run test:p7 && bun run test:p6 && bun run test:security && bun run build",
     "test:ci4": "bun test tests/ci4-patient360-projection.test.ts",
-    "validate:ci4": "bun run typecheck && bun run lint && bun run test:ci-foundation && bun run test:ci1 && bun run test:ci2 && bun run test:ci3 && bun run test:ci4 && bun run test:p7 && bun run test:p6 && bun run test:security && bun run build"
+    "validate:ci4": "bun run typecheck && bun run lint && bun run test:ci-foundation && bun run test:ci1 && bun run test:ci2 && bun run test:ci3 && bun run test:ci4 && bun run test:p7 && bun run test:p6 && bun run test:security && bun run build",
+    "test:ci5": "bun test tests/ci5-patient360-read-surface.test.ts",
+    "validate:ci5": "bun run typecheck && bun run lint && bun run test:ci-foundation && bun run test:ci1 && bun run test:ci2 && bun run test:ci3 && bun run test:ci4 && bun run test:ci5 && bun run test:p7 && bun run test:p6 && bun run test:security && bun run build"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
     const authError = error instanceof AuthError
       ? error
       : new AuthError({
-          code: 'SYNC_STATUS_UNAVAILABLE',
+          code: 'INTERNAL_AUTH_ERROR',
           message: error instanceof Error ? error.message : 'Unable to verify authoritative sync replica',
           statusCode: 503,
         });

@@ -509,6 +509,7 @@ class ClinicalSyncEngine {
                   mutationId: mutation.id,
                   occurredAt: mutation.clientTimestamp || mutation.timestamp,
                   commandType: mutation.commandType,
+                  collection: mutation.collection,
                   payload: await resolveMappedReferences(mutationTenantId, mutation.payload),
                   idempotencyKey: mutation.idempotencyKey,
                   entityId: await resolveMappedReferences(

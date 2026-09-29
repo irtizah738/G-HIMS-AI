@@ -7,6 +7,7 @@ import {
   listSecureEdgeEntities,
   replaceSecureTenantEdgeSnapshot,
 } from '@/lib/offline/secure-store';
+import { enforceEdgeStorageBudget } from '@/lib/offline/storage-manager';
 
 export interface EdgeSnapshot {
   tenantId: string;
@@ -130,6 +131,7 @@ export async function hydrateEdgeSnapshot(tenantId: string): Promise<EdgeSnapsho
         serverGeneratedAt: Number(payload.generatedAt || Date.now()),
       }
     );
+    await enforceEdgeStorageBudget(normalizedTenantId).catch(() => {});
 
     return {
       tenantId: normalizedTenantId,

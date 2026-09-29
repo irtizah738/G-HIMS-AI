@@ -624,6 +624,18 @@ class ClinicalSyncEngine {
         },
       });
       void this.refreshReplicaStatus(eventTenantId || undefined);
+      if (typeof window !== 'undefined' && eventTenantId && syncedCount > 0) {
+        window.dispatchEvent(
+          new CustomEvent('ghims:edge-sync-complete', {
+            detail: {
+              tenantId: eventTenantId,
+              syncedCount,
+              conflictCount,
+              batchIds,
+            },
+          })
+        );
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Sync loop failed';
 

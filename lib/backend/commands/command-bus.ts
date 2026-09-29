@@ -129,6 +129,15 @@ export class CommandBus {
           );
           break;
 
+        case 'CommitEncounterDispositionCommand':
+          result = await EncounterDomainService.commitDisposition(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
         case 'PlaceDiagnosticOrderCommand':
           result = await ClinicalOrderDomainService.placeDiagnosticOrder(
             context,

@@ -84,4 +84,41 @@ describe('G-HIMS P5C pilot readiness guards', () => {
     expect(workflow).not.toContain('vercel deploy --prod');
     expect(workflow).not.toContain('--target=production');
   });
+  test('dashboard does not mount forbidden legacy root Firestore listeners', async () => {
+    const hospitalContext = await source('lib/context/hospital-context.tsx');
+
+    expect(hospitalContext).not.toContain("from '@/lib/firebase/firestore-service'");
+    expect(hospitalContext).not.toContain('subscribeToPatients(');
+    expect(hospitalContext).not.toContain('subscribeToBeds(');
+    expect(hospitalContext).not.toContain('subscribeToBillingMismatches(');
+    expect(hospitalContext).not.toContain('subscribeToOpdQueue(');
+    expect(hospitalContext).not.toContain('subscribeToAuditLogs(');
+    expect(hospitalContext).not.toContain('subscribeToTelehealthSessions(');
+    expect(hospitalContext).toContain('Legacy root-level Firestore listeners were retired');
+  });
+
+  test('successful tenant claim forces a fresh Firebase token before tenant reads', async () => {
+    const tenantContext = await source('lib/tenant/context.tsx');
+
+    expect(tenantContext).toContain('await user.getIdToken(true)');
+    expect(tenantContext).toContain('Array.isArray(data.roles)');
+    expect(tenantContext).toContain("administrator: 'admin'");
+  });
+
+  test('SSO configuration never reads or writes server-only Firestore config from browser', async () => {
+    const sso = await source('lib/auth/sso-service.ts');
+
+    expect(sso).not.toContain("from 'firebase/firestore'");
+    expect(sso).not.toContain("doc(db, 'tenants'");
+    expect(sso).toContain("NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO'");
+    expect(sso).toContain('SSO_CONFIG_DISABLED');
+  });
+
+  test('Next.js request boundary uses the v16 proxy convention', async () => {
+    const proxy = await source('proxy.ts');
+
+    expect(proxy).toContain('export function proxy(request: NextRequest)');
+    expect(proxy).toContain('x-ghims-tenant-id');
+  });
+
 });

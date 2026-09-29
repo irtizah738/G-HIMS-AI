@@ -10,6 +10,10 @@ import { DomainStateRepository } from '@/server/repositories/domain-state-reposi
 import type { RevenueIntegrityFinding } from './revenue-integrity-domain-service';
 import { AIDraftRepository, type AIDraftRecord } from '@/server/ai/ai-draft-repository';
 import { calculateNEWS2 } from '@/lib/clinical/news2';
+import {
+  buildCanonicalClinicalDocument,
+  buildCanonicalVitalObservations,
+} from '@/lib/clinical/canonical-fact-builders';
 
 export interface RecordVitalsPayload {
   encounterId: string;
@@ -131,25 +135,49 @@ export class ClinicalDocumentationDomainService {
       status: 'FINAL',
     };
 
-    const tx = await TransactionManager.executeAtomicWrite(
-      context,
-      commandId,
+    const canonicalObservations = buildCanonicalVitalObservations({
+      tenantId: context.tenantId,
+      patientId: payload.patientId,
+      encounterId: payload.encounterId,
+      sourceEvidenceId: evidenceId,
+      actorId: context.actorId,
+      measuredAt,
+      heartRate: payload.heartRate,
+      bloodPressure: payload.bloodPressure,
+      temperature: payload.temperature,
+      respiratoryRate: payload.respiratoryRate,
+      oxygenSaturation: payload.oxygenSaturation,
+    });
+
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'CLINICIAN',
+      aggregateType: 'ENCOUNTER_EVIDENCE',
+      aggregateId: evidenceId,
+      eventType: 'VITALS_RECORDED',
+      eventPayload: {
+        evidenceId,
+        patientId: payload.patientId,
+        encounterId: payload.encounterId,
+        measuredAt,
+        canonicalObservationIds: canonicalObservations.map((item) => item.observationId),
+      },
+      auditAction: 'RECORD_VITALS',
+      auditResourceType: 'ENCOUNTER_EVIDENCE',
+      auditResourceId: evidenceId,
+      auditReason: `Recorded vitals for encounter ${payload.encounterId}`,
+      outboxTopic: 'g-hims-clinical-events',
       idempotencyKey,
-      {
-        entityType: 'ENCOUNTER_EVIDENCE',
-        entityId: evidenceId,
-        eventType: 'VITALS_RECORDED',
-        domainState,
-        eventPayload: {
-          evidenceId,
-          patientId: payload.patientId,
-          encounterId: payload.encounterId,
-          measuredAt,
-        },
-        auditReason: `Recorded vitals for encounter ${payload.encounterId}`,
-        outboxTopic: 'g-hims-clinical-events',
-      }
-    );
+      commandId,
+      correlationId: context.correlationId,
+      domainState,
+      additionalStateWrites: canonicalObservations.map((observation) => ({
+        entityType: 'CLINICAL_OBSERVATION',
+        entityId: observation.observationId,
+        domainState: observation,
+      })),
+    });
 
     return {
       success: true,
@@ -159,7 +187,10 @@ export class ClinicalDocumentationDomainService {
       eventId: tx.event.eventId,
       auditId: tx.audit.auditId,
       outboxId: tx.outbox.outboxId,
-      data: domainState,
+      data: {
+        ...domainState,
+        canonicalObservationIds: canonicalObservations.map((item) => item.observationId),
+      },
     };
   }
 
@@ -387,6 +418,19 @@ export class ClinicalDocumentationDomainService {
       status: 'FINAL',
     };
 
+    const canonicalDocument = buildCanonicalClinicalDocument({
+      tenantId: context.tenantId,
+      patientId: payload.patientId,
+      encounterId: payload.encounterId,
+      sourceEvidenceId: evidenceId,
+      actorId: context.actorId,
+      category: payload.category,
+      content: payload.content,
+      signedAt,
+      sourceDraftId: payload.sourceDraftId,
+      structuredData: payload.acceptedStructuredData,
+    });
+
     // A signed note may create Revenue Integrity *candidates*, never automatic charges.
     // Only explicitly clinician-accepted structured billing codes are considered.
     const structured = payload.acceptedStructuredData || {};
@@ -445,6 +489,11 @@ export class ClinicalDocumentationDomainService {
       correlationId: context.correlationId,
       domainState,
       additionalStateWrites: [
+        {
+          entityType: 'CLINICAL_DOCUMENT',
+          entityId: canonicalDocument.clinicalDocumentId,
+          domainState: canonicalDocument,
+        },
         ...revenueIntegrityFindings.map((finding) => ({
           entityType: 'REVENUE_INTEGRITY_FINDING',
           entityId: finding.id,
@@ -476,6 +525,7 @@ export class ClinicalDocumentationDomainService {
       outboxId: tx.outboxId,
       data: {
         ...domainState,
+        canonicalDocumentId: canonicalDocument.clinicalDocumentId,
         revenueIntegrityFindings,
       },
     };

@@ -1,4 +1,4 @@
-import type { CollectionReference, DocumentData } from 'firebase-admin/firestore';
+import { FieldPath, type CollectionReference, type DocumentData, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { sanitizeForFirestore } from '@/lib/firestore/sanitize';
 import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
@@ -66,16 +66,72 @@ function patientIdsFromEvent(event: DomainEventEnvelope): string[] {
   ]);
 }
 
+const PATIENT360_PAGE_SIZE = 500;
+const PATIENT360_SOURCE_MAX = 50000;
+
 async function queryByPatient<T>(
   collection: CollectionReference<DocumentData>,
-  patientId: string,
-  limit = 2000
+  patientId: string
 ): Promise<T[]> {
-  const snapshot = await collection
-    .where('patientId', '==', patientId)
-    .limit(limit)
-    .get();
-  return snapshot.docs.map((document) => document.data() as T);
+  const rows: T[] = [];
+  let lastDocument: QueryDocumentSnapshot | null = null;
+
+  while (true) {
+    let query = collection
+      .where('patientId', '==', patientId)
+      .orderBy(FieldPath.documentId())
+      .limit(PATIENT360_PAGE_SIZE);
+
+    if (lastDocument) query = query.startAfter(lastDocument);
+
+    const snapshot = await query.get();
+    rows.push(...snapshot.docs.map((document) => document.data() as T));
+
+    if (rows.length > PATIENT360_SOURCE_MAX) {
+      throw new Error(
+        `PATIENT360_SOURCE_LIMIT_EXCEEDED:${collection.id}:${PATIENT360_SOURCE_MAX}`
+      );
+    }
+
+    if (snapshot.size < PATIENT360_PAGE_SIZE) break;
+    lastDocument = snapshot.docs[snapshot.docs.length - 1] || null;
+    if (!lastDocument) break;
+  }
+
+  return rows;
+}
+
+async function queryEventsByField(
+  collection: CollectionReference<DocumentData>,
+  field: string,
+  patientId: string
+): Promise<DomainEventEnvelope[]> {
+  const rows: DomainEventEnvelope[] = [];
+  let lastDocument: QueryDocumentSnapshot | null = null;
+
+  while (true) {
+    let query = collection
+      .where(field, '==', patientId)
+      .orderBy(FieldPath.documentId())
+      .limit(PATIENT360_PAGE_SIZE);
+
+    if (lastDocument) query = query.startAfter(lastDocument);
+
+    const snapshot = await query.get();
+    rows.push(...snapshot.docs.map((document) => document.data() as DomainEventEnvelope));
+
+    if (rows.length > PATIENT360_SOURCE_MAX) {
+      throw new Error(
+        `PATIENT360_EVENT_LIMIT_EXCEEDED:${field}:${PATIENT360_SOURCE_MAX}`
+      );
+    }
+
+    if (snapshot.size < PATIENT360_PAGE_SIZE) break;
+    lastDocument = snapshot.docs[snapshot.docs.length - 1] || null;
+    if (!lastDocument) break;
+  }
+
+  return rows;
 }
 
 function toSourceEvent(event: DomainEventEnvelope): Patient360SourceEvent {
@@ -91,7 +147,7 @@ function toSourceEvent(event: DomainEventEnvelope): Patient360SourceEvent {
 }
 
 export class Patient360ProjectionService {
-  private static async loadPatientEvents(
+  public static async loadPatientEvents(
     tenantId: string,
     patientId: string
   ): Promise<Patient360SourceEvent[]> {
@@ -102,16 +158,15 @@ export class Patient360ProjectionService {
 
     const eventsRef = db.collection('tenants').doc(tenantId).collection('events');
     const queries = await Promise.all([
-      eventsRef.where('payload.patientId', '==', patientId).limit(2000).get(),
-      eventsRef.where('payload.primaryPatientId', '==', patientId).limit(500).get(),
-      eventsRef.where('payload.secondaryPatientId', '==', patientId).limit(500).get(),
-      eventsRef.where('aggregateId', '==', patientId).limit(500).get(),
+      queryEventsByField(eventsRef, 'payload.patientId', patientId),
+      queryEventsByField(eventsRef, 'payload.primaryPatientId', patientId),
+      queryEventsByField(eventsRef, 'payload.secondaryPatientId', patientId),
+      queryEventsByField(eventsRef, 'aggregateId', patientId),
     ]);
 
     const byId = new Map<string, DomainEventEnvelope>();
-    for (const snapshot of queries) {
-      for (const document of snapshot.docs) {
-        const event = document.data() as DomainEventEnvelope;
+    for (const events of queries) {
+      for (const event of events) {
         if (!event.eventId) continue;
         byId.set(event.eventId, event);
       }
@@ -154,38 +209,31 @@ export class Patient360ProjectionService {
     ] = await Promise.all([
       queryByPatient<Record<string, unknown>>(
         tenantRef.collection('encounters'),
-        patientId,
-        1000
+        patientId
       ),
       queryByPatient<ClinicalCondition>(
         tenantRef.collection('clinicalConditions'),
-        patientId,
-        1000
+        patientId
       ),
       queryByPatient<ClinicalAllergy>(
         tenantRef.collection('clinicalAllergies'),
-        patientId,
-        1000
+        patientId
       ),
       queryByPatient<MedicationOrder>(
         tenantRef.collection('medicationOrders'),
-        patientId,
-        1000
+        patientId
       ),
       queryByPatient<ClinicalObservation>(
         tenantRef.collection('clinicalObservations'),
-        patientId,
-        3000
+        patientId
       ),
       queryByPatient<DiagnosticReport>(
         tenantRef.collection('diagnosticReports'),
-        patientId,
-        1000
+        patientId
       ),
       queryByPatient<ClinicalDocument>(
         tenantRef.collection('clinicalDocuments'),
-        patientId,
-        1000
+        patientId
       ),
       this.loadPatientEvents(tenantId, patientId),
     ]);

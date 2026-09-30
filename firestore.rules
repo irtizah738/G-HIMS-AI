@@ -296,6 +296,23 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      match /scmSupplierInvoices/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /scmSupplierInvoiceMatches/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /scmPaymentAuthorizations/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /scmSupplierPayments/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+
       match /billingMismatches/{id} {
         allow read: if canReadFinance(tenantId);
         allow write: if false;

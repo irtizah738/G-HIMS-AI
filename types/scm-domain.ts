@@ -438,6 +438,7 @@ export interface PurchaseOrderRecord {
   supplierName: string;
   contractId?: string;
   contractNumber?: string;
+  contractReservedSpendMinorUnits?: number;
   emergencyContractWaiver?: {
     reason: string;
     approvedBy?: string;

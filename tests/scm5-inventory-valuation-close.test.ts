@@ -255,13 +255,15 @@ describe('SCM-5 inventory valuation, costing and period close', () => {
   test('SCM-5 control account and read models are provisioned and client-write denied', async () => {
     const coa = await source('lib/finance/double-entry.ts');
     const provisioner = await source(
-      'scripts/ops/scm4-provision-financial-control-accounts.ts'
+      'scripts/ops/scm5-provision-inventory-control-account.ts'
     );
     const rules = await source('firestore.rules');
     const pkg = await source('package.json');
 
     expect(coa).toContain("accountCode: '6040'");
-    expect(provisioner).toContain("code: '6040'");
+    expect(provisioner).toContain("accountCode: '6040'");
+    expect(provisioner).toContain('GHIMS_SCM5_PROVISION_TENANT');
+    expect(provisioner).toContain('GHIMS_ALLOW_SCM5_FINANCE_PROVISION');
     expect(pkg).toContain('"ops:scm5:provision-finance"');
 
     for (const collection of [

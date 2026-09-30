@@ -55,11 +55,13 @@ export interface ExecuteRecallQuarantinePayload {
   recallId: string;
   batchIds: string[];
   balanceIds: string[];
+  finalChunk: boolean;
 }
 
 export interface ProjectRecallExposuresPayload {
   recallId: string;
   consumptionIds: string[];
+  finalChunk: boolean;
 }
 
 export interface RecallExposureRecord {

@@ -587,6 +587,14 @@ service cloud.firestore {
         allow read: if canReadAudit(tenantId);
         allow write: if false;
       }
+      match /leaveBalances/{id} {
+        allow read: if canReadHcm(tenantId);
+        allow write: if false;
+      }
+      match /leaveCalendars/{id} {
+        allow read: if canReadHcm(tenantId);
+        allow write: if false;
+      }
       match /attendanceOpenSlots/{id} {
         allow read, write: if false;
       }

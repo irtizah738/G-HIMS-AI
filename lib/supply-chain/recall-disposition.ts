@@ -38,7 +38,10 @@ export function batchMatchesRecall(
             recall.manufacturerName.trim().toLowerCase()
       );
     case 'SERIAL_SPECIFIC':
-      return false;
+      // Inventory balances are batch-scoped today. Serial-specific recalls
+      // therefore require the affected batch number(s) to be supplied for
+      // physical quarantine while patient exposure matching remains serial exact.
+      return recall.targetBatchNumbers.includes(batch.batchNumber);
     default:
       return false;
   }

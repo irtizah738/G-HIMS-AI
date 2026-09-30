@@ -19,6 +19,8 @@ import {
   isInventoryPeriodBlocked,
   periodKeyFromIso,
 } from '@/lib/supply-chain/inventory-costing';
+import type { SupplierContract } from '@/types/scm-sourcing';
+import { validatePurchaseOrderAgainstContract } from '@/lib/supply-chain/supplier-sourcing';
 
 type RequisitionDecision = 'APPROVED' | 'REJECTED';
 type PurchaseOrderDecision = 'APPROVED' | 'REJECTED';
@@ -38,6 +40,8 @@ interface CreatePurchaseOrderPayload {
   poNumber: string;
   requisitionId: string;
   supplierId: string;
+  contractId?: string;
+  emergencyWaiverReason?: string;
   currency: string;
   paymentTerms: string;
   expectedDeliveryDate: string;
@@ -425,6 +429,14 @@ export class ScmProcurementDomainService {
             entityId: payload.destinationLocationId,
             required: true,
           },
+          ...(payload.contractId
+            ? [{
+                key: 'contract',
+                entityType: 'SUPPLIER_CONTRACT',
+                entityId: payload.contractId,
+                required: true,
+              }]
+            : []),
         ],
         prepare: (current) => {
           const requisition =
@@ -432,6 +444,9 @@ export class ScmProcurementDomainService {
           const supplier = current.supplier as unknown as SupplierMaster;
           const destination =
             current.destination as unknown as InventoryLocation;
+          const contract = payload.contractId
+            ? (current.contract as unknown as SupplierContract)
+            : null;
 
           assertFacilityScope(context, requisition.facilityId);
 
@@ -452,6 +467,21 @@ export class ScmProcurementDomainService {
               'SUPPLIER_NOT_ACTIVE',
               'Purchase orders may only be issued to an active supplier.'
             );
+          }
+
+          const emergencyWaiverReason = String(
+            payload.emergencyWaiverReason || ''
+          ).trim();
+          if (!contract) {
+            if (
+              requisition.priority !== 'EMERGENCY' ||
+              emergencyWaiverReason.length < 20
+            ) {
+              throw new AtomicMutationRejectedError(
+                'SUPPLIER_CONTRACT_REQUIRED',
+                'Routine purchase orders require an active supplier contract. Emergency off-contract procurement requires a substantive waiver reason.'
+              );
+            }
           }
           if (
             destination.facilityId !== requisition.facilityId ||
@@ -546,6 +576,33 @@ export class ScmProcurementDomainService {
             );
           }
 
+          if (contract) {
+            try {
+              validatePurchaseOrderAgainstContract({
+                contract,
+                po: {
+                  supplierId: supplier.supplierId,
+                  currency: payload.currency,
+                  paymentTerms: payload.paymentTerms,
+                  orderDate: new Date().toISOString(),
+                  lines: poLines.map((line) => ({
+                    itemId: line.itemId,
+                    uom: line.uom,
+                    unitPriceMinorUnits: Math.round(line.unitPrice * 100),
+                    quantity: line.quantityOrdered,
+                  })),
+                },
+              });
+            } catch (error) {
+              throw new AtomicMutationRejectedError(
+                'SUPPLIER_CONTRACT_VALIDATION_FAILED',
+                error instanceof Error
+                  ? error.message
+                  : 'Purchase order violates supplier contract controls.'
+              );
+            }
+          }
+
           const subtotal = roundMoney(
             poLines.reduce(
               (sum, line) =>
@@ -577,6 +634,11 @@ export class ScmProcurementDomainService {
             requisitionNumber: requisition.requisitionNumber,
             supplierId: supplier.supplierId,
             supplierName: supplier.displayName || supplier.legalName,
+            contractId: contract?.contractId,
+            contractNumber: contract?.contractNumber,
+            emergencyContractWaiver: contract
+              ? undefined
+              : { reason: emergencyWaiverReason },
             items: poLines,
             currency: payload.currency.toUpperCase(),
             subtotal,
@@ -624,6 +686,8 @@ export class ScmProcurementDomainService {
               poNumber: po.poNumber,
               requisitionId: po.requisitionId,
               supplierId: po.supplierId,
+              contractId: po.contractId,
+              emergencyContractWaiver: Boolean(po.emergencyContractWaiver),
               facilityId: po.facilityId,
               totalAmount: po.totalAmount,
               currency: po.currency,
@@ -738,6 +802,13 @@ export class ScmProcurementDomainService {
             ...po,
             status:
               payload.decision === 'APPROVED' ? 'APPROVED' : 'REJECTED',
+            emergencyContractWaiver:
+              payload.decision === 'APPROVED' && po.emergencyContractWaiver
+                ? {
+                    ...po.emergencyContractWaiver,
+                    approvedBy: context.actorId,
+                  }
+                : po.emergencyContractWaiver,
             ...(payload.decision === 'APPROVED'
               ? {
                   approvedBy: {

@@ -7,6 +7,7 @@ import type { CommandContext, CommandResult } from '@/lib/backend/types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import type {
   FinancePeriodRecord,
+  FinanceAccountRecord,
   GovernedJournalRecord,
   TaxCodeRecord,
   TaxLedgerItem,

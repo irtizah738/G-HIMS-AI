@@ -26,23 +26,23 @@ import type {
 import { evaluateSupplierInvoiceMatch } from '@/lib/supply-chain/receive-to-pay';
 
 const AP_ACCOUNT = {
-  id: '2100',
-  name: 'Accounts Payable - Trade Suppliers',
+  id: '2010',
+  name: 'Accounts Payable - Medical & Trade Vendors',
 };
 const GRNI_ACCOUNT = {
-  id: '2110',
+  id: '2030',
   name: 'Goods Received Not Invoiced (GRNI)',
 };
 const INPUT_TAX_ACCOUNT = {
-  id: '1220',
+  id: '1230',
   name: 'Recoverable Input Tax',
 };
 const FREIGHT_ACCOUNT = {
-  id: '1215',
+  id: '1240',
   name: 'Freight-In Inventory',
 };
 const PURCHASE_VARIANCE_ACCOUNT = {
-  id: '6190',
+  id: '6030',
   name: 'Purchase Price Variance',
 };
 

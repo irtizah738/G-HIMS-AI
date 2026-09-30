@@ -252,6 +252,31 @@ describe('SCM-4 receive-to-pay financial integrity', () => {
     expect(tx).toContain("SUPPLIER_PAYMENT: 'scmSupplierPayments'");
   });
 
+  test('AP read models are finance-scoped, server-write-only, and excluded from generic offline hydration', async () => {
+    const rules = await source('firestore.rules');
+    const hydration = await source('lib/offline/hydration.ts');
+    const adapter = await source(
+      'lib/supply-chain/scm-payables-edge-adapter.ts'
+    );
+
+    for (const collection of [
+      'scmSupplierInvoices',
+      'scmSupplierInvoiceMatches',
+      'scmPaymentAuthorizations',
+      'scmSupplierPayments',
+    ]) {
+      const start = rules.indexOf(`match /${collection}/{id}`);
+      expect(start).toBeGreaterThan(-1);
+      const block = rules.slice(start, start + 180);
+      expect(block).toContain('allow read: if canReadFinance(tenantId);');
+      expect(block).toContain('allow write: if false;');
+      expect(hydration).not.toContain(`'${collection}'`);
+    }
+
+    expect(adapter).not.toContain('offlineQueue');
+    expect(adapter).toContain('executeActiveTenantCommand');
+  });
+
   test('master command bus routes the complete receive-to-pay workflow', async () => {
     const bus = await source('lib/backend/commands/command-bus.ts');
     for (const command of [

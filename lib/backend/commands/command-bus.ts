@@ -59,6 +59,49 @@ export class CommandBus {
       });
     };
 
+    // Zero-trust perimeter validation must precede schema/idempotency work.
+    if (!context.tenantId?.trim() || !command.tenantId?.trim()) {
+      emit('REJECTED', 'TENANT_ISOLATION_ERROR');
+      return {
+        success: false,
+        commandId: command.commandId,
+        idempotencyKey: command.idempotencyKey,
+        error: {
+          code: 'TENANT_ISOLATION_ERROR',
+          message: 'Command context is missing an authenticated tenant identifier.',
+        },
+      };
+    }
+
+    if (
+      context.tenantId.trim().toLowerCase() !==
+      command.tenantId.trim().toLowerCase()
+    ) {
+      emit('REJECTED', 'TENANT_MISMATCH');
+      return {
+        success: false,
+        commandId: command.commandId,
+        idempotencyKey: command.idempotencyKey,
+        error: {
+          code: 'TENANT_MISMATCH',
+          message: 'Cross-tenant mutation strictly blocked.',
+        },
+      };
+    }
+
+    if (!context.actorId?.trim()) {
+      emit('REJECTED', 'UNAUTHENTICATED_ACTOR');
+      return {
+        success: false,
+        commandId: command.commandId,
+        idempotencyKey: command.idempotencyKey,
+        error: {
+          code: 'UNAUTHENTICATED_ACTOR',
+          message: 'Command context does not contain an authoritative actor ID.',
+        },
+      };
+    }
+
     try {
       const schemaValidation = validateCommandPayload(command);
       if (!schemaValidation.success) {

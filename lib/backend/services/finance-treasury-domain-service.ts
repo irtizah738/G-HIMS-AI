@@ -226,7 +226,7 @@ export class FinanceTreasuryDomainService {
           const next:CashShiftRecord={
             ...shift,expectedClosingMinorUnits:expected,
             countedClosingMinorUnits:payload.countedClosingMinorUnits,varianceMinorUnits:variance,
-            status:'AWAITING_REVIEW',closedBy:context.actorId,
+            status:'AWAITING_REVIEW',closedBy:context.actorId,closedAt:payload.closedAt,
           };
           return {domainState:next,eventPayload:{shiftId:shift.shiftId,expectedClosingMinorUnits:expected,countedClosingMinorUnits:payload.countedClosingMinorUnits,varianceMinorUnits:variance},
             auditReason:`Closed cash shift ${shift.shiftId} for treasury review with variance ${variance} minor units.`,resultData:next};

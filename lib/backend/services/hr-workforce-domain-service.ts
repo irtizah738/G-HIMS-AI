@@ -1653,7 +1653,7 @@ export class HrWorkforceDomainService {
               startTime:payload.startTime,
               endTime:payload.endTime,
             },
-            auditReason:`Assigned ${payload.shiftName} shift to ${payload.employeeName} on ${payload.date}.`,
+            auditReason:`Assigned ${payload.shiftName} shift to ${shiftEntry.employeeName} on ${payload.date}.`,
             resultData:shiftEntry,
           };
         },

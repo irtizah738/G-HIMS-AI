@@ -388,7 +388,7 @@ export class HrWorkforceDomainService {
           entityId:payload.employeeId,required:true,
         }],
         prepare:(current)=>{
-          const employee=((current.employee as unknown as EmployeeMaster)|null)||preflight;
+          const employee=(current.employee as unknown as EmployeeMaster | null)||preflight;
           if(!allowedEmploymentTransition(employee.employmentStatus,payload.newStatus)){
             throw new AtomicMutationRejectedError(
               'INVALID_EMPLOYMENT_STATUS_TRANSITION',

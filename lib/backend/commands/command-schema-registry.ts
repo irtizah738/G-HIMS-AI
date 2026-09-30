@@ -211,6 +211,76 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       }).strict()).min(1).max(500),
     }).strict(),
   },
+  RecordSupplierInvoiceCommand: {
+    1: z.object({
+      facilityId: nonEmpty,
+      supplierId: nonEmpty,
+      invoiceNumber: nonEmpty.max(200),
+      poId: nonEmpty,
+      grnIds: z.array(nonEmpty).min(1).max(100),
+      issueDate: nonEmpty,
+      dueDate: nonEmpty,
+      currency: z.string().trim().length(3),
+      shippingMinorUnits: z.number().int().safe().nonnegative().optional(),
+      priceToleranceBasisPoints: z.number().int().min(0).max(500).optional(),
+      quantityTolerance: z.number().finite().nonnegative().max(1000000).optional(),
+      lines: z.array(z.object({
+        lineId: nonEmpty,
+        itemId: nonEmpty,
+        billedQuantity: z.number().finite().positive(),
+        uom: nonEmpty,
+        unitPriceMinorUnits: z.number().int().safe().nonnegative(),
+        discountMinorUnits: z.number().int().safe().nonnegative().optional(),
+        taxMinorUnits: z.number().int().safe().nonnegative().optional(),
+      }).strict()).min(1).max(500),
+    }).strict(),
+  },
+  ResolveSupplierInvoiceMatchCommand: {
+    1: z.object({
+      invoiceId: nonEmpty,
+      poId: nonEmpty,
+      decision: z.enum(['APPROVE', 'REJECT']),
+      notes: nonEmpty.max(2000),
+    }).strict(),
+  },
+  RecognizeSupplierInvoicePayableCommand: {
+    1: z.object({
+      invoiceId: nonEmpty,
+      poId: nonEmpty,
+      fiscalYear: z.number().int().min(2000).max(2200),
+      postingPeriod: z.number().int().min(1).max(12),
+      documentDate: z.number().finite().positive(),
+      postingDate: z.number().finite().positive(),
+    }).strict(),
+  },
+  RequestSupplierPaymentAuthorizationCommand: {
+    1: z.object({
+      authorizationId: nonEmpty,
+      invoiceId: nonEmpty,
+      amountMinorUnits: z.number().int().safe().positive(),
+      reason: nonEmpty.max(1000),
+    }).strict(),
+  },
+  ApproveSupplierPaymentAuthorizationCommand: {
+    1: z.object({
+      authorizationId: nonEmpty,
+      decision: z.enum(['APPROVE', 'REJECT']),
+      comments: z.string().trim().max(1000).optional(),
+    }).strict(),
+  },
+  RecordSupplierPaymentCommand: {
+    1: z.object({
+      authorizationId: nonEmpty,
+      invoiceId: nonEmpty,
+      paymentReference: nonEmpty.max(200),
+      paymentMethod: z.enum(['BANK_TRANSFER', 'CHECK', 'ACH', 'CASH']),
+      sourceAccountId: nonEmpty.max(100),
+      sourceAccountName: nonEmpty.max(250),
+      settledAt: nonEmpty,
+      fiscalYear: z.number().int().min(2000).max(2200),
+      postingPeriod: z.number().int().min(1).max(12),
+    }).strict(),
+  },
   RecordCashReceiptCommand: {
     1: z.object({
       receiptId: nonEmpty,

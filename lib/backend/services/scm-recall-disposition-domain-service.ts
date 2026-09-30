@@ -393,7 +393,7 @@ export class ScmRecallDispositionDomainService {
                 normalizedQuantity:delta,
                 unitCost:balance.unitCost,
                 totalCost:Math.round(delta*balance.unitCost*100)/100,
-                currency:'',
+                currency:String(selectedBatches.find((candidate)=>candidate.batchId===balance.batchId)?.currency||'').trim().toUpperCase(),
                 transactionType:'QUARANTINE',
                 referenceType:'RECALL_CASE',
                 referenceId:recall.recallId,
@@ -587,7 +587,6 @@ export class ScmRecallDispositionDomainService {
         readTargets:[
           {key:'balance',entityType:'INVENTORY_BALANCE',entityId:payload.balanceId,required:true},
           {key:'batch',entityType:'BATCH_LOT',entityId:payload.batchId,required:true},
-          {key:'item',entityType:'ITEM_MASTER',entityId:'',required:false},
           {key:'periodClose',entityType:'INVENTORY_PERIOD_CLOSE',entityId:periodCloseId,required:false},
           ...(payload.recallId?[{key:'recall',entityType:'SCM_RECALL',entityId:payload.recallId,required:true}]:[]),
         ],

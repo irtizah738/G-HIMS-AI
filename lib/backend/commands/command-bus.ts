@@ -27,6 +27,7 @@ import { ScmPlanningDomainService } from '../services/scm-planning-domain-servic
 import { ScmRecallDispositionDomainService } from '../services/scm-recall-disposition-domain-service';
 import { ScmControlledInventoryDomainService } from '../services/scm-controlled-inventory-domain-service';
 import { ScmConsignmentDomainService } from '../services/scm-consignment-domain-service';
+import { ScmIntelligenceDomainService } from '../services/scm-intelligence-domain-service';
 import { ScmCostingDomainService } from '../services/scm-costing-domain-service';
 import { CashReceiptDomainService } from '../services/cash-receipt-domain-service';
 import { DiagnosticResultDomainService } from '../services/diagnostic-result-domain-service';
@@ -695,6 +696,15 @@ export class CommandBus {
 
         case 'RecordConsignmentUsageCommand':
           result = await ScmConsignmentDomainService.recordUsage(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'GenerateScmIntelligenceSnapshotCommand':
+          result = await ScmIntelligenceDomainService.generateSnapshot(
             context,
             command.commandId,
             command.idempotencyKey,

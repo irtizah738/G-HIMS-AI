@@ -5,6 +5,8 @@ import type {
   CreateConsignmentAgreementPayload,
   ReceiveConsignmentStockPayload,
   RecordConsignmentUsagePayload,
+  CaptureConsignmentSupplierInvoicePayload,
+  ReviewConsignmentSupplierInvoicePayload,
 } from '@/types/scm-consignment';
 
 async function run<T>(commandType:string,payload:Record<string,unknown>,idempotencyKey?:string):Promise<T>{
@@ -16,3 +18,6 @@ export const createConsignmentAgreementEdge=(p:CreateConsignmentAgreementPayload
 export const approveConsignmentAgreementEdge=(p:ApproveConsignmentAgreementPayload,k?:string)=>run('ApproveConsignmentAgreementCommand',p as unknown as Record<string,unknown>,k);
 export const receiveConsignmentStockEdge=(p:ReceiveConsignmentStockPayload,k?:string)=>run('ReceiveConsignmentStockCommand',p as unknown as Record<string,unknown>,k);
 export const recordConsignmentUsageEdge=(p:RecordConsignmentUsagePayload,k?:string)=>run('RecordConsignmentUsageCommand',p as unknown as Record<string,unknown>,k);
+
+export const captureConsignmentSupplierInvoiceEdge=(p:CaptureConsignmentSupplierInvoicePayload,k?:string)=>run('CaptureConsignmentSupplierInvoiceCommand',p as unknown as Record<string,unknown>,k);
+export const reviewConsignmentSupplierInvoiceEdge=(p:ReviewConsignmentSupplierInvoicePayload,k?:string)=>run('ReviewConsignmentSupplierInvoiceCommand',p as unknown as Record<string,unknown>,k);

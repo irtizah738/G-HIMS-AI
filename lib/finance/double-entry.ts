@@ -200,6 +200,7 @@ export const DEFAULT_HOSPITAL_COA: Array<Omit<Account, 'id' | 'tenantId' | 'crea
     description: 'Primary liquidity and clinical operational disbursement checking account',
     isActive: true,
     isSystemLocked: true,
+    allowSupplierPayments: true,
   },
   {
     accountCode: '1020',

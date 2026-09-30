@@ -66,6 +66,19 @@ describe('SCM-10 consignment and high-value inventory',()=>{
     expect(service).toContain('CONSIGNMENT_COMMERCIAL_MISMATCH');
   });
 
+  test('consignment accrual clears into standard AP before existing payment authorization',async()=>{
+    const service=await source('lib/backend/services/scm-consignment-domain-service.ts');
+    const payables=await source('lib/backend/services/scm-payables-domain-service.ts');
+    expect(service).toContain('CONSIGNMENT_SUPPLIER_INVOICE_CAPTURED');
+    expect(service).toContain('CONSIGNMENT_PAYABLE_RECOGNIZED');
+    expect(service).toContain("glAccountId:'2030'");
+    expect(service).toContain("glAccountId:'2010'");
+    expect(service).toContain("status:'PAYABLE_RECOGNIZED'");
+    expect(service).toContain('SCM_FINANCE_SEGREGATION_OF_DUTIES');
+    expect(payables).toContain("case");
+    expect(payables).toContain("'PAYABLE_RECOGNIZED'");
+  });
+
   test('SCM-10 commands are routed and client writes are denied',async()=>{
     const bus=await source('lib/backend/commands/command-bus.ts');
     for(const command of [
@@ -73,6 +86,8 @@ describe('SCM-10 consignment and high-value inventory',()=>{
       'ApproveConsignmentAgreementCommand',
       'ReceiveConsignmentStockCommand',
       'RecordConsignmentUsageCommand',
+      'CaptureConsignmentSupplierInvoiceCommand',
+      'ReviewConsignmentSupplierInvoiceCommand',
     ]) expect(bus).toContain(`case '${command}'`);
 
     const rules=await source('firestore.rules');

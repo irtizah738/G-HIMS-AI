@@ -13,10 +13,29 @@ describe('SCM-1 authoritative inventory and procurement foundation', () => {
     expect(service).toContain('executeAtomicReadModifyMutation');
     expect(service).toContain("key: 'balance'");
     expect(service).toContain("'INVENTORY_STATE_CONFLICT'");
-    expect(service).toContain('calculateDerivedBalance(base, canonicalTxn)');
+    expect(service).toContain('calculateDerivedBalance(base, authoritativeTxn)');
     expect(service).not.toContain(
       "DomainStateRepository.getById<InventoryBalance>"
     );
+  });
+
+  test('batch lot and inventory balance move atomically under authoritative item data', async () => {
+    const service = await source(
+      'lib/backend/services/scm-offline-domain-service.ts'
+    );
+    const tx = await source(
+      'lib/backend/transactions/transaction-manager.ts'
+    );
+
+    expect(tx).toContain("BATCH_LOT: 'batches'");
+    expect(service).toContain("key: 'item'");
+    expect(service).toContain("key: 'batch'");
+    expect(service).toContain("'BATCH_ITEM_MISMATCH'");
+    expect(service).toContain("'BATCH_NOT_AVAILABLE'");
+    expect(service).toContain("'BATCH_EXPIRED'");
+    expect(service).toContain("'BATCH_QUANTITY_CONFLICT'");
+    expect(service).toContain("entityType: 'BATCH_LOT'");
+    expect(service).toContain('quantityRemaining -= authoritativeTxn.quantity');
   });
 
   test('stock balance location follows movement direction', async () => {

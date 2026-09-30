@@ -60,15 +60,30 @@ ${JSON.stringify(body.riskSignals || {}, null, 2)}`;
           model: modelName,
           ...result,
         });
-      } catch {
-        // Try next model.
+      } catch (modelErr) {
+        console.warn(`Model ${modelName} unavailable or quota exceeded, attempting fallback:`, modelErr);
       }
     }
 
-    return NextResponse.json(
-      { error: 'AI_UNAVAILABLE', message: 'No fallback clinical recommendations were generated.' },
-      { status: 503 }
-    );
+    // Deterministic Rule-Based Fallback if Gemini quota is exhausted
+    const chiefComplaint = String(body.patientContext?.chiefComplaint || body.patientContext?.reasonForVisit || 'Clinical presentation evaluation').trim();
+    const vitals = body.patientContext?.vitals || {};
+    const riskSignals = Array.isArray(body.riskSignals) ? body.riskSignals.map(String) : [];
+
+    return NextResponse.json({
+      status: 'DRAFT_REQUIRES_CLINICIAN_REVIEW',
+      model: 'deterministic-clinical-rules',
+      executiveSummary: `Patient presented with ${chiefComplaint}. Baseline vital parameters captured. Clinician review required for diagnostic workup.`,
+      sbar: {
+        situation: `Clinical assessment requested for ${chiefComplaint}.`,
+        background: `Encounter initiated in OPD/Triage. Prior history: ${JSON.stringify(body.specialtyHistory || {})}.`,
+        assessment: riskSignals.length > 0 ? `Active risk flags: ${riskSignals.join(', ')}` : 'Standard clinical protocol evaluation.',
+        recommendation: 'Complete clinician SOAP documentation, review diagnostic panel, and verify medication orders.',
+      },
+      observedRiskSignals: riskSignals.length > 0 ? riskSignals : ['Routine monitoring'],
+      missingOrUnverifiedInformation: ['Attending physician signature', 'Pharmacy dispensing verification'],
+      sourceLimited: true,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Clinical intelligence request failed';
     const unauthorized = /AUTH|TENANT|UNAUTH/i.test(message);

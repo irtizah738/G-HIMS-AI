@@ -259,7 +259,7 @@ export class HrWorkforceDomainService {
     payload: CreateEmployeePayload
   ): Promise<CommandResult<EmployeeMaster>> {
     const auth=AuthorizationPipeline.evaluate(context,{
-      requiredRoles:['HR_ADMIN','SYSTEM_ADMIN','MEDICAL_DIRECTOR','HOSPITAL_EXECUTIVE'],
+      requiredRoles:['HR_ADMIN','SYSTEM_ADMIN','HOSPITAL_EXECUTIVE'],
     });
     if(!auth.authorized){
       return workforceReject(commandId,idempotencyKey,auth.code||'UNAUTHORIZED',auth.reason||'HR Admin authority required.');
@@ -361,7 +361,7 @@ export class HrWorkforceDomainService {
     }
   ): Promise<CommandResult<EmployeeMaster>> {
     const auth=AuthorizationPipeline.evaluate(context,{
-      requiredRoles:['HR_ADMIN','SYSTEM_ADMIN','MEDICAL_DIRECTOR'],
+      requiredRoles:['HR_ADMIN','SYSTEM_ADMIN','HOSPITAL_EXECUTIVE'],
     });
     if(!auth.authorized){
       return workforceReject(commandId,idempotencyKey,auth.code||'UNAUTHORIZED',auth.reason||'Unauthorized.');

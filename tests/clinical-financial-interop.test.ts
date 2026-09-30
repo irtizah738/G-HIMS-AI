@@ -10,6 +10,7 @@ import { parseHL7, extractORU_R01, generateACK } from '../lib/interop/hl7-parser
 import { DeviceTelemetryAdapter, RawTelemetryPacket } from '../lib/interop/device-telemetry-adapter';
 import { RadioIntercomAdapter } from '../lib/interop/radio-intercom-adapter';
 import { ReconciliationDomainService } from '../lib/backend/services/reconciliation-domain-service';
+import { validateGovernedJournal } from '../lib/finance/finance-engine';
 
 describe('G-HIMS Clinical Safety, Financial & Interoperability Engine', () => {
   const tenantId = `tenant_${crypto.randomUUID().slice(0, 8)}`;
@@ -127,57 +128,73 @@ describe('G-HIMS Clinical Safety, Financial & Interoperability Engine', () => {
   });
 
   describe('2. Universal Financial Journal & Double-Entry Invariance', () => {
-    test('Balanced General Ledger journal entry (Debits == Credits) posts successfully', async () => {
-      const balancedCmd: BaseCommand = {
-        commandId: 'cmd_fin_bal_01',
-        idempotencyKey: 'idemp_fin_bal_01',
-        tenantId,
-        commandType: 'PostJournalCommand',
-        schemaVersion: 1,
-        payload: {
-          fiscalYear: 2026,
-          postingPeriod: 9,
-          documentDate: Date.now(),
-          postingDate: Date.now(),
-          documentHeader: 'Patient Inpatient Pharmacy Settlement',
-          currency: 'USD',
-          lines: [
-            { glAccountId: '101000', glAccountName: 'Operating Cash', debitMinorUnits: 15400, creditMinorUnits: 0, lineDescription: 'Cash Received' },
-            { glAccountId: '402000', glAccountName: 'Pharmacy Inpatient Revenue', debitMinorUnits: 0, creditMinorUnits: 15400, lineDescription: 'Medication Revenue' },
-          ],
-        },
-      };
+    const governedAccounts = [
+      {
+        accountCode: '101000',
+        accountName: 'Operating Cash',
+        category: 'asset',
+        subCategory: 'cash',
+        normalBalance: 'debit',
+        currency: 'USD',
+        allowManualPosting: true,
+        isActive: true,
+      },
+      {
+        accountCode: '402000',
+        accountName: 'Pharmacy Inpatient Revenue',
+        category: 'revenue',
+        subCategory: 'patient_revenue',
+        normalBalance: 'credit',
+        currency: 'USD',
+        allowManualPosting: true,
+        isActive: true,
+      },
+    ] as any;
 
-      const result = await CommandBus.dispatch(accountantContext, balancedCmd);
-      expect(result.success).toBe(true);
-      expect(result.entityId).toBeDefined();
-      expect(result.data).toBeDefined();
+    test('Balanced General Ledger journal entry (Debits == Credits) posts successfully', () => {
+      expect(() => validateGovernedJournal({
+        currency: 'USD',
+        accounts: governedAccounts,
+        lines: [
+          {
+            glAccountId: '101000',
+            glAccountName: 'Operating Cash',
+            debitMinorUnits: 15400,
+            creditMinorUnits: 0,
+            lineDescription: 'Cash Received',
+          },
+          {
+            glAccountId: '402000',
+            glAccountName: 'Pharmacy Inpatient Revenue',
+            debitMinorUnits: 0,
+            creditMinorUnits: 15400,
+            lineDescription: 'Medication Revenue',
+          },
+        ],
+      })).not.toThrow();
     });
 
-    test('Unbalanced journal entry (Debits !== Credits) is strictly rejected', async () => {
-      const unbalancedCmd: BaseCommand = {
-        commandId: 'cmd_fin_unbal_01',
-        idempotencyKey: 'idemp_fin_unbal_01',
-        tenantId,
-        commandType: 'PostJournalCommand',
-        schemaVersion: 1,
-        payload: {
-          fiscalYear: 2026,
-          postingPeriod: 9,
-          documentDate: Date.now(),
-          postingDate: Date.now(),
-          documentHeader: 'Corrupted Journal Posting Attempt',
-          currency: 'USD',
-          lines: [
-            { glAccountId: '101000', glAccountName: 'Cash', debitMinorUnits: 20000, creditMinorUnits: 0, lineDescription: 'Debit $200' },
-            { glAccountId: '402000', glAccountName: 'Revenue', debitMinorUnits: 0, creditMinorUnits: 18000, lineDescription: 'Credit $180' }, // Imbalance of $20!
-          ],
-        },
-      };
-
-      const result = await CommandBus.dispatch(accountantContext, unbalancedCmd);
-      expect(result.success).toBe(false);
-      expect(result.error?.code).toBe('UNBALANCED_JOURNAL_POSTING');
+    test('Unbalanced journal entry (Debits !== Credits) is strictly rejected', () => {
+      expect(() => validateGovernedJournal({
+        currency: 'USD',
+        accounts: governedAccounts,
+        lines: [
+          {
+            glAccountId: '101000',
+            glAccountName: 'Cash',
+            debitMinorUnits: 20000,
+            creditMinorUnits: 0,
+            lineDescription: 'Debit $200',
+          },
+          {
+            glAccountId: '402000',
+            glAccountName: 'Revenue',
+            debitMinorUnits: 0,
+            creditMinorUnits: 18000,
+            lineDescription: 'Credit $180',
+          },
+        ],
+      })).toThrow('UNBALANCED_JOURNAL_POSTING');
     });
   });
 

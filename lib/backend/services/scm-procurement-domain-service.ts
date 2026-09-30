@@ -77,6 +77,7 @@ interface ReceiptLinePayload {
 
 interface RecordGoodsReceiptPayload {
   grnId: string;
+  facilityId: string;
   grnNumber: string;
   purchaseOrderId: string;
   deliveryNoteNumber: string;
@@ -668,7 +669,20 @@ export class ScmProcurementDomainService {
         ],
         prepare: (current) => {
           const po = current.po as unknown as PurchaseOrderRecord;
+          const destination =
+            current.destination as unknown as InventoryLocation;
           assertFacilityScope(context, po.facilityId);
+
+          if (
+            po.facilityId !== payload.facilityId ||
+            destination.facilityId !== po.facilityId ||
+            !destination.active
+          ) {
+            throw new AtomicMutationRejectedError(
+              'GRN_FACILITY_OR_LOCATION_MISMATCH',
+              'GRN facility and destination must match an active location on the authoritative purchase order.'
+            );
+          }
 
           if (!['PENDING_APPROVAL', 'SUBMITTED'].includes(po.status)) {
             throw new AtomicMutationRejectedError(
@@ -793,6 +807,12 @@ export class ScmProcurementDomainService {
         entityId: payload.purchaseOrderId,
         required: true,
       },
+      {
+        key: 'destination',
+        entityType: 'INVENTORY_LOCATION',
+        entityId: payload.destinationLocationId,
+        required: true,
+      },
       ...normalizedLines.flatMap((line, index) => [
         {
           key: `item:${index}`,
@@ -804,6 +824,18 @@ export class ScmProcurementDomainService {
           key: `batch:${index}`,
           entityType: 'BATCH_LOT',
           entityId: line.batchId,
+          required: false,
+        },
+        {
+          key: `balance:${index}`,
+          entityType: 'INVENTORY_BALANCE',
+          entityId: balanceId(
+            context.tenantId,
+            payload.facilityId,
+            payload.destinationLocationId,
+            line.itemId,
+            line.batchId
+          ),
           required: false,
         },
       ]),
@@ -844,7 +876,7 @@ export class ScmProcurementDomainService {
             );
           }
 
-          const destinationLocationId = payload.destinationLocationId;
+          const destinationLocationId = destination.locationId;
           if (
             po.destinationLocationId &&
             po.destinationLocationId !== destinationLocationId
@@ -979,175 +1011,177 @@ export class ScmProcurementDomainService {
             }
 
             const now = new Date().toISOString();
-            const batch: BatchLotRecord = {
-              ...(existingBatch || {
-                batchId: line.batchId,
-                tenantId: context.tenantId,
-                itemId: item.itemId,
-                itemCode: item.itemCode,
-                itemName: item.name,
-                batchNumber:
-                  String(line.batchNumber || '').trim() ||
-                  `UNBATCHED-${item.itemCode}`,
-                lotNumber: line.lotNumber,
-                manufacturer:
-                  String(line.manufacturer || item.manufacturerName || '').trim() ||
-                  'UNSPECIFIED',
-                manufactureDate: String(line.manufactureDate || payload.receivedAt),
-                expiryDate: String(line.expiryDate || '2999-12-31T00:00:00.000Z'),
-                receivedDate: payload.receivedAt,
-                supplierId: po.supplierId,
-                supplierName: po.supplierName,
-                purchaseOrderId: po.poId,
-                grnId: payload.grnId,
-                unitCost,
-                currency: po.currency,
-                quantityReceived: 0,
-                quantityRemaining: 0,
-                quantityReserved: 0,
-                storageCondition: item.storageRequirements,
-                status: quarantined ? 'QUARANTINED' : 'AVAILABLE',
-                createdAt: now,
-                updatedAt: now,
-              }),
-              quantityReceived:
-                Number(existingBatch?.quantityReceived || 0) + accepted,
-              quantityRemaining:
-                Number(existingBatch?.quantityRemaining || 0) + accepted,
-              unitCost,
-              currency: po.currency,
-              grnId: payload.grnId,
-              status: quarantined ? 'QUARANTINED' : 'AVAILABLE',
-              temperatureExcursionDetected:
-                Boolean(existingBatch?.temperatureExcursionDetected) ||
-                Boolean(line.temperatureExcursion),
-              ...(line.temperatureExcursion &&
-              Number.isFinite(Number(line.recordedTemperatureCelsius))
-                ? {
-                    excursionDetails: {
-                      recordedTemp: Number(line.recordedTemperatureCelsius),
-                      durationHours: 0,
-                      flaggedAt: now,
-                    },
-                  }
-                : {}),
-              ...(quarantined
-                ? {
-                    quarantineReason: line.temperatureExcursion
-                      ? 'TEMPERATURE_EXCURSION'
-                      : 'QUALITY_INSPECTION_HOLD',
-                  }
-                : {}),
-              updatedAt: now,
-            };
 
-            const existingBalanceId = balanceId(
-              context.tenantId,
-              po.facilityId,
-              destinationLocationId,
-              item.itemId,
-              line.batchId
-            );
-            const currentBalance =
-              current[`balance:${index}`] as unknown as InventoryBalance | null;
-
-            // balance targets are added below before execution; this branch exists
-            // to keep the prepare logic deterministic for both new and existing lots.
-            const balance: InventoryBalance = recomputeAvailable({
-              ...(currentBalance || {
-                balanceId: existingBalanceId,
-                tenantId: context.tenantId,
-                facilityId: po.facilityId,
-                locationId: destinationLocationId,
-                locationName:
-                  payload.destinationLocationName ||
-                  po.destinationLocationName ||
-                  destinationLocationId,
-                itemId: item.itemId,
-                itemCode: item.itemCode,
-                itemName: item.name,
-                itemType: item.itemType,
-                batchId: line.batchId,
-                batchNumber: batch.batchNumber,
-                expiryDate: batch.expiryDate,
-                onHand: 0,
-                reserved: 0,
-                quarantined: 0,
-                damaged: 0,
-                expired: 0,
-                inTransit: 0,
-                available: 0,
-                uom: item.stockUOM,
-                minimumStock: item.minimumStock,
-                maximumStock: item.maximumStock,
-                reorderPoint: item.reorderPoint,
-                unitCost,
-                totalValuation: 0,
-                lastMovementAt: now,
-                version: 0,
-              }),
-              onHand: Number(currentBalance?.onHand || 0) + accepted,
-              quarantined:
-                Number(currentBalance?.quarantined || 0) +
-                (quarantined ? accepted : 0),
-              unitCost,
-            });
-
-            const stockTransactionId = `txn_grn_${payload.grnId}_${index + 1}`;
-            receiptTransactionIds.push(stockTransactionId);
-
-            writes.push(
-              {
-                entityType: 'BATCH_LOT',
-                entityId: batch.batchId,
-                domainState: batch,
-              },
-              {
-                entityType: 'INVENTORY_BALANCE',
-                entityId: balance.balanceId,
-                domainState: balance,
-              },
-              {
-                entityType: 'STOCK_TRANSACTION',
-                entityId: stockTransactionId,
-                domainState: {
-                  transactionId: stockTransactionId,
+            if (accepted > 0) {
+              const batch: BatchLotRecord = {
+                ...(existingBatch || {
+                  batchId: line.batchId,
                   tenantId: context.tenantId,
-                  facilityId: po.facilityId,
                   itemId: item.itemId,
                   itemCode: item.itemCode,
                   itemName: item.name,
-                  batchId: batch.batchId,
-                  batchNumber: batch.batchNumber,
-                  expirationDate: batch.expiryDate,
-                  toLocationId: destinationLocationId,
-                  toLocationName: balance.locationName,
-                  quantity: accepted,
-                  normalizedQuantity: accepted,
-                  uom: item.stockUOM,
+                  batchNumber:
+                    String(line.batchNumber || '').trim() ||
+                    `UNBATCHED-${item.itemCode}`,
+                  lotNumber: line.lotNumber,
+                  manufacturer:
+                    String(line.manufacturer || item.manufacturerName || '').trim() ||
+                    'UNSPECIFIED',
+                  manufactureDate: String(line.manufactureDate || payload.receivedAt),
+                  expiryDate: String(line.expiryDate || '2999-12-31T00:00:00.000Z'),
+                  receivedDate: payload.receivedAt,
+                  supplierId: po.supplierId,
+                  supplierName: po.supplierName,
+                  purchaseOrderId: po.poId,
+                  grnId: payload.grnId,
                   unitCost,
-                  totalCost: roundMoney(accepted * unitCost),
                   currency: po.currency,
-                  transactionType: 'RECEIPT',
-                  referenceType: 'GOODS_RECEIPT_NOTE',
-                  referenceId: payload.grnId,
-                  performedBy: {
-                    userId: context.actorId,
-                    userName: context.actorId,
-                    role: context.roles[0] || 'AUTHENTICATED_USER',
-                  },
-                  occurredAt: payload.receivedAt,
-                  recordedAt: now,
-                  idempotencyKey,
-                  source: 'ONLINE',
-                  metadata: {
-                    poId: po.poId,
-                    inspectionStatus: payload.inspectionStatus,
-                    quarantined,
-                  },
+                  quantityReceived: 0,
+                  quantityRemaining: 0,
+                  quantityReserved: 0,
+                  storageCondition: item.storageRequirements,
+                  status: quarantined ? 'QUARANTINED' : 'AVAILABLE',
+                  createdAt: now,
+                  updatedAt: now,
+                }),
+                quantityReceived:
+                  Number(existingBatch?.quantityReceived || 0) + accepted,
+                quantityRemaining:
+                  Number(existingBatch?.quantityRemaining || 0) + accepted,
+                unitCost,
+                currency: po.currency,
+                grnId: payload.grnId,
+                status: quarantined ? 'QUARANTINED' : 'AVAILABLE',
+                temperatureExcursionDetected:
+                  Boolean(existingBatch?.temperatureExcursionDetected) ||
+                  Boolean(line.temperatureExcursion),
+                ...(line.temperatureExcursion &&
+                Number.isFinite(Number(line.recordedTemperatureCelsius))
+                  ? {
+                      excursionDetails: {
+                        recordedTemp: Number(line.recordedTemperatureCelsius),
+                        durationHours: 0,
+                        flaggedAt: now,
+                      },
+                    }
+                  : {}),
+                ...(quarantined
+                  ? {
+                      quarantineReason: line.temperatureExcursion
+                        ? 'TEMPERATURE_EXCURSION'
+                        : 'QUALITY_INSPECTION_HOLD',
+                    }
+                  : {}),
+                updatedAt: now,
+              };
+
+              const existingBalanceId = balanceId(
+                context.tenantId,
+                po.facilityId,
+                destinationLocationId,
+                item.itemId,
+                line.batchId
+              );
+              const currentBalance =
+                current[`balance:${index}`] as unknown as InventoryBalance | null;
+
+              const balance: InventoryBalance = recomputeAvailable({
+                ...(currentBalance || {
+                  balanceId: existingBalanceId,
+                  tenantId: context.tenantId,
+                  facilityId: po.facilityId,
+                  locationId: destinationLocationId,
+                  locationName:
+                    payload.destinationLocationName ||
+                    destination.name ||
+                    po.destinationLocationName ||
+                    destinationLocationId,
+                  itemId: item.itemId,
+                  itemCode: item.itemCode,
+                  itemName: item.name,
+                  itemType: item.itemType,
+                  batchId: line.batchId,
+                  batchNumber: batch.batchNumber,
+                  expiryDate: batch.expiryDate,
+                  onHand: 0,
+                  reserved: 0,
+                  quarantined: 0,
+                  damaged: 0,
+                  expired: 0,
+                  inTransit: 0,
+                  available: 0,
+                  uom: item.stockUOM,
+                  minimumStock: item.minimumStock,
+                  maximumStock: item.maximumStock,
+                  reorderPoint: item.reorderPoint,
+                  unitCost,
+                  totalValuation: 0,
+                  lastMovementAt: now,
+                  version: 0,
+                }),
+                onHand: Number(currentBalance?.onHand || 0) + accepted,
+                quarantined:
+                  Number(currentBalance?.quarantined || 0) +
+                  (quarantined ? accepted : 0),
+                unitCost,
+              });
+
+              const stockTransactionId = `txn_grn_${payload.grnId}_${index + 1}`;
+              receiptTransactionIds.push(stockTransactionId);
+
+              writes.push(
+                {
+                  entityType: 'BATCH_LOT',
+                  entityId: batch.batchId,
+                  domainState: batch,
                 },
-              }
-            );
+                {
+                  entityType: 'INVENTORY_BALANCE',
+                  entityId: balance.balanceId,
+                  domainState: balance,
+                },
+                {
+                  entityType: 'STOCK_TRANSACTION',
+                  entityId: stockTransactionId,
+                  domainState: {
+                    transactionId: stockTransactionId,
+                    tenantId: context.tenantId,
+                    facilityId: po.facilityId,
+                    itemId: item.itemId,
+                    itemCode: item.itemCode,
+                    itemName: item.name,
+                    batchId: batch.batchId,
+                    batchNumber: batch.batchNumber,
+                    expirationDate: batch.expiryDate,
+                    toLocationId: destinationLocationId,
+                    toLocationName: balance.locationName,
+                    quantity: accepted,
+                    normalizedQuantity: accepted,
+                    uom: item.stockUOM,
+                    unitCost,
+                    totalCost: roundMoney(accepted * unitCost),
+                    currency: po.currency,
+                    transactionType: 'RECEIPT',
+                    referenceType: 'GOODS_RECEIPT_NOTE',
+                    referenceId: payload.grnId,
+                    performedBy: {
+                      userId: context.actorId,
+                      userName: context.actorId,
+                      role: context.roles[0] || 'AUTHENTICATED_USER',
+                    },
+                    occurredAt: payload.receivedAt,
+                    recordedAt: now,
+                    idempotencyKey,
+                    source: 'ONLINE',
+                    metadata: {
+                      poId: po.poId,
+                      inspectionStatus: payload.inspectionStatus,
+                      quarantined,
+                    },
+                  },
+                }
+              );
+            }
 
             const poLineIndex = nextPoLines.findIndex(
               (candidate) => candidate.itemId === line.itemId
@@ -1176,11 +1210,15 @@ export class ScmProcurementDomainService {
               quantityRejected: rejected,
               quantityDamaged: damaged,
               uom: item.stockUOM,
-              batchNumber: batch.batchNumber,
+              batchNumber:
+                String(line.batchNumber || '').trim() ||
+                `UNBATCHED-${item.itemCode}`,
               lotNumber: line.lotNumber,
-              expiryDate: batch.expiryDate,
-              manufactureDate: batch.manufactureDate,
-              manufacturer: batch.manufacturer,
+              expiryDate: String(line.expiryDate || '2999-12-31T00:00:00.000Z'),
+              manufactureDate: String(line.manufactureDate || payload.receivedAt),
+              manufacturer:
+                String(line.manufacturer || item.manufacturerName || '').trim() ||
+                'UNSPECIFIED',
               recordedTemperatureCelsius: line.recordedTemperatureCelsius,
               temperatureExcursion: Boolean(line.temperatureExcursion),
               inspectionPassed: line.inspectionPassed,

@@ -140,6 +140,13 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       notes: z.string().trim().max(4000).optional(),
     }).strict(),
   },
+  ReviewPurchaseOrderCommand: {
+    1: z.object({
+      purchaseOrderId: nonEmpty,
+      decision: z.enum(['APPROVED', 'REJECTED']),
+      comments: z.string().trim().max(2000).optional(),
+    }).strict(),
+  },
   ReceivePurchaseOrderCommand: {
     1: z.object({
       purchaseOrderId: nonEmpty,

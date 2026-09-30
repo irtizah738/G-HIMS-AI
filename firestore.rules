@@ -322,6 +322,85 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      match /scmOperationalSnapshots/{id} {
+        allow read: if canReadScm(tenantId) || canReadFinance(tenantId);
+        allow write: if false;
+      }
+
+      match /scmConsignmentAgreements/{id} {
+        allow read: if canReadScm(tenantId) || canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /scmConsignmentLots/{id} {
+        allow read: if canReadScm(tenantId);
+        allow write: if false;
+      }
+      match /scmConsignmentUsages/{id} {
+        allow read: if canReadScm(tenantId) || canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /scmConsignmentIdentities/{id} {
+        allow read: if canReadScm(tenantId);
+        allow write: if false;
+      }
+
+      match /scmColdChainObservations/{id} {
+        allow read: if canReadScm(tenantId);
+        allow write: if false;
+      }
+      match /scmColdChainExcursions/{id} {
+        allow read: if canReadScm(tenantId);
+        allow write: if false;
+      }
+      match /scmControlledCustody/{id} {
+        allow read: if canReadScm(tenantId) || canReadAudit(tenantId);
+        allow write: if false;
+      }
+
+      match /scmRecalls/{id} {
+        allow read: if canReadScm(tenantId);
+        allow write: if false;
+      }
+      // Recall exposures contain patient identifiers and are only exposed
+      // through authenticated server APIs, never raw Firestore client reads.
+      match /scmRecallExposures/{id} {
+        allow read, write: if false;
+      }
+      match /scmInventoryDispositions/{id} {
+        allow read: if canReadScm(tenantId) || canReadFinance(tenantId);
+        allow write: if false;
+      }
+
+      match /scmReplenishmentPolicies/{id} {
+        allow read: if canReadScm(tenantId);
+        allow write: if false;
+      }
+      match /scmReplenishmentPlans/{id} {
+        allow read: if canReadScm(tenantId) || canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /scmReplenishmentOrders/{id} {
+        allow read: if canReadScm(tenantId);
+        allow write: if false;
+      }
+
+      match /scmSupplierQualificationReviews/{id} {
+        allow read: if canReadScm(tenantId);
+        allow write: if false;
+      }
+      match /scmRfqs/{id} {
+        allow read: if canReadScm(tenantId);
+        allow write: if false;
+      }
+      match /scmSupplierQuotations/{id} {
+        allow read: if canReadScm(tenantId);
+        allow write: if false;
+      }
+      match /scmSupplierContracts/{id} {
+        allow read: if canReadScm(tenantId) || canReadFinance(tenantId);
+        allow write: if false;
+      }
+
       match /scmCycleCounts/{id} {
         allow read: if canReadScm(tenantId);
         allow write: if false;

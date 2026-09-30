@@ -22,6 +22,12 @@ import { RevenueIntegrityDomainService } from '../services/revenue-integrity-dom
 import { ScmOfflineDomainService } from '../services/scm-offline-domain-service';
 import { ScmProcurementDomainService } from '../services/scm-procurement-domain-service';
 import { ScmPayablesDomainService } from '../services/scm-payables-domain-service';
+import { ScmSourcingDomainService } from '../services/scm-sourcing-domain-service';
+import { ScmPlanningDomainService } from '../services/scm-planning-domain-service';
+import { ScmRecallDispositionDomainService } from '../services/scm-recall-disposition-domain-service';
+import { ScmControlledInventoryDomainService } from '../services/scm-controlled-inventory-domain-service';
+import { ScmConsignmentDomainService } from '../services/scm-consignment-domain-service';
+import { ScmIntelligenceDomainService } from '../services/scm-intelligence-domain-service';
 import { ScmCostingDomainService } from '../services/scm-costing-domain-service';
 import { CashReceiptDomainService } from '../services/cash-receipt-domain-service';
 import { DiagnosticResultDomainService } from '../services/diagnostic-result-domain-service';
@@ -555,6 +561,249 @@ export class CommandBus {
 
         case 'RecordGoodsReceiptCommand':
           result = await ScmProcurementDomainService.recordGoodsReceipt(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'InitiateScmRecallCommand':
+          result = await ScmRecallDispositionDomainService.initiateRecall(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ExecuteRecallQuarantineCommand':
+          result = await ScmRecallDispositionDomainService.executeRecallQuarantine(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ProjectRecallExposuresCommand':
+          result = await ScmRecallDispositionDomainService.projectRecallExposures(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecordRecallNotificationCommand':
+          result = await ScmRecallDispositionDomainService.recordRecallNotification(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'CreateInventoryDispositionCommand':
+          result = await ScmRecallDispositionDomainService.createDisposition(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ReviewInventoryDispositionCommand':
+          result = await ScmRecallDispositionDomainService.reviewDisposition(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ExecuteInventoryDispositionCommand':
+          result = await ScmRecallDispositionDomainService.executeDisposition(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ResolveScmRecallCommand':
+          result = await ScmRecallDispositionDomainService.resolveRecall(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecordColdChainObservationCommand':
+          result = await ScmControlledInventoryDomainService.recordColdChainObservation(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ReviewColdChainExcursionCommand':
+          result = await ScmControlledInventoryDomainService.reviewColdChainExcursion(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecordControlledCustodyCommand':
+          result = await ScmControlledInventoryDomainService.recordControlledCustody(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'CreateConsignmentAgreementCommand':
+          result = await ScmConsignmentDomainService.createAgreement(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ApproveConsignmentAgreementCommand':
+          result = await ScmConsignmentDomainService.approveAgreement(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ReceiveConsignmentStockCommand':
+          result = await ScmConsignmentDomainService.receiveStock(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecordConsignmentUsageCommand':
+          result = await ScmConsignmentDomainService.recordUsage(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'GenerateScmIntelligenceSnapshotCommand':
+          result = await ScmIntelligenceDomainService.generateSnapshot(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'UpsertReplenishmentPolicyCommand':
+          result = await ScmPlanningDomainService.upsertReplenishmentPolicy(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'GenerateReplenishmentPlanCommand':
+          result = await ScmPlanningDomainService.generateReplenishmentPlan(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ReviewReplenishmentPlanCommand':
+          result = await ScmPlanningDomainService.reviewReplenishmentPlan(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ExecuteReplenishmentPlanCommand':
+          result = await ScmPlanningDomainService.executeReplenishmentPlan(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'CompleteInternalReplenishmentOrderCommand':
+          result = await ScmPlanningDomainService.completeInternalReplenishmentOrder(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ReviewSupplierQualificationCommand':
+          result = await ScmSourcingDomainService.reviewSupplierQualification(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'CreateScmRfqCommand':
+          result = await ScmSourcingDomainService.createRfq(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecordSupplierQuotationCommand':
+          result = await ScmSourcingDomainService.recordSupplierQuotation(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'AwardSupplierContractCommand':
+          result = await ScmSourcingDomainService.awardSupplierContract(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ApproveSupplierContractCommand':
+          result = await ScmSourcingDomainService.approveSupplierContract(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ChangeSupplierContractStatusCommand':
+          result = await ScmSourcingDomainService.changeSupplierContractStatus(
             context,
             command.commandId,
             command.idempotencyKey,

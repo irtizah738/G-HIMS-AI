@@ -272,6 +272,18 @@ export const DEFAULT_HOSPITAL_COA: Array<Omit<Account, 'id' | 'tenantId' | 'crea
     isSystemLocked: true,
   },
   {
+    accountCode: '1250',
+    accountName: 'Supplier Returns & Credit Receivable',
+    category: 'asset',
+    subCategory: 'Current Assets',
+    normalBalance: 'debit',
+    balance: 0,
+    currency: 'USD',
+    description: 'Approved inventory returned to suppliers pending credit memo or settlement',
+    isActive: true,
+    isSystemLocked: true,
+  },
+  {
     accountCode: '1510',
     accountName: 'Medical Machinery & Diagnostic Equipment',
     category: 'asset',

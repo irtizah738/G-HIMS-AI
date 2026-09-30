@@ -224,7 +224,8 @@ export type StockTransactionType =
   | 'CONSUMPTION'
   | 'DISPENSE'
   | 'RECALL'
-  | 'WRITE_OFF';
+  | 'WRITE_OFF'
+  | 'RETURN_TO_SUPPLIER';
 
 export type ReferenceType =
   | 'PURCHASE_ORDER'
@@ -436,6 +437,13 @@ export interface PurchaseOrderRecord {
   requisitionNumber?: string;
   supplierId: string;
   supplierName: string;
+  contractId?: string;
+  contractNumber?: string;
+  contractReservedSpendMinorUnits?: number;
+  emergencyContractWaiver?: {
+    reason: string;
+    approvedBy?: string;
+  };
   items: POLineItem[];
   currency: string;
   subtotal?: number;

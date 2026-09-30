@@ -45,6 +45,7 @@ export function calculateDerivedBalance(
     case 'CONSUMPTION':
     case 'DISPENSE':
     case 'WRITE_OFF':
+    case 'RETURN_TO_SUPPLIER':
       next.onHand = Math.max(0, next.onHand - qty);
       break;
 

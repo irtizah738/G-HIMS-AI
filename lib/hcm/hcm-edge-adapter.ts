@@ -12,6 +12,7 @@ import type {
   EmployeeMaster,
   RosterShiftEntry,
   RosterSwapRecord,
+  AttendanceRecord,
 } from '@/types/hcm-advanced';
 import type {
   ClinicalCredential,
@@ -204,6 +205,49 @@ export type AssignShiftEdgePayload = Omit<
   | 'createdAt'
   | 'updatedAt'
 >;
+
+export const recordClockInEdge=(
+  payload:{
+    employeeId:string;
+    source:
+      | 'BIOMETRIC_SCANNER'
+      | 'KIOSK_TERMINAL'
+      | 'MOBILE_GPS'
+      | 'WEB_PORTAL'
+      | 'SUPERVISOR_OVERRIDE'
+      | 'HL7_ACCESS_CARD';
+    deviceIdentifier?:string;
+    scheduledShiftId?:string;
+  },
+  idempotencyKey?:string
+)=>run<AttendanceRecord>(
+  'RecordClockInCommand',
+  payload as unknown as Record<string,unknown>,
+  idempotencyKey
+);
+
+export const recordClockOutEdge=(
+  payload:{attendanceId:string},
+  idempotencyKey?:string
+)=>run<AttendanceRecord>(
+  'RecordClockOutCommand',
+  payload as unknown as Record<string,unknown>,
+  idempotencyKey
+);
+
+export const correctAttendanceTimeEdge=(
+  payload:{
+    attendanceId:string;
+    newClockInTime:string;
+    newClockOutTime?:string;
+    reason:string;
+  },
+  idempotencyKey?:string
+)=>run<AttendanceRecord>(
+  'CorrectAttendanceTimeCommand',
+  payload as unknown as Record<string,unknown>,
+  idempotencyKey
+);
 
 export const assignShiftEdge=(
   payload:AssignShiftEdgePayload,

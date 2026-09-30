@@ -20,6 +20,7 @@ import type {
 import {
   arAgingBucket,
   assertMinorUnits,
+  calculateArOutstandingAsOf,
   financePeriodId,
 } from '@/lib/finance/finance-engine';
 
@@ -434,19 +435,41 @@ export class FinanceArRevenueDomainService {
     if(!auth.authorized)return reject(commandId,idempotencyKey,auth.code||'UNAUTHORIZED',auth.reason||'AR aging authority required.');
     if(!Number.isFinite(payload.asOf))return reject(commandId,idempotencyKey,'INVALID_AR_AGING_DATE','AR aging as-of date is invalid.');
     const currency=payload.currency.trim().toUpperCase();
-    const items=(await DomainStateRepository.list<FinanceArOpenItem>(
-      context.tenantId,'arOpenItems',200000
-    )).filter(item=>item.currency===currency&&item.outstandingMinorUnits>0&&item.issueAt<=payload.asOf);
+    const [items,receipts,adjustments]=await Promise.all([
+      DomainStateRepository.list<FinanceArOpenItem>(context.tenantId,'arOpenItems',200000),
+      DomainStateRepository.list<Record<string,unknown>>(context.tenantId,'financeArReceipts',200000),
+      DomainStateRepository.list<FinanceArAdjustment>(context.tenantId,'financeArAdjustments',200000),
+    ]);
+    const asOf=calculateArOutstandingAsOf({
+      openItems:items,
+      receipts:receipts.map(row=>({
+        openItemId:String(row.openItemId||''),
+        amountMinorUnits:Number(row.amountMinorUnits||0),
+        receivedAt:Number(row.receivedAt||0),
+        currency:String(row.currency||''),
+      })),
+      adjustments,
+      asOf:payload.asOf,
+      currency,
+    });
+    const relevantItems=items.filter(item=>
+      item.currency===currency &&
+      item.issueAt<=payload.asOf &&
+      (asOf.outstandingByOpenItemId.get(item.openItemId)||0)>0
+    );
 
     const totals={CURRENT:0,'1_30':0,'31_60':0,'61_90':0,OVER_90:0};
-    for(const item of items)totals[arAgingBucket(item,payload.asOf)]+=item.outstandingMinorUnits;
+    for(const item of relevantItems){
+      totals[arAgingBucket(item,payload.asOf)]+=
+        asOf.outstandingByOpenItemId.get(item.openItemId)||0;
+    }
     const snapshot={
       snapshotId:payload.snapshotId,tenantId:context.tenantId,asOf:payload.asOf,currency,
       currentMinorUnits:totals.CURRENT,days1to30MinorUnits:totals['1_30'],
       days31to60MinorUnits:totals['31_60'],days61to90MinorUnits:totals['61_90'],
       over90MinorUnits:totals.OVER_90,
-      totalOutstandingMinorUnits:Object.values(totals).reduce((a,b)=>a+b,0),
-      openItemCount:items.length,generatedAt:new Date().toISOString(),generatedBy:context.actorId,
+      totalOutstandingMinorUnits:asOf.totalOutstandingMinorUnits,
+      openItemCount:relevantItems.length,generatedAt:new Date().toISOString(),generatedBy:context.actorId,
     };
     const tx=await TransactionManager.executeAtomicWrite(context,commandId,idempotencyKey,{
       entityType:'AR_AGING_SNAPSHOT',entityId:payload.snapshotId,

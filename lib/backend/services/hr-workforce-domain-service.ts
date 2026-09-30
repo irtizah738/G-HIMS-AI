@@ -49,6 +49,8 @@ function workforceIdentityId(kind:'EMAIL'|'NATIONAL_ID', value:string):string{
   const normalized=value.trim().toLowerCase();
   const digest=createHash('sha256').update(`${kind}\u0000${normalized}`).digest('hex').slice(0,40);
   return `wid_${kind.toLowerCase()}_${digest}`;
+}
+
 function credentialIdentityId(
   credentialType:EmployeeCredential['credentialType'],
   credentialNumber:string
@@ -75,8 +77,6 @@ function privilegeSlotId(params:{
     ].map(v=>v.trim().toLowerCase()).join('\u0000'))
     .digest('hex')
     .slice(0,40);
-}
-
 }
 
 function workforceReject<T>(

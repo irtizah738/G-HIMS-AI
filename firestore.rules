@@ -71,10 +71,20 @@ service cloud.firestore {
         'accountant',
         'finance_manager',
         'treasury_manager',
+        'auditor',
+        'tax_accountant',
+        'budget_manager',
+        'fixed_asset_accountant',
+        'billing_admin',
         'ACCOUNTS_PAYABLE',
         'ACCOUNTANT',
         'FINANCE_MANAGER',
         'TREASURY_MANAGER',
+        'AUDITOR',
+        'TAX_ACCOUNTANT',
+        'BUDGET_MANAGER',
+        'FIXED_ASSET_ACCOUNTANT',
+        'BILLING_ADMIN',
         'SYSTEM_ADMIN',
         'ADMINISTRATOR'
       ]);
@@ -293,6 +303,107 @@ service cloud.firestore {
 
       // Financial read models can be read only within tenant scope. All postings,
       // adjustments, reversals and idempotency records are server-only writes.
+      match /financeTrialBalanceSnapshots/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /financeRevenueRecognitions/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /financeArAdjustments/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /financeArReceipts/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /financeArAgingSnapshots/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /treasuryAccounts/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /cashRegisterShifts/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /financeTreasuryTransfers/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /financeBankReconciliations/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /financeApAgingSnapshots/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /financeSupplierCredits/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /financeCostCenters/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /financeCostAllocationRules/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /financeCostAllocationRuns/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /financeBudgets/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /financeBudgetCommitments/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /financeFixedAssets/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /financeDepreciationRuns/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /financeCloses/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /financeStatementSnapshots/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /financeTaxCodes/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /financeTaxLedger/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /financeTaxRemittances/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /financeTaxSummarySnapshots/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /financeIntelligenceSnapshots/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+
       match /accounts/{id} {
         allow read: if canReadFinance(tenantId);
         allow write: if false;

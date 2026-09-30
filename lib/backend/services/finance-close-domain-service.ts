@@ -142,8 +142,19 @@ export class FinanceCloseDomainService {
       if(!cashReconciled)throw new AtomicMutationRejectedError('TREASURY_NOT_RECONCILED','All period bank reconciliations and cash shifts must be approved/closed.');
 
       const depreciableAssets=assets.filter(a=>a.currency===currency&&a.status==='ACTIVE'&&a.inServiceAt<=periodEnd);
-      const depreciationPosted=depreciableAssets.length===0||depreciationRuns.some(r=>r.fiscalYear===payload.fiscalYear&&r.postingPeriod===payload.postingPeriod&&r.currency===currency);
-      if(!depreciationPosted)throw new AtomicMutationRejectedError('DEPRECIATION_NOT_POSTED','Monthly depreciation must be posted before finance close.');
+      const periodDepreciationRuns=depreciationRuns.filter(
+        r=>r.fiscalYear===payload.fiscalYear&&r.postingPeriod===payload.postingPeriod&&r.currency===currency
+      );
+      const depreciatedAssetIds=new Set(periodDepreciationRuns.flatMap(r=>r.assetIds||[]));
+      const missingDepreciationAssets=depreciableAssets
+        .filter(asset=>!depreciatedAssetIds.has(asset.assetId))
+        .map(asset=>asset.assetId);
+      const depreciationPosted=missingDepreciationAssets.length===0;
+      if(!depreciationPosted)throw new AtomicMutationRejectedError(
+        'DEPRECIATION_NOT_POSTED',
+        'Every active in-service depreciable asset must be covered by a period depreciation batch before finance close.',
+        {assetIds:missingDepreciationAssets}
+      );
 
       const assetsMinor=trial.lines.filter(l=>l.category==='asset').reduce((s,l)=>s+l.endingBalanceMinorUnits,0);
       const liabilitiesMinor=trial.lines.filter(l=>l.category==='liability').reduce((s,l)=>s+l.endingBalanceMinorUnits,0);

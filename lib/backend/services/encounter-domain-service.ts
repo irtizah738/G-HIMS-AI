@@ -459,6 +459,29 @@ export class EncounterDomainService {
       };
     }
 
+    // OPD disposition is a terminal clinical action. It may only execute after
+    // the authoritative workflow runtime has advanced the encounter to the
+    // discharge/referral stage. This prevents clients from bypassing triage,
+    // signed consultation evidence, diagnostics/pharmacy and billing guards by
+    // calling CommitEncounterDispositionCommand directly.
+    if (encounter.encounterType === 'OPD') {
+      const authoritativeStage = OpdWorkflowRuntimeService.resolveStage(
+        encounter.clinicalState || encounter.currentStage
+      );
+      if (authoritativeStage !== 'DISCHARGE_OR_REFERRAL') {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'OPD_DISPOSITION_STAGE_NOT_READY',
+            message:
+              'OPD disposition requires the authoritative workflow to reach DISCHARGE_OR_REFERRAL before encounter closure.',
+          },
+        };
+      }
+    }
+
     const patient = await DomainStateRepository.getById<Record<string, unknown>>(
       context.tenantId,
       'patients',

@@ -679,7 +679,12 @@ export function OpdMasterWorkspace() {
   };
 
   // HANDLER: Save Triage Vitals through authoritative encounter evidence.
+  // The evidence and its dependent stage transition are both replayable offline.
+  // A local evidence reference is deliberately used when the write is queued;
+  // the reconciliation service remaps it to the canonical evidence ID before
+  // replaying AdvanceStageCommand.
   const handleSaveVitals = async (vitals: ComprehensiveVitals) => {
+    const localEvidenceId = `vitals-${activeEncounter.id}-${vitals.measuredAt}`;
     const vitalsResult = await executeActiveTenantCommand<Record<string, unknown>>(
       'RecordVitalsCommand',
       {
@@ -709,7 +714,7 @@ export function OpdMasterWorkspace() {
         offlineQueue: {
           enabled: true,
           collection: 'encounterEvidence',
-          resourceId: `vitals-${activeEncounter.id}-${vitals.measuredAt}`,
+          resourceId: localEvidenceId,
           action: 'CREATE',
           optimisticCache: true,
         },
@@ -725,9 +730,18 @@ export function OpdMasterWorkspace() {
         encounterId: activeEncounter.id,
         currentStage: activeEncounter.currentStage || 'TRIAGE',
         targetStage: 'CONSULTATION',
-        evidenceId: vitalsResult.entityId,
+        evidenceId: vitalsResult.entityId || localEvidenceId,
       },
-      { idempotencyKey: `opd-stage-triage-consult:${activeEncounter.id}` }
+      {
+        idempotencyKey: `opd-stage-triage-consult:${activeEncounter.id}`,
+        offlineQueue: {
+          enabled: true,
+          collection: 'encounters',
+          resourceId: activeEncounter.id,
+          action: 'UPDATE',
+          optimisticCache: false,
+        },
+      }
     );
     if (!transition.success) {
       throw new Error(
@@ -763,6 +777,8 @@ export function OpdMasterWorkspace() {
   };
 
   // HANDLER: Save Consultation SOAP as signed encounter evidence.
+  // As with triage, offline replay preserves ordering by queueing the evidence
+  // before the dependent DAG transition and remapping the local evidence ID.
   const handleSaveConsultation = async (soap: SoapDocumentation) => {
     const noteContent = [
       `Subjective: ${soap.subjective || ''}`,
@@ -770,6 +786,8 @@ export function OpdMasterWorkspace() {
       `Assessment: ${soap.assessment || ''}`,
       `Plan: ${soap.plan || ''}`,
     ].join('\n\n');
+    const noteTimestamp = soap.completedAt || Date.now();
+    const localEvidenceId = `soap-${activeEncounter.id}-${noteTimestamp}`;
 
     const noteResult = await executeActiveTenantCommand<Record<string, unknown>>(
       'SignClinicalNoteCommand',
@@ -785,11 +803,11 @@ export function OpdMasterWorkspace() {
         },
       },
       {
-        idempotencyKey: `opd-soap:${activeEncounter.id}:${soap.completedAt || Date.now()}`,
+        idempotencyKey: `opd-soap:${activeEncounter.id}:${noteTimestamp}`,
         offlineQueue: {
           enabled: true,
           collection: 'encounterEvidence',
-          resourceId: `soap-${activeEncounter.id}-${soap.completedAt || Date.now()}`,
+          resourceId: localEvidenceId,
           action: 'CREATE',
           optimisticCache: true,
         },
@@ -805,9 +823,18 @@ export function OpdMasterWorkspace() {
         encounterId: activeEncounter.id,
         currentStage: activeEncounter.currentStage || 'CONSULTATION',
         targetStage: 'DIAGNOSTICS',
-        evidenceId: noteResult.entityId,
+        evidenceId: noteResult.entityId || localEvidenceId,
       },
-      { idempotencyKey: `opd-stage-consult-diagnostics:${activeEncounter.id}` }
+      {
+        idempotencyKey: `opd-stage-consult-diagnostics:${activeEncounter.id}`,
+        offlineQueue: {
+          enabled: true,
+          collection: 'encounters',
+          resourceId: activeEncounter.id,
+          action: 'UPDATE',
+          optimisticCache: false,
+        },
+      }
     );
     if (!transition.success) {
       throw new Error(
@@ -996,12 +1023,56 @@ export function OpdMasterWorkspace() {
   };
 
   // HANDLER: Cash settlement — the pilot is intentionally cash-only.
-  // The same command is queued offline and posts a balanced journal on replay.
+  // Billing is part of the authoritative OPD DAG. The client may render an
+  // optimistic balance, but it cannot skip the server-owned billing stage or
+  // advance to disposition until the local invoice is fully settled.
   const handleSettlePayment = async (payment: PaymentTransaction) => {
     if (!activeEncounter.invoice) throw new Error('INVOICE_REQUIRED');
     if (payment.mode !== 'CASH') {
       throw new Error(
         'EXTERNAL_PAYMENT_GATEWAY_REQUIRED: only cash settlement is enabled for the offline-first pilot.'
+      );
+    }
+    if (!Number.isSafeInteger(payment.amountMinorUnits) || payment.amountMinorUnits <= 0) {
+      throw new Error('INVALID_PAYMENT_AMOUNT: enter a positive whole minor-unit amount.');
+    }
+
+    const currentPaid = activeEncounter.invoice.payments.reduce(
+      (sum: number, item: PaymentTransaction) => sum + item.amountMinorUnits,
+      0
+    );
+    const currentBalance = Math.max(
+      0,
+      activeEncounter.invoice.patientCopayAmountMinorUnits - currentPaid
+    );
+    if (payment.amountMinorUnits > currentBalance) {
+      throw new Error(
+        'PAYMENT_EXCEEDS_BALANCE: cash collection cannot exceed the outstanding patient balance.'
+      );
+    }
+
+    const billingTransition = await executeActiveTenantCommand(
+      'AdvanceStageCommand',
+      {
+        encounterId: activeEncounter.id,
+        currentStage: activeEncounter.currentStage || 'DIAGNOSTICS',
+        targetStage: 'BILLING_SETTLEMENT',
+      },
+      {
+        idempotencyKey: `opd-stage-billing:${activeEncounter.id}`,
+        offlineQueue: {
+          enabled: true,
+          collection: 'encounters',
+          resourceId: activeEncounter.id,
+          action: 'UPDATE',
+          optimisticCache: false,
+        },
+      }
+    );
+    if (!billingTransition.success) {
+      throw new Error(
+        billingTransition.error?.message ||
+          'Clinical workflow runtime blocked transition into billing settlement.'
       );
     }
 
@@ -1041,27 +1112,70 @@ export function OpdMasterWorkspace() {
       ...payment,
       glJournalEntryId: `je_cash_${payment.id}`,
     };
+    const totalPaid = currentPaid + governedPayment.amountMinorUnits;
+    const newBalance = Math.max(
+      0,
+      activeEncounter.invoice.patientCopayAmountMinorUnits - totalPaid
+    );
+    const isSettled = newBalance === 0;
+
+    if (isSettled) {
+      const dispositionTransition = await executeActiveTenantCommand(
+        'AdvanceStageCommand',
+        {
+          encounterId: activeEncounter.id,
+          currentStage: 'BILLING_SETTLEMENT',
+          targetStage: 'DISCHARGE_OR_REFERRAL',
+          evidenceId: result.entityId || payment.id,
+        },
+        {
+          idempotencyKey: `opd-stage-disposition:${activeEncounter.id}`,
+          offlineQueue: {
+            enabled: true,
+            collection: 'encounters',
+            resourceId: activeEncounter.id,
+            action: 'UPDATE',
+            optimisticCache: false,
+          },
+        }
+      );
+      if (!dispositionTransition.success) {
+        throw new Error(
+          dispositionTransition.error?.message ||
+            'Clinical workflow runtime blocked transition from billing to disposition.'
+        );
+      }
+    }
 
     setEncounters((prev) =>
       prev.map((e) => {
         if (e.id === activeEncounter.id && e.invoice) {
           const updatedPayments = [...e.invoice.payments, governedPayment];
-          const totalPaid = updatedPayments.reduce((acc, p) => acc + p.amountMinorUnits, 0);
-          const newBalance = Math.max(0, e.invoice.patientCopayAmountMinorUnits - totalPaid);
-          const isSettled = newBalance === 0;
 
           return {
             ...e,
-            currentStage: 'DISPOSITION_CLOSURE',
+            currentStage: isSettled ? 'DISPOSITION_CLOSURE' : 'BILLING_SETTLEMENT',
             stageProgress: {
               ...e.stageProgress,
               BILLING_SETTLEMENT: {
-                status: 'COMPLETED',
-                enteredAt: Date.now() - 600000,
-                completedAt: Date.now(),
-                completedBy: governedPayment.processedBy,
+                status: isSettled ? 'COMPLETED' : 'ACTIVE',
+                enteredAt:
+                  e.stageProgress?.BILLING_SETTLEMENT?.enteredAt || Date.now(),
+                ...(isSettled
+                  ? {
+                      completedAt: Date.now(),
+                      completedBy: governedPayment.processedBy,
+                    }
+                  : {}),
               },
-              DISPOSITION_CLOSURE: { status: 'ACTIVE', enteredAt: Date.now() },
+              ...(isSettled
+                ? {
+                    DISPOSITION_CLOSURE: {
+                      status: 'ACTIVE',
+                      enteredAt: Date.now(),
+                    },
+                  }
+                : {}),
             },
             invoice: {
               ...e.invoice,
@@ -1075,8 +1189,11 @@ export function OpdMasterWorkspace() {
         return e;
       })
     );
-    recordEvent('PAYMENT_SETTLED', `Collected PKR ${(payment.amountMinorUnits / 100).toLocaleString()} via ${payment.mode}. General Ledger entry ${payment.glJournalEntryId} posted.`);
-    setActiveTab('DISPOSITION');
+    recordEvent(
+      isSettled ? 'PAYMENT_SETTLED' : 'PAYMENT_PARTIALLY_SETTLED',
+      `Collected PKR ${(payment.amountMinorUnits / 100).toLocaleString()} via ${payment.mode}. General Ledger entry ${governedPayment.glJournalEntryId} posted.`
+    );
+    setActiveTab(isSettled ? 'DISPOSITION' : 'BILLING');
   };
 
   // HANDLER: Commit Disposition through the encounter lifecycle service.

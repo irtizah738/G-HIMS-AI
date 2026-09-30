@@ -18,6 +18,7 @@ import {
   compareAuthoritativeEntityVersion,
   getAuthoritativeEntityVersion,
 } from '@/server/repositories/edge-version-repository';
+import { compareClocks } from '@/lib/offline/vector-clock';
 
 function conflictCategory(commandType: string): ConflictCategory {
   if (['PostJournalCommand', 'RecordCashReceiptCommand'].includes(commandType)) return 'FINANCIAL_CONFLICT';
@@ -176,6 +177,11 @@ export class OfflineReconciliationDomainService {
     let conflicted = 0;
     let rejected = 0;
     const canonicalMappings = new Map<string, string>();
+    // Tracks only mutations accepted earlier in this same authenticated batch.
+    // This lets an offline device replay a causal sequence of safety-critical
+    // commands against one entity without falsely conflicting with the version
+    // increment produced by its own immediately preceding command.
+    const acceptedEntityClocks = new Map<string, Record<string, number>>();
 
     // Registration must establish canonical patient/encounter IDs before dependent
     // offline commands are replayed.
@@ -248,8 +254,27 @@ export class OfflineReconciliationDomainService {
           mutation.baseEntityVersion,
           mutation.baseVectorClock
         );
+        const entityChainKey = authoritativeEntityId
+          ? `${mutation.collection}:${authoritativeEntityId}`
+          : '';
+        const priorAcceptedClock = entityChainKey
+          ? acceptedEntityClocks.get(entityChainKey)
+          : undefined;
+        const chainRelation =
+          priorAcceptedClock &&
+          mutation.vectorClock &&
+          Object.keys(priorAcceptedClock).length > 0 &&
+          Object.keys(mutation.vectorClock).length > 0
+            ? compareClocks(priorAcceptedClock, mutation.vectorClock)
+            : null;
+        const isCausalContinuation =
+          chainRelation === 'LESS' || chainRelation === 'EQUAL';
 
-        if (category !== 'SAFE_APPEND' && causalState !== 'MATCH') {
+        if (
+          category !== 'SAFE_APPEND' &&
+          causalState !== 'MATCH' &&
+          !isCausalContinuation
+        ) {
           conflicted += 1;
           results.push({
             mutationId: mutation.mutationId,
@@ -297,6 +322,14 @@ export class OfflineReconciliationDomainService {
 
           for (const mapping of entityMappings) {
             canonicalMappings.set(mapping.localId, mapping.canonicalId);
+          }
+
+          if (
+            entityChainKey &&
+            mutation.vectorClock &&
+            Object.keys(mutation.vectorClock).length > 0
+          ) {
+            acceptedEntityClocks.set(entityChainKey, mutation.vectorClock);
           }
 
           accepted += 1;

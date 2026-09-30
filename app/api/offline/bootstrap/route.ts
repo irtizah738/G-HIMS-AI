@@ -191,7 +191,7 @@ function authorizedCollections(roles: string[]): string[] {
   }
 
   if (
-    ['HR_ADMIN', 'HOSPITAL_EXECUTIVE']
+    ['HR_ADMIN', 'HOSPITAL_EXECUTIVE', 'MEDICAL_DIRECTOR']
       .some((role) => normalized.has(role))
   ) {
     add(...HCM_COLLECTIONS);

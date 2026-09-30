@@ -301,6 +301,30 @@ export class CommandBus {
           );
           break;
 
+        case 'ApprovePayrollPeriodCommand':
+          result = await HcmPayrollDomainService.approvePayrollPeriod(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'PostPayrollPeriodCommand':
+          result = await HcmPayrollDomainService.postPayrollPeriod(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'SettlePayrollPeriodCommand':
+          result = await HcmPayrollDomainService.settlePayrollPeriod(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'RemitPayrollLiabilityCommand':
+          result = await HcmPayrollDomainService.remitPayrollLiability(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
         case 'RecordVitalsCommand':
           result = await ClinicalDocumentationDomainService.recordVitals(
             context,

@@ -50,7 +50,7 @@ export interface CreateFinancePeriodPayload {
 export interface ChangeFinancePeriodStatusPayload {
   fiscalYear: number;
   postingPeriod: number;
-  nextStatus: 'SOFT_CLOSE' | 'OPEN' | 'CLOSED' | 'LOCKED';
+  nextStatus: 'SOFT_CLOSE' | 'OPEN';
   reason: string;
 }
 
@@ -486,12 +486,7 @@ export class FinanceGlDomainService {
           const next: FinancePeriodRecord = {
             ...period,
             status: payload.nextStatus,
-            ...(payload.nextStatus === 'CLOSED'
-              ? { closedAt: now, closedBy: context.actorId }
-              : {}),
-            ...(payload.nextStatus === 'LOCKED'
-              ? { lockedAt: now, lockedBy: context.actorId }
-              : {}),
+
           };
           return {
             domainState: next,

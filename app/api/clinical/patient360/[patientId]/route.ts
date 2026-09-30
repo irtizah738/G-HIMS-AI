@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
 import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
-import { assertPatient360ReadAccess } from '@/lib/clinical/patient360/patient360-access';
+import { assertPatient360PatientAccess } from '@/lib/clinical/patient360/patient360-access';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import { DischargeReadinessService } from '@/lib/clinical/intelligence/discharge-readiness-service';
 import { ClinicalDeteriorationService } from '@/lib/clinical/intelligence/clinical-deterioration-service';
@@ -28,7 +28,6 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
     ).trim().toLowerCase();
 
     const { context } = await deriveAuthoritativeContext(req, requestedTenantId);
-    assertPatient360ReadAccess(context);
     const patient = await DomainStateRepository.getById<Record<string, unknown>>(
       context.tenantId,
       'patients',
@@ -41,6 +40,19 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
         { status: 404, headers: { 'Cache-Control': 'no-store' } }
       );
     }
+
+    const activeEncounterId = String(
+      patient.activeEncounterId || patient.currentEncounterId || ''
+    ).trim();
+    const activeEncounter = activeEncounterId
+      ? await DomainStateRepository.getById<Record<string, unknown>>(
+          context.tenantId,
+          'encounters',
+          activeEncounterId
+        )
+      : null;
+
+    assertPatient360PatientAccess(context, patient, activeEncounter);
 
     const timelineLimit = Math.max(
       1,

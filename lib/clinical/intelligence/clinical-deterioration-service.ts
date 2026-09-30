@@ -174,7 +174,7 @@ export class ClinicalDeteriorationService {
     return projections
       .filter(
         (projection): projection is DeteriorationProjection =>
-          Boolean(projection) && projection.state !== 'NOT_APPLICABLE'
+          projection !== null && projection.state !== 'NOT_APPLICABLE'
       )
       .sort((left, right) =>
         right.evaluatedAt - left.evaluatedAt ||

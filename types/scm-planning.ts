@@ -91,7 +91,7 @@ export interface ReplenishmentPlan {
   executedBy?: string;
   executedAt?: string;
   purchaseRequisitionId?: string;
-  replenishmentOrderId?: string;
+  replenishmentOrderIds?: string[];
 }
 
 export interface ReviewReplenishmentPlanPayload {

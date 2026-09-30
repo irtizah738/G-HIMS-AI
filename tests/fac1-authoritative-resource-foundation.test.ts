@@ -162,7 +162,7 @@ describe('FAC-1 authoritative facility & biomedical resource foundation',()=>{
     expect(created.success).toBe(true);
 
     const completed=await CommandBus.dispatch(
-      {...adminContext,roles:['BIOMEDICAL_ENGINEER']},
+      {...adminContext,roles:['BIOMEDICAL_ENGINEER'],facilityIds:['fac_central']},
       {
         commandId:'fac1-wo-complete',
         idempotencyKey:'fac1-wo-complete-idem',

@@ -256,6 +256,7 @@ export interface EmployeeMaster {
   subSpecialties?: string[];
   onboardingStage?: 'OFFER_ACCEPTED' | 'DOCUMENT_SUBMISSION' | 'CREDENTIAL_VERIFICATION' | 'TRAINING_ASSIGNED' | 'ACTIVE';
   offboardingStage?: 'RESIGNED' | 'NOTICE_PERIOD' | 'ACCESS_REVOKED' | 'ASSETS_RETURNED' | 'SETTLEMENT_COMPLETED' | 'ARCHIVED';
+  credentialRevision?: number;
   compensation?: {
     baseSalary?: number;
     hourlyRate?: number;

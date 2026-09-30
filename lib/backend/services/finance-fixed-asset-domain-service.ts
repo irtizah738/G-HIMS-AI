@@ -130,7 +130,7 @@ export class FinanceFixedAssetDomainService {
     if(!auth.authorized)return reject(commandId,idempotencyKey,auth.code||'UNAUTHORIZED',auth.reason||'Depreciation posting authority required.');
     try{
       const unique=[...new Set(payload.assetIds)];
-      if(!unique.length||unique.length!==payload.assetIds.length||unique.length>500)throw new AtomicMutationRejectedError('INVALID_DEPRECIATION_ASSET_SET','Depreciation run requires 1-500 unique assets.');
+      if(!unique.length||unique.length!==payload.assetIds.length||unique.length>200)throw new AtomicMutationRejectedError('INVALID_DEPRECIATION_ASSET_SET','Depreciation run requires 1-200 unique assets to remain inside one atomic Firestore commit.');
       const periodId=financePeriodId(payload.fiscalYear,payload.postingPeriod);
       const assets=await Promise.all(unique.map(id=>DomainStateRepository.getById<FinanceFixedAssetRecord>(context.tenantId,'financeFixedAssets',id)));
       if(assets.some(asset=>!asset))throw new AtomicMutationRejectedError('FIXED_ASSET_NOT_FOUND','One or more fixed assets do not exist.');

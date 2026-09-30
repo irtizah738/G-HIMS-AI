@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
+import type { SupplierContract } from '@/types/scm-sourcing';
 import {
   ItemMaster,
   InventoryLocation,
@@ -120,6 +121,7 @@ export function SupplyChainScmView({ tenantId = 'metro-health' }: SupplyChainScm
   const [consumptions, setConsumptions] = useState<PatientConsumptionRecord[]>([]);
   const [recallCases, setRecallCases] = useState<RecallCase[]>([]);
   const [suppliers, setSuppliers] = useState<SupplierMaster[]>([]);
+  const [supplierContracts, setSupplierContracts] = useState<SupplierContract[]>([]);
   const [threeWayMatches, setThreeWayMatches] = useState<ThreeWayMatchResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [governanceNotice, setGovernanceNotice] = useState<string | null>(null);
@@ -187,6 +189,7 @@ export function SupplyChainScmView({ tenantId = 'metro-health' }: SupplyChainScm
     setConsumptions(data.consumptions || []);
     setRecallCases(data.recalls || []);
     setSuppliers(data.suppliers || []);
+    setSupplierContracts(data.supplierContracts || []);
     setThreeWayMatches(data.threeWayMatches || []);
   };
 
@@ -1499,6 +1502,7 @@ export function SupplyChainScmView({ tenantId = 'metro-health' }: SupplyChainScm
           requisitions={requisitions}
           purchaseOrders={purchaseOrders}
           suppliers={suppliers}
+          supplierContracts={supplierContracts}
           locations={locations}
           onRefresh={loadData}
         />

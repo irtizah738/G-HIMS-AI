@@ -42,15 +42,12 @@ import {
   CredentialExpiryAlert,
 } from '@/types/hcm';
 import {
-  subscribeToStaffMembers,
-  subscribeToRosterShifts,
-  subscribeToStaffCredentials,
-  createRosterShift,
-  updateRosterShift,
-  deleteRosterShift,
-  swapShifts,
-  seedInitialRosterAndShifts,
-} from '@/lib/firebase/services/hcm';
+  assignShiftEdge,
+  cancelShiftEdge,
+  executeRosterSwapEdge,
+  hydrateRoster,
+  loadLocalRoster,
+} from '@/lib/hcm/hcm-edge-adapter';
 import {
   validateShiftAssignment,
   calculateShiftDurationHours,
@@ -60,7 +57,7 @@ import {
 
 export default function ClinicalRosterPage() {
   const params = useParams();
-  const tenantId = (params?.tenantId as string) || 'metro-health';
+  const tenantId = String(params?.tenantId || '').trim();
 
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [shifts, setShifts] = useState<RosterShift[]>([]);
@@ -126,20 +123,38 @@ export default function ClinicalRosterPage() {
   // Seeding State
   const [seeding, setSeeding] = useState(false);
 
-  useEffect(() => {
-    setLoading(true);
-    const unsubStaff = subscribeToStaffMembers(tenantId, setStaff);
-    const unsubShifts = subscribeToRosterShifts(tenantId, (data) => {
-      setShifts(data);
-      setLoading(false);
-    });
-    const unsubCreds = subscribeToStaffCredentials(tenantId, setCredentials);
+  const applyRosterSnapshot = (
+    snapshot: Awaited<ReturnType<typeof loadLocalRoster>>
+  ) => {
+    setStaff(snapshot.staff);
+    setShifts(snapshot.shifts);
+    setCredentials(snapshot.credentials);
+  };
 
-    return () => {
-      unsubStaff();
-      unsubShifts();
-      unsubCreds();
-    };
+  const refreshRoster = async () => {
+    setLoading(true);
+    try {
+      if (!tenantId) {
+        setCreateError('TENANT_CONTEXT_REQUIRED: Rostering requires an explicit tenant route.');
+        setStaff([]);
+        setShifts([]);
+        setCredentials([]);
+        return;
+      }
+      applyRosterSnapshot(await loadLocalRoster(tenantId));
+      applyRosterSnapshot(await hydrateRoster(tenantId));
+    } catch (error) {
+      setCreateError(
+        error instanceof Error ? error.message : 'Failed to load governed roster.'
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshRoster();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId]);
 
   // Set default staff in create modal
@@ -502,30 +517,35 @@ export default function ClinicalRosterPage() {
 
     setCreatingShift(true);
     try {
-      const shiftNum = `SH-${newDate.replace(/-/g, '')}-${Math.floor(100 + Math.random() * 900)}`;
+      if (!staffMember.facilityId) {
+        throw new Error('Selected employee has no authoritative facility assignment.');
+      }
+      const startTime = new Date(newStartTime).toISOString();
+      const endTime = new Date(newEndTime).toISOString();
 
-      await createRosterShift(tenantId, {
-        shiftNumber: shiftNum,
-        staffId: staffMember.id,
-        staffName: staffMember.fullName,
-        staffRole: staffMember.primaryRole,
+      await assignShiftEdge({
+        facilityId: staffMember.facilityId,
+        facilityName: staffMember.facilityName || staffMember.facilityId,
         departmentId: staffMember.departmentId,
         departmentName: staffMember.departmentName,
-        wardId: newWardId,
-        wardName: newWardName,
-        shiftType: newShiftType,
+        employeeId: staffMember.id,
         date: newDate,
-        scheduledStartTime: newStartTime,
-        scheduledEndTime: newEndTime,
-        breakDuration: Number(newBreakDuration),
-        status: 'scheduled',
-        notes: newNotes.trim() || undefined,
+        shiftId: newShiftType,
+        shiftName: newShiftType.replaceAll('_', ' ').toUpperCase(),
+        startTime,
+        endTime,
+        notes: [
+          newWardName ? `Ward: ${newWardName}` : '',
+          Number(newBreakDuration) > 0 ? `Planned break: ${Number(newBreakDuration)} min` : '',
+          newNotes.trim(),
+        ].filter(Boolean).join(' | ') || undefined,
       });
 
       setShowCreateModal(false);
       setNewNotes('');
-    } catch (err: any) {
-      setCreateError(err.message || 'Failed to schedule shift.');
+      await refreshRoster();
+    } catch (err: unknown) {
+      setCreateError(err instanceof Error ? err.message : 'Failed to schedule shift.');
     } finally {
       setCreatingShift(false);
     }
@@ -555,20 +575,18 @@ export default function ClinicalRosterPage() {
 
     setSwapping(true);
     try {
-      await swapShifts(tenantId, {
-        requestingShiftId: shiftA.id,
-        targetShiftId: shiftB.id,
-        requestingStaffId: shiftA.staffId,
-        targetStaffId: shiftB.staffId,
-        reason: swapReason,
-        reviewer: 'Clinical Shift Supervisor',
+      await executeRosterSwapEdge({
+        shiftAId: shiftA.id,
+        shiftBId: shiftB.id,
+        reason: swapReason.trim() || 'Mutual schedule adjustment',
       });
 
       setShowSwapModal(false);
       setSwapShiftAId('');
       setSwapShiftBId('');
-    } catch (err: any) {
-      setSwapError(err.message || 'Failed to execute shift swap.');
+      await refreshRoster();
+    } catch (err: unknown) {
+      setSwapError(err instanceof Error ? err.message : 'Failed to execute shift swap.');
     } finally {
       setSwapping(false);
     }
@@ -577,7 +595,11 @@ export default function ClinicalRosterPage() {
   const handleDeleteShift = async (shiftId: string) => {
     if (!confirm('Are you sure you want to cancel and remove this scheduled shift?')) return;
     try {
-      await deleteRosterShift(tenantId, shiftId);
+      await cancelShiftEdge({
+        rosterId: shiftId,
+        reason: 'Cancelled from governed roster console',
+      });
+      await refreshRoster();
       if (selectedShift?.id === shiftId) {
         setSelectedShift(null);
       }
@@ -589,9 +611,9 @@ export default function ClinicalRosterPage() {
   const handleSeedRoster = async () => {
     setSeeding(true);
     try {
-      await seedInitialRosterAndShifts(tenantId);
-    } catch (err) {
-      console.error('Failed to seed roster:', err);
+      setCreateError(
+        'Demo roster seeding is disabled in the governed HCM runtime. Create roster assignments through the controlled scheduler.'
+      );
     } finally {
       setSeeding(false);
     }

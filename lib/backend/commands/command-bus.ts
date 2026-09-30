@@ -20,6 +20,7 @@ import { CareTransitionDomainService } from '../services/care-transition-domain-
 import { TelehealthDomainService } from '../services/telehealth-domain-service';
 import { RevenueIntegrityDomainService } from '../services/revenue-integrity-domain-service';
 import { ScmOfflineDomainService } from '../services/scm-offline-domain-service';
+import { ScmProcurementDomainService } from '../services/scm-procurement-domain-service';
 import { CashReceiptDomainService } from '../services/cash-receipt-domain-service';
 import { DiagnosticResultDomainService } from '../services/diagnostic-result-domain-service';
 import { PatientClinicalKnowledgeDomainService } from '../services/patient-clinical-knowledge-domain-service';
@@ -516,6 +517,42 @@ export class CommandBus {
 
         case 'SubmitPurchaseRequisitionCommand':
           result = await ScmOfflineDomainService.submitPurchaseRequisition(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ApprovePurchaseRequisitionCommand':
+          result = await ScmProcurementDomainService.approvePurchaseRequisition(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'CreatePurchaseOrderCommand':
+          result = await ScmProcurementDomainService.createPurchaseOrder(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ApprovePurchaseOrderCommand':
+          result = await ScmProcurementDomainService.approvePurchaseOrder(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecordGoodsReceiptCommand':
+          result = await ScmProcurementDomainService.recordGoodsReceipt(
             context,
             command.commandId,
             command.idempotencyKey,

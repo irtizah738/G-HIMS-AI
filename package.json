@@ -61,7 +61,9 @@
     "test:clinical-architecture": "bun test tests/clinical-workflow-architecture-contract.test.ts",
     "validate:clinical-architecture": "bun run typecheck && bun run lint && bun run test:clinical-architecture && bun run test:ci7 && bun run test:ci8 && bun run test:p6 && bun run test:p7 && bun run test:security && bun run build",
     "test:p8": "bun test tests/p8-main-baseline-hardening.test.ts",
-    "validate:p8": "bun run typecheck && bun run lint && bun run test:p8 && bun run test:clinical-architecture && bun run test:ci7 && bun run test:ci8 && bun run test:p6 && bun run test:p7 && bun run test:security && bun run build"
+    "validate:p8": "bun run typecheck && bun run lint && bun run test:p8 && bun run test:clinical-architecture && bun run test:ci7 && bun run test:ci8 && bun run test:p6 && bun run test:p7 && bun run test:security && bun run build",
+    "test:scm1": "bun test tests/scm1-inventory-integrity.test.ts",
+    "validate:scm1": "bun run typecheck && bun run lint && bun run test:scm1 && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

@@ -14,6 +14,11 @@ import type {
   PurchaseRequisition,
   SupplierMaster,
 } from '@/types/scm-domain';
+import {
+  inventoryPeriodCloseId,
+  isInventoryPeriodBlocked,
+  periodKeyFromIso,
+} from '@/lib/supply-chain/inventory-costing';
 
 type RequisitionDecision = 'APPROVED' | 'REJECTED';
 type PurchaseOrderDecision = 'APPROVED' | 'REJECTED';
@@ -705,6 +710,13 @@ export class ScmProcurementDomainService {
           },
         ],
         prepare: (current) => {
+          if (isInventoryPeriodBlocked(current.periodClose)) {
+            throw new AtomicMutationRejectedError(
+              'INVENTORY_PERIOD_BLOCKED',
+              'Goods receipt cannot post into an inventory period that is closing or closed.'
+            );
+          }
+
           const po = current.po as unknown as PurchaseOrderRecord;
           assertFacilityScope(context, po.facilityId);
 
@@ -817,6 +829,19 @@ export class ScmProcurementDomainService {
       );
     }
 
+    if (!Number.isFinite(Date.parse(payload.receivedAt))) {
+      return rejection(
+        commandId,
+        idempotencyKey,
+        'INVALID_GRN_RECEIVED_DATE',
+        'Goods receipt date is invalid.'
+      );
+    }
+    const periodCloseId = inventoryPeriodCloseId(
+      payload.facilityId,
+      periodKeyFromIso(payload.receivedAt)
+    );
+
     const normalizedLines = payload.items.map((line) => ({
       ...line,
       batchId:
@@ -825,6 +850,12 @@ export class ScmProcurementDomainService {
     }));
 
     const readTargets = [
+      {
+        key: 'periodClose',
+        entityType: 'INVENTORY_PERIOD_CLOSE',
+        entityId: periodCloseId,
+        required: false,
+      },
       {
         key: 'po',
         entityType: 'PURCHASE_ORDER',

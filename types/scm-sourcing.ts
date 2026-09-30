@@ -31,6 +31,37 @@ export interface SupplierQualificationReview {
   reviewedBy: string;
 }
 
+export interface GovernedRfqRecord {
+  rfqId: string;
+  tenantId: string;
+  rfqNumber: string;
+  requisitionId: string;
+  facilityId: string;
+  currency: string;
+  items: Array<{
+    itemId: string;
+    itemCode: string;
+    itemName: string;
+    quantity: number;
+    uom: StandardUOM;
+    specifications: string;
+  }>;
+  requiredDeliveryDate: string;
+  submissionDeadline: string;
+  invitedSupplierIds: string[];
+  terms: string;
+  status:
+    | 'OPEN'
+    | 'SUBMISSIONS_RECEIVED'
+    | 'EVALUATED'
+    | 'AWARDED'
+    | 'CANCELLED';
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  awardedContractId?: string;
+}
+
 export interface CreateRfqPayload {
   rfqId: string;
   rfqNumber: string;

@@ -613,6 +613,14 @@ service cloud.firestore {
       match /payrollAttendanceLocks/{id} {
         allow read, write: if false;
       }
+      match /payrollStatutoryLiabilities/{id} {
+        allow read: if canReadHcm(tenantId) || canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /hcmIntelligenceSnapshots/{id} {
+        allow read: if canReadHcm(tenantId) || canReadAudit(tenantId);
+        allow write: if false;
+      }
       match /leaveBalances/{id} {
         allow read: if canReadHcm(tenantId);
         allow write: if false;

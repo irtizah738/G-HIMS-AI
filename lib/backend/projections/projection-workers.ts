@@ -10,6 +10,7 @@ import { getAdminFirestore } from '@/server/firebase/admin';
 import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
 import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
 import { DischargeReadinessService } from '@/lib/clinical/intelligence/discharge-readiness-service';
+import { ClinicalDeteriorationService } from '@/lib/clinical/intelligence/clinical-deterioration-service';
 
 export interface ConsumableEvent {
   eventId: string;
@@ -324,6 +325,7 @@ export class ProjectionWorkers {
     if (!options.skipPatient360) {
       await Patient360ProjectionService.refreshFromEvent(event);
       await DischargeReadinessService.refreshFromEvent(event);
+      await ClinicalDeteriorationService.refreshFromEvent(event);
     }
   }
 
@@ -432,6 +434,8 @@ export class ProjectionWorkers {
       'patient360Timeline',
       'dischargeReadinessCheckpoints',
       'dischargeReadinessProjections',
+      'deteriorationCheckpoints',
+      'deteriorationProjections',
     ]) {
       await this.clearCollection(tenantId, collectionName);
     }
@@ -445,6 +449,10 @@ export class ProjectionWorkers {
       orderedEvents
     );
     await DischargeReadinessService.rebuildTenantFromEvents(
+      tenantId,
+      orderedEvents
+    );
+    await ClinicalDeteriorationService.rebuildTenantFromEvents(
       tenantId,
       orderedEvents
     );

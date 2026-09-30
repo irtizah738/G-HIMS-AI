@@ -55,7 +55,9 @@
     "test:ci6": "bun test tests/ci6-patient360-knowledge-status.test.ts",
     "validate:ci6": "bun run typecheck && bun run lint && bun run test:ci-foundation && bun run test:ci1 && bun run test:ci2 && bun run test:ci3 && bun run test:ci4 && bun run test:ci5 && bun run test:ci6 && bun run test:p7 && bun run test:p6 && bun run test:security && bun run build",
     "test:ci7": "bun test tests/ci7-discharge-readiness.test.ts",
-    "validate:ci7": "bun run typecheck && bun run lint && bun run test:ci-foundation && bun run test:ci1 && bun run test:ci2 && bun run test:ci3 && bun run test:ci4 && bun run test:ci5 && bun run test:ci6 && bun run test:ci7 && bun run test:p7 && bun run test:p6 && bun run test:security && bun run build"
+    "validate:ci7": "bun run typecheck && bun run lint && bun run test:ci-foundation && bun run test:ci1 && bun run test:ci2 && bun run test:ci3 && bun run test:ci4 && bun run test:ci5 && bun run test:ci6 && bun run test:ci7 && bun run test:p7 && bun run test:p6 && bun run test:security && bun run build",
+    "test:ci8": "bun test tests/ci8-deterioration-escalation.test.ts",
+    "validate:ci8": "bun run typecheck && bun run lint && bun run test:ci-foundation && bun run test:ci1 && bun run test:ci2 && bun run test:ci3 && bun run test:ci4 && bun run test:ci5 && bun run test:ci6 && bun run test:ci7 && bun run test:ci8 && bun run test:p7 && bun run test:p6 && bun run test:security && bun run build"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

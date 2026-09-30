@@ -243,6 +243,15 @@ service cloud.firestore {
       match /clinicalIntelligenceEvaluations/{evaluationId} {
         allow read, write: if false;
       }
+      match /deteriorationProjections/{encounterId} {
+        allow read, write: if false;
+      }
+      match /deteriorationCheckpoints/{eventId} {
+        allow read, write: if false;
+      }
+      match /clinicalDeteriorationEvaluations/{evaluationId} {
+        allow read, write: if false;
+      }
       match /dischargeReadinessReviews/{reviewId} {
         allow read, write: if false;
       }

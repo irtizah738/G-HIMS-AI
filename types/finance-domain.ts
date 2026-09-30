@@ -289,7 +289,7 @@ export interface CostAllocationRule {
   allocationBasis: 'PERCENT' | 'HEADCOUNT' | 'AREA' | 'ENCOUNTERS';
   targets: Array<{
     costCenterId: string;
-    percentBasisPoints?: number;
+    percentBasisPoints: number;
   }>;
   effectiveFrom: number;
   effectiveTo?: number;

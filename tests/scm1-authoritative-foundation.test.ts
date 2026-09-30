@@ -110,6 +110,17 @@ describe('SCM-1 authoritative inventory and procurement foundation', () => {
     );
   });
 
+  test('expiry quarantine and FEFO issuance use the governed stock ledger', async () => {
+    const expiry = await source(
+      'components/supply-chain/scm-expiry-dashboard.tsx'
+    );
+    expect(expiry).toContain('recordStockTransactionEdge');
+    expect(expiry).toContain("transactionType: 'QUARANTINE'");
+    expect(expiry).toContain("transactionType: 'ISSUE'");
+    expect(expiry).not.toContain('quarantineBatchRecord');
+    expect(expiry).not.toContain('recordStockTransaction(');
+  });
+
   test('free-standing browser batch creation is retired', async () => {
     const ledger = await source(
       'components/supply-chain/scm-batch-tracking-ledger.tsx'

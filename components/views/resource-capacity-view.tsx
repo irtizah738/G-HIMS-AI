@@ -45,7 +45,6 @@ import {
 import {
   hydrateFacilitiesProjection,
   loadLocalFacilitiesProjection,
-  recordCalibrationEdge,
 } from '@/lib/facilities/facilities-edge-adapter';
 
 export function ResourceCapacityView() {
@@ -66,8 +65,6 @@ export function ResourceCapacityView() {
   const [showAddResourceModal, setShowAddResourceModal] = useState(false);
   const [showReservationModal, setShowReservationModal] = useState(false);
   const [showWorkOrderModal, setShowWorkOrderModal] = useState(false);
-  const [showCalibrationModal, setShowCalibrationModal] = useState(false);
-  const [selectedResourceForCal, setSelectedResourceForCal] = useState<ResourceMaster | null>(null);
 
   // Matcher State
   const [matchServiceType, setMatchServiceType] = useState<'OPD' | 'OT_SURGERY' | 'EMERGENCY_SURGE'>('OT_SURGERY');
@@ -160,38 +157,13 @@ export function ResourceCapacityView() {
     });
   };
 
-  const handleRecordCalibrationPass = async (resource: ResourceMaster) => {
-    const nextYear = new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString().split('T')[0];
-    const today = new Date().toISOString().split('T')[0];
-    const certNumber = `CAL-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
-
-    try {
-      if (!tenantId) {
-        throw new Error('Tenant context is required.');
-      }
-
-      await recordCalibrationEdge(
-        {
-          resourceId: resource.resourceId,
-          resourceName: resource.name,
-          model: resource.model || 'Standard',
-          serialNumber: resource.serialNumber || 'N/A',
-          calibrationDate: today,
-          nextDueDate: nextYear,
-          certificateNumber: certNumber,
-          technicianName: 'Lead Biomedical Engineer',
-          result: 'PASS',
-        },
-        `calibration:${resource.resourceId}:${certNumber}`
-      );
-      await refreshProjection();
-      setActionMessage({
-        text: `Biomedical calibration validated for ${resource.name}. Asset returned to clinical service!`,
-        type: 'success',
-      });
-    } catch (e: any) {
-      setActionMessage({ text: e.message || 'Calibration failed', type: 'error' });
-    }
+  const handleRequestCalibration = (resource: ResourceMaster) => {
+    setActionMessage({
+      text:
+        `Calibration lock remains active for ${resource.name}. ` +
+        'A biomedical engineer must record certificate evidence through the governed calibration workflow; browser-generated PASS certification is disabled.',
+      type: 'info',
+    });
   };
 
   return (
@@ -443,10 +415,10 @@ export function ResourceCapacityView() {
                         <td className="px-4 py-3 text-right">
                           {res.calibrationStatus === 'CALIBRATION_REQUIRED' && (
                             <button
-                              onClick={() => handleRecordCalibrationPass(res)}
+                              onClick={() => handleRequestCalibration(res)}
                               className="px-2.5 py-1 rounded bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-semibold cursor-pointer"
                             >
-                              Recertify Calibration
+                              Calibration Evidence Required
                             </button>
                           )}
                         </td>

@@ -541,6 +541,15 @@ export class CommandBus {
           );
           break;
 
+        case 'ReviewPurchaseOrderCommand':
+          result = await ScmOfflineDomainService.reviewPurchaseOrder(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
         case 'ReceivePurchaseOrderCommand':
           result = await ScmOfflineDomainService.receivePurchaseOrder(
             context,

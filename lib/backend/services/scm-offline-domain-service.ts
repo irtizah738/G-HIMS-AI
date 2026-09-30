@@ -818,6 +818,21 @@ export class ScmOfflineDomainService {
             );
           }
 
+          const requesterId = String(requisition.requestedBy?.userId || '').trim();
+          const elevatedAdmin = context.roles.some((role) =>
+            ['SYSTEM_ADMIN', 'ADMINISTRATOR'].includes(role.toUpperCase())
+          );
+          if (
+            requesterId &&
+            requesterId === context.actorId &&
+            !elevatedAdmin
+          ) {
+            throw new AtomicMutationRejectedError(
+              'REQUISITION_SELF_APPROVAL_DENIED',
+              'Purchase requisition requester cannot approve their own request.'
+            );
+          }
+
           const now = new Date().toISOString();
           const next: PurchaseRequisition = {
             ...requisition,

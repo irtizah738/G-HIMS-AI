@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { AuthorizationPipeline } from '@/lib/backend/auth/authorization-pipeline';
 import {
   AtomicMutationRejectedError,
@@ -5,6 +6,8 @@ import {
 } from '@/lib/backend/transactions/transaction-manager';
 import type { CommandContext, CommandResult } from '@/lib/backend/types';
 import type { ItemMaster, SupplierMaster } from '@/types/scm-domain';
+import type { SupplierInvoiceRecord } from '@/types/scm-payables';
+import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import type {
   ApproveConsignmentAgreementPayload,
   ConsignmentAgreement,
@@ -13,11 +16,24 @@ import type {
   CreateConsignmentAgreementPayload,
   ReceiveConsignmentStockPayload,
   RecordConsignmentUsagePayload,
+  CaptureConsignmentSupplierInvoicePayload,
+  ReviewConsignmentSupplierInvoicePayload,
 } from '@/types/scm-consignment';
 import {
   consignmentUsageCostMinorUnits,
   validateHighValueIdentity,
 } from '@/lib/supply-chain/consignment';
+
+function canonicalSupplierInvoiceId(
+  tenantId:string,
+  supplierId:string,
+  invoiceNumber:string
+):string{
+  const digest=createHash('sha256')
+    .update([tenantId,supplierId,invoiceNumber].map(v=>v.trim().toLowerCase()).join('\u0000'))
+    .digest('hex').slice(0,32);
+  return `sinv_${digest}`;
+}
 
 function rejection(commandId:string,idempotencyKey:string,code:string,message:string,details?:unknown):CommandResult{
   return {success:false,commandId,idempotencyKey,error:{code,message,details}};
@@ -321,6 +337,215 @@ export class ScmConsignmentDomainService {
         },
       });
       return {success:true,commandId,idempotencyKey,entityId:payload.usageId,eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:tx.resultData};
+    }catch(error){if(error instanceof AtomicMutationRejectedError)return rejection(commandId,idempotencyKey,error.code,error.message,error.details);throw error;}
+  }
+
+  public static async captureConsignmentSupplierInvoice(
+    context:CommandContext,
+    commandId:string,
+    idempotencyKey:string,
+    payload:CaptureConsignmentSupplierInvoicePayload
+  ):Promise<CommandResult>{
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['ACCOUNTS_PAYABLE','ACCOUNTANT','FINANCE_MANAGER','SYSTEM_ADMIN','ADMINISTRATOR'],
+    });
+    if(!auth.authorized)return rejection(commandId,idempotencyKey,auth.code||'UNAUTHORIZED',auth.reason||'Consignment invoice capture authority required.');
+
+    try{
+      assertFacilityScope(context,payload.facilityId);
+      const usageIds=[...new Set(payload.usageIds)];
+      if(!usageIds.length||usageIds.length!==payload.usageIds.length||usageIds.length>100){
+        throw new AtomicMutationRejectedError('INVALID_CONSIGNMENT_INVOICE_USAGE_SET','Consignment supplier invoice requires 1-100 unique usage IDs.');
+      }
+      const issueMs=Date.parse(payload.issueDate),dueMs=Date.parse(payload.dueDate);
+      if(!Number.isFinite(issueMs)||!Number.isFinite(dueMs)||dueMs<issueMs){
+        throw new AtomicMutationRejectedError('INVALID_SUPPLIER_INVOICE_DATES','Supplier invoice issue/due dates are invalid.');
+      }
+      const currency=payload.currency.trim().toUpperCase();
+      if(currency.length!==3)throw new AtomicMutationRejectedError('INVALID_SUPPLIER_INVOICE_CURRENCY','Supplier invoice currency must be a 3-letter code.');
+      const preflight=await Promise.all(
+        usageIds.map(id=>DomainStateRepository.getById<ConsignmentUsageRecord>(context.tenantId,'scmConsignmentUsages',id))
+      );
+      if(preflight.some(row=>!row))throw new AtomicMutationRejectedError('CONSIGNMENT_USAGE_NOT_FOUND','One or more consignment usages do not exist.');
+      const usages=preflight as ConsignmentUsageRecord[];
+      const invoiceId=canonicalSupplierInvoiceId(context.tenantId,payload.supplierId,payload.invoiceNumber);
+
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,actorId:context.actorId,actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'SUPPLIER_INVOICE',aggregateId:invoiceId,
+        eventType:'CONSIGNMENT_SUPPLIER_INVOICE_CAPTURED',
+        auditAction:'CONSIGNMENT_SUPPLIER_INVOICE_CAPTURED',
+        auditResourceType:'SUPPLIER_INVOICE',auditResourceId:invoiceId,
+        outboxTopic:'g-hims-scm-finance-events',idempotencyKey,commandId,correlationId:context.correlationId,
+        readTargets:[
+          {key:'existingInvoice',entityType:'SUPPLIER_INVOICE',entityId:invoiceId,required:false},
+          {key:'agreement',entityType:'CONSIGNMENT_AGREEMENT',entityId:payload.agreementId,required:true},
+          {key:'supplier',entityType:'SUPPLIER_MASTER',entityId:payload.supplierId,required:true},
+          ...usages.flatMap((usage,index)=>[
+            {key:`usage:${index}`,entityType:'CONSIGNMENT_USAGE',entityId:usage.usageId,required:true},
+            {key:`lot:${index}`,entityType:'CONSIGNMENT_LOT',entityId:usage.lotId,required:true},
+            {key:`item:${index}`,entityType:'ITEM_MASTER',entityId:usage.itemId,required:true},
+          ]),
+        ],
+        prepare:(current)=>{
+          if(current.existingInvoice)throw new AtomicMutationRejectedError('DUPLICATE_SUPPLIER_INVOICE','This supplier invoice number is already captured for the supplier.');
+          const agreement=current.agreement as unknown as ConsignmentAgreement;
+          const supplier=current.supplier as unknown as SupplierMaster;
+          if(agreement.agreementId!==payload.agreementId||agreement.supplierId!==payload.supplierId||agreement.facilityId!==payload.facilityId){
+            throw new AtomicMutationRejectedError('CONSIGNMENT_INVOICE_SCOPE_MISMATCH','Invoice does not match consignment agreement supplier/facility.');
+          }
+          if(supplier.status!=='ACTIVE')throw new AtomicMutationRejectedError('SUPPLIER_NOT_ACTIVE','Supplier must be active.');
+          if(agreement.currency.toUpperCase()!==currency)throw new AtomicMutationRejectedError('CONSIGNMENT_INVOICE_CURRENCY_MISMATCH','Invoice currency must match consignment agreement.');
+
+          const now=new Date().toISOString();
+          let total=0;
+          const invoiceLines=usages.map((_pre,index)=>{
+            const usage=current[`usage:${index}`] as unknown as ConsignmentUsageRecord;
+            const lot=current[`lot:${index}`] as unknown as ConsignmentLotRecord;
+            const item=current[`item:${index}`] as unknown as ItemMaster;
+            if(
+              usage.status!=='ACCRUED_AWAITING_SUPPLIER_INVOICE' ||
+              usage.supplierId!==payload.supplierId ||
+              usage.agreementId!==payload.agreementId ||
+              usage.facilityId!==payload.facilityId ||
+              usage.currency.toUpperCase()!==currency ||
+              lot.lotId!==usage.lotId ||
+              item.itemId!==usage.itemId
+            ){
+              throw new AtomicMutationRejectedError('CONSIGNMENT_USAGE_NOT_INVOICEABLE','Consignment usage is not eligible for this supplier invoice.');
+            }
+            total+=usage.totalCostMinorUnits;
+            return {
+              lineId:usage.usageId,itemId:item.itemId,itemCode:item.itemCode,itemName:item.name,
+              billedQuantity:usage.quantity,uom:item.stockUOM,
+              unitPriceMinorUnits:usage.unitCostMinorUnits,discountMinorUnits:0,taxMinorUnits:0,
+              netAmountMinorUnits:usage.totalCostMinorUnits,totalAmountMinorUnits:usage.totalCostMinorUnits,
+            };
+          });
+          if(!Number.isSafeInteger(total)||total<=0)throw new AtomicMutationRejectedError('INVALID_CONSIGNMENT_INVOICE_TOTAL','Consignment invoice total must be positive minor units.');
+
+          const invoice:SupplierInvoiceRecord={
+            invoiceId,tenantId:context.tenantId,facilityId:payload.facilityId,invoiceNumber:payload.invoiceNumber,
+            supplierId:payload.supplierId,supplierName:supplier.displayName||supplier.legalName,
+            poId:`CONSIGNMENT:${agreement.agreementId}`,poNumber:`CONSIGNMENT-${agreement.agreementNumber}`,
+            grnIds:[],currency,issueDate:payload.issueDate,dueDate:payload.dueDate,lines:invoiceLines,
+            subtotalMinorUnits:total,discountMinorUnits:0,taxMinorUnits:0,shippingMinorUnits:0,totalAmountMinorUnits:total,
+            amountPaidMinorUnits:0,balanceMinorUnits:total,pendingPaymentMinorUnits:0,
+            matchId:`consignment_${invoiceId}`,matchStatus:'FULLY_MATCHED',status:'MATCHED',
+            capturedBy:context.actorId,capturedAt:now,createdAt:now,updatedAt:now,
+            sourceType:'CONSIGNMENT_USAGE',consignmentAgreementId:agreement.agreementId,consignmentUsageIds:usageIds,
+          };
+          const usageWrites=usages.map((_row,index)=>{
+            const usage=current[`usage:${index}`] as unknown as ConsignmentUsageRecord;
+            return {
+              entityType:'CONSIGNMENT_USAGE',entityId:usage.usageId,
+              domainState:{...usage,status:'INVOICE_CAPTURED_PENDING_APPROVAL',supplierInvoiceId:invoiceId},
+            };
+          });
+          return {
+            domainState:invoice,additionalStateWrites:usageWrites,
+            eventPayload:{invoiceId,supplierId:payload.supplierId,usageIds,totalAmountMinorUnits:total,currency},
+            auditReason:`Captured consignment supplier invoice ${payload.invoiceNumber} against ${usageIds.length} accrued usage(s).`,
+            resultData:invoice,
+          };
+        },
+      });
+      return {success:true,commandId,idempotencyKey,entityId:invoiceId,eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:tx.resultData};
+    }catch(error){if(error instanceof AtomicMutationRejectedError)return rejection(commandId,idempotencyKey,error.code,error.message,error.details);throw error;}
+  }
+
+  public static async reviewConsignmentSupplierInvoice(
+    context:CommandContext,
+    commandId:string,
+    idempotencyKey:string,
+    payload:ReviewConsignmentSupplierInvoicePayload
+  ):Promise<CommandResult>{
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['FINANCE_MANAGER','ACCOUNTANT','SYSTEM_ADMIN','ADMINISTRATOR'],
+    });
+    if(!auth.authorized)return rejection(commandId,idempotencyKey,auth.code||'UNAUTHORIZED',auth.reason||'Consignment payable approval authority required.');
+
+    try{
+      const preflight=await DomainStateRepository.getById<SupplierInvoiceRecord>(context.tenantId,'scmSupplierInvoices',payload.invoiceId);
+      if(!preflight)throw new AtomicMutationRejectedError('SUPPLIER_INVOICE_NOT_FOUND','Supplier invoice does not exist.');
+      if(preflight.sourceType!=='CONSIGNMENT_USAGE'||!preflight.consignmentUsageIds?.length){
+        throw new AtomicMutationRejectedError('NOT_CONSIGNMENT_SUPPLIER_INVOICE','Supplier invoice is not a consignment usage invoice.');
+      }
+      const usageIds=preflight.consignmentUsageIds;
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,actorId:context.actorId,actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'SUPPLIER_INVOICE',aggregateId:payload.invoiceId,
+        eventType:payload.decision==='APPROVE'?'CONSIGNMENT_PAYABLE_RECOGNIZED':'CONSIGNMENT_SUPPLIER_INVOICE_REJECTED',
+        auditAction:payload.decision==='APPROVE'?'CONSIGNMENT_PAYABLE_RECOGNIZED':'CONSIGNMENT_SUPPLIER_INVOICE_REJECTED',
+        auditResourceType:'SUPPLIER_INVOICE',auditResourceId:payload.invoiceId,
+        outboxTopic:'g-hims-scm-finance-events',idempotencyKey,commandId,correlationId:context.correlationId,
+        readTargets:[
+          {key:'invoice',entityType:'SUPPLIER_INVOICE',entityId:payload.invoiceId,required:true},
+          ...usageIds.map((id,index)=>({key:`usage:${index}`,entityType:'CONSIGNMENT_USAGE',entityId:id,required:true})),
+        ],
+        prepare:(current)=>{
+          const invoice=current.invoice as unknown as SupplierInvoiceRecord;
+          assertFacilityScope(context,invoice.facilityId);
+          if(invoice.sourceType!=='CONSIGNMENT_USAGE'||invoice.status!=='MATCHED'){
+            throw new AtomicMutationRejectedError('CONSIGNMENT_INVOICE_NOT_REVIEWABLE','Consignment supplier invoice is not awaiting payable approval.');
+          }
+          if(invoice.capturedBy===context.actorId)throw new AtomicMutationRejectedError('SCM_FINANCE_SEGREGATION_OF_DUTIES','Invoice capturer cannot approve the same consignment payable.');
+          const usages=usageIds.map((id,index)=>{
+            const usage=current[`usage:${index}`] as unknown as ConsignmentUsageRecord;
+            if(usage.usageId!==id||usage.supplierInvoiceId!==invoice.invoiceId||usage.status!=='INVOICE_CAPTURED_PENDING_APPROVAL'){
+              throw new AtomicMutationRejectedError('CONSIGNMENT_USAGE_INVOICE_STATE_CONFLICT','Consignment usage state changed before invoice review.');
+            }
+            return usage;
+          });
+          const now=new Date().toISOString();
+          if(payload.decision==='REJECT'){
+            const nextInvoice:SupplierInvoiceRecord={...invoice,status:'VOID',resolvedBy:context.actorId,resolvedAt:now,resolutionNotes:payload.notes,updatedAt:now};
+            return {
+              domainState:nextInvoice,
+              additionalStateWrites:usages.map(usage=>({
+                entityType:'CONSIGNMENT_USAGE',entityId:usage.usageId,
+                domainState:{...usage,status:'ACCRUED_AWAITING_SUPPLIER_INVOICE',supplierInvoiceId:undefined},
+              })),
+              eventPayload:{invoiceId:invoice.invoiceId,decision:'REJECT',usageIds},
+              auditReason:`Rejected consignment supplier invoice ${invoice.invoiceNumber}; usage accruals returned to invoice queue.`,
+              resultData:nextInvoice,
+            };
+          }
+
+          const journalId=`je_ap_consignment_${invoice.invoiceId}`;
+          const issueMs=Date.parse(invoice.issueDate);
+          const date=new Date(issueMs);
+          const journal={
+            journalId,tenantId:context.tenantId,fiscalYear:date.getUTCFullYear(),postingPeriod:date.getUTCMonth()+1,
+            documentDate:issueMs,postingDate:issueMs,referenceDocumentId:invoice.invoiceId,
+            documentHeader:`Consignment AP recognition ${invoice.invoiceNumber}`,currency:invoice.currency,
+            totalAmountMinorUnits:invoice.totalAmountMinorUnits,
+            lines:[
+              {glAccountId:'2030',glAccountName:'Goods Received Not Invoiced (GRNI)',debitMinorUnits:invoice.totalAmountMinorUnits,creditMinorUnits:0,lineDescription:'Clear consignment usage accrual'},
+              {glAccountId:'2010',glAccountName:'Accounts Payable - Medical & Trade Vendors',debitMinorUnits:0,creditMinorUnits:invoice.totalAmountMinorUnits,lineDescription:'Recognize consignment supplier payable'},
+            ],
+            status:'POSTED',postedBy:context.actorId,postedAt:Date.now(),
+          };
+          const nextInvoice:SupplierInvoiceRecord={
+            ...invoice,status:'PAYABLE_RECOGNIZED',recognizedBy:context.actorId,recognizedAt:now,
+            journalEntryId:journalId,resolvedBy:context.actorId,resolvedAt:now,resolutionNotes:payload.notes,updatedAt:now,
+          };
+          return {
+            domainState:nextInvoice,
+            additionalStateWrites:[
+              ...usages.map(usage=>({
+                entityType:'CONSIGNMENT_USAGE',entityId:usage.usageId,
+                domainState:{...usage,status:'INVOICED_PAYABLE_RECOGNIZED',supplierInvoiceId:invoice.invoiceId},
+              })),
+              {entityType:'JOURNAL_ENTRY',entityId:journalId,domainState:journal},
+            ],
+            eventPayload:{invoiceId:invoice.invoiceId,decision:'APPROVE',usageIds,journalId,totalAmountMinorUnits:invoice.totalAmountMinorUnits},
+            auditReason:`Recognized consignment supplier invoice ${invoice.invoiceNumber} into Accounts Payable.`,
+            resultData:nextInvoice,
+          };
+        },
+      });
+      return {success:true,commandId,idempotencyKey,entityId:payload.invoiceId,eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:tx.resultData};
     }catch(error){if(error instanceof AtomicMutationRejectedError)return rejection(commandId,idempotencyKey,error.code,error.message,error.details);throw error;}
   }
 }

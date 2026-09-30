@@ -58,6 +58,7 @@ export async function loadLocalEdgeSnapshot(tenantId: string): Promise<EdgeSnaps
     'payrollEmployeeSlots',
     'payrollPayslips',
     'payrollStatutoryLiabilities',
+    'payrollComplianceSnapshots',
     'hcmIntelligenceSnapshots',
     'items',
     'inventoryBalances',

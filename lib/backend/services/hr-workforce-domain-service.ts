@@ -49,6 +49,34 @@ function workforceIdentityId(kind:'EMAIL'|'NATIONAL_ID', value:string):string{
   const normalized=value.trim().toLowerCase();
   const digest=createHash('sha256').update(`${kind}\u0000${normalized}`).digest('hex').slice(0,40);
   return `wid_${kind.toLowerCase()}_${digest}`;
+function credentialIdentityId(
+  credentialType:EmployeeCredential['credentialType'],
+  credentialNumber:string
+):string{
+  const normalized=credentialNumber.trim().toUpperCase().replace(/\s+/g,' ');
+  return 'cred_ident_'+createHash('sha256')
+    .update(`${credentialType}\u0000${normalized}`)
+    .digest('hex')
+    .slice(0,40);
+}
+
+function privilegeSlotId(params:{
+  employeeId:string;
+  privilegeType:ClinicalPrivilege['privilegeType'];
+  facilityId:string;
+  departmentId:string;
+}):string{
+  return 'prv_slot_'+createHash('sha256')
+    .update([
+      params.employeeId,
+      params.privilegeType,
+      params.facilityId,
+      params.departmentId,
+    ].map(v=>v.trim().toLowerCase()).join('\u0000'))
+    .digest('hex')
+    .slice(0,40);
+}
+
 }
 
 function workforceReject<T>(
@@ -685,47 +713,132 @@ export class HrWorkforceDomainService {
     context: CommandContext,
     commandId: string,
     idempotencyKey: string,
-    payload: Omit<EmployeeCredential, 'credentialId' | 'verificationStatus' | 'createdAt' | 'updatedAt'>
+    payload: Omit<
+      EmployeeCredential,
+      | 'credentialId'
+      | 'employeeName'
+      | 'verificationStatus'
+      | 'verifiedByActorId'
+      | 'verifiedByName'
+      | 'verifiedAt'
+      | 'submittedByActorId'
+      | 'submittedAt'
+      | 'createdAt'
+      | 'updatedAt'
+    >
   ): Promise<CommandResult<EmployeeCredential>> {
-    const credentialId = `crd_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const now = new Date().toISOString();
-
-    const credential: EmployeeCredential = {
-      ...payload,
-      credentialId,
-      verificationStatus: 'UNDER_REVIEW',
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    this.credentials.set(credentialId, credential);
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'EMPLOYEE_CREDENTIAL',
-      entityId: credentialId,
-      eventType: 'CREDENTIAL_SUBMITTED',
-      domainState: credential,
-      eventPayload: {
-        credentialId,
-        employeeId: payload.employeeId,
-        credentialType: payload.credentialType,
-        credentialNumber: payload.credentialNumber,
-        expiryDate: payload.expiryDate,
-      },
-      auditReason: `Credential ${payload.title} (${payload.credentialNumber}) submitted for employee ${payload.employeeId}`,
-      outboxTopic: 'g-hims-credential-events',
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['HR_ADMIN','MEDICAL_DIRECTOR','SYSTEM_ADMIN'],
     });
+    if(!auth.authorized){
+      return workforceReject(
+        commandId,idempotencyKey,auth.code||'UNAUTHORIZED',
+        auth.reason||'Credential submission authority required.'
+      );
+    }
 
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: credentialId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: credential,
-    };
+    const employee=await this.loadEmployee(context.tenantId,payload.employeeId);
+    if(!employee){
+      return workforceReject(commandId,idempotencyKey,'EMPLOYEE_NOT_FOUND','Credential target employee does not exist.');
+    }
+    try{
+      assertWorkforceFacilityScope(context,employee.facilityIds);
+      if(['TERMINATED','RETIRED','INACTIVE'].includes(employee.employmentStatus)){
+        throw new AtomicMutationRejectedError(
+          'EMPLOYEE_NOT_CREDENTIALABLE',
+          `Credentials cannot be submitted for employee status ${employee.employmentStatus}.`
+        );
+      }
+      const issueMs=Date.parse(payload.issueDate);
+      const expiryMs=Date.parse(payload.expiryDate);
+      if(!Number.isFinite(issueMs)||!Number.isFinite(expiryMs)||expiryMs<=issueMs){
+        throw new AtomicMutationRejectedError(
+          'INVALID_CREDENTIAL_VALIDITY',
+          'Credential issue/expiry dates are invalid.'
+        );
+      }
+
+      const credentialId=`crd_${randomUUID()}`;
+      const identityId=credentialIdentityId(payload.credentialType,payload.credentialNumber);
+      const normalizedNumber=payload.credentialNumber.trim().toUpperCase().replace(/\s+/g,' ');
+      const now=new Date().toISOString();
+      const credential:EmployeeCredential={
+        ...payload,
+        employeeName:`${employee.personalInfo.legalFirstName} ${employee.personalInfo.legalLastName}`,
+        credentialNumber:normalizedNumber,
+        credentialId,
+        verificationStatus:'UNDER_REVIEW',
+        submittedByActorId:context.actorId,
+        submittedAt:now,
+        createdAt:now,
+        updatedAt:now,
+      };
+
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,
+        actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'EMPLOYEE_CREDENTIAL',
+        aggregateId:credentialId,
+        eventType:'CREDENTIAL_SUBMITTED',
+        auditAction:'CREDENTIAL_SUBMITTED',
+        auditResourceType:'EMPLOYEE_CREDENTIAL',
+        auditResourceId:credentialId,
+        outboxTopic:'g-hims-credential-events',
+        idempotencyKey,commandId,correlationId:context.correlationId,
+        readTargets:[
+          {key:'employee',entityType:'EMPLOYEE_MASTER',entityId:employee.employeeId,required:true},
+          {key:'identity',entityType:'CREDENTIAL_IDENTITY',entityId:identityId,required:false},
+        ],
+        prepare:(current)=>{
+          const currentEmployee=current.employee as unknown as EmployeeMaster;
+          if(['TERMINATED','RETIRED','INACTIVE'].includes(currentEmployee.employmentStatus)){
+            throw new AtomicMutationRejectedError('EMPLOYEE_NOT_CREDENTIALABLE','Employee status changed before credential submission.');
+          }
+          if(current.identity){
+            throw new AtomicMutationRejectedError(
+              'CREDENTIAL_NUMBER_ALREADY_REGISTERED',
+              'This credential type/number is already registered in the tenant.'
+            );
+          }
+          return {
+            domainState:credential,
+            additionalStateWrites:[{
+              entityType:'CREDENTIAL_IDENTITY',
+              entityId:identityId,
+              domainState:{
+                identityId,
+                tenantId:context.tenantId,
+                credentialId,
+                employeeId:credential.employeeId,
+                credentialType:credential.credentialType,
+                credentialNumber:normalizedNumber,
+                createdAt:now,
+              },
+            }],
+            eventPayload:{
+              credentialId,
+              employeeId:credential.employeeId,
+              credentialType:credential.credentialType,
+              credentialNumber:normalizedNumber,
+              expiryDate:credential.expiryDate,
+            },
+            auditReason:`Credential ${credential.title} (${normalizedNumber}) submitted for employee ${credential.employeeId}.`,
+            resultData:credential,
+          };
+        },
+      });
+      this.credentials.set(credentialId,credential);
+      return {
+        success:true,commandId,idempotencyKey,entityId:credentialId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:credential,
+      };
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
+    }
   }
 
   public static async verifyCredential(
@@ -738,68 +851,104 @@ export class HrWorkforceDomainService {
       notes?: string;
     }
   ): Promise<CommandResult<EmployeeCredential>> {
-    const auth = AuthorizationPipeline.evaluate(context, {
-      requiredRoles: ['MEDICAL_DIRECTOR', 'HR_ADMIN', 'SYSTEM_ADMIN'],
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['MEDICAL_DIRECTOR','HR_ADMIN','SYSTEM_ADMIN'],
     });
-
-    if (!auth.authorized) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: auth.code || 'UNAUTHORIZED', message: auth.reason || 'Medical Director authority required to verify credentials.' },
-      };
+    if(!auth.authorized){
+      return workforceReject(
+        commandId,idempotencyKey,auth.code||'UNAUTHORIZED',
+        auth.reason||'Credential verification authority required.'
+      );
     }
 
-    const credential = await this.loadCredential(context.tenantId, payload.credentialId);
-    if (!credential) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: 'CREDENTIAL_NOT_FOUND', message: `Credential ${payload.credentialId} not found.` },
-      };
+    const preflight=await this.loadCredential(context.tenantId,payload.credentialId);
+    if(!preflight){
+      return workforceReject(commandId,idempotencyKey,'CREDENTIAL_NOT_FOUND',`Credential ${payload.credentialId} not found.`);
+    }
+    const employee=await this.loadEmployee(context.tenantId,preflight.employeeId);
+    if(!employee){
+      return workforceReject(commandId,idempotencyKey,'EMPLOYEE_NOT_FOUND','Credential employee no longer exists.');
     }
 
-    const now = new Date().toISOString();
-    credential.verificationStatus = payload.status;
-    credential.verifiedByActorId = context.actorId;
-    credential.verifiedByName = 'Medical Director Office';
-    credential.verifiedAt = now;
-    credential.notes = payload.notes || credential.notes;
-    credential.updatedAt = now;
-
-    this.credentials.set(payload.credentialId, credential);
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'EMPLOYEE_CREDENTIAL',
-      entityId: payload.credentialId,
-      eventType: payload.status === 'VERIFIED' ? 'CREDENTIAL_VERIFIED' : 'CREDENTIAL_REJECTED',
-      domainState: credential,
-      eventPayload: {
-        credentialId: payload.credentialId,
-        employeeId: credential.employeeId,
-        verificationStatus: payload.status,
-        verifiedBy: context.actorId,
-      },
-      auditReason: `Credential ${credential.title} set to ${payload.status} by ${context.actorId}`,
-      outboxTopic: 'g-hims-credential-events',
-    });
-
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: payload.credentialId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: credential,
-    };
+    try{
+      assertWorkforceFacilityScope(context,employee.facilityIds);
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,
+        actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'EMPLOYEE_CREDENTIAL',
+        aggregateId:payload.credentialId,
+        eventType:payload.status==='VERIFIED'?'CREDENTIAL_VERIFIED':'CREDENTIAL_REJECTED',
+        auditAction:payload.status==='VERIFIED'?'CREDENTIAL_VERIFIED':'CREDENTIAL_REJECTED',
+        auditResourceType:'EMPLOYEE_CREDENTIAL',
+        auditResourceId:payload.credentialId,
+        outboxTopic:'g-hims-credential-events',
+        idempotencyKey,commandId,correlationId:context.correlationId,
+        readTargets:[
+          {key:'credential',entityType:'EMPLOYEE_CREDENTIAL',entityId:payload.credentialId,required:true},
+          {key:'employee',entityType:'EMPLOYEE_MASTER',entityId:employee.employeeId,required:true},
+        ],
+        prepare:(current)=>{
+          const credential=current.credential as unknown as EmployeeCredential;
+          if(!['PENDING','SUBMITTED','UNDER_REVIEW'].includes(credential.verificationStatus)){
+            throw new AtomicMutationRejectedError(
+              'CREDENTIAL_NOT_REVIEWABLE',
+              `Credential in status ${credential.verificationStatus} cannot be reviewed again.`
+            );
+          }
+          if(credential.submittedByActorId&&credential.submittedByActorId===context.actorId){
+            throw new AtomicMutationRejectedError(
+              'HCM_SEGREGATION_OF_DUTIES',
+              'Credential submitter cannot verify the same credential.'
+            );
+          }
+          const today=new Date().toISOString().slice(0,10);
+          if(payload.status==='VERIFIED'&&credential.expiryDate<today){
+            throw new AtomicMutationRejectedError(
+              'CREDENTIAL_ALREADY_EXPIRED',
+              'An expired credential cannot be verified as active.'
+            );
+          }
+          const now=new Date().toISOString();
+          const next:EmployeeCredential={
+            ...credential,
+            verificationStatus:payload.status,
+            verifiedByActorId:context.actorId,
+            verifiedByName:context.actorId,
+            verifiedAt:now,
+            notes:payload.notes||credential.notes,
+            updatedAt:now,
+          };
+          return {
+            domainState:next,
+            eventPayload:{
+              credentialId:next.credentialId,
+              employeeId:next.employeeId,
+              verificationStatus:next.verificationStatus,
+              verifiedBy:context.actorId,
+            },
+            auditReason:`Credential ${next.credentialId} set to ${next.verificationStatus} by ${context.actorId}.`,
+            resultData:next,
+          };
+        },
+      });
+      const next=tx.resultData as EmployeeCredential;
+      this.credentials.set(payload.credentialId,next);
+      return {
+        success:true,commandId,idempotencyKey,entityId:payload.credentialId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:next,
+      };
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
+    }
   }
 
   /**
-   * Enforces automated clinical practice lockout if mandatory credentials have expired.
+   * Test/runtime helper. Production command authorization derives eligibility from
+   * persistent tenant-scoped credential/privilege records in authorization-context.ts.
    */
   public static checkClinicalEligibility(employeeId: string): {
     isEligible: boolean;
@@ -807,197 +956,352 @@ export class HrWorkforceDomainService {
     expiredCredentials: EmployeeCredential[];
     activePrivileges: ClinicalPrivilege[];
   } {
-    const today = new Date().toISOString().split('T')[0];
-    const employeeCreds = Array.from(this.credentials.values()).filter(
-      (c) => c.employeeId === employeeId
+    const today=new Date().toISOString().slice(0,10);
+    const employeeCreds=Array.from(this.credentials.values()).filter(c=>c.employeeId===employeeId);
+    const mandatory=employeeCreds.filter(c=>c.isMandatoryForPractice);
+    const invalidMandatory=mandatory.filter(c=>
+      c.verificationStatus!=='VERIFIED'||!c.expiryDate||c.expiryDate<today
     );
-
-    const expiredOrInvalidMandatory = employeeCreds.filter(
-      (c) =>
-        c.isMandatoryForPractice &&
-        (c.verificationStatus !== 'VERIFIED' || (c.expiryDate && c.expiryDate < today))
+    const employeePrivileges=Array.from(this.privileges.values()).filter(p=>
+      p.employeeId===employeeId&&
+      p.status==='GRANTED'&&
+      p.effectiveFrom<=today&&
+      p.effectiveUntil>=today
     );
-
-    const employeePrivileges = Array.from(this.privileges.values()).filter(
-      (p) => p.employeeId === employeeId && p.status === 'GRANTED' && p.effectiveUntil >= today
-    );
-
-    if (expiredOrInvalidMandatory.length > 0) {
+    if(mandatory.length===0||invalidMandatory.length>0){
       return {
-        isEligible: false,
-        reason: `CLINICAL PRACTICE LOCKOUT: ${expiredOrInvalidMandatory.length} mandatory license(s) expired or unverified (${expiredOrInvalidMandatory.map((c) => c.title).join(', ')}).`,
-        expiredCredentials: expiredOrInvalidMandatory,
-        activePrivileges: [],
+        isEligible:false,
+        reason:mandatory.length===0
+          ? 'CLINICAL PRACTICE LOCKOUT: no mandatory verified credential is on file.'
+          : `CLINICAL PRACTICE LOCKOUT: ${invalidMandatory.length} mandatory credential(s) expired or unverified.`,
+        expiredCredentials:invalidMandatory,
+        activePrivileges:[],
       };
     }
-
-    return {
-      isEligible: true,
-      expiredCredentials: [],
-      activePrivileges: employeePrivileges,
-    };
+    return {isEligible:true,expiredCredentials:[],activePrivileges:employeePrivileges};
   }
 
   public static async grantClinicalPrivilege(
     context: CommandContext,
     commandId: string,
     idempotencyKey: string,
-    payload: Omit<ClinicalPrivilege, 'privilegeId' | 'status' | 'grantedByActorId' | 'createdAt' | 'updatedAt'>
+    payload: Omit<
+      ClinicalPrivilege,
+      | 'privilegeId'
+      | 'employeeName'
+      | 'status'
+      | 'grantedByActorId'
+      | 'grantedByName'
+      | 'reviewedAt'
+      | 'statusReason'
+      | 'statusChangedByActorId'
+      | 'statusChangedAt'
+      | 'createdAt'
+      | 'updatedAt'
+    >
   ): Promise<CommandResult<ClinicalPrivilege>> {
-    const auth = AuthorizationPipeline.evaluate(context, {
-      requiredRoles: ['MEDICAL_DIRECTOR', 'SYSTEM_ADMIN'],
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['MEDICAL_DIRECTOR','SYSTEM_ADMIN'],
     });
-
-    if (!auth.authorized) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: 'UNAUTHORIZED', message: 'Medical Director authority required to grant clinical privileges.' },
-      };
+    if(!auth.authorized){
+      return workforceReject(commandId,idempotencyKey,auth.code||'UNAUTHORIZED','Medical Director authority required to grant clinical privileges.');
     }
 
-    const employee = await this.loadEmployee(context.tenantId, payload.employeeId);
-    if (!employee) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: 'EMPLOYEE_NOT_FOUND', message: 'Clinical privilege target employee does not exist.' },
-      };
+    const employee=await this.loadEmployee(context.tenantId,payload.employeeId);
+    if(!employee){
+      return workforceReject(commandId,idempotencyKey,'EMPLOYEE_NOT_FOUND','Clinical privilege target employee does not exist.');
     }
+    try{
+      assertWorkforceFacilityScope(context,[payload.facilityId]);
+      if(employee.employmentStatus!=='ACTIVE'){
+        throw new AtomicMutationRejectedError(
+          'EMPLOYEE_NOT_ACTIVE',
+          `Clinical privileges cannot be granted while employee status is ${employee.employmentStatus}.`
+        );
+      }
+      if(
+        !employee.facilityIds.includes(payload.facilityId) ||
+        !employee.departmentIds.includes(payload.departmentId)
+      ){
+        throw new AtomicMutationRejectedError(
+          'PRIVILEGE_SCOPE_OUTSIDE_EMPLOYEE_ASSIGNMENT',
+          'Clinical privilege scope must be within the employee workforce assignment.'
+        );
+      }
+      const today=new Date().toISOString().slice(0,10);
+      if(
+        !payload.effectiveFrom ||
+        !payload.effectiveUntil ||
+        payload.effectiveFrom>payload.effectiveUntil ||
+        payload.effectiveUntil<today
+      ){
+        throw new AtomicMutationRejectedError('INVALID_PRIVILEGE_VALIDITY','Clinical privilege requires a valid effective period.');
+      }
 
-    if (employee.employmentStatus !== 'ACTIVE') {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: {
-          code: 'EMPLOYEE_NOT_ACTIVE',
-          message: `Clinical privileges cannot be granted while employee status is ${employee.employmentStatus}.`,
+      const credentials=await DomainStateRepository.queryEqual<EmployeeCredential>(
+        context.tenantId,'clinicalCredentials','employeeId',payload.employeeId
+      );
+      const credentialTargets=credentials.map((credential,index)=>({
+        key:`credential:${index}`,
+        entityType:'EMPLOYEE_CREDENTIAL',
+        entityId:credential.credentialId,
+        required:true,
+      }));
+      const slotId=privilegeSlotId(payload);
+      const privilegeId=`prv_${randomUUID()}`;
+      const now=new Date().toISOString();
+
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,
+        actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'CLINICAL_PRIVILEGE',
+        aggregateId:privilegeId,
+        eventType:'CLINICAL_PRIVILEGE_GRANTED',
+        auditAction:'CLINICAL_PRIVILEGE_GRANTED',
+        auditResourceType:'CLINICAL_PRIVILEGE',
+        auditResourceId:privilegeId,
+        outboxTopic:'g-hims-privilege-events',
+        idempotencyKey,commandId,correlationId:context.correlationId,
+        readTargets:[
+          {key:'employee',entityType:'EMPLOYEE_MASTER',entityId:employee.employeeId,required:true},
+          {key:'slot',entityType:'CLINICAL_PRIVILEGE_SLOT',entityId:slotId,required:false},
+          ...credentialTargets,
+        ],
+        prepare:(current)=>{
+          const currentEmployee=current.employee as unknown as EmployeeMaster;
+          if(currentEmployee.employmentStatus!=='ACTIVE'){
+            throw new AtomicMutationRejectedError('EMPLOYEE_NOT_ACTIVE','Employee status changed before privilege grant.');
+          }
+          const currentCredentials=credentialTargets.map(target=>
+            current[target.key] as unknown as EmployeeCredential
+          );
+          const mandatory=currentCredentials.filter(credential=>credential.isMandatoryForPractice);
+          const invalidMandatory=mandatory.filter(credential=>
+            credential.verificationStatus!=='VERIFIED' ||
+            !credential.expiryDate ||
+            credential.expiryDate<today
+          );
+          if(mandatory.length===0||invalidMandatory.length>0){
+            throw new AtomicMutationRejectedError(
+              'CREDENTIAL_PREREQUISITE_FAILED',
+              mandatory.length===0
+                ? 'Clinical privilege denied: no mandatory verified credential is on file.'
+                : `Clinical privilege denied: ${invalidMandatory.length} mandatory credential(s) are expired or unverified.`
+            );
+          }
+          const slot=current.slot as unknown as {status?:string;activePrivilegeId?:string}|null;
+          if(slot?.status==='ACTIVE'){
+            throw new AtomicMutationRejectedError(
+              'ACTIVE_PRIVILEGE_ALREADY_EXISTS',
+              `An active ${payload.privilegeType} privilege already exists for this scope.`
+            );
+          }
+
+          const privilege:ClinicalPrivilege={
+            ...payload,
+            employeeName:`${currentEmployee.personalInfo.legalFirstName} ${currentEmployee.personalInfo.legalLastName}`,
+            privilegeId,
+            status:'GRANTED',
+            grantedByActorId:context.actorId,
+            grantedByName:context.actorId,
+            reviewedAt:now,
+            statusChangedByActorId:context.actorId,
+            statusChangedAt:now,
+            createdAt:now,
+            updatedAt:now,
+          };
+          return {
+            domainState:privilege,
+            additionalStateWrites:[{
+              entityType:'CLINICAL_PRIVILEGE_SLOT',
+              entityId:slotId,
+              domainState:{
+                slotId,tenantId:context.tenantId,
+                employeeId:payload.employeeId,
+                privilegeType:payload.privilegeType,
+                facilityId:payload.facilityId,
+                departmentId:payload.departmentId,
+                activePrivilegeId:privilegeId,
+                status:'ACTIVE',
+                updatedAt:now,
+              },
+            }],
+            eventPayload:{
+              privilegeId,
+              employeeId:payload.employeeId,
+              privilegeType:payload.privilegeType,
+              facilityId:payload.facilityId,
+              departmentId:payload.departmentId,
+              effectiveFrom:payload.effectiveFrom,
+              effectiveUntil:payload.effectiveUntil,
+            },
+            auditReason:`Granted privilege ${payload.privilegeType} to employee ${payload.employeeId}.`,
+            resultData:privilege,
+          };
         },
-      };
-    }
-
-    // Credential authority is resolved from persistent tenant-scoped records,
-    // never from process memory alone.
-    const credentials = await DomainStateRepository.queryEqual<EmployeeCredential>(
-      context.tenantId,
-      'clinicalCredentials',
-      'employeeId',
-      payload.employeeId
-    );
-
-    const today = new Date().toISOString().split('T')[0];
-    const mandatoryCredentials = credentials.filter((credential) => credential.isMandatoryForPractice);
-    const invalidMandatory = mandatoryCredentials.filter(
-      (credential) =>
-        credential.verificationStatus !== 'VERIFIED' ||
-        !credential.expiryDate ||
-        credential.expiryDate < today
-    );
-    const verifiedActiveCredentials = credentials.filter(
-      (credential) =>
-        credential.verificationStatus === 'VERIFIED' &&
-        !!credential.expiryDate &&
-        credential.expiryDate >= today
-    );
-
-    if (verifiedActiveCredentials.length === 0 || invalidMandatory.length > 0) {
+      });
+      const privilege=tx.resultData as ClinicalPrivilege;
+      this.privileges.set(privilegeId,privilege);
       return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: {
-          code: 'CREDENTIAL_PREREQUISITE_FAILED',
-          message:
-            invalidMandatory.length > 0
-              ? `Clinical privilege denied: ${invalidMandatory.length} mandatory credential(s) are expired or unverified.`
-              : 'Clinical privilege denied: no verified, unexpired professional credential is on file.',
-        },
+        success:true,commandId,idempotencyKey,entityId:privilegeId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:privilege,
       };
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
     }
+  }
 
-    if (!payload.effectiveFrom || !payload.effectiveUntil || payload.effectiveUntil < today) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: {
-          code: 'INVALID_PRIVILEGE_VALIDITY',
-          message: 'Clinical privilege requires a valid effective period that has not already expired.',
-        },
-      };
+  public static async changeClinicalPrivilegeStatus(
+    context:CommandContext,
+    commandId:string,
+    idempotencyKey:string,
+    payload:{
+      privilegeId:string;
+      status:'GRANTED'|'SUSPENDED'|'REVOKED';
+      reason:string;
     }
-
-    const existingPrivileges = await DomainStateRepository.queryEqual<ClinicalPrivilege>(
-      context.tenantId,
-      'clinicalPrivileges',
-      'employeeId',
-      payload.employeeId
-    );
-    const duplicate = existingPrivileges.find(
-      (privilege) =>
-        privilege.privilegeType === payload.privilegeType &&
-        privilege.facilityId === payload.facilityId &&
-        privilege.departmentId === payload.departmentId &&
-        privilege.status === 'GRANTED' &&
-        privilege.effectiveUntil >= today
-    );
-
-    if (duplicate) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: {
-          code: 'ACTIVE_PRIVILEGE_ALREADY_EXISTS',
-          message: `An active ${payload.privilegeType} privilege already exists for this scope.`,
-        },
-      };
-    }
-
-    const privilegeId = `prv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const now = new Date().toISOString();
-
-    const privilege: ClinicalPrivilege = {
-      ...payload,
-      privilegeId,
-      status: 'GRANTED',
-      grantedByActorId: context.actorId,
-      grantedByName: 'Medical Board & Credentialing Committee',
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    this.privileges.set(privilegeId, privilege);
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'CLINICAL_PRIVILEGE',
-      entityId: privilegeId,
-      eventType: 'CLINICAL_PRIVILEGE_GRANTED',
-      domainState: privilege,
-      eventPayload: {
-        privilegeId,
-        employeeId: payload.employeeId,
-        privilegeType: payload.privilegeType,
-        effectiveFrom: payload.effectiveFrom,
-        effectiveUntil: payload.effectiveUntil,
-      },
-      auditReason: `Granted privilege ${payload.privilegeType} to employee ${payload.employeeId}`,
-      outboxTopic: 'g-hims-privilege-events',
+  ):Promise<CommandResult<ClinicalPrivilege>>{
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['MEDICAL_DIRECTOR','SYSTEM_ADMIN'],
     });
+    if(!auth.authorized){
+      return workforceReject(commandId,idempotencyKey,auth.code||'UNAUTHORIZED','Medical Director authority required to change clinical privileges.');
+    }
 
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: privilegeId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: privilege,
-    };
+    const preflight=await DomainStateRepository.getById<ClinicalPrivilege>(
+      context.tenantId,'clinicalPrivileges',payload.privilegeId
+    );
+    if(!preflight){
+      return workforceReject(commandId,idempotencyKey,'CLINICAL_PRIVILEGE_NOT_FOUND','Clinical privilege does not exist.');
+    }
+    const employee=await this.loadEmployee(context.tenantId,preflight.employeeId);
+    if(!employee){
+      return workforceReject(commandId,idempotencyKey,'EMPLOYEE_NOT_FOUND','Privilege employee does not exist.');
+    }
+
+    try{
+      assertWorkforceFacilityScope(context,[preflight.facilityId]);
+      const credentials=payload.status==='GRANTED'
+        ? await DomainStateRepository.queryEqual<EmployeeCredential>(
+            context.tenantId,'clinicalCredentials','employeeId',preflight.employeeId
+          )
+        : [];
+      const credentialTargets=credentials.map((credential,index)=>({
+        key:`credential:${index}`,
+        entityType:'EMPLOYEE_CREDENTIAL',
+        entityId:credential.credentialId,
+        required:true,
+      }));
+      const slotId=privilegeSlotId(preflight);
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,
+        actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'CLINICAL_PRIVILEGE',
+        aggregateId:payload.privilegeId,
+        eventType:payload.status==='GRANTED'
+          ? 'CLINICAL_PRIVILEGE_REINSTATED'
+          : payload.status==='SUSPENDED'
+            ? 'CLINICAL_PRIVILEGE_SUSPENDED'
+            : 'CLINICAL_PRIVILEGE_REVOKED',
+        auditAction:'CLINICAL_PRIVILEGE_STATUS_CHANGED',
+        auditResourceType:'CLINICAL_PRIVILEGE',
+        auditResourceId:payload.privilegeId,
+        outboxTopic:'g-hims-privilege-events',
+        idempotencyKey,commandId,correlationId:context.correlationId,
+        readTargets:[
+          {key:'privilege',entityType:'CLINICAL_PRIVILEGE',entityId:payload.privilegeId,required:true},
+          {key:'employee',entityType:'EMPLOYEE_MASTER',entityId:preflight.employeeId,required:true},
+          {key:'slot',entityType:'CLINICAL_PRIVILEGE_SLOT',entityId:slotId,required:false},
+          ...credentialTargets,
+        ],
+        prepare:(current)=>{
+          const privilege=current.privilege as unknown as ClinicalPrivilege;
+          const currentEmployee=current.employee as unknown as EmployeeMaster;
+          if(privilege.status==='REVOKED'){
+            throw new AtomicMutationRejectedError('PRIVILEGE_REVOKED_TERMINAL','A revoked privilege cannot be reactivated or changed.');
+          }
+          if(payload.status==='GRANTED'){
+            if(privilege.status!=='SUSPENDED'){
+              throw new AtomicMutationRejectedError('PRIVILEGE_NOT_REINSTATABLE','Only a suspended privilege may be reinstated.');
+            }
+            if(currentEmployee.employmentStatus!=='ACTIVE'){
+              throw new AtomicMutationRejectedError('EMPLOYEE_NOT_ACTIVE','Inactive employee cannot regain clinical privilege.');
+            }
+            const today=new Date().toISOString().slice(0,10);
+            if(privilege.effectiveUntil<today){
+              throw new AtomicMutationRejectedError('PRIVILEGE_EXPIRED','Expired privilege cannot be reinstated.');
+            }
+            const currentCredentials=credentialTargets.map(target=>
+              current[target.key] as unknown as EmployeeCredential
+            );
+            const mandatory=currentCredentials.filter(credential=>credential.isMandatoryForPractice);
+            if(
+              mandatory.length===0 ||
+              mandatory.some(credential=>
+                credential.verificationStatus!=='VERIFIED' ||
+                !credential.expiryDate ||
+                credential.expiryDate<today
+              )
+            ){
+              throw new AtomicMutationRejectedError('CREDENTIAL_PREREQUISITE_FAILED','Credential prerequisites are not satisfied for reinstatement.');
+            }
+          }
+          const now=new Date().toISOString();
+          const next:ClinicalPrivilege={
+            ...privilege,
+            status:payload.status,
+            statusReason:payload.reason,
+            statusChangedByActorId:context.actorId,
+            statusChangedAt:now,
+            reviewedAt:now,
+            updatedAt:now,
+          };
+          return {
+            domainState:next,
+            additionalStateWrites:[{
+              entityType:'CLINICAL_PRIVILEGE_SLOT',
+              entityId:slotId,
+              domainState:{
+                slotId,tenantId:context.tenantId,
+                employeeId:next.employeeId,
+                privilegeType:next.privilegeType,
+                facilityId:next.facilityId,
+                departmentId:next.departmentId,
+                activePrivilegeId:next.privilegeId,
+                status:payload.status==='GRANTED'
+                  ? 'ACTIVE'
+                  : payload.status,
+                updatedAt:now,
+              },
+            }],
+            eventPayload:{
+              privilegeId:next.privilegeId,
+              employeeId:next.employeeId,
+              status:next.status,
+              reason:payload.reason,
+            },
+            auditReason:`Clinical privilege ${next.privilegeId} changed to ${next.status}: ${payload.reason}`,
+            resultData:next,
+          };
+        },
+      });
+      const next=tx.resultData as ClinicalPrivilege;
+      this.privileges.set(next.privilegeId,next);
+      return {
+        success:true,commandId,idempotencyKey,entityId:next.privilegeId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:next,
+      };
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
+    }
   }
 
   // ============================================================================

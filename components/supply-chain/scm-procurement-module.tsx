@@ -10,6 +10,7 @@ import {
 } from '@/types/scm-domain';
 import {
   convertPurchaseRequisitionToOrderEdge,
+  reviewPurchaseOrderEdge,
   reviewPurchaseRequisitionEdge,
   submitPurchaseRequisitionEdge,
 } from '@/lib/supply-chain/scm-edge-adapter';
@@ -245,6 +246,30 @@ export function ScmProcurementModule({
       setFeedback({
         type: 'error',
         text: err instanceof Error ? err.message : 'Failed to generate PO.',
+      });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleApprovePurchaseOrder = async (po: PurchaseOrderRecord) => {
+    setActionLoading(true);
+    setFeedback(null);
+    try {
+      await reviewPurchaseOrderEdge({
+        purchaseOrderId: po.poId,
+        decision: 'APPROVED',
+        comments: 'Approved through authenticated SCM financial governance.',
+      });
+      setFeedback({
+        type: 'success',
+        text: `Purchase Order ${po.poNumber} approved by the authenticated authority.`,
+      });
+      await onRefresh();
+    } catch (err: unknown) {
+      setFeedback({
+        type: 'error',
+        text: err instanceof Error ? err.message : 'Purchase order approval failed.',
       });
     } finally {
       setActionLoading(false);
@@ -542,6 +567,7 @@ export function ScmProcurementModule({
                   <th className="p-3">Payment Terms</th>
                   <th className="p-3 text-right">Total Amount</th>
                   <th className="p-3 text-center">Status</th>
+                  <th className="p-3 text-right">Governance</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -569,6 +595,22 @@ export function ScmProcurementModule({
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 font-mono">
                         {po.status}
                       </span>
+                    </td>
+                    <td className="p-3 text-right">
+                      {po.status === 'PENDING_APPROVAL' ? (
+                        <button
+                          type="button"
+                          disabled={actionLoading}
+                          onClick={() => void handleApprovePurchaseOrder(po)}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold"
+                        >
+                          Approve PO
+                        </button>
+                      ) : (
+                        <span className="text-[10px] text-slate-400">
+                          {po.status === 'APPROVED' ? 'Approved' : 'No action'}
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}

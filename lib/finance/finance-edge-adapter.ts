@@ -86,7 +86,7 @@ export const postManualJournalEdge=(
 );
 
 function toLegacyJournal(journal:GovernedJournalRecord):JournalEntry{
-  const module:JournalEntry['sourceModule'] =
+  const legacySourceModule:JournalEntry['sourceModule'] =
     journal.sourceModule==='AP'?'ap_invoice':
     journal.sourceModule==='ASSETS'?'depreciation':
     journal.sourceModule==='BILLING'||journal.sourceModule==='AR'?'patient_billing':
@@ -98,7 +98,7 @@ function toLegacyJournal(journal:GovernedJournalRecord):JournalEntry{
     postingDate:new Date(journal.postingDate).toISOString().slice(0,10),
     referenceNumber:journal.referenceDocumentId||'',
     description:journal.documentHeader,
-    sourceModule:module,
+    sourceModule:legacySourceModule,
     lines:journal.lines.map((line,index)=>({
       id:`${journal.journalId}_${index}`,
       accountCode:line.glAccountId,

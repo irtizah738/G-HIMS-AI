@@ -10,6 +10,7 @@ import type {
   PurchaseOrderRecord,
   SupplierMaster,
 } from '@/types/scm-domain';
+import type { Account } from '@/types/erp-finance';
 import type {
   ApproveSupplierPaymentAuthorizationPayload,
   RecognizeSupplierInvoicePayablePayload,
@@ -274,6 +275,19 @@ export class ScmPayablesDomainService {
               'Supplier invoice currency must match the purchase order currency until governed FX settlement is enabled.'
             );
           }
+          const issueDateMs = Date.parse(payload.issueDate);
+          const dueDateMs = Date.parse(payload.dueDate);
+          if (
+            !Number.isFinite(issueDateMs) ||
+            !Number.isFinite(dueDateMs) ||
+            dueDateMs < issueDateMs
+          ) {
+            throw new AtomicMutationRejectedError(
+              'INVALID_SUPPLIER_INVOICE_DATES',
+              'Supplier invoice issue and due dates must be valid, with due date on or after issue date.'
+            );
+          }
+
           if (
             !['PARTIALLY_RECEIVED', 'FULLY_RECEIVED'].includes(po.status)
           ) {
@@ -334,6 +348,16 @@ export class ScmPayablesDomainService {
             ),
             quantityTolerance: Math.max(0, payload.quantityTolerance ?? 0),
           });
+
+          if (
+            !Number.isSafeInteger(evaluation.invoiceTotalMinorUnits) ||
+            evaluation.invoiceTotalMinorUnits <= 0
+          ) {
+            throw new AtomicMutationRejectedError(
+              'INVALID_SUPPLIER_INVOICE_TOTAL',
+              'Supplier invoice total must be a positive safe integer in minor currency units.'
+            );
+          }
 
           if (evaluation.exceptions.includes('OVER_INVOICED')) {
             throw new AtomicMutationRejectedError(
@@ -404,6 +428,7 @@ export class ScmPayablesDomainService {
             totalAmountMinorUnits: evaluation.invoiceTotalMinorUnits,
             amountPaidMinorUnits: 0,
             balanceMinorUnits: evaluation.invoiceTotalMinorUnits,
+            pendingPaymentMinorUnits: 0,
             matchId,
             matchStatus,
             status,
@@ -981,6 +1006,12 @@ export class ScmPayablesDomainService {
             entityId: payload.invoiceId,
             required: true,
           },
+          {
+            key: 'sourceAccount',
+            entityType: 'GL_ACCOUNT',
+            entityId: payload.sourceAccountId,
+            required: true,
+          },
         ],
         prepare: (current) => {
           if (current.existingAuthorization) {
@@ -1000,13 +1031,18 @@ export class ScmPayablesDomainService {
               `Payment authorization cannot be requested from invoice status ${invoice.status}.`
             );
           }
+          const availableForAuthorization = Math.max(
+            0,
+            invoice.balanceMinorUnits -
+              Number(invoice.pendingPaymentMinorUnits || 0)
+          );
           if (
             payload.amountMinorUnits <= 0 ||
-            payload.amountMinorUnits > invoice.balanceMinorUnits
+            payload.amountMinorUnits > availableForAuthorization
           ) {
             throw new AtomicMutationRejectedError(
-              'PAYMENT_AMOUNT_EXCEEDS_BALANCE',
-              'Requested payment must be positive and cannot exceed the authoritative supplier invoice balance.'
+              'PAYMENT_AMOUNT_EXCEEDS_AVAILABLE_BALANCE',
+              'Requested payment must be positive and cannot exceed the unreserved authoritative supplier invoice balance.'
             );
           }
 
@@ -1026,8 +1062,23 @@ export class ScmPayablesDomainService {
             updatedAt: now,
           };
 
+          const nextInvoice: SupplierInvoiceRecord = {
+            ...invoice,
+            pendingPaymentMinorUnits:
+              Number(invoice.pendingPaymentMinorUnits || 0) +
+              authorization.amountMinorUnits,
+            updatedAt: now,
+          };
+
           return {
             domainState: authorization,
+            additionalStateWrites: [
+              {
+                entityType: 'SUPPLIER_INVOICE',
+                entityId: invoice.invoiceId,
+                domainState: nextInvoice,
+              },
+            ],
             eventPayload: {
               authorizationId: authorization.authorizationId,
               invoiceId: invoice.invoiceId,
@@ -1116,10 +1167,26 @@ export class ScmPayablesDomainService {
             entityId: payload.authorizationId,
             required: true,
           },
+          {
+            key: 'invoice',
+            entityType: 'SUPPLIER_INVOICE',
+            entityId: payload.invoiceId,
+            required: true,
+          },
         ],
         prepare: (current) => {
           const authorization =
             current.authorization as unknown as SupplierPaymentAuthorization;
+          const invoice = current.invoice as unknown as SupplierInvoiceRecord;
+          if (
+            authorization.invoiceId !== invoice.invoiceId ||
+            payload.invoiceId !== invoice.invoiceId
+          ) {
+            throw new AtomicMutationRejectedError(
+              'PAYMENT_AUTHORIZATION_INVOICE_MISMATCH',
+              'Payment authorization does not belong to the supplied invoice.'
+            );
+          }
           if (authorization.status !== 'PENDING_APPROVAL') {
             throw new AtomicMutationRejectedError(
               'PAYMENT_AUTHORIZATION_STATE_CONFLICT',
@@ -1143,9 +1210,27 @@ export class ScmPayablesDomainService {
             approvalComments: payload.comments,
             updatedAt: now,
           };
+          const nextInvoice: SupplierInvoiceRecord = approved
+            ? { ...invoice, updatedAt: now }
+            : {
+                ...invoice,
+                pendingPaymentMinorUnits: Math.max(
+                  0,
+                  Number(invoice.pendingPaymentMinorUnits || 0) -
+                    authorization.amountMinorUnits
+                ),
+                updatedAt: now,
+              };
 
           return {
             domainState: next,
+            additionalStateWrites: [
+              {
+                entityType: 'SUPPLIER_INVOICE',
+                entityId: invoice.invoiceId,
+                domainState: nextInvoice,
+              },
+            ],
             eventPayload: {
               authorizationId: next.authorizationId,
               invoiceId: next.invoiceId,
@@ -1256,6 +1341,7 @@ export class ScmPayablesDomainService {
           const authorization =
             current.authorization as unknown as SupplierPaymentAuthorization;
           const invoice = current.invoice as unknown as SupplierInvoiceRecord;
+          const sourceAccount = current.sourceAccount as unknown as Account;
           assertFacilityScope(context, invoice.facilityId);
 
           if (
@@ -1297,13 +1383,15 @@ export class ScmPayablesDomainService {
             );
           }
           if (
-            !payload.sourceAccountId.trim() ||
-            payload.sourceAccountId === AP_ACCOUNT.id ||
-            payload.sourceAccountId === GRNI_ACCOUNT.id
+            !sourceAccount ||
+            sourceAccount.id !== payload.sourceAccountId ||
+            !sourceAccount.isActive ||
+            sourceAccount.category !== 'asset' ||
+            sourceAccount.normalBalance !== 'debit'
           ) {
             throw new AtomicMutationRejectedError(
               'INVALID_PAYMENT_SOURCE_ACCOUNT',
-              'Supplier payment requires a distinct cash or bank GL account.'
+              'Supplier payment source must be an active debit-normal asset account from the authoritative chart of accounts.'
             );
           }
 
@@ -1327,8 +1415,8 @@ export class ScmPayablesDomainService {
                 lineDescription: `Settle AP for ${invoice.invoiceNumber}`,
               },
               {
-                glAccountId: payload.sourceAccountId.trim(),
-                glAccountName: payload.sourceAccountName.trim(),
+                glAccountId: sourceAccount.accountCode,
+                glAccountName: sourceAccount.accountName,
                 debitMinorUnits: 0,
                 creditMinorUnits: authorization.amountMinorUnits,
                 lineDescription: `Supplier payment ${payload.paymentReference}`,
@@ -1349,6 +1437,11 @@ export class ScmPayablesDomainService {
             ...invoice,
             amountPaidMinorUnits: nextPaid,
             balanceMinorUnits: nextBalance,
+            pendingPaymentMinorUnits: Math.max(
+              0,
+              Number(invoice.pendingPaymentMinorUnits || 0) -
+                authorization.amountMinorUnits
+            ),
             status: nextBalance === 0 ? 'PAID' : 'PARTIALLY_PAID',
             updatedAt: now,
           };
@@ -1369,8 +1462,8 @@ export class ScmPayablesDomainService {
             currency: invoice.currency,
             amountMinorUnits: authorization.amountMinorUnits,
             paymentMethod: payload.paymentMethod,
-            sourceAccountId: payload.sourceAccountId.trim(),
-            sourceAccountName: payload.sourceAccountName.trim(),
+            sourceAccountId: sourceAccount.id,
+            sourceAccountName: sourceAccount.accountName,
             paymentReference: payload.paymentReference.trim(),
             settledAt: payload.settledAt,
             recordedBy: context.actorId,

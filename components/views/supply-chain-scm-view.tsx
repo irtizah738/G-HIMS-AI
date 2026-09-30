@@ -85,10 +85,13 @@ import {
 } from 'lucide-react';
 
 interface SupplyChainScmViewProps {
-  tenantId?: string;
+  tenantId: string;
 }
 
-export function SupplyChainScmView({ tenantId = 'metro-health' }: SupplyChainScmViewProps) {
+export function SupplyChainScmView({ tenantId }: SupplyChainScmViewProps) {
+  if (!tenantId.trim()) {
+    throw new Error('TENANT_CONTEXT_REQUIRED: Supply Chain Management cannot run without a tenant.');
+  }
   // Navigation Tabs
   const [activeTab, setActiveTab] = useState<
     | 'dashboard'

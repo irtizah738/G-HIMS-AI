@@ -48,6 +48,16 @@ describe('SCM-9 cold-chain and controlled inventory',()=>{
     expect(service).toContain("aggregateType:'CONTROLLED_CUSTODY'");
   });
 
+  test('cold-chain disposition handoff is explicit and closes excursion after execution',async()=>{
+    const disposition=await source('lib/backend/services/scm-recall-disposition-domain-service.ts');
+    const controlled=await source('types/scm-controlled.ts');
+    expect(disposition).toContain('COLD_CHAIN_EXCURSION_REQUIRED');
+    expect(disposition).toContain('DISPOSITION_COLD_CHAIN_SCOPE_MISMATCH');
+    expect(disposition).toContain("entityType:'COLD_CHAIN_EXCURSION'");
+    expect(disposition).toContain("status:'DISPOSED'");
+    expect(controlled).toContain("| 'DISPOSED'");
+  });
+
   test('SCM-9 commands are strictly routed and mutations are online-only',async()=>{
     const bus=await source('lib/backend/commands/command-bus.ts');
     for(const command of [

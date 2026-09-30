@@ -270,7 +270,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       batchId: nonEmpty,
       quantity: z.number().finite().positive(),
       dispositionType: z.enum(['DESTROY','RETURN_TO_SUPPLIER']),
-      reason: z.enum(['EXPIRY','DAMAGE','RECALL','QUALITY_FAILURE']),
+      reason: z.enum(['EXPIRY','DAMAGE','RECALL','QUALITY_FAILURE','TEMPERATURE_EXCURSION']),
       recallId: nonEmpty.optional(),
       supplierId: nonEmpty.optional(),
       justification: nonEmpty.max(4000),
@@ -638,6 +638,25 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       serialNumbers: z.array(nonEmpty).max(500).optional(),
       udis: z.array(nonEmpty).max(500).optional(),
       usedAt: nonEmpty,
+    }).strict(),
+  },
+  CaptureConsignmentSupplierInvoiceCommand: {
+    1: z.object({
+      facilityId: nonEmpty,
+      supplierId: nonEmpty,
+      agreementId: nonEmpty,
+      invoiceNumber: nonEmpty.max(200),
+      usageIds: z.array(nonEmpty).min(1).max(100),
+      issueDate: nonEmpty,
+      dueDate: nonEmpty,
+      currency: z.string().trim().length(3),
+    }).strict(),
+  },
+  ReviewConsignmentSupplierInvoiceCommand: {
+    1: z.object({
+      invoiceId: nonEmpty,
+      decision: z.enum(['APPROVE','REJECT']),
+      notes: nonEmpty.max(2000),
     }).strict(),
   },
   GenerateScmIntelligenceSnapshotCommand: {

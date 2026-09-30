@@ -39,11 +39,14 @@ export interface ColdChainExcursionRecord {
   status:
     | 'QUARANTINED_PENDING_REVIEW'
     | 'RELEASED'
-    | 'DISPOSITION_REQUIRED';
+    | 'DISPOSITION_REQUIRED'
+    | 'DISPOSED';
   reviewedAt?: string;
   reviewedBy?: string;
   reviewDecision?: 'RELEASE' | 'DISPOSE_REQUIRED';
   reviewNotes?: string;
+  disposalOrderId?: string;
+  disposedAt?: string;
 }
 
 export interface ReviewColdChainExcursionPayload {

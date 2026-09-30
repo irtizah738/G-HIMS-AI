@@ -86,7 +86,9 @@
     "test:scm10": "bun test tests/scm10-consignment-high-value.test.ts",
     "validate:scm10": "bun run typecheck && bun run lint && bun run test:scm1 && bun run test:scm2 && bun run test:scm3 && bun run test:scm4 && bun run test:scm5 && bun run test:scm6 && bun run test:scm7 && bun run test:scm8 && bun run test:scm9 && bun run test:scm10 && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",
     "test:scm11": "bun test tests/scm11-operational-intelligence.test.ts",
-    "validate:scm11": "bun run typecheck && bun run lint && bun run test:scm1 && bun run test:scm2 && bun run test:scm3 && bun run test:scm4 && bun run test:scm5 && bun run test:scm6 && bun run test:scm7 && bun run test:scm8 && bun run test:scm9 && bun run test:scm10 && bun run test:scm11 && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build"
+    "validate:scm11": "bun run typecheck && bun run lint && bun run test:scm1 && bun run test:scm2 && bun run test:scm3 && bun run test:scm4 && bun run test:scm5 && bun run test:scm6 && bun run test:scm7 && bun run test:scm8 && bun run test:scm9 && bun run test:scm10 && bun run test:scm11 && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",
+    "test:scm-completion": "bun test tests/scm9-cold-chain-controlled.test.ts tests/scm10-consignment-high-value.test.ts tests/scm11-operational-intelligence.test.ts",
+    "validate:scm-completion": "bun run typecheck && bun run lint && bun run test:scm1 && bun run test:scm2 && bun run test:scm3 && bun run test:scm4 && bun run test:scm5 && bun run test:scm6 && bun run test:scm7 && bun run test:scm8 && bun run test:scm9 && bun run test:scm10 && bun run test:scm11 && bun run test:scm-completion && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

@@ -20,6 +20,10 @@ import type {
   PayrollPeriodRecord,
 } from '@/types/hcm-advanced';
 import type {
+  HcmWorkforceIntelligenceSnapshot,
+  PayrollStatutoryLiabilityRecord,
+} from '@/types/hcm-enterprise';
+import type {
   ClinicalCredential,
   CredentialExpiryAlert,
   RosterShift,
@@ -623,4 +627,29 @@ export async function loadLocalRoster(tenantId:string){
 
 export async function hydrateRoster(tenantId:string){
   return mapRosterSnapshot(await hydrateEdgeSnapshot(tenantId));
+}
+
+
+function mapPayrollSnapshot(
+  snapshot:Awaited<ReturnType<typeof loadLocalEdgeSnapshot>>
+){
+  return {
+    employees:(snapshot.collections.employees||[]) as unknown as EmployeeMaster[],
+    compensationProfiles:(snapshot.collections.compensationProfiles||[]) as unknown as CompensationProfileRecord[],
+    payrollPeriods:(snapshot.collections.payrollPeriods||[]) as unknown as PayrollPeriodRecord[],
+    payrollEmployeeSlots:(snapshot.collections.payrollEmployeeSlots||[]) as unknown as PayrollEmployeeSlotRecord[],
+    payrollPayslips:(snapshot.collections.payrollPayslips||[]) as unknown as PayrollPayslipRecord[],
+    payrollLiabilities:(snapshot.collections.payrollStatutoryLiabilities||[]) as unknown as PayrollStatutoryLiabilityRecord[],
+    intelligence:(snapshot.collections.hcmIntelligenceSnapshots||[]) as unknown as HcmWorkforceIntelligenceSnapshot[],
+    source:snapshot.source,
+    generatedAt:snapshot.generatedAt,
+  };
+}
+
+export async function loadLocalPayroll(tenantId:string){
+  return mapPayrollSnapshot(await loadLocalEdgeSnapshot(tenantId));
+}
+
+export async function hydratePayroll(tenantId:string){
+  return mapPayrollSnapshot(await hydrateEdgeSnapshot(tenantId));
 }

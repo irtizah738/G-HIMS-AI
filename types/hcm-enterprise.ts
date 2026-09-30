@@ -33,6 +33,7 @@ export interface HcmWorkforceIntelligenceSnapshot {
   tenantId: string;
   asOf: string;
   lookbackDays: number;
+  facilityId?: string;
   generatedAt: string;
   generatedBy: string;
   inputFingerprint: string;

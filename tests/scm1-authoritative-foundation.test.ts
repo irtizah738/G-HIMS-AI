@@ -38,6 +38,17 @@ describe('SCM-1 authoritative inventory and procurement foundation', () => {
     expect(service).toContain('quantityRemaining -= authoritativeTxn.quantity');
   });
 
+  test('stock movements enforce server-side type and facility scope', async () => {
+    const service = await source(
+      'lib/backend/services/scm-offline-domain-service.ts'
+    );
+    expect(service).toContain('allowedTransactionTypes');
+    expect(service).toContain("'FACILITY_SCOPE_MISMATCH'");
+    expect(service).toContain('context.facilityIds');
+    expect(service).toContain('txn.referenceType');
+    expect(service).toContain('txn.referenceId');
+  });
+
   test('stock balance location follows movement direction', async () => {
     const service = await source(
       'lib/backend/services/scm-offline-domain-service.ts'

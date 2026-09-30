@@ -797,6 +797,9 @@ export class ScmSourcingDomainService {
             warrantyPeriodMonths: selected.warrantyPeriodMonths,
             maxSpendMinorUnits: payload.maxSpendMinorUnits,
             committedSpendMinorUnits: 0,
+            reservedSpendMinorUnits: 0,
+            committedQuantityByItem: {},
+            reservedQuantityByItem: {},
             lines: selected.items.map((line) => {
               const rfqLine = rfqByItem.get(line.itemId);
               if (!rfqLine) {
@@ -1138,6 +1141,17 @@ export class ScmSourcingDomainService {
             throw new AtomicMutationRejectedError(
               'SUPPLIER_CONTRACT_NOT_ACTIVE',
               'Only an active contract may be suspended or terminated.'
+            );
+          }
+          if (
+            Number(contract.reservedSpendMinorUnits || 0) > 0 ||
+            Object.values(contract.reservedQuantityByItem || {}).some(
+              (quantity) => Number(quantity) > 0
+            )
+          ) {
+            throw new AtomicMutationRejectedError(
+              'SUPPLIER_CONTRACT_HAS_OPEN_PO_RESERVATIONS',
+              'Contract cannot be suspended or terminated while purchase orders are pending approval.'
             );
           }
           const next: SupplierContract = {

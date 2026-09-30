@@ -40,6 +40,8 @@ import {
 import { calculateDerivedBalance, traceRecallImpact } from '@/lib/supply-chain/scm-engine';
 import { POApprovalSignature } from '@/types/supply-chain';
 
+const IS_DEMO_RUNTIME = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
+
 // ============================================================================
 // 1. ITEM MASTER
 // ============================================================================
@@ -49,7 +51,7 @@ export async function getItems(tenantId: string): Promise<ItemMaster[]> {
   try {
     const q = query(collection(db, 'tenants', tenantId, 'items'));
     const snap = await getDocs(q);
-    if (snap.empty) {
+    if (snap.empty && IS_DEMO_RUNTIME) {
       await seedRealisticHospitalSCMData(tenantId);
       const reSnap = await getDocs(q);
       return reSnap.docs.map((d) => d.data() as ItemMaster);
@@ -81,7 +83,7 @@ export async function getLocations(tenantId: string): Promise<InventoryLocation[
   try {
     const q = query(collection(db, 'tenants', tenantId, 'inventoryLocations'));
     const snap = await getDocs(q);
-    if (snap.empty) {
+    if (snap.empty && IS_DEMO_RUNTIME) {
       await seedRealisticHospitalSCMData(tenantId);
       const reSnap = await getDocs(q);
       return reSnap.docs.map((d) => d.data() as InventoryLocation);
@@ -101,7 +103,7 @@ export async function getBatches(tenantId: string): Promise<BatchLotRecord[]> {
   try {
     const q = query(collection(db, 'tenants', tenantId, 'batches'));
     const snap = await getDocs(q);
-    if (snap.empty) {
+    if (snap.empty && IS_DEMO_RUNTIME) {
       await seedRealisticHospitalSCMData(tenantId);
       const reSnap = await getDocs(q);
       return reSnap.docs.map((d) => d.data() as BatchLotRecord);
@@ -253,7 +255,7 @@ export async function getInventoryBalances(tenantId: string): Promise<InventoryB
   try {
     const q = query(collection(db, 'tenants', tenantId, 'inventoryBalances'));
     const snap = await getDocs(q);
-    if (snap.empty) {
+    if (snap.empty && IS_DEMO_RUNTIME) {
       await seedRealisticHospitalSCMData(tenantId);
       const reSnap = await getDocs(q);
       return reSnap.docs.map((d) => d.data() as InventoryBalance);
@@ -272,7 +274,7 @@ export async function getStockTransactions(
   try {
     const q = query(collection(db, 'tenants', tenantId, 'stockTransactions'));
     const snap = await getDocs(q);
-    if (snap.empty) {
+    if (snap.empty && IS_DEMO_RUNTIME) {
       await seedRealisticHospitalSCMData(tenantId);
       const reSnap = await getDocs(q);
       return reSnap.docs.map((d) => d.data() as StockTransaction);
@@ -468,7 +470,7 @@ export async function getPurchaseRequisitions(tenantId: string): Promise<Purchas
   try {
     const q = query(collection(db, 'tenants', tenantId, 'purchaseRequisitions'));
     const snap = await getDocs(q);
-    if (snap.empty) {
+    if (snap.empty && IS_DEMO_RUNTIME) {
       await seedRealisticHospitalSCMData(tenantId);
       const reSnap = await getDocs(q);
       return reSnap.docs.map((d) => d.data() as PurchaseRequisition);
@@ -770,7 +772,7 @@ export async function getPurchaseOrders(tenantId: string): Promise<PurchaseOrder
   try {
     const q = query(collection(db, 'tenants', tenantId, 'scmPurchaseOrders'));
     const snap = await getDocs(q);
-    if (snap.empty) {
+    if (snap.empty && IS_DEMO_RUNTIME) {
       await seedRealisticHospitalSCMData(tenantId);
       const reSnap = await getDocs(q);
       return reSnap.docs.map((d) => d.data() as PurchaseOrderRecord);
@@ -964,7 +966,7 @@ export async function getGoodsReceiptNotes(tenantId: string): Promise<GoodsRecei
   try {
     const q = query(collection(db, 'tenants', tenantId, 'goodsReceiptNotes'));
     const snap = await getDocs(q);
-    if (snap.empty) {
+    if (snap.empty && IS_DEMO_RUNTIME) {
       await seedRealisticHospitalSCMData(tenantId);
       const reSnap = await getDocs(q);
       return reSnap.docs.map((d) => d.data() as GoodsReceiptNote);
@@ -1076,7 +1078,7 @@ export async function getStockTransfersList(tenantId: string): Promise<StockTran
   try {
     const q = query(collection(db, 'tenants', tenantId, 'scmTransfers'));
     const snap = await getDocs(q);
-    if (snap.empty) {
+    if (snap.empty && IS_DEMO_RUNTIME) {
       await seedRealisticHospitalSCMData(tenantId);
       const reSnap = await getDocs(q);
       return reSnap.docs.map((d) => d.data() as StockTransferRecord);
@@ -1203,7 +1205,7 @@ export async function getPatientConsumptions(
   try {
     const q = query(collection(db, 'tenants', tenantId, 'patientConsumptions'));
     const snap = await getDocs(q);
-    if (snap.empty) {
+    if (snap.empty && IS_DEMO_RUNTIME) {
       await seedRealisticHospitalSCMData(tenantId);
       const reSnap = await getDocs(q);
       return reSnap.docs.map((d) => d.data() as PatientConsumptionRecord);
@@ -1276,7 +1278,7 @@ export async function getRecallCases(tenantId: string): Promise<RecallCase[]> {
   try {
     const q = query(collection(db, 'tenants', tenantId, 'recallCases'));
     const snap = await getDocs(q);
-    if (snap.empty) {
+    if (snap.empty && IS_DEMO_RUNTIME) {
       await seedRealisticHospitalSCMData(tenantId);
       const reSnap = await getDocs(q);
       return reSnap.docs.map((d) => d.data() as RecallCase);
@@ -1356,7 +1358,7 @@ export async function getSuppliers(tenantId: string): Promise<SupplierMaster[]> 
   try {
     const q = query(collection(db, 'tenants', tenantId, 'suppliers'));
     const snap = await getDocs(q);
-    if (snap.empty) {
+    if (snap.empty && IS_DEMO_RUNTIME) {
       await seedRealisticHospitalSCMData(tenantId);
       const reSnap = await getDocs(q);
       return reSnap.docs.map((d) => d.data() as SupplierMaster);
@@ -1372,7 +1374,7 @@ export async function getThreeWayMatches(tenantId: string): Promise<ThreeWayMatc
   try {
     const q = query(collection(db, 'tenants', tenantId, 'threeWayMatches'));
     const snap = await getDocs(q);
-    if (snap.empty) {
+    if (snap.empty && IS_DEMO_RUNTIME) {
       await seedRealisticHospitalSCMData(tenantId);
       const reSnap = await getDocs(q);
       return reSnap.docs.map((d) => d.data() as ThreeWayMatchResult);
@@ -1407,7 +1409,7 @@ export async function getStockAdjustments(tenantId: string): Promise<StockAdjust
   try {
     const q = query(collection(db, 'tenants', tenantId, 'stockAdjustments'));
     const snap = await getDocs(q);
-    if (snap.empty) {
+    if (snap.empty && IS_DEMO_RUNTIME) {
       await seedRealisticHospitalSCMData(tenantId);
       const reSnap = await getDocs(q);
       return reSnap.docs.map((d) => d.data() as StockAdjustmentRecord);
@@ -1524,7 +1526,7 @@ export async function getScmDomainEvents(
   try {
     const q = query(collection(db, 'tenants', tenantId, 'scmEvents'));
     const snap = await getDocs(q);
-    if (snap.empty) {
+    if (snap.empty && IS_DEMO_RUNTIME) {
       await seedRealisticHospitalSCMData(tenantId);
       const reSnap = await getDocs(q);
       const events = reSnap.docs.map((d) => d.data() as ScmDomainEvent);

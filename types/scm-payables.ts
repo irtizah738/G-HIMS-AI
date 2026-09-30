@@ -75,6 +75,9 @@ export interface SupplierInvoiceRecord {
   resolutionNotes?: string;
   createdAt: string;
   updatedAt: string;
+  sourceType?: 'PO_GRN' | 'CONSIGNMENT_USAGE';
+  consignmentAgreementId?: string;
+  consignmentUsageIds?: string[];
 }
 
 export interface SupplierInvoiceMatchLine {

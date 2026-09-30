@@ -166,3 +166,67 @@ export interface SupplierPaymentRecord {
   journalEntryId: string;
   createdAt: string;
 }
+
+export interface RecordSupplierInvoicePayload {
+  facilityId: string;
+  supplierId: string;
+  invoiceNumber: string;
+  poId: string;
+  grnIds: string[];
+  issueDate: string;
+  dueDate: string;
+  currency: string;
+  shippingMinorUnits?: number;
+  priceToleranceBasisPoints?: number;
+  quantityTolerance?: number;
+  lines: Array<{
+    lineId: string;
+    itemId: string;
+    billedQuantity: number;
+    uom: StandardUOM;
+    unitPriceMinorUnits: number;
+    discountMinorUnits?: number;
+    taxMinorUnits?: number;
+  }>;
+}
+
+export interface ResolveSupplierInvoiceMatchPayload {
+  invoiceId: string;
+  poId: string;
+  decision: 'APPROVE' | 'REJECT';
+  notes: string;
+}
+
+export interface RecognizeSupplierInvoicePayablePayload {
+  invoiceId: string;
+  poId: string;
+  fiscalYear: number;
+  postingPeriod: number;
+  documentDate: number;
+  postingDate: number;
+}
+
+export interface RequestSupplierPaymentAuthorizationPayload {
+  authorizationId: string;
+  invoiceId: string;
+  amountMinorUnits: number;
+  reason: string;
+}
+
+export interface ApproveSupplierPaymentAuthorizationPayload {
+  authorizationId: string;
+  decision: 'APPROVE' | 'REJECT';
+  comments?: string;
+}
+
+export interface RecordSupplierPaymentPayload {
+  authorizationId: string;
+  invoiceId: string;
+  paymentReference: string;
+  paymentMethod: SupplierPaymentRecord['paymentMethod'];
+  sourceAccountId: string;
+  sourceAccountName: string;
+  settledAt: string;
+  fiscalYear: number;
+  postingPeriod: number;
+}

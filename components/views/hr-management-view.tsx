@@ -1489,75 +1489,25 @@ export function HrManagementView() {
       )}
 
       {/* ========================================================================= */}
-      {/* TAB 8: COMPENSATION & ERP PAYROLL BRIDGE */}
+      {/* TAB 8: COMPENSATION & GOVERNED PAYROLL */}
       {/* ========================================================================= */}
       {activeTab === 'payroll' && (
         <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                <DollarSign className="w-4 h-4 text-emerald-600" /> ERP General Ledger & Payroll Bridge
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Exports verified attendance hours, approved on-call allowances, and tax withholdings directly into General Ledger journal lines.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                id="btn-open-statutory-tax-compliance"
-                onClick={() => setShowStatutoryTaxModal(true)}
-                className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-xs flex items-center gap-1.5 cursor-pointer"
-              >
-                <FileSpreadsheet className="w-4 h-4" />
-                <span>Statutory Tax & 941 Report</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  setActionMessage({
-                    text: 'Exported 4 verified employee payroll lines to SAP/ERP General Ledger (Account: 5100-SALARY-EXPENSE).',
-                    type: 'success',
-                  });
-                }}
-                className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs flex items-center gap-1.5 cursor-pointer"
-              >
-                <FileSpreadsheet className="w-4 h-4" />
-                <span>Post to ERP Ledger</span>
-              </button>
-            </div>
+          <div>
+            <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+              <DollarSign className="w-4 h-4 text-emerald-600" /> Governed Compensation & Payroll
+            </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              Payroll is no longer calculated or posted from this workforce dashboard. The authoritative payroll console
+              uses server-side commands, maker-checker approval, Finance journals, Treasury settlement, and statutory liability remittance.
+            </p>
           </div>
-
-          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 space-y-2">
-            <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
-              Bi-Weekly Period Summary (March 01 - March 15, 2026)
-            </span>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-              <div>
-                <span className="text-slate-400 text-[10px] block">Gross Salary Total</span>
-                <strong className="text-slate-900 dark:text-slate-100 font-mono text-sm">$48,450.00</strong>
-              </div>
-              <div>
-                <span className="text-slate-400 text-[10px] block">Overtime Pay</span>
-                <strong className="text-emerald-600 font-mono text-sm">$3,120.00</strong>
-              </div>
-              <div>
-                <span className="text-slate-400 text-[10px] block">Statutory Withholdings</span>
-                <strong className="text-rose-600 font-mono text-sm">-$12,890.00</strong>
-              </div>
-              <div>
-                <span className="text-slate-400 text-[10px] block">Net Payroll Disbursement</span>
-                <strong className="text-blue-600 font-mono text-sm">$38,680.00</strong>
-              </div>
-            </div>
-          </div>
-
-          {/* Overtime Pay Trends & Clinical Unit Variances embedded in Payroll */}
-          <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
-            <OvertimeBudgetVarianceChart
-              onNotifyLead={(msg) => setActionMessage({ text: msg, type: 'info' })}
-            />
-          </div>
+          <a
+            href="./payroll"
+            className="inline-flex items-center rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
+          >
+            Open Governed Payroll Console
+          </a>
         </div>
       )}
 

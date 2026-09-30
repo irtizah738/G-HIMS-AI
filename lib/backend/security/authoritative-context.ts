@@ -94,6 +94,8 @@ export async function deriveAuthoritativeContext(
     roles: authContext.roles.map((role) => role.toUpperCase()),
     permissions: authContext.permissions.map((permission) => permission.toUpperCase()),
     departmentId: authContext.departmentIds[0],
+    departmentIds: [...authContext.departmentIds],
+    facilityIds: [...authContext.facilityIds],
     clinicalPrivileges: authContext.clinicalPrivileges.map((privilege) => privilege.toUpperCase()),
     correlationId: req.headers.get('x-correlation-id') || `corr_${crypto.randomUUID()}`,
     requestId: req.headers.get('x-request-id') || `req_${crypto.randomUUID()}`,

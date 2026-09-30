@@ -180,6 +180,7 @@ function collectionForEntityType(entityType: string): string {
     REVENUE_RECOGNITION: 'financeRevenueRecognitions',
     AR_OPEN_ITEM: 'arOpenItems',
     AR_ADJUSTMENT: 'financeArAdjustments',
+    AR_RECEIPT: 'financeArReceipts',
     AR_AGING_SNAPSHOT: 'financeArAgingSnapshots',
     TREASURY_ACCOUNT: 'treasuryAccounts',
     CASH_SHIFT: 'cashRegisterShifts',

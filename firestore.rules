@@ -560,6 +560,34 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      // Facilities / biomedical authoritative read models.
+      match /resources/{id} {
+        allow read: if canReadAudit(tenantId);
+        allow write: if false;
+      }
+      match /rooms/{id} {
+        allow read: if canReadAudit(tenantId);
+        allow write: if false;
+      }
+      match /resourceReservations/{id} {
+        allow read: if canReadAudit(tenantId);
+        allow write: if false;
+      }
+      match /maintenanceWorkOrders/{id} {
+        allow read: if canReadAudit(tenantId);
+        allow write: if false;
+      }
+      match /calibrationRecords/{id} {
+        allow read: if canReadAudit(tenantId);
+        allow write: if false;
+      }
+      match /resourceIdentities/{id} {
+        allow read, write: if false;
+      }
+      match /roomIdentities/{id} {
+        allow read, write: if false;
+      }
+
       // Workforce/resource read models.
       match /employees/{id} {
         allow read: if canReadAudit(tenantId);

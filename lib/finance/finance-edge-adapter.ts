@@ -40,7 +40,7 @@ export const capitalizeFixedAssetEdge=(
   idempotencyKey
 );
 
-export const runDepreciationEdge=(
+export async function runDepreciationEdge(
   payload:{
     runId:string;
     fiscalYear:number;
@@ -49,11 +49,14 @@ export const runDepreciationEdge=(
     assetIds:string[];
   },
   idempotencyKey?:string
-)=>run<DepreciationRunRecord>(
-  'RunDepreciationCommand',
-  payload as Record<string,unknown>,
-  idempotencyKey
-);
+):Promise<DepreciationRunLog>{
+  const result=await run<DepreciationRunRecord>(
+    'RunDepreciationCommand',
+    payload as Record<string,unknown>,
+    idempotencyKey
+  );
+  return toLegacyRun(result);
+}
 
 export const transferFixedAssetEdge=(
   payload:{

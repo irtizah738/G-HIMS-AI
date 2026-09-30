@@ -11,6 +11,71 @@ import type {
 } from '@/types/scm-domain';
 import { calculateDerivedBalance } from '@/lib/supply-chain/scm-engine';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
+import {
+  inventoryAccountForItemType,
+  inventoryPeriodCloseId,
+  isExpensedOutboundType,
+  isGovernedAdjustmentType,
+  isInventoryPeriodBlocked,
+  periodKeyFromIso,
+  toMinorUnits,
+} from '@/lib/supply-chain/inventory-costing';
+
+function buildInventoryExpenseJournal(params: {
+  journalId: string;
+  tenantId: string;
+  occurredAt: string;
+  referenceDocumentId: string;
+  item: ItemMaster;
+  amountMinorUnits: number;
+  currency: string;
+  postedBy: string;
+}) {
+  const occurredMs = Date.parse(params.occurredAt);
+  if (!Number.isFinite(occurredMs) || params.amountMinorUnits <= 0) {
+    throw new AtomicMutationRejectedError(
+      'INVALID_INVENTORY_EXPENSE_POSTING',
+      'Inventory expense journal requires a valid occurrence date and positive amount.'
+    );
+  }
+  const date = new Date(occurredMs);
+  const inventoryAccount = inventoryAccountForItemType(params.item.itemType);
+  const inventoryName =
+    inventoryAccount === '1210'
+      ? 'Pharmacy Formulary Inventory'
+      : 'Surgical & Sterile Medical Supplies Inventory';
+  return {
+    journalId: params.journalId,
+    tenantId: params.tenantId,
+    fiscalYear: date.getUTCFullYear(),
+    postingPeriod: date.getUTCMonth() + 1,
+    documentDate: occurredMs,
+    postingDate: occurredMs,
+    referenceDocumentId: params.referenceDocumentId,
+    documentHeader: `Inventory consumption expense: ${params.item.itemCode}`,
+    currency: params.currency,
+    totalAmountMinorUnits: params.amountMinorUnits,
+    lines: [
+      {
+        glAccountId: '6020',
+        glAccountName: 'Medical Consumables & Surgical Implants Used',
+        debitMinorUnits: params.amountMinorUnits,
+        creditMinorUnits: 0,
+        lineDescription: `Expense inventory usage for ${params.item.name}`,
+      },
+      {
+        glAccountId: inventoryAccount,
+        glAccountName: inventoryName,
+        debitMinorUnits: 0,
+        creditMinorUnits: params.amountMinorUnits,
+        lineDescription: `Reduce inventory asset for ${params.item.name}`,
+      },
+    ],
+    status: 'POSTED',
+    postedBy: params.postedBy,
+    postedAt: Date.now(),
+  };
+}
 
 function stockBalanceId(
   tenantId: string,
@@ -176,6 +241,36 @@ export class ScmOfflineDomainService {
       };
     }
 
+    if (isGovernedAdjustmentType(txn.transactionType)) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'GOVERNED_INVENTORY_ADJUSTMENT_REQUIRED',
+          message:
+            'Inventory gains, losses, and write-offs must use the governed cycle-count/adjustment workflow.',
+        },
+      };
+    }
+
+    const occurredAt = txn.occurredAt || new Date().toISOString();
+    if (!Number.isFinite(Date.parse(occurredAt))) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INVALID_STOCK_OCCURRENCE_DATE',
+          message: 'Stock transaction occurrence date is invalid.',
+        },
+      };
+    }
+    const closeId = inventoryPeriodCloseId(
+      txn.facilityId,
+      periodKeyFromIso(occurredAt)
+    );
+
     const isTransfer =
       txn.transactionType === 'TRANSFER_OUT' ||
       txn.transactionType === 'TRANSFER_IN';
@@ -244,6 +339,12 @@ export class ScmOfflineDomainService {
 
     const readTargets = [
       {
+        key: 'periodClose',
+        entityType: 'INVENTORY_PERIOD_CLOSE',
+        entityId: closeId,
+        required: false,
+      },
+      {
         key: 'item',
         entityType: 'ITEM_MASTER',
         entityId: txn.itemId,
@@ -302,6 +403,13 @@ export class ScmOfflineDomainService {
         correlationId: context.correlationId,
         readTargets,
         prepare: (current) => {
+          if (isInventoryPeriodBlocked(current.periodClose)) {
+            throw new AtomicMutationRejectedError(
+              'INVENTORY_PERIOD_BLOCKED',
+              'Stock movements cannot post into an inventory period that is closing or closed.'
+            );
+          }
+
           const item = current.item as unknown as ItemMaster | null;
           if (!item || item.itemId !== txn.itemId || item.isActive === false) {
             throw new AtomicMutationRejectedError(
@@ -343,6 +451,26 @@ export class ScmOfflineDomainService {
           }
 
           const now = new Date().toISOString();
+          const authoritativeSourceBalance = sourceBalanceId
+            ? (current.sourceBalance as unknown as InventoryBalance)
+            : null;
+          const authoritativeDestinationBalance = destinationBalanceId
+            ? (current.destinationBalance as unknown as InventoryBalance | null)
+            : null;
+          const authoritativeUnitCost = Number(
+            authoritativeSourceBalance?.unitCost ??
+              authoritativeDestinationBalance?.unitCost ??
+              batch?.unitCost ??
+              item.unitCost ??
+              0
+          );
+          if (!Number.isFinite(authoritativeUnitCost) || authoritativeUnitCost < 0) {
+            throw new AtomicMutationRejectedError(
+              'INVALID_AUTHORITATIVE_STOCK_COST',
+              'Authoritative stock cost is missing or invalid.'
+            );
+          }
+
           const canonicalTxn: StockTransaction = {
             ...txn,
             tenantId: context.tenantId,
@@ -356,16 +484,9 @@ export class ScmOfflineDomainService {
             itemName: item.name,
             batchNumber: batch?.batchNumber || txn.batchNumber,
             expirationDate: batch?.expiryDate || txn.expirationDate,
-            unitCost:
-              Number.isFinite(Number(txn.unitCost)) && Number(txn.unitCost) >= 0
-                ? Number(txn.unitCost)
-                : Number(batch?.unitCost || item.unitCost || 0),
-            totalCost:
-              quantity *
-              (Number.isFinite(Number(txn.unitCost)) && Number(txn.unitCost) >= 0
-                ? Number(txn.unitCost)
-                : Number(batch?.unitCost || item.unitCost || 0)),
-            currency: String(txn.currency || item.currency || '').toUpperCase(),
+            unitCost: authoritativeUnitCost,
+            totalCost: Math.round(quantity * authoritativeUnitCost * 100) / 100,
+            currency: String(batch?.currency || item.currency || txn.currency || '').toUpperCase(),
             performedBy: {
               userId: context.actorId,
               userName: context.actorId,
@@ -376,7 +497,7 @@ export class ScmOfflineDomainService {
               String(txn.source || '').toUpperCase() === 'OFFLINE_SYNC'
                 ? 'OFFLINE_SYNC'
                 : 'ONLINE',
-            occurredAt: txn.occurredAt || now,
+            occurredAt,
             recordedAt: now,
           };
 
@@ -444,6 +565,30 @@ export class ScmOfflineDomainService {
             destinationBalance = nextDestination;
           }
 
+          let journalId: string | undefined;
+          if (isExpensedOutboundType(canonicalTxn.transactionType)) {
+            const amountMinorUnits = Math.round(
+              canonicalTxn.normalizedQuantity * toMinorUnits(canonicalTxn.unitCost)
+            );
+            if (amountMinorUnits > 0) {
+              journalId = `je_cogs_${canonicalTxn.transactionId}`;
+              writes.push({
+                entityType: 'JOURNAL_ENTRY',
+                entityId: journalId,
+                domainState: buildInventoryExpenseJournal({
+                  journalId,
+                  tenantId: context.tenantId,
+                  occurredAt: canonicalTxn.occurredAt,
+                  referenceDocumentId: canonicalTxn.transactionId,
+                  item,
+                  amountMinorUnits,
+                  currency: canonicalTxn.currency,
+                  postedBy: context.actorId,
+                }),
+              });
+            }
+          }
+
           return {
             domainState: canonicalTxn,
             additionalStateWrites: writes,
@@ -457,6 +602,7 @@ export class ScmOfflineDomainService {
               toLocationId: canonicalTxn.toLocationId,
               sourceBalanceId: sourceBalanceId || undefined,
               destinationBalanceId: destinationBalanceId || undefined,
+              journalId,
             },
             auditReason: isTransfer
               ? `Transferred ${quantity} ${canonicalTxn.uom} of ${canonicalTxn.itemName} from ${canonicalTxn.fromLocationId} to ${canonicalTxn.toLocationId}`
@@ -574,6 +720,22 @@ export class ScmOfflineDomainService {
     const stockTransactionId =
       consumption.stockTransactionId ||
       `txn_consumption_${consumption.consumptionId}`;
+    const consumedAt = consumption.consumedAt || new Date().toISOString();
+    if (!Number.isFinite(Date.parse(consumedAt))) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INVALID_CONSUMPTION_DATE',
+          message: 'Patient consumption date is invalid.',
+        },
+      };
+    }
+    const consumptionCloseId = inventoryPeriodCloseId(
+      facilityId,
+      periodKeyFromIso(consumedAt)
+    );
 
     try {
       const tx = await TransactionManager.executeAtomicReadModifyMutation({
@@ -591,6 +753,12 @@ export class ScmOfflineDomainService {
         commandId,
         correlationId: context.correlationId,
         readTargets: [
+          {
+            key: 'periodClose',
+            entityType: 'INVENTORY_PERIOD_CLOSE',
+            entityId: consumptionCloseId,
+            required: false,
+          },
           {
             key: 'patient',
             entityType: 'PATIENT_MPI',
@@ -623,6 +791,13 @@ export class ScmOfflineDomainService {
           },
         ],
         prepare: (current) => {
+          if (isInventoryPeriodBlocked(current.periodClose)) {
+            throw new AtomicMutationRejectedError(
+              'INVENTORY_PERIOD_BLOCKED',
+              'Patient consumption cannot post into an inventory period that is closing or closed.'
+            );
+          }
+
           const encounter = current.encounter || {};
           if (
             String(encounter.patientId || '') !== consumption.patientId
@@ -680,9 +855,8 @@ export class ScmOfflineDomainService {
             quantity,
             uom: consumption.uom,
             normalizedQuantity: quantity,
-            unitCost: Number(batch.unitCost || item.unitCost || 0),
-            totalCost:
-              quantity * Number(batch.unitCost || item.unitCost || 0),
+            unitCost: Number(balance.unitCost || 0),
+            totalCost: Math.round(quantity * Number(balance.unitCost || 0) * 100) / 100,
             currency: String(batch.currency || item.currency || '').toUpperCase(),
             transactionType: 'CONSUMPTION',
             referenceType: consumption.procedureId
@@ -698,7 +872,7 @@ export class ScmOfflineDomainService {
               userName: context.actorId,
               role: context.roles[0] || 'AUTHENTICATED_USER',
             },
-            occurredAt: consumption.consumedAt || now,
+            occurredAt: consumedAt,
             recordedAt: now,
             idempotencyKey,
             source: 'ONLINE',
@@ -708,6 +882,13 @@ export class ScmOfflineDomainService {
           };
 
           const nextBalance = calculateDerivedBalance(balance, stockTxn);
+          const cogsMinorUnits = Math.round(
+            quantity * toMinorUnits(Number(balance.unitCost || 0))
+          );
+          const cogsJournalId =
+            cogsMinorUnits > 0
+              ? `je_cogs_${consumption.consumptionId}`
+              : undefined;
 
           const canonicalConsumption: PatientConsumptionRecord = {
             ...consumption,
@@ -722,7 +903,7 @@ export class ScmOfflineDomainService {
             grnId: batch.grnId,
             quantity,
             documentedBy: context.actorId,
-            consumedAt: consumption.consumedAt || now,
+            consumedAt,
           };
 
           return {
@@ -738,6 +919,22 @@ export class ScmOfflineDomainService {
                 entityId: balanceId,
                 domainState: nextBalance,
               },
+              ...(cogsJournalId
+                ? [{
+                    entityType: 'JOURNAL_ENTRY',
+                    entityId: cogsJournalId,
+                    domainState: buildInventoryExpenseJournal({
+                      journalId: cogsJournalId,
+                      tenantId: context.tenantId,
+                      occurredAt: consumedAt,
+                      referenceDocumentId: canonicalConsumption.consumptionId,
+                      item,
+                      amountMinorUnits: cogsMinorUnits,
+                      currency: stockTxn.currency,
+                      postedBy: context.actorId,
+                    }),
+                  }]
+                : []),
             ],
             eventPayload: {
               consumptionId: canonicalConsumption.consumptionId,
@@ -750,6 +947,7 @@ export class ScmOfflineDomainService {
               sourceLocationId,
               quantity,
               balanceId,
+              journalId: cogsJournalId,
             },
             auditReason: `Consumed ${quantity} ${canonicalConsumption.uom} of ${item.name} for patient encounter ${canonicalConsumption.encounterId}`,
             resultData: {

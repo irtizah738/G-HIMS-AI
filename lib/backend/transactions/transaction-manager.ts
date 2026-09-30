@@ -279,6 +279,46 @@ export class TransactionManager {
   private static inMemoryEventStore: DomainEventEnvelope[] = [];
   private static inMemoryAuditStore: AuditRecord[] = [];
   private static inMemoryOutboxStore: OutboxRecord[] = [];
+  private static inMemoryDomainState: Map<string, Record<string, unknown>> = new Map();
+
+  private static ephemeralStateKey(
+    tenantId:string,
+    entityType:string,
+    entityId:string
+  ):string{
+    return `${tenantId}\u0000${entityType}\u0000${entityId}`;
+  }
+
+  private static getEphemeralState(
+    tenantId:string,
+    entityType:string,
+    entityId:string
+  ):Record<string,unknown>|null{
+    return this.inMemoryDomainState.get(
+      this.ephemeralStateKey(tenantId,entityType,entityId)
+    )||null;
+  }
+
+  private static setEphemeralState(
+    tenantId:string,
+    entityType:string,
+    entityId:string,
+    value:unknown
+  ):void{
+    const key=this.ephemeralStateKey(tenantId,entityType,entityId);
+    const existing=this.inMemoryDomainState.get(key)||null;
+    this.inMemoryDomainState.set(
+      key,
+      toVersionedDocumentData(value,entityType,existing)
+    );
+  }
+
+  public static resetEphemeralStateForTesting():void{
+    this.inMemoryDomainState.clear();
+    this.inMemoryEventStore=[];
+    this.inMemoryAuditStore=[];
+    this.inMemoryOutboxStore=[];
+  }
 
   private static buildRecords(params: {
     tenantId: string;
@@ -379,6 +419,21 @@ export class TransactionManager {
         throw new Error('TRANSACTION_STORE_UNAVAILABLE: durable Firestore transaction store is required.');
       }
       if (params.stateWrite) await params.stateWrite();
+      if(params.domainState!==undefined){
+        this.setEphemeralState(params.tenantId,params.aggregateType,params.aggregateId,params.domainState);
+      }
+      for(const write of params.additionalStateWrites||[]){
+        const existing=this.getEphemeralState(params.tenantId,write.entityType,write.entityId);
+        if(
+          write.expectedServerVersion!==undefined &&
+          Number(existing?._serverVersion||0)!==write.expectedServerVersion
+        ){
+          throw new Error(
+            `DOMAIN_STATE_VERSION_CONFLICT: ${write.entityType}/${write.entityId} changed during command execution.`
+          );
+        }
+        this.setEphemeralState(params.tenantId,write.entityType,write.entityId,write.domainState);
+      }
       this.inMemoryEventStore.push(event);
       this.inMemoryAuditStore.push(audit);
       this.inMemoryOutboxStore.push(outbox);
@@ -514,9 +569,39 @@ export class TransactionManager {
         throw new Error('TRANSACTION_STORE_UNAVAILABLE: durable Firestore transaction store is required.');
       }
 
-      const prepared = params.prepare(
-        Object.fromEntries(params.readTargets.map((target) => [target.key, null]))
-      );
+      const current:Record<string,Record<string,unknown>|null>={};
+      for(const target of params.readTargets){
+        const value=this.getEphemeralState(params.tenantId,target.entityType,target.entityId);
+        if(!value&&target.required){
+          throw new AtomicMutationRejectedError(
+            'REQUIRED_STATE_NOT_FOUND',
+            `Required authoritative state '${target.key}' does not exist.`,
+            {entityType:target.entityType,entityId:target.entityId}
+          );
+        }
+        current[target.key]=value;
+      }
+      const prepared = params.prepare(current);
+      if(prepared.domainState!==undefined){
+        this.setEphemeralState(
+          params.tenantId,
+          params.aggregateType,
+          params.aggregateId,
+          prepared.domainState
+        );
+      }
+      for(const write of prepared.additionalStateWrites||[]){
+        const existing=this.getEphemeralState(params.tenantId,write.entityType,write.entityId);
+        if(
+          write.expectedServerVersion!==undefined &&
+          Number(existing?._serverVersion||0)!==write.expectedServerVersion
+        ){
+          throw new Error(
+            `DOMAIN_STATE_VERSION_CONFLICT: ${write.entityType}/${write.entityId} changed during command execution.`
+          );
+        }
+        this.setEphemeralState(params.tenantId,write.entityType,write.entityId,write.domainState);
+      }
       const { event, audit, outbox } = this.buildRecords({
         ...params,
         eventPayload: prepared.eventPayload,
@@ -727,6 +812,12 @@ export class TransactionManager {
       if (!canUseEphemeralPersistence()) {
         throw new Error('TRANSACTION_STORE_UNAVAILABLE: durable Firestore transaction store is required.');
       }
+      this.setEphemeralState(
+        context.tenantId,
+        payload.entityType,
+        payload.entityId,
+        payload.domainState
+      );
       this.inMemoryEventStore.push(event);
       this.inMemoryAuditStore.push(audit);
       this.inMemoryOutboxStore.push(outbox);

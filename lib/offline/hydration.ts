@@ -60,6 +60,9 @@ export async function loadLocalEdgeSnapshot(tenantId: string): Promise<EdgeSnaps
     'suppliers',
     'threeWayMatches',
     'scmCycleCounts',
+    'scmReplenishmentPolicies',
+    'scmReplenishmentPlans',
+    'scmReplenishmentOrders',
   ];
 
   const entries = await Promise.all(

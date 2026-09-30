@@ -76,6 +76,7 @@ describe('SCM-1 authoritative inventory and procurement foundation', () => {
     );
     expect(service).toContain('reviewPurchaseRequisition');
     expect(service).toContain("'REQUISITION_STATE_CONFLICT'");
+    expect(service).toContain("'REQUISITION_SELF_APPROVAL_DENIED'");
     expect(service).toContain("'PR_APPROVED'");
     expect(service).toContain("'PR_REJECTED'");
   });

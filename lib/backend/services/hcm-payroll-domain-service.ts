@@ -17,6 +17,14 @@ import type {
   PayrollPayslipRecord,
   PayrollPeriodRecord,
 } from '@/types/hcm-advanced';
+import type { PayrollStatutoryLiabilityRecord } from '@/types/hcm-enterprise';
+import type {
+  FinanceAccountRecord,
+  FinancePeriodRecord,
+  GovernedJournalRecord,
+  TreasuryAccountRecord,
+} from '@/types/finance-domain';
+import { financePeriodId } from '@/lib/finance/finance-engine';
 import {
   attendanceEvidenceFingerprint,
   calculatePayrollLine,
@@ -70,6 +78,41 @@ function safeDate(date:string):number{
   return value;
 }
 
+function financePeriodForDate(date:string){
+  const ms=safeDate(date);
+  const d=new Date(ms);
+  return {ms,fiscalYear:d.getUTCFullYear(),postingPeriod:d.getUTCMonth()+1};
+}
+
+async function requireFinanceAccounts(
+  tenantId:string,
+  currency:string,
+  codes:string[]
+):Promise<Map<string,FinanceAccountRecord>>{
+  const accounts=await DomainStateRepository.list<FinanceAccountRecord>(tenantId,'accounts',50000);
+  const byCode=new Map(accounts.map(account=>[account.accountCode,account]));
+  for(const code of [...new Set(codes)]){
+    const account=byCode.get(code);
+    if(
+      !account ||
+      !account.isActive ||
+      account.currency.trim().toUpperCase()!==currency
+    ){
+      throw new AtomicMutationRejectedError(
+        'PAYROLL_FINANCE_ACCOUNT_INVALID',
+        `Required payroll Finance account ${code} is missing, inactive, or in another currency.`
+      );
+    }
+  }
+  return byCode;
+}
+
+function payrollLiabilityId(periodId:string,code:string,accountCode:string):string{
+  return 'prliab_'+createHash('sha256')
+    .update([periodId,code,accountCode].map(value=>value.trim().toLowerCase()).join('\u0000'))
+    .digest('hex').slice(0,40);
+}
+
 export class HcmPayrollDomainService {
   public static async setCompensation(
     context:CommandContext,commandId:string,idempotencyKey:string,
@@ -82,7 +125,10 @@ export class HcmPayrollDomainService {
       hourlyRateMinorUnits:number;
       overtimeMultiplierBasisPoints:number;
       monthlyAllowanceMinorUnits:number;
-      deductions:Array<{code:string;name:string;rateBasisPoints:number;fixedMinorUnits:number}>;
+      deductions:Array<{
+        code:string;name:string;rateBasisPoints:number;fixedMinorUnits:number;
+        liabilityAccountCode:string;
+      }>;
       effectiveFrom:string;
     }
   ):Promise<CommandResult<CompensationProfileRecord>>{
@@ -116,7 +162,8 @@ export class HcmPayrollDomainService {
         if(
           !rule.code.trim()||!rule.name.trim()||
           !Number.isInteger(rule.rateBasisPoints)||rule.rateBasisPoints<0||rule.rateBasisPoints>10000||
-          !Number.isSafeInteger(rule.fixedMinorUnits)||rule.fixedMinorUnits<0
+          !Number.isSafeInteger(rule.fixedMinorUnits)||rule.fixedMinorUnits<0||
+          !rule.liabilityAccountCode.trim()
         ) throw new AtomicMutationRejectedError('INVALID_PAYROLL_DEDUCTION_RULE','Payroll deduction rule is invalid.');
       });
       safeDate(payload.effectiveFrom);
@@ -147,7 +194,11 @@ export class HcmPayrollDomainService {
             hourlyRateMinorUnits:payload.hourlyRateMinorUnits,
             overtimeMultiplierBasisPoints:payload.overtimeMultiplierBasisPoints,
             monthlyAllowanceMinorUnits:payload.monthlyAllowanceMinorUnits,
-            deductions:payload.deductions.map(rule=>({...rule,code:rule.code.trim().toUpperCase()})),
+            deductions:payload.deductions.map(rule=>({
+              ...rule,
+              code:rule.code.trim().toUpperCase(),
+              liabilityAccountCode:rule.liabilityAccountCode.trim(),
+            })),
             effectiveFrom:payload.effectiveFrom,status:'PENDING_APPROVAL',
             createdBy:context.actorId,createdAt:now,
           };
@@ -544,7 +595,13 @@ export class HcmPayrollDomainService {
           if(currentPeriod.totalGrossMinorUnits!==currentPeriod.totalNetMinorUnits+currentPeriod.totalDeductionsMinorUnits){
             throw new AtomicMutationRejectedError('PAYROLL_CONTROL_TOTAL_MISMATCH','Payroll gross does not equal net plus deductions.');
           }
-          const next={...currentPeriod,status:'CALCULATED' as const,updatedAt:now};
+          const next={
+            ...currentPeriod,
+            status:'CALCULATED' as const,
+            finalizedBy:context.actorId,
+            finalizedAt:now,
+            updatedAt:now,
+          };
           return {domainState:next,eventPayload:{periodId:next.periodId,enrolledCount:next.enrolledCount,
             totalGrossMinorUnits:next.totalGrossMinorUnits,totalNetMinorUnits:next.totalNetMinorUnits},
             auditReason:`Finalized payroll calculations for ${next.periodNumber}.`,resultData:next};
@@ -557,4 +614,428 @@ export class HcmPayrollDomainService {
       throw error;
     }
   }
+
+  public static async approvePayrollPeriod(
+    context:CommandContext,commandId:string,idempotencyKey:string,
+    payload:{periodId:string;notes?:string}
+  ):Promise<CommandResult<PayrollPeriodRecord>>{
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['FINANCE_MANAGER','HOSPITAL_EXECUTIVE','SYSTEM_ADMIN'],
+    });
+    if(!auth.authorized)return reject(commandId,idempotencyKey,auth.code||'UNAUTHORIZED',auth.reason||'Payroll approval authority required.');
+    try{
+      const period=await DomainStateRepository.getById<PayrollPeriodRecord>(
+        context.tenantId,'payrollPeriods',payload.periodId
+      );
+      if(!period)throw new AtomicMutationRejectedError('PAYROLL_PERIOD_NOT_FOUND','Payroll period does not exist.');
+      assertFacility(context,period.facilityId);
+      const now=new Date().toISOString();
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,actorId:context.actorId,actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'PAYROLL_PERIOD',aggregateId:period.periodId,
+        eventType:'PAYROLL_PERIOD_APPROVED',auditAction:'PAYROLL_PERIOD_APPROVED',
+        auditResourceType:'PAYROLL_PERIOD',auditResourceId:period.periodId,
+        outboxTopic:'g-hims-payroll-events',idempotencyKey,commandId,correlationId:context.correlationId,
+        readTargets:[{key:'period',entityType:'PAYROLL_PERIOD',entityId:period.periodId,required:true}],
+        prepare:(current)=>{
+          const currentPeriod=current.period as unknown as PayrollPeriodRecord;
+          if(currentPeriod.status!=='CALCULATED'){
+            throw new AtomicMutationRejectedError('PAYROLL_NOT_APPROVABLE','Payroll must be finalized before approval.');
+          }
+          if(currentPeriod.finalizedBy===context.actorId){
+            throw new AtomicMutationRejectedError(
+              'HCM_SEGREGATION_OF_DUTIES',
+              'Payroll finalizer cannot approve the same payroll.'
+            );
+          }
+          const next:PayrollPeriodRecord={
+            ...currentPeriod,status:'APPROVED',
+            approvedBy:context.actorId,approvedAt:now,updatedAt:now,
+          };
+          return {
+            domainState:next,
+            eventPayload:{periodId:next.periodId,notes:payload.notes},
+            auditReason:`Approved payroll period ${next.periodNumber}.`,
+            resultData:next,
+          };
+        },
+      });
+      return {success:true,commandId,idempotencyKey,entityId:period.periodId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:tx.resultData as PayrollPeriodRecord};
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError)return reject(commandId,idempotencyKey,error.code,error.message,error.details);
+      throw error;
+    }
+  }
+
+  public static async postPayrollPeriod(
+    context:CommandContext,commandId:string,idempotencyKey:string,
+    payload:{periodId:string}
+  ):Promise<CommandResult<PayrollPeriodRecord>>{
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['FINANCE_MANAGER','PAYROLL_MANAGER','SYSTEM_ADMIN'],
+    });
+    if(!auth.authorized)return reject(commandId,idempotencyKey,auth.code||'UNAUTHORIZED',auth.reason||'Payroll posting authority required.');
+    try{
+      const period=await DomainStateRepository.getById<PayrollPeriodRecord>(
+        context.tenantId,'payrollPeriods',payload.periodId
+      );
+      if(!period)throw new AtomicMutationRejectedError('PAYROLL_PERIOD_NOT_FOUND','Payroll period does not exist.');
+      assertFacility(context,period.facilityId);
+      if(period.status!=='APPROVED')throw new AtomicMutationRejectedError('PAYROLL_NOT_POSTABLE','Payroll must be approved before posting.');
+      if(period.approvedBy===context.actorId){
+        throw new AtomicMutationRejectedError('HCM_SEGREGATION_OF_DUTIES','Payroll approver cannot post the same payroll.');
+      }
+
+      const posting=financePeriodForDate(period.paymentDate);
+      const financePeriod=await DomainStateRepository.getById<FinancePeriodRecord>(
+        context.tenantId,'accountingPeriods',financePeriodId(posting.fiscalYear,posting.postingPeriod)
+      );
+      if(!financePeriod||!['OPEN','SOFT_CLOSE'].includes(financePeriod.status)){
+        throw new AtomicMutationRejectedError('FINANCE_PERIOD_NOT_POSTABLE','Finance period is not open for payroll posting.');
+      }
+
+      const payslips=await DomainStateRepository.queryEqual<PayrollPayslipRecord>(
+        context.tenantId,'payrollPayslips','periodId',period.periodId,100000
+      );
+      if(payslips.length!==period.enrolledCount||period.calculatedCount!==period.enrolledCount){
+        throw new AtomicMutationRejectedError('PAYROLL_LINES_INCOMPLETE','Every enrolled employee must have one governed payslip before posting.');
+      }
+      const regular=payslips.reduce((sum,row)=>sum+row.regularPayMinorUnits,0);
+      const variable=payslips.reduce((sum,row)=>sum+row.overtimePayMinorUnits+row.allowanceMinorUnits,0);
+      const gross=payslips.reduce((sum,row)=>sum+row.grossPayMinorUnits,0);
+      const deductions=payslips.reduce((sum,row)=>sum+row.totalDeductionsMinorUnits,0);
+      const net=payslips.reduce((sum,row)=>sum+row.netPayMinorUnits,0);
+      if(
+        gross!==period.totalGrossMinorUnits ||
+        deductions!==period.totalDeductionsMinorUnits ||
+        net!==period.totalNetMinorUnits ||
+        regular!==period.totalRegularMinorUnits ||
+        payslips.reduce((sum,row)=>sum+row.overtimePayMinorUnits,0)!==period.totalOvertimeMinorUnits ||
+        payslips.reduce((sum,row)=>sum+row.allowanceMinorUnits,0)!==period.totalAllowanceMinorUnits
+      ){
+        throw new AtomicMutationRejectedError('PAYROLL_TOTALS_CHANGED','Payroll control totals changed before Finance posting.');
+      }
+
+      const liabilityGroups=new Map<string,{code:string;name:string;accountCode:string;amount:number}>();
+      for(const payslip of payslips){
+        for(const deduction of payslip.deductions){
+          const accountCode=String(deduction.liabilityAccountCode||'').trim();
+          if(!accountCode){
+            throw new AtomicMutationRejectedError(
+              'PAYROLL_DEDUCTION_LIABILITY_ACCOUNT_REQUIRED',
+              `Deduction ${deduction.code} has no governed liability account.`
+            );
+          }
+          const key=`${deduction.code}|${accountCode}`;
+          const prior=liabilityGroups.get(key)||{
+            code:deduction.code,name:deduction.name,accountCode,amount:0
+          };
+          prior.amount+=deduction.amountMinorUnits;
+          liabilityGroups.set(key,prior);
+        }
+      }
+      const liabilityCodes=[...new Set([...liabilityGroups.values()].map(row=>row.accountCode))];
+      const accounts=await requireFinanceAccounts(
+        context.tenantId,period.currency,['6510','6520','2060',...liabilityCodes]
+      );
+      for(const code of liabilityCodes){
+        const account=accounts.get(code)!;
+        if(account.category!=='liability'||account.normalBalance!=='credit'){
+          throw new AtomicMutationRejectedError(
+            'PAYROLL_FINANCE_ACCOUNT_INVALID',
+            `Payroll deduction account ${code} must be an active liability/credit account.`
+          );
+        }
+      }
+      for(const code of ['6510','6520']){
+        const account=accounts.get(code)!;
+        if(account.category!=='expense'||account.normalBalance!=='debit'){
+          throw new AtomicMutationRejectedError('PAYROLL_FINANCE_ACCOUNT_INVALID',`Payroll expense account ${code} is invalid.`);
+        }
+      }
+      const payrollPayable=accounts.get('2060')!;
+      if(payrollPayable.category!=='liability'||payrollPayable.normalBalance!=='credit'){
+        throw new AtomicMutationRejectedError('PAYROLL_FINANCE_ACCOUNT_INVALID','Payroll payable account 2060 is invalid.');
+      }
+
+      const journalId=`je_payroll_${period.periodId}`;
+      const journalLines:GovernedJournalRecord['lines']=[
+        ...(regular>0?[{
+          glAccountId:'6510',glAccountName:accounts.get('6510')!.accountName,
+          debitMinorUnits:regular,creditMinorUnits:0,
+          lineDescription:`Payroll regular compensation ${period.periodNumber}`,
+        }]:[]),
+        ...(variable>0?[{
+          glAccountId:'6520',glAccountName:accounts.get('6520')!.accountName,
+          debitMinorUnits:variable,creditMinorUnits:0,
+          lineDescription:`Payroll overtime and allowances ${period.periodNumber}`,
+        }]:[]),
+        {
+          glAccountId:'2060',glAccountName:payrollPayable.accountName,
+          debitMinorUnits:0,creditMinorUnits:net,
+          lineDescription:`Accrued net payroll payable ${period.periodNumber}`,
+        },
+        ...[...liabilityGroups.values()].filter(row=>row.amount>0).map(row=>({
+          glAccountId:row.accountCode,glAccountName:accounts.get(row.accountCode)!.accountName,
+          debitMinorUnits:0,creditMinorUnits:row.amount,
+          lineDescription:`${row.name} payroll liability ${period.periodNumber}`,
+        })),
+      ];
+      const debits=journalLines.reduce((sum,row)=>sum+row.debitMinorUnits,0);
+      const credits=journalLines.reduce((sum,row)=>sum+row.creditMinorUnits,0);
+      if(debits!==credits||debits!==gross){
+        throw new AtomicMutationRejectedError('PAYROLL_JOURNAL_UNBALANCED','Payroll Finance journal is not balanced.');
+      }
+
+      const now=new Date().toISOString();
+      const journal:GovernedJournalRecord={
+        journalId,tenantId:context.tenantId,
+        fiscalYear:posting.fiscalYear,postingPeriod:posting.postingPeriod,
+        documentDate:posting.ms,postingDate:posting.ms,
+        referenceDocumentId:period.periodId,
+        documentHeader:`Payroll accrual ${period.periodNumber}`,
+        currency:period.currency,totalAmountMinorUnits:gross,
+        lines:journalLines,sourceModule:'PAYROLL',status:'POSTED',
+        postedBy:context.actorId,postedAt:Date.now(),
+      };
+      const liabilityWrites=[...liabilityGroups.values()].filter(row=>row.amount>0).map(row=>{
+        const liability:PayrollStatutoryLiabilityRecord={
+          liabilityId:payrollLiabilityId(period.periodId,row.code,row.accountCode),
+          tenantId:context.tenantId,periodId:period.periodId,code:row.code,name:row.name,
+          liabilityAccountCode:row.accountCode,currency:period.currency,
+          amountMinorUnits:row.amount,status:'ACCRUED',createdAt:now,
+        };
+        return {entityType:'PAYROLL_STATUTORY_LIABILITY',entityId:liability.liabilityId,domainState:liability};
+      });
+
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,actorId:context.actorId,actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'PAYROLL_PERIOD',aggregateId:period.periodId,
+        eventType:'PAYROLL_POSTED_TO_FINANCE',auditAction:'PAYROLL_POSTED_TO_FINANCE',
+        auditResourceType:'PAYROLL_PERIOD',auditResourceId:period.periodId,
+        outboxTopic:'g-hims-payroll-events',idempotencyKey,commandId,correlationId:context.correlationId,
+        readTargets:[{key:'period',entityType:'PAYROLL_PERIOD',entityId:period.periodId,required:true}],
+        prepare:(current)=>{
+          const currentPeriod=current.period as unknown as PayrollPeriodRecord;
+          if(currentPeriod.status!=='APPROVED'||currentPeriod.approvedBy!==period.approvedBy){
+            throw new AtomicMutationRejectedError('PAYROLL_CHANGED_BEFORE_POSTING','Payroll approval changed before posting.');
+          }
+          const next:PayrollPeriodRecord={
+            ...currentPeriod,status:'POSTED',financeJournalId:journalId,
+            postedBy:context.actorId,postedAt:now,updatedAt:now,
+          };
+          return {
+            domainState:next,
+            additionalStateWrites:[
+              {entityType:'JOURNAL_ENTRY',entityId:journalId,domainState:journal},
+              ...liabilityWrites,
+            ],
+            eventPayload:{periodId:period.periodId,journalId,grossMinorUnits:gross,netMinorUnits:net},
+            auditReason:`Posted payroll period ${period.periodNumber} to Finance atomically.`,
+            resultData:next,
+          };
+        },
+      });
+      return {success:true,commandId,idempotencyKey,entityId:period.periodId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:tx.resultData as PayrollPeriodRecord};
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError)return reject(commandId,idempotencyKey,error.code,error.message,error.details);
+      throw error;
+    }
+  }
+
+  public static async settlePayrollPeriod(
+    context:CommandContext,commandId:string,idempotencyKey:string,
+    payload:{periodId:string;treasuryAccountId:string;settlementReference:string;settledAt:string}
+  ):Promise<CommandResult<PayrollPeriodRecord>>{
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['TREASURY_MANAGER','FINANCE_MANAGER','SYSTEM_ADMIN'],
+    });
+    if(!auth.authorized)return reject(commandId,idempotencyKey,auth.code||'UNAUTHORIZED',auth.reason||'Payroll settlement authority required.');
+    try{
+      const [period,treasury]=await Promise.all([
+        DomainStateRepository.getById<PayrollPeriodRecord>(context.tenantId,'payrollPeriods',payload.periodId),
+        DomainStateRepository.getById<TreasuryAccountRecord>(context.tenantId,'treasuryAccounts',payload.treasuryAccountId),
+      ]);
+      if(!period)throw new AtomicMutationRejectedError('PAYROLL_PERIOD_NOT_FOUND','Payroll period does not exist.');
+      assertFacility(context,period.facilityId);
+      if(period.status!=='POSTED')throw new AtomicMutationRejectedError('PAYROLL_NOT_SETTLEABLE','Payroll must be posted before settlement.');
+      if(period.postedBy===context.actorId){
+        throw new AtomicMutationRejectedError('HCM_SEGREGATION_OF_DUTIES','Payroll Finance poster cannot settle the same payroll.');
+      }
+      if(!treasury||!treasury.isActive||!treasury.allowPayments||treasury.kind!=='BANK'){
+        throw new AtomicMutationRejectedError('TREASURY_ACCOUNT_NOT_PAYABLE','Treasury account is not an active payment bank account.');
+      }
+      if(treasury.currency!==period.currency){
+        throw new AtomicMutationRejectedError('PAYROLL_SETTLEMENT_CURRENCY_MISMATCH','Treasury currency does not match payroll.');
+      }
+      const settledMs=Date.parse(payload.settledAt);
+      if(!Number.isFinite(settledMs))throw new AtomicMutationRejectedError('INVALID_PAYROLL_SETTLEMENT_DATE','Settlement date is invalid.');
+      const d=new Date(settledMs);
+      const financePeriod=await DomainStateRepository.getById<FinancePeriodRecord>(
+        context.tenantId,'accountingPeriods',financePeriodId(d.getUTCFullYear(),d.getUTCMonth()+1)
+      );
+      if(!financePeriod||!['OPEN','SOFT_CLOSE'].includes(financePeriod.status)){
+        throw new AtomicMutationRejectedError('FINANCE_PERIOD_NOT_POSTABLE','Finance period is not open for payroll settlement.');
+      }
+      const accounts=await requireFinanceAccounts(
+        context.tenantId,period.currency,['2060',treasury.accountCode]
+      );
+      const journalId=`je_payroll_settlement_${period.periodId}`;
+      const journal:GovernedJournalRecord={
+        journalId,tenantId:context.tenantId,
+        fiscalYear:d.getUTCFullYear(),postingPeriod:d.getUTCMonth()+1,
+        documentDate:settledMs,postingDate:settledMs,
+        referenceDocumentId:payload.settlementReference,
+        documentHeader:`Payroll settlement ${period.periodNumber}`,
+        currency:period.currency,totalAmountMinorUnits:period.totalNetMinorUnits,
+        lines:[
+          {
+            glAccountId:'2060',glAccountName:accounts.get('2060')!.accountName,
+            debitMinorUnits:period.totalNetMinorUnits,creditMinorUnits:0,
+            lineDescription:`Clear accrued net payroll ${period.periodNumber}`,
+          },
+          {
+            glAccountId:treasury.accountCode,glAccountName:accounts.get(treasury.accountCode)!.accountName,
+            debitMinorUnits:0,creditMinorUnits:period.totalNetMinorUnits,
+            lineDescription:`Payroll bank settlement ${period.periodNumber}`,
+          },
+        ],
+        sourceModule:'PAYROLL',status:'POSTED',postedBy:context.actorId,postedAt:Date.now(),
+      };
+      const now=new Date().toISOString();
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,actorId:context.actorId,actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'PAYROLL_PERIOD',aggregateId:period.periodId,
+        eventType:'PAYROLL_SETTLED',auditAction:'PAYROLL_SETTLED',
+        auditResourceType:'PAYROLL_PERIOD',auditResourceId:period.periodId,
+        outboxTopic:'g-hims-payroll-events',idempotencyKey,commandId,correlationId:context.correlationId,
+        readTargets:[{key:'period',entityType:'PAYROLL_PERIOD',entityId:period.periodId,required:true}],
+        prepare:(current)=>{
+          const currentPeriod=current.period as unknown as PayrollPeriodRecord;
+          if(currentPeriod.status!=='POSTED'||currentPeriod.financeJournalId!==period.financeJournalId){
+            throw new AtomicMutationRejectedError('PAYROLL_CHANGED_BEFORE_SETTLEMENT','Payroll state changed before settlement.');
+          }
+          const next:PayrollPeriodRecord={
+            ...currentPeriod,status:'PAID',settlementJournalId:journalId,
+            paidBy:context.actorId,paidAt:now,settlementReference:payload.settlementReference,updatedAt:now,
+          };
+          return {
+            domainState:next,
+            additionalStateWrites:[{entityType:'JOURNAL_ENTRY',entityId:journalId,domainState:journal}],
+            eventPayload:{periodId:period.periodId,journalId,amountMinorUnits:period.totalNetMinorUnits},
+            auditReason:`Settled payroll period ${period.periodNumber} from treasury account ${treasury.treasuryAccountId}.`,
+            resultData:next,
+          };
+        },
+      });
+      return {success:true,commandId,idempotencyKey,entityId:period.periodId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:tx.resultData as PayrollPeriodRecord};
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError)return reject(commandId,idempotencyKey,error.code,error.message,error.details);
+      throw error;
+    }
+  }
+
+  public static async remitPayrollLiability(
+    context:CommandContext,commandId:string,idempotencyKey:string,
+    payload:{liabilityId:string;treasuryAccountId:string;remittanceReference:string;remittedAt:string}
+  ):Promise<CommandResult<PayrollStatutoryLiabilityRecord>>{
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['TREASURY_MANAGER','FINANCE_MANAGER','PAYROLL_MANAGER','SYSTEM_ADMIN'],
+    });
+    if(!auth.authorized)return reject(commandId,idempotencyKey,auth.code||'UNAUTHORIZED',auth.reason||'Payroll liability remittance authority required.');
+    try{
+      const liability=await DomainStateRepository.getById<PayrollStatutoryLiabilityRecord>(
+        context.tenantId,'payrollStatutoryLiabilities',payload.liabilityId
+      );
+      if(!liability)throw new AtomicMutationRejectedError('PAYROLL_LIABILITY_NOT_FOUND','Payroll liability does not exist.');
+      const [period,treasury]=await Promise.all([
+        DomainStateRepository.getById<PayrollPeriodRecord>(context.tenantId,'payrollPeriods',liability.periodId),
+        DomainStateRepository.getById<TreasuryAccountRecord>(context.tenantId,'treasuryAccounts',payload.treasuryAccountId),
+      ]);
+      if(!period)throw new AtomicMutationRejectedError('PAYROLL_PERIOD_NOT_FOUND','Payroll period for liability does not exist.');
+      if(!['POSTED','PAID'].includes(period.status)){
+        throw new AtomicMutationRejectedError('PAYROLL_LIABILITY_NOT_POSTED','Payroll liability cannot be remitted before payroll posts to Finance.');
+      }
+      if(period.postedBy===context.actorId){
+        throw new AtomicMutationRejectedError('HCM_SEGREGATION_OF_DUTIES','Payroll Finance poster cannot remit the same payroll liability.');
+      }
+      if(liability.status!=='ACCRUED')throw new AtomicMutationRejectedError('PAYROLL_LIABILITY_NOT_REMITTABLE','Payroll liability is already remitted.');
+      if(!treasury||!treasury.isActive||!treasury.allowPayments||treasury.kind!=='BANK'){
+        throw new AtomicMutationRejectedError('TREASURY_ACCOUNT_NOT_PAYABLE','Treasury account is not available for remittance.');
+      }
+      if(treasury.currency!==liability.currency){
+        throw new AtomicMutationRejectedError('PAYROLL_REMITTANCE_CURRENCY_MISMATCH','Treasury currency does not match payroll liability.');
+      }
+      const remittedMs=Date.parse(payload.remittedAt);
+      if(!Number.isFinite(remittedMs))throw new AtomicMutationRejectedError('INVALID_PAYROLL_REMITTANCE_DATE','Remittance date is invalid.');
+      const d=new Date(remittedMs);
+      const financePeriod=await DomainStateRepository.getById<FinancePeriodRecord>(
+        context.tenantId,'accountingPeriods',financePeriodId(d.getUTCFullYear(),d.getUTCMonth()+1)
+      );
+      if(!financePeriod||!['OPEN','SOFT_CLOSE'].includes(financePeriod.status)){
+        throw new AtomicMutationRejectedError('FINANCE_PERIOD_NOT_POSTABLE','Finance period is not open for payroll liability remittance.');
+      }
+      const accounts=await requireFinanceAccounts(
+        context.tenantId,liability.currency,[liability.liabilityAccountCode,treasury.accountCode]
+      );
+      const journalId=`je_payroll_liability_${liability.liabilityId}`;
+      const journal:GovernedJournalRecord={
+        journalId,tenantId:context.tenantId,
+        fiscalYear:d.getUTCFullYear(),postingPeriod:d.getUTCMonth()+1,
+        documentDate:remittedMs,postingDate:remittedMs,
+        referenceDocumentId:payload.remittanceReference,
+        documentHeader:`Payroll liability remittance ${liability.code}`,
+        currency:liability.currency,totalAmountMinorUnits:liability.amountMinorUnits,
+        lines:[
+          {
+            glAccountId:liability.liabilityAccountCode,
+            glAccountName:accounts.get(liability.liabilityAccountCode)!.accountName,
+            debitMinorUnits:liability.amountMinorUnits,creditMinorUnits:0,
+            lineDescription:`Clear payroll liability ${liability.name}`,
+          },
+          {
+            glAccountId:treasury.accountCode,glAccountName:accounts.get(treasury.accountCode)!.accountName,
+            debitMinorUnits:0,creditMinorUnits:liability.amountMinorUnits,
+            lineDescription:`Remit payroll liability ${liability.name}`,
+          },
+        ],
+        sourceModule:'PAYROLL',status:'POSTED',postedBy:context.actorId,postedAt:Date.now(),
+      };
+      const now=new Date().toISOString();
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,actorId:context.actorId,actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'PAYROLL_STATUTORY_LIABILITY',aggregateId:liability.liabilityId,
+        eventType:'PAYROLL_LIABILITY_REMITTED',auditAction:'PAYROLL_LIABILITY_REMITTED',
+        auditResourceType:'PAYROLL_STATUTORY_LIABILITY',auditResourceId:liability.liabilityId,
+        outboxTopic:'g-hims-payroll-events',idempotencyKey,commandId,correlationId:context.correlationId,
+        readTargets:[{key:'liability',entityType:'PAYROLL_STATUTORY_LIABILITY',entityId:liability.liabilityId,required:true}],
+        prepare:(current)=>{
+          const currentLiability=current.liability as unknown as PayrollStatutoryLiabilityRecord;
+          if(currentLiability.status!=='ACCRUED'){
+            throw new AtomicMutationRejectedError('PAYROLL_LIABILITY_CHANGED','Payroll liability changed before remittance.');
+          }
+          const next:PayrollStatutoryLiabilityRecord={
+            ...currentLiability,status:'REMITTED',remittedAt:payload.remittedAt,
+            remittanceJournalId:journalId,remittanceReference:payload.remittanceReference,
+          };
+          return {
+            domainState:next,
+            additionalStateWrites:[{entityType:'JOURNAL_ENTRY',entityId:journalId,domainState:journal}],
+            eventPayload:{liabilityId:next.liabilityId,journalId,amountMinorUnits:next.amountMinorUnits},
+            auditReason:`Remitted payroll liability ${next.code} from treasury account ${treasury.treasuryAccountId}.`,
+            resultData:next,
+          };
+        },
+      });
+      return {success:true,commandId,idempotencyKey,entityId:liability.liabilityId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:tx.resultData as PayrollStatutoryLiabilityRecord};
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError)return reject(commandId,idempotencyKey,error.code,error.message,error.details);
+      throw error;
+    }
+  }
+
 }

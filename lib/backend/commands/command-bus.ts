@@ -17,7 +17,6 @@ import { FinanceFixedAssetDomainService } from '../services/finance-fixed-asset-
 import { FinanceCloseDomainService } from '../services/finance-close-domain-service';
 import { FinanceTaxDomainService } from '../services/finance-tax-domain-service';
 import { FinanceIntelligenceDomainService } from '../services/finance-intelligence-domain-service';
-import { HcmPrivilegeDomainService } from '../services/hcm-privilege-domain-service';
 import { HrWorkforceDomainService } from '../services/hr-workforce-domain-service';
 import { ResourceCapacityDomainService } from '../services/resource-capacity-domain-service';
 import { PatientIdentityDomainService } from '../services/patient-identity-domain-service';
@@ -1093,6 +1092,15 @@ export class CommandBus {
 
         case 'GrantClinicalPrivilegeCommand':
           result = await HrWorkforceDomainService.grantClinicalPrivilege(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ChangeClinicalPrivilegeStatusCommand':
+          result = await HrWorkforceDomainService.changeClinicalPrivilegeStatus(
             context,
             command.commandId,
             command.idempotencyKey,

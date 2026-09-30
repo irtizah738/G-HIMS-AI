@@ -123,3 +123,77 @@ export async function submitPurchaseRequisitionEdge(
   );
   if (!result.success) throw new Error(result.error?.message || 'Purchase requisition failed.');
 }
+
+
+export async function reviewPurchaseRequisitionEdge(input: {
+  requisitionId: string;
+  decision: 'APPROVED' | 'REJECTED';
+  comments?: string;
+}): Promise<void> {
+  const result = await executeActiveTenantCommand(
+    'ReviewPurchaseRequisitionCommand',
+    input,
+    {
+      idempotencyKey: `scm-pr-review:${input.requisitionId}:${input.decision}`,
+      offlineQueue: {
+        enabled: false,
+      },
+    }
+  );
+  if (!result.success) {
+    throw new Error(result.error?.message || 'Purchase requisition review failed.');
+  }
+}
+
+export async function convertPurchaseRequisitionToOrderEdge(input: {
+  requisitionId: string;
+  supplierId: string;
+  paymentTerms: string;
+  expectedDeliveryDate: string;
+  notes?: string;
+}): Promise<PurchaseOrderRecord> {
+  const result = await executeActiveTenantCommand<{
+    purchaseOrder?: PurchaseOrderRecord;
+  }>(
+    'ConvertPurchaseRequisitionToOrderCommand',
+    input,
+    {
+      idempotencyKey: `scm-pr-to-po:${input.requisitionId}`,
+      offlineQueue: {
+        enabled: false,
+      },
+    }
+  );
+  if (!result.success) {
+    throw new Error(result.error?.message || 'Purchase order generation failed.');
+  }
+  const po = result.data?.purchaseOrder;
+  if (!po) throw new Error('Authoritative purchase order response was missing.');
+  return po;
+}
+
+export async function receivePurchaseOrderEdge(input: {
+  purchaseOrderId: string;
+  deliveryNoteNumber: string;
+  supplierInvoiceReference?: string;
+  items: GoodsReceiptNote['items'];
+}): Promise<GoodsReceiptNote> {
+  const result = await executeActiveTenantCommand<{
+    goodsReceiptNote?: GoodsReceiptNote;
+  }>(
+    'ReceivePurchaseOrderCommand',
+    input,
+    {
+      idempotencyKey: `scm-grn:${input.purchaseOrderId}:${input.deliveryNoteNumber}`,
+      offlineQueue: {
+        enabled: false,
+      },
+    }
+  );
+  if (!result.success) {
+    throw new Error(result.error?.message || 'Goods receipt failed.');
+  }
+  const grn = result.data?.goodsReceiptNote;
+  if (!grn) throw new Error('Authoritative goods receipt response was missing.');
+  return grn;
+}

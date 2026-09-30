@@ -159,7 +159,15 @@ async function resolveAccounts(
           `Account code ${accountCode} must resolve to exactly one authoritative GL account.`
         );
       }
-      return matches[0];
+      const row = matches[0] as FinanceAccountRecord & { id?: string };
+      const accountId = String(row.accountId || row.id || '').trim();
+      if (!accountId) {
+        throw new AtomicMutationRejectedError(
+          'GL_ACCOUNT_DOCUMENT_ID_MISSING',
+          `Account code ${accountCode} is missing its stable document identifier.`
+        );
+      }
+      return { ...row, accountId };
     })
   );
   return records;
@@ -215,6 +223,7 @@ export class FinanceGlDomainService {
       const now = new Date().toISOString();
       const account: FinanceAccountRecord = {
         accountId,
+        id: accountId,
         tenantId: context.tenantId,
         accountCode,
         accountName: payload.accountName.trim(),

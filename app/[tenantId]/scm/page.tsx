@@ -15,7 +15,11 @@ interface PageProps {
 
 export default function SCMPage({ params }: PageProps) {
   const resolvedParams = use(params);
-  const tenantId = resolvedParams.tenantId || 'metro-health';
+  const tenantId = resolvedParams.tenantId?.trim();
+
+  if (!tenantId) {
+    throw new Error('TENANT_CONTEXT_REQUIRED: SCM requires an explicit tenant route context.');
+  }
 
   return (
     <div className="min-h-screen bg-slate-100/60 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors">

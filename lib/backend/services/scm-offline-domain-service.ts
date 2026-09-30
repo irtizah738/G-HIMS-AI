@@ -340,49 +340,200 @@ export class ScmOfflineDomainService {
     payload: Record<string, unknown>
   ): Promise<CommandResult> {
     const auth = AuthorizationPipeline.evaluate(context, {
-      requiredRoles: ['SCM_MANAGER', 'INVENTORY_OFFICER', 'PHARMACIST', 'DEPARTMENT_HEAD', 'SYSTEM_ADMIN', 'ADMINISTRATOR'],
+      requiredRoles: [
+        'SCM_MANAGER',
+        'INVENTORY_OFFICER',
+        'PHARMACIST',
+        'DEPARTMENT_HEAD',
+        'SYSTEM_ADMIN',
+        'ADMINISTRATOR',
+      ],
     });
     if (!auth.authorized) {
-      return { success:false, commandId, idempotencyKey, error:{ code:auth.code || 'UNAUTHORIZED', message:auth.reason || 'Requisition submission authority required.' } };
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Requisition submission authority required.',
+        },
+      };
     }
 
     const requisition = payload as unknown as PurchaseRequisition;
-    if (!requisition.requisitionId || !Array.isArray(requisition.items) || requisition.items.length === 0) {
-      return { success:false, commandId, idempotencyKey, error:{ code:'INVALID_REQUISITION', message:'Requisition identity and at least one line item are required.' } };
+    if (
+      !requisition.requisitionId ||
+      !Array.isArray(requisition.items) ||
+      requisition.items.length === 0 ||
+      !requisition.facilityId ||
+      !requisition.requestingLocationId ||
+      !requisition.requestingDepartment ||
+      !requisition.priority
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INVALID_REQUISITION',
+          message:
+            'Requisition identity, facility, department, location, priority and at least one line item are required.',
+        },
+      };
     }
 
-    const canonical: PurchaseRequisition = {
-      ...requisition,
-      tenantId: context.tenantId,
-      status: requisition.status === 'DRAFT' ? 'SUBMITTED' : requisition.status,
-      updatedAt: new Date().toISOString(),
-    };
+    const uniqueItemIds = Array.from(
+      new Set(
+        requisition.items
+          .map((line) => String(line.itemId || '').trim())
+          .filter(Boolean)
+      )
+    );
 
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'PURCHASE_REQUISITION',
-      entityId: canonical.requisitionId,
-      eventType: 'PR_SUBMITTED',
-      domainState: canonical,
-      eventPayload: {
-        requisitionId: canonical.requisitionId,
-        priority: canonical.priority,
-        requestingDepartment: canonical.requestingDepartment,
-        itemsCount: canonical.items.length,
-      },
-      auditReason: `Submitted purchase requisition ${canonical.requisitionNumber}`,
-      outboxTopic: 'g-hims-scm-events',
-    });
+    if (uniqueItemIds.length !== requisition.items.length) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INVALID_REQUISITION_ITEMS',
+          message:
+            'Every requisition line must reference one unique authoritative item.',
+        },
+      };
+    }
 
-    return {
-      success:true,
-      commandId,
-      idempotencyKey,
-      entityId:canonical.requisitionId,
-      eventId:tx.event.eventId,
-      auditId:tx.audit.auditId,
-      outboxId:tx.outbox.outboxId,
-      data:canonical,
-    };
+    try {
+      const tx = await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.roles[0] || 'AUTHENTICATED_USER',
+        aggregateType: 'PURCHASE_REQUISITION',
+        aggregateId: requisition.requisitionId,
+        eventType: 'PR_SUBMITTED',
+        auditAction: 'PR_SUBMITTED',
+        auditResourceType: 'PURCHASE_REQUISITION',
+        auditResourceId: requisition.requisitionId,
+        outboxTopic: 'g-hims-scm-events',
+        idempotencyKey,
+        commandId,
+        correlationId: context.correlationId,
+        readTargets: uniqueItemIds.map((itemId) => ({
+          key: `item:${itemId}`,
+          entityType: 'ITEM_MASTER',
+          entityId: itemId,
+          required: true,
+        })),
+        prepare: (current) => {
+          const now = new Date().toISOString();
+
+          const canonicalItems = requisition.items.map((line) => {
+            const item = current[`item:${line.itemId}`] || {};
+            if (item.isActive === false) {
+              throw new AtomicMutationRejectedError(
+                'REQUISITION_ITEM_INACTIVE',
+                `Item ${line.itemId} is inactive and cannot be requisitioned.`
+              );
+            }
+
+            const requestedQuantity = Number(line.requestedQuantity);
+            const unitCost = Number(item.unitCost);
+            if (
+              !Number.isFinite(requestedQuantity) ||
+              requestedQuantity <= 0 ||
+              !Number.isFinite(unitCost) ||
+              unitCost < 0
+            ) {
+              throw new AtomicMutationRejectedError(
+                'REQUISITION_LINE_INVALID',
+                `Requisition line ${line.itemId} has invalid quantity or authoritative cost.`
+              );
+            }
+
+            return {
+              ...line,
+              itemId: String(item.itemId || line.itemId),
+              itemCode: String(item.itemCode || line.itemCode || ''),
+              itemName: String(item.name || line.itemName || ''),
+              uom: (item.unitOfMeasure || line.uom) as typeof line.uom,
+              reorderPoint: Number(item.reorderPoint || 0),
+              suggestedQuantity: Number(
+                item.reorderQuantity || line.suggestedQuantity || requestedQuantity
+              ),
+              estimatedUnitCost: unitCost,
+              estimatedTotal:
+                Math.round(requestedQuantity * unitCost * 100) / 100,
+              requestedQuantity,
+            };
+          });
+
+          const estimatedTotalCost =
+            Math.round(
+              canonicalItems.reduce(
+                (sum, line) => sum + line.estimatedTotal,
+                0
+              ) * 100
+            ) / 100;
+
+          const canonical: PurchaseRequisition = {
+            ...requisition,
+            tenantId: context.tenantId,
+            requestedBy: {
+              userId: context.actorId,
+              userName: context.actorId,
+              role: context.roles[0] || 'AUTHENTICATED_USER',
+            },
+            items: canonicalItems,
+            estimatedTotalCost,
+            status: 'PENDING_APPROVAL',
+            approvalHistory: [],
+            createdAt: requisition.createdAt || now,
+            updatedAt: now,
+          };
+
+          return {
+            domainState: canonical,
+            eventPayload: {
+              requisitionId: canonical.requisitionId,
+              priority: canonical.priority,
+              facilityId: canonical.facilityId,
+              requestingDepartment: canonical.requestingDepartment,
+              itemsCount: canonical.items.length,
+              estimatedTotalCost,
+              currency: canonical.currency,
+            },
+            auditReason: `Submitted purchase requisition ${canonical.requisitionNumber}`,
+            resultData: canonical,
+          };
+        },
+      });
+
+      return {
+        success: true,
+        commandId,
+        idempotencyKey,
+        entityId: requisition.requisitionId,
+        eventId: tx.eventId,
+        auditId: tx.auditId,
+        outboxId: tx.outboxId,
+        data: tx.resultData,
+      };
+    } catch (error) {
+      if (error instanceof AtomicMutationRejectedError) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+          },
+        };
+      }
+      throw error;
+    }
   }
 
   public static async reviewPurchaseRequisition(
@@ -669,17 +820,11 @@ export class ScmOfflineDomainService {
             totalAmount,
             paymentTerms,
             expectedDeliveryDate,
-            status: 'APPROVED',
+            status: 'PENDING_APPROVAL',
             createdBy: {
               userId: context.actorId,
               userName: context.actorId,
               role: context.roles[0] || 'AUTHENTICATED_USER',
-            },
-            approvedBy: {
-              userId: context.actorId,
-              userName: context.actorId,
-              approvalTier: 'SCM_APPROVED_PR_CONVERSION',
-              approvedAt: now,
             },
             destinationLocationId: requisition.requestingLocationId,
             notes,
@@ -715,6 +860,7 @@ export class ScmOfflineDomainService {
             resultData: {
               requisition: nextRequisition,
               purchaseOrder: po,
+              nextRequiredAction: 'PO_APPROVAL_REQUIRED_BEFORE_VENDOR_DISPATCH',
             },
           };
         },
@@ -823,7 +969,13 @@ export class ScmOfflineDomainService {
         prepare: (current) => {
           const po = current.purchaseOrder as unknown as PurchaseOrderRecord;
           if (
-            ['CLOSED', 'CANCELLED', 'REJECTED'].includes(po.status)
+            ![
+              'APPROVED',
+              'SENT',
+              'SENT_TO_SUPPLIER',
+              'ACKNOWLEDGED',
+              'PARTIALLY_RECEIVED',
+            ].includes(po.status)
           ) {
             throw new AtomicMutationRejectedError(
               'PURCHASE_ORDER_NOT_RECEIVABLE',

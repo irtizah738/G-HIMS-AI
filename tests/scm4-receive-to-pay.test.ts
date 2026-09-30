@@ -302,6 +302,8 @@ describe('SCM-4 receive-to-pay financial integrity', () => {
     expect(provisioner).toContain('GHIMS_BOOTSTRAP_CONFIRM_PROJECT');
     expect(provisioner).toContain('GHIMS_ALLOW_PRODUCTION_SCM4_FINANCE_PROVISION');
     expect(provisioner).toContain('SCM4_COA_DUPLICATE_CODE');
+    expect(provisioner).toContain('const writeBatch = db.batch()');
+    expect(provisioner).toContain('await writeBatch.commit()');
     expect(provisioner).toContain("code: '1010'");
     expect(provisioner).toContain('allowSupplierPayments: true');
     expect(coa).toContain('allowSupplierPayments: true');

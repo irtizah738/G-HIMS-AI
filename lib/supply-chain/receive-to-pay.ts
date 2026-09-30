@@ -181,7 +181,7 @@ export function evaluateSupplierInvoiceMatch(params: {
       }
     }
 
-    if (Math.abs(quantityVariance) > Math.max(0, quantityTolerance)) {
+    if (quantityVariance > Math.max(0, quantityTolerance)) {
       status = 'QTY_MISMATCH';
       if (!exceptions.includes('QUANTITY_VARIANCE')) {
         exceptions.push('QUANTITY_VARIANCE');

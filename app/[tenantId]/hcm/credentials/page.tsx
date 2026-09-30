@@ -1097,13 +1097,13 @@ export default function ClinicalCredentialsPage() {
               <div className="flex">
                 <span className="text-slate-400 w-16 font-medium">To:</span>
                 <span className="text-slate-800 font-mono font-semibold">
-                  {selectedAlertForEmail.recipientEmail} (Credentialing Director)
+                  {selectedAlertForEmail.recipientEmail || 'Configured credentialing recipient'} (Credentialing Director)
                 </span>
               </div>
               <div className="flex">
                 <span className="text-slate-400 w-16 font-medium">From:</span>
                 <span className="text-slate-800 font-mono">
-                  compliance-alerts@metrohealth.ghims.org (G-HIMS Safety Bot)
+                  G-HIMS Credentialing Service
                 </span>
               </div>
               <div className="flex">

@@ -541,6 +541,46 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       currency: z.string().trim().length(3),
     }).strict(),
   },
+  RecordColdChainObservationCommand: {
+    1: z.object({
+      observationId: nonEmpty,
+      facilityId: nonEmpty,
+      locationId: nonEmpty,
+      itemId: nonEmpty,
+      batchId: nonEmpty,
+      balanceId: nonEmpty,
+      temperatureCelsius: z.number().finite().min(-100).max(100),
+      observedAt: nonEmpty,
+      deviceId: nonEmpty.max(200),
+      calibrationValidUntil: nonEmpty,
+    }).strict(),
+  },
+  ReviewColdChainExcursionCommand: {
+    1: z.object({
+      excursionId: nonEmpty,
+      decision: z.enum(['RELEASE', 'DISPOSE_REQUIRED']),
+      notes: nonEmpty.max(2000),
+    }).strict(),
+  },
+  RecordControlledCustodyCommand: {
+    1: z.object({
+      custodyId: nonEmpty,
+      facilityId: nonEmpty,
+      locationId: nonEmpty,
+      itemId: nonEmpty,
+      batchId: nonEmpty,
+      balanceId: nonEmpty,
+      action: z.enum(['RECEIVE','HANDOFF','ISSUE','RETURN','WASTE_WITNESS']),
+      quantity: z.number().finite().positive(),
+      fromCustodianId: z.string().trim().min(1).optional(),
+      toCustodianId: z.string().trim().min(1).optional(),
+      witnessUserId: nonEmpty,
+      stockTransactionId: z.string().trim().min(1).optional(),
+      referenceId: nonEmpty,
+      occurredAt: nonEmpty,
+      notes: z.string().trim().max(2000).optional(),
+    }).strict(),
+  },
   RecordCashReceiptCommand: {
     1: z.object({
       receiptId: nonEmpty,

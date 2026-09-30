@@ -531,10 +531,6 @@ export default function InpatientBedBoardPage() {
             patientId: selectedBed.currentPatientId,
             category: 'DISCHARGE',
             content: formData.notes,
-          },
-          {
-            idempotencyKey:
-              `ipd-discharge-summary:${selectedBed.currentEncounterId}:${formData.notes.length}`,
           }
         );
         if (!summary.success) {

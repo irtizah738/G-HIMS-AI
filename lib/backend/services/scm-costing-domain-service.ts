@@ -91,6 +91,13 @@ function validateClosePeriod(
     );
   }
 
+  if (endMs > Date.now()) {
+    throw new AtomicMutationRejectedError(
+      'INVENTORY_CLOSE_PERIOD_NOT_ENDED',
+      'Inventory period cannot begin closing before its end date.'
+    );
+  }
+
   const periodKey = periodKeyFromIso(payload.periodStart);
   if (periodKey !== periodKeyFromIso(payload.periodEnd)) {
     throw new AtomicMutationRejectedError(
@@ -506,6 +513,12 @@ export class ScmCostingDomainService {
             entityId: balanceId,
             required: true,
           })),
+          ...(preflight?.lines.map((line, index) => ({
+            key: `item:${index}`,
+            entityType: 'ITEM_MASTER',
+            entityId: line.itemId,
+            required: true,
+          })) || []),
         ],
         prepare: (current) => {
           const count = current.count as unknown as GovernedCycleCountRecord;
@@ -583,6 +596,25 @@ export class ScmCostingDomainService {
             const index = unique.indexOf(countLine.balanceId);
             const balance =
               current[`balance:${index}`] as unknown as InventoryBalance;
+            const authoritativeItem = preflight
+              ? (current[`item:${count.lines.indexOf(countLine)}`] as unknown as ItemMaster)
+              : null;
+
+            if (
+              authoritativeItem &&
+              (
+                authoritativeItem.isActive === false ||
+                authoritativeItem.itemId !== countLine.itemId ||
+                authoritativeItem.itemType !== countLine.itemType ||
+                String(authoritativeItem.currency || '').trim().toUpperCase() !==
+                  countLine.currency
+              )
+            ) {
+              throw new AtomicMutationRejectedError(
+                'CYCLE_COUNT_ITEM_MASTER_CHANGED',
+                'Item type/currency changed after count submission; recount and reclassification are required.'
+              );
+            }
 
             if (
               balance.facilityId !== count.facilityId ||
@@ -1128,6 +1160,9 @@ export class ScmCostingDomainService {
             journalMovementMinorUnitsByAccount: {
               ...ledger.movementMinorUnitsByAccount,
             },
+            endingValuationMinorUnitsByAccount: {
+              ...stock.endingValuationMinorUnitsByAccount,
+            },
             reconciliationDeltaMinorUnitsByAccount: deltas,
             stockTransactionCount: stock.transactionCount,
             journalEntryCount: ledger.journalEntryCount,
@@ -1141,6 +1176,8 @@ export class ScmCostingDomainService {
               periodKey,
               stockTransactionCount: stock.transactionCount,
               journalEntryCount: ledger.journalEntryCount,
+              endingValuationMinorUnitsByAccount:
+                stock.endingValuationMinorUnitsByAccount,
               deltas,
             },
             auditReason: `Closed inventory period ${periodKey} after stock-to-GL reconciliation completed within one minor currency unit.`,

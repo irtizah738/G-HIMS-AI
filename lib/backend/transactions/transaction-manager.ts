@@ -225,6 +225,8 @@ function collectionForEntityType(entityType: string): string {
     PAYROLL_EMPLOYEE_SLOT: 'payrollEmployeeSlots',
     PAYROLL_PAYSLIP: 'payrollPayslips',
     PAYROLL_ATTENDANCE_LOCK: 'payrollAttendanceLocks',
+    PAYROLL_STATUTORY_LIABILITY: 'payrollStatutoryLiabilities',
+    HCM_INTELLIGENCE_SNAPSHOT: 'hcmIntelligenceSnapshots',
     RESOURCE_MASTER: 'resources',
     HOSPITAL_ROOM: 'rooms',
     HOSPITAL_BED: 'beds',

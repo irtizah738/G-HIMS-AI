@@ -14,10 +14,8 @@ import {
   FEFOAllocationResult,
   ExpiryAlertCategory,
 } from '@/lib/supply-chain/scm-engine';
-import {
-  recordStockTransaction,
-  quarantineBatchRecord,
-} from '@/lib/firebase/services/scm-firestore-service';
+import { quarantineBatchRecord } from '@/lib/firebase/services/scm-firestore-service';
+import { recordStockTransactionEdge } from '@/lib/supply-chain/scm-edge-adapter';
 import {
   Clock,
   AlertTriangle,
@@ -194,7 +192,7 @@ export function ScmExpiryDashboard({
     try {
       for (const alloc of fefoAllocationPreview.allocations) {
         const txnId = `txn_fefo_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-        await recordStockTransaction(tenantId, {
+        await recordStockTransactionEdge({
           transactionId: txnId,
           tenantId,
           facilityId: 'FAC-MAIN',

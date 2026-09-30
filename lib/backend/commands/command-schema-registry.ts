@@ -1401,7 +1401,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       purchaseCost: z.number().finite().nonnegative().optional(),
       warrantyExpiry: z.string().trim().optional(),
       calibrationRequired: z.boolean().optional(),
-      calibrationStatus: z.enum(['VALID','EXPIRING_SOON','CALIBRATION_REQUIRED','FAILED']).optional(),
+      calibrationStatus: z.enum(['NOT_REQUIRED','VALID','EXPIRING_SOON','CALIBRATION_REQUIRED','FAILED']).optional(),
       currentCustodianId: z.string().trim().max(100).optional(),
       currentCustodianName: z.string().trim().max(200).optional(),
       operatingSpecifications: z.record(z.string(), z.union([z.string(),z.number()])).optional(),

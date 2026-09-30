@@ -80,6 +80,22 @@ service cloud.firestore {
       ]);
     }
 
+    function canReadScm(tenantId) {
+      return hasAnyRole(tenantId, [
+        'administrator',
+        'pharmacist',
+        'store_keeper',
+        'inventory_officer',
+        'scm_manager',
+        'PHARMACIST',
+        'STORE_KEEPER',
+        'INVENTORY_OFFICER',
+        'SCM_MANAGER',
+        'SYSTEM_ADMIN',
+        'ADMINISTRATOR'
+      ]);
+    }
+
     function canReadAudit(tenantId) {
       return hasAnyRole(tenantId, ['administrator']);
     }
@@ -303,6 +319,19 @@ service cloud.firestore {
       }
       match /claims/{id} {
         allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+
+      match /scmCycleCounts/{id} {
+        allow read: if canReadScm(tenantId);
+        allow write: if false;
+      }
+      match /scmStockAdjustments/{id} {
+        allow read: if canReadScm(tenantId) || canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /scmInventoryPeriodCloses/{id} {
+        allow read: if canReadScm(tenantId) || canReadFinance(tenantId);
         allow write: if false;
       }
 

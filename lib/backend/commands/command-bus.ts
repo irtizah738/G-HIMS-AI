@@ -22,6 +22,7 @@ import { RevenueIntegrityDomainService } from '../services/revenue-integrity-dom
 import { ScmOfflineDomainService } from '../services/scm-offline-domain-service';
 import { ScmProcurementDomainService } from '../services/scm-procurement-domain-service';
 import { ScmPayablesDomainService } from '../services/scm-payables-domain-service';
+import { ScmCostingDomainService } from '../services/scm-costing-domain-service';
 import { CashReceiptDomainService } from '../services/cash-receipt-domain-service';
 import { DiagnosticResultDomainService } from '../services/diagnostic-result-domain-service';
 import { PatientClinicalKnowledgeDomainService } from '../services/patient-clinical-knowledge-domain-service';
@@ -608,6 +609,42 @@ export class CommandBus {
 
         case 'RecordSupplierPaymentCommand':
           result = await ScmPayablesDomainService.recordSupplierPayment(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'SubmitCycleCountCommand':
+          result = await ScmCostingDomainService.submitCycleCount(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ApproveCycleCountCommand':
+          result = await ScmCostingDomainService.approveCycleCount(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'StartInventoryPeriodCloseCommand':
+          result = await ScmCostingDomainService.startInventoryPeriodClose(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'FinalizeInventoryPeriodCloseCommand':
+          result = await ScmCostingDomainService.finalizeInventoryPeriodClose(
             context,
             command.commandId,
             command.idempotencyKey,

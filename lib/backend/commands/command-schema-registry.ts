@@ -264,6 +264,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
   ApproveSupplierPaymentAuthorizationCommand: {
     1: z.object({
       authorizationId: nonEmpty,
+      invoiceId: nonEmpty,
       decision: z.enum(['APPROVE', 'REJECT']),
       comments: z.string().trim().max(1000).optional(),
     }).strict(),
@@ -275,7 +276,6 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       paymentReference: nonEmpty.max(200),
       paymentMethod: z.enum(['BANK_TRANSFER', 'CHECK', 'ACH', 'CASH']),
       sourceAccountId: nonEmpty.max(100),
-      sourceAccountName: nonEmpty.max(250),
       settledAt: nonEmpty,
       fiscalYear: z.number().int().min(2000).max(2200),
       postingPeriod: z.number().int().min(1).max(12),

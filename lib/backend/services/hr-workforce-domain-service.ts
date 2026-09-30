@@ -105,6 +105,13 @@ function rosterRelevantMonthKeys(startMs:number,endMs:number,minRestMs:number):s
   ])];
 }
 
+function payrollAttendanceLockIdForWorkforce(employeeId:string):string{
+  return 'prlock_'+createHash('sha256')
+    .update(employeeId.trim().toLowerCase())
+    .digest('hex')
+    .slice(0,40);
+}
+
 function attendanceOpenSlotId(employeeId:string):string{
   return 'att_open_'+createHash('sha256')
     .update(employeeId.trim().toLowerCase())
@@ -2365,6 +2372,7 @@ export class HrWorkforceDomainService {
         );
       }
       const correctionId=`acor_${randomUUID()}`;
+      const payrollLockId=payrollAttendanceLockIdForWorkforce(preflight.employeeId);
       const now=new Date().toISOString();
       const tx=await TransactionManager.executeAtomicReadModifyMutation({
         tenantId:context.tenantId,actorId:context.actorId,
@@ -2376,9 +2384,17 @@ export class HrWorkforceDomainService {
         correlationId:context.correlationId,
         readTargets:[
           {key:'attendance',entityType:'ATTENDANCE_RECORD',entityId:payload.attendanceId,required:true},
+          {key:'payrollLock',entityType:'PAYROLL_ATTENDANCE_LOCK',entityId:payrollLockId,required:false},
         ],
         prepare:(current)=>{
           const record=current.attendance as unknown as AttendanceRecord;
+          const payrollLock=current.payrollLock as unknown as {lockedThroughDate?:string}|null;
+          if(payrollLock?.lockedThroughDate&&record.date<=payrollLock.lockedThroughDate){
+            throw new AtomicMutationRejectedError(
+              'ATTENDANCE_LOCKED_BY_PAYROLL',
+              'Attendance evidence has already been consumed by payroll and cannot be edited in place. Use a governed payroll adjustment.'
+            );
+          }
           const correction:AttendanceCorrectionRecord={
             correctionId,tenantId:context.tenantId,
             attendanceId:record.attendanceId,employeeId:record.employeeId,

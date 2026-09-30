@@ -795,48 +795,167 @@ export class ScmOfflineDomainService {
     payload: Record<string, unknown>
   ): Promise<CommandResult> {
     const auth = AuthorizationPipeline.evaluate(context, {
-      requiredRoles: ['SCM_MANAGER', 'INVENTORY_OFFICER', 'PHARMACIST', 'DEPARTMENT_HEAD', 'SYSTEM_ADMIN', 'ADMINISTRATOR'],
+      requiredRoles: [
+        'SCM_MANAGER',
+        'INVENTORY_OFFICER',
+        'PHARMACIST',
+        'DEPARTMENT_HEAD',
+        'SYSTEM_ADMIN',
+        'ADMINISTRATOR',
+      ],
     });
     if (!auth.authorized) {
-      return { success:false, commandId, idempotencyKey, error:{ code:auth.code || 'UNAUTHORIZED', message:auth.reason || 'Requisition submission authority required.' } };
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Requisition submission authority required.',
+        },
+      };
     }
 
     const requisition = payload as unknown as PurchaseRequisition;
-    if (!requisition.requisitionId || !Array.isArray(requisition.items) || requisition.items.length === 0) {
-      return { success:false, commandId, idempotencyKey, error:{ code:'INVALID_REQUISITION', message:'Requisition identity and at least one line item are required.' } };
+    if (
+      !requisition.requisitionId ||
+      !requisition.requisitionNumber ||
+      !requisition.facilityId ||
+      !requisition.requestingDepartment ||
+      !requisition.requestingLocationId ||
+      !Array.isArray(requisition.items) ||
+      requisition.items.length === 0
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INVALID_REQUISITION',
+          message:
+            'Requisition identity, facility, department, location and at least one line item are required.',
+        },
+      };
     }
+
+    const isAdministrative =
+      context.roles.includes('SYSTEM_ADMIN') ||
+      context.roles.includes('ADMINISTRATOR');
+    if (
+      !isAdministrative &&
+      context.facilityIds?.length &&
+      !context.facilityIds.includes(requisition.facilityId)
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'FACILITY_SCOPE_MISMATCH',
+          message: 'Requisition facility is outside the authenticated actor scope.',
+        },
+      };
+    }
+
+    const now = new Date().toISOString();
+    const canonicalItems = requisition.items.map((item) => {
+      const requestedQuantity = Number(item.requestedQuantity);
+      const estimatedUnitCost = Number(item.estimatedUnitCost);
+      if (
+        !item.itemId ||
+        !item.itemCode ||
+        !item.itemName ||
+        !Number.isFinite(requestedQuantity) ||
+        requestedQuantity <= 0 ||
+        !Number.isFinite(estimatedUnitCost) ||
+        estimatedUnitCost < 0
+      ) {
+        throw new AtomicMutationRejectedError(
+          'INVALID_REQUISITION_LINE',
+          'Every requisition line requires a valid item, positive quantity and non-negative estimated unit cost.'
+        );
+      }
+
+      return {
+        ...item,
+        requestedQuantity,
+        estimatedUnitCost,
+        estimatedTotal:
+          Math.round(requestedQuantity * estimatedUnitCost * 100) / 100,
+      };
+    });
+
+    const estimatedTotalCost =
+      Math.round(
+        canonicalItems.reduce((sum, item) => sum + item.estimatedTotal, 0) * 100
+      ) / 100;
 
     const canonical: PurchaseRequisition = {
       ...requisition,
       tenantId: context.tenantId,
-      status: requisition.status === 'DRAFT' ? 'SUBMITTED' : requisition.status,
-      updatedAt: new Date().toISOString(),
-    };
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'PURCHASE_REQUISITION',
-      entityId: canonical.requisitionId,
-      eventType: 'PR_SUBMITTED',
-      domainState: canonical,
-      eventPayload: {
-        requisitionId: canonical.requisitionId,
-        priority: canonical.priority,
-        requestingDepartment: canonical.requestingDepartment,
-        itemsCount: canonical.items.length,
+      requestedBy: {
+        userId: context.actorId,
+        userName: context.actorId,
+        role: context.roles[0] || 'AUTHENTICATED_USER',
       },
-      auditReason: `Submitted purchase requisition ${canonical.requisitionNumber}`,
-      outboxTopic: 'g-hims-scm-events',
-    });
-
-    return {
-      success:true,
-      commandId,
-      idempotencyKey,
-      entityId:canonical.requisitionId,
-      eventId:tx.event.eventId,
-      auditId:tx.audit.auditId,
-      outboxId:tx.outbox.outboxId,
-      data:canonical,
+      items: canonicalItems,
+      estimatedTotalCost,
+      status: 'SUBMITTED',
+      approvalHistory: [],
+      createdAt: requisition.createdAt || now,
+      updatedAt: now,
     };
+
+    try {
+      const tx = await TransactionManager.executeAtomicWrite(
+        context,
+        commandId,
+        idempotencyKey,
+        {
+          entityType: 'PURCHASE_REQUISITION',
+          entityId: canonical.requisitionId,
+          eventType: 'PR_SUBMITTED',
+          domainState: canonical,
+          eventPayload: {
+            requisitionId: canonical.requisitionId,
+            requisitionNumber: canonical.requisitionNumber,
+            facilityId: canonical.facilityId,
+            priority: canonical.priority,
+            requestingDepartment: canonical.requestingDepartment,
+            requestingLocationId: canonical.requestingLocationId,
+            itemsCount: canonical.items.length,
+            estimatedTotalCost,
+            currency: canonical.currency,
+          },
+          auditReason: `Submitted purchase requisition ${canonical.requisitionNumber}`,
+          outboxTopic: 'g-hims-scm-events',
+        }
+      );
+
+      return {
+        success: true,
+        commandId,
+        idempotencyKey,
+        entityId: canonical.requisitionId,
+        eventId: tx.event.eventId,
+        auditId: tx.audit.auditId,
+        outboxId: tx.outbox.outboxId,
+        data: canonical,
+      };
+    } catch (error) {
+      if (error instanceof AtomicMutationRejectedError) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+          },
+        };
+      }
+      throw error;
+    }
   }
 }

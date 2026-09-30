@@ -492,6 +492,30 @@ export interface RosterSwapRecord {
 // 6. ATTENDANCE, TIME TRACKING & CORRECTIONS
 // ============================================================================
 
+export interface AttendanceOpenSlot {
+  slotId: string;
+  tenantId: string;
+  employeeId: string;
+  attendanceId: string;
+  status: 'OPEN' | 'CLOSED';
+  openedAt: string;
+  closedAt?: string;
+}
+
+export interface AttendanceCorrectionRecord {
+  correctionId: string;
+  tenantId: string;
+  attendanceId: string;
+  employeeId: string;
+  previousClockInTime: string;
+  previousClockOutTime?: string;
+  newClockInTime: string;
+  newClockOutTime?: string;
+  reason: string;
+  correctedByActorId: string;
+  correctedAt: string;
+}
+
 export interface AttendanceRecord {
   attendanceId: string;
   tenantId: string;

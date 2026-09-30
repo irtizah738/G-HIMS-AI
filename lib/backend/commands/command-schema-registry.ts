@@ -270,7 +270,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       batchId: nonEmpty,
       quantity: z.number().finite().positive(),
       dispositionType: z.enum(['DESTROY','RETURN_TO_SUPPLIER']),
-      reason: z.enum(['EXPIRY','DAMAGE','RECALL','QUALITY_FAILURE']),
+      reason: z.enum(['EXPIRY','DAMAGE','RECALL','QUALITY_FAILURE','TEMPERATURE_EXCURSION']),
       recallId: nonEmpty.optional(),
       supplierId: nonEmpty.optional(),
       justification: nonEmpty.max(4000),

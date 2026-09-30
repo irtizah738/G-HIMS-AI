@@ -22,10 +22,7 @@ import type {
   SupplierPaymentAuthorization,
   SupplierPaymentRecord,
 } from '@/types/scm-payables';
-import {
-  evaluateSupplierInvoiceMatch,
-  type SupplierInvoiceInputLine,
-} from '@/lib/supply-chain/receive-to-pay';
+import { evaluateSupplierInvoiceMatch } from '@/lib/supply-chain/receive-to-pay';
 
 const AP_ACCOUNT = {
   id: '2100',

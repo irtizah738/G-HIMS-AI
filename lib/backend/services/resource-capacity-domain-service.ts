@@ -61,6 +61,18 @@ function assertFacilityScope(
   }
 }
 
+function isCalibrationLocked(
+  resource: ResourceMaster,
+  requiredThroughMs?: number
+): boolean {
+  if (!resource.calibrationRequired) return false;
+  if (resource.calibrationStatus !== 'VALID') return true;
+  if (!resource.nextCalibrationDate) return true;
+  const dueMs = Date.parse(`${resource.nextCalibrationDate}T23:59:59.999Z`);
+  if (!Number.isFinite(dueMs)) return true;
+  return requiredThroughMs !== undefined ? requiredThroughMs > dueMs : Date.now() > dueMs;
+}
+
 function repositoryRequiredOutsideTests(): void {
   if (!DomainStateRepository.isAvailable() && process.env.NODE_ENV !== 'test') {
     throw new Error('RESOURCE_PERSISTENCE_UNAVAILABLE');
@@ -501,7 +513,10 @@ export class ResourceCapacityDomainService {
       };
     }
     {
-      if (resource.status === 'OUT_OF_SERVICE' || resource.status === 'MAINTENANCE') {
+      if (
+        resource.lifecycleState !== 'IN_SERVICE' ||
+        ['OUT_OF_SERVICE', 'MAINTENANCE', 'LOST', 'RETIRED'].includes(resource.status)
+      ) {
         return {
           success: false,
           commandId,
@@ -513,7 +528,7 @@ export class ResourceCapacityDomainService {
         };
       }
 
-      if (resource.calibrationRequired && resource.calibrationStatus === 'CALIBRATION_REQUIRED') {
+      if (isCalibrationLocked(resource, proposedEnd)) {
         return {
           success: false,
           commandId,
@@ -766,6 +781,10 @@ export class ResourceCapacityDomainService {
 
     const workOrder: MaintenanceWorkOrder = {
       ...payload,
+      resourceId: resource.resourceId,
+      resourceName: resource.name,
+      resourceType: resource.resourceType,
+      reportedByActorId: context.actorId,
       workOrderId,
       workOrderNumber,
       status: 'REPORTED',
@@ -882,7 +901,7 @@ export class ResourceCapacityDomainService {
 
     const updatedResource: ResourceMaster = {
       ...resource,
-      status: 'AVAILABLE',
+      status: isCalibrationLocked(resource) ? 'OUT_OF_SERVICE' : 'AVAILABLE',
       lastMaintenanceDate: now.split('T')[0],
       updatedAt: now,
     };
@@ -984,6 +1003,11 @@ export class ResourceCapacityDomainService {
 
     const calibration: CalibrationRecord = {
       ...payload,
+      resourceId: resource.resourceId,
+      resourceName: resource.name,
+      model: resource.model || payload.model,
+      serialNumber: resource.serialNumber || payload.serialNumber,
+      technicianId: context.actorId,
       calibrationId,
       status: isPassed ? 'VALID' : 'FAILED',
       createdAt: now,
@@ -995,11 +1019,7 @@ export class ResourceCapacityDomainService {
       lastCalibrationDate: payload.calibrationDate,
       nextCalibrationDate: payload.nextDueDate,
       calibrationCertificateNumber: payload.certificateNumber,
-      status: !isPassed
-        ? 'OUT_OF_SERVICE'
-        : resource.status === 'OUT_OF_SERVICE'
-          ? 'AVAILABLE'
-          : resource.status,
+      status: !isPassed ? 'OUT_OF_SERVICE' : resource.status,
       updatedAt: now,
     };
 

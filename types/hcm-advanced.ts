@@ -559,6 +559,23 @@ export interface AttendanceRecord {
 // 7. LEAVE MANAGEMENT & BALANCES
 // ============================================================================
 
+export interface LeaveCalendarEntry {
+  leaveId: string;
+  leaveType: LeaveType;
+  startDate: string;
+  endDate: string;
+  status: LeaveStatus;
+}
+
+export interface LeaveCalendarBucket {
+  calendarId: string;
+  tenantId: string;
+  employeeId: string;
+  year: number;
+  entries: LeaveCalendarEntry[];
+  updatedAt: string;
+}
+
 export interface LeaveRequest {
   leaveId: string;
   tenantId: string;

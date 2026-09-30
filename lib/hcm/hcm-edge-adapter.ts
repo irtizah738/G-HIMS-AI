@@ -291,6 +291,15 @@ export const generateHcmIntelligenceEdge=(
   idempotencyKey
 );
 
+export const generatePayrollComplianceSnapshotEdge=(
+  payload:{snapshotId:string;asOf:string;currency:string},
+  idempotencyKey?:string
+)=>run(
+  'GeneratePayrollComplianceSnapshotCommand',
+  payload as unknown as Record<string,unknown>,
+  idempotencyKey
+);
+
 export const submitLeaveRequestEdge=(
   payload:{
     employeeId:string;

@@ -1387,7 +1387,22 @@ export class HrWorkforceDomainService {
     context: CommandContext,
     commandId: string,
     idempotencyKey: string,
-    payload: Omit<RosterShiftEntry, 'rosterId' | 'status' | 'createdAt' | 'updatedAt'>
+    payload: Omit<
+      RosterShiftEntry,
+      | 'rosterId'
+      | 'tenantId'
+      | 'employeeName'
+      | 'positionTitle'
+      | 'durationHours'
+      | 'status'
+      | 'isOvertime'
+      | 'overtimeHours'
+      | 'publishedAt'
+      | 'publishedBy'
+      | 'conflictFlags'
+      | 'createdAt'
+      | 'updatedAt'
+    >
   ): Promise<CommandResult<RosterShiftEntry>> {
     const auth=AuthorizationPipeline.evaluate(context,{
       requiredRoles:['HR_ADMIN','NURSE_MANAGER','DEPARTMENT_HEAD','SYSTEM_ADMIN'],
@@ -1575,8 +1590,12 @@ export class HrWorkforceDomainService {
             ...payload,
             rosterId,
             tenantId:context.tenantId,
+            employeeName:`${currentEmployee.personalInfo.legalFirstName} ${currentEmployee.personalInfo.legalLastName}`,
+            positionTitle:currentEmployee.positionTitle,
             durationHours,
             status:'PUBLISHED',
+            isOvertime:durationHours>8,
+            ...(durationHours>8?{overtimeHours:durationHours-8}:{}),
             publishedAt:now,
             publishedBy:context.actorId,
             createdAt:now,

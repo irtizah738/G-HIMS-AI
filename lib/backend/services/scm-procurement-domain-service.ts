@@ -127,6 +127,35 @@ function roundMoney(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+function toStockQuantity(
+  item: ItemMaster,
+  quantity: number,
+  fromUom: string
+): { quantity: number; factor: number } {
+  if (fromUom === item.stockUOM) {
+    return { quantity, factor: 1 };
+  }
+
+  const direct = (item.conversionRules || []).find(
+    (rule) =>
+      rule.fromUOM === fromUom &&
+      rule.toUOM === item.stockUOM &&
+      Number.isFinite(Number(rule.factor)) &&
+      Number(rule.factor) > 0
+  );
+  if (!direct) {
+    throw new AtomicMutationRejectedError(
+      'SCM_UOM_CONVERSION_MISSING',
+      `No authoritative conversion exists from ${fromUom} to stock UOM ${item.stockUOM} for ${item.itemCode}.`
+    );
+  }
+
+  return {
+    quantity: quantity * Number(direct.factor),
+    factor: Number(direct.factor),
+  };
+}
+
 function recomputeAvailable(balance: InventoryBalance): InventoryBalance {
   const next = { ...balance };
   next.available = Math.max(
@@ -433,7 +462,15 @@ export class ScmProcurementDomainService {
             requisition.items.map((line) => [line.itemId, line])
           );
 
+          const seenPoItemIds = new Set<string>();
           const poLines = payload.items.map((line) => {
+            if (seenPoItemIds.has(line.itemId)) {
+              throw new AtomicMutationRejectedError(
+                'DUPLICATE_PO_ITEM',
+                `Purchase order cannot contain duplicate item ${line.itemId}.`
+              );
+            }
+            seenPoItemIds.add(line.itemId);
             const reqLine = requisitionByItem.get(line.itemId);
             if (!reqLine) {
               throw new AtomicMutationRejectedError(
@@ -859,7 +896,20 @@ export class ScmProcurementDomainService {
         readTargets,
         prepare: (current) => {
           const po = current.po as unknown as PurchaseOrderRecord;
+          const destination =
+            current.destination as unknown as InventoryLocation;
           assertFacilityScope(context, po.facilityId);
+
+          if (
+            po.facilityId !== payload.facilityId ||
+            destination.facilityId !== po.facilityId ||
+            !destination.active
+          ) {
+            throw new AtomicMutationRejectedError(
+              'GRN_FACILITY_OR_LOCATION_MISMATCH',
+              'GRN facility and destination must match an active location on the authoritative purchase order.'
+            );
+          }
 
           if (
             ![
@@ -898,6 +948,7 @@ export class ScmProcurementDomainService {
           const canonicalItems: GoodsReceiptNote['items'] = [];
           const nextPoLines = po.items.map((line) => ({ ...line }));
           const receiptTransactionIds: string[] = [];
+          const seenReceiptItems = new Set<string>();
 
           for (let index = 0; index < normalizedLines.length; index += 1) {
             const line = normalizedLines[index];
@@ -905,6 +956,14 @@ export class ScmProcurementDomainService {
             const item = current[`item:${index}`] as unknown as ItemMaster;
             const existingBatch =
               current[`batch:${index}`] as unknown as BatchLotRecord | null;
+
+            if (seenReceiptItems.has(line.itemId)) {
+              throw new AtomicMutationRejectedError(
+                'DUPLICATE_GRN_ITEM',
+                `GRN cannot contain duplicate item ${line.itemId}; consolidate quantities per item/batch receipt.`
+              );
+            }
+            seenReceiptItems.add(line.itemId);
 
             if (!poLine) {
               throw new AtomicMutationRejectedError(
@@ -935,6 +994,31 @@ export class ScmProcurementDomainService {
               throw new AtomicMutationRejectedError(
                 'INVALID_GRN_QUANTITIES',
                 'Received quantity must equal accepted + rejected + damaged quantities.'
+              );
+            }
+
+            if (payload.inspectionStatus === 'FAILED' && accepted > 0) {
+              throw new AtomicMutationRejectedError(
+                'FAILED_INSPECTION_CANNOT_ACCEPT_STOCK',
+                'A failed inspection cannot place accepted stock into inventory.'
+              );
+            }
+            if (
+              payload.inspectionStatus === 'PASSED' &&
+              (rejected > 0 || damaged > 0 || !line.inspectionPassed)
+            ) {
+              throw new AtomicMutationRejectedError(
+                'GRN_INSPECTION_STATUS_CONFLICT',
+                'PASSED inspection status cannot contain rejected, damaged, or failed-inspection lines.'
+              );
+            }
+            if (
+              item.requiresTemperatureTracking &&
+              !Number.isFinite(Number(line.recordedTemperatureCelsius))
+            ) {
+              throw new AtomicMutationRejectedError(
+                'GRN_TEMPERATURE_REQUIRED',
+                `Temperature-tracked item ${item.itemCode} requires a recorded receipt temperature.`
               );
             }
 
@@ -990,13 +1074,18 @@ export class ScmProcurementDomainService {
               );
             }
 
-            const unitCost = Number(line.unitCost);
-            if (!Number.isFinite(unitCost) || unitCost < 0) {
+            const poUnitCost = Number(poLine.unitPrice);
+            if (!Number.isFinite(poUnitCost) || poUnitCost < 0) {
               throw new AtomicMutationRejectedError(
-                'INVALID_GRN_UNIT_COST',
-                'GRN unit cost must be a non-negative finite value.'
+                'INVALID_PO_UNIT_COST',
+                'Authoritative PO unit cost is invalid.'
               );
             }
+            const acceptedStock = toStockQuantity(item, accepted, line.uom);
+            const stockUnitCost =
+              acceptedStock.factor > 0
+                ? roundMoney(poUnitCost / acceptedStock.factor)
+                : poUnitCost;
 
             const quarantined =
               payload.inspectionStatus === 'QUARANTINED' ||
@@ -1007,6 +1096,26 @@ export class ScmProcurementDomainService {
               throw new AtomicMutationRejectedError(
                 'SCM_BATCH_ITEM_MISMATCH',
                 'Existing batch identity belongs to a different item.'
+              );
+            }
+            if (
+              existingBatch &&
+              String(line.batchNumber || '').trim() &&
+              existingBatch.batchNumber !== String(line.batchNumber).trim()
+            ) {
+              throw new AtomicMutationRejectedError(
+                'SCM_BATCH_NUMBER_CONFLICT',
+                'Existing batch identity cannot be reused with a different batch number.'
+              );
+            }
+            if (
+              existingBatch &&
+              line.expiryDate &&
+              existingBatch.expiryDate !== line.expiryDate
+            ) {
+              throw new AtomicMutationRejectedError(
+                'SCM_BATCH_EXPIRY_CONFLICT',
+                'Existing batch identity cannot be reused with a different expiry date.'
               );
             }
 
@@ -1034,7 +1143,7 @@ export class ScmProcurementDomainService {
                   supplierName: po.supplierName,
                   purchaseOrderId: po.poId,
                   grnId: payload.grnId,
-                  unitCost,
+                  unitCost: stockUnitCost,
                   currency: po.currency,
                   quantityReceived: 0,
                   quantityRemaining: 0,
@@ -1045,13 +1154,20 @@ export class ScmProcurementDomainService {
                   updatedAt: now,
                 }),
                 quantityReceived:
-                  Number(existingBatch?.quantityReceived || 0) + accepted,
+                  Number(existingBatch?.quantityReceived || 0) +
+                  acceptedStock.quantity,
                 quantityRemaining:
-                  Number(existingBatch?.quantityRemaining || 0) + accepted,
-                unitCost,
+                  Number(existingBatch?.quantityRemaining || 0) +
+                  acceptedStock.quantity,
+                unitCost: stockUnitCost,
                 currency: po.currency,
-                grnId: payload.grnId,
-                status: quarantined ? 'QUARANTINED' : 'AVAILABLE',
+                grnId: existingBatch?.grnId || payload.grnId,
+                status:
+                  existingBatch && existingBatch.status !== 'AVAILABLE'
+                    ? existingBatch.status
+                    : quarantined
+                      ? 'QUARANTINED'
+                      : 'AVAILABLE',
                 temperatureExcursionDetected:
                   Boolean(existingBatch?.temperatureExcursionDetected) ||
                   Boolean(line.temperatureExcursion),
@@ -1114,16 +1230,18 @@ export class ScmProcurementDomainService {
                   minimumStock: item.minimumStock,
                   maximumStock: item.maximumStock,
                   reorderPoint: item.reorderPoint,
-                  unitCost,
+                  unitCost: stockUnitCost,
                   totalValuation: 0,
                   lastMovementAt: now,
                   version: 0,
                 }),
-                onHand: Number(currentBalance?.onHand || 0) + accepted,
+                onHand:
+                  Number(currentBalance?.onHand || 0) +
+                  acceptedStock.quantity,
                 quarantined:
                   Number(currentBalance?.quarantined || 0) +
-                  (quarantined ? accepted : 0),
-                unitCost,
+                  (quarantined ? acceptedStock.quantity : 0),
+                unitCost: stockUnitCost,
               });
 
               const stockTransactionId = `txn_grn_${payload.grnId}_${index + 1}`;
@@ -1155,11 +1273,11 @@ export class ScmProcurementDomainService {
                     expirationDate: batch.expiryDate,
                     toLocationId: destinationLocationId,
                     toLocationName: balance.locationName,
-                    quantity: accepted,
-                    normalizedQuantity: accepted,
+                    quantity: acceptedStock.quantity,
+                    normalizedQuantity: acceptedStock.quantity,
                     uom: item.stockUOM,
-                    unitCost,
-                    totalCost: roundMoney(accepted * unitCost),
+                    unitCost: stockUnitCost,
+                    totalCost: roundMoney(accepted * poUnitCost),
                     currency: po.currency,
                     transactionType: 'RECEIPT',
                     referenceType: 'GOODS_RECEIPT_NOTE',
@@ -1177,6 +1295,9 @@ export class ScmProcurementDomainService {
                       poId: po.poId,
                       inspectionStatus: payload.inspectionStatus,
                       quarantined,
+                      receiptUom: line.uom,
+                      acceptedReceiptQuantity: accepted,
+                      conversionFactorToStockUom: acceptedStock.factor,
                     },
                   },
                 }
@@ -1224,7 +1345,7 @@ export class ScmProcurementDomainService {
               inspectionPassed: line.inspectionPassed,
               inspectionNotes: line.inspectionNotes,
               putawayLocationId: destinationLocationId,
-              unitCost,
+              unitCost: poUnitCost,
             });
           }
 

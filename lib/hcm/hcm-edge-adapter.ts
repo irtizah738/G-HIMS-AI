@@ -262,6 +262,8 @@ function toLegacyStaff(employee:EmployeeMaster):StaffMember{
     fullName:`${employee.personalInfo.legalFirstName} ${employee.personalInfo.legalLastName}`,
     email:employee.personalInfo.contactEmail,
     phone:employee.personalInfo.contactPhone,
+    facilityId:employee.primaryFacilityId,
+    facilityName:employee.primaryFacilityId,
     departmentId:employee.primaryDepartmentId,
     departmentName:employee.primaryDepartmentName,
     primaryRole:inferLegacyStaffRole(employee),

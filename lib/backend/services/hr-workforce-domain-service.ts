@@ -801,21 +801,33 @@ export class HrWorkforceDomainService {
               'This credential type/number is already registered in the tenant.'
             );
           }
+          const nextEmployee:EmployeeMaster={
+            ...currentEmployee,
+            credentialRevision:Number(currentEmployee.credentialRevision||0)+1,
+            updatedAt:now,
+          };
           return {
             domainState:credential,
-            additionalStateWrites:[{
-              entityType:'CREDENTIAL_IDENTITY',
-              entityId:identityId,
-              domainState:{
-                identityId,
-                tenantId:context.tenantId,
-                credentialId,
-                employeeId:credential.employeeId,
-                credentialType:credential.credentialType,
-                credentialNumber:normalizedNumber,
-                createdAt:now,
+            additionalStateWrites:[
+              {
+                entityType:'CREDENTIAL_IDENTITY',
+                entityId:identityId,
+                domainState:{
+                  identityId,
+                  tenantId:context.tenantId,
+                  credentialId,
+                  employeeId:credential.employeeId,
+                  credentialType:credential.credentialType,
+                  credentialNumber:normalizedNumber,
+                  createdAt:now,
+                },
               },
-            }],
+              {
+                entityType:'EMPLOYEE_MASTER',
+                entityId:currentEmployee.employeeId,
+                domainState:nextEmployee,
+              },
+            ],
             eventPayload:{
               credentialId,
               employeeId:credential.employeeId,
@@ -919,8 +931,19 @@ export class HrWorkforceDomainService {
             notes:payload.notes||credential.notes,
             updatedAt:now,
           };
+          const currentEmployee=current.employee as unknown as EmployeeMaster;
+          const nextEmployee:EmployeeMaster={
+            ...currentEmployee,
+            credentialRevision:Number(currentEmployee.credentialRevision||0)+1,
+            updatedAt:now,
+          };
           return {
             domainState:next,
+            additionalStateWrites:[{
+              entityType:'EMPLOYEE_MASTER',
+              entityId:currentEmployee.employeeId,
+              domainState:nextEmployee,
+            }],
             eventPayload:{
               credentialId:next.credentialId,
               employeeId:next.employeeId,
@@ -1038,6 +1061,7 @@ export class HrWorkforceDomainService {
         throw new AtomicMutationRejectedError('INVALID_PRIVILEGE_VALIDITY','Clinical privilege requires a valid effective period.');
       }
 
+      const expectedCredentialRevision=Number(employee.credentialRevision||0);
       const credentials=await DomainStateRepository.queryEqual<EmployeeCredential>(
         context.tenantId,'clinicalCredentials','employeeId',payload.employeeId
       );
@@ -1072,6 +1096,12 @@ export class HrWorkforceDomainService {
           const currentEmployee=current.employee as unknown as EmployeeMaster;
           if(currentEmployee.employmentStatus!=='ACTIVE'){
             throw new AtomicMutationRejectedError('EMPLOYEE_NOT_ACTIVE','Employee status changed before privilege grant.');
+          }
+          if(Number(currentEmployee.credentialRevision||0)!==expectedCredentialRevision){
+            throw new AtomicMutationRejectedError(
+              'CREDENTIAL_SET_CHANGED_RETRY',
+              'Credential set changed during privilege evaluation; retry with fresh credential evidence.'
+            );
           }
           const currentCredentials=credentialTargets.map(target=>
             current[target.key] as unknown as EmployeeCredential
@@ -1185,6 +1215,7 @@ export class HrWorkforceDomainService {
 
     try{
       assertWorkforceFacilityScope(context,[preflight.facilityId]);
+      const expectedCredentialRevision=Number(employee.credentialRevision||0);
       const credentials=payload.status==='GRANTED'
         ? await DomainStateRepository.queryEqual<EmployeeCredential>(
             context.tenantId,'clinicalCredentials','employeeId',preflight.employeeId
@@ -1226,6 +1257,12 @@ export class HrWorkforceDomainService {
             throw new AtomicMutationRejectedError('PRIVILEGE_REVOKED_TERMINAL','A revoked privilege cannot be reactivated or changed.');
           }
           if(payload.status==='GRANTED'){
+            if(Number(currentEmployee.credentialRevision||0)!==expectedCredentialRevision){
+              throw new AtomicMutationRejectedError(
+                'CREDENTIAL_SET_CHANGED_RETRY',
+                'Credential set changed during privilege reinstatement; retry with fresh evidence.'
+              );
+            }
             if(privilege.status!=='SUSPENDED'){
               throw new AtomicMutationRejectedError('PRIVILEGE_NOT_REINSTATABLE','Only a suspended privilege may be reinstated.');
             }

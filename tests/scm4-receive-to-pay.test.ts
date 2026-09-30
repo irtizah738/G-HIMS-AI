@@ -312,6 +312,18 @@ describe('SCM-4 receive-to-pay financial integrity', () => {
 
   test('AP read models are finance-scoped, server-write-only, and excluded from generic offline hydration', async () => {
     const rules = await source('firestore.rules');
+    for (const role of [
+      'accounts_payable',
+      'accountant',
+      'finance_manager',
+      'treasury_manager',
+      'ACCOUNTS_PAYABLE',
+      'ACCOUNTANT',
+      'FINANCE_MANAGER',
+      'TREASURY_MANAGER',
+    ]) {
+      expect(rules).toContain(`'${role}'`);
+    }
     const hydration = await source('lib/offline/hydration.ts');
     const adapter = await source(
       'lib/supply-chain/scm-payables-edge-adapter.ts'

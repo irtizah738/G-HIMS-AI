@@ -1154,6 +1154,34 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       effectiveDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     }).strict(),
   },
+  AssignShiftCommand: {
+    1: z.object({
+      facilityId: nonEmpty,
+      facilityName: nonEmpty.max(200),
+      departmentId: nonEmpty,
+      departmentName: nonEmpty.max(200),
+      employeeId: nonEmpty,
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      shiftId: nonEmpty,
+      shiftName: nonEmpty.max(200),
+      startTime: nonEmpty,
+      endTime: nonEmpty,
+      notes: z.string().trim().max(2000).optional(),
+    }).strict(),
+  },
+  CancelShiftCommand: {
+    1: z.object({
+      rosterId: nonEmpty,
+      reason: nonEmpty.max(2000),
+    }).strict(),
+  },
+  ExecuteRosterSwapCommand: {
+    1: z.object({
+      shiftAId: nonEmpty,
+      shiftBId: nonEmpty,
+      reason: nonEmpty.max(2000),
+    }).strict(),
+  },
   SubmitCredentialCommand: {
     1: z.object({
       employeeId: nonEmpty.max(100),

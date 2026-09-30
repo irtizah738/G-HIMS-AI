@@ -322,6 +322,20 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      match /scmRecalls/{id} {
+        allow read: if canReadScm(tenantId);
+        allow write: if false;
+      }
+      // Recall exposures contain patient identifiers and are only exposed
+      // through authenticated server APIs, never raw Firestore client reads.
+      match /scmRecallExposures/{id} {
+        allow read, write: if false;
+      }
+      match /scmInventoryDispositions/{id} {
+        allow read: if canReadScm(tenantId) || canReadFinance(tenantId);
+        allow write: if false;
+      }
+
       match /scmReplenishmentPolicies/{id} {
         allow read: if canReadScm(tenantId);
         allow write: if false;

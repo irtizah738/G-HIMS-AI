@@ -264,7 +264,29 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
     });
 
     test('Verifying a submitted credential requires Medical Director authority', async () => {
-      // Nurse cannot verify credential
+      const submitCmd: BaseCommand = {
+        commandId: 'cmd_submit_cred_01',
+        idempotencyKey: 'idemp_submit_cred_01',
+        commandType: 'SubmitCredentialCommand',
+        tenantId: 'central-metro-hospital',
+        actorId: 'usr_hr_lead_01',
+        timestamp: new Date().toISOString(),
+        payload: {
+          employeeId: 'emp_001',
+          credentialType: 'MEDICAL_LICENSE',
+          title: 'Additional Medical Council License',
+          issuingAuthority: 'Medical Council',
+          credentialNumber: 'MC-HCM2-001',
+          issueDate: '2026-01-01',
+          expiryDate: '2028-01-01',
+          isMandatoryForPractice: true,
+          notes: 'Submitted for independent verification',
+        },
+      };
+      const submitted = await CommandBus.dispatch(hrAdminContext, submitCmd);
+      expect(submitted.success).toBe(true);
+      const credentialId = submitted.entityId!;
+
       const verifyCmdNurse: BaseCommand = {
         commandId: 'cmd_verify_01',
         idempotencyKey: 'idemp_verify_01',
@@ -273,7 +295,7 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
         actorId: 'usr_nurse_01',
         timestamp: new Date().toISOString(),
         payload: {
-          credentialId: 'crd_001',
+          credentialId,
           status: 'VERIFIED',
           notes: 'Attempt by nurse to verify',
         },
@@ -283,7 +305,6 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
       expect(nurseResult.success).toBe(false);
       expect(nurseResult.error?.code).toBe('INSUFFICIENT_ROLE');
 
-      // Medical Director can verify
       const verifyCmdMedDir: BaseCommand = {
         ...verifyCmdNurse,
         commandId: 'cmd_verify_02',

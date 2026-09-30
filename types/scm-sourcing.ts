@@ -175,6 +175,9 @@ export interface SupplierContract {
   warrantyPeriodMonths?: number;
   maxSpendMinorUnits?: number;
   committedSpendMinorUnits: number;
+  reservedSpendMinorUnits: number;
+  committedQuantityByItem: Record<string, number>;
+  reservedQuantityByItem: Record<string, number>;
   lines: Array<{
     itemId: string;
     uom: StandardUOM;

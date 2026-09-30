@@ -22,15 +22,14 @@ import {
 } from 'lucide-react';
 import { Account, AccountCategory, JournalEntry } from '@/types/erp-finance';
 import {
-  subscribeToAccounts,
-  createAccount,
-  seedInitialChartOfAccounts,
-  subscribeToJournalEntries,
-} from '@/lib/firebase/services/erp-finance';
+  createFinanceAccountEdge,
+  hydrateFinanceLedger,
+  loadLocalFinanceLedger,
+} from '@/lib/finance/finance-edge-adapter';
 
 export default function ChartOfAccountsPage() {
   const params = useParams();
-  const tenantId = (params?.tenantId as string) || 'central-metro-hospital';
+  const tenantId = String(params?.tenantId || '').trim();
 
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
@@ -51,21 +50,34 @@ export default function ChartOfAccountsPage() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const applyLedger = (data: Awaited<ReturnType<typeof loadLocalFinanceLedger>>) => {
+    setAccounts(data.accounts);
+    setJournalEntries(data.journals);
+  };
+
+  const loadLedger = async () => {
     setLoading(true);
-    const unsubAccounts = subscribeToAccounts(tenantId, (data) => {
-      setAccounts(data);
+    try {
+      if (!tenantId) {
+        setCreateError('TENANT_CONTEXT_REQUIRED: Finance requires an explicit tenant route.');
+        setAccounts([]);
+        setJournalEntries([]);
+        return;
+      }
+      applyLedger(await loadLocalFinanceLedger(tenantId));
+      applyLedger(await hydrateFinanceLedger(tenantId));
+    } catch (error) {
+      setCreateError(
+        error instanceof Error ? error.message : 'Failed to load governed finance ledger.'
+      );
+    } finally {
       setLoading(false);
-    });
+    }
+  };
 
-    const unsubJE = subscribeToJournalEntries(tenantId, (data) => {
-      setJournalEntries(data);
-    });
-
-    return () => {
-      unsubAccounts();
-      unsubJE();
-    };
+  useEffect(() => {
+    void loadLedger();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId]);
 
   // Aggregate Category Totals
@@ -162,18 +174,30 @@ export default function ChartOfAccountsPage() {
       return;
     }
 
+    if (!tenantId) {
+      setCreateError('TENANT_CONTEXT_REQUIRED: Finance requires an explicit tenant route.');
+      return;
+    }
+    if (Number(newBalance) !== 0) {
+      setCreateError(
+        'Opening balances cannot be written onto an account master. Create the account at zero and post a governed opening-balance journal.'
+      );
+      return;
+    }
+
     setCreating(true);
     try {
-      await createAccount(tenantId, {
+      await createFinanceAccountEdge({
         accountCode: newCode.trim(),
         accountName: newName.trim(),
         category: newCategory,
         subCategory: newSubCategory.trim() || 'General',
         normalBalance: newNormalBalance,
-        balance: Number(newBalance) || 0,
         currency: 'USD',
-        description: newDescription.trim(),
-        isActive: true,
+        allowManualPosting: false,
+        allowCashReceipts: false,
+        allowSupplierPayments: false,
+        isSystemLocked: false,
       });
 
       setShowCreateModal(false);
@@ -181,8 +205,9 @@ export default function ChartOfAccountsPage() {
       setNewName('');
       setNewBalance(0);
       setNewDescription('');
-    } catch (err: any) {
-      setCreateError(err.message || 'Failed to create account.');
+      await loadLedger();
+    } catch (err: unknown) {
+      setCreateError(err instanceof Error ? err.message : 'Failed to create account.');
     } finally {
       setCreating(false);
     }
@@ -226,9 +251,13 @@ export default function ChartOfAccountsPage() {
         <div className="flex items-center gap-3">
           <button
             id="seed-coa-btn"
-            onClick={() => seedInitialChartOfAccounts(tenantId)}
+            onClick={() =>
+              setCreateError(
+                'Standard COA restoration is an administrator provisioning operation and cannot run from the browser.'
+              )
+            }
             className="flex items-center gap-2 px-3.5 py-2 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors"
-            title="Reset standard healthcare accounts hierarchy"
+            title="Standard COA is provisioned through the guarded server-side finance provisioning command"
           >
             <RefreshCw className="h-4 w-4 text-slate-500" />
             Restore Standard COA

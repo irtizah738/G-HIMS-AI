@@ -26,6 +26,8 @@ import {
   POApprovalSignature,
 } from '@/types/supply-chain';
 
+const IS_DEMO_RUNTIME = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
+
 // ============================================================================
 // 1. VENDORS SERVICE & VALIDATION WORKFLOW
 // ============================================================================
@@ -187,7 +189,7 @@ export async function getVendors(tenantId: string): Promise<Vendor[]> {
   try {
     const q = query(collection(db, 'tenants', tenantId, 'vendors'));
     const snapshot = await getDocs(q);
-    if (snapshot.empty) {
+    if (snapshot.empty && IS_DEMO_RUNTIME) {
       await seedInitialVendors(tenantId);
       const seeded = await getDocs(q);
       return seeded.docs.map((d) => d.data() as Vendor);
@@ -265,7 +267,7 @@ export async function getPurchaseOrders(tenantId: string): Promise<PurchaseOrder
   try {
     const q = query(collection(db, 'tenants', tenantId, 'purchaseOrders'));
     const snapshot = await getDocs(q);
-    if (snapshot.empty) {
+    if (snapshot.empty && IS_DEMO_RUNTIME) {
       await seedInitialPurchaseOrders(tenantId);
       const seeded = await getDocs(q);
       return seeded.docs.map((d) => d.data() as PurchaseOrder);
@@ -658,7 +660,7 @@ export async function getParLocations(tenantId: string): Promise<PARLocation[]> 
   try {
     const q = query(collection(db, 'tenants', tenantId, 'parLocations'));
     const snapshot = await getDocs(q);
-    if (snapshot.empty) {
+    if (snapshot.empty && IS_DEMO_RUNTIME) {
       await seedInitialParLocations(tenantId);
       const seeded = await getDocs(q);
       return seeded.docs.map((d) => d.data() as PARLocation);
@@ -799,7 +801,7 @@ export async function getStockTransfers(tenantId: string): Promise<StockTransfer
   try {
     const q = query(collection(db, 'tenants', tenantId, 'stockTransfers'));
     const snapshot = await getDocs(q);
-    if (snapshot.empty) {
+    if (snapshot.empty && IS_DEMO_RUNTIME) {
       await seedInitialStockTransfers(tenantId);
       const seeded = await getDocs(q);
       return seeded.docs.map((d) => d.data() as StockTransferRequest);
@@ -981,7 +983,7 @@ export async function getSterilizationCycles(tenantId: string): Promise<Steriliz
   try {
     const q = query(collection(db, 'tenants', tenantId, 'sterilizationCycles'));
     const snapshot = await getDocs(q);
-    if (snapshot.empty) {
+    if (snapshot.empty && IS_DEMO_RUNTIME) {
       await seedInitialSterilizationCycles(tenantId);
       const seeded = await getDocs(q);
       return seeded.docs.map((d) => d.data() as SterilizationCycle);

@@ -132,6 +132,7 @@ export interface InventoryPeriodCloseRecord {
   finalizedBy?: string;
   stockMovementMinorUnitsByAccount?: Record<string, number>;
   journalMovementMinorUnitsByAccount?: Record<string, number>;
+  endingValuationMinorUnitsByAccount?: Record<string, number>;
   reconciliationDeltaMinorUnitsByAccount?: Record<string, number>;
   stockTransactionCount?: number;
   journalEntryCount?: number;
@@ -147,5 +148,6 @@ export interface InventoryValuationTransaction {
 
 export interface InventoryValuationResult {
   movementMinorUnitsByAccount: Record<'1210' | '1220', number>;
+  endingValuationMinorUnitsByAccount: Record<'1210' | '1220', number>;
   transactionCount: number;
 }

@@ -640,6 +640,25 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       usedAt: nonEmpty,
     }).strict(),
   },
+  CaptureConsignmentSupplierInvoiceCommand: {
+    1: z.object({
+      facilityId: nonEmpty,
+      supplierId: nonEmpty,
+      agreementId: nonEmpty,
+      invoiceNumber: nonEmpty.max(200),
+      usageIds: z.array(nonEmpty).min(1).max(100),
+      issueDate: nonEmpty,
+      dueDate: nonEmpty,
+      currency: z.string().trim().length(3),
+    }).strict(),
+  },
+  ReviewConsignmentSupplierInvoiceCommand: {
+    1: z.object({
+      invoiceId: nonEmpty,
+      decision: z.enum(['APPROVE','REJECT']),
+      notes: nonEmpty.max(2000),
+    }).strict(),
+  },
   GenerateScmIntelligenceSnapshotCommand: {
     1: z.object({
       snapshotId: nonEmpty,

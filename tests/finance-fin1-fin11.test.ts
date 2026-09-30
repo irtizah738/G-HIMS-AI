@@ -61,8 +61,8 @@ describe('FIN-1 through FIN-11 enterprise finance completion',()=>{
       fiscalYear:2026,throughPostingPeriod:9,currency:'USD',
     });
     expect(trial.balanced).toBe(true);
-    expect(trial.totalDebitsMinorUnits).toBe(100);
-    expect(trial.totalCreditsMinorUnits).toBe(100);
+    expect(trial.totalDebitMinorUnits).toBe(100);
+    expect(trial.totalCreditMinorUnits).toBe(100);
   });
 
   test('historical AR/AP balances replay immutable evidence through the requested cutoff',()=>{
@@ -128,7 +128,7 @@ describe('FIN-1 through FIN-11 enterprise finance completion',()=>{
     expect(s).toContain('AR_RECEIPT');
     expect(s).toContain('FINANCE_PERIOD_NOT_POSTABLE');
     expect(s).toContain("entityType:'JOURNAL_ENTRY'");
-    expect(s).toContain('SCM_FINANCE_SEGREGATION_OF_DUTIES');
+    expect(s).toContain('INVOICE_CHANGED_BEFORE_RECOGNITION');
   });
 
   test('FIN-3 treasury uses maker-checker and bank reconciliation controls',async()=>{
@@ -137,7 +137,7 @@ describe('FIN-1 through FIN-11 enterprise finance completion',()=>{
     expect(s).toContain('CASH_SHIFT');
     expect(s).toContain('TREASURY_TRANSFER');
     expect(s).toContain('BANK_RECONCILIATION');
-    expect(s).toContain('SCM_FINANCE_SEGREGATION_OF_DUTIES');
+    expect(s).toContain('FINANCE_SEGREGATION_OF_DUTIES');
     expect(s).toContain('FINANCE_PERIOD_NOT_POSTABLE');
     expect(s).toContain("entityType:'JOURNAL_ENTRY'");
   });
@@ -157,13 +157,13 @@ describe('FIN-1 through FIN-11 enterprise finance completion',()=>{
       'BUDGET_ENVELOPE','BUDGET_COMMITMENT'
     ]) expect(s).toContain(marker);
     expect(s).toContain('BUDGET_INSUFFICIENT_AVAILABLE');
-    expect(s).toContain('SCM_FINANCE_SEGREGATION_OF_DUTIES');
+    expect(s).toContain('FINANCE_SEGREGATION_OF_DUTIES');
   });
 
   test('FIN-8 fixed assets use deterministic straight-line depreciation and journals',async()=>{
     expect(straightLineMonthlyDepreciationMinorUnits({
       acquisitionCostMinorUnits:1200,
-      residualValueMinorUnits:0,
+      salvageValueMinorUnits:0,
       usefulLifeMonths:12,
       monthsDepreciated:0,
     })).toBe(100);
@@ -178,7 +178,8 @@ describe('FIN-1 through FIN-11 enterprise finance completion',()=>{
     const gl=await source('lib/backend/services/finance-gl-domain-service.ts');
     const schema=await source('lib/backend/commands/command-schema-registry.ts');
     const start=schema.indexOf('ChangeFinancePeriodStatusCommand');
-    const block=schema.slice(start,start+500);
+    const end=schema.indexOf('ReverseJournalCommand',start);
+    const block=schema.slice(start,end);
     expect(block).toContain("z.enum(['SOFT_CLOSE','OPEN'])");
     expect(block).not.toContain("'CLOSED'");
     expect(block).not.toContain("'LOCKED'");
@@ -234,8 +235,8 @@ describe('FIN-1 through FIN-11 enterprise finance completion',()=>{
     const bus=await source('lib/backend/commands/command-bus.ts');
     for(const command of [
       'CreateFinanceAccountCommand','CreateFinancePeriodCommand','ChangeFinancePeriodStatusCommand',
-      'PostGovernedJournalCommand','ReverseGovernedJournalCommand','GenerateTrialBalanceCommand',
-      'RecognizeRevenueInvoiceCommand','AdjustArOpenItemCommand','RecordArReceiptCommand','GenerateArAgingCommand',
+      'PostJournalCommand','ReverseJournalCommand','GenerateTrialBalanceCommand',
+      'RecognizePatientInvoiceCommand','AdjustArOpenItemCommand','RecordArReceiptCommand','GenerateArAgingCommand',
       'RegisterTreasuryAccountCommand','OpenCashShiftCommand','CloseCashShiftCommand','ReviewCashShiftCommand',
       'TreasuryTransferCommand','PrepareBankReconciliationCommand','ApproveBankReconciliationCommand',
       'GenerateApAgingCommand','ApplySupplierCreditCommand',

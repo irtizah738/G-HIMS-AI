@@ -104,7 +104,8 @@ export type InventoryDispositionReason =
   | 'EXPIRY'
   | 'DAMAGE'
   | 'RECALL'
-  | 'QUALITY_FAILURE';
+  | 'QUALITY_FAILURE'
+  | 'TEMPERATURE_EXCURSION';
 
 export interface CreateInventoryDispositionPayload {
   orderId: string;
@@ -117,6 +118,7 @@ export interface CreateInventoryDispositionPayload {
   dispositionType: InventoryDispositionType;
   reason: InventoryDispositionReason;
   recallId?: string;
+  excursionId?: string;
   supplierId?: string;
   justification: string;
   requestedAt: string;

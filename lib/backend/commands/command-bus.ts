@@ -26,6 +26,7 @@ import { ScmSourcingDomainService } from '../services/scm-sourcing-domain-servic
 import { ScmPlanningDomainService } from '../services/scm-planning-domain-service';
 import { ScmRecallDispositionDomainService } from '../services/scm-recall-disposition-domain-service';
 import { ScmControlledInventoryDomainService } from '../services/scm-controlled-inventory-domain-service';
+import { ScmConsignmentDomainService } from '../services/scm-consignment-domain-service';
 import { ScmCostingDomainService } from '../services/scm-costing-domain-service';
 import { CashReceiptDomainService } from '../services/cash-receipt-domain-service';
 import { DiagnosticResultDomainService } from '../services/diagnostic-result-domain-service';
@@ -658,6 +659,42 @@ export class CommandBus {
 
         case 'RecordControlledCustodyCommand':
           result = await ScmControlledInventoryDomainService.recordControlledCustody(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'CreateConsignmentAgreementCommand':
+          result = await ScmConsignmentDomainService.createAgreement(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ApproveConsignmentAgreementCommand':
+          result = await ScmConsignmentDomainService.approveAgreement(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ReceiveConsignmentStockCommand':
+          result = await ScmConsignmentDomainService.receiveStock(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecordConsignmentUsageCommand':
+          result = await ScmConsignmentDomainService.recordUsage(
             context,
             command.commandId,
             command.idempotencyKey,

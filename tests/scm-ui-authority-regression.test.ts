@@ -24,7 +24,9 @@ describe('SCM final UI authority and branch-cleanup regression', () => {
     expect(procurement).toContain('approvePurchaseRequisitionEdge');
     expect(procurement).toContain('createPurchaseOrderEdge');
     expect(procurement).toContain('supplierContracts');
-    expect(procurement).toContain('SUPPLIER_CONTRACT_REQUIRED');
+    expect(procurement).toContain('contractId: contract?.contractId');
+    expect(procurement).toContain("candidate.status === 'ACTIVE'");
+    expect(procurement).toContain('Complete SCM-6 sourcing/contract approval');
   });
 
   test('SCM edge adapter exposes governed procurement mutations', async () => {

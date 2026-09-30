@@ -91,7 +91,7 @@ describe('OPD clinical workflow runtime integration', () => {
   test('billing stays in billing until fully settled and then advances through the DAG', async () => {
     const workspace = await source('components/opd/OpdMasterWorkspace.tsx');
 
-    expect(workspace).toContain("'PAYMENT_EXCEEDS_BALANCE'");
+    expect(workspace).toContain('PAYMENT_EXCEEDS_BALANCE');
     expect(workspace).toContain("targetStage: 'BILLING_SETTLEMENT'");
     expect(workspace).toContain("targetStage: 'DISCHARGE_OR_REFERRAL'");
     expect(workspace).toContain("setActiveTab(isSettled ? 'DISPOSITION' : 'BILLING')");

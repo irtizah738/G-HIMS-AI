@@ -531,6 +531,14 @@ export class FinanceGlDomainService {
     payload: PostGovernedJournalPayload
   ): Promise<CommandResult> {
     const sourceModule = payload.sourceModule || 'MANUAL';
+    if (sourceModule !== 'MANUAL') {
+      return reject(
+        commandId,
+        idempotencyKey,
+        'GENERIC_JOURNAL_SOURCE_MODULE_FORBIDDEN',
+        'The generic journal command is reserved for MANUAL postings. System subledgers must post through their governed domain services.'
+      );
+    }
     const auth = AuthorizationPipeline.evaluate(context, {
       requiredRoles:
         sourceModule === 'MANUAL'

@@ -223,6 +223,60 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "scmRecalls",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "severity",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "initiatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "scmRecallExposures",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "recallId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "notificationStatus",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "consumedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "scmInventoryDispositions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "facilityId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "requestedAt",
+          "order": "DESCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []

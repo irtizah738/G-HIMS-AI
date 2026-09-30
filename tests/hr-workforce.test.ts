@@ -181,7 +181,7 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
         payload: {
           personalInfo: { legalFirstName: 'Dave', legalLastName: 'Clark', dateOfBirth: '1980-01-01', gender: 'MALE', contactEmail: 'd@h.com', contactPhone: '123', emergencyContact: { name: 'E', relationship: 'S', phone: '123' }, residentialAddress: { street: 'S', city: 'C', state: 'NY', postalCode: '1', country: 'USA' } },
           primaryFacilityId: 'fac_central', facilityIds: ['fac_central'], primaryDepartmentId: 'dept_icu', primaryDepartmentName: 'ICU', departmentIds: ['dept_icu'],
-          positionId: 'pos_nurse', positionTitle: 'Nurse', employmentType: 'FULL_TIME', employmentStatus: 'ACTIVE', hireDate: '2026-01-01',
+          positionId: 'pos_nurse', positionTitle: 'Nurse', employmentType: 'FULL_TIME', hireDate: '2026-01-01',
         },
       };
 

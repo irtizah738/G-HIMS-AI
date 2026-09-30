@@ -14,6 +14,8 @@ import type {
   FinanceArOpenItem,
   GovernedJournalRecord,
   RecognizePatientInvoicePayload,
+  TreasuryAccountRecord,
+  FinancePeriodRecord,
 } from '@/types/finance-domain';
 import {
   arAgingBucket,
@@ -25,6 +27,16 @@ export interface GenerateArAgingPayload {
   snapshotId: string;
   asOf: number;
   currency: string;
+}
+
+export interface RecordArReceiptPayload {
+  receiptId: string;
+  openItemId: string;
+  treasuryAccountId: string;
+  amountMinorUnits: number;
+  receivedAt: number;
+  method: 'BANK_TRANSFER' | 'CARD' | 'MOBILE_WALLET' | 'INSURANCE_SETTLEMENT';
+  reference: string;
 }
 
 function reject(
@@ -445,4 +457,152 @@ export class FinanceArRevenueDomainService {
     });
     return {success:true,commandId,idempotencyKey,entityId:payload.snapshotId,eventId:tx.event.eventId,auditId:tx.audit.auditId,outboxId:tx.outbox.outboxId,data:snapshot};
   }
+
+  public static async recordArReceipt(
+    context:CommandContext,
+    commandId:string,
+    idempotencyKey:string,
+    payload:RecordArReceiptPayload
+  ):Promise<CommandResult>{
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:[
+        'BILLING_ADMIN','ACCOUNTANT','FINANCE_MANAGER','TREASURY_MANAGER',
+        'SYSTEM_ADMIN','ADMINISTRATOR'
+      ],
+    });
+    if(!auth.authorized)return reject(
+      commandId,idempotencyKey,auth.code||'UNAUTHORIZED',
+      auth.reason||'AR receipt allocation authority required.'
+    );
+
+    try{
+      assertMinorUnits(payload.amountMinorUnits,'INVALID_AR_RECEIPT_AMOUNT');
+      if(payload.amountMinorUnits<=0)throw new AtomicMutationRejectedError(
+        'INVALID_AR_RECEIPT_AMOUNT','AR receipt amount must be positive.'
+      );
+      const [openItem,treasury]=await Promise.all([
+        DomainStateRepository.getById<FinanceArOpenItem>(
+          context.tenantId,'arOpenItems',payload.openItemId
+        ),
+        DomainStateRepository.getById<TreasuryAccountRecord>(
+          context.tenantId,'treasuryAccounts',payload.treasuryAccountId
+        ),
+      ]);
+      if(!openItem||openItem.outstandingMinorUnits<=0)throw new AtomicMutationRejectedError(
+        'AR_OPEN_ITEM_NOT_OPEN','AR open item is not open.'
+      );
+      if(
+        !treasury ||
+        !treasury.isActive ||
+        !treasury.allowReceipts ||
+        treasury.currency!==openItem.currency
+      )throw new AtomicMutationRejectedError(
+        'TREASURY_RECEIPT_ACCOUNT_INVALID',
+        'Receipt requires an active receipt-enabled treasury account in the AR currency.'
+      );
+      if(payload.amountMinorUnits>openItem.outstandingMinorUnits)throw new AtomicMutationRejectedError(
+        'AR_RECEIPT_EXCEEDS_OUTSTANDING',
+        'Receipt exceeds AR open-item outstanding amount.'
+      );
+
+      const date=new Date(payload.receivedAt);
+      const fiscalYear=date.getUTCFullYear(),postingPeriod=date.getUTCMonth()+1;
+      const periodId=financePeriodId(fiscalYear,postingPeriod);
+      const journalId=`je_ar_receipt_${payload.receiptId}`;
+      const journal:GovernedJournalRecord={
+        journalId,tenantId:context.tenantId,fiscalYear,postingPeriod,
+        documentDate:payload.receivedAt,postingDate:payload.receivedAt,
+        referenceDocumentId:payload.receiptId,
+        documentHeader:`AR receipt ${payload.reference}`,
+        currency:openItem.currency,totalAmountMinorUnits:payload.amountMinorUnits,
+        lines:[
+          {
+            glAccountId:treasury.accountCode,glAccountName:treasury.accountName,
+            debitMinorUnits:payload.amountMinorUnits,creditMinorUnits:0,
+            lineDescription:`${payload.method} receipt ${payload.reference}`,
+          },
+          {
+            glAccountId:'1110',glAccountName:'Accounts Receivable - Patient & Insurers',
+            debitMinorUnits:0,creditMinorUnits:payload.amountMinorUnits,
+            lineDescription:`Clear AR open item ${openItem.openItemId}`,
+          },
+        ],
+        sourceModule:'AR',status:'POSTED',postedBy:context.actorId,postedAt:Date.now(),
+      };
+      const receipt={
+        receiptId:payload.receiptId,tenantId:context.tenantId,
+        openItemId:openItem.openItemId,invoiceId:openItem.invoiceId,
+        debtorType:openItem.debtorType,debtorId:openItem.debtorId,
+        treasuryAccountId:treasury.treasuryAccountId,
+        amountMinorUnits:payload.amountMinorUnits,currency:openItem.currency,
+        method:payload.method,reference:payload.reference,receivedAt:payload.receivedAt,
+        journalId,recordedBy:context.actorId,recordedAt:new Date().toISOString(),
+      };
+
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,actorId:context.actorId,
+        actorRole:context.roles[0]||'ACCOUNTANT',
+        aggregateType:'AR_RECEIPT',aggregateId:payload.receiptId,
+        eventType:'AR_RECEIPT_ALLOCATED',auditAction:'AR_RECEIPT_ALLOCATED',
+        auditResourceType:'AR_OPEN_ITEM',auditResourceId:payload.openItemId,
+        outboxTopic:'g-hims-finance-events',idempotencyKey,commandId,
+        correlationId:context.correlationId,
+        readTargets:[
+          {key:'period',entityType:'FINANCE_PERIOD',entityId:periodId,required:true},
+          {key:'openItem',entityType:'AR_OPEN_ITEM',entityId:payload.openItemId,required:true},
+          {key:'treasury',entityType:'TREASURY_ACCOUNT',entityId:payload.treasuryAccountId,required:true},
+        ],
+        prepare:(current)=>{
+          const period=current.period as unknown as FinancePeriodRecord;
+          const live=current.openItem as unknown as FinanceArOpenItem;
+          const liveTreasury=current.treasury as unknown as TreasuryAccountRecord;
+          if(!['OPEN','SOFT_CLOSE'].includes(period.status))throw new AtomicMutationRejectedError(
+            'FINANCE_PERIOD_NOT_POSTABLE','AR receipt period is not open.'
+          );
+          if(
+            !liveTreasury.isActive ||
+            !liveTreasury.allowReceipts ||
+            liveTreasury.currency!==live.currency
+          )throw new AtomicMutationRejectedError(
+            'TREASURY_RECEIPT_ACCOUNT_CHANGED',
+            'Treasury receipt account changed before settlement.'
+          );
+          if(payload.amountMinorUnits>live.outstandingMinorUnits)throw new AtomicMutationRejectedError(
+            'AR_RECEIPT_EXCEEDS_OUTSTANDING','AR open-item state changed before receipt allocation.'
+          );
+          const nextOutstanding=live.outstandingMinorUnits-payload.amountMinorUnits;
+          const next:FinanceArOpenItem={
+            ...live,allocatedMinorUnits:live.allocatedMinorUnits+payload.amountMinorUnits,
+            outstandingMinorUnits:nextOutstanding,
+            status:nextOutstanding===0?'SETTLED':'PARTIALLY_SETTLED',
+            updatedAt:new Date().toISOString(),
+          };
+          return {
+            domainState:receipt,
+            additionalStateWrites:[
+              {entityType:'AR_OPEN_ITEM',entityId:live.openItemId,domainState:next},
+              {entityType:'JOURNAL_ENTRY',entityId:journalId,domainState:journal},
+            ],
+            eventPayload:{
+              receiptId:payload.receiptId,openItemId:live.openItemId,
+              invoiceId:live.invoiceId,amountMinorUnits:payload.amountMinorUnits,
+              currency:live.currency,journalId,
+            },
+            auditReason:`Allocated ${payload.method} receipt ${payload.reference} to AR item ${live.openItemId}.`,
+            resultData:{receipt,openItem:next,journal},
+          };
+        },
+      });
+      return {
+        success:true,commandId,idempotencyKey,entityId:payload.receiptId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:tx.resultData
+      };
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError)return reject(
+        commandId,idempotencyKey,error.code,error.message,error.details
+      );
+      throw error;
+    }
+  }
+
 }

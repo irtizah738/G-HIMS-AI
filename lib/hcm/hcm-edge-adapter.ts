@@ -13,6 +13,7 @@ import type {
   RosterShiftEntry,
   RosterSwapRecord,
   AttendanceRecord,
+  LeaveRequest,
 } from '@/types/hcm-advanced';
 import type {
   ClinicalCredential,
@@ -205,6 +206,31 @@ export type AssignShiftEdgePayload = Omit<
   | 'createdAt'
   | 'updatedAt'
 >;
+
+export const submitLeaveRequestEdge=(
+  payload:{
+    employeeId:string;
+    leaveType:LeaveRequest['leaveType'];
+    startDate:string;
+    endDate:string;
+    reason:string;
+    coveringEmployeeId?:string;
+  },
+  idempotencyKey?:string
+)=>run<LeaveRequest>(
+  'SubmitLeaveRequestCommand',
+  payload as unknown as Record<string,unknown>,
+  idempotencyKey
+);
+
+export const approveLeaveRequestEdge=(
+  payload:{leaveId:string;approved:boolean;rejectionReason?:string},
+  idempotencyKey?:string
+)=>run<LeaveRequest>(
+  'ApproveLeaveRequestCommand',
+  payload as unknown as Record<string,unknown>,
+  idempotencyKey
+);
 
 export const recordClockInEdge=(
   payload:{

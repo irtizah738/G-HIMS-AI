@@ -66,11 +66,15 @@ export function buildInventoryMovementValuation(params: {
     '1210': 0,
     '1220': 0,
   };
+  const endingValuationMinorUnitsByAccount: Record<'1210' | '1220', number> = {
+    '1210': 0,
+    '1220': 0,
+  };
   let transactionCount = 0;
 
   for (const transaction of params.transactions) {
     const occurredMs = Date.parse(transaction.occurredAt);
-    if (!Number.isFinite(occurredMs) || occurredMs < startMs || occurredMs > endMs) {
+    if (!Number.isFinite(occurredMs) || occurredMs > endMs) {
       continue;
     }
 
@@ -94,11 +98,18 @@ export function buildInventoryMovementValuation(params: {
       Number(transaction.normalizedQuantity || transaction.quantity) * unitCostMinorUnits
     );
     const account = inventoryAccountForItemType(item.itemType);
-    movementMinorUnitsByAccount[account] += sign * valueMinorUnits;
-    transactionCount += 1;
+    endingValuationMinorUnitsByAccount[account] += sign * valueMinorUnits;
+    if (occurredMs >= startMs) {
+      movementMinorUnitsByAccount[account] += sign * valueMinorUnits;
+      transactionCount += 1;
+    }
   }
 
-  return { movementMinorUnitsByAccount, transactionCount };
+  return {
+    movementMinorUnitsByAccount,
+    endingValuationMinorUnitsByAccount,
+    transactionCount,
+  };
 }
 
 export function buildJournalInventoryMovement(params: {

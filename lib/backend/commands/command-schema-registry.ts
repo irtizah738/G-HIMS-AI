@@ -272,6 +272,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       dispositionType: z.enum(['DESTROY','RETURN_TO_SUPPLIER']),
       reason: z.enum(['EXPIRY','DAMAGE','RECALL','QUALITY_FAILURE','TEMPERATURE_EXCURSION']),
       recallId: nonEmpty.optional(),
+      excursionId: nonEmpty.optional(),
       supplierId: nonEmpty.optional(),
       justification: nonEmpty.max(4000),
       requestedAt: nonEmpty,

@@ -16,6 +16,8 @@ export type FinancePeriodStatus =
 
 export interface FinanceAccountRecord {
   accountId: string;
+  /** Legacy ERP account document ID, retained during finance migration. */
+  id?: string;
   tenantId: string;
   accountCode: string;
   accountName: string;

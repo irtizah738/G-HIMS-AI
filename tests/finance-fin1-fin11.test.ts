@@ -250,6 +250,26 @@ describe('FIN-1 through FIN-11 enterprise finance completion',()=>{
     ]) expect(bus).toContain(`case '${command}'`);
   });
 
+  test('Finance primary UI cannot bypass governed command authority',async()=>{
+    const coa=await source('app/[tenantId]/erp/chart-of-accounts/page.tsx');
+    const journals=await source('app/[tenantId]/erp/journal-entries/page.tsx');
+    const adapter=await source('lib/finance/finance-edge-adapter.ts');
+    const gl=await source('lib/backend/services/finance-gl-domain-service.ts');
+
+    for(const page of [coa,journals]){
+      expect(page).not.toContain("from '@/lib/firebase/services/erp-finance'");
+      expect(page).not.toContain("|| 'metro-health'");
+      expect(page).not.toContain("|| 'central-metro-hospital'");
+    }
+    expect(coa).toContain('createFinanceAccountEdge');
+    expect(coa).toContain('Opening balances cannot be written onto an account master');
+    expect(journals).toContain('postManualJournalEdge');
+    expect(adapter).toContain("'CreateFinanceAccountCommand'");
+    expect(adapter).toContain("'PostJournalCommand'");
+    expect(adapter).toContain("sourceModule:'MANUAL'");
+    expect(gl).toContain('GENERIC_JOURNAL_SOURCE_MODULE_FORBIDDEN');
+  });
+
   test('Finance read models are tenant scoped, server-write-only, and available offline where safe',async()=>{
     const rules=await source('firestore.rules');
     const hydration=await source('lib/offline/hydration.ts');

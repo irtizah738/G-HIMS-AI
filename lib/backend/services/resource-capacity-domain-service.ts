@@ -8,7 +8,10 @@ import { createHash } from 'node:crypto';
 
 import { CommandContext, CommandResult } from '../types';
 import { AuthorizationPipeline } from '../auth/authorization-pipeline';
-import { TransactionManager } from '../transactions/transaction-manager';
+import {
+  AtomicMutationRejectedError,
+  TransactionManager,
+} from '../transactions/transaction-manager';
 import {
   ResourceMaster,
   HospitalRoom,
@@ -31,6 +34,14 @@ function deterministicId(
     .update(`${tenantId}\u0000${commandId}`)
     .digest('hex')
     .slice(0, 24);
+  return `${prefix}_${digest}`;
+}
+
+function identityId(prefix: string, ...parts: string[]): string {
+  const digest = createHash('sha256')
+    .update(parts.map((part) => part.trim().toLowerCase()).join('\u0000'))
+    .digest('hex')
+    .slice(0, 32);
   return `${prefix}_${digest}`;
 }
 
@@ -131,79 +142,167 @@ export class ResourceCapacityDomainService {
     context: CommandContext,
     commandId: string,
     idempotencyKey: string,
-    payload: Omit<ResourceMaster, 'resourceId' | 'resourceNumber' | 'createdAt' | 'updatedAt'>
+    payload: Omit<ResourceMaster, 'resourceId' | 'createdAt' | 'updatedAt'> & {
+      resourceNumber?: string;
+    }
   ): Promise<CommandResult<ResourceMaster>> {
     const auth = AuthorizationPipeline.evaluate(context, {
       requiredRoles: ['FACILITIES_ADMIN', 'BIOMEDICAL_ENGINEER', 'SYSTEM_ADMIN', 'HR_ADMIN'],
     });
-
     if (!auth.authorized) {
       return {
         success: false,
         commandId,
         idempotencyKey,
-        error: { code: auth.code || 'UNAUTHORIZED', message: auth.reason || 'Facilities / Biomedical authorization required.' },
+        error: {
+          code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Facilities / Biomedical authorization required.',
+        },
       };
     }
 
     repositoryRequiredOutsideTests();
     try {
       assertFacilityScope(context, payload.facilityId);
-    } catch {
+      const resourceId = deterministicId('res', context.tenantId, commandId);
+      const resourceNumber =
+        payload.resourceNumber?.trim() ||
+        `RES-${payload.resourceType.substring(0, 3)}-${resourceId.slice(-8).toUpperCase()}`;
+      const now = new Date().toISOString();
+
+      const identities = [
+        {
+          key: 'resourceNumberIdentity',
+          entityId: identityId('resource-number', resourceNumber),
+          type: 'RESOURCE_NUMBER',
+          value: resourceNumber,
+        },
+        ...(payload.serialNumber?.trim()
+          ? [{
+              key: 'serialIdentity',
+              entityId: identityId('resource-serial', payload.serialNumber),
+              type: 'SERIAL_NUMBER',
+              value: payload.serialNumber.trim(),
+            }]
+          : []),
+        ...(payload.assetTagNumber?.trim()
+          ? [{
+              key: 'assetTagIdentity',
+              entityId: identityId('resource-asset-tag', payload.assetTagNumber),
+              type: 'ASSET_TAG',
+              value: payload.assetTagNumber.trim(),
+            }]
+          : []),
+      ];
+
+      const tx = await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.roles[0] || 'AUTHENTICATED_USER',
+        aggregateType: 'RESOURCE_MASTER',
+        aggregateId: resourceId,
+        eventType: 'RESOURCE_REGISTERED',
+        auditAction: 'RESOURCE_REGISTERED',
+        auditResourceType: 'RESOURCE_MASTER',
+        auditResourceId: resourceId,
+        outboxTopic: 'g-hims-resource-events',
+        idempotencyKey,
+        commandId,
+        correlationId: context.correlationId,
+        readTargets: identities.map((identity) => ({
+          key: identity.key,
+          entityType: 'RESOURCE_IDENTITY',
+          entityId: identity.entityId,
+          required: false,
+        })),
+        prepare: (current) => {
+          for (const identity of identities) {
+            if (current[identity.key]) {
+              throw new AtomicMutationRejectedError(
+                'RESOURCE_IDENTITY_ALREADY_REGISTERED',
+                `${identity.type} '${identity.value}' is already registered in this tenant.`,
+                { type: identity.type, value: identity.value }
+              );
+            }
+          }
+
+          const resource: ResourceMaster = {
+            ...payload,
+            resourceId,
+            resourceNumber,
+            createdAt: now,
+            updatedAt: now,
+          };
+
+          return {
+            domainState: resource,
+            additionalStateWrites: identities.map((identity) => ({
+              entityType: 'RESOURCE_IDENTITY',
+              entityId: identity.entityId,
+              domainState: {
+                identityId: identity.entityId,
+                tenantId: context.tenantId,
+                type: identity.type,
+                value: identity.value,
+                resourceId,
+                createdAt: now,
+              },
+            })),
+            eventPayload: {
+              resourceId,
+              resourceNumber,
+              name: resource.name,
+              resourceType: resource.resourceType,
+              facilityId: resource.facilityId,
+              departmentId: resource.departmentId,
+              status: resource.status,
+            },
+            auditReason:
+              `Registered authoritative resource ${resourceNumber} (${resource.name}) for ` +
+              `${resource.departmentName || resource.departmentId}.`,
+            resultData: resource,
+          };
+        },
+      });
+
+      const resource = tx.resultData as ResourceMaster;
+      this.resources.set(resourceId, resource);
       return {
-        success: false,
+        success: true,
         commandId,
         idempotencyKey,
-        error: {
-          code: 'FACILITY_SCOPE_MISMATCH',
-          message: 'Resource registration is outside the actor facility scope.',
-        },
+        entityId: resourceId,
+        eventId: tx.eventId,
+        auditId: tx.auditId,
+        outboxId: tx.outboxId,
+        data: resource,
       };
+    } catch (error) {
+      if (error instanceof AtomicMutationRejectedError) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+          },
+        };
+      }
+      if (error instanceof Error && error.message === 'FACILITY_SCOPE_MISMATCH') {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'FACILITY_SCOPE_MISMATCH',
+            message: 'Resource registration is outside the actor facility scope.',
+          },
+        };
+      }
+      throw error;
     }
-
-    const resourceId = deterministicId('res', context.tenantId, commandId);
-    const resourceNumber =
-      payload.resourceNumber ||
-      `RES-${payload.resourceType.substring(0, 3)}-${resourceId.slice(-8).toUpperCase()}`;
-    const now = new Date().toISOString();
-
-    const resource: ResourceMaster = {
-      ...payload,
-      resourceId,
-      resourceNumber,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    this.resources.set(resourceId, resource);
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'RESOURCE_MASTER',
-      entityId: resourceId,
-      eventType: 'RESOURCE_REGISTERED',
-      domainState: resource,
-      eventPayload: {
-        resourceId,
-        resourceNumber,
-        name: resource.name,
-        resourceType: resource.resourceType,
-        departmentId: resource.departmentId,
-        status: resource.status,
-      },
-      auditReason: `Registered asset ${resourceNumber} (${resource.name}) for ${resource.departmentName || resource.departmentId}`,
-      outboxTopic: 'g-hims-resource-events',
-    });
-
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: resourceId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: resource,
-    };
   }
 
   // ============================================================================
@@ -219,69 +318,137 @@ export class ResourceCapacityDomainService {
     const auth = AuthorizationPipeline.evaluate(context, {
       requiredRoles: ['FACILITIES_ADMIN', 'SYSTEM_ADMIN', 'HOSPITAL_EXECUTIVE'],
     });
-
     if (!auth.authorized) {
       return {
         success: false,
         commandId,
         idempotencyKey,
-        error: { code: 'UNAUTHORIZED', message: 'Facilities admin authority required.' },
+        error: {
+          code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Facilities admin authority required.',
+        },
       };
     }
 
     repositoryRequiredOutsideTests();
     try {
       assertFacilityScope(context, payload.facilityId);
-    } catch {
+      if (payload.currentOccupancy > payload.capacity) {
+        throw new AtomicMutationRejectedError(
+          'ROOM_OCCUPANCY_EXCEEDS_CAPACITY',
+          'Room occupancy cannot exceed configured capacity.'
+        );
+      }
+      const roomId = deterministicId('room', context.tenantId, commandId);
+      const roomIdentityId = identityId(
+        'room-number',
+        payload.facilityId,
+        payload.building,
+        payload.floor,
+        payload.roomNumber
+      );
+      const now = new Date().toISOString();
+
+      const tx = await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.roles[0] || 'AUTHENTICATED_USER',
+        aggregateType: 'HOSPITAL_ROOM',
+        aggregateId: roomId,
+        eventType: 'ROOM_REGISTERED',
+        auditAction: 'ROOM_REGISTERED',
+        auditResourceType: 'HOSPITAL_ROOM',
+        auditResourceId: roomId,
+        outboxTopic: 'g-hims-facility-events',
+        idempotencyKey,
+        commandId,
+        correlationId: context.correlationId,
+        readTargets: [{
+          key: 'roomIdentity',
+          entityType: 'ROOM_IDENTITY',
+          entityId: roomIdentityId,
+          required: false,
+        }],
+        prepare: (current) => {
+          if (current.roomIdentity) {
+            throw new AtomicMutationRejectedError(
+              'ROOM_IDENTITY_ALREADY_REGISTERED',
+              'This room number/location is already registered in the facility.'
+            );
+          }
+          const room: HospitalRoom = {
+            ...payload,
+            roomId,
+            createdAt: now,
+            updatedAt: now,
+          };
+          return {
+            domainState: room,
+            additionalStateWrites: [{
+              entityType: 'ROOM_IDENTITY',
+              entityId: roomIdentityId,
+              domainState: {
+                identityId: roomIdentityId,
+                tenantId: context.tenantId,
+                facilityId: payload.facilityId,
+                building: payload.building,
+                floor: payload.floor,
+                roomNumber: payload.roomNumber,
+                roomId,
+                createdAt: now,
+              },
+            }],
+            eventPayload: {
+              roomId,
+              roomNumber: room.roomNumber,
+              roomType: room.roomType,
+              facilityId: room.facilityId,
+              departmentId: room.departmentId,
+            },
+            auditReason: `Registered authoritative room ${room.roomNumber} (${room.roomType}).`,
+            resultData: room,
+          };
+        },
+      });
+
+      const room = tx.resultData as HospitalRoom;
+      this.rooms.set(roomId, room);
       return {
-        success: false,
+        success: true,
         commandId,
         idempotencyKey,
-        error: {
-          code: 'FACILITY_SCOPE_MISMATCH',
-          message: 'Room registration is outside the actor facility scope.',
-        },
+        entityId: roomId,
+        eventId: tx.eventId,
+        auditId: tx.auditId,
+        outboxId: tx.outboxId,
+        data: room,
       };
+    } catch (error) {
+      if (error instanceof AtomicMutationRejectedError) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+          },
+        };
+      }
+      if (error instanceof Error && error.message === 'FACILITY_SCOPE_MISMATCH') {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'FACILITY_SCOPE_MISMATCH',
+            message: 'Room registration is outside the actor facility scope.',
+          },
+        };
+      }
+      throw error;
     }
-
-    const roomId = deterministicId('room', context.tenantId, commandId);
-    const now = new Date().toISOString();
-
-    const room: HospitalRoom = {
-      ...payload,
-      roomId,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    this.rooms.set(roomId, room);
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'HOSPITAL_ROOM',
-      entityId: roomId,
-      eventType: 'ROOM_REGISTERED',
-      domainState: room,
-      eventPayload: {
-        roomId,
-        roomNumber: room.roomNumber,
-        roomType: room.roomType,
-        facilityId: room.facilityId,
-        departmentId: room.departmentId,
-      },
-      auditReason: `Registered room ${room.roomNumber} (${room.roomType})`,
-      outboxTopic: 'g-hims-facility-events',
-    });
-
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: roomId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: room,
-    };
   }
 
   // ============================================================================

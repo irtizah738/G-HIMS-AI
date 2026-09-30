@@ -1301,6 +1301,13 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       remittedAt: nonEmpty,
     }).strict(),
   },
+  GeneratePayrollComplianceSnapshotCommand: {
+    1: z.object({
+      snapshotId: nonEmpty.max(180),
+      asOf: nonEmpty,
+      currency: z.string().trim().length(3),
+    }).strict(),
+  },
   GenerateHcmIntelligenceCommand: {
     1: z.object({
       snapshotId: nonEmpty.max(180),

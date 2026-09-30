@@ -74,11 +74,15 @@ describe('HCM-1 workforce master and trust boundary',()=>{
     expect(service).toContain("employmentStatus:'ONBOARDING'");
     expect(service).toContain("onboardingStage:'OFFER_ACCEPTED'");
     expect(service).toContain("entityType:'EMPLOYEE_ASSIGNMENT'");
+    expect(service).toContain("entityType:'WORKFORCE_IDENTITY'");
+    expect(service).toContain('EMPLOYEE_EMAIL_ALREADY_REGISTERED');
+    expect(service).toContain('EMPLOYEE_NATIONAL_ID_ALREADY_REGISTERED');
     expect(service).toContain('executeAtomicReadModifyMutation');
     expect(service).toContain('INVALID_EMPLOYMENT_STATUS_TRANSITION');
     expect(service).toContain('HCM_FACILITY_SCOPE_MISMATCH');
     expect(service).not.toContain('Math.floor(1000 + Math.random() * 9000)');
     expect(tx).toContain("EMPLOYEE_ASSIGNMENT: 'employeeAssignments'");
+    expect(tx).toContain("WORKFORCE_IDENTITY: 'workforceIdentities'");
   });
 
   test('employee master mutations are least-privilege and terminal states cannot transfer',async()=>{

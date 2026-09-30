@@ -1182,6 +1182,30 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       reason: nonEmpty.max(2000),
     }).strict(),
   },
+  RecordClockInCommand: {
+    1: z.object({
+      employeeId: nonEmpty.max(100),
+      source: z.enum([
+        'BIOMETRIC_SCANNER','KIOSK_TERMINAL','MOBILE_GPS',
+        'WEB_PORTAL','SUPERVISOR_OVERRIDE','HL7_ACCESS_CARD'
+      ]),
+      deviceIdentifier: z.string().trim().min(1).max(250).optional(),
+      scheduledShiftId: z.string().trim().min(1).max(150).optional(),
+    }).strict(),
+  },
+  RecordClockOutCommand: {
+    1: z.object({
+      attendanceId: nonEmpty.max(150),
+    }).strict(),
+  },
+  CorrectAttendanceTimeCommand: {
+    1: z.object({
+      attendanceId: nonEmpty.max(150),
+      newClockInTime: nonEmpty,
+      newClockOutTime: z.string().trim().min(1).optional(),
+      reason: nonEmpty.max(2000),
+    }).strict(),
+  },
   SubmitCredentialCommand: {
     1: z.object({
       employeeId: nonEmpty.max(100),

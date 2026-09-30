@@ -281,6 +281,51 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       postingPeriod: z.number().int().min(1).max(12),
     }).strict(),
   },
+  SubmitCycleCountCommand: {
+    1: z.object({
+      countId: nonEmpty,
+      facilityId: nonEmpty,
+      locationId: nonEmpty,
+      locationName: z.string().trim().max(250).optional(),
+      countedAt: nonEmpty,
+      isBlindCount: z.boolean(),
+      lines: z.array(z.object({
+        balanceId: nonEmpty,
+        countedQuantity: z.number().finite().nonnegative(),
+      }).strict()).min(1).max(500),
+      notes: z.string().trim().max(2000).optional(),
+    }).strict(),
+  },
+  ApproveCycleCountCommand: {
+    1: z.object({
+      countId: nonEmpty,
+      balanceIds: z.array(nonEmpty).min(1).max(500),
+      decision: z.enum(['APPROVE', 'REJECT']),
+      reason: nonEmpty.max(2000),
+    }).strict(),
+  },
+  StartInventoryPeriodCloseCommand: {
+    1: z.object({
+      closeId: nonEmpty,
+      facilityId: nonEmpty,
+      fiscalYear: z.number().int().min(2000).max(2200),
+      postingPeriod: z.number().int().min(1).max(12),
+      periodStart: nonEmpty,
+      periodEnd: nonEmpty,
+      currency: z.string().trim().length(3),
+    }).strict(),
+  },
+  FinalizeInventoryPeriodCloseCommand: {
+    1: z.object({
+      closeId: nonEmpty,
+      facilityId: nonEmpty,
+      fiscalYear: z.number().int().min(2000).max(2200),
+      postingPeriod: z.number().int().min(1).max(12),
+      periodStart: nonEmpty,
+      periodEnd: nonEmpty,
+      currency: z.string().trim().length(3),
+    }).strict(),
+  },
   RecordCashReceiptCommand: {
     1: z.object({
       receiptId: nonEmpty,

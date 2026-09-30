@@ -1,0 +1,30 @@
+name: One-Time HCM-1 Branch Cleanup
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  delete-hcm1-feature-branch:
+    name: Delete merged HCM-1 branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout authenticated repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Delete merged HCM-1 branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch="hcm/hcm1-workforce-trust-boundary"
+          if git ls-remote --exit-code --heads origin "refs/heads/${branch}" >/dev/null 2>&1; then
+            git push origin --delete "${branch}"
+          else
+            echo "Already absent: ${branch}"
+          fi

@@ -264,16 +264,74 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
     });
 
     test('Verifying a submitted credential requires Medical Director authority', async () => {
-      // Nurse cannot verify credential
+      const employeeCmd: BaseCommand = {
+        commandId: 'cmd_cred_emp_01',
+        idempotencyKey: 'idemp_cred_emp_01',
+        commandType: 'CreateEmployeeCommand',
+        schemaVersion: 1,
+        tenantId: 'central-metro-hospital',
+        actorId: 'usr_hr_lead_01',
+        timestamp: new Date().toISOString(),
+        payload: {
+          personalInfo: {
+            legalFirstName: 'Credential',
+            legalLastName: 'Candidate',
+            dateOfBirth: '1985-02-02',
+            gender: 'FEMALE',
+            contactEmail: 'credential.candidate@hcm2.test',
+            contactPhone: '555-0202',
+            emergencyContact: { name: 'Emergency Contact', relationship: 'Sibling', phone: '555-0203' },
+            residentialAddress: { street: '1 Test Way', city: 'Test City', state: 'TS', postalCode: '10001', country: 'USA' },
+          },
+          primaryFacilityId: 'fac_central',
+          facilityIds: ['fac_central'],
+          primaryDepartmentId: 'dept_general_medicine',
+          primaryDepartmentName: 'General Medicine',
+          departmentIds: ['dept_general_medicine'],
+          positionId: 'pos_credential_candidate',
+          positionTitle: 'Physician',
+          employmentType: 'FULL_TIME',
+          hireDate: '2026-03-01',
+        },
+      };
+      const createdEmployee = await CommandBus.dispatch(hrAdminContext, employeeCmd);
+      expect(createdEmployee.success).toBe(true);
+      const employeeId = createdEmployee.entityId!;
+
+      const submitCmd: BaseCommand = {
+        commandId: 'cmd_submit_cred_01',
+        idempotencyKey: 'idemp_submit_cred_01',
+        commandType: 'SubmitCredentialCommand',
+        schemaVersion: 1,
+        tenantId: 'central-metro-hospital',
+        actorId: 'usr_hr_lead_01',
+        timestamp: new Date().toISOString(),
+        payload: {
+          employeeId,
+          credentialType: 'MEDICAL_LICENSE',
+          title: 'Additional Medical Council License',
+          issuingAuthority: 'Medical Council',
+          credentialNumber: 'MC-HCM2-001',
+          issueDate: '2026-01-01',
+          expiryDate: '2028-01-01',
+          isMandatoryForPractice: true,
+          notes: 'Submitted for independent verification',
+        },
+      };
+      const submitted = await CommandBus.dispatch(hrAdminContext, submitCmd);
+      expect(submitted.success).toBe(true);
+      const credentialId = submitted.entityId!;
+
       const verifyCmdNurse: BaseCommand = {
         commandId: 'cmd_verify_01',
         idempotencyKey: 'idemp_verify_01',
         commandType: 'VerifyCredentialCommand',
+        schemaVersion: 1,
         tenantId: 'central-metro-hospital',
         actorId: 'usr_nurse_01',
         timestamp: new Date().toISOString(),
         payload: {
-          credentialId: 'crd_001',
+          credentialId,
           status: 'VERIFIED',
           notes: 'Attempt by nurse to verify',
         },
@@ -283,7 +341,6 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
       expect(nurseResult.success).toBe(false);
       expect(nurseResult.error?.code).toBe('INSUFFICIENT_ROLE');
 
-      // Medical Director can verify
       const verifyCmdMedDir: BaseCommand = {
         ...verifyCmdNurse,
         commandId: 'cmd_verify_02',
@@ -306,32 +363,28 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
         commandId: 'cmd_fatigue_01',
         idempotencyKey: 'idemp_fatigue_01',
         commandType: 'AssignShiftCommand',
+        schemaVersion: 1,
         tenantId: 'central-metro-hospital',
         actorId: 'usr_hr_lead_01',
         timestamp: new Date().toISOString(),
         payload: {
-          tenantId: 'central-metro-hospital',
           facilityId: 'fac_central',
           facilityName: 'Central Metro Hospital',
           departmentId: 'dept_cardiology',
           departmentName: 'Cardiology',
           employeeId: 'emp_001',
-          employeeName: 'Dr. Sarah Jenkins',
-          positionTitle: 'Attending Cardiologist',
           date: today,
           shiftId: 'sft_night_call',
           shiftName: 'Cardiology Night Call',
           startTime: `${today}T18:00:00Z`,
           endTime: `${today}T23:59:00Z`,
-          durationHours: 6,
-          isOvertime: false,
         },
       };
 
       const result = await CommandBus.dispatch(hrAdminContext, violatingShiftCmd);
       expect(result.success).toBe(false);
       expect(result.error?.code).toBe('FATIGUE_COMPLIANCE_VIOLATION');
-      expect(result.error?.message).toContain('Mandatory rest violation');
+      expect(result.error?.message).toContain('mandatory 10-hour rest');
     });
 
     test('Rejects overlapping shift due to double-booking conflict', async () => {
@@ -342,25 +395,21 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
         commandId: 'cmd_db_01',
         idempotencyKey: 'idemp_db_01',
         commandType: 'AssignShiftCommand',
+        schemaVersion: 1,
         tenantId: 'central-metro-hospital',
         actorId: 'usr_hr_lead_01',
         timestamp: new Date().toISOString(),
         payload: {
-          tenantId: 'central-metro-hospital',
           facilityId: 'fac_central',
           facilityName: 'Central Metro Hospital',
           departmentId: 'dept_cardiology',
           departmentName: 'Cardiology',
           employeeId: 'emp_001',
-          employeeName: 'Dr. Sarah Jenkins',
-          positionTitle: 'Attending Cardiologist',
           date: today,
           shiftId: 'sft_conflict',
           shiftName: 'Conflicting Specialty Clinic',
           startTime: `${today}T10:00:00Z`,
           endTime: `${today}T14:00:00Z`,
-          durationHours: 4,
-          isOvertime: false,
         },
       };
 
@@ -376,14 +425,12 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
         commandId: 'cmd_cin_01',
         idempotencyKey: 'idemp_cin_01',
         commandType: 'RecordClockInCommand',
+        schemaVersion: 1,
         tenantId: 'central-metro-hospital',
         actorId: 'usr_hr_lead_01',
         timestamp: new Date().toISOString(),
         payload: {
           employeeId: 'emp_003',
-          employeeName: 'Elena Rostova',
-          facilityId: 'fac_central',
-          departmentId: 'dept_icu',
           source: 'BIOMETRIC_SCANNER',
         },
       };
@@ -392,10 +439,15 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
       expect(inResult.success).toBe(true);
       const attId = inResult.entityId;
 
+      // Production rejects a zero-duration attendance interval. Ensure this
+      // regression test crosses the millisecond boundary before clock-out.
+      await Bun.sleep(5);
+
       const clockOutCmd: BaseCommand = {
         commandId: 'cmd_cout_01',
         idempotencyKey: 'idemp_cout_01',
         commandType: 'RecordClockOutCommand',
+        schemaVersion: 1,
         tenantId: 'central-metro-hospital',
         actorId: 'usr_hr_lead_01',
         timestamp: new Date().toISOString(),
@@ -430,6 +482,7 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
         commandId: 'cmd_cor_01',
         idempotencyKey: 'idemp_cor_01',
         commandType: 'CorrectAttendanceTimeCommand',
+        schemaVersion: 1,
         tenantId: 'central-metro-hospital',
         actorId: 'usr_hr_lead_01',
         timestamp: new Date().toISOString(),
@@ -458,18 +511,15 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
         commandId: 'cmd_lve_01',
         idempotencyKey: 'idemp_lve_01',
         commandType: 'SubmitLeaveRequestCommand',
+        schemaVersion: 1,
         tenantId: 'central-metro-hospital',
         actorId: 'usr_hr_lead_01',
         timestamp: new Date().toISOString(),
         payload: {
-          tenantId: 'central-metro-hospital',
           employeeId: 'emp_001',
-          employeeName: 'Dr. Sarah Jenkins',
-          departmentId: 'dept_cardiology',
           leaveType: 'ANNUAL',
           startDate: '2026-07-01',
           endDate: '2026-07-05',
-          totalDays: 5,
           reason: 'Annual family leave',
         },
       };
@@ -482,6 +532,7 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
         commandId: 'cmd_app_01',
         idempotencyKey: 'idemp_app_01',
         commandType: 'ApproveLeaveRequestCommand',
+        schemaVersion: 1,
         tenantId: 'central-metro-hospital',
         actorId: 'usr_hr_lead_01',
         timestamp: new Date().toISOString(),

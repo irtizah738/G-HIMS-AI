@@ -1154,6 +1154,221 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       effectiveDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     }).strict(),
   },
+  AssignShiftCommand: {
+    1: z.object({
+      facilityId: nonEmpty,
+      facilityName: nonEmpty.max(200),
+      departmentId: nonEmpty,
+      departmentName: nonEmpty.max(200),
+      employeeId: nonEmpty,
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      shiftId: nonEmpty,
+      shiftName: nonEmpty.max(200),
+      startTime: nonEmpty,
+      endTime: nonEmpty,
+      notes: z.string().trim().max(2000).optional(),
+    }).strict(),
+  },
+  CancelShiftCommand: {
+    1: z.object({
+      rosterId: nonEmpty,
+      reason: nonEmpty.max(2000),
+    }).strict(),
+  },
+  ExecuteRosterSwapCommand: {
+    1: z.object({
+      shiftAId: nonEmpty,
+      shiftBId: nonEmpty,
+      reason: nonEmpty.max(2000),
+    }).strict(),
+  },
+  RecordClockInCommand: {
+    1: z.object({
+      employeeId: nonEmpty.max(100),
+      source: z.enum([
+        'BIOMETRIC_SCANNER','KIOSK_TERMINAL','MOBILE_GPS',
+        'WEB_PORTAL','SUPERVISOR_OVERRIDE','HL7_ACCESS_CARD'
+      ]),
+      deviceIdentifier: z.string().trim().min(1).max(250).optional(),
+      scheduledShiftId: z.string().trim().min(1).max(150).optional(),
+    }).strict(),
+  },
+  RecordClockOutCommand: {
+    1: z.object({
+      attendanceId: nonEmpty.max(150),
+    }).strict(),
+  },
+  CorrectAttendanceTimeCommand: {
+    1: z.object({
+      attendanceId: nonEmpty.max(150),
+      newClockInTime: nonEmpty,
+      newClockOutTime: z.string().trim().min(1).optional(),
+      reason: nonEmpty.max(2000),
+    }).strict(),
+  },
+  SubmitLeaveRequestCommand: {
+    1: z.object({
+      employeeId: nonEmpty.max(100),
+      leaveType: z.enum([
+        'ANNUAL','SICK','EMERGENCY','MATERNITY','PATERNITY',
+        'STUDY_CME','COMPASSIONATE','UNPAID','OTHER'
+      ]),
+      startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      reason: nonEmpty.max(2000),
+      coveringEmployeeId: z.string().trim().min(1).max(100).optional(),
+    }).strict(),
+  },
+  ApproveLeaveRequestCommand: {
+    1: z.object({
+      leaveId: nonEmpty.max(150),
+      approved: z.boolean(),
+      rejectionReason: z.string().trim().min(1).max(2000).optional(),
+    }).strict(),
+  },
+  SetCompensationCommand: {
+    1: z.object({
+      employeeId: nonEmpty.max(100),
+      payBasis: z.enum(['SALARIED','HOURLY']),
+      payFrequency: z.enum(['MONTHLY','SEMI_MONTHLY','BI_WEEKLY']),
+      currency: z.string().trim().length(3),
+      annualSalaryMinorUnits: z.number().int().safe().nonnegative(),
+      hourlyRateMinorUnits: z.number().int().safe().nonnegative(),
+      overtimeMultiplierBasisPoints: z.number().int().min(10000).max(50000),
+      monthlyAllowanceMinorUnits: z.number().int().safe().nonnegative(),
+      deductions: z.array(z.object({
+        code: nonEmpty.max(80),
+        name: nonEmpty.max(200),
+        rateBasisPoints: z.number().int().min(0).max(10000),
+        fixedMinorUnits: z.number().int().safe().nonnegative(),
+        liabilityAccountCode: nonEmpty.max(40),
+      }).strict()).max(50),
+      effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    }).strict(),
+  },
+  ReviewCompensationCommand: {
+    1: z.object({
+      compensationId: nonEmpty.max(180),
+      decision: z.enum(['APPROVE','REJECT']),
+      notes: z.string().trim().max(2000).optional(),
+    }).strict(),
+  },
+  CreatePayrollPeriodCommand: {
+    1: z.object({
+      facilityId: nonEmpty.max(100),
+      periodNumber: nonEmpty.max(100),
+      periodName: nonEmpty.max(250),
+      payFrequency: z.enum(['MONTHLY','SEMI_MONTHLY','BI_WEEKLY']),
+      startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      paymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      currency: z.string().trim().length(3),
+    }).strict(),
+  },
+  EnrollPayrollEmployeeCommand: {
+    1: z.object({periodId: nonEmpty.max(180),employeeId: nonEmpty.max(100)}).strict(),
+  },
+  CalculatePayrollEmployeeCommand: {
+    1: z.object({periodId: nonEmpty.max(180),employeeId: nonEmpty.max(100)}).strict(),
+  },
+  FinalizePayrollPeriodCommand: {
+    1: z.object({periodId: nonEmpty.max(180)}).strict(),
+  },
+  ApprovePayrollPeriodCommand: {
+    1: z.object({
+      periodId: nonEmpty.max(180),
+      notes: z.string().trim().max(2000).optional(),
+    }).strict(),
+  },
+  PostPayrollPeriodCommand: {
+    1: z.object({
+      periodId: nonEmpty.max(180),
+    }).strict(),
+  },
+  SettlePayrollPeriodCommand: {
+    1: z.object({
+      periodId: nonEmpty.max(180),
+      treasuryAccountId: nonEmpty.max(180),
+      settlementReference: nonEmpty.max(250),
+      settledAt: nonEmpty,
+    }).strict(),
+  },
+  RemitPayrollLiabilityCommand: {
+    1: z.object({
+      liabilityId: nonEmpty.max(220),
+      treasuryAccountId: nonEmpty.max(180),
+      remittanceReference: nonEmpty.max(250),
+      remittedAt: nonEmpty,
+    }).strict(),
+  },
+  GeneratePayrollComplianceSnapshotCommand: {
+    1: z.object({
+      snapshotId: nonEmpty.max(180),
+      asOf: nonEmpty,
+      currency: z.string().trim().length(3),
+    }).strict(),
+  },
+  GenerateHcmIntelligenceCommand: {
+    1: z.object({
+      snapshotId: nonEmpty.max(180),
+      asOf: nonEmpty,
+      lookbackDays: z.number().int().min(1).max(365),
+      facilityId: z.string().trim().min(1).max(100).optional(),
+    }).strict(),
+  },
+  SubmitCredentialCommand: {
+    1: z.object({
+      employeeId: nonEmpty.max(100),
+      credentialType: z.enum([
+        'MEDICAL_LICENSE','NURSING_BOARD','PHARMACY_LICENSE',
+        'PROFESSIONAL_REGISTRATION','SPECIALTY_BOARD','BLS_ACLS',
+        'DEA_REGISTRATION','HOSPITAL_CREDENTIAL','FELLOWSHIP_CERTIFICATE'
+      ]),
+      title: nonEmpty.max(250),
+      issuingAuthority: nonEmpty.max(250),
+      credentialNumber: nonEmpty.max(150),
+      issueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      expiryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      documentReference: z.string().trim().min(1).max(1000).optional(),
+      documentHash: z.string().trim().min(16).max(256).optional(),
+      notes: z.string().trim().max(2000).optional(),
+      isMandatoryForPractice: z.boolean(),
+    }).strict(),
+  },
+  VerifyCredentialCommand: {
+    1: z.object({
+      credentialId: nonEmpty.max(150),
+      status: z.enum(['VERIFIED','REJECTED']),
+      notes: z.string().trim().max(2000).optional(),
+    }).strict(),
+  },
+  GrantClinicalPrivilegeCommand: {
+    1: z.object({
+      employeeId: nonEmpty.max(100),
+      privilegeType: z.enum([
+        'CONSULT_OPD','PRESCRIBE_MEDICATION','PERFORM_GENERAL_SURGERY',
+        'PERFORM_CARDIOTHORACIC_SURGERY','ADMINISTER_ANESTHESIA',
+        'ORDER_HIGH_COMPLEXITY_LAB','APPROVE_LAB_RESULTS',
+        'INTERPRET_RADIOLOGY_CT_MRI','SIGN_DEATH_CERTIFICATE',
+        'PERFORM_INVASIVE_PROCEDURES','SIGN_SOAP_CLINICAL_NOTE'
+      ]),
+      specialty: nonEmpty.max(200),
+      facilityId: nonEmpty.max(100),
+      facilityName: nonEmpty.max(200),
+      departmentId: nonEmpty.max(100),
+      departmentName: nonEmpty.max(200),
+      effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      effectiveUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      restrictionNotes: z.string().trim().max(2000).optional(),
+    }).strict(),
+  },
+  ChangeClinicalPrivilegeStatusCommand: {
+    1: z.object({
+      privilegeId: nonEmpty.max(150),
+      status: z.enum(['GRANTED','SUSPENDED','REVOKED']),
+      reason: nonEmpty.max(2000),
+    }).strict(),
+  },
   RecordVitalsCommand: {
     1: z.object({
       patientId: nonEmpty,

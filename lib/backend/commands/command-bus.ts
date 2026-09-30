@@ -17,8 +17,9 @@ import { FinanceFixedAssetDomainService } from '../services/finance-fixed-asset-
 import { FinanceCloseDomainService } from '../services/finance-close-domain-service';
 import { FinanceTaxDomainService } from '../services/finance-tax-domain-service';
 import { FinanceIntelligenceDomainService } from '../services/finance-intelligence-domain-service';
-import { HcmPrivilegeDomainService } from '../services/hcm-privilege-domain-service';
 import { HrWorkforceDomainService } from '../services/hr-workforce-domain-service';
+import { HcmPayrollDomainService } from '../services/hcm-payroll-domain-service';
+import { HcmIntelligenceDomainService } from '../services/hcm-intelligence-domain-service';
 import { ResourceCapacityDomainService } from '../services/resource-capacity-domain-service';
 import { PatientIdentityDomainService } from '../services/patient-identity-domain-service';
 import { PatientMergeDomainService } from '../services/patient-merge-domain-service';
@@ -262,6 +263,78 @@ export class CommandBus {
             command.commandId,
             command.idempotencyKey,
             command.payload as any
+          );
+          break;
+
+        case 'SetCompensationCommand':
+          result = await HcmPayrollDomainService.setCompensation(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'ReviewCompensationCommand':
+          result = await HcmPayrollDomainService.reviewCompensation(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'CreatePayrollPeriodCommand':
+          result = await HcmPayrollDomainService.createPayrollPeriod(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'EnrollPayrollEmployeeCommand':
+          result = await HcmPayrollDomainService.enrollPayrollEmployee(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'CalculatePayrollEmployeeCommand':
+          result = await HcmPayrollDomainService.calculatePayrollEmployee(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'FinalizePayrollPeriodCommand':
+          result = await HcmPayrollDomainService.finalizePayrollPeriod(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'ApprovePayrollPeriodCommand':
+          result = await HcmPayrollDomainService.approvePayrollPeriod(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'PostPayrollPeriodCommand':
+          result = await HcmPayrollDomainService.postPayrollPeriod(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'SettlePayrollPeriodCommand':
+          result = await HcmPayrollDomainService.settlePayrollPeriod(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'RemitPayrollLiabilityCommand':
+          result = await HcmPayrollDomainService.remitPayrollLiability(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'GenerateHcmIntelligenceCommand':
+          result = await HcmIntelligenceDomainService.generateSnapshot(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'GeneratePayrollComplianceSnapshotCommand':
+          result = await HcmPayrollDomainService.generatePayrollComplianceSnapshot(
+            context, command.commandId, command.idempotencyKey, command.payload as any
           );
           break;
 
@@ -1100,8 +1173,35 @@ export class CommandBus {
           );
           break;
 
+        case 'ChangeClinicalPrivilegeStatusCommand':
+          result = await HrWorkforceDomainService.changeClinicalPrivilegeStatus(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
         case 'AssignShiftCommand':
           result = await HrWorkforceDomainService.assignShift(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'CancelShiftCommand':
+          result = await HrWorkforceDomainService.cancelShift(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ExecuteRosterSwapCommand':
+          result = await HrWorkforceDomainService.executeRosterSwap(
             context,
             command.commandId,
             command.idempotencyKey,

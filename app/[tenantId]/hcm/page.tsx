@@ -1,15 +1,12 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useParams } from 'next/navigation';
 import { HrManagementView } from '@/components/views/hr-management-view';
 import { ResourceCapacityView } from '@/components/views/resource-capacity-view';
 import { Users, Boxes, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 
 export default function HcmMasterPage() {
-  const params = useParams();
-  const tenantId = (params?.tenantId as string) || 'metro-health';
   const [activeModule, setActiveModule] = useState<'workforce' | 'resources'>('workforce');
 
   return (

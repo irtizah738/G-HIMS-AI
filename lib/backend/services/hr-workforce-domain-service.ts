@@ -17,9 +17,14 @@ import {
   EmployeeCredential,
   ClinicalPrivilege,
   RosterShiftEntry,
+  RosterTimelineBucket,
+  RosterSwapRecord,
   StaffingGapAnalysis,
   AttendanceRecord,
+  AttendanceOpenSlot,
+  AttendanceCorrectionRecord,
   LeaveRequest,
+  LeaveCalendarBucket,
   EmployeeLeaveBalance,
   CompensationStructure,
   PerformanceReview,
@@ -49,6 +54,90 @@ function workforceIdentityId(kind:'EMAIL'|'NATIONAL_ID', value:string):string{
   const normalized=value.trim().toLowerCase();
   const digest=createHash('sha256').update(`${kind}\u0000${normalized}`).digest('hex').slice(0,40);
   return `wid_${kind.toLowerCase()}_${digest}`;
+}
+
+function credentialIdentityId(
+  credentialType:EmployeeCredential['credentialType'],
+  credentialNumber:string
+):string{
+  const normalized=credentialNumber.trim().toUpperCase().replace(/\s+/g,' ');
+  return 'cred_ident_'+createHash('sha256')
+    .update(`${credentialType}\u0000${normalized}`)
+    .digest('hex')
+    .slice(0,40);
+}
+
+function privilegeSlotId(params:{
+  employeeId:string;
+  privilegeType:ClinicalPrivilege['privilegeType'];
+  facilityId:string;
+  departmentId:string;
+}):string{
+  return 'prv_slot_'+createHash('sha256')
+    .update([
+      params.employeeId,
+      params.privilegeType,
+      params.facilityId,
+      params.departmentId,
+    ].map(v=>v.trim().toLowerCase()).join('\u0000'))
+    .digest('hex')
+    .slice(0,40);
+}
+
+function rosterMonthKey(timestamp:number):string{
+  const date=new Date(timestamp);
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth()+1).padStart(2,'0')}`;
+}
+
+function rosterTimelineId(employeeId:string,monthKey:string):string{
+  const digest=createHash('sha256')
+    .update(`${employeeId.trim().toLowerCase()}\u0000${monthKey}`)
+    .digest('hex').slice(0,32);
+  return `rtl_${digest}`;
+}
+
+function rosterRelevantMonthKeys(startMs:number,endMs:number,minRestMs:number):string[]{
+  return [...new Set([
+    rosterMonthKey(startMs-minRestMs),
+    rosterMonthKey(startMs),
+    rosterMonthKey(endMs),
+    rosterMonthKey(endMs+minRestMs),
+  ])];
+}
+
+function payrollAttendanceLockIdForWorkforce(employeeId:string):string{
+  return 'prlock_'+createHash('sha256')
+    .update(employeeId.trim().toLowerCase())
+    .digest('hex')
+    .slice(0,40);
+}
+
+function attendanceOpenSlotId(employeeId:string):string{
+  return 'att_open_'+createHash('sha256')
+    .update(employeeId.trim().toLowerCase())
+    .digest('hex')
+    .slice(0,40);
+}
+
+function leaveBalanceId(employeeId:string,leaveType:LeaveRequest['leaveType'],year:number):string{
+  return 'lvb_'+createHash('sha256')
+    .update([employeeId,leaveType,String(year)].map(v=>v.trim().toLowerCase()).join('\u0000'))
+    .digest('hex').slice(0,40);
+}
+
+function leaveCalendarId(employeeId:string,year:number):string{
+  return 'lvc_'+createHash('sha256')
+    .update(`${employeeId.trim().toLowerCase()}\u0000${year}`)
+    .digest('hex').slice(0,40);
+}
+
+function leaveDayCount(startDate:string,endDate:string):number{
+  const start=Date.parse(`${startDate}T00:00:00.000Z`);
+  const end=Date.parse(`${endDate}T00:00:00.000Z`);
+  if(!Number.isFinite(start)||!Number.isFinite(end)||end<start){
+    throw new AtomicMutationRejectedError('INVALID_LEAVE_INTERVAL','Leave dates are invalid.');
+  }
+  return Math.floor((end-start)/86_400_000)+1;
 }
 
 function workforceReject<T>(
@@ -174,6 +263,21 @@ export class HrWorkforceDomainService {
       return persisted;
     }
     return this.credentials.get(credentialId) || null;
+  }
+
+  private static async loadShift(
+    tenantId:string,
+    rosterId:string
+  ):Promise<RosterShiftEntry|null>{
+    if(DomainStateRepository.isAvailable()){
+      const persisted=await DomainStateRepository.getById<RosterShiftEntry>(
+        tenantId,'rosterAssignments',rosterId
+      );
+      if(persisted) this.shifts.set(rosterId,persisted);
+      else this.shifts.delete(rosterId);
+      return persisted;
+    }
+    return this.shifts.get(rosterId)||null;
   }
 
   private static async loadAttendance(
@@ -380,6 +484,28 @@ export class HrWorkforceDomainService {
               },
             });
           }
+          const entitlementYear=new Date().getUTCFullYear();
+          const leaveBalanceWrites:Array<{entityType:string;entityId:string;domainState:unknown}>=[
+            ['ANNUAL',21],['SICK',14],['STUDY_CME',7]
+          ].map(([leaveType,days])=>{
+            const entitlement=Number(days);
+            const record:EmployeeLeaveBalance={
+              employeeId,
+              leaveType:leaveType as EmployeeLeaveBalance['leaveType'],
+              year:entitlementYear,
+              annualEntitlement:entitlement,
+              accruedDays:entitlement,
+              usedDays:0,
+              pendingApprovalDays:0,
+              remainingDays:entitlement,
+              lastUpdated:now,
+            };
+            return {
+              entityType:'LEAVE_BALANCE',
+              entityId:leaveBalanceId(employeeId,record.leaveType,entitlementYear),
+              domainState:record,
+            };
+          });
           return {
           domainState:employee,
           additionalStateWrites:[
@@ -389,6 +515,7 @@ export class HrWorkforceDomainService {
               entityId:assignmentId,
               domainState:assignment,
             },
+            ...leaveBalanceWrites,
           ],
           eventPayload:{
             employeeId,employeeNumber,
@@ -685,47 +812,144 @@ export class HrWorkforceDomainService {
     context: CommandContext,
     commandId: string,
     idempotencyKey: string,
-    payload: Omit<EmployeeCredential, 'credentialId' | 'verificationStatus' | 'createdAt' | 'updatedAt'>
+    payload: Omit<
+      EmployeeCredential,
+      | 'credentialId'
+      | 'employeeName'
+      | 'verificationStatus'
+      | 'verifiedByActorId'
+      | 'verifiedByName'
+      | 'verifiedAt'
+      | 'submittedByActorId'
+      | 'submittedAt'
+      | 'createdAt'
+      | 'updatedAt'
+    >
   ): Promise<CommandResult<EmployeeCredential>> {
-    const credentialId = `crd_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const now = new Date().toISOString();
-
-    const credential: EmployeeCredential = {
-      ...payload,
-      credentialId,
-      verificationStatus: 'UNDER_REVIEW',
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    this.credentials.set(credentialId, credential);
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'EMPLOYEE_CREDENTIAL',
-      entityId: credentialId,
-      eventType: 'CREDENTIAL_SUBMITTED',
-      domainState: credential,
-      eventPayload: {
-        credentialId,
-        employeeId: payload.employeeId,
-        credentialType: payload.credentialType,
-        credentialNumber: payload.credentialNumber,
-        expiryDate: payload.expiryDate,
-      },
-      auditReason: `Credential ${payload.title} (${payload.credentialNumber}) submitted for employee ${payload.employeeId}`,
-      outboxTopic: 'g-hims-credential-events',
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['HR_ADMIN','MEDICAL_DIRECTOR','SYSTEM_ADMIN'],
     });
+    if(!auth.authorized){
+      return workforceReject(
+        commandId,idempotencyKey,auth.code||'UNAUTHORIZED',
+        auth.reason||'Credential submission authority required.'
+      );
+    }
 
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: credentialId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: credential,
-    };
+    const employee=await this.loadEmployee(context.tenantId,payload.employeeId);
+    if(!employee){
+      return workforceReject(commandId,idempotencyKey,'EMPLOYEE_NOT_FOUND','Credential target employee does not exist.');
+    }
+    try{
+      assertWorkforceFacilityScope(context,employee.facilityIds);
+      if(['TERMINATED','RETIRED','INACTIVE'].includes(employee.employmentStatus)){
+        throw new AtomicMutationRejectedError(
+          'EMPLOYEE_NOT_CREDENTIALABLE',
+          `Credentials cannot be submitted for employee status ${employee.employmentStatus}.`
+        );
+      }
+      const issueMs=Date.parse(payload.issueDate);
+      const expiryMs=Date.parse(payload.expiryDate);
+      if(!Number.isFinite(issueMs)||!Number.isFinite(expiryMs)||expiryMs<=issueMs){
+        throw new AtomicMutationRejectedError(
+          'INVALID_CREDENTIAL_VALIDITY',
+          'Credential issue/expiry dates are invalid.'
+        );
+      }
+
+      const credentialId=`crd_${randomUUID()}`;
+      const identityId=credentialIdentityId(payload.credentialType,payload.credentialNumber);
+      const normalizedNumber=payload.credentialNumber.trim().toUpperCase().replace(/\s+/g,' ');
+      const now=new Date().toISOString();
+      const credential:EmployeeCredential={
+        ...payload,
+        employeeName:`${employee.personalInfo.legalFirstName} ${employee.personalInfo.legalLastName}`,
+        credentialNumber:normalizedNumber,
+        credentialId,
+        verificationStatus:'UNDER_REVIEW',
+        submittedByActorId:context.actorId,
+        submittedAt:now,
+        createdAt:now,
+        updatedAt:now,
+      };
+
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,
+        actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'EMPLOYEE_CREDENTIAL',
+        aggregateId:credentialId,
+        eventType:'CREDENTIAL_SUBMITTED',
+        auditAction:'CREDENTIAL_SUBMITTED',
+        auditResourceType:'EMPLOYEE_CREDENTIAL',
+        auditResourceId:credentialId,
+        outboxTopic:'g-hims-credential-events',
+        idempotencyKey,commandId,correlationId:context.correlationId,
+        readTargets:[
+          {key:'employee',entityType:'EMPLOYEE_MASTER',entityId:employee.employeeId,required:true},
+          {key:'identity',entityType:'CREDENTIAL_IDENTITY',entityId:identityId,required:false},
+        ],
+        prepare:(current)=>{
+          const currentEmployee=current.employee as unknown as EmployeeMaster;
+          if(['TERMINATED','RETIRED','INACTIVE'].includes(currentEmployee.employmentStatus)){
+            throw new AtomicMutationRejectedError('EMPLOYEE_NOT_CREDENTIALABLE','Employee status changed before credential submission.');
+          }
+          if(current.identity){
+            throw new AtomicMutationRejectedError(
+              'CREDENTIAL_NUMBER_ALREADY_REGISTERED',
+              'This credential type/number is already registered in the tenant.'
+            );
+          }
+          const nextEmployee:EmployeeMaster={
+            ...currentEmployee,
+            credentialRevision:Number(currentEmployee.credentialRevision||0)+1,
+            updatedAt:now,
+          };
+          return {
+            domainState:credential,
+            additionalStateWrites:[
+              {
+                entityType:'CREDENTIAL_IDENTITY',
+                entityId:identityId,
+                domainState:{
+                  identityId,
+                  tenantId:context.tenantId,
+                  credentialId,
+                  employeeId:credential.employeeId,
+                  credentialType:credential.credentialType,
+                  credentialNumber:normalizedNumber,
+                  createdAt:now,
+                },
+              },
+              {
+                entityType:'EMPLOYEE_MASTER',
+                entityId:currentEmployee.employeeId,
+                domainState:nextEmployee,
+              },
+            ],
+            eventPayload:{
+              credentialId,
+              employeeId:credential.employeeId,
+              credentialType:credential.credentialType,
+              credentialNumber:normalizedNumber,
+              expiryDate:credential.expiryDate,
+            },
+            auditReason:`Credential ${credential.title} (${normalizedNumber}) submitted for employee ${credential.employeeId}.`,
+            resultData:credential,
+          };
+        },
+      });
+      this.credentials.set(credentialId,credential);
+      return {
+        success:true,commandId,idempotencyKey,entityId:credentialId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:credential,
+      };
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
+    }
   }
 
   public static async verifyCredential(
@@ -738,68 +962,115 @@ export class HrWorkforceDomainService {
       notes?: string;
     }
   ): Promise<CommandResult<EmployeeCredential>> {
-    const auth = AuthorizationPipeline.evaluate(context, {
-      requiredRoles: ['MEDICAL_DIRECTOR', 'HR_ADMIN', 'SYSTEM_ADMIN'],
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['MEDICAL_DIRECTOR','HR_ADMIN','SYSTEM_ADMIN'],
     });
-
-    if (!auth.authorized) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: auth.code || 'UNAUTHORIZED', message: auth.reason || 'Medical Director authority required to verify credentials.' },
-      };
+    if(!auth.authorized){
+      return workforceReject(
+        commandId,idempotencyKey,auth.code||'UNAUTHORIZED',
+        auth.reason||'Credential verification authority required.'
+      );
     }
 
-    const credential = await this.loadCredential(context.tenantId, payload.credentialId);
-    if (!credential) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: 'CREDENTIAL_NOT_FOUND', message: `Credential ${payload.credentialId} not found.` },
-      };
+    const preflight=await this.loadCredential(context.tenantId,payload.credentialId);
+    if(!preflight){
+      return workforceReject(commandId,idempotencyKey,'CREDENTIAL_NOT_FOUND',`Credential ${payload.credentialId} not found.`);
+    }
+    const employee=await this.loadEmployee(context.tenantId,preflight.employeeId);
+    if(!employee){
+      return workforceReject(commandId,idempotencyKey,'EMPLOYEE_NOT_FOUND','Credential employee no longer exists.');
     }
 
-    const now = new Date().toISOString();
-    credential.verificationStatus = payload.status;
-    credential.verifiedByActorId = context.actorId;
-    credential.verifiedByName = 'Medical Director Office';
-    credential.verifiedAt = now;
-    credential.notes = payload.notes || credential.notes;
-    credential.updatedAt = now;
-
-    this.credentials.set(payload.credentialId, credential);
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'EMPLOYEE_CREDENTIAL',
-      entityId: payload.credentialId,
-      eventType: payload.status === 'VERIFIED' ? 'CREDENTIAL_VERIFIED' : 'CREDENTIAL_REJECTED',
-      domainState: credential,
-      eventPayload: {
-        credentialId: payload.credentialId,
-        employeeId: credential.employeeId,
-        verificationStatus: payload.status,
-        verifiedBy: context.actorId,
-      },
-      auditReason: `Credential ${credential.title} set to ${payload.status} by ${context.actorId}`,
-      outboxTopic: 'g-hims-credential-events',
-    });
-
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: payload.credentialId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: credential,
-    };
+    try{
+      assertWorkforceFacilityScope(context,employee.facilityIds);
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,
+        actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'EMPLOYEE_CREDENTIAL',
+        aggregateId:payload.credentialId,
+        eventType:payload.status==='VERIFIED'?'CREDENTIAL_VERIFIED':'CREDENTIAL_REJECTED',
+        auditAction:payload.status==='VERIFIED'?'CREDENTIAL_VERIFIED':'CREDENTIAL_REJECTED',
+        auditResourceType:'EMPLOYEE_CREDENTIAL',
+        auditResourceId:payload.credentialId,
+        outboxTopic:'g-hims-credential-events',
+        idempotencyKey,commandId,correlationId:context.correlationId,
+        readTargets:[
+          {key:'credential',entityType:'EMPLOYEE_CREDENTIAL',entityId:payload.credentialId,required:true},
+          {key:'employee',entityType:'EMPLOYEE_MASTER',entityId:employee.employeeId,required:true},
+        ],
+        prepare:(current)=>{
+          const credential=current.credential as unknown as EmployeeCredential;
+          if(!['PENDING','SUBMITTED','UNDER_REVIEW'].includes(credential.verificationStatus)){
+            throw new AtomicMutationRejectedError(
+              'CREDENTIAL_NOT_REVIEWABLE',
+              `Credential in status ${credential.verificationStatus} cannot be reviewed again.`
+            );
+          }
+          if(credential.submittedByActorId&&credential.submittedByActorId===context.actorId){
+            throw new AtomicMutationRejectedError(
+              'HCM_SEGREGATION_OF_DUTIES',
+              'Credential submitter cannot verify the same credential.'
+            );
+          }
+          const today=new Date().toISOString().slice(0,10);
+          if(payload.status==='VERIFIED'&&credential.expiryDate<today){
+            throw new AtomicMutationRejectedError(
+              'CREDENTIAL_ALREADY_EXPIRED',
+              'An expired credential cannot be verified as active.'
+            );
+          }
+          const now=new Date().toISOString();
+          const next:EmployeeCredential={
+            ...credential,
+            verificationStatus:payload.status,
+            verifiedByActorId:context.actorId,
+            verifiedByName:context.actorId,
+            verifiedAt:now,
+            notes:payload.notes||credential.notes,
+            updatedAt:now,
+          };
+          const currentEmployee=current.employee as unknown as EmployeeMaster;
+          const nextEmployee:EmployeeMaster={
+            ...currentEmployee,
+            credentialRevision:Number(currentEmployee.credentialRevision||0)+1,
+            updatedAt:now,
+          };
+          return {
+            domainState:next,
+            additionalStateWrites:[{
+              entityType:'EMPLOYEE_MASTER',
+              entityId:currentEmployee.employeeId,
+              domainState:nextEmployee,
+            }],
+            eventPayload:{
+              credentialId:next.credentialId,
+              employeeId:next.employeeId,
+              verificationStatus:next.verificationStatus,
+              verifiedBy:context.actorId,
+            },
+            auditReason:`Credential ${next.credentialId} set to ${next.verificationStatus} by ${context.actorId}.`,
+            resultData:next,
+          };
+        },
+      });
+      const next=tx.resultData as EmployeeCredential;
+      this.credentials.set(payload.credentialId,next);
+      return {
+        success:true,commandId,idempotencyKey,entityId:payload.credentialId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:next,
+      };
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
+    }
   }
 
   /**
-   * Enforces automated clinical practice lockout if mandatory credentials have expired.
+   * Test/runtime helper. Production command authorization derives eligibility from
+   * persistent tenant-scoped credential/privilege records in authorization-context.ts.
    */
   public static checkClinicalEligibility(employeeId: string): {
     isEligible: boolean;
@@ -807,197 +1078,366 @@ export class HrWorkforceDomainService {
     expiredCredentials: EmployeeCredential[];
     activePrivileges: ClinicalPrivilege[];
   } {
-    const today = new Date().toISOString().split('T')[0];
-    const employeeCreds = Array.from(this.credentials.values()).filter(
-      (c) => c.employeeId === employeeId
+    const today=new Date().toISOString().slice(0,10);
+    const employeeCreds=Array.from(this.credentials.values()).filter(c=>c.employeeId===employeeId);
+    const mandatory=employeeCreds.filter(c=>c.isMandatoryForPractice);
+    const invalidMandatory=mandatory.filter(c=>
+      c.verificationStatus!=='VERIFIED'||!c.expiryDate||c.expiryDate<today
     );
-
-    const expiredOrInvalidMandatory = employeeCreds.filter(
-      (c) =>
-        c.isMandatoryForPractice &&
-        (c.verificationStatus !== 'VERIFIED' || (c.expiryDate && c.expiryDate < today))
+    const employeePrivileges=Array.from(this.privileges.values()).filter(p=>
+      p.employeeId===employeeId&&
+      p.status==='GRANTED'&&
+      p.effectiveFrom<=today&&
+      p.effectiveUntil>=today
     );
-
-    const employeePrivileges = Array.from(this.privileges.values()).filter(
-      (p) => p.employeeId === employeeId && p.status === 'GRANTED' && p.effectiveUntil >= today
-    );
-
-    if (expiredOrInvalidMandatory.length > 0) {
+    if(mandatory.length===0||invalidMandatory.length>0){
       return {
-        isEligible: false,
-        reason: `CLINICAL PRACTICE LOCKOUT: ${expiredOrInvalidMandatory.length} mandatory license(s) expired or unverified (${expiredOrInvalidMandatory.map((c) => c.title).join(', ')}).`,
-        expiredCredentials: expiredOrInvalidMandatory,
-        activePrivileges: [],
+        isEligible:false,
+        reason:mandatory.length===0
+          ? 'CLINICAL PRACTICE LOCKOUT: no mandatory verified credential is on file.'
+          : `CLINICAL PRACTICE LOCKOUT: ${invalidMandatory.length} mandatory credential(s) expired or unverified.`,
+        expiredCredentials:invalidMandatory,
+        activePrivileges:[],
       };
     }
-
-    return {
-      isEligible: true,
-      expiredCredentials: [],
-      activePrivileges: employeePrivileges,
-    };
+    return {isEligible:true,expiredCredentials:[],activePrivileges:employeePrivileges};
   }
 
   public static async grantClinicalPrivilege(
     context: CommandContext,
     commandId: string,
     idempotencyKey: string,
-    payload: Omit<ClinicalPrivilege, 'privilegeId' | 'status' | 'grantedByActorId' | 'createdAt' | 'updatedAt'>
+    payload: Omit<
+      ClinicalPrivilege,
+      | 'privilegeId'
+      | 'employeeName'
+      | 'status'
+      | 'grantedByActorId'
+      | 'grantedByName'
+      | 'reviewedAt'
+      | 'statusReason'
+      | 'statusChangedByActorId'
+      | 'statusChangedAt'
+      | 'createdAt'
+      | 'updatedAt'
+    >
   ): Promise<CommandResult<ClinicalPrivilege>> {
-    const auth = AuthorizationPipeline.evaluate(context, {
-      requiredRoles: ['MEDICAL_DIRECTOR', 'SYSTEM_ADMIN'],
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['MEDICAL_DIRECTOR','SYSTEM_ADMIN'],
     });
-
-    if (!auth.authorized) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: 'UNAUTHORIZED', message: 'Medical Director authority required to grant clinical privileges.' },
-      };
+    if(!auth.authorized){
+      return workforceReject(commandId,idempotencyKey,auth.code||'UNAUTHORIZED','Medical Director authority required to grant clinical privileges.');
     }
 
-    const employee = await this.loadEmployee(context.tenantId, payload.employeeId);
-    if (!employee) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: 'EMPLOYEE_NOT_FOUND', message: 'Clinical privilege target employee does not exist.' },
-      };
+    const employee=await this.loadEmployee(context.tenantId,payload.employeeId);
+    if(!employee){
+      return workforceReject(commandId,idempotencyKey,'EMPLOYEE_NOT_FOUND','Clinical privilege target employee does not exist.');
     }
+    try{
+      assertWorkforceFacilityScope(context,[payload.facilityId]);
+      if(employee.employmentStatus!=='ACTIVE'){
+        throw new AtomicMutationRejectedError(
+          'EMPLOYEE_NOT_ACTIVE',
+          `Clinical privileges cannot be granted while employee status is ${employee.employmentStatus}.`
+        );
+      }
+      if(
+        !employee.facilityIds.includes(payload.facilityId) ||
+        !employee.departmentIds.includes(payload.departmentId)
+      ){
+        throw new AtomicMutationRejectedError(
+          'PRIVILEGE_SCOPE_OUTSIDE_EMPLOYEE_ASSIGNMENT',
+          'Clinical privilege scope must be within the employee workforce assignment.'
+        );
+      }
+      const today=new Date().toISOString().slice(0,10);
+      if(
+        !payload.effectiveFrom ||
+        !payload.effectiveUntil ||
+        payload.effectiveFrom>payload.effectiveUntil ||
+        payload.effectiveUntil<today
+      ){
+        throw new AtomicMutationRejectedError('INVALID_PRIVILEGE_VALIDITY','Clinical privilege requires a valid effective period.');
+      }
 
-    if (employee.employmentStatus !== 'ACTIVE') {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: {
-          code: 'EMPLOYEE_NOT_ACTIVE',
-          message: `Clinical privileges cannot be granted while employee status is ${employee.employmentStatus}.`,
+      const expectedCredentialRevision=Number(employee.credentialRevision||0);
+      const credentials=await DomainStateRepository.queryEqual<EmployeeCredential>(
+        context.tenantId,'clinicalCredentials','employeeId',payload.employeeId
+      );
+      const credentialTargets=credentials.map((credential,index)=>({
+        key:`credential:${index}`,
+        entityType:'EMPLOYEE_CREDENTIAL',
+        entityId:credential.credentialId,
+        required:true,
+      }));
+      const slotId=privilegeSlotId(payload);
+      const privilegeId=`prv_${randomUUID()}`;
+      const now=new Date().toISOString();
+
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,
+        actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'CLINICAL_PRIVILEGE',
+        aggregateId:privilegeId,
+        eventType:'CLINICAL_PRIVILEGE_GRANTED',
+        auditAction:'CLINICAL_PRIVILEGE_GRANTED',
+        auditResourceType:'CLINICAL_PRIVILEGE',
+        auditResourceId:privilegeId,
+        outboxTopic:'g-hims-privilege-events',
+        idempotencyKey,commandId,correlationId:context.correlationId,
+        readTargets:[
+          {key:'employee',entityType:'EMPLOYEE_MASTER',entityId:employee.employeeId,required:true},
+          {key:'slot',entityType:'CLINICAL_PRIVILEGE_SLOT',entityId:slotId,required:false},
+          ...credentialTargets,
+        ],
+        prepare:(current)=>{
+          const currentEmployee=current.employee as unknown as EmployeeMaster;
+          if(currentEmployee.employmentStatus!=='ACTIVE'){
+            throw new AtomicMutationRejectedError('EMPLOYEE_NOT_ACTIVE','Employee status changed before privilege grant.');
+          }
+          if(Number(currentEmployee.credentialRevision||0)!==expectedCredentialRevision){
+            throw new AtomicMutationRejectedError(
+              'CREDENTIAL_SET_CHANGED_RETRY',
+              'Credential set changed during privilege evaluation; retry with fresh credential evidence.'
+            );
+          }
+          const currentCredentials=credentialTargets.map(target=>
+            current[target.key] as unknown as EmployeeCredential
+          );
+          const mandatory=currentCredentials.filter(credential=>credential.isMandatoryForPractice);
+          const invalidMandatory=mandatory.filter(credential=>
+            credential.verificationStatus!=='VERIFIED' ||
+            !credential.expiryDate ||
+            credential.expiryDate<today
+          );
+          if(mandatory.length===0||invalidMandatory.length>0){
+            throw new AtomicMutationRejectedError(
+              'CREDENTIAL_PREREQUISITE_FAILED',
+              mandatory.length===0
+                ? 'Clinical privilege denied: no mandatory verified credential is on file.'
+                : `Clinical privilege denied: ${invalidMandatory.length} mandatory credential(s) are expired or unverified.`
+            );
+          }
+          const slot=current.slot as unknown as {status?:string;activePrivilegeId?:string}|null;
+          if(slot?.status==='ACTIVE'){
+            throw new AtomicMutationRejectedError(
+              'ACTIVE_PRIVILEGE_ALREADY_EXISTS',
+              `An active ${payload.privilegeType} privilege already exists for this scope.`
+            );
+          }
+
+          const privilege:ClinicalPrivilege={
+            ...payload,
+            employeeName:`${currentEmployee.personalInfo.legalFirstName} ${currentEmployee.personalInfo.legalLastName}`,
+            privilegeId,
+            status:'GRANTED',
+            grantedByActorId:context.actorId,
+            grantedByName:context.actorId,
+            reviewedAt:now,
+            statusChangedByActorId:context.actorId,
+            statusChangedAt:now,
+            createdAt:now,
+            updatedAt:now,
+          };
+          return {
+            domainState:privilege,
+            additionalStateWrites:[{
+              entityType:'CLINICAL_PRIVILEGE_SLOT',
+              entityId:slotId,
+              domainState:{
+                slotId,tenantId:context.tenantId,
+                employeeId:payload.employeeId,
+                privilegeType:payload.privilegeType,
+                facilityId:payload.facilityId,
+                departmentId:payload.departmentId,
+                activePrivilegeId:privilegeId,
+                status:'ACTIVE',
+                updatedAt:now,
+              },
+            }],
+            eventPayload:{
+              privilegeId,
+              employeeId:payload.employeeId,
+              privilegeType:payload.privilegeType,
+              facilityId:payload.facilityId,
+              departmentId:payload.departmentId,
+              effectiveFrom:payload.effectiveFrom,
+              effectiveUntil:payload.effectiveUntil,
+            },
+            auditReason:`Granted privilege ${payload.privilegeType} to employee ${payload.employeeId}.`,
+            resultData:privilege,
+          };
         },
-      };
-    }
-
-    // Credential authority is resolved from persistent tenant-scoped records,
-    // never from process memory alone.
-    const credentials = await DomainStateRepository.queryEqual<EmployeeCredential>(
-      context.tenantId,
-      'clinicalCredentials',
-      'employeeId',
-      payload.employeeId
-    );
-
-    const today = new Date().toISOString().split('T')[0];
-    const mandatoryCredentials = credentials.filter((credential) => credential.isMandatoryForPractice);
-    const invalidMandatory = mandatoryCredentials.filter(
-      (credential) =>
-        credential.verificationStatus !== 'VERIFIED' ||
-        !credential.expiryDate ||
-        credential.expiryDate < today
-    );
-    const verifiedActiveCredentials = credentials.filter(
-      (credential) =>
-        credential.verificationStatus === 'VERIFIED' &&
-        !!credential.expiryDate &&
-        credential.expiryDate >= today
-    );
-
-    if (verifiedActiveCredentials.length === 0 || invalidMandatory.length > 0) {
+      });
+      const privilege=tx.resultData as ClinicalPrivilege;
+      this.privileges.set(privilegeId,privilege);
       return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: {
-          code: 'CREDENTIAL_PREREQUISITE_FAILED',
-          message:
-            invalidMandatory.length > 0
-              ? `Clinical privilege denied: ${invalidMandatory.length} mandatory credential(s) are expired or unverified.`
-              : 'Clinical privilege denied: no verified, unexpired professional credential is on file.',
-        },
+        success:true,commandId,idempotencyKey,entityId:privilegeId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:privilege,
       };
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
     }
+  }
 
-    if (!payload.effectiveFrom || !payload.effectiveUntil || payload.effectiveUntil < today) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: {
-          code: 'INVALID_PRIVILEGE_VALIDITY',
-          message: 'Clinical privilege requires a valid effective period that has not already expired.',
-        },
-      };
+  public static async changeClinicalPrivilegeStatus(
+    context:CommandContext,
+    commandId:string,
+    idempotencyKey:string,
+    payload:{
+      privilegeId:string;
+      status:'GRANTED'|'SUSPENDED'|'REVOKED';
+      reason:string;
     }
-
-    const existingPrivileges = await DomainStateRepository.queryEqual<ClinicalPrivilege>(
-      context.tenantId,
-      'clinicalPrivileges',
-      'employeeId',
-      payload.employeeId
-    );
-    const duplicate = existingPrivileges.find(
-      (privilege) =>
-        privilege.privilegeType === payload.privilegeType &&
-        privilege.facilityId === payload.facilityId &&
-        privilege.departmentId === payload.departmentId &&
-        privilege.status === 'GRANTED' &&
-        privilege.effectiveUntil >= today
-    );
-
-    if (duplicate) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: {
-          code: 'ACTIVE_PRIVILEGE_ALREADY_EXISTS',
-          message: `An active ${payload.privilegeType} privilege already exists for this scope.`,
-        },
-      };
-    }
-
-    const privilegeId = `prv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const now = new Date().toISOString();
-
-    const privilege: ClinicalPrivilege = {
-      ...payload,
-      privilegeId,
-      status: 'GRANTED',
-      grantedByActorId: context.actorId,
-      grantedByName: 'Medical Board & Credentialing Committee',
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    this.privileges.set(privilegeId, privilege);
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'CLINICAL_PRIVILEGE',
-      entityId: privilegeId,
-      eventType: 'CLINICAL_PRIVILEGE_GRANTED',
-      domainState: privilege,
-      eventPayload: {
-        privilegeId,
-        employeeId: payload.employeeId,
-        privilegeType: payload.privilegeType,
-        effectiveFrom: payload.effectiveFrom,
-        effectiveUntil: payload.effectiveUntil,
-      },
-      auditReason: `Granted privilege ${payload.privilegeType} to employee ${payload.employeeId}`,
-      outboxTopic: 'g-hims-privilege-events',
+  ):Promise<CommandResult<ClinicalPrivilege>>{
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['MEDICAL_DIRECTOR','SYSTEM_ADMIN'],
     });
+    if(!auth.authorized){
+      return workforceReject(commandId,idempotencyKey,auth.code||'UNAUTHORIZED','Medical Director authority required to change clinical privileges.');
+    }
 
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: privilegeId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: privilege,
-    };
+    const preflight=await DomainStateRepository.getById<ClinicalPrivilege>(
+      context.tenantId,'clinicalPrivileges',payload.privilegeId
+    );
+    if(!preflight){
+      return workforceReject(commandId,idempotencyKey,'CLINICAL_PRIVILEGE_NOT_FOUND','Clinical privilege does not exist.');
+    }
+    const employee=await this.loadEmployee(context.tenantId,preflight.employeeId);
+    if(!employee){
+      return workforceReject(commandId,idempotencyKey,'EMPLOYEE_NOT_FOUND','Privilege employee does not exist.');
+    }
+
+    try{
+      assertWorkforceFacilityScope(context,[preflight.facilityId]);
+      const expectedCredentialRevision=Number(employee.credentialRevision||0);
+      const credentials=payload.status==='GRANTED'
+        ? await DomainStateRepository.queryEqual<EmployeeCredential>(
+            context.tenantId,'clinicalCredentials','employeeId',preflight.employeeId
+          )
+        : [];
+      const credentialTargets=credentials.map((credential,index)=>({
+        key:`credential:${index}`,
+        entityType:'EMPLOYEE_CREDENTIAL',
+        entityId:credential.credentialId,
+        required:true,
+      }));
+      const slotId=privilegeSlotId(preflight);
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,
+        actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'CLINICAL_PRIVILEGE',
+        aggregateId:payload.privilegeId,
+        eventType:payload.status==='GRANTED'
+          ? 'CLINICAL_PRIVILEGE_REINSTATED'
+          : payload.status==='SUSPENDED'
+            ? 'CLINICAL_PRIVILEGE_SUSPENDED'
+            : 'CLINICAL_PRIVILEGE_REVOKED',
+        auditAction:'CLINICAL_PRIVILEGE_STATUS_CHANGED',
+        auditResourceType:'CLINICAL_PRIVILEGE',
+        auditResourceId:payload.privilegeId,
+        outboxTopic:'g-hims-privilege-events',
+        idempotencyKey,commandId,correlationId:context.correlationId,
+        readTargets:[
+          {key:'privilege',entityType:'CLINICAL_PRIVILEGE',entityId:payload.privilegeId,required:true},
+          {key:'employee',entityType:'EMPLOYEE_MASTER',entityId:preflight.employeeId,required:true},
+          {key:'slot',entityType:'CLINICAL_PRIVILEGE_SLOT',entityId:slotId,required:false},
+          ...credentialTargets,
+        ],
+        prepare:(current)=>{
+          const privilege=current.privilege as unknown as ClinicalPrivilege;
+          const currentEmployee=current.employee as unknown as EmployeeMaster;
+          if(privilege.status==='REVOKED'){
+            throw new AtomicMutationRejectedError('PRIVILEGE_REVOKED_TERMINAL','A revoked privilege cannot be reactivated or changed.');
+          }
+          if(payload.status==='GRANTED'){
+            if(Number(currentEmployee.credentialRevision||0)!==expectedCredentialRevision){
+              throw new AtomicMutationRejectedError(
+                'CREDENTIAL_SET_CHANGED_RETRY',
+                'Credential set changed during privilege reinstatement; retry with fresh evidence.'
+              );
+            }
+            if(privilege.status!=='SUSPENDED'){
+              throw new AtomicMutationRejectedError('PRIVILEGE_NOT_REINSTATABLE','Only a suspended privilege may be reinstated.');
+            }
+            if(currentEmployee.employmentStatus!=='ACTIVE'){
+              throw new AtomicMutationRejectedError('EMPLOYEE_NOT_ACTIVE','Inactive employee cannot regain clinical privilege.');
+            }
+            const today=new Date().toISOString().slice(0,10);
+            if(privilege.effectiveUntil<today){
+              throw new AtomicMutationRejectedError('PRIVILEGE_EXPIRED','Expired privilege cannot be reinstated.');
+            }
+            const currentCredentials=credentialTargets.map(target=>
+              current[target.key] as unknown as EmployeeCredential
+            );
+            const mandatory=currentCredentials.filter(credential=>credential.isMandatoryForPractice);
+            if(
+              mandatory.length===0 ||
+              mandatory.some(credential=>
+                credential.verificationStatus!=='VERIFIED' ||
+                !credential.expiryDate ||
+                credential.expiryDate<today
+              )
+            ){
+              throw new AtomicMutationRejectedError('CREDENTIAL_PREREQUISITE_FAILED','Credential prerequisites are not satisfied for reinstatement.');
+            }
+          }
+          const now=new Date().toISOString();
+          const next:ClinicalPrivilege={
+            ...privilege,
+            status:payload.status,
+            statusReason:payload.reason,
+            statusChangedByActorId:context.actorId,
+            statusChangedAt:now,
+            reviewedAt:now,
+            updatedAt:now,
+          };
+          return {
+            domainState:next,
+            additionalStateWrites:[{
+              entityType:'CLINICAL_PRIVILEGE_SLOT',
+              entityId:slotId,
+              domainState:{
+                slotId,tenantId:context.tenantId,
+                employeeId:next.employeeId,
+                privilegeType:next.privilegeType,
+                facilityId:next.facilityId,
+                departmentId:next.departmentId,
+                activePrivilegeId:next.privilegeId,
+                status:payload.status==='GRANTED'
+                  ? 'ACTIVE'
+                  : payload.status,
+                updatedAt:now,
+              },
+            }],
+            eventPayload:{
+              privilegeId:next.privilegeId,
+              employeeId:next.employeeId,
+              status:next.status,
+              reason:payload.reason,
+            },
+            auditReason:`Clinical privilege ${next.privilegeId} changed to ${next.status}: ${payload.reason}`,
+            resultData:next,
+          };
+        },
+      });
+      const next=tx.resultData as ClinicalPrivilege;
+      this.privileges.set(next.privilegeId,next);
+      return {
+        success:true,commandId,idempotencyKey,entityId:next.privilegeId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:next,
+      };
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
+    }
   }
 
   // ============================================================================
@@ -1008,121 +1448,633 @@ export class HrWorkforceDomainService {
     context: CommandContext,
     commandId: string,
     idempotencyKey: string,
-    payload: Omit<RosterShiftEntry, 'rosterId' | 'status' | 'createdAt' | 'updatedAt'>
+    payload: Omit<
+      RosterShiftEntry,
+      | 'rosterId'
+      | 'tenantId'
+      | 'employeeName'
+      | 'positionTitle'
+      | 'durationHours'
+      | 'status'
+      | 'isOvertime'
+      | 'overtimeHours'
+      | 'publishedAt'
+      | 'publishedBy'
+      | 'conflictFlags'
+      | 'createdAt'
+      | 'updatedAt'
+    >
   ): Promise<CommandResult<RosterShiftEntry>> {
-    const auth = AuthorizationPipeline.evaluate(context, {
-      requiredRoles: ['HR_ADMIN', 'NURSE_MANAGER', 'DEPARTMENT_HEAD', 'SYSTEM_ADMIN'],
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['HR_ADMIN','NURSE_MANAGER','DEPARTMENT_HEAD','SYSTEM_ADMIN'],
     });
-
-    if (!auth.authorized) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: 'UNAUTHORIZED', message: 'Department Head / Nurse Manager role required.' },
-      };
+    if(!auth.authorized){
+      return workforceReject(
+        commandId,idempotencyKey,auth.code||'UNAUTHORIZED',
+        auth.reason||'Department Head / Nurse Manager role required.'
+      );
     }
 
-    // Check credential lockout for clinical shifts
-    await this.hydrateClinicalEligibility(context.tenantId, payload.employeeId);
-    const eligibility = this.checkClinicalEligibility(payload.employeeId);
-    if (!eligibility.isEligible) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: {
-          code: 'CLINICAL_CREDENTIAL_EXPIRED',
-          message: `Cannot assign clinical shift: ${eligibility.reason}`,
+    const employee=await this.loadEmployee(context.tenantId,payload.employeeId);
+    if(!employee){
+      return workforceReject(commandId,idempotencyKey,'EMPLOYEE_NOT_FOUND','Shift employee does not exist.');
+    }
+
+    try{
+      assertWorkforceFacilityScope(context,[payload.facilityId]);
+      if(
+        !employee.facilityIds.includes(payload.facilityId) ||
+        !employee.departmentIds.includes(payload.departmentId)
+      ){
+        throw new AtomicMutationRejectedError(
+          'ROSTER_SCOPE_OUTSIDE_EMPLOYEE_ASSIGNMENT',
+          'Roster shift facility/department must be within the employee workforce assignment.'
+        );
+      }
+      if(!['ACTIVE','ONBOARDING'].includes(employee.employmentStatus)){
+        throw new AtomicMutationRejectedError(
+          'EMPLOYEE_NOT_ROSTERABLE',
+          `Employee status ${employee.employmentStatus} is not rosterable.`
+        );
+      }
+
+      const startMs=Date.parse(payload.startTime);
+      const endMs=Date.parse(payload.endTime);
+      if(!Number.isFinite(startMs)||!Number.isFinite(endMs)||endMs<=startMs){
+        throw new AtomicMutationRejectedError(
+          'INVALID_SHIFT_INTERVAL',
+          'Roster shift requires a valid end time after its start time.'
+        );
+      }
+      const durationHours=(endMs-startMs)/3_600_000;
+      if(durationHours>24){
+        throw new AtomicMutationRejectedError(
+          'SHIFT_DURATION_EXCEEDS_LIMIT',
+          'A single roster assignment cannot exceed 24 hours.'
+        );
+      }
+      const expectedDate=new Date(startMs).toISOString().slice(0,10);
+      if(payload.date!==expectedDate){
+        throw new AtomicMutationRejectedError(
+          'SHIFT_DATE_MISMATCH',
+          'Roster date must match the UTC date of the scheduled start.'
+        );
+      }
+
+      const minRestMs=10*60*60*1000;
+      const expectedCredentialRevision=Number(employee.credentialRevision||0);
+      const credentials=DomainStateRepository.isAvailable()
+        ? await DomainStateRepository.queryEqual<EmployeeCredential>(
+            context.tenantId,'clinicalCredentials','employeeId',payload.employeeId
+          )
+        : Array.from(this.credentials.values()).filter(
+            credential=>credential.employeeId===payload.employeeId
+          );
+      const credentialTargets=credentials.map((credential,index)=>({
+        key:`credential:${index}`,
+        entityType:'EMPLOYEE_CREDENTIAL',
+        entityId:credential.credentialId,
+        required:true,
+      }));
+
+      const baselineShifts=(await this.loadShiftsForEmployee(
+        context.tenantId,payload.employeeId
+      )).filter(shift=>shift.status!=='CANCELLED');
+
+      const monthKeys=rosterRelevantMonthKeys(startMs,endMs,minRestMs);
+      const timelineTargets=monthKeys.map((monthKey,index)=>({
+        key:`timeline:${index}`,
+        entityType:'ROSTER_TIMELINE',
+        entityId:rosterTimelineId(payload.employeeId,monthKey),
+        required:false,
+      }));
+      const rosterId=`rst_${randomUUID()}`;
+      const now=new Date().toISOString();
+
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,
+        actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'ROSTER_SHIFT',
+        aggregateId:rosterId,
+        eventType:'SHIFT_ASSIGNED',
+        auditAction:'SHIFT_ASSIGNED',
+        auditResourceType:'ROSTER_SHIFT',
+        auditResourceId:rosterId,
+        outboxTopic:'g-hims-roster-events',
+        idempotencyKey,commandId,correlationId:context.correlationId,
+        readTargets:[
+          {key:'employee',entityType:'EMPLOYEE_MASTER',entityId:payload.employeeId,required:true},
+          ...credentialTargets,
+          ...timelineTargets,
+        ],
+        prepare:(current)=>{
+          const currentEmployee=current.employee as unknown as EmployeeMaster;
+          if(
+            !['ACTIVE','ONBOARDING'].includes(currentEmployee.employmentStatus) ||
+            !currentEmployee.facilityIds.includes(payload.facilityId) ||
+            !currentEmployee.departmentIds.includes(payload.departmentId)
+          ){
+            throw new AtomicMutationRejectedError(
+              'EMPLOYEE_ASSIGNMENT_CHANGED_RETRY',
+              'Employee workforce assignment/status changed before roster commit.'
+            );
+          }
+          if(Number(currentEmployee.credentialRevision||0)!==expectedCredentialRevision){
+            throw new AtomicMutationRejectedError(
+              'CREDENTIAL_SET_CHANGED_RETRY',
+              'Credential set changed during roster evaluation; retry with fresh credential evidence.'
+            );
+          }
+
+          const currentCredentials=credentialTargets.map(
+            target=>current[target.key] as unknown as EmployeeCredential
+          );
+          const mandatory=currentCredentials.filter(
+            credential=>credential.isMandatoryForPractice
+          );
+          const today=new Date().toISOString().slice(0,10);
+          const invalidMandatory=mandatory.filter(credential=>
+            credential.verificationStatus!=='VERIFIED' ||
+            !credential.expiryDate ||
+            credential.expiryDate<today
+          );
+          const clinicalRole=/doctor|physician|surgeon|nurse|pharmac|lab|technician/i.test(
+            `${currentEmployee.positionTitle} ${currentEmployee.specialty||''}`
+          );
+          if(clinicalRole&&(mandatory.length===0||invalidMandatory.length>0)){
+            throw new AtomicMutationRejectedError(
+              'CLINICAL_CREDENTIAL_EXPIRED',
+              mandatory.length===0
+                ? 'Cannot assign clinical shift: no mandatory verified credential is on file.'
+                : `Cannot assign clinical shift: ${invalidMandatory.length} mandatory credential(s) are expired or unverified.`
+            );
+          }
+
+          const timelineShifts=timelineTargets.flatMap(target=>{
+            const bucket=current[target.key] as unknown as RosterTimelineBucket|null;
+            return bucket?.shifts||[];
+          });
+          const allExisting=new Map<string,{rosterId:string;startTime:string;endTime:string;status:string}>();
+          for(const shift of baselineShifts){
+            allExisting.set(shift.rosterId,{
+              rosterId:shift.rosterId,startTime:shift.startTime,endTime:shift.endTime,status:shift.status,
+            });
+          }
+          for(const shift of timelineShifts) allExisting.set(shift.rosterId,shift);
+
+          for(const existing of allExisting.values()){
+            if(existing.status==='CANCELLED') continue;
+            const existingStart=Date.parse(existing.startTime);
+            const existingEnd=Date.parse(existing.endTime);
+            if(!Number.isFinite(existingStart)||!Number.isFinite(existingEnd)) continue;
+            if(startMs<existingEnd&&endMs>existingStart){
+              throw new AtomicMutationRejectedError(
+                'SHIFT_DOUBLE_BOOKING_CONFLICT',
+                'Employee already has an overlapping roster assignment.'
+              );
+            }
+            const restBefore=startMs-existingEnd;
+            const restAfter=existingStart-endMs;
+            if(
+              (restBefore>0&&restBefore<minRestMs) ||
+              (restAfter>0&&restAfter<minRestMs)
+            ){
+              throw new AtomicMutationRejectedError(
+                'FATIGUE_COMPLIANCE_VIOLATION',
+                'Roster assignment violates the mandatory 10-hour rest interval.'
+              );
+            }
+          }
+
+          const shiftEntry:RosterShiftEntry={
+            ...payload,
+            rosterId,
+            tenantId:context.tenantId,
+            employeeName:`${currentEmployee.personalInfo.legalFirstName} ${currentEmployee.personalInfo.legalLastName}`,
+            positionTitle:currentEmployee.positionTitle,
+            durationHours,
+            status:'PUBLISHED',
+            isOvertime:durationHours>8,
+            ...(durationHours>8?{overtimeHours:durationHours-8}:{}),
+            publishedAt:now,
+            publishedBy:context.actorId,
+            createdAt:now,
+            updatedAt:now,
+          };
+
+          const primaryMonth=rosterMonthKey(startMs);
+          const targetIndex=monthKeys.indexOf(primaryMonth);
+          const targetKey=`timeline:${targetIndex}`;
+          const existingBucket=current[targetKey] as unknown as RosterTimelineBucket|null;
+          const baselineForMonth=baselineShifts
+            .filter(shift=>rosterMonthKey(Date.parse(shift.startTime))===primaryMonth)
+            .map(shift=>({
+              rosterId:shift.rosterId,startTime:shift.startTime,endTime:shift.endTime,status:shift.status,
+            }));
+          const merged=new Map(
+            [...(existingBucket?.shifts||[]),...baselineForMonth]
+              .map(shift=>[shift.rosterId,shift] as const)
+          );
+          merged.set(rosterId,{
+            rosterId,startTime:payload.startTime,endTime:payload.endTime,status:'PUBLISHED',
+          });
+          const timeline:RosterTimelineBucket={
+            timelineId:rosterTimelineId(payload.employeeId,primaryMonth),
+            tenantId:context.tenantId,
+            employeeId:payload.employeeId,
+            monthKey:primaryMonth,
+            shifts:[...merged.values()].sort((a,b)=>a.startTime.localeCompare(b.startTime)),
+            updatedAt:now,
+          };
+
+          return {
+            domainState:shiftEntry,
+            additionalStateWrites:[{
+              entityType:'ROSTER_TIMELINE',
+              entityId:timeline.timelineId,
+              domainState:timeline,
+            }],
+            eventPayload:{
+              rosterId,
+              employeeId:payload.employeeId,
+              departmentId:payload.departmentId,
+              facilityId:payload.facilityId,
+              date:payload.date,
+              shiftName:payload.shiftName,
+              startTime:payload.startTime,
+              endTime:payload.endTime,
+            },
+            auditReason:`Assigned ${payload.shiftName} shift to ${shiftEntry.employeeName} on ${payload.date}.`,
+            resultData:shiftEntry,
+          };
         },
+      });
+
+      const shiftEntry=tx.resultData as RosterShiftEntry;
+      this.shifts.set(rosterId,shiftEntry);
+      return {
+        success:true,commandId,idempotencyKey,entityId:rosterId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:shiftEntry,
       };
-    }
-
-    // Fatigue compliance: Check for rest period violation (< 10 hours rest between consecutive shifts)
-    const existingEmployeeShifts = (await this.loadShiftsForEmployee(
-      context.tenantId,
-      payload.employeeId
-    )).filter((shift) => shift.status !== 'CANCELLED');
-
-    const proposedStart = new Date(payload.startTime).getTime();
-    const minRestMs = 10 * 60 * 60 * 1000; // 10 hours
-
-    for (const existing of existingEmployeeShifts) {
-      const existingEnd = new Date(existing.endTime).getTime();
-      const existingStart = new Date(existing.startTime).getTime();
-
-      // Double-booking check
-      if (
-        (proposedStart >= existingStart && proposedStart < existingEnd) ||
-        (new Date(payload.endTime).getTime() > existingStart && new Date(payload.endTime).getTime() <= existingEnd)
-      ) {
-        return {
-          success: false,
-          commandId,
-          idempotencyKey,
-          error: {
-            code: 'SHIFT_DOUBLE_BOOKING_CONFLICT',
-            message: `Staff member ${payload.employeeName} is already rostered for shift ${existing.shiftName} (${existing.startTime} - ${existing.endTime}).`,
-          },
-        };
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
       }
-
-      // Rest period check
-      const restGap = proposedStart - existingEnd;
-      if (restGap > 0 && restGap < minRestMs) {
-        return {
-          success: false,
-          commandId,
-          idempotencyKey,
-          error: {
-            code: 'FATIGUE_COMPLIANCE_VIOLATION',
-            message: `Mandatory rest violation: Only ${(restGap / (1000 * 60 * 60)).toFixed(1)}h rest between shifts. Minimum required is 10 hours.`,
-          },
-        };
-      }
+      throw error;
     }
+  }
 
-    const rosterId = `rst_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const now = new Date().toISOString();
-
-    const shiftEntry: RosterShiftEntry = {
-      ...payload,
-      rosterId,
-      status: 'PUBLISHED',
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    this.shifts.set(rosterId, shiftEntry);
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'ROSTER_SHIFT',
-      entityId: rosterId,
-      eventType: 'SHIFT_ASSIGNED',
-      domainState: shiftEntry,
-      eventPayload: {
-        rosterId,
-        employeeId: payload.employeeId,
-        departmentId: payload.departmentId,
-        date: payload.date,
-        shiftName: payload.shiftName,
-        startTime: payload.startTime,
-        endTime: payload.endTime,
-      },
-      auditReason: `Assigned ${payload.shiftName} shift to ${payload.employeeName} on ${payload.date}`,
-      outboxTopic: 'g-hims-roster-events',
+  public static async cancelShift(
+    context:CommandContext,
+    commandId:string,
+    idempotencyKey:string,
+    payload:{rosterId:string;reason:string}
+  ):Promise<CommandResult<RosterShiftEntry>>{
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['HR_ADMIN','NURSE_MANAGER','DEPARTMENT_HEAD','SYSTEM_ADMIN'],
     });
+    if(!auth.authorized){
+      return workforceReject(commandId,idempotencyKey,auth.code||'UNAUTHORIZED',
+        auth.reason||'Roster cancellation authority required.');
+    }
+    const preflight=await this.loadShift(context.tenantId,payload.rosterId);
+    if(!preflight){
+      return workforceReject(commandId,idempotencyKey,'ROSTER_SHIFT_NOT_FOUND','Roster shift does not exist.');
+    }
+    try{
+      assertWorkforceFacilityScope(context,[preflight.facilityId]);
+      const monthKey=rosterMonthKey(Date.parse(preflight.startTime));
+      const timelineId=rosterTimelineId(preflight.employeeId,monthKey);
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'ROSTER_SHIFT',aggregateId:payload.rosterId,
+        eventType:'SHIFT_CANCELLED',auditAction:'SHIFT_CANCELLED',
+        auditResourceType:'ROSTER_SHIFT',auditResourceId:payload.rosterId,
+        outboxTopic:'g-hims-roster-events',idempotencyKey,commandId,
+        correlationId:context.correlationId,
+        readTargets:[
+          {key:'shift',entityType:'ROSTER_SHIFT',entityId:payload.rosterId,required:true},
+          {key:'timeline',entityType:'ROSTER_TIMELINE',entityId:timelineId,required:false},
+        ],
+        prepare:(current)=>{
+          const shift=current.shift as unknown as RosterShiftEntry;
+          if(shift.status==='CANCELLED'){
+            throw new AtomicMutationRejectedError('ROSTER_SHIFT_ALREADY_CANCELLED','Roster shift is already cancelled.');
+          }
+          const now=new Date().toISOString();
+          const next:RosterShiftEntry={
+            ...shift,status:'CANCELLED',
+            conflictFlags:[...(shift.conflictFlags||[]),`Cancelled: ${payload.reason}`],
+            updatedAt:now,
+          };
+          const bucket=current.timeline as unknown as RosterTimelineBucket|null;
+          const timeline:RosterTimelineBucket={
+            timelineId,
+            tenantId:context.tenantId,
+            employeeId:shift.employeeId,
+            monthKey,
+            shifts:(bucket?.shifts||[])
+              .map(item=>item.rosterId===shift.rosterId?{...item,status:'CANCELLED' as const}:item),
+            updatedAt:now,
+          };
+          return {
+            domainState:next,
+            additionalStateWrites:[{entityType:'ROSTER_TIMELINE',entityId:timelineId,domainState:timeline}],
+            eventPayload:{rosterId:shift.rosterId,employeeId:shift.employeeId,reason:payload.reason},
+            auditReason:`Cancelled roster shift ${shift.rosterId}: ${payload.reason}.`,
+            resultData:next,
+          };
+        },
+      });
+      const next=tx.resultData as RosterShiftEntry;
+      this.shifts.set(next.rosterId,next);
+      return {success:true,commandId,idempotencyKey,entityId:next.rosterId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:next};
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
+    }
+  }
 
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: rosterId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: shiftEntry,
-    };
+  public static async executeRosterSwap(
+    context:CommandContext,
+    commandId:string,
+    idempotencyKey:string,
+    payload:{shiftAId:string;shiftBId:string;reason:string}
+  ):Promise<CommandResult<RosterSwapRecord>>{
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['HR_ADMIN','NURSE_MANAGER','DEPARTMENT_HEAD','SYSTEM_ADMIN'],
+    });
+    if(!auth.authorized){
+      return workforceReject(commandId,idempotencyKey,auth.code||'UNAUTHORIZED',
+        auth.reason||'Roster swap authority required.');
+    }
+    if(payload.shiftAId===payload.shiftBId){
+      return workforceReject(commandId,idempotencyKey,'INVALID_ROSTER_SWAP','Roster swap requires two distinct shifts.');
+    }
+
+    const [shiftA,shiftB]=await Promise.all([
+      this.loadShift(context.tenantId,payload.shiftAId),
+      this.loadShift(context.tenantId,payload.shiftBId),
+    ]);
+    if(!shiftA||!shiftB){
+      return workforceReject(commandId,idempotencyKey,'ROSTER_SHIFT_NOT_FOUND','One or both roster shifts do not exist.');
+    }
+    if(shiftA.employeeId===shiftB.employeeId){
+      return workforceReject(commandId,idempotencyKey,'INVALID_ROSTER_SWAP','Cannot swap two shifts assigned to the same employee.');
+    }
+
+    const [employeeA,employeeB]=await Promise.all([
+      this.loadEmployee(context.tenantId,shiftA.employeeId),
+      this.loadEmployee(context.tenantId,shiftB.employeeId),
+    ]);
+    if(!employeeA||!employeeB){
+      return workforceReject(commandId,idempotencyKey,'EMPLOYEE_NOT_FOUND','Roster swap employee no longer exists.');
+    }
+
+    try{
+      assertWorkforceFacilityScope(context,[shiftA.facilityId,shiftB.facilityId]);
+      const minRestMs=10*60*60*1000;
+      const [credentialsA,credentialsB,baselineA,baselineB]=await Promise.all([
+        DomainStateRepository.isAvailable()
+          ? DomainStateRepository.queryEqual<EmployeeCredential>(context.tenantId,'clinicalCredentials','employeeId',employeeA.employeeId)
+          : Promise.resolve(Array.from(this.credentials.values()).filter(c=>c.employeeId===employeeA.employeeId)),
+        DomainStateRepository.isAvailable()
+          ? DomainStateRepository.queryEqual<EmployeeCredential>(context.tenantId,'clinicalCredentials','employeeId',employeeB.employeeId)
+          : Promise.resolve(Array.from(this.credentials.values()).filter(c=>c.employeeId===employeeB.employeeId)),
+        this.loadShiftsForEmployee(context.tenantId,employeeA.employeeId),
+        this.loadShiftsForEmployee(context.tenantId,employeeB.employeeId),
+      ]);
+      const revisionA=Number(employeeA.credentialRevision||0);
+      const revisionB=Number(employeeB.credentialRevision||0);
+
+      const targetAStart=Date.parse(shiftB.startTime);
+      const targetAEnd=Date.parse(shiftB.endTime);
+      const targetBStart=Date.parse(shiftA.startTime);
+      const targetBEnd=Date.parse(shiftA.endTime);
+      const monthsA=[...new Set([
+        ...rosterRelevantMonthKeys(targetAStart,targetAEnd,minRestMs),
+        rosterMonthKey(Date.parse(shiftA.startTime)),
+      ])];
+      const monthsB=[...new Set([
+        ...rosterRelevantMonthKeys(targetBStart,targetBEnd,minRestMs),
+        rosterMonthKey(Date.parse(shiftB.startTime)),
+      ])];
+
+      const timelineTargetsA=monthsA.map((monthKey,index)=>({
+        key:`timelineA:${index}`,entityType:'ROSTER_TIMELINE',
+        entityId:rosterTimelineId(employeeA.employeeId,monthKey),required:false,
+      }));
+      const timelineTargetsB=monthsB.map((monthKey,index)=>({
+        key:`timelineB:${index}`,entityType:'ROSTER_TIMELINE',
+        entityId:rosterTimelineId(employeeB.employeeId,monthKey),required:false,
+      }));
+      const credentialTargetsA=credentialsA.map((credential,index)=>({
+        key:`credentialA:${index}`,entityType:'EMPLOYEE_CREDENTIAL',entityId:credential.credentialId,required:true,
+      }));
+      const credentialTargetsB=credentialsB.map((credential,index)=>({
+        key:`credentialB:${index}`,entityType:'EMPLOYEE_CREDENTIAL',entityId:credential.credentialId,required:true,
+      }));
+      const swapId=`rsw_${randomUUID()}`;
+
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'ROSTER_SWAP',aggregateId:swapId,
+        eventType:'ROSTER_SWAP_COMPLETED',auditAction:'ROSTER_SWAP_COMPLETED',
+        auditResourceType:'ROSTER_SWAP',auditResourceId:swapId,
+        outboxTopic:'g-hims-roster-events',idempotencyKey,commandId,
+        correlationId:context.correlationId,
+        readTargets:[
+          {key:'shiftA',entityType:'ROSTER_SHIFT',entityId:shiftA.rosterId,required:true},
+          {key:'shiftB',entityType:'ROSTER_SHIFT',entityId:shiftB.rosterId,required:true},
+          {key:'employeeA',entityType:'EMPLOYEE_MASTER',entityId:employeeA.employeeId,required:true},
+          {key:'employeeB',entityType:'EMPLOYEE_MASTER',entityId:employeeB.employeeId,required:true},
+          ...credentialTargetsA,...credentialTargetsB,...timelineTargetsA,...timelineTargetsB,
+        ],
+        prepare:(current)=>{
+          const currentShiftA=current.shiftA as unknown as RosterShiftEntry;
+          const currentShiftB=current.shiftB as unknown as RosterShiftEntry;
+          const currentEmployeeA=current.employeeA as unknown as EmployeeMaster;
+          const currentEmployeeB=current.employeeB as unknown as EmployeeMaster;
+          if(currentShiftA.status==='CANCELLED'||currentShiftB.status==='CANCELLED'){
+            throw new AtomicMutationRejectedError('ROSTER_SWAP_SHIFT_NOT_ACTIVE','Cancelled shifts cannot be swapped.');
+          }
+          if(
+            currentShiftA.employeeId!==employeeA.employeeId ||
+            currentShiftB.employeeId!==employeeB.employeeId
+          ){
+            throw new AtomicMutationRejectedError('ROSTER_SWAP_STALE','Roster assignment changed before swap commit.');
+          }
+          if(
+            Number(currentEmployeeA.credentialRevision||0)!==revisionA ||
+            Number(currentEmployeeB.credentialRevision||0)!==revisionB
+          ){
+            throw new AtomicMutationRejectedError('CREDENTIAL_SET_CHANGED_RETRY','Credential set changed during roster swap evaluation.');
+          }
+          if(
+            !currentEmployeeA.facilityIds.includes(currentShiftB.facilityId) ||
+            !currentEmployeeA.departmentIds.includes(currentShiftB.departmentId) ||
+            !currentEmployeeB.facilityIds.includes(currentShiftA.facilityId) ||
+            !currentEmployeeB.departmentIds.includes(currentShiftA.departmentId)
+          ){
+            throw new AtomicMutationRejectedError(
+              'ROSTER_SWAP_SCOPE_MISMATCH',
+              'Each employee must be assigned to the facility/department of the shift they will receive.'
+            );
+          }
+
+          const today=new Date().toISOString().slice(0,10);
+          const assertCredentialSet=(employee:EmployeeMaster,targets:typeof credentialTargetsA)=>{
+            const rows=targets.map(target=>current[target.key] as unknown as EmployeeCredential);
+            const mandatory=rows.filter(row=>row.isMandatoryForPractice);
+            const clinicalRole=/doctor|physician|surgeon|nurse|pharmac|lab|technician/i.test(
+              `${employee.positionTitle} ${employee.specialty||''}`
+            );
+            if(
+              clinicalRole &&
+              (
+                mandatory.length===0 ||
+                mandatory.some(row=>
+                  row.verificationStatus!=='VERIFIED'||!row.expiryDate||row.expiryDate<today
+                )
+              )
+            ){
+              throw new AtomicMutationRejectedError(
+                'CLINICAL_CREDENTIAL_EXPIRED',
+                'Roster swap would assign a clinical shift to an employee without valid mandatory credentials.'
+              );
+            }
+          };
+          assertCredentialSet(currentEmployeeA,credentialTargetsA);
+          assertCredentialSet(currentEmployeeB,credentialTargetsB);
+
+          const timelineEntries=(targets:Array<{key:string}>)=>targets.flatMap(target=>{
+            const bucket=current[target.key] as unknown as RosterTimelineBucket|null;
+            return bucket?.shifts||[];
+          });
+          const assertTargetSafe=(
+            employee:EmployeeMaster,
+            baseline:RosterShiftEntry[],
+            timeline:Array<{rosterId:string;startTime:string;endTime:string;status:string}>,
+            excludeId:string,
+            targetStart:number,
+            targetEnd:number
+          )=>{
+            const all=new Map<string,{rosterId:string;startTime:string;endTime:string;status:string}>();
+            baseline.forEach(item=>all.set(item.rosterId,{
+              rosterId:item.rosterId,startTime:item.startTime,endTime:item.endTime,status:item.status,
+            }));
+            timeline.forEach(item=>all.set(item.rosterId,item));
+            for(const existing of all.values()){
+              if(existing.rosterId===excludeId||existing.status==='CANCELLED') continue;
+              const s=Date.parse(existing.startTime),e=Date.parse(existing.endTime);
+              if(targetStart<e&&targetEnd>s){
+                throw new AtomicMutationRejectedError('SHIFT_DOUBLE_BOOKING_CONFLICT',
+                  `Roster swap would double-book employee ${employee.employeeId}.`);
+              }
+              const before=targetStart-e,after=s-targetEnd;
+              if((before>0&&before<minRestMs)||(after>0&&after<minRestMs)){
+                throw new AtomicMutationRejectedError('FATIGUE_COMPLIANCE_VIOLATION',
+                  `Roster swap would violate mandatory rest for employee ${employee.employeeId}.`);
+              }
+            }
+          };
+          assertTargetSafe(currentEmployeeA,baselineA,timelineEntries(timelineTargetsA),currentShiftA.rosterId,targetAStart,targetAEnd);
+          assertTargetSafe(currentEmployeeB,baselineB,timelineEntries(timelineTargetsB),currentShiftB.rosterId,targetBStart,targetBEnd);
+
+          const now=new Date().toISOString();
+          const nextA:RosterShiftEntry={
+            ...currentShiftA,
+            employeeId:currentEmployeeB.employeeId,
+            employeeName:`${currentEmployeeB.personalInfo.legalFirstName} ${currentEmployeeB.personalInfo.legalLastName}`,
+            positionTitle:currentEmployeeB.positionTitle,
+            updatedAt:now,
+          };
+          const nextB:RosterShiftEntry={
+            ...currentShiftB,
+            employeeId:currentEmployeeA.employeeId,
+            employeeName:`${currentEmployeeA.personalInfo.legalFirstName} ${currentEmployeeA.personalInfo.legalLastName}`,
+            positionTitle:currentEmployeeA.positionTitle,
+            updatedAt:now,
+          };
+
+          const buildTimelineWrites=(
+            employee:EmployeeMaster,
+            months:string[],
+            targets:Array<{key:string;entityId:string}>,
+            removeId:string,
+            addShift:RosterShiftEntry
+          )=>{
+            const byMonth=new Map<string,RosterTimelineBucket>();
+            months.forEach((monthKey,index)=>{
+              const existing=current[targets[index].key] as unknown as RosterTimelineBucket|null;
+              const baseline=(employee.employeeId===employeeA.employeeId?baselineA:baselineB)
+                .filter(shift=>rosterMonthKey(Date.parse(shift.startTime))===monthKey)
+                .map(shift=>({
+                  rosterId:shift.rosterId,startTime:shift.startTime,endTime:shift.endTime,status:shift.status,
+                }));
+              const merged=new Map(
+                [...(existing?.shifts||[]),...baseline]
+                  .filter(item=>item.rosterId!==removeId)
+                  .map(item=>[item.rosterId,item] as const)
+              );
+              if(rosterMonthKey(Date.parse(addShift.startTime))===monthKey){
+                merged.set(addShift.rosterId,{
+                  rosterId:addShift.rosterId,startTime:addShift.startTime,endTime:addShift.endTime,status:addShift.status,
+                });
+              }
+              byMonth.set(monthKey,{
+                timelineId:targets[index].entityId,tenantId:context.tenantId,
+                employeeId:employee.employeeId,monthKey,
+                shifts:[...merged.values()].sort((a,b)=>a.startTime.localeCompare(b.startTime)),
+                updatedAt:now,
+              });
+            });
+            return [...byMonth.values()].map(bucket=>({
+              entityType:'ROSTER_TIMELINE',entityId:bucket.timelineId,domainState:bucket,
+            }));
+          };
+
+          const record:RosterSwapRecord={
+            swapId,tenantId:context.tenantId,
+            shiftAId:currentShiftA.rosterId,shiftBId:currentShiftB.rosterId,
+            employeeAId:currentEmployeeA.employeeId,employeeBId:currentEmployeeB.employeeId,
+            reason:payload.reason,executedBy:context.actorId,executedAt:now,status:'COMPLETED',
+          };
+          return {
+            domainState:record,
+            additionalStateWrites:[
+              {entityType:'ROSTER_SHIFT',entityId:nextA.rosterId,domainState:nextA},
+              {entityType:'ROSTER_SHIFT',entityId:nextB.rosterId,domainState:nextB},
+              ...buildTimelineWrites(currentEmployeeA,monthsA,timelineTargetsA,currentShiftA.rosterId,nextB),
+              ...buildTimelineWrites(currentEmployeeB,monthsB,timelineTargetsB,currentShiftB.rosterId,nextA),
+            ],
+            eventPayload:{swapId,shiftAId:nextA.rosterId,shiftBId:nextB.rosterId,
+              employeeAId:record.employeeAId,employeeBId:record.employeeBId},
+            auditReason:`Completed governed roster swap ${swapId}: ${payload.reason}.`,
+            resultData:record,
+          };
+        },
+      });
+
+      const record=tx.resultData as RosterSwapRecord;
+      const updatedA=await this.loadShift(context.tenantId,shiftA.rosterId);
+      const updatedB=await this.loadShift(context.tenantId,shiftB.rosterId);
+      if(updatedA) this.shifts.set(updatedA.rosterId,updatedA);
+      if(updatedB) this.shifts.set(updatedB.rosterId,updatedB);
+      return {success:true,commandId,idempotencyKey,entityId:swapId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:record};
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
+    }
   }
 
   public static calculateStaffingGaps(
@@ -1165,227 +2117,348 @@ export class HrWorkforceDomainService {
   // ============================================================================
 
   public static async recordClockIn(
-    context: CommandContext,
-    commandId: string,
-    idempotencyKey: string,
-    payload: {
-      employeeId: string;
-      employeeName: string;
-      facilityId: string;
-      departmentId: string;
-      source: AttendanceRecord['source'];
-      deviceIdentifier?: string;
+    context:CommandContext,
+    commandId:string,
+    idempotencyKey:string,
+    payload:{
+      employeeId:string;
+      source:AttendanceRecord['source'];
+      deviceIdentifier?:string;
+      scheduledShiftId?:string;
     }
-  ): Promise<CommandResult<AttendanceRecord>> {
-    const attendanceId = `att_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const now = new Date().toISOString();
-    const today = now.split('T')[0];
+  ):Promise<CommandResult<AttendanceRecord>>{
+    const employee=await this.loadEmployee(context.tenantId,payload.employeeId);
+    if(!employee){
+      return workforceReject(commandId,idempotencyKey,'EMPLOYEE_NOT_FOUND','Attendance employee does not exist.');
+    }
+    try{
+      assertWorkforceFacilityScope(context,employee.facilityIds);
+      if(!['ACTIVE','ONBOARDING','ON_LEAVE'].includes(employee.employmentStatus)){
+        throw new AtomicMutationRejectedError(
+          'EMPLOYEE_NOT_ATTENDANCE_ELIGIBLE',
+          `Employee status ${employee.employmentStatus} cannot clock in.`
+        );
+      }
+      const scheduledShift=payload.scheduledShiftId
+        ? await this.loadShift(context.tenantId,payload.scheduledShiftId)
+        : null;
+      if(payload.scheduledShiftId&&!scheduledShift){
+        throw new AtomicMutationRejectedError('ROSTER_SHIFT_NOT_FOUND','Scheduled shift does not exist.');
+      }
+      if(
+        scheduledShift &&
+        (
+          scheduledShift.employeeId!==employee.employeeId ||
+          scheduledShift.status==='CANCELLED'
+        )
+      ){
+        throw new AtomicMutationRejectedError(
+          'ATTENDANCE_SHIFT_MISMATCH',
+          'Scheduled shift does not belong to this active employee assignment.'
+        );
+      }
 
-    const attendance: AttendanceRecord = {
-      attendanceId,
-      tenantId: context.tenantId,
-      employeeId: payload.employeeId,
-      employeeName: payload.employeeName,
-      facilityId: payload.facilityId,
-      departmentId: payload.departmentId,
-      date: today,
-      clockInTime: now,
-      totalHoursWorked: 0,
-      overtimeHours: 0,
-      overtimeApproved: false,
-      source: payload.source,
-      deviceIdentifier: payload.deviceIdentifier,
-      status: 'ON_TIME',
-      isCorrected: false,
-      createdAt: now,
-      updatedAt: now,
-    };
+      const attendanceId=`att_${randomUUID()}`;
+      const slotId=attendanceOpenSlotId(employee.employeeId);
+      const now=new Date().toISOString();
+      const nowMs=Date.parse(now);
+      const status:AttendanceRecord['status']=
+        scheduledShift && nowMs-Date.parse(scheduledShift.startTime)>15*60*1000
+          ? 'LATE_ARRIVAL'
+          : 'ON_TIME';
 
-    this.attendanceRecords.set(attendanceId, attendance);
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'ATTENDANCE_RECORD',aggregateId:attendanceId,
+        eventType:'EMPLOYEE_CLOCKED_IN',auditAction:'EMPLOYEE_CLOCKED_IN',
+        auditResourceType:'ATTENDANCE_RECORD',auditResourceId:attendanceId,
+        outboxTopic:'g-hims-attendance-events',idempotencyKey,commandId,
+        correlationId:context.correlationId,
+        readTargets:[
+          {key:'employee',entityType:'EMPLOYEE_MASTER',entityId:employee.employeeId,required:true},
+          {key:'slot',entityType:'ATTENDANCE_OPEN_SLOT',entityId:slotId,required:false},
+          ...(scheduledShift?[{key:'shift',entityType:'ROSTER_SHIFT',entityId:scheduledShift.rosterId,required:true}]:[]),
+        ],
+        prepare:(current)=>{
+          const currentEmployee=current.employee as unknown as EmployeeMaster;
+          if(!['ACTIVE','ONBOARDING','ON_LEAVE'].includes(currentEmployee.employmentStatus)){
+            throw new AtomicMutationRejectedError(
+              'EMPLOYEE_NOT_ATTENDANCE_ELIGIBLE',
+              'Employee status changed before clock-in commit.'
+            );
+          }
+          const slot=current.slot as unknown as AttendanceOpenSlot|null;
+          if(slot?.status==='OPEN'){
+            throw new AtomicMutationRejectedError(
+              'ATTENDANCE_ALREADY_OPEN',
+              'Employee already has an open attendance record.'
+            );
+          }
+          const shift=current.shift as unknown as RosterShiftEntry|null;
+          if(
+            shift &&
+            (shift.employeeId!==currentEmployee.employeeId||shift.status==='CANCELLED')
+          ){
+            throw new AtomicMutationRejectedError(
+              'ATTENDANCE_SHIFT_MISMATCH',
+              'Scheduled shift changed before clock-in commit.'
+            );
+          }
 
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'ATTENDANCE_RECORD',
-      entityId: attendanceId,
-      eventType: 'EMPLOYEE_CLOCKED_IN',
-      domainState: attendance,
-      eventPayload: {
-        attendanceId,
-        employeeId: payload.employeeId,
-        clockInTime: now,
-        source: payload.source,
-      },
-      auditReason: `Employee ${payload.employeeName} clocked in via ${payload.source}`,
-      outboxTopic: 'g-hims-attendance-events',
-    });
-
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: attendanceId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: attendance,
-    };
+          const attendance:AttendanceRecord={
+            attendanceId,tenantId:context.tenantId,
+            employeeId:currentEmployee.employeeId,
+            employeeName:`${currentEmployee.personalInfo.legalFirstName} ${currentEmployee.personalInfo.legalLastName}`,
+            facilityId:shift?.facilityId||currentEmployee.primaryFacilityId,
+            departmentId:shift?.departmentId||currentEmployee.primaryDepartmentId,
+            date:now.slice(0,10),
+            ...(shift?{
+              scheduledShiftId:shift.rosterId,
+              scheduledShiftName:shift.shiftName,
+              scheduledStartTime:shift.startTime,
+              scheduledEndTime:shift.endTime,
+            }:{}),
+            clockInTime:now,totalHoursWorked:0,overtimeHours:0,
+            overtimeApproved:false,source:payload.source,
+            deviceIdentifier:payload.deviceIdentifier,status,
+            isCorrected:false,createdAt:now,updatedAt:now,
+          };
+          const openSlot:AttendanceOpenSlot={
+            slotId,tenantId:context.tenantId,employeeId:currentEmployee.employeeId,
+            attendanceId,status:'OPEN',openedAt:now,
+          };
+          return {
+            domainState:attendance,
+            additionalStateWrites:[
+              {entityType:'ATTENDANCE_OPEN_SLOT',entityId:slotId,domainState:openSlot},
+            ],
+            eventPayload:{
+              attendanceId,employeeId:attendance.employeeId,
+              clockInTime:attendance.clockInTime,source:attendance.source,
+              scheduledShiftId:attendance.scheduledShiftId,
+            },
+            auditReason:`Employee ${attendance.employeeName} clocked in via ${attendance.source}.`,
+            resultData:attendance,
+          };
+        },
+      });
+      const attendance=tx.resultData as AttendanceRecord;
+      this.attendanceRecords.set(attendance.attendanceId,attendance);
+      return {success:true,commandId,idempotencyKey,entityId:attendance.attendanceId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:attendance};
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
+    }
   }
 
   public static async recordClockOut(
-    context: CommandContext,
-    commandId: string,
-    idempotencyKey: string,
-    payload: {
-      attendanceId: string;
+    context:CommandContext,
+    commandId:string,
+    idempotencyKey:string,
+    payload:{attendanceId:string}
+  ):Promise<CommandResult<AttendanceRecord>>{
+    const preflight=await this.loadAttendance(context.tenantId,payload.attendanceId);
+    if(!preflight){
+      return workforceReject(commandId,idempotencyKey,'RECORD_NOT_FOUND','Attendance record not found.');
     }
-  ): Promise<CommandResult<AttendanceRecord>> {
-    const attendance = await this.loadAttendance(context.tenantId, payload.attendanceId);
-    if (!attendance) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: 'RECORD_NOT_FOUND', message: 'Attendance record not found.' },
-      };
+    const slotId=attendanceOpenSlotId(preflight.employeeId);
+    try{
+      assertWorkforceFacilityScope(context,[preflight.facilityId]);
+      const now=new Date().toISOString();
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'ATTENDANCE_RECORD',aggregateId:payload.attendanceId,
+        eventType:'EMPLOYEE_CLOCKED_OUT',auditAction:'EMPLOYEE_CLOCKED_OUT',
+        auditResourceType:'ATTENDANCE_RECORD',auditResourceId:payload.attendanceId,
+        outboxTopic:'g-hims-attendance-events',idempotencyKey,commandId,
+        correlationId:context.correlationId,
+        readTargets:[
+          {key:'attendance',entityType:'ATTENDANCE_RECORD',entityId:payload.attendanceId,required:true},
+          {key:'slot',entityType:'ATTENDANCE_OPEN_SLOT',entityId:slotId,required:true},
+        ],
+        prepare:(current)=>{
+          const attendance=current.attendance as unknown as AttendanceRecord;
+          const slot=current.slot as unknown as AttendanceOpenSlot;
+          if(attendance.clockOutTime){
+            throw new AtomicMutationRejectedError('ATTENDANCE_ALREADY_CLOSED','Attendance record is already clocked out.');
+          }
+          if(slot.status!=='OPEN'||slot.attendanceId!==attendance.attendanceId){
+            throw new AtomicMutationRejectedError('ATTENDANCE_OPEN_SLOT_MISMATCH','Attendance open-slot state is inconsistent.');
+          }
+          const inMs=Date.parse(attendance.clockInTime);
+          const outMs=Date.parse(now);
+          if(!Number.isFinite(inMs)||outMs<=inMs){
+            throw new AtomicMutationRejectedError('INVALID_ATTENDANCE_INTERVAL','Clock-out must occur after clock-in.');
+          }
+          const hoursWorked=(outMs-inMs)/3_600_000;
+          const overtimeHours=Math.max(0,hoursWorked-8);
+          const scheduledEnd=attendance.scheduledEndTime?Date.parse(attendance.scheduledEndTime):NaN;
+          const status:AttendanceRecord['status']=
+            overtimeHours>0?'OVERTIME':
+            Number.isFinite(scheduledEnd)&&outMs<scheduledEnd-15*60*1000
+              ? 'EARLY_DEPARTURE'
+              : attendance.status;
+          const next:AttendanceRecord={
+            ...attendance,clockOutTime:now,
+            totalHoursWorked:Number(hoursWorked.toFixed(2)),
+            overtimeHours:Number(overtimeHours.toFixed(2)),
+            status,updatedAt:now,
+          };
+          const closedSlot:AttendanceOpenSlot={
+            ...slot,status:'CLOSED',closedAt:now,
+          };
+          return {
+            domainState:next,
+            additionalStateWrites:[
+              {entityType:'ATTENDANCE_OPEN_SLOT',entityId:slotId,domainState:closedSlot},
+            ],
+            eventPayload:{
+              attendanceId:next.attendanceId,employeeId:next.employeeId,
+              clockOutTime:now,totalHoursWorked:next.totalHoursWorked,
+              overtimeHours:next.overtimeHours,status:next.status,
+            },
+            auditReason:`Employee ${next.employeeName} clocked out after ${next.totalHoursWorked} hours.`,
+            resultData:next,
+          };
+        },
+      });
+      const next=tx.resultData as AttendanceRecord;
+      this.attendanceRecords.set(next.attendanceId,next);
+      return {success:true,commandId,idempotencyKey,entityId:next.attendanceId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:next};
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
     }
-
-    const now = new Date().toISOString();
-    const clockInMs = new Date(attendance.clockInTime).getTime();
-    const clockOutMs = new Date(now).getTime();
-    const hoursWorked = Math.max(0, (clockOutMs - clockInMs) / (1000 * 60 * 60));
-    const overtimeHours = Math.max(0, hoursWorked - 8.0);
-
-    attendance.clockOutTime = now;
-    attendance.totalHoursWorked = Number(hoursWorked.toFixed(2));
-    attendance.overtimeHours = Number(overtimeHours.toFixed(2));
-    attendance.updatedAt = now;
-
-    this.attendanceRecords.set(payload.attendanceId, attendance);
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'ATTENDANCE_RECORD',
-      entityId: payload.attendanceId,
-      eventType: 'EMPLOYEE_CLOCKED_OUT',
-      domainState: attendance,
-      eventPayload: {
-        attendanceId: payload.attendanceId,
-        employeeId: attendance.employeeId,
-        clockOutTime: now,
-        totalHoursWorked: attendance.totalHoursWorked,
-        overtimeHours: attendance.overtimeHours,
-      },
-      auditReason: `Employee ${attendance.employeeName} clocked out. Total hours: ${attendance.totalHoursWorked}`,
-      outboxTopic: 'g-hims-attendance-events',
-    });
-
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: payload.attendanceId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: attendance,
-    };
   }
 
   public static async correctAttendanceTime(
-    context: CommandContext,
-    commandId: string,
-    idempotencyKey: string,
-    payload: {
-      attendanceId: string;
-      newClockInTime: string;
-      newClockOutTime?: string;
-      reason: string;
+    context:CommandContext,
+    commandId:string,
+    idempotencyKey:string,
+    payload:{
+      attendanceId:string;
+      newClockInTime:string;
+      newClockOutTime?:string;
+      reason:string;
     }
-  ): Promise<CommandResult<AttendanceRecord>> {
-    const auth = AuthorizationPipeline.evaluate(context, {
-      requiredRoles: ['HR_ADMIN', 'SUPERVISOR', 'DEPARTMENT_HEAD', 'SYSTEM_ADMIN'],
+  ):Promise<CommandResult<AttendanceRecord>>{
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['HR_ADMIN','SUPERVISOR','DEPARTMENT_HEAD','SYSTEM_ADMIN'],
     });
-
-    if (!auth.authorized) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: 'UNAUTHORIZED', message: 'Supervisor / HR authorization required for time corrections.' },
-      };
+    if(!auth.authorized){
+      return workforceReject(commandId,idempotencyKey,auth.code||'UNAUTHORIZED',
+        auth.reason||'Supervisor / HR authorization required for time corrections.');
     }
-
-    const record = await this.loadAttendance(context.tenantId, payload.attendanceId);
-    if (!record) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: 'RECORD_NOT_FOUND', message: 'Attendance record not found.' },
-      };
+    const preflight=await this.loadAttendance(context.tenantId,payload.attendanceId);
+    if(!preflight){
+      return workforceReject(commandId,idempotencyKey,'RECORD_NOT_FOUND','Attendance record not found.');
     }
-
-    const previousClockIn = record.clockInTime;
-    const correctionId = `cor_${Date.now()}`;
-    const now = new Date().toISOString();
-
-    if (!record.originalClockInTime) {
-      record.originalClockInTime = record.clockInTime;
+    try{
+      assertWorkforceFacilityScope(context,[preflight.facilityId]);
+      const inMs=Date.parse(payload.newClockInTime);
+      const outMs=payload.newClockOutTime?Date.parse(payload.newClockOutTime):NaN;
+      if(!Number.isFinite(inMs)||(payload.newClockOutTime&&(!Number.isFinite(outMs)||outMs<=inMs))){
+        throw new AtomicMutationRejectedError(
+          'INVALID_ATTENDANCE_CORRECTION_INTERVAL',
+          'Corrected attendance timestamps are invalid.'
+        );
+      }
+      const correctionId=`acor_${randomUUID()}`;
+      const payrollLockId=payrollAttendanceLockIdForWorkforce(preflight.employeeId);
+      const now=new Date().toISOString();
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'ATTENDANCE_CORRECTION',aggregateId:correctionId,
+        eventType:'ATTENDANCE_CORRECTED',auditAction:'ATTENDANCE_CORRECTED',
+        auditResourceType:'ATTENDANCE_CORRECTION',auditResourceId:correctionId,
+        outboxTopic:'g-hims-attendance-events',idempotencyKey,commandId,
+        correlationId:context.correlationId,
+        readTargets:[
+          {key:'attendance',entityType:'ATTENDANCE_RECORD',entityId:payload.attendanceId,required:true},
+          {key:'payrollLock',entityType:'PAYROLL_ATTENDANCE_LOCK',entityId:payrollLockId,required:false},
+        ],
+        prepare:(current)=>{
+          const record=current.attendance as unknown as AttendanceRecord;
+          const payrollLock=current.payrollLock as unknown as {lockedThroughDate?:string}|null;
+          if(payrollLock?.lockedThroughDate&&record.date<=payrollLock.lockedThroughDate){
+            throw new AtomicMutationRejectedError(
+              'ATTENDANCE_LOCKED_BY_PAYROLL',
+              'Attendance evidence has already been consumed by payroll and cannot be edited in place. Use a governed payroll adjustment.'
+            );
+          }
+          const correction:AttendanceCorrectionRecord={
+            correctionId,tenantId:context.tenantId,
+            attendanceId:record.attendanceId,employeeId:record.employeeId,
+            previousClockInTime:record.clockInTime,
+            previousClockOutTime:record.clockOutTime,
+            newClockInTime:payload.newClockInTime,
+            newClockOutTime:payload.newClockOutTime,
+            reason:payload.reason,correctedByActorId:context.actorId,correctedAt:now,
+          };
+          const effectiveOut=payload.newClockOutTime||record.clockOutTime;
+          let totalHoursWorked=record.totalHoursWorked;
+          let overtimeHours=record.overtimeHours;
+          if(effectiveOut){
+            const effectiveOutMs=Date.parse(effectiveOut);
+            if(effectiveOutMs<=inMs){
+              throw new AtomicMutationRejectedError(
+                'INVALID_ATTENDANCE_CORRECTION_INTERVAL',
+                'Corrected clock-out must be after corrected clock-in.'
+              );
+            }
+            totalHoursWorked=Number(((effectiveOutMs-inMs)/3_600_000).toFixed(2));
+            overtimeHours=Number(Math.max(0,totalHoursWorked-8).toFixed(2));
+          }
+          const history=[...(record.correctionHistory||[]),{
+            correctionId,correctedByActorId:context.actorId,
+            correctedByName:'Supervisor / HR Admin',correctedAt:now,
+            previousClockIn:record.clockInTime,newClockIn:payload.newClockInTime,
+            reason:payload.reason,
+          }];
+          const next:AttendanceRecord={
+            ...record,
+            originalClockInTime:record.originalClockInTime||record.clockInTime,
+            originalClockOutTime:record.originalClockOutTime||record.clockOutTime,
+            clockInTime:payload.newClockInTime,
+            ...(payload.newClockOutTime?{clockOutTime:payload.newClockOutTime}:{}),
+            totalHoursWorked,overtimeHours,isCorrected:true,status:'CORRECTED',
+            correctionHistory:history,updatedAt:now,
+          };
+          return {
+            domainState:correction,
+            additionalStateWrites:[
+              {entityType:'ATTENDANCE_RECORD',entityId:record.attendanceId,domainState:next},
+            ],
+            eventPayload:{
+              correctionId,attendanceId:record.attendanceId,employeeId:record.employeeId,
+              previousClockIn:record.clockInTime,newClockIn:payload.newClockInTime,
+              previousClockOut:record.clockOutTime,newClockOut:payload.newClockOutTime,
+              reason:payload.reason,
+            },
+            auditReason:`Attendance correction for ${record.attendanceId}: ${payload.reason}.`,
+            resultData:next,
+          };
+        },
+      });
+      const next=tx.resultData as AttendanceRecord;
+      this.attendanceRecords.set(next.attendanceId,next);
+      return {success:true,commandId,idempotencyKey,entityId:next.attendanceId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:next};
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
     }
-    if (!record.originalClockOutTime && record.clockOutTime) {
-      record.originalClockOutTime = record.clockOutTime;
-    }
-
-    record.clockInTime = payload.newClockInTime;
-    if (payload.newClockOutTime) {
-      record.clockOutTime = payload.newClockOutTime;
-      const inMs = new Date(payload.newClockInTime).getTime();
-      const outMs = new Date(payload.newClockOutTime).getTime();
-      record.totalHoursWorked = Number(Math.max(0, (outMs - inMs) / (1000 * 60 * 60)).toFixed(2));
-      record.overtimeHours = Number(Math.max(0, record.totalHoursWorked - 8).toFixed(2));
-    }
-
-    record.isCorrected = true;
-    record.status = 'CORRECTED';
-    record.updatedAt = now;
-
-    if (!record.correctionHistory) record.correctionHistory = [];
-    record.correctionHistory.push({
-      correctionId,
-      correctedByActorId: context.actorId,
-      correctedByName: 'Supervisor / HR Admin',
-      correctedAt: now,
-      previousClockIn,
-      newClockIn: payload.newClockInTime,
-      reason: payload.reason,
-    });
-
-    this.attendanceRecords.set(payload.attendanceId, record);
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'ATTENDANCE_RECORD',
-      entityId: payload.attendanceId,
-      eventType: 'ATTENDANCE_CORRECTED',
-      domainState: record,
-      eventPayload: {
-        attendanceId: payload.attendanceId,
-        previousClockIn,
-        newClockIn: payload.newClockInTime,
-        reason: payload.reason,
-        correctedBy: context.actorId,
-      },
-      auditReason: `Attendance correction: ${payload.reason}`,
-      outboxTopic: 'g-hims-attendance-events',
-    });
-
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: payload.attendanceId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: record,
-    };
   }
 
   // ============================================================================
@@ -1393,134 +2466,243 @@ export class HrWorkforceDomainService {
   // ============================================================================
 
   public static async submitLeaveRequest(
-    context: CommandContext,
-    commandId: string,
-    idempotencyKey: string,
-    payload: Omit<LeaveRequest, 'leaveId' | 'status' | 'createdAt' | 'updatedAt'>
-  ): Promise<CommandResult<LeaveRequest>> {
-    const leaveId = `lve_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const now = new Date().toISOString();
+    context:CommandContext,
+    commandId:string,
+    idempotencyKey:string,
+    payload:{
+      employeeId:string;
+      leaveType:LeaveRequest['leaveType'];
+      startDate:string;
+      endDate:string;
+      reason:string;
+      coveringEmployeeId?:string;
+    }
+  ):Promise<CommandResult<LeaveRequest>>{
+    const employee=await this.loadEmployee(context.tenantId,payload.employeeId);
+    if(!employee){
+      return workforceReject(commandId,idempotencyKey,'EMPLOYEE_NOT_FOUND','Leave employee does not exist.');
+    }
+    try{
+      assertWorkforceFacilityScope(context,employee.facilityIds);
+      if(['TERMINATED','RETIRED','INACTIVE'].includes(employee.employmentStatus)){
+        throw new AtomicMutationRejectedError('EMPLOYEE_NOT_LEAVE_ELIGIBLE','Inactive/terminal employees cannot request leave.');
+      }
+      const totalDays=leaveDayCount(payload.startDate,payload.endDate);
+      const startYear=Number(payload.startDate.slice(0,4));
+      const endYear=Number(payload.endDate.slice(0,4));
+      if(startYear!==endYear){
+        throw new AtomicMutationRejectedError(
+          'CROSS_YEAR_LEAVE_NOT_SUPPORTED',
+          'A leave request must remain within one entitlement year; split cross-year leave into separate requests.'
+        );
+      }
+      const balanceId=leaveBalanceId(employee.employeeId,payload.leaveType,startYear);
+      const calendarId=leaveCalendarId(employee.employeeId,startYear);
+      const leaveId=`lve_${randomUUID()}`;
+      const now=new Date().toISOString();
 
-    const leave: LeaveRequest = {
-      ...payload,
-      leaveId,
-      status: 'SUBMITTED',
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    this.leaveRequests.set(leaveId, leave);
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'LEAVE_REQUEST',
-      entityId: leaveId,
-      eventType: 'LEAVE_REQUESTED',
-      domainState: leave,
-      eventPayload: {
-        leaveId,
-        employeeId: payload.employeeId,
-        leaveType: payload.leaveType,
-        startDate: payload.startDate,
-        endDate: payload.endDate,
-        totalDays: payload.totalDays,
-      },
-      auditReason: `Leave requested by ${payload.employeeName} (${payload.leaveType}, ${payload.totalDays} days)`,
-      outboxTopic: 'g-hims-leave-events',
-    });
-
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: leaveId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: leave,
-    };
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'LEAVE_REQUEST',aggregateId:leaveId,
+        eventType:'LEAVE_REQUESTED',auditAction:'LEAVE_REQUESTED',
+        auditResourceType:'LEAVE_REQUEST',auditResourceId:leaveId,
+        outboxTopic:'g-hims-leave-events',idempotencyKey,commandId,
+        correlationId:context.correlationId,
+        readTargets:[
+          {key:'employee',entityType:'EMPLOYEE_MASTER',entityId:employee.employeeId,required:true},
+          {key:'balance',entityType:'LEAVE_BALANCE',entityId:balanceId,required:true},
+          {key:'calendar',entityType:'LEAVE_CALENDAR',entityId:calendarId,required:false},
+        ],
+        prepare:(current)=>{
+          const currentEmployee=current.employee as unknown as EmployeeMaster;
+          const balance=current.balance as unknown as EmployeeLeaveBalance;
+          const calendar=current.calendar as unknown as LeaveCalendarBucket|null;
+          if(['TERMINATED','RETIRED','INACTIVE'].includes(currentEmployee.employmentStatus)){
+            throw new AtomicMutationRejectedError('EMPLOYEE_NOT_LEAVE_ELIGIBLE','Employee state changed before leave submission.');
+          }
+          const start=Date.parse(`${payload.startDate}T00:00:00.000Z`);
+          const finish=Date.parse(`${payload.endDate}T23:59:59.999Z`);
+          const overlap=(calendar?.entries||[]).some(entry=>{
+            if(['REJECTED','CANCELLED'].includes(entry.status)) return false;
+            const es=Date.parse(`${entry.startDate}T00:00:00.000Z`);
+            const ee=Date.parse(`${entry.endDate}T23:59:59.999Z`);
+            return start<=ee&&finish>=es;
+          });
+          if(overlap){
+            throw new AtomicMutationRejectedError('LEAVE_REQUEST_OVERLAP','Employee already has overlapping active/pending leave.');
+          }
+          if(balance.remainingDays<totalDays){
+            throw new AtomicMutationRejectedError(
+              'INSUFFICIENT_LEAVE_BALANCE',
+              'Leave request exceeds the remaining entitlement.',
+              {remainingDays:balance.remainingDays,requestedDays:totalDays}
+            );
+          }
+          const leave:LeaveRequest={
+            leaveId,tenantId:context.tenantId,employeeId:currentEmployee.employeeId,
+            employeeName:`${currentEmployee.personalInfo.legalFirstName} ${currentEmployee.personalInfo.legalLastName}`,
+            departmentId:currentEmployee.primaryDepartmentId,
+            departmentName:currentEmployee.primaryDepartmentName,
+            leaveType:payload.leaveType,startDate:payload.startDate,endDate:payload.endDate,
+            totalDays,reason:payload.reason,status:'SUBMITTED',
+            coveringEmployeeId:payload.coveringEmployeeId,
+            createdAt:now,updatedAt:now,
+          };
+          const nextBalance:EmployeeLeaveBalance={
+            ...balance,
+            pendingApprovalDays:balance.pendingApprovalDays+totalDays,
+            remainingDays:balance.remainingDays-totalDays,
+            lastUpdated:now,
+          };
+          const nextCalendar:LeaveCalendarBucket={
+            calendarId,tenantId:context.tenantId,employeeId:currentEmployee.employeeId,
+            year:startYear,
+            entries:[...(calendar?.entries||[]),{
+              leaveId,leaveType:payload.leaveType,startDate:payload.startDate,
+              endDate:payload.endDate,status:'SUBMITTED',
+            }],
+            updatedAt:now,
+          };
+          return {
+            domainState:leave,
+            additionalStateWrites:[
+              {entityType:'LEAVE_BALANCE',entityId:balanceId,domainState:nextBalance},
+              {entityType:'LEAVE_CALENDAR',entityId:calendarId,domainState:nextCalendar},
+            ],
+            eventPayload:{leaveId,employeeId:leave.employeeId,leaveType:leave.leaveType,
+              startDate:leave.startDate,endDate:leave.endDate,totalDays},
+            auditReason:`Leave requested by ${leave.employeeName} for ${totalDays} day(s).`,
+            resultData:leave,
+          };
+        },
+      });
+      const leave=tx.resultData as LeaveRequest;
+      this.leaveRequests.set(leave.leaveId,leave);
+      return {success:true,commandId,idempotencyKey,entityId:leave.leaveId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:leave};
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
+    }
   }
 
   public static async approveLeaveRequest(
-    context: CommandContext,
-    commandId: string,
-    idempotencyKey: string,
-    payload: {
-      leaveId: string;
-      approved: boolean;
-      rejectionReason?: string;
-    }
-  ): Promise<CommandResult<LeaveRequest>> {
-    const auth = AuthorizationPipeline.evaluate(context, {
-      requiredRoles: ['HR_ADMIN', 'DEPARTMENT_HEAD', 'MEDICAL_DIRECTOR', 'SYSTEM_ADMIN'],
+    context:CommandContext,
+    commandId:string,
+    idempotencyKey:string,
+    payload:{leaveId:string;approved:boolean;rejectionReason?:string}
+  ):Promise<CommandResult<LeaveRequest>>{
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['HR_ADMIN','DEPARTMENT_HEAD','MEDICAL_DIRECTOR','SYSTEM_ADMIN'],
     });
-
-    if (!auth.authorized) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: 'UNAUTHORIZED', message: 'Department Head or HR approval authority required.' },
-      };
+    if(!auth.authorized){
+      return workforceReject(commandId,idempotencyKey,auth.code||'UNAUTHORIZED',
+        auth.reason||'Department Head or HR approval authority required.');
     }
-
-    const leave = await this.loadLeave(context.tenantId, payload.leaveId);
-    if (!leave) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: 'LEAVE_NOT_FOUND', message: 'Leave request not found.' },
-      };
+    const preflight=await this.loadLeave(context.tenantId,payload.leaveId);
+    if(!preflight){
+      return workforceReject(commandId,idempotencyKey,'LEAVE_NOT_FOUND','Leave request not found.');
     }
-
-    const now = new Date().toISOString();
-    leave.status = payload.approved ? 'APPROVED' : 'REJECTED';
-    leave.reviewedByActorId = context.actorId;
-    leave.reviewedByName = 'Department Head / HR';
-    leave.reviewedAt = now;
-    if (!payload.approved && payload.rejectionReason) {
-      leave.rejectionReason = payload.rejectionReason;
-    }
-    leave.updatedAt = now;
-
-    this.leaveRequests.set(payload.leaveId, leave);
-
-    // Deduct leave balance if approved
-    if (payload.approved) {
-      const balances = this.leaveBalances.get(leave.employeeId) || [];
-      const balance = balances.find((b) => b.leaveType === leave.leaveType);
-      if (balance) {
-        balance.usedDays += leave.totalDays;
-        balance.remainingDays = Math.max(0, balance.annualEntitlement - balance.usedDays);
-        balance.lastUpdated = now;
+    try{
+      const employee=await this.loadEmployee(context.tenantId,preflight.employeeId);
+      if(!employee) throw new AtomicMutationRejectedError('EMPLOYEE_NOT_FOUND','Leave employee no longer exists.');
+      assertWorkforceFacilityScope(context,employee.facilityIds);
+      if(payload.approved){
+        const shifts=(await this.loadShiftsForEmployee(context.tenantId,preflight.employeeId))
+          .filter(shift=>{
+            if(shift.status==='CANCELLED') return false;
+            const ss=Date.parse(shift.startTime);
+            const se=Date.parse(shift.endTime);
+            const ls=Date.parse(`${preflight.startDate}T00:00:00.000Z`);
+            const le=Date.parse(`${preflight.endDate}T23:59:59.999Z`);
+            return ss<=le&&se>=ls;
+          });
+        if(shifts.length){
+          throw new AtomicMutationRejectedError(
+            'LEAVE_ROSTER_CONFLICT',
+            'Leave cannot be approved while active roster assignments overlap the leave interval.',
+            {rosterIds:shifts.map(shift=>shift.rosterId)}
+          );
+        }
       }
+      const year=Number(preflight.startDate.slice(0,4));
+      const balanceId=leaveBalanceId(preflight.employeeId,preflight.leaveType,year);
+      const calendarId=leaveCalendarId(preflight.employeeId,year);
+      const now=new Date().toISOString();
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'LEAVE_REQUEST',aggregateId:payload.leaveId,
+        eventType:payload.approved?'LEAVE_APPROVED':'LEAVE_REJECTED',
+        auditAction:payload.approved?'LEAVE_APPROVED':'LEAVE_REJECTED',
+        auditResourceType:'LEAVE_REQUEST',auditResourceId:payload.leaveId,
+        outboxTopic:'g-hims-leave-events',idempotencyKey,commandId,
+        correlationId:context.correlationId,
+        readTargets:[
+          {key:'leave',entityType:'LEAVE_REQUEST',entityId:payload.leaveId,required:true},
+          {key:'balance',entityType:'LEAVE_BALANCE',entityId:balanceId,required:true},
+          {key:'calendar',entityType:'LEAVE_CALENDAR',entityId:calendarId,required:true},
+        ],
+        prepare:(current)=>{
+          const leave=current.leave as unknown as LeaveRequest;
+          const balance=current.balance as unknown as EmployeeLeaveBalance;
+          const calendar=current.calendar as unknown as LeaveCalendarBucket;
+          if(leave.status!=='SUBMITTED'){
+            throw new AtomicMutationRejectedError('LEAVE_NOT_REVIEWABLE','Only submitted leave can be reviewed.');
+          }
+          const nextStatus:LeaveRequest['status']=payload.approved?'APPROVED':'REJECTED';
+          const nextLeave:LeaveRequest={
+            ...leave,status:nextStatus,reviewedByActorId:context.actorId,
+            reviewedByName:'Department Head / HR',reviewedAt:now,
+            ...(!payload.approved?{rejectionReason:payload.rejectionReason||'Rejected'}:{}),
+            updatedAt:now,
+          };
+          const nextBalance:EmployeeLeaveBalance=payload.approved
+            ? {
+                ...balance,
+                pendingApprovalDays:Math.max(0,balance.pendingApprovalDays-leave.totalDays),
+                usedDays:balance.usedDays+leave.totalDays,
+                lastUpdated:now,
+              }
+            : {
+                ...balance,
+                pendingApprovalDays:Math.max(0,balance.pendingApprovalDays-leave.totalDays),
+                remainingDays:balance.remainingDays+leave.totalDays,
+                lastUpdated:now,
+              };
+          const nextCalendar:LeaveCalendarBucket={
+            ...calendar,
+            entries:calendar.entries.map(entry=>
+              entry.leaveId===leave.leaveId?{...entry,status:nextStatus}:entry
+            ),
+            updatedAt:now,
+          };
+          return {
+            domainState:nextLeave,
+            additionalStateWrites:[
+              {entityType:'LEAVE_BALANCE',entityId:balanceId,domainState:nextBalance},
+              {entityType:'LEAVE_CALENDAR',entityId:calendarId,domainState:nextCalendar},
+            ],
+            eventPayload:{leaveId:leave.leaveId,employeeId:leave.employeeId,
+              approved:payload.approved,rejectionReason:payload.rejectionReason},
+            auditReason:`Leave ${leave.leaveId} was ${nextStatus} by ${context.actorId}.`,
+            resultData:nextLeave,
+          };
+        },
+      });
+      const next=tx.resultData as LeaveRequest;
+      this.leaveRequests.set(next.leaveId,next);
+      return {success:true,commandId,idempotencyKey,entityId:next.leaveId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:next};
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
     }
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'LEAVE_REQUEST',
-      entityId: payload.leaveId,
-      eventType: payload.approved ? 'LEAVE_APPROVED' : 'LEAVE_REJECTED',
-      domainState: leave,
-      eventPayload: {
-        leaveId: payload.leaveId,
-        employeeId: leave.employeeId,
-        approved: payload.approved,
-        rejectionReason: payload.rejectionReason,
-      },
-      auditReason: `Leave ${payload.leaveId} was ${leave.status} by ${context.actorId}`,
-      outboxTopic: 'g-hims-leave-events',
-    });
-
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: payload.leaveId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: leave,
-    };
   }
 
   // ============================================================================
@@ -1566,6 +2748,17 @@ export class HrWorkforceDomainService {
       },
     ];
     this.leaveBalances.set(employeeId, defaultBalances);
+    const fixtureTenant=String(
+      process.env.GHIMS_HCM_TEST_TENANT || 'central-metro-hospital'
+    ).trim();
+    for(const balance of defaultBalances){
+      TransactionManager.seedEphemeralStateForTesting(
+        fixtureTenant,
+        'LEAVE_BALANCE',
+        leaveBalanceId(employeeId,balance.leaveType,balance.year),
+        balance
+      );
+    }
   }
 
   public static ensureInitialized(): void {
@@ -1584,6 +2777,9 @@ export class HrWorkforceDomainService {
 
     const now = new Date().toISOString();
     const today = now.split('T')[0];
+    const fixtureTenant=String(
+      process.env.GHIMS_HCM_TEST_TENANT || 'central-metro-hospital'
+    ).trim();
 
     const sampleEmployees: EmployeeMaster[] = [
       {
@@ -1676,8 +2872,12 @@ export class HrWorkforceDomainService {
     ];
 
     sampleEmployees.forEach((emp) => {
-      this.employees.set(emp.employeeId, emp);
-      this.seedDefaultLeaveBalances(emp.employeeId);
+      const normalized={...emp,tenantId:fixtureTenant};
+      this.employees.set(normalized.employeeId,normalized);
+      TransactionManager.seedEphemeralStateForTesting(
+        fixtureTenant,'EMPLOYEE_MASTER',normalized.employeeId,normalized
+      );
+      this.seedDefaultLeaveBalances(normalized.employeeId);
     });
 
     // Sample Credentials
@@ -1735,7 +2935,12 @@ export class HrWorkforceDomainService {
       },
     ];
 
-    sampleCreds.forEach((c) => this.credentials.set(c.credentialId, c));
+    sampleCreds.forEach((credential) => {
+      this.credentials.set(credential.credentialId,credential);
+      TransactionManager.seedEphemeralStateForTesting(
+        fixtureTenant,'EMPLOYEE_CREDENTIAL',credential.credentialId,credential
+      );
+    });
 
     // Sample Privileges
     const samplePrivs: ClinicalPrivilege[] = [
@@ -1795,7 +3000,12 @@ export class HrWorkforceDomainService {
       },
     ];
 
-    samplePrivs.forEach((p) => this.privileges.set(p.privilegeId, p));
+    samplePrivs.forEach((privilege) => {
+      this.privileges.set(privilege.privilegeId,privilege);
+      TransactionManager.seedEphemeralStateForTesting(
+        fixtureTenant,'CLINICAL_PRIVILEGE',privilege.privilegeId,privilege
+      );
+    });
 
     // Sample Shifts
     const sampleShift: RosterShiftEntry = {
@@ -1819,10 +3029,15 @@ export class HrWorkforceDomainService {
       createdAt: now,
       updatedAt: now,
     };
-    this.shifts.set(sampleShift.rosterId, sampleShift);
+    const normalizedShift={...sampleShift,tenantId:fixtureTenant};
+    this.shifts.set(normalizedShift.rosterId,normalizedShift);
+    TransactionManager.seedEphemeralStateForTesting(
+      fixtureTenant,'ROSTER_SHIFT',normalizedShift.rosterId,normalizedShift
+    );
   }
 
   public static resetForTesting(): void {
+    TransactionManager.resetEphemeralStateForTesting();
     this.employees.clear();
     this.credentials.clear();
     this.privileges.clear();

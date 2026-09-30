@@ -154,8 +154,15 @@ describe('G-HIMS Security Penetration & Zero-Trust Engine', () => {
         schemaVersion: 1,
         payload: {
           employeeId: 'emp_doc_junior_303',
-          privilegeCode: 'NEUROSURGERY_COMPLEX',
-          grantedByActorId: 'doc_junior_303',
+          privilegeType: 'PERFORM_INVASIVE_PROCEDURES',
+          specialty: 'Neurosurgery',
+          facilityId: 'fac_central',
+          facilityName: 'Central Metro Hospital',
+          departmentId: 'dept_neurosurgery',
+          departmentName: 'Neurosurgery',
+          effectiveFrom: '2026-10-01',
+          effectiveUntil: '2027-10-01',
+          restrictionNotes: 'Privilege escalation penetration test',
         },
       };
 

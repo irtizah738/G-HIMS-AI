@@ -59,6 +59,12 @@ const ADMIN_COLLECTIONS = [
 const HCM_COLLECTIONS = [
   'employees',
   'employeeAssignments',
+  'clinicalCredentials',
+  'clinicalPrivileges',
+  'rosterAssignments',
+  'attendanceRecords',
+  'leaveRequests',
+  'leaveBalances',
 ] as const;
 
 const SCM_COLLECTIONS = [
@@ -189,7 +195,7 @@ function authorizedCollections(roles: string[]): string[] {
   }
 
   if (
-    ['HR_ADMIN', 'HOSPITAL_EXECUTIVE']
+    ['HR_ADMIN', 'HOSPITAL_EXECUTIVE', 'MEDICAL_DIRECTOR']
       .some((role) => normalized.has(role))
   ) {
     add(...HCM_COLLECTIONS);
@@ -305,6 +311,51 @@ function scopeOfflineCollections(
     scoped.employeeAssignments = collections.employeeAssignments.filter((assignment) =>
       valueMatchesScope(assignment.facilityId, facilities) &&
       valueMatchesScope(assignment.departmentId, departments)
+    );
+  }
+
+  const scopedEmployeeIds=new Set(
+    (scoped.employees||[]).map(employee=>String(employee.employeeId||'').trim()).filter(Boolean)
+  );
+
+  if(collections.clinicalCredentials){
+    scoped.clinicalCredentials=collections.clinicalCredentials.filter(credential=>
+      scopedEmployeeIds.has(String(credential.employeeId||'').trim())
+    );
+  }
+
+  if(collections.clinicalPrivileges){
+    scoped.clinicalPrivileges=collections.clinicalPrivileges.filter(privilege=>
+      scopedEmployeeIds.has(String(privilege.employeeId||'').trim()) &&
+      valueMatchesScope(privilege.facilityId,facilities) &&
+      valueMatchesScope(privilege.departmentId,departments)
+    );
+  }
+
+  if(collections.rosterAssignments){
+    scoped.rosterAssignments=collections.rosterAssignments.filter(shift=>
+      scopedEmployeeIds.has(String(shift.employeeId||'').trim()) &&
+      valueMatchesScope(shift.facilityId,facilities) &&
+      valueMatchesScope(shift.departmentId,departments)
+    );
+  }
+
+  if(collections.attendanceRecords){
+    scoped.attendanceRecords=collections.attendanceRecords.filter(record=>
+      scopedEmployeeIds.has(String(record.employeeId||'').trim()) &&
+      valueMatchesScope(record.facilityId,facilities) &&
+      valueMatchesScope(record.departmentId,departments)
+    );
+  }
+
+  if(collections.leaveRequests){
+    scoped.leaveRequests=collections.leaveRequests.filter(request=>
+      scopedEmployeeIds.has(String(request.employeeId||'').trim())
+    );
+  }
+  if(collections.leaveBalances){
+    scoped.leaveBalances=collections.leaveBalances.filter(balance=>
+      scopedEmployeeIds.has(String(balance.employeeId||'').trim())
     );
   }
 

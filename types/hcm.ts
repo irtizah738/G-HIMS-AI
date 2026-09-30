@@ -8,7 +8,7 @@ export type CredentialVerificationStatus = 'verified' | 'pending' | 'expired';
 
 export type ShiftType = 'morning' | 'evening' | 'night' | 'on_call' | 'custom';
 
-export type ShiftStatus = 'scheduled' | 'in_progress' | 'completed' | 'swapped' | 'absent';
+export type ShiftStatus = 'scheduled' | 'in_progress' | 'completed' | 'swapped' | 'cancelled' | 'absent';
 
 export type PayrollPeriodStatus = 'open' | 'processing' | 'approved' | 'paid';
 
@@ -24,6 +24,8 @@ export interface StaffMember {
   fullName: string;
   email: string;
   phone?: string;
+  facilityId?: string;
+  facilityName?: string;
   departmentId: string;
   departmentName: string;
   primaryRole: StaffRole;

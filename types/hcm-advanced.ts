@@ -256,6 +256,7 @@ export interface EmployeeMaster {
   subSpecialties?: string[];
   onboardingStage?: 'OFFER_ACCEPTED' | 'DOCUMENT_SUBMISSION' | 'CREDENTIAL_VERIFICATION' | 'TRAINING_ASSIGNED' | 'ACTIVE';
   offboardingStage?: 'RESIGNED' | 'NOTICE_PERIOD' | 'ACCESS_REVOKED' | 'ASSETS_RETURNED' | 'SETTLEMENT_COMPLETED' | 'ARCHIVED';
+  credentialRevision?: number;
   compensation?: {
     baseSalary?: number;
     hourlyRate?: number;
@@ -307,6 +308,8 @@ export interface EmployeeCredential {
   documentHash?: string;
   notes?: string;
   isMandatoryForPractice: boolean;
+  submittedByActorId?: string;
+  submittedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -328,6 +331,9 @@ export interface ClinicalPrivilege {
   grantedByName?: string;
   reviewedAt?: string;
   restrictionNotes?: string;
+  statusReason?: string;
+  statusChangedByActorId?: string;
+  statusChangedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -426,6 +432,22 @@ export interface StaffingGapAnalysis {
   credentialAlerts: string[];
 }
 
+export interface RosterTimelineEntry {
+  rosterId: string;
+  startTime: string;
+  endTime: string;
+  status: RosterShiftStatus;
+}
+
+export interface RosterTimelineBucket {
+  timelineId: string;
+  tenantId: string;
+  employeeId: string;
+  monthKey: string; // YYYY-MM
+  shifts: RosterTimelineEntry[];
+  updatedAt: string;
+}
+
 export interface RosterShiftEntry {
   rosterId: string;
   tenantId: string;
@@ -453,9 +475,46 @@ export interface RosterShiftEntry {
   updatedAt: string;
 }
 
+export interface RosterSwapRecord {
+  swapId: string;
+  tenantId: string;
+  shiftAId: string;
+  shiftBId: string;
+  employeeAId: string;
+  employeeBId: string;
+  reason: string;
+  executedBy: string;
+  executedAt: string;
+  status: 'COMPLETED';
+}
+
 // ============================================================================
 // 6. ATTENDANCE, TIME TRACKING & CORRECTIONS
 // ============================================================================
+
+export interface AttendanceOpenSlot {
+  slotId: string;
+  tenantId: string;
+  employeeId: string;
+  attendanceId: string;
+  status: 'OPEN' | 'CLOSED';
+  openedAt: string;
+  closedAt?: string;
+}
+
+export interface AttendanceCorrectionRecord {
+  correctionId: string;
+  tenantId: string;
+  attendanceId: string;
+  employeeId: string;
+  previousClockInTime: string;
+  previousClockOutTime?: string;
+  newClockInTime: string;
+  newClockOutTime?: string;
+  reason: string;
+  correctedByActorId: string;
+  correctedAt: string;
+}
 
 export interface AttendanceRecord {
   attendanceId: string;
@@ -499,6 +558,23 @@ export interface AttendanceRecord {
 // ============================================================================
 // 7. LEAVE MANAGEMENT & BALANCES
 // ============================================================================
+
+export interface LeaveCalendarEntry {
+  leaveId: string;
+  leaveType: LeaveType;
+  startDate: string;
+  endDate: string;
+  status: LeaveStatus;
+}
+
+export interface LeaveCalendarBucket {
+  calendarId: string;
+  tenantId: string;
+  employeeId: string;
+  year: number;
+  entries: LeaveCalendarEntry[];
+  updatedAt: string;
+}
 
 export interface LeaveRequest {
   leaveId: string;
@@ -559,6 +635,149 @@ export interface CompensationStructure {
   }>;
   version: number;
   createdAt: string;
+}
+
+export type CompensationPayBasis = 'SALARIED' | 'HOURLY';
+export type PayrollFrequency = 'MONTHLY' | 'SEMI_MONTHLY' | 'BI_WEEKLY';
+
+export interface CompensationProfileRecord {
+  compensationId: string;
+  tenantId: string;
+  employeeId: string;
+  payBasis: CompensationPayBasis;
+  payFrequency: PayrollFrequency;
+  currency: string;
+  annualSalaryMinorUnits: number;
+  hourlyRateMinorUnits: number;
+  overtimeMultiplierBasisPoints: number;
+  monthlyAllowanceMinorUnits: number;
+  deductions: Array<{
+    code: string;
+    name: string;
+    rateBasisPoints: number;
+    fixedMinorUnits: number;
+    liabilityAccountCode?: string;
+  }>;
+  effectiveFrom: string;
+  status: 'PENDING_APPROVAL' | 'ACTIVE' | 'REJECTED' | 'SUPERSEDED';
+  createdBy: string;
+  createdAt: string;
+  approvedBy?: string;
+  approvedAt?: string;
+}
+
+export interface CompensationSlotRecord {
+  slotId: string;
+  tenantId: string;
+  employeeId: string;
+  activeCompensationId?: string;
+  pendingCompensationId?: string;
+  revision: number;
+  updatedAt: string;
+}
+
+export interface PayrollPeriodRecord {
+  periodId: string;
+  tenantId: string;
+  facilityId: string;
+  periodNumber: string;
+  periodName: string;
+  payFrequency: PayrollFrequency;
+  startDate: string;
+  endDate: string;
+  paymentDate: string;
+  currency: string;
+  status: 'OPEN' | 'CALCULATING' | 'CALCULATED' | 'APPROVED' | 'POSTED' | 'PAID' | 'VOID';
+  enrolledCount: number;
+  calculatedCount: number;
+  totalRegularMinorUnits: number;
+  totalOvertimeMinorUnits: number;
+  totalAllowanceMinorUnits: number;
+  totalGrossMinorUnits: number;
+  totalDeductionsMinorUnits: number;
+  totalNetMinorUnits: number;
+  expenseByCostCenterMinorUnits: Record<string, number>;
+  financeJournalId?: string;
+  settlementJournalId?: string;
+  finalizedBy?: string;
+  finalizedAt?: string;
+  approvedBy?: string;
+  approvedAt?: string;
+  postedBy?: string;
+  postedAt?: string;
+  paidBy?: string;
+  paidAt?: string;
+  settlementReference?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PayrollCalendarEntry {
+  periodId: string;
+  startDate: string;
+  endDate: string;
+  status: PayrollPeriodRecord['status'];
+}
+
+export interface PayrollCalendarBucket {
+  calendarId: string;
+  tenantId: string;
+  facilityId: string;
+  year: number;
+  entries: PayrollCalendarEntry[];
+  updatedAt: string;
+}
+
+export interface PayrollAttendanceLockRecord {
+  lockId: string;
+  tenantId: string;
+  employeeId: string;
+  lockedThroughDate: string;
+  periodId: string;
+  updatedAt: string;
+}
+
+export interface PayrollEmployeeSlotRecord {
+  slotId: string;
+  tenantId: string;
+  periodId: string;
+  employeeId: string;
+  compensationId: string;
+  compensationRevision: number;
+  status: 'PENDING' | 'CALCULATED' | 'EXCLUDED';
+  payslipId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PayrollPayslipRecord {
+  payslipId: string;
+  tenantId: string;
+  periodId: string;
+  employeeId: string;
+  employeeNumber: string;
+  employeeName: string;
+  departmentId: string;
+  departmentName: string;
+  currency: string;
+  regularHours: number;
+  overtimeHours: number;
+  regularPayMinorUnits: number;
+  overtimePayMinorUnits: number;
+  allowanceMinorUnits: number;
+  grossPayMinorUnits: number;
+  deductions: Array<{
+    code: string;
+    name: string;
+    amountMinorUnits: number;
+    liabilityAccountCode?: string;
+  }>;
+  totalDeductionsMinorUnits: number;
+  netPayMinorUnits: number;
+  attendanceFingerprint: string;
+  calculatedAt: string;
+  calculatedBy: string;
 }
 
 export interface PayrollExportPayload {

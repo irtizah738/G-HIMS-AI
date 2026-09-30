@@ -577,9 +577,74 @@ service cloud.firestore {
         allow read: if canReadAudit(tenantId);
         allow write: if false;
       }
+      match /credentialIdentities/{id} {
+        allow read, write: if false;
+      }
+      match /clinicalPrivilegeSlots/{id} {
+        allow read, write: if false;
+      }
       match /rosterAssignments/{id} {
         allow read: if canReadAudit(tenantId);
         allow write: if false;
+      }
+      match /compensationProfiles/{id} {
+        allow read: if canReadHcm(tenantId) || canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /compensationSlots/{id} {
+        allow read: if canReadHcm(tenantId) || canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /payrollPeriods/{id} {
+        allow read: if canReadHcm(tenantId) || canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /payrollEmployeeSlots/{id} {
+        allow read: if canReadHcm(tenantId) || canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /payrollPayslips/{id} {
+        allow read: if canReadHcm(tenantId) || canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /payrollCalendars/{id} {
+        allow read, write: if false;
+      }
+      match /payrollAttendanceLocks/{id} {
+        allow read, write: if false;
+      }
+      match /payrollStatutoryLiabilities/{id} {
+        allow read: if canReadHcm(tenantId) || canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /payrollComplianceSnapshots/{id} {
+        allow read: if canReadHcm(tenantId) || canReadFinance(tenantId) || canReadAudit(tenantId);
+        allow write: if false;
+      }
+      match /hcmIntelligenceSnapshots/{id} {
+        allow read: if canReadHcm(tenantId) || canReadAudit(tenantId);
+        allow write: if false;
+      }
+      match /leaveBalances/{id} {
+        allow read: if canReadHcm(tenantId);
+        allow write: if false;
+      }
+      match /leaveCalendars/{id} {
+        allow read: if canReadHcm(tenantId);
+        allow write: if false;
+      }
+      match /attendanceOpenSlots/{id} {
+        allow read, write: if false;
+      }
+      match /attendanceCorrections/{id} {
+        allow read: if canReadHcm(tenantId) || canReadAudit(tenantId);
+        allow write: if false;
+      }
+      match /rosterTimelines/{id} {
+        allow read, write: if false;
+      }
+      match /rosterSwaps/{id} {
+        allow read, write: if false;
       }
       match /attendanceRecords/{id} {
         allow read: if canReadAudit(tenantId);

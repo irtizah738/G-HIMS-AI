@@ -320,7 +320,14 @@ export const recordClockInEdge=(
 )=>run<AttendanceRecord>(
   'RecordClockInCommand',
   payload as unknown as Record<string,unknown>,
-  idempotencyKey
+  idempotencyKey,
+  {
+    enabled:true,
+    collection:'attendanceRecords',
+    resourceId:`clockin_${payload.employeeId}`,
+    action:'CREATE',
+    optimisticCache:false,
+  }
 );
 
 export const recordClockOutEdge=(
@@ -329,7 +336,14 @@ export const recordClockOutEdge=(
 )=>run<AttendanceRecord>(
   'RecordClockOutCommand',
   payload as unknown as Record<string,unknown>,
-  idempotencyKey
+  idempotencyKey,
+  {
+    enabled:true,
+    collection:'attendanceRecords',
+    resourceId:payload.attendanceId,
+    action:'UPDATE',
+    optimisticCache:false,
+  }
 );
 
 export const correctAttendanceTimeEdge=(

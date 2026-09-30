@@ -5,6 +5,7 @@ import {
 } from '@/lib/backend/transactions/transaction-manager';
 import type { CommandContext, CommandResult } from '@/lib/backend/types';
 import type {
+  BatchLotRecord,
   InventoryBalance,
   PatientConsumptionRecord,
   GoodsReceiptNote,
@@ -13,7 +14,6 @@ import type {
   StockTransaction,
 } from '@/types/scm-domain';
 import { calculateDerivedBalance } from '@/lib/supply-chain/scm-engine';
-import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import crypto from 'node:crypto';
 
 function inventoryLocationForTransaction(txn: StockTransaction): string {
@@ -147,25 +147,102 @@ export class ScmOfflineDomainService {
             entityId: balanceId,
             required: false,
           },
+          {
+            key: 'item',
+            entityType: 'ITEM_MASTER',
+            entityId: canonicalTxn.itemId,
+            required: true,
+          },
+          {
+            key: 'batch',
+            entityType: 'BATCH_LOT',
+            entityId: String(canonicalTxn.batchId || ''),
+            required: true,
+          },
         ],
         prepare: (current) => {
+          const item = current.item || {};
+          const batch = current.batch as unknown as BatchLotRecord;
           const existing = current.balance as unknown as InventoryBalance | null;
+
+          if (item.isActive === false) {
+            throw new AtomicMutationRejectedError(
+              'INVENTORY_ITEM_INACTIVE',
+              'Inactive item cannot participate in stock movement.'
+            );
+          }
+          if (
+            String(batch.itemId || '') !== canonicalTxn.itemId ||
+            String(batch.batchId || '') !== String(canonicalTxn.batchId || '')
+          ) {
+            throw new AtomicMutationRejectedError(
+              'BATCH_ITEM_MISMATCH',
+              'Batch does not belong to the requested inventory item.'
+            );
+          }
+
+          const clinicallyUsableOutbound = new Set([
+            'ISSUE',
+            'TRANSFER_OUT',
+            'CONSUMPTION',
+            'DISPENSE',
+            'RESERVATION',
+          ]);
+          const batchStatus = String(batch.status || '').toUpperCase();
+          const expiryAt = Date.parse(String(batch.expiryDate || ''));
+
+          if (
+            clinicallyUsableOutbound.has(canonicalTxn.transactionType) &&
+            batchStatus !== 'AVAILABLE'
+          ) {
+            throw new AtomicMutationRejectedError(
+              'BATCH_NOT_AVAILABLE',
+              `Batch status ${batchStatus || 'UNKNOWN'} does not permit clinical issue.`
+            );
+          }
+          if (
+            clinicallyUsableOutbound.has(canonicalTxn.transactionType) &&
+            (!Number.isFinite(expiryAt) || expiryAt <= Date.now())
+          ) {
+            throw new AtomicMutationRejectedError(
+              'BATCH_EXPIRED',
+              'Expired or invalid-dated batch cannot be issued, dispensed, consumed, transferred or reserved.'
+            );
+          }
+
+          const authoritativeTxn: StockTransaction = {
+            ...canonicalTxn,
+            itemCode: String(item.itemCode || canonicalTxn.itemCode || ''),
+            itemName: String(item.name || canonicalTxn.itemName || ''),
+            batchNumber: String(batch.batchNumber || canonicalTxn.batchNumber || ''),
+            manufactureDate: batch.manufactureDate || canonicalTxn.manufactureDate,
+            expirationDate: batch.expiryDate || canonicalTxn.expirationDate,
+            uom: (item.unitOfMeasure || canonicalTxn.uom) as StockTransaction['uom'],
+            unitCost: Number(batch.unitCost ?? item.unitCost ?? canonicalTxn.unitCost ?? 0),
+            totalCost:
+              Math.round(
+                Number(batch.unitCost ?? item.unitCost ?? canonicalTxn.unitCost ?? 0) *
+                  canonicalTxn.quantity *
+                  100
+              ) / 100,
+          };
+
           const base: InventoryBalance = existing || {
             balanceId,
             tenantId: context.tenantId,
-            facilityId: canonicalTxn.facilityId,
+            facilityId: authoritativeTxn.facilityId,
             locationId,
             locationName:
-              canonicalTxn.fromLocationId === locationId
-                ? canonicalTxn.fromLocationName || locationId
-                : canonicalTxn.toLocationName || locationId,
-            itemId: canonicalTxn.itemId,
-            itemCode: canonicalTxn.itemCode,
-            itemName: canonicalTxn.itemName,
-            itemType: 'MEDICAL_CONSUMABLE',
-            batchId: canonicalTxn.batchId || '',
-            batchNumber: canonicalTxn.batchNumber || '',
-            expiryDate: canonicalTxn.expirationDate || '',
+              authoritativeTxn.fromLocationId === locationId
+                ? authoritativeTxn.fromLocationName || locationId
+                : authoritativeTxn.toLocationName || locationId,
+            itemId: authoritativeTxn.itemId,
+            itemCode: authoritativeTxn.itemCode,
+            itemName: authoritativeTxn.itemName,
+            itemType: (item.itemType || 'MEDICAL_CONSUMABLE') as InventoryBalance['itemType'],
+            batchId: authoritativeTxn.batchId || '',
+            batchNumber: authoritativeTxn.batchNumber || '',
+            expiryDate: authoritativeTxn.expirationDate || '',
             onHand: 0,
             reserved: 0,
             quarantined: 0,
@@ -173,13 +250,13 @@ export class ScmOfflineDomainService {
             expired: 0,
             inTransit: 0,
             available: 0,
-            uom: canonicalTxn.uom,
-            minimumStock: 0,
-            maximumStock: 0,
-            reorderPoint: 0,
-            unitCost: canonicalTxn.unitCost || 0,
+            uom: authoritativeTxn.uom,
+            minimumStock: Number(item.minimumStock || 0),
+            maximumStock: Number(item.maximumStock || 0),
+            reorderPoint: Number(item.reorderPoint || 0),
+            unitCost: authoritativeTxn.unitCost || 0,
             totalValuation: 0,
-            lastMovementAt: canonicalTxn.recordedAt,
+            lastMovementAt: authoritativeTxn.recordedAt,
             version: 0,
           };
 
@@ -198,21 +275,21 @@ export class ScmOfflineDomainService {
           ]);
 
           if (
-            deductionTypes.has(canonicalTxn.transactionType) &&
-            base.available < canonicalTxn.quantity
+            deductionTypes.has(authoritativeTxn.transactionType) &&
+            base.available < authoritativeTxn.quantity
           ) {
             throw new AtomicMutationRejectedError(
               'INVENTORY_STATE_CONFLICT',
-              `Available stock ${base.available} is below requested quantity ${canonicalTxn.quantity}.`,
+              `Available stock ${base.available} is below requested quantity ${authoritativeTxn.quantity}.`,
               {
                 balanceId,
                 available: base.available,
-                requested: canonicalTxn.quantity,
+                requested: authoritativeTxn.quantity,
               }
             );
           }
 
-          const nextBalance = calculateDerivedBalance(base, canonicalTxn);
+          const nextBalance = calculateDerivedBalance(base, authoritativeTxn);
           if (
             nextBalance.onHand < 0 ||
             nextBalance.available < 0 ||
@@ -225,27 +302,83 @@ export class ScmOfflineDomainService {
             );
           }
 
+          const nextBatch: BatchLotRecord = {
+            ...batch,
+            updatedAt: authoritativeTxn.recordedAt,
+          };
+          const batchDeduction = new Set([
+            'ISSUE',
+            'ADJUSTMENT_OUT',
+            'TRANSFER_OUT',
+            'CONSUMPTION',
+            'DISPENSE',
+            'WRITE_OFF',
+            'DAMAGE',
+            'EXPIRY',
+          ]);
+          const batchAddition = new Set([
+            'RECEIPT',
+            'RETURN',
+            'TRANSFER_IN',
+            'ADJUSTMENT_IN',
+          ]);
+
+          if (batchDeduction.has(authoritativeTxn.transactionType)) {
+            if (nextBatch.quantityRemaining < authoritativeTxn.quantity) {
+              throw new AtomicMutationRejectedError(
+                'BATCH_QUANTITY_CONFLICT',
+                'Batch remaining quantity is below the requested stock movement.'
+              );
+            }
+            nextBatch.quantityRemaining -= authoritativeTxn.quantity;
+          } else if (batchAddition.has(authoritativeTxn.transactionType)) {
+            nextBatch.quantityRemaining += authoritativeTxn.quantity;
+          } else if (authoritativeTxn.transactionType === 'RESERVATION') {
+            nextBatch.quantityReserved =
+              Number(nextBatch.quantityReserved || 0) + authoritativeTxn.quantity;
+          } else if (authoritativeTxn.transactionType === 'UNRESERVATION') {
+            nextBatch.quantityReserved = Math.max(
+              0,
+              Number(nextBatch.quantityReserved || 0) - authoritativeTxn.quantity
+            );
+          } else if (authoritativeTxn.transactionType === 'QUARANTINE') {
+            nextBatch.status = 'QUARANTINED';
+          } else if (authoritativeTxn.transactionType === 'RECALL') {
+            nextBatch.status = 'RECALLED';
+          } else if (authoritativeTxn.transactionType === 'RELEASE') {
+            nextBatch.status = 'AVAILABLE';
+          }
+
+          if (nextBatch.quantityRemaining === 0) {
+            nextBatch.status = 'DEPLETED';
+          }
+
           return {
-            domainState: canonicalTxn,
+            domainState: authoritativeTxn,
             additionalStateWrites: [
               {
                 entityType: 'INVENTORY_BALANCE',
                 entityId: balanceId,
                 domainState: nextBalance,
               },
+              {
+                entityType: 'BATCH_LOT',
+                entityId: nextBatch.batchId,
+                domainState: nextBatch,
+              },
             ],
             eventPayload: {
-              transactionId: canonicalTxn.transactionId,
-              itemId: canonicalTxn.itemId,
-              quantity: canonicalTxn.quantity,
-              transactionType: canonicalTxn.transactionType,
+              transactionId: authoritativeTxn.transactionId,
+              itemId: authoritativeTxn.itemId,
+              quantity: authoritativeTxn.quantity,
+              transactionType: authoritativeTxn.transactionType,
               balanceId,
               locationId,
-              batchId: canonicalTxn.batchId,
+              batchId: authoritativeTxn.batchId,
             },
-            auditReason: `${canonicalTxn.transactionType} ${canonicalTxn.quantity} ${canonicalTxn.uom} ${canonicalTxn.itemName}`,
+            auditReason: `${authoritativeTxn.transactionType} ${authoritativeTxn.quantity} ${authoritativeTxn.uom} ${authoritativeTxn.itemName}`,
             resultData: {
-              transaction: canonicalTxn,
+              transaction: authoritativeTxn,
               balance: nextBalance,
             },
           };

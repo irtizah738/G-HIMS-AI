@@ -216,6 +216,8 @@ function collectionForEntityType(entityType: string): string {
     ATTENDANCE_OPEN_SLOT: 'attendanceOpenSlots',
     ATTENDANCE_CORRECTION: 'attendanceCorrections',
     LEAVE_REQUEST: 'leaveRequests',
+    LEAVE_BALANCE: 'leaveBalances',
+    LEAVE_CALENDAR: 'leaveCalendars',
     RESOURCE_MASTER: 'resources',
     HOSPITAL_ROOM: 'rooms',
     HOSPITAL_BED: 'beds',

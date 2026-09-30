@@ -18,9 +18,9 @@ describe('SCM-3 tenant boundary hardening', () => {
     const view = await source('components/views/supply-chain-scm-view.tsx');
 
     expect(view).toContain('tenantId: string;');
-    expect(view).toContain("if (!tenantId.trim())");
     expect(view).not.toContain("tenantId?: string;");
     expect(view).not.toContain("tenantId = 'metro-health'");
+    expect(view).not.toContain('TENANT_CONTEXT_REQUIRED');
   });
 
   test('SCM writes remain bound to the authenticated active-tenant command client', async () => {

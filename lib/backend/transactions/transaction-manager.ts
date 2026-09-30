@@ -322,6 +322,18 @@ export class TransactionManager {
     this.inMemoryOutboxStore=[];
   }
 
+  public static seedEphemeralStateForTesting(
+    tenantId:string,
+    entityType:string,
+    entityId:string,
+    value:unknown
+  ):void{
+    if(!canUseEphemeralPersistence()){
+      throw new Error('EPHEMERAL_STATE_SEED_FORBIDDEN_OUTSIDE_TEST_OR_DEMO');
+    }
+    this.setEphemeralState(tenantId,entityType,entityId,value);
+  }
+
   private static buildRecords(params: {
     tenantId: string;
     actorId: string;

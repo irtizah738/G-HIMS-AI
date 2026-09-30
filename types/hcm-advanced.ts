@@ -637,6 +637,110 @@ export interface CompensationStructure {
   createdAt: string;
 }
 
+export type CompensationPayBasis = 'SALARIED' | 'HOURLY';
+
+export interface CompensationProfileRecord {
+  compensationId: string;
+  tenantId: string;
+  employeeId: string;
+  payBasis: CompensationPayBasis;
+  currency: string;
+  annualSalaryMinorUnits: number;
+  hourlyRateMinorUnits: number;
+  overtimeMultiplierBasisPoints: number;
+  monthlyAllowanceMinorUnits: number;
+  deductions: Array<{
+    code: string;
+    name: string;
+    rateBasisPoints: number;
+    fixedMinorUnits: number;
+  }>;
+  effectiveFrom: string;
+  status: 'PENDING_APPROVAL' | 'ACTIVE' | 'REJECTED' | 'SUPERSEDED';
+  createdBy: string;
+  createdAt: string;
+  approvedBy?: string;
+  approvedAt?: string;
+}
+
+export interface CompensationSlotRecord {
+  slotId: string;
+  tenantId: string;
+  employeeId: string;
+  activeCompensationId?: string;
+  pendingCompensationId?: string;
+  revision: number;
+  updatedAt: string;
+}
+
+export interface PayrollPeriodRecord {
+  periodId: string;
+  tenantId: string;
+  facilityId: string;
+  periodNumber: string;
+  periodName: string;
+  startDate: string;
+  endDate: string;
+  paymentDate: string;
+  currency: string;
+  status: 'OPEN' | 'CALCULATING' | 'CALCULATED' | 'POSTED' | 'PAID' | 'VOID';
+  enrolledCount: number;
+  calculatedCount: number;
+  totalRegularMinorUnits: number;
+  totalOvertimeMinorUnits: number;
+  totalAllowanceMinorUnits: number;
+  totalGrossMinorUnits: number;
+  totalDeductionsMinorUnits: number;
+  totalNetMinorUnits: number;
+  expenseByCostCenterMinorUnits: Record<string, number>;
+  financeJournalId?: string;
+  settlementJournalId?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PayrollEmployeeSlotRecord {
+  slotId: string;
+  tenantId: string;
+  periodId: string;
+  employeeId: string;
+  compensationId: string;
+  compensationRevision: number;
+  status: 'PENDING' | 'CALCULATED' | 'EXCLUDED';
+  payslipId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PayrollPayslipRecord {
+  payslipId: string;
+  tenantId: string;
+  periodId: string;
+  employeeId: string;
+  employeeNumber: string;
+  employeeName: string;
+  departmentId: string;
+  departmentName: string;
+  currency: string;
+  regularHours: number;
+  overtimeHours: number;
+  regularPayMinorUnits: number;
+  overtimePayMinorUnits: number;
+  allowanceMinorUnits: number;
+  grossPayMinorUnits: number;
+  deductions: Array<{
+    code: string;
+    name: string;
+    amountMinorUnits: number;
+  }>;
+  totalDeductionsMinorUnits: number;
+  netPayMinorUnits: number;
+  attendanceFingerprint: string;
+  calculatedAt: string;
+  calculatedBy: string;
+}
+
 export interface PayrollExportPayload {
   tenantId: string;
   periodStart: string;

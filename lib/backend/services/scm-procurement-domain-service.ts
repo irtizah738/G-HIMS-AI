@@ -872,8 +872,18 @@ export class ScmProcurementDomainService {
         actorRole: context.roles[0] || 'AUTHENTICATED_USER',
         aggregateType: 'GOODS_RECEIPT_NOTE',
         aggregateId: payload.grnId,
-        eventType: 'GRN_INSPECTED_ACCEPTED',
-        auditAction: 'GRN_INSPECTED_ACCEPTED',
+        eventType:
+          payload.inspectionStatus === 'FAILED'
+            ? 'GRN_INSPECTION_FAILED'
+            : payload.inspectionStatus === 'QUARANTINED'
+              ? 'GRN_QUARANTINED'
+              : 'GRN_RECORDED',
+        auditAction:
+          payload.inspectionStatus === 'FAILED'
+            ? 'GRN_INSPECTION_FAILED'
+            : payload.inspectionStatus === 'QUARANTINED'
+              ? 'GRN_QUARANTINED'
+              : 'GRN_RECORDED',
         auditResourceType: 'GOODS_RECEIPT_NOTE',
         auditResourceId: payload.grnId,
         outboxTopic: 'g-hims-scm-events',
@@ -1294,7 +1304,9 @@ export class ScmProcurementDomainService {
             const poLineIndex = nextPoLines.findIndex(
               (candidate) => candidate.itemId === line.itemId
             );
-            const newReceived = alreadyReceived + received;
+            // Only accepted quantity fulfils the purchase commitment.
+            // Rejected/damaged units remain open for replacement or supplier credit.
+            const newReceived = alreadyReceived + accepted;
             nextPoLines[poLineIndex] = {
               ...nextPoLines[poLineIndex],
               quantityReceived: newReceived,
@@ -1376,7 +1388,11 @@ export class ScmProcurementDomainService {
             inspectionStatus: payload.inspectionStatus,
             inspectorName: context.actorId,
             inspectedAt: now,
-            status: 'PUTAWAY_COMPLETED',
+            status:
+              payload.inspectionStatus === 'FAILED' ||
+              payload.inspectionStatus === 'QUARANTINED'
+                ? 'INSPECTED'
+                : 'PUTAWAY_COMPLETED',
             notes: payload.notes,
             createdAt: now,
             updatedAt: now,

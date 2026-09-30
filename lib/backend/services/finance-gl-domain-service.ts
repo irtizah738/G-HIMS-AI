@@ -471,9 +471,9 @@ export class FinanceGlDomainService {
         prepare: (current) => {
           const period = current.period as unknown as FinancePeriodRecord;
           const allowed: Record<string, string[]> = {
-            OPEN: ['SOFT_CLOSE', 'CLOSED'],
-            SOFT_CLOSE: ['OPEN', 'CLOSED'],
-            CLOSED: ['LOCKED'],
+            OPEN: ['SOFT_CLOSE'],
+            SOFT_CLOSE: ['OPEN'],
+            CLOSED: [],
             LOCKED: [],
           };
           if (!(allowed[period.status] || []).includes(payload.nextStatus)) {

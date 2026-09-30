@@ -4,6 +4,7 @@ import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient36
 import { assertPatient360ReadAccess } from '@/lib/clinical/patient360/patient360-access';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import { DischargeReadinessService } from '@/lib/clinical/intelligence/discharge-readiness-service';
+import { ClinicalDeteriorationService } from '@/lib/clinical/intelligence/clinical-deterioration-service';
 
 interface RouteContext {
   params: Promise<{ patientId: string }>;
@@ -70,11 +71,16 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
       );
     }
 
-    const dischargeReadiness =
-      await DischargeReadinessService.getForPatient(
+    const [dischargeReadiness, deterioration] = await Promise.all([
+      DischargeReadinessService.getForPatient(
         context.tenantId,
         normalizedPatientId
-      );
+      ),
+      ClinicalDeteriorationService.getForPatient(
+        context.tenantId,
+        normalizedPatientId
+      ),
+    ]);
 
     return NextResponse.json(
       {
@@ -84,6 +90,7 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
         projection,
         timeline,
         dischargeReadiness,
+        deterioration,
         freshness: {
           projectionVersion: projection.projectionVersion,
           revision: projection.revision,

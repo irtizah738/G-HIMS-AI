@@ -7,6 +7,110 @@ import { AuthorizationContext } from '@/lib/auth/auth-types';
 import { AuthError } from '@/lib/auth/auth-errors';
 import { VerifiedTokenResult } from './verify-token';
 import { getTenantMembership } from './tenant-membership';
+import { getAdminFirestore } from '@/server/firebase/admin';
+import type {
+  ClinicalPrivilege,
+  EmployeeCredential,
+  EmployeeMaster,
+} from '@/types/hcm-advanced';
+
+function isClinicalRole(roles:string[]):boolean{
+  const clinical=new Set([
+    'doctor','physician','surgeon','nurse','pharmacist','radiologist',
+    'anesthesiologist','lab_tech','labtechnician'
+  ]);
+  return roles.some(role=>clinical.has(role.toLowerCase()));
+}
+
+function mapHcmPrivilegeToAuthorization(privilege:ClinicalPrivilege['privilegeType']):string[]{
+  const map:Record<ClinicalPrivilege['privilegeType'],string[]>={
+    CONSULT_OPD:['CONSULT_OPD'],
+    PRESCRIBE_MEDICATION:['PRESCRIBE_MEDICATION','ORDER_MEDICATIONS','SIGN_PRESCRIPTIONS'],
+    PERFORM_GENERAL_SURGERY:['PERFORM_GENERAL_SURGERY','PERFORM_PROCEDURES'],
+    PERFORM_CARDIOTHORACIC_SURGERY:['PERFORM_CARDIOTHORACIC_SURGERY','PERFORM_PROCEDURES'],
+    ADMINISTER_ANESTHESIA:['ADMINISTER_ANESTHESIA','PERFORM_PROCEDURES'],
+    ORDER_HIGH_COMPLEXITY_LAB:['ORDER_HIGH_COMPLEXITY_LAB','ORDER_LAB','ORDER_DIAGNOSTICS'],
+    APPROVE_LAB_RESULTS:['APPROVE_LAB_RESULTS'],
+    INTERPRET_RADIOLOGY_CT_MRI:['INTERPRET_RADIOLOGY_CT_MRI','ORDER_RADIOLOGY'],
+    SIGN_DEATH_CERTIFICATE:['SIGN_DEATH_CERTIFICATE','SIGN_CLINICAL_NOTES'],
+    PERFORM_INVASIVE_PROCEDURES:['PERFORM_INVASIVE_PROCEDURES','PERFORM_PROCEDURES'],
+    SIGN_SOAP_CLINICAL_NOTE:['SIGN_SOAP_CLINICAL_NOTE','SIGN_CLINICAL_NOTES'],
+  };
+  return map[privilege]||[privilege];
+}
+
+async function resolveCredentialGatedPrivileges(params:{
+  tenantId:string;
+  userId:string;
+  email:string;
+  roles:string[];
+  facilityIds:string[];
+  departmentIds:string[];
+}):Promise<string[]>{
+  if(!isClinicalRole(params.roles)) return [];
+  const db=getAdminFirestore();
+  if(!db) return [];
+
+  const tenantRef=db.collection('tenants').doc(params.tenantId);
+  let employee:EmployeeMaster|undefined;
+
+  const byUser=await tenantRef.collection('employees')
+    .where('userId','==',params.userId).limit(2).get();
+  if(byUser.size===1){
+    employee=byUser.docs[0].data() as EmployeeMaster;
+  }else if(byUser.size>1){
+    return [];
+  }
+
+  if(!employee && params.email){
+    const normalizedEmail=params.email.trim().toLowerCase();
+    const byEmail=await tenantRef.collection('employees')
+      .where('personalInfo.contactEmail','==',normalizedEmail).limit(2).get();
+    if(byEmail.size===1){
+      employee=byEmail.docs[0].data() as EmployeeMaster;
+    }else if(byEmail.size>1){
+      return [];
+    }
+  }
+
+  if(!employee || employee.employmentStatus!=='ACTIVE') return [];
+
+  const [credentialSnap,privilegeSnap]=await Promise.all([
+    tenantRef.collection('clinicalCredentials')
+      .where('employeeId','==',employee.employeeId).get(),
+    tenantRef.collection('clinicalPrivileges')
+      .where('employeeId','==',employee.employeeId).get(),
+  ]);
+  const credentials=credentialSnap.docs.map(doc=>doc.data() as EmployeeCredential);
+  const privileges=privilegeSnap.docs.map(doc=>doc.data() as ClinicalPrivilege);
+  const today=new Date().toISOString().slice(0,10);
+
+  const mandatory=credentials.filter(credential=>credential.isMandatoryForPractice);
+  if(
+    mandatory.length===0 ||
+    mandatory.some(credential=>
+      credential.verificationStatus!=='VERIFIED' ||
+      !credential.expiryDate ||
+      credential.expiryDate<today
+    )
+  ) return [];
+
+  const facilityScope=new Set(params.facilityIds);
+  const departmentScope=new Set(params.departmentIds);
+  const effective=new Set<string>();
+  for(const privilege of privileges){
+    if(
+      privilege.status!=='GRANTED' ||
+      privilege.effectiveFrom>today ||
+      privilege.effectiveUntil<today
+    ) continue;
+    if(facilityScope.size>0&&!facilityScope.has(privilege.facilityId)) continue;
+    if(departmentScope.size>0&&!departmentScope.has(privilege.departmentId)) continue;
+    mapHcmPrivilegeToAuthorization(privilege.privilegeType)
+      .forEach(value=>effective.add(value));
+  }
+  return [...effective];
+}
 
 export async function resolveAuthorizationContext(
   verifiedToken: VerifiedTokenResult,
@@ -58,6 +162,15 @@ export async function resolveAuthorizationContext(
     });
   }
 
+  const clinicalPrivileges=await resolveCredentialGatedPrivileges({
+    tenantId:membership.tenantId,
+    userId:verifiedToken.uid,
+    email:verifiedToken.email,
+    roles:membership.roles,
+    facilityIds:membership.facilityIds,
+    departmentIds:membership.departmentIds,
+  });
+
   return {
     uid: verifiedToken.uid,
     email: verifiedToken.email,
@@ -66,7 +179,7 @@ export async function resolveAuthorizationContext(
     permissions: membership.permissions,
     departmentIds: membership.departmentIds,
     facilityIds: membership.facilityIds,
-    clinicalPrivileges: membership.clinicalPrivileges,
+    clinicalPrivileges,
     accountStatus: membership.status,
     sessionId: sessionId || '',
     deviceId,

@@ -656,6 +656,7 @@ export interface CompensationProfileRecord {
     name: string;
     rateBasisPoints: number;
     fixedMinorUnits: number;
+    liabilityAccountCode?: string;
   }>;
   effectiveFrom: string;
   status: 'PENDING_APPROVAL' | 'ACTIVE' | 'REJECTED' | 'SUPERSEDED';
@@ -686,7 +687,7 @@ export interface PayrollPeriodRecord {
   endDate: string;
   paymentDate: string;
   currency: string;
-  status: 'OPEN' | 'CALCULATING' | 'CALCULATED' | 'POSTED' | 'PAID' | 'VOID';
+  status: 'OPEN' | 'CALCULATING' | 'CALCULATED' | 'APPROVED' | 'POSTED' | 'PAID' | 'VOID';
   enrolledCount: number;
   calculatedCount: number;
   totalRegularMinorUnits: number;
@@ -698,6 +699,15 @@ export interface PayrollPeriodRecord {
   expenseByCostCenterMinorUnits: Record<string, number>;
   financeJournalId?: string;
   settlementJournalId?: string;
+  finalizedBy?: string;
+  finalizedAt?: string;
+  approvedBy?: string;
+  approvedAt?: string;
+  postedBy?: string;
+  postedAt?: string;
+  paidBy?: string;
+  paidAt?: string;
+  settlementReference?: string;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -761,6 +771,7 @@ export interface PayrollPayslipRecord {
     code: string;
     name: string;
     amountMinorUnits: number;
+    liabilityAccountCode?: string;
   }>;
   totalDeductionsMinorUnits: number;
   netPayMinorUnits: number;

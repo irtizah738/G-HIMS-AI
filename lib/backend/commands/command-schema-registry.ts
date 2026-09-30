@@ -1369,6 +1369,172 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       reason: nonEmpty.max(2000),
     }).strict(),
   },
+  RegisterResourceCommand: {
+    1: z.object({
+      resourceNumber: z.string().trim().min(1).max(100).optional(),
+      resourceType: z.enum([
+        'ROOM','BED','MEDICAL_DEVICE','LAB_EQUIPMENT','RADIOLOGY_EQUIPMENT',
+        'SURGICAL_EQUIPMENT','IT_EQUIPMENT','VEHICLE','FURNITURE','OTHER'
+      ]),
+      name: nonEmpty.max(250),
+      facilityId: nonEmpty.max(100),
+      facilityName: z.string().trim().max(200).optional(),
+      departmentId: nonEmpty.max(100),
+      departmentName: z.string().trim().max(200).optional(),
+      ownerDepartmentId: nonEmpty.max(100),
+      ownerDepartmentName: z.string().trim().max(200).optional(),
+      location: z.object({
+        building: nonEmpty.max(200),
+        floor: nonEmpty.max(100),
+        roomNumber: z.string().trim().max(100).optional(),
+        zone: z.string().trim().max(100).optional(),
+      }).strict(),
+      status: z.enum([
+        'AVAILABLE','ALLOCATED','IN_USE','RESERVED','MAINTENANCE',
+        'OUT_OF_SERVICE','LOST','RETIRED'
+      ]),
+      manufacturer: z.string().trim().max(200).optional(),
+      model: z.string().trim().max(200).optional(),
+      serialNumber: z.string().trim().max(200).optional(),
+      assetTagNumber: z.string().trim().max(200).optional(),
+      purchaseDate: z.string().trim().optional(),
+      purchaseCost: z.number().finite().nonnegative().optional(),
+      warrantyExpiry: z.string().trim().optional(),
+      calibrationRequired: z.boolean().optional(),
+      calibrationStatus: z.enum(['VALID','EXPIRING_SOON','CALIBRATION_REQUIRED','FAILED']).optional(),
+      currentCustodianId: z.string().trim().max(100).optional(),
+      currentCustodianName: z.string().trim().max(200).optional(),
+      operatingSpecifications: z.record(z.string(), z.union([z.string(),z.number()])).optional(),
+      acquisitionDate: nonEmpty,
+      lifecycleState: z.enum(['IN_SERVICE','STORAGE','UNDER_REPAIR','DECOMMISSIONED','DISPOSED']),
+    }).strict(),
+  },
+  RegisterRoomCommand: {
+    1: z.object({
+      roomNumber: nonEmpty.max(100),
+      facilityId: nonEmpty.max(100),
+      facilityName: nonEmpty.max(200),
+      building: nonEmpty.max(200),
+      floor: nonEmpty.max(100),
+      departmentId: nonEmpty.max(100),
+      departmentName: nonEmpty.max(200),
+      roomType: z.enum([
+        'consultation','procedure','operating_room','isolation','icu',
+        'meeting','storage','laboratory','imaging'
+      ]),
+      capacity: z.number().int().positive().max(10000),
+      currentOccupancy: z.number().int().nonnegative().max(10000),
+      status: z.enum([
+        'AVAILABLE','ALLOCATED','IN_USE','RESERVED','MAINTENANCE',
+        'OUT_OF_SERVICE','LOST','RETIRED'
+      ]),
+      equipmentIds: z.array(nonEmpty.max(150)).max(500).optional(),
+      bedIds: z.array(nonEmpty.max(150)).max(500).optional(),
+      features: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
+      operatingHours: z.object({
+        openTime: nonEmpty.max(10),
+        closeTime: nonEmpty.max(10),
+        is24x7: z.boolean(),
+      }).strict().optional(),
+    }).strict(),
+  },
+  ReserveResourceCommand: {
+    1: z.object({
+      resourceId: nonEmpty.max(150),
+      resourceName: nonEmpty.max(250),
+      resourceType: z.enum([
+        'ROOM','BED','MEDICAL_DEVICE','LAB_EQUIPMENT','RADIOLOGY_EQUIPMENT',
+        'SURGICAL_EQUIPMENT','IT_EQUIPMENT','VEHICLE','FURNITURE','OTHER'
+      ]),
+      facilityId: nonEmpty.max(100),
+      departmentId: nonEmpty.max(100),
+      startTime: nonEmpty,
+      endTime: nonEmpty,
+      purpose: z.enum([
+        'OPD_CONSULTATION','SURGICAL_PROCEDURE','DIAGNOSTIC_IMAGING','LAB_BATCH',
+        'PREVENTIVE_MAINTENANCE','STAFF_TRAINING','EMERGENCY_HOLD'
+      ]),
+      procedureCode: z.string().trim().max(100).optional(),
+      clinicalEncounterId: z.string().trim().max(150).optional(),
+      patientId: z.string().trim().max(150).optional(),
+      patientName: z.string().trim().max(250).optional(),
+      requesterActorId: z.string().trim().max(150).optional(),
+      requesterName: nonEmpty.max(250),
+      priority: z.enum(['ROUTINE','URGENT','STAT_EMERGENCY']),
+      notes: z.string().trim().max(2000).optional(),
+    }).strict(),
+  },
+  TransferResourceCommand: {
+    1: z.object({
+      resourceId: nonEmpty.max(150),
+      toDepartmentId: nonEmpty.max(100),
+      toDepartmentName: nonEmpty.max(200),
+      toFacilityId: nonEmpty.max(100),
+      toFacilityName: nonEmpty.max(200),
+      toLocation: z.object({
+        building: nonEmpty.max(200),
+        floor: nonEmpty.max(100),
+        roomNumber: nonEmpty.max(100),
+      }).strict(),
+      custodianName: z.string().trim().max(200).optional(),
+      reason: nonEmpty.max(2000),
+    }).strict(),
+  },
+  CreateMaintenanceWorkOrderCommand: {
+    1: z.object({
+      resourceId: nonEmpty.max(150),
+      resourceName: nonEmpty.max(250),
+      resourceType: z.enum([
+        'ROOM','BED','MEDICAL_DEVICE','LAB_EQUIPMENT','RADIOLOGY_EQUIPMENT',
+        'SURGICAL_EQUIPMENT','IT_EQUIPMENT','VEHICLE','FURNITURE','OTHER'
+      ]).optional(),
+      issueDescription: nonEmpty.max(4000),
+      maintenanceType: z.enum(['PREVENTIVE','CORRECTIVE','EMERGENCY_REPAIR']),
+      priority: z.enum(['LOW','MEDIUM','HIGH','CRITICAL_SURGE']),
+      reportedByActorId: z.string().trim().max(150).optional(),
+      reportedByName: nonEmpty.max(250),
+      assignedTechnicianId: z.string().trim().max(150).optional(),
+      assignedTechnicianName: z.string().trim().max(250).optional(),
+      assignedVendorName: z.string().trim().max(250).optional(),
+      partsUsed: z.array(z.object({
+        partNumber: nonEmpty.max(150),
+        partName: nonEmpty.max(250),
+        quantity: z.number().finite().positive(),
+        unitCost: z.number().finite().nonnegative(),
+      }).strict()).max(200).optional(),
+    }).strict(),
+  },
+  CompleteMaintenanceWorkOrderCommand: {
+    1: z.object({
+      workOrderId: nonEmpty.max(150),
+      resolutionSummary: nonEmpty.max(4000),
+      totalCost: z.number().finite().nonnegative(),
+      downtimeHours: z.number().finite().nonnegative(),
+    }).strict(),
+  },
+  RecordCalibrationCommand: {
+    1: z.object({
+      resourceId: nonEmpty.max(150),
+      resourceName: nonEmpty.max(250),
+      model: nonEmpty.max(200),
+      serialNumber: nonEmpty.max(200),
+      calibrationDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      nextDueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      certificateNumber: nonEmpty.max(200),
+      technicianName: nonEmpty.max(250),
+      technicianId: z.string().trim().max(150).optional(),
+      accreditedAgency: z.string().trim().max(250).optional(),
+      result: z.enum(['PASS','FAIL','CONDITIONAL_PASS']),
+      measuredTolerances: z.record(z.string(), z.object({
+        standard: z.number().finite(),
+        measured: z.number().finite(),
+        deviation: z.number().finite(),
+        pass: z.boolean(),
+      }).strict()).optional(),
+      notes: z.string().trim().max(4000).optional(),
+      documentReference: z.string().trim().max(1000).optional(),
+    }).strict(),
+  },
   RecordVitalsCommand: {
     1: z.object({
       patientId: nonEmpty,

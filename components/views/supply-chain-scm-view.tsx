@@ -306,7 +306,9 @@ export function SupplyChainScmView({ tenantId = 'metro-health' }: SupplyChainScm
           itemName: targetItem.name,
           requestedQuantity: reqQuantity,
           uom: targetItem.unitOfMeasure,
-          currentStock: 10,
+          currentStock: balances
+            .filter((balance) => balance.itemId === targetItem.itemId)
+            .reduce((sum, balance) => sum + balance.available, 0),
           reorderPoint: targetItem.reorderPoint,
           suggestedQuantity: targetItem.reorderQuantity || reqQuantity,
           estimatedUnitCost: targetItem.unitCost,
@@ -345,9 +347,23 @@ export function SupplyChainScmView({ tenantId = 'metro-health' }: SupplyChainScm
   const handleExecuteStockIssue = async () => {
     if (!issueItem || issueQty <= 0) return;
 
-    const availableItemBatches = batches.filter(
-      (b) => b.itemId === issueItem.itemId && b.status === 'AVAILABLE'
-    );
+    const sourceLocationId = 'loc-pharmacy-main';
+    const availableItemBatches = batches
+      .filter((b) => b.itemId === issueItem.itemId && b.status === 'AVAILABLE')
+      .map((batch) => {
+        const sourceBalance = balances.find(
+          (balance) =>
+            balance.itemId === issueItem.itemId &&
+            balance.batchId === batch.batchId &&
+            balance.locationId === sourceLocationId
+        );
+        return {
+          ...batch,
+          quantityRemaining: sourceBalance?.onHand || 0,
+          quantityReserved: sourceBalance?.reserved || 0,
+        };
+      })
+      .filter((batch) => batch.quantityRemaining > 0);
     const fefoResult = allocateFefoBatches(availableItemBatches, issueQty);
 
     if (fefoResult.allocations.length === 0) {
@@ -361,7 +377,13 @@ export function SupplyChainScmView({ tenantId = 'metro-health' }: SupplyChainScm
       await recordStockTransactionEdge({
         transactionId: txnId,
         tenantId,
-        facilityId: 'FAC-MAIN',
+        facilityId:
+          balances.find(
+            (balance) =>
+              balance.itemId === issueItem.itemId &&
+              balance.batchId === alloc.batchId &&
+              balance.locationId === sourceLocationId
+          )?.facilityId || 'FAC-MAIN',
         itemId: issueItem.itemId,
         itemCode: issueItem.itemCode,
         itemName: issueItem.name,
@@ -369,17 +391,17 @@ export function SupplyChainScmView({ tenantId = 'metro-health' }: SupplyChainScm
         batchNumber: alloc.batchNumber,
         manufactureDate: targetBatch?.manufactureDate,
         expirationDate: alloc.expiryDate,
-        fromLocationId: 'loc-pharmacy-main',
+        fromLocationId: sourceLocationId,
         fromLocationName: 'Inpatient Central Pharmacy',
         toLocationId: 'loc-icu-hub',
         toLocationName: issueRecipient,
         quantity: alloc.allocatedQty,
-        uom: issueItem.unitOfMeasure,
+        uom: issueItem.stockUOM || issueItem.unitOfMeasure,
         normalizedQuantity: alloc.allocatedQty,
         unitCost: issueItem.unitCost,
         totalCost: issueItem.unitCost * alloc.allocatedQty,
         currency: 'USD',
-        transactionType: 'ISSUE',
+        transactionType: 'TRANSFER_OUT',
         referenceType: 'INTERNAL_REQUEST',
         referenceId: `REQ-${Date.now()}`,
         performedBy: {

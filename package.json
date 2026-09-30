@@ -77,7 +77,10 @@
     "test:scm6": "bun test tests/scm6-supplier-contracts.test.ts",
     "validate:scm6": "bun run typecheck && bun run lint && bun run test:scm1 && bun run test:scm2 && bun run test:scm3 && bun run test:scm4 && bun run test:scm5 && bun run test:scm6 && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",
     "test:scm7": "bun test tests/scm7-demand-replenishment.test.ts",
-    "validate:scm7": "bun run typecheck && bun run lint && bun run test:scm1 && bun run test:scm2 && bun run test:scm3 && bun run test:scm4 && bun run test:scm5 && bun run test:scm6 && bun run test:scm7 && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build"
+    "validate:scm7": "bun run typecheck && bun run lint && bun run test:scm1 && bun run test:scm2 && bun run test:scm3 && bun run test:scm4 && bun run test:scm5 && bun run test:scm6 && bun run test:scm7 && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",
+    "test:scm8": "bun test tests/scm8-recall-disposal.test.ts",
+    "validate:scm8": "bun run typecheck && bun run lint && bun run test:scm1 && bun run test:scm2 && bun run test:scm3 && bun run test:scm4 && bun run test:scm5 && bun run test:scm6 && bun run test:scm7 && bun run test:scm8 && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",
+    "ops:scm8:provision-finance": "bun scripts/ops/scm8-provision-return-clearing-account.ts"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

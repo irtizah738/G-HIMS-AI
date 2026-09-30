@@ -1,0 +1,29 @@
+name: One-Time HCM Redundant Branch Cleanup
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  delete-redundant-hcm-branch:
+    name: Delete redundant HCM branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Delete redundant branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch="hcm/hcm1-workforce-trust-boundary"
+          if git ls-remote --exit-code --heads origin "refs/heads/${branch}" >/dev/null 2>&1; then
+            git push origin --delete "${branch}"
+          else
+            echo "Already absent: ${branch}"
+          fi

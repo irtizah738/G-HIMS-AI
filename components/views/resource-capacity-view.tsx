@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import {
   Boxes,
@@ -42,7 +42,11 @@ import {
   OperationalMatchRequest,
   OperationalMatchResult,
 } from '@/types/resource-management';
-import { executeCommand } from '@/lib/api/command-client';
+import {
+  hydrateFacilitiesProjection,
+  loadLocalFacilitiesProjection,
+  recordCalibrationEdge,
+} from '@/lib/facilities/facilities-edge-adapter';
 
 export function ResourceCapacityView() {
   const params = useParams<{ tenantId: string }>();
@@ -69,257 +73,55 @@ export function ResourceCapacityView() {
   const [matchServiceType, setMatchServiceType] = useState<'OPD' | 'OT_SURGERY' | 'EMERGENCY_SURGE'>('OT_SURGERY');
   const [matchResult, setMatchResult] = useState<OperationalMatchResult | null>(null);
 
-  // Sample Master Datasets
-  const [resources, setResources] = useState<ResourceMaster[]>([
-    {
-      resourceId: 'res_001',
-      resourceNumber: 'RES-MED-4029',
-      resourceType: 'MEDICAL_DEVICE',
-      name: 'GE Healthcare Aisys CS2 Anesthesia Delivery Workstation',
-      facilityId: 'fac_central',
-      facilityName: 'Central Metro Hospital',
-      departmentId: 'dept_surgery',
-      departmentName: 'Surgical Theaters',
-      ownerDepartmentId: 'dept_surgery',
-      location: { building: 'Surgical Pavilion', floor: 'Floor 3', roomNumber: 'OR-01' },
-      status: 'AVAILABLE',
-      manufacturer: 'GE Healthcare',
-      model: 'Aisys CS2',
-      serialNumber: 'GE-ANE-98412',
-      assetTagNumber: 'TAG-84920',
-      calibrationRequired: true,
-      calibrationStatus: 'VALID',
-      lastCalibrationDate: '2025-11-10',
-      nextCalibrationDate: '2026-11-10',
-      calibrationCertificateNumber: 'CAL-2025-9941',
-      currentCustodianName: 'Dr. Elena Rostova (Chief Surgeon)',
-      acquisitionDate: '2023-05-15',
-      lifecycleState: 'IN_SERVICE',
-      createdAt: '2023-05-15T00:00:00Z',
-      updatedAt: '2026-02-01T00:00:00Z',
-    },
-    {
-      resourceId: 'res_002',
-      resourceNumber: 'RES-SUR-8102',
-      resourceType: 'SURGICAL_EQUIPMENT',
-      name: 'Intuitive da Vinci Xi Surgical Robotic Console',
-      facilityId: 'fac_central',
-      departmentId: 'dept_surgery',
-      departmentName: 'Surgical Theaters',
-      ownerDepartmentId: 'dept_surgery',
-      location: { building: 'Surgical Pavilion', floor: 'Floor 3', roomNumber: 'OR-03' },
-      status: 'IN_USE',
-      manufacturer: 'Intuitive Surgical',
-      model: 'da Vinci Xi',
-      serialNumber: 'IS-XI-78401',
-      assetTagNumber: 'TAG-39201',
-      calibrationRequired: true,
-      calibrationStatus: 'VALID',
-      lastCalibrationDate: '2026-01-15',
-      nextCalibrationDate: '2026-07-15',
-      currentCustodianName: 'Dr. Elena Rostova',
-      acquisitionDate: '2022-09-10',
-      lifecycleState: 'IN_SERVICE',
-      createdAt: '2022-09-10T00:00:00Z',
-      updatedAt: '2026-03-01T00:00:00Z',
-    },
-    {
-      resourceId: 'res_003',
-      resourceNumber: 'RES-RAD-1920',
-      resourceType: 'RADIOLOGY_EQUIPMENT',
-      name: 'Siemens SOMATOM Force Dual-Source CT Scanner',
-      facilityId: 'fac_central',
-      departmentId: 'dept_radiology',
-      departmentName: 'Diagnostic Imaging',
-      ownerDepartmentId: 'dept_radiology',
-      location: { building: 'Diagnostic Wing', floor: 'Ground Floor', roomNumber: 'RAD-CT-02' },
-      status: 'AVAILABLE',
-      manufacturer: 'Siemens Healthineers',
-      model: 'SOMATOM Force',
-      serialNumber: 'SIEM-CT-5510',
-      assetTagNumber: 'TAG-10492',
-      calibrationRequired: true,
-      calibrationStatus: 'CALIBRATION_REQUIRED', // Requires calibration!
-      lastCalibrationDate: '2025-02-15',
-      nextCalibrationDate: '2026-02-15', // Past due
-      acquisitionDate: '2021-08-01',
-      lifecycleState: 'UNDER_REPAIR',
-      createdAt: '2021-08-01T00:00:00Z',
-      updatedAt: '2026-02-20T00:00:00Z',
-    },
-    {
-      resourceId: 'res_004',
-      resourceNumber: 'RES-LAB-3891',
-      resourceType: 'LAB_EQUIPMENT',
-      name: 'Roche Cobas 8000 Clinical Chemistry Analyzer',
-      facilityId: 'fac_central',
-      departmentId: 'dept_laboratory',
-      departmentName: 'Central Diagnostic Lab',
-      ownerDepartmentId: 'dept_laboratory',
-      location: { building: 'Diagnostic Wing', floor: 'Floor 2', roomNumber: 'LAB-204' },
-      status: 'AVAILABLE',
-      manufacturer: 'Roche Diagnostics',
-      model: 'Cobas 8000',
-      serialNumber: 'RCH-8000-4819',
-      assetTagNumber: 'TAG-59201',
-      calibrationRequired: true,
-      calibrationStatus: 'VALID',
-      lastCalibrationDate: '2026-02-01',
-      nextCalibrationDate: '2026-08-01',
-      acquisitionDate: '2023-01-20',
-      lifecycleState: 'IN_SERVICE',
-      createdAt: '2023-01-20T00:00:00Z',
-      updatedAt: '2026-02-01T00:00:00Z',
-    },
-  ]);
+  // Tenant-scoped authoritative projections. No demo resource state is embedded in the UI.
+  const [resources, setResources] = useState<ResourceMaster[]>([]);
+  const [rooms, setRooms] = useState<HospitalRoom[]>([]);
+  const [transfers] = useState<ResourceTransferRecord[]>([]);
+  const [workOrders, setWorkOrders] = useState<MaintenanceWorkOrder[]>([]);
+  const [calibrations, setCalibrations] = useState<CalibrationRecord[]>([]);
+  const [reservations, setReservations] = useState<ResourceReservation[]>([]);
+  const [loadingProjection, setLoadingProjection] = useState(true);
 
-  const [rooms, setRooms] = useState<HospitalRoom[]>([
-    {
-      roomId: 'rm_001',
-      roomNumber: 'OR-01',
-      facilityId: 'fac_central',
-      facilityName: 'Central Metro Hospital',
-      building: 'Surgical Pavilion',
-      floor: 'Floor 3',
-      departmentId: 'dept_surgery',
-      departmentName: 'Surgical Theaters',
-      roomType: 'operating_room',
-      capacity: 1,
-      currentOccupancy: 0,
-      status: 'AVAILABLE',
-      features: ['Laminar Flow', 'HEPA Filtration', 'Negative Pressure', 'Central Gas Outlets'],
-      createdAt: '2024-01-01T00:00:00Z',
-      updatedAt: '2026-03-01T00:00:00Z',
-    },
-    {
-      roomId: 'rm_002',
-      roomNumber: 'OR-03 (Robotics)',
-      facilityId: 'fac_central',
-      facilityName: 'Central Metro Hospital',
-      building: 'Surgical Pavilion',
-      floor: 'Floor 3',
-      departmentId: 'dept_surgery',
-      departmentName: 'Surgical Theaters',
-      roomType: 'operating_room',
-      capacity: 1,
-      currentOccupancy: 1,
-      status: 'IN_USE',
-      features: ['Robotic Arms Docking', 'HD Surgical Monitors', 'Laminar Airflow'],
-      createdAt: '2024-01-01T00:00:00Z',
-      updatedAt: '2026-03-01T00:00:00Z',
-    },
-    {
-      roomId: 'rm_003',
-      roomNumber: 'CONS-CARD-104',
-      facilityId: 'fac_central',
-      facilityName: 'Central Metro Hospital',
-      building: 'Outpatient Pavilion',
-      floor: 'Floor 1',
-      departmentId: 'dept_cardiology',
-      departmentName: 'Cardiology Outpatient',
-      roomType: 'consultation',
-      capacity: 1,
-      currentOccupancy: 0,
-      status: 'AVAILABLE',
-      features: ['12-Lead ECG Machine', 'Echocardiography Station', 'Examination Couch'],
-      createdAt: '2024-01-01T00:00:00Z',
-      updatedAt: '2026-03-01T00:00:00Z',
-    },
-  ]);
+  const applyProjection = (
+    projection: Awaited<ReturnType<typeof loadLocalFacilitiesProjection>>
+  ) => {
+    setResources(projection.resources);
+    setRooms(projection.rooms);
+    setWorkOrders(projection.workOrders);
+    setCalibrations(projection.calibrations);
+    setReservations(projection.reservations);
+  };
 
-  const [transfers, setTransfers] = useState<ResourceTransferRecord[]>([
-    {
-      transferId: 'trf_001',
-      resourceId: 'res_001',
-      resourceName: 'GE Anesthesia Delivery CS2',
-      sourceDepartmentId: 'dept_surgery',
-      sourceDepartmentName: 'Surgical Theaters',
-      destinationDepartmentId: 'dept_emergency',
-      destinationDepartmentName: 'Emergency Trauma Care',
-      sourceFacilityId: 'fac_central',
-      destinationFacilityId: 'fac_central',
-      requestedBy: 'usr_er_lead',
-      requestedByName: 'Dr. Michael Chang',
-      transferredAt: '2026-02-28T10:00:00Z',
-      reason: 'Temporary surge capacity support during multi-vehicle collision trauma response',
-      status: 'COMPLETED',
-      transferChecklistVerified: true,
-      createdAt: '2026-02-28T10:00:00Z',
-    },
-  ]);
+  const refreshProjection = async () => {
+    if (!tenantId) {
+      setActionMessage({
+        text: 'TENANT_CONTEXT_REQUIRED: Facilities requires an explicit tenant route.',
+        type: 'error',
+      });
+      setLoadingProjection(false);
+      return;
+    }
+    setLoadingProjection(true);
+    try {
+      applyProjection(await loadLocalFacilitiesProjection(tenantId));
+      applyProjection(await hydrateFacilitiesProjection(tenantId));
+    } catch (error) {
+      setActionMessage({
+        text:
+          error instanceof Error
+            ? error.message
+            : 'Failed to load authoritative facilities projection.',
+        type: 'error',
+      });
+    } finally {
+      setLoadingProjection(false);
+    }
+  };
 
-  const [workOrders, setWorkOrders] = useState<MaintenanceWorkOrder[]>([
-    {
-      workOrderId: 'wo_001',
-      workOrderNumber: 'WO-2026-4819',
-      resourceId: 'res_003',
-      resourceName: 'Siemens SOMATOM Force CT Scanner',
-      resourceType: 'RADIOLOGY_EQUIPMENT',
-      issueDescription: 'X-ray tube calibration drift exceeding ±2.5% tolerance threshold',
-      maintenanceType: 'CORRECTIVE',
-      priority: 'HIGH',
-      reportedByActorId: 'usr_rad_lead',
-      reportedByName: 'Radiology Chief Tech',
-      assignedTechnicianName: 'Siemens Certified Field Specialist',
-      status: 'IN_PROGRESS',
-      openedAt: '2026-02-27T08:00:00Z',
-      createdAt: '2026-02-27T08:00:00Z',
-      updatedAt: '2026-03-01T09:00:00Z',
-    },
-  ]);
-
-  const [calibrations, setCalibrations] = useState<CalibrationRecord[]>([
-    {
-      calibrationId: 'cal_001',
-      resourceId: 'res_001',
-      resourceName: 'GE Healthcare Aisys CS2 Anesthesia',
-      model: 'Aisys CS2',
-      serialNumber: 'GE-ANE-98412',
-      calibrationDate: '2025-11-10',
-      nextDueDate: '2026-11-10',
-      certificateNumber: 'CAL-2025-9941',
-      technicianName: 'Biomedical Inspection Agency',
-      result: 'PASS',
-      status: 'VALID',
-      createdAt: '2025-11-10T00:00:00Z',
-    },
-    {
-      calibrationId: 'cal_002',
-      resourceId: 'res_003',
-      resourceName: 'Siemens SOMATOM Force CT Scanner',
-      model: 'SOMATOM Force',
-      serialNumber: 'SIEM-CT-5510',
-      calibrationDate: '2025-02-15',
-      nextDueDate: '2026-02-15', // Expired
-      certificateNumber: 'CAL-2025-1049',
-      technicianName: 'Siemens Service Team',
-      result: 'FAIL',
-      status: 'CALIBRATION_REQUIRED',
-      createdAt: '2025-02-15T00:00:00Z',
-    },
-  ]);
-
-  const [reservations, setReservations] = useState<ResourceReservation[]>([
-    {
-      reservationId: 'resv_001',
-      resourceId: 'rm_002',
-      resourceName: 'Operating Theater OR-03',
-      resourceType: 'ROOM',
-      facilityId: 'fac_central',
-      departmentId: 'dept_surgery',
-      startTime: `${new Date().toISOString().split('T')[0]}T08:00:00Z`,
-      endTime: `${new Date().toISOString().split('T')[0]}T14:00:00Z`,
-      purpose: 'SURGICAL_PROCEDURE',
-      procedureCode: 'CPT-33533 (Coronary Artery Bypass)',
-      patientName: 'Robert Langdon (MRN-84920)',
-      requesterActorId: 'usr_surgeon',
-      requesterName: 'Dr. Elena Rostova, MD',
-      priority: 'URGENT',
-      status: 'IN_USE',
-      createdAt: '2026-03-01T06:00:00Z',
-      updatedAt: '2026-03-01T08:00:00Z',
-    },
-  ]);
+  useEffect(() => {
+    void refreshProjection();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantId]);
 
   // Aggregate Metrics
   const totalAssets = resources.length;
@@ -368,10 +170,8 @@ export function ResourceCapacityView() {
         throw new Error('Tenant context is required.');
       }
 
-      const result = await executeCommand({
-        tenantId,
-        commandType: 'RecordCalibrationCommand',
-        payload: {
+      await recordCalibrationEdge(
+        {
           resourceId: resource.resourceId,
           resourceName: resource.name,
           model: resource.model || 'Standard',
@@ -382,27 +182,13 @@ export function ResourceCapacityView() {
           technicianName: 'Lead Biomedical Engineer',
           result: 'PASS',
         },
+        `calibration:${resource.resourceId}:${certNumber}`
+      );
+      await refreshProjection();
+      setActionMessage({
+        text: `Biomedical calibration validated for ${resource.name}. Asset returned to clinical service!`,
+        type: 'success',
       });
-
-      if (result.success) {
-        setResources((prev) =>
-          prev.map((r) =>
-            r.resourceId === resource.resourceId
-              ? {
-                  ...r,
-                  calibrationStatus: 'VALID',
-                  status: 'AVAILABLE',
-                  nextCalibrationDate: nextYear,
-                  calibrationCertificateNumber: certNumber,
-                }
-              : r
-          )
-        );
-        setActionMessage({
-          text: `Biomedical calibration validated for ${resource.name}. Asset returned to clinical service!`,
-          type: 'success',
-        });
-      }
     } catch (e: any) {
       setActionMessage({ text: e.message || 'Calibration failed', type: 'error' });
     }
@@ -458,6 +244,10 @@ export function ResourceCapacityView() {
             ×
           </button>
         </div>
+      )}
+
+      {loadingProjection && (
+        <div className="text-xs text-slate-500">Refreshing authoritative facility/resource state…</div>
       )}
 
       {/* Real-time KPI Summary */}

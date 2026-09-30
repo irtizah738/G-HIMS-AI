@@ -577,6 +577,12 @@ service cloud.firestore {
         allow read: if canReadAudit(tenantId);
         allow write: if false;
       }
+      match /credentialIdentities/{id} {
+        allow read, write: if false;
+      }
+      match /clinicalPrivilegeSlots/{id} {
+        allow read, write: if false;
+      }
       match /rosterAssignments/{id} {
         allow read: if canReadAudit(tenantId);
         allow write: if false;

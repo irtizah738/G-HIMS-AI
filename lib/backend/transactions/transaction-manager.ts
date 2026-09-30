@@ -213,6 +213,8 @@ function collectionForEntityType(entityType: string): string {
     ROSTER_TIMELINE: 'rosterTimelines',
     ROSTER_SWAP: 'rosterSwaps',
     ATTENDANCE_RECORD: 'attendanceRecords',
+    ATTENDANCE_OPEN_SLOT: 'attendanceOpenSlots',
+    ATTENDANCE_CORRECTION: 'attendanceCorrections',
     LEAVE_REQUEST: 'leaveRequests',
     RESOURCE_MASTER: 'resources',
     HOSPITAL_ROOM: 'rooms',

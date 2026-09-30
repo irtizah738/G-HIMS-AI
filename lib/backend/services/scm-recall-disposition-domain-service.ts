@@ -232,6 +232,7 @@ export class ScmRecallDispositionDomainService {
             quarantinedBatchIds: [],
             quarantinedBalanceIds: [],
             quarantinedQuantity: 0,
+            disposedQuantity: 0,
             exposureCount: 0,
             notifiedExposureCount: 0,
             dispositionOrderIds: [],
@@ -742,7 +743,7 @@ export class ScmRecallDispositionDomainService {
           ];
           if(order.recallId){
             const recall=current.recall as unknown as GovernedRecallCase;
-            writes.push({entityType:'SCM_RECALL',entityId:recall.recallId,domainState:{...recall,dispositionOrderIds:unique([...recall.dispositionOrderIds,order.orderId]),updatedAt:now}});
+            writes.push({entityType:'SCM_RECALL',entityId:recall.recallId,domainState:{...recall,dispositionOrderIds:unique([...recall.dispositionOrderIds,order.orderId]),disposedQuantity:Number(recall.disposedQuantity||0)+order.quantity,updatedAt:now}});
           }
           return {domainState:nextOrder,additionalStateWrites:writes,eventPayload:{orderId:order.orderId,dispositionType:order.dispositionType,quantity:order.quantity,stockTransactionId,journalEntryId,witnessUserId:payload.witnessUserId},auditReason:`Executed inventory disposition ${order.orderNumber} with independent witness ${payload.witnessUserId}.`,resultData:nextOrder};
         },
@@ -780,6 +781,7 @@ export class ScmRecallDispositionDomainService {
           const recall=current.recall as unknown as GovernedRecallCase;
           if(!['QUARANTINE_EXECUTED','PATIENTS_IDENTIFIED'].includes(recall.status)) throw new AtomicMutationRejectedError('RECALL_NOT_RESOLVABLE',`Recall status ${recall.status} cannot be resolved.`);
           if(recall.exposureCount!==recall.notifiedExposureCount) throw new AtomicMutationRejectedError('RECALL_PATIENT_NOTIFICATIONS_INCOMPLETE','Every identified patient exposure must be notified before recall resolution.');
+          if(Number(recall.disposedQuantity||0)+0.000001<Number(recall.quarantinedQuantity||0)) throw new AtomicMutationRejectedError('RECALL_QUARANTINED_STOCK_NOT_DISPOSED','All quarantined recall stock must be destroyed or returned to supplier before resolution.');
           const authoritativeIds=unique(recall.dispositionOrderIds).sort();
           const supplied=ids.sort();
           if(authoritativeIds.length!==supplied.length||authoritativeIds.some((id,index)=>id!==supplied[index])) throw new AtomicMutationRejectedError('RECALL_DISPOSITION_SET_MISMATCH','Resolution must include every disposition order linked to the recall.');

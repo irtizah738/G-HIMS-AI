@@ -127,6 +127,8 @@ describe('G-HIMS P6 full offline-first completion', () => {
     expect(versions).toContain("'STALE'");
     expect(reconcile).toContain('STALE_BASE_VERSION');
     expect(reconcile).toContain('CAUSAL_CONFLICT');
+    expect(reconcile).toContain('acceptedEntityClocks');
+    expect(reconcile).toContain("chainRelation === 'LESS' || chainRelation === 'EQUAL'");
     expect(reconcile).not.toContain('resolveVectorConflict');
   });
 

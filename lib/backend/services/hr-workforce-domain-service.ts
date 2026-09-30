@@ -2164,6 +2164,7 @@ export class HrWorkforceDomainService {
   }
 
   public static resetForTesting(): void {
+    TransactionManager.resetEphemeralStateForTesting();
     this.employees.clear();
     this.credentials.clear();
     this.privileges.clear();

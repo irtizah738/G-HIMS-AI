@@ -73,7 +73,9 @@
     "ops:scm4:provision-finance": "bun scripts/ops/scm4-provision-financial-control-accounts.ts",
     "test:scm5": "bun test tests/scm5-inventory-valuation-close.test.ts",
     "validate:scm5": "bun run typecheck && bun run lint && bun run test:scm1 && bun run test:scm2 && bun run test:scm3 && bun run test:scm4 && bun run test:scm5 && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",
-    "ops:scm5:provision-finance": "bun scripts/ops/scm5-provision-inventory-control-account.ts"
+    "ops:scm5:provision-finance": "bun scripts/ops/scm5-provision-inventory-control-account.ts",
+    "test:scm6": "bun test tests/scm6-supplier-contracts.test.ts",
+    "validate:scm6": "bun run typecheck && bun run lint && bun run test:scm1 && bun run test:scm2 && bun run test:scm3 && bun run test:scm4 && bun run test:scm5 && bun run test:scm6 && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

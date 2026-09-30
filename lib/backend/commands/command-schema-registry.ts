@@ -27,6 +27,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
         'DISPENSE',
         'RECALL',
         'WRITE_OFF',
+        'RETURN_TO_SUPPLIER',
       ]),
       quantity: z.number().finite().positive(),
       uom: nonEmpty,

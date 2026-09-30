@@ -224,7 +224,8 @@ export type StockTransactionType =
   | 'CONSUMPTION'
   | 'DISPENSE'
   | 'RECALL'
-  | 'WRITE_OFF';
+  | 'WRITE_OFF'
+  | 'RETURN_TO_SUPPLIER';
 
 export type ReferenceType =
   | 'PURCHASE_ORDER'

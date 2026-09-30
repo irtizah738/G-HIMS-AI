@@ -1,0 +1,52 @@
+name: One-Time SCM Branch Cleanup
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  delete-obsolete-scm-branches:
+    name: Delete obsolete SCM branches
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout authenticated repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Delete superseded SCM branches
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          branches=(
+            "hardening/scm3-tenant-boundary"
+            "hardening/scm-completion-handoffs"
+            "scm/scm1-authoritative-foundation"
+            "scm/scm2-procure-to-receive"
+            "scm/scm2-procurement-governance"
+            "scm/scm3-stock-control-traceability"
+            "scm/scm3-ui-authority-migration"
+            "scm/scm4-receive-to-pay"
+            "scm/scm5-inventory-valuation-close"
+            "scm/scm6-supplier-contracts"
+            "scm/scm7-demand-replenishment"
+            "scm/scm8-recall-disposal"
+            "scm/scm9-cold-chain-controlled"
+            "scm/scm10-consignment-high-value"
+            "scm/scm11-operational-intelligence"
+            "hardening/scm-final-branch-cleanup"
+          )
+
+          for branch in "${branches[@]}"; do
+            if git ls-remote --exit-code --heads origin "refs/heads/${branch}" >/dev/null 2>&1; then
+              echo "Deleting ${branch}"
+              git push origin --delete "${branch}"
+            else
+              echo "Already absent: ${branch}"
+            fi
+          done

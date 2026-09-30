@@ -29,6 +29,29 @@ const BILLING_COLLECTIONS = [
   'cashReceipts',
 ] as const;
 
+const FINANCE_COLLECTIONS = [
+  'accounts',
+  'accountingPeriods',
+  'journalEntries',
+  'cashReceipts',
+  'arOpenItems',
+  'financeArReceipts',
+  'financeArAdjustments',
+  'financeArAgingSnapshots',
+  'treasuryAccounts',
+  'cashRegisterShifts',
+  'financeBankReconciliations',
+  'financeApAgingSnapshots',
+  'financeCostCenters',
+  'financeBudgets',
+  'financeBudgetCommitments',
+  'financeFixedAssets',
+  'financeDepreciationRuns',
+  'financeStatementSnapshots',
+  'financeTaxSummarySnapshots',
+  'financeIntelligenceSnapshots',
+] as const;
+
 const ADMIN_COLLECTIONS = [
   'telehealthSessions',
   'employees',
@@ -98,6 +121,7 @@ function authorizedCollections(roles: string[]): string[] {
     return [
       ...CLINICAL_COLLECTIONS,
       ...BILLING_COLLECTIONS,
+      ...FINANCE_COLLECTIONS,
       ...ADMIN_COLLECTIONS,
       ...SCM_COLLECTIONS,
     ];
@@ -134,6 +158,22 @@ function authorizedCollections(roles: string[]): string[] {
   ) {
     add(...BILLING_COLLECTIONS);
     add('patients', 'encounters');
+  }
+
+  if (
+    [
+      'ACCOUNTS_PAYABLE',
+      'ACCOUNTANT',
+      'FINANCE_MANAGER',
+      'TREASURY_MANAGER',
+      'AUDITOR',
+      'TAX_ACCOUNTANT',
+      'BUDGET_MANAGER',
+      'FIXED_ASSET_ACCOUNTANT',
+      'FINANCE'
+    ].some((role) => normalized.has(role))
+  ) {
+    add(...FINANCE_COLLECTIONS);
   }
 
   if (

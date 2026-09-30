@@ -54,7 +54,11 @@ const FINANCE_COLLECTIONS = [
 
 const ADMIN_COLLECTIONS = [
   'telehealthSessions',
+] as const;
+
+const HCM_COLLECTIONS = [
   'employees',
+  'employeeAssignments',
 ] as const;
 
 const SCM_COLLECTIONS = [
@@ -124,6 +128,7 @@ function authorizedCollections(roles: string[]): string[] {
       ...FINANCE_COLLECTIONS,
       ...ADMIN_COLLECTIONS,
       ...SCM_COLLECTIONS,
+      ...HCM_COLLECTIONS,
     ];
   }
 
@@ -181,6 +186,13 @@ function authorizedCollections(roles: string[]): string[] {
       .some((role) => normalized.has(role))
   ) {
     add(...SCM_COLLECTIONS);
+  }
+
+  if (
+    ['HR_ADMIN', 'HOSPITAL_EXECUTIVE']
+      .some((role) => normalized.has(role))
+  ) {
+    add(...HCM_COLLECTIONS);
   }
 
   return [...selected];
@@ -270,6 +282,31 @@ function scopeOfflineCollections(
     ...collections,
     encounters,
   };
+
+  if (collections.employees) {
+    scoped.employees = collections.employees.filter((employee) => {
+      const employeeFacilities = Array.isArray(employee.facilityIds)
+        ? employee.facilityIds.map((value) => String(value || '').trim()).filter(Boolean)
+        : [String(employee.primaryFacilityId || '').trim()].filter(Boolean);
+      const employeeDepartments = Array.isArray(employee.departmentIds)
+        ? employee.departmentIds.map((value) => String(value || '').trim()).filter(Boolean)
+        : [String(employee.primaryDepartmentId || '').trim()].filter(Boolean);
+      const facilityMatch =
+        facilities.size === 0 ||
+        employeeFacilities.some((facilityId) => facilities.has(facilityId));
+      const departmentMatch =
+        departments.size === 0 ||
+        employeeDepartments.some((departmentId) => departments.has(departmentId));
+      return facilityMatch && departmentMatch;
+    });
+  }
+
+  if (collections.employeeAssignments) {
+    scoped.employeeAssignments = collections.employeeAssignments.filter((assignment) =>
+      valueMatchesScope(assignment.facilityId, facilities) &&
+      valueMatchesScope(assignment.departmentId, departments)
+    );
+  }
 
   const byEncounterOrPatient = new Set([
     'encounterEvidence',

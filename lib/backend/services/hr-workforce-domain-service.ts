@@ -477,6 +477,28 @@ export class HrWorkforceDomainService {
               },
             });
           }
+          const entitlementYear=new Date().getUTCFullYear();
+          const leaveBalanceWrites:Array<{entityType:string;entityId:string;domainState:unknown}>=[
+            ['ANNUAL',21],['SICK',14],['STUDY_CME',7]
+          ].map(([leaveType,days])=>{
+            const entitlement=Number(days);
+            const record:EmployeeLeaveBalance={
+              employeeId,
+              leaveType:leaveType as EmployeeLeaveBalance['leaveType'],
+              year:entitlementYear,
+              annualEntitlement:entitlement,
+              accruedDays:entitlement,
+              usedDays:0,
+              pendingApprovalDays:0,
+              remainingDays:entitlement,
+              lastUpdated:now,
+            };
+            return {
+              entityType:'LEAVE_BALANCE',
+              entityId:leaveBalanceId(employeeId,record.leaveType,entitlementYear),
+              domainState:record,
+            };
+          });
           return {
           domainState:employee,
           additionalStateWrites:[
@@ -486,6 +508,7 @@ export class HrWorkforceDomainService {
               entityId:assignmentId,
               domainState:assignment,
             },
+            ...leaveBalanceWrites,
           ],
           eventPayload:{
             employeeId,employeeNumber,
@@ -2709,6 +2732,17 @@ export class HrWorkforceDomainService {
       },
     ];
     this.leaveBalances.set(employeeId, defaultBalances);
+    const fixtureTenant=String(
+      process.env.GHIMS_HCM_TEST_TENANT || 'central-metro-hospital'
+    ).trim();
+    for(const balance of defaultBalances){
+      TransactionManager.seedEphemeralStateForTesting(
+        fixtureTenant,
+        'LEAVE_BALANCE',
+        leaveBalanceId(employeeId,balance.leaveType,balance.year),
+        balance
+      );
+    }
   }
 
   public static ensureInitialized(): void {

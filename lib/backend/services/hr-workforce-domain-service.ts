@@ -366,7 +366,7 @@ export class HrWorkforceDomainService {
               entityId:emailIdentityId,
               domainState:{
                 identityId:emailIdentityId,tenantId:context.tenantId,type:'EMAIL',
-                normalizedValue:normalizedEmail,employeeId,createdAt:now,
+                employeeId,createdAt:now,
               },
             },
           ];
@@ -376,7 +376,7 @@ export class HrWorkforceDomainService {
               entityId:nationalIdentityId,
               domainState:{
                 identityId:nationalIdentityId,tenantId:context.tenantId,type:'NATIONAL_ID',
-                normalizedValue:normalizedNationalId.toLowerCase(),employeeId,createdAt:now,
+                employeeId,createdAt:now,
               },
             });
           }
@@ -450,10 +450,20 @@ export class HrWorkforceDomainService {
         auditResourceType:'EMPLOYEE_MASTER',auditResourceId:payload.employeeId,
         outboxTopic:'g-hims-workforce-events',
         idempotencyKey,commandId,correlationId:context.correlationId,
-        readTargets:[{
-          key:'employee',entityType:'EMPLOYEE_MASTER',
-          entityId:payload.employeeId,required:true,
-        }],
+        readTargets:[
+          {
+            key:'employee',entityType:'EMPLOYEE_MASTER',
+            entityId:payload.employeeId,required:true,
+          },
+          ...(preflight.currentAssignmentId
+            ? [{
+                key:'currentAssignment',
+                entityType:'EMPLOYEE_ASSIGNMENT',
+                entityId:preflight.currentAssignmentId,
+                required:false,
+              }]
+            : []),
+        ],
         prepare:(current)=>{
           const employee=(current.employee as unknown as EmployeeMaster | null)||preflight;
           if(!allowedEmploymentTransition(employee.employmentStatus,payload.newStatus)){
@@ -472,16 +482,35 @@ export class HrWorkforceDomainService {
               ? {terminationDate:now.slice(0,10)}
               : {}),
           };
+          const terminal=['TERMINATED','RETIRED','INACTIVE'].includes(payload.newStatus);
+          const currentAssignment=current.currentAssignment as unknown as EmployeeAssignmentHistory|null;
+          const additionalStateWrites:Array<{entityType:string;entityId:string;domainState:unknown}>=[];
+          if(terminal&&currentAssignment){
+            additionalStateWrites.push({
+              entityType:'EMPLOYEE_ASSIGNMENT',
+              entityId:currentAssignment.assignmentId,
+              domainState:{
+                ...currentAssignment,
+                endDate:now.slice(0,10),
+                status:'CONCLUDED',
+              },
+            });
+          }
+          const finalState:EmployeeMaster=terminal
+            ? {...next,currentAssignmentId:undefined}
+            : next;
           return {
-            domainState:next,
+            domainState:finalState,
+            additionalStateWrites,
             eventPayload:{
-              employeeId:next.employeeId,
+              employeeId:finalState.employeeId,
               previousStatus:employee.employmentStatus,
               newStatus:payload.newStatus,
               reason:payload.reason,
+              assignmentConcluded:terminal&&Boolean(currentAssignment),
             },
-            auditReason:`Status of ${next.employeeNumber} changed from ${employee.employmentStatus} to ${payload.newStatus}: ${payload.reason}`,
-            resultData:next,
+            auditReason:`Status of ${finalState.employeeNumber} changed from ${employee.employmentStatus} to ${payload.newStatus}: ${payload.reason}`,
+            resultData:finalState,
           };
         },
       });

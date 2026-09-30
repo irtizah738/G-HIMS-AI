@@ -218,6 +218,7 @@ export interface CashShiftRecord {
   status: 'OPEN' | 'AWAITING_REVIEW' | 'CLOSED';
   openedBy: string;
   closedBy?: string;
+  closedAt?: number;
   reviewedBy?: string;
   reviewedAt?: string;
 }

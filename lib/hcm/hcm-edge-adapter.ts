@@ -221,7 +221,10 @@ export const setCompensationEdge=(
     hourlyRateMinorUnits:number;
     overtimeMultiplierBasisPoints:number;
     monthlyAllowanceMinorUnits:number;
-    deductions:Array<{code:string;name:string;rateBasisPoints:number;fixedMinorUnits:number}>;
+    deductions:Array<{
+      code:string;name:string;rateBasisPoints:number;fixedMinorUnits:number;
+      liabilityAccountCode:string;
+    }>;
     effectiveFrom:string;
   },idempotencyKey?:string
 )=>run<CompensationProfileRecord>('SetCompensationCommand',payload as unknown as Record<string,unknown>,idempotencyKey);

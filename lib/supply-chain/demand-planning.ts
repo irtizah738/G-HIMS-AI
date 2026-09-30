@@ -36,7 +36,7 @@ export function calculateDemandPlanLine(
     const occurred = Date.parse(record.occurredAt);
     return (
       Number.isFinite(occurred) &&
-      occurred > cutoff &&
+      occurred >= cutoff &&
       occurred <= asOfMs &&
       Number.isFinite(record.quantity) &&
       record.quantity > 0

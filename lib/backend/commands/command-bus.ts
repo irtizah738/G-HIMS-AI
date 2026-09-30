@@ -703,6 +703,24 @@ export class CommandBus {
           );
           break;
 
+        case 'CaptureConsignmentSupplierInvoiceCommand':
+          result = await ScmConsignmentDomainService.captureConsignmentSupplierInvoice(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ReviewConsignmentSupplierInvoiceCommand':
+          result = await ScmConsignmentDomainService.reviewConsignmentSupplierInvoice(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
         case 'GenerateScmIntelligenceSnapshotCommand':
           result = await ScmIntelligenceDomainService.generateSnapshot(
             context,

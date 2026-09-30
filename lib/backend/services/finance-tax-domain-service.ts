@@ -42,6 +42,7 @@ export interface RemitTaxLiabilityPayload {
   taxCodeId:string;
   amountMinorUnits:number;
   treasuryAccountCode:string;
+  currency:string;
   postingAt:number;
   reference:string;
 }
@@ -169,6 +170,22 @@ export class FinanceTaxDomainService {
       amount(payload.amountMinorUnits,'INVALID_TAX_REMITTANCE_AMOUNT');
       const taxCode=await DomainStateRepository.getById<TaxCodeRecord>(context.tenantId,'financeTaxCodes',payload.taxCodeId);
       if(!taxCode||!taxCode.isActive)throw new AtomicMutationRejectedError('TAX_CODE_INVALID','Tax code is not active.');
+      const currency=payload.currency.trim().toUpperCase();
+      const treasuryRows=await DomainStateRepository.queryAllEqual<FinanceAccountRecord>(
+        context.tenantId,'accounts','accountCode',payload.treasuryAccountCode,{pageSize:10,maxRows:10}
+      );
+      if(
+        treasuryRows.length!==1 ||
+        treasuryRows[0].category!=='asset' ||
+        treasuryRows[0].isActive!==true ||
+        treasuryRows[0].currency!==currency ||
+        treasuryRows[0].allowSupplierPayments!==true
+      ){
+        throw new AtomicMutationRejectedError(
+          'TAX_REMITTANCE_TREASURY_INVALID',
+          'Tax remittance requires one active payment-enabled treasury asset account in the requested currency.'
+        );
+      }
       const date=new Date(payload.postingAt);
       const fiscalYear=date.getUTCFullYear(),postingPeriod=date.getUTCMonth()+1;
       const periodId=financePeriodId(fiscalYear,postingPeriod);
@@ -177,7 +194,7 @@ export class FinanceTaxDomainService {
       const journal:GovernedJournalRecord={
         journalId,tenantId:context.tenantId,fiscalYear,postingPeriod,
         documentDate:payload.postingAt,postingDate:payload.postingAt,referenceDocumentId:payload.remittanceId,
-        documentHeader:`Tax remittance ${payload.reference}`,currency:'PKR',
+        documentHeader:`Tax remittance ${payload.reference}`,currency,
         totalAmountMinorUnits:payload.amountMinorUnits,
         lines:[
           {glAccountId:taxCode.payableAccountCode,glAccountName:taxCode.payableAccountCode,debitMinorUnits:payload.amountMinorUnits,creditMinorUnits:0,lineDescription:`Settle ${taxCode.code} tax payable`},

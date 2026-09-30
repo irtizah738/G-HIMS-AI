@@ -8,10 +8,8 @@ import {
   InventoryLocation,
   InventoryBalance,
 } from '@/types/scm-domain';
-import {
-  recordStockTransaction,
-  createBatchRecord,
-} from '@/lib/firebase/services/scm-firestore-service';
+import { createBatchRecord } from '@/lib/firebase/services/scm-firestore-service';
+import { recordStockTransactionEdge } from '@/lib/supply-chain/scm-edge-adapter';
 import {
   Layers,
   Boxes,
@@ -230,7 +228,7 @@ export function ScmBatchTrackingLedger({
     };
 
     try {
-      await recordStockTransaction(tenantId, newTxn);
+      await recordStockTransactionEdge(newTxn);
       setFeedback({
         type: 'success',
         text: `Stock transaction recorded! Moved ${txnQty} ${selectedTxnItem.unitOfMeasure} of ${selectedTxnItem.name} (Batch: ${newTxn.batchNumber}, Exp: ${newTxn.expirationDate ? newTxn.expirationDate.split('T')[0] : 'N/A'}).`,

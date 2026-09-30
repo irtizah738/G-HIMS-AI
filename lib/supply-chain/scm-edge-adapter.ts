@@ -15,6 +15,7 @@ import type {
   SupplierMaster,
   ThreeWayMatchResult,
 } from '@/types/scm-domain';
+import type { SupplierContract } from '@/types/scm-sourcing';
 import { hydrateEdgeSnapshot, loadLocalEdgeSnapshot, type EdgeSnapshot } from '@/lib/offline/hydration';
 import { executeActiveTenantCommand } from '@/lib/api/command-client';
 
@@ -31,6 +32,7 @@ export interface ScmEdgeData {
   consumptions: PatientConsumptionRecord[];
   recalls: RecallCase[];
   suppliers: SupplierMaster[];
+  supplierContracts: SupplierContract[];
   threeWayMatches: ThreeWayMatchResult[];
   source: 'LOCAL' | 'SERVER';
 }
@@ -53,6 +55,7 @@ function adapt(snapshot: EdgeSnapshot): ScmEdgeData {
     consumptions: rows<PatientConsumptionRecord>(snapshot, 'patientConsumptions'),
     recalls: rows<RecallCase>(snapshot, 'recallCases'),
     suppliers: rows<SupplierMaster>(snapshot, 'suppliers'),
+    supplierContracts: rows<SupplierContract>(snapshot, 'scmSupplierContracts'),
     threeWayMatches: rows<ThreeWayMatchResult>(snapshot, 'threeWayMatches'),
     source: snapshot.source,
   };

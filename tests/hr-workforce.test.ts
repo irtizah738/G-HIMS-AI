@@ -190,7 +190,7 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
         commandId: 'cmd_cfl_2',
         payload: {
           ...cmd1.payload,
-          primaryDepartmentId: 'dept_surgery', // modified payload!
+          positionTitle: 'Senior Nurse', // valid but conflicting payload
         },
       };
 

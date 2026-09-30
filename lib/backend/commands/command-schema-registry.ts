@@ -1241,6 +1241,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
         name: nonEmpty.max(200),
         rateBasisPoints: z.number().int().min(0).max(10000),
         fixedMinorUnits: z.number().int().safe().nonnegative(),
+        liabilityAccountCode: nonEmpty.max(40),
       }).strict()).max(50),
       effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     }).strict(),

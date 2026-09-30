@@ -41,7 +41,7 @@ describe('G-HIMS Resource & Capacity Management Domain Engine', () => {
 
   beforeEach(() => {
     ResourceCapacityDomainService.resetForTesting();
-    ResourceCapacityDomainService.ensureInitialized();
+    ResourceCapacityDomainService.seedTestFixtures();
   });
 
   describe('1. Resource Registration & Role Authorization (Gate E)', () => {
@@ -207,8 +207,9 @@ describe('G-HIMS Resource & Capacity Management Domain Engine', () => {
           resourceName: 'Hamilton-G5 Intensive Care Mechanical Ventilator',
           calibrationDate: today,
           nextDueDate: nextYear,
-          performedByActorId: 'usr_biomed_01',
-          performedByName: 'Biomedical Engineering Team',
+          model: 'G5',
+          serialNumber: 'HAM-VEN-59201',
+          technicianName: 'Biomedical Engineering Team',
           certificateNumber: 'CAL-CERT-2026-8819',
           result: 'PASS',
           notes: 'Annual transducer and oxygen sensor recalibration complete. Meets factory specs.',
@@ -237,7 +238,7 @@ describe('G-HIMS Resource & Capacity Management Domain Engine', () => {
         payload: {
           resourceId: 'res_002',
           resourceName: 'Stryker 1688 AIM 4K Endoscopy Tower System',
-          workOrderType: 'CORRECTIVE',
+          maintenanceType: 'CORRECTIVE',
           priority: 'HIGH',
           issueDescription: 'Fiber optic light cable flickering during laparoscopic cholecystectomy',
           reportedByActorId: 'usr_fac_lead_01',

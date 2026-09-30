@@ -42,6 +42,7 @@ export interface GovernedRecallCase {
   quarantinedBatchIds: string[];
   quarantinedBalanceIds: string[];
   quarantinedQuantity: number;
+  affectedOnHandQuantity: number;
   disposedQuantity: number;
   exposureCount: number;
   notifiedExposureCount: number;

@@ -1006,12 +1006,6 @@ export class ScmPayablesDomainService {
             entityId: payload.invoiceId,
             required: true,
           },
-          {
-            key: 'sourceAccount',
-            entityType: 'GL_ACCOUNT',
-            entityId: payload.sourceAccountId,
-            required: true,
-          },
         ],
         prepare: (current) => {
           if (current.existingAuthorization) {
@@ -1178,6 +1172,7 @@ export class ScmPayablesDomainService {
           const authorization =
             current.authorization as unknown as SupplierPaymentAuthorization;
           const invoice = current.invoice as unknown as SupplierInvoiceRecord;
+          assertFacilityScope(context, invoice.facilityId);
           if (
             authorization.invoiceId !== invoice.invoiceId ||
             payload.invoiceId !== invoice.invoiceId
@@ -1329,6 +1324,12 @@ export class ScmPayablesDomainService {
             entityId: payload.invoiceId,
             required: true,
           },
+          {
+            key: 'sourceAccount',
+            entityType: 'GL_ACCOUNT',
+            entityId: payload.sourceAccountId,
+            required: true,
+          },
         ],
         prepare: (current) => {
           if (current.existingPayment) {
@@ -1395,14 +1396,22 @@ export class ScmPayablesDomainService {
             );
           }
 
+          const settledAtMs = Date.parse(payload.settledAt);
+          if (!Number.isFinite(settledAtMs)) {
+            throw new AtomicMutationRejectedError(
+              'INVALID_PAYMENT_SETTLEMENT_DATE',
+              'Supplier payment requires a valid settlement timestamp.'
+            );
+          }
+
           const journalId = `je_pay_${paymentId}`;
           const journal = buildJournalState({
             journalId,
             tenantId: context.tenantId,
             fiscalYear: payload.fiscalYear,
             postingPeriod: payload.postingPeriod,
-            documentDate: Date.parse(payload.settledAt),
-            postingDate: Date.parse(payload.settledAt),
+            documentDate: settledAtMs,
+            postingDate: settledAtMs,
             referenceDocumentId: paymentId,
             documentHeader: `Supplier payment: ${invoice.invoiceNumber} / ${payload.paymentReference}`,
             currency: invoice.currency,

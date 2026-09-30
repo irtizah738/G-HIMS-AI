@@ -5,6 +5,7 @@ node_modules/
 coverage/
 playwright-report/
 test-results/
+*.tsbuildinfo
 
 # Environment and credentials
 .env

@@ -32,12 +32,11 @@ import {
   DepreciationMethod,
 } from '@/types/erp-finance';
 import {
-  subscribeToFixedAssets,
-  createFixedAsset,
-  runMonthlyDepreciationPosting,
-  getDepreciationRuns,
-  seedInitialFixedAssets,
-} from '@/lib/firebase/services/erp-finance';
+  capitalizeFixedAssetEdge,
+  hydrateFinanceAssets,
+  loadLocalFinanceAssets,
+  runDepreciationEdge,
+} from '@/lib/finance/finance-edge-adapter';
 import {
   calculateMonthlyDepreciation,
   calculateAssetDepreciationSchedule,
@@ -45,7 +44,7 @@ import {
 
 export default function FixedAssetsPage() {
   const params = useParams();
-  const tenantId = (params?.tenantId as string) || 'metro-health';
+  const tenantId = String(params?.tenantId || '').trim();
 
   const [assets, setAssets] = useState<FixedAsset[]>([]);
   const [depreciationRuns, setDepreciationRuns] = useState<DepreciationRunLog[]>([]);
@@ -81,19 +80,37 @@ export default function FixedAssetsPage() {
     useState<DepreciationMethod>('straight_line');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [assetFacilityId, setAssetFacilityId] = useState('');
+  const [assetCostCenterId, setAssetCostCenterId] = useState('');
+  const [sourceJournalId, setSourceJournalId] = useState('');
+  const [assetCurrency, setAssetCurrency] = useState('USD');
+
+  const loadGovernedFinanceAssets = async () => {
+    if (!tenantId) {
+      setAssets([]);
+      setDepreciationRuns([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const local = await loadLocalFinanceAssets(tenantId);
+      setAssets(local.assets);
+      setDepreciationRuns(local.depreciationRuns);
+
+      const hydrated = await hydrateFinanceAssets(tenantId);
+      setAssets(hydrated.assets);
+      setDepreciationRuns(hydrated.depreciationRuns);
+    } catch (error) {
+      console.error('Failed loading governed finance asset projections:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    setLoading(true);
-    const unsubAssets = subscribeToFixedAssets(tenantId, (data) => {
-      setAssets(data);
-      setLoading(false);
-    });
-
-    getDepreciationRuns(tenantId)
-      .then(setDepreciationRuns)
-      .catch(console.error);
-
-    return () => unsubAssets();
+    void loadGovernedFinanceAssets();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId]);
 
   // Aggregate Asset Financials
@@ -148,15 +165,35 @@ export default function FixedAssetsPage() {
     setRunningDepr(true);
 
     try {
-      const result = await runMonthlyDepreciationPosting(
-        tenantId,
-        fiscalPeriod,
-        'Director of Accounting (Admin)'
-      );
+      const [yearText, monthText] = fiscalPeriod.split('-');
+      const fiscalYear = Number(yearText);
+      const postingPeriod = Number(monthText);
+      const eligibleAssetIds = assets
+        .filter(
+          (asset) =>
+            asset.status === 'active' &&
+            asset.currentBookValue > asset.salvageValue
+        )
+        .map((asset) => asset.id);
+
+      if (!eligibleAssetIds.length) {
+        throw new Error('No active depreciable assets are available for this period.');
+      }
+      if (eligibleAssetIds.length > 200) {
+        throw new Error(
+          'Depreciation runs are limited to 200 assets per atomic run. Split the asset set by controlled batch.'
+        );
+      }
+
+      const result = await runDepreciationEdge({
+        runId: `dep_${fiscalPeriod}_${crypto.randomUUID()}`,
+        fiscalYear,
+        postingPeriod,
+        currency: assetCurrency.trim().toUpperCase(),
+        assetIds: eligibleAssetIds,
+      });
       setLatestRunSuccess(result);
-      // Refresh runs list
-      const updatedRuns = await getDepreciationRuns(tenantId);
-      setDepreciationRuns(updatedRuns);
+      await loadGovernedFinanceAssets();
     } catch (err: any) {
       setRunError(err.message || 'Depreciation execution failed.');
     } finally {
@@ -203,26 +240,47 @@ export default function FixedAssetsPage() {
 
     setCreating(true);
     try {
-      await createFixedAsset(tenantId, {
+      if (!tenantId) {
+        throw new Error('Tenant route context is required.');
+      }
+      if (!assetFacilityId.trim() || !assetCostCenterId.trim()) {
+        throw new Error('Facility ID and Cost Center ID are required.');
+      }
+      if (!sourceJournalId.trim()) {
+        throw new Error(
+          'A posted capital-expenditure clearing journal ID is required before capitalization.'
+        );
+      }
+
+      const category =
+        assetCategory === 'medical_equipment'
+          ? 'MEDICAL_EQUIPMENT'
+          : assetCategory === 'it_hardware'
+            ? 'IT_HARDWARE'
+            : assetCategory === 'facility'
+              ? 'FACILITY'
+              : 'VEHICLE';
+
+      await capitalizeFixedAssetEdge({
+        assetId: `asset_${crypto.randomUUID()}`,
         assetTag: assetTag.trim().toUpperCase(),
-        serialNumber: serialNumber.trim(),
+        serialNumber: serialNumber.trim() || undefined,
         assetName: assetName.trim(),
-        assetCategory,
-        department: department.trim(),
-        location: location.trim(),
-        manufacturer: manufacturer.trim(),
-        model: model.trim(),
-        purchaseDate,
-        inServiceDate: purchaseDate,
-        acquisitionCost: Number(acquisitionCost),
-        salvageValue: Number(salvageValue),
-        usefulLifeYears: Number(usefulLifeYears),
-        depreciationMethod,
+        assetCategory: category,
+        facilityId: assetFacilityId.trim(),
+        costCenterId: assetCostCenterId.trim(),
+        acquisitionAt: Date.parse(`${purchaseDate}T00:00:00.000Z`),
+        inServiceAt: Date.parse(`${purchaseDate}T00:00:00.000Z`),
+        acquisitionCostMinorUnits: Math.round(Number(acquisitionCost) * 100),
+        salvageValueMinorUnits: Math.round(Number(salvageValue) * 100),
+        usefulLifeMonths: Math.round(Number(usefulLifeYears) * 12),
         assetAccountCode,
         accumulatedDepreciationAccountCode,
         depreciationExpenseAccountCode,
-        status: 'active',
+        currency: assetCurrency.trim().toUpperCase(),
+        sourceReferenceId: sourceJournalId.trim(),
       });
+      await loadGovernedFinanceAssets();
 
       setShowCreateModal(false);
       setAssetTag('');
@@ -230,6 +288,7 @@ export default function FixedAssetsPage() {
       setAssetName('');
       setAcquisitionCost(100000);
       setSalvageValue(10000);
+      setSourceJournalId('');
     } catch (err: any) {
       setCreateError(err.message || 'Failed to create fixed asset.');
     } finally {
@@ -249,6 +308,14 @@ export default function FixedAssetsPage() {
         return <Truck className="h-4 w-4 text-amber-600" />;
     }
   };
+
+  if (!tenantId) {
+    return (
+      <div className="p-6 text-sm text-rose-700">
+        TENANT_CONTEXT_REQUIRED: Fixed Assets requires an explicit tenant route.
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 pb-12" id="fixed-assets-view">
@@ -871,6 +938,66 @@ export default function FixedAssetsPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Facility ID *
+                  </label>
+                  <input
+                    id="new-asset-facility-input"
+                    type="text"
+                    required
+                    value={assetFacilityId}
+                    onChange={(e) => setAssetFacilityId(e.target.value)}
+                    className="w-full px-3 py-2 text-sm font-mono bg-slate-50 border border-slate-200 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Cost Center ID *
+                  </label>
+                  <input
+                    id="new-asset-cost-center-input"
+                    type="text"
+                    required
+                    value={assetCostCenterId}
+                    onChange={(e) => setAssetCostCenterId(e.target.value)}
+                    className="w-full px-3 py-2 text-sm font-mono bg-slate-50 border border-slate-200 rounded-lg"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <div className="col-span-2">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Posted CapEx Clearing Journal ID *
+                  </label>
+                  <input
+                    id="new-asset-source-journal-input"
+                    type="text"
+                    required
+                    value={sourceJournalId}
+                    onChange={(e) => setSourceJournalId(e.target.value)}
+                    placeholder="Journal containing debit to 1595"
+                    className="w-full px-3 py-2 text-sm font-mono bg-slate-50 border border-slate-200 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Currency *
+                  </label>
+                  <input
+                    id="new-asset-currency-input"
+                    type="text"
+                    maxLength={3}
+                    required
+                    value={assetCurrency}
+                    onChange={(e) => setAssetCurrency(e.target.value.toUpperCase())}
+                    className="w-full px-3 py-2 text-sm font-mono uppercase bg-slate-50 border border-slate-200 rounded-lg"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
                     Acquisition Cost ($) *
                   </label>
                   <input
@@ -929,7 +1056,6 @@ export default function FixedAssetsPage() {
                     className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500/20"
                   >
                     <option value="straight_line">Straight-Line (GAAP)</option>
-                    <option value="declining_balance">200% Double Declining</option>
                   </select>
                 </div>
               </div>

@@ -413,6 +413,10 @@ export interface POLineItem {
   quantityOrdered: number;
   quantityReceived?: number;
   quantityRemaining?: number;
+  /** Quantity already recognized into Accounts Payable. */
+  quantityInvoiced?: number;
+  /** Quantity reserved by captured invoices pending match/recognition. */
+  quantityPendingInvoice?: number;
   uom: StandardUOM;
   unitPrice: number;
   unitCost?: number;
@@ -546,6 +550,8 @@ export interface GoodsReceiptNote {
   status: 'DRAFT' | 'PENDING_INSPECTION' | 'INSPECTED' | 'PUTAWAY_COMPLETED' | 'CLOSED';
   attachments?: string[];
   notes?: string;
+  /** Universal Journal entry created for accepted inventory / GRNI accrual. */
+  journalEntryId?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -977,6 +983,13 @@ export type ScmDomainEventType =
   | 'GRN_RECORDED'
   | 'GRN_INSPECTION_FAILED'
   | 'GRN_QUARANTINED'
+  | 'GRNI_ACCRUAL_POSTED'
+  | 'SUPPLIER_INVOICE_MATCHED'
+  | 'SUPPLIER_INVOICE_EXCEPTION'
+  | 'SUPPLIER_INVOICE_PAYABLE_RECOGNIZED'
+  | 'SUPPLIER_PAYMENT_AUTHORIZATION_REQUESTED'
+  | 'SUPPLIER_PAYMENT_AUTHORIZED'
+  | 'SUPPLIER_PAYMENT_RECORDED'
   | 'STOCK_ISSUED'
   | 'STOCK_RECEIVED'
   | 'STOCK_ADJUSTED'

@@ -1301,6 +1301,14 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       remittedAt: nonEmpty,
     }).strict(),
   },
+  GenerateHcmIntelligenceCommand: {
+    1: z.object({
+      snapshotId: nonEmpty.max(180),
+      asOf: nonEmpty,
+      lookbackDays: z.number().int().min(1).max(365),
+      facilityId: z.string().trim().min(1).max(100).optional(),
+    }).strict(),
+  },
   SubmitCredentialCommand: {
     1: z.object({
       employeeId: nonEmpty.max(100),

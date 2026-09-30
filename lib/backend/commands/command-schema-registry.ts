@@ -214,6 +214,92 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       }).strict()).min(1).max(500),
     }).strict(),
   },
+  InitiateScmRecallCommand: {
+    1: z.object({
+      recallId: nonEmpty,
+      recallCaseNumber: nonEmpty,
+      itemId: nonEmpty,
+      scope: z.enum([
+        'ITEM_WIDE',
+        'BATCH_WIDE',
+        'LOT_WIDE',
+        'SERIAL_SPECIFIC',
+        'SUPPLIER_SPECIFIC',
+        'MANUFACTURER_SPECIFIC',
+      ]),
+      targetBatchNumbers: z.array(nonEmpty).max(500).optional(),
+      targetLotNumbers: z.array(nonEmpty).max(500).optional(),
+      targetSerialNumbers: z.array(nonEmpty).max(5000).optional(),
+      supplierId: nonEmpty.optional(),
+      manufacturerName: nonEmpty.max(250).optional(),
+      recallReason: nonEmpty.max(4000),
+      severity: z.enum(['CRITICAL_CLASS_1','URGENT_CLASS_2','ADVISORY_CLASS_3']),
+      initiatedAt: nonEmpty,
+    }).strict(),
+  },
+  ExecuteRecallQuarantineCommand: {
+    1: z.object({
+      recallId: nonEmpty,
+      batchIds: z.array(nonEmpty).min(1).max(50),
+      balanceIds: z.array(nonEmpty).min(1).max(100),
+      finalChunk: z.boolean(),
+    }).strict(),
+  },
+  ProjectRecallExposuresCommand: {
+    1: z.object({
+      recallId: nonEmpty,
+      consumptionIds: z.array(nonEmpty).min(1).max(100),
+      finalChunk: z.boolean(),
+    }).strict(),
+  },
+  RecordRecallNotificationCommand: {
+    1: z.object({
+      recallId: nonEmpty,
+      exposureId: nonEmpty,
+      note: nonEmpty.max(4000),
+      notifiedAt: nonEmpty,
+    }).strict(),
+  },
+  CreateInventoryDispositionCommand: {
+    1: z.object({
+      orderId: nonEmpty,
+      orderNumber: nonEmpty,
+      facilityId: nonEmpty,
+      locationId: nonEmpty,
+      balanceId: nonEmpty,
+      batchId: nonEmpty,
+      quantity: z.number().finite().positive(),
+      dispositionType: z.enum(['DESTROY','RETURN_TO_SUPPLIER']),
+      reason: z.enum(['EXPIRY','DAMAGE','RECALL','QUALITY_FAILURE']),
+      recallId: nonEmpty.optional(),
+      supplierId: nonEmpty.optional(),
+      justification: nonEmpty.max(4000),
+      requestedAt: nonEmpty,
+    }).strict(),
+  },
+  ReviewInventoryDispositionCommand: {
+    1: z.object({
+      orderId: nonEmpty,
+      decision: z.enum(['APPROVE','REJECT']),
+      comments: nonEmpty.max(2000),
+    }).strict(),
+  },
+  ExecuteInventoryDispositionCommand: {
+    1: z.object({
+      orderId: nonEmpty,
+      executedAt: nonEmpty,
+      witnessUserId: nonEmpty,
+      destructionCertificateNumber: nonEmpty.max(250).optional(),
+      carrierReference: nonEmpty.max(250).optional(),
+    }).strict(),
+  },
+  ResolveScmRecallCommand: {
+    1: z.object({
+      recallId: nonEmpty,
+      dispositionOrderIds: z.array(nonEmpty).max(200),
+      resolutionNotes: nonEmpty.max(4000),
+    }).strict(),
+  },
   UpsertReplenishmentPolicyCommand: {
     1: z.object({
       policyId: nonEmpty,

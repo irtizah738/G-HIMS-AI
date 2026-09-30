@@ -752,6 +752,17 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       postingAt: z.number().finite().positive(),
     }).strict(),
   },
+  RecordArReceiptCommand: {
+    1: z.object({
+      receiptId: nonEmpty,
+      openItemId: nonEmpty,
+      treasuryAccountId: nonEmpty,
+      amountMinorUnits: z.number().int().safe().positive(),
+      receivedAt: z.number().finite().positive(),
+      method: z.enum(['BANK_TRANSFER','CARD','MOBILE_WALLET','INSURANCE_SETTLEMENT']),
+      reference: nonEmpty.max(200),
+    }).strict(),
+  },
   GenerateArAgingCommand: {
     1: z.object({
       snapshotId: nonEmpty,

@@ -38,6 +38,7 @@ export interface GovernedCycleCountLine {
   unitCostMinorUnits: number;
   varianceValueMinorUnits: number;
   inventoryAccountCode: '1210' | '1220';
+  currency: string;
   status: 'MATCH' | 'VARIANCE_FLAGGED' | 'ADJUSTED' | 'REJECTED';
 }
 
@@ -48,6 +49,7 @@ export interface GovernedCycleCountRecord {
   locationId: string;
   locationName: string;
   valuationMethod: InventoryValuationMethod;
+  currency: string;
   isBlindCount: boolean;
   countedAt: string;
   submittedAt: string;
@@ -84,6 +86,7 @@ export interface InventoryAdjustmentPosting {
   varianceValueMinorUnits: number;
   inventoryAccountCode: '1210' | '1220';
   varianceAccountCode: '6040';
+  currency: string;
   reasonCode: 'COUNT_VARIANCE';
   approvedBy: string;
   approvedAt: string;

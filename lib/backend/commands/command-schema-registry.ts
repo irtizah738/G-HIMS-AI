@@ -213,6 +213,58 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       }).strict()).min(1).max(500),
     }).strict(),
   },
+  UpsertReplenishmentPolicyCommand: {
+    1: z.object({
+      policyId: nonEmpty,
+      facilityId: nonEmpty,
+      locationId: nonEmpty,
+      itemId: nonEmpty,
+      sourceLocationId: nonEmpty.optional(),
+      preferredSupplierId: nonEmpty.optional(),
+      minQuantity: z.number().finite().nonnegative(),
+      maxQuantity: z.number().finite().positive(),
+      reorderPoint: z.number().finite().nonnegative(),
+      safetyStockQuantity: z.number().finite().nonnegative(),
+      safetyStockDays: z.number().finite().nonnegative().max(365),
+      leadTimeDays: z.number().finite().positive().max(3650),
+      mode: z.enum(['AUTO', 'INTERNAL_TRANSFER_ONLY', 'PURCHASE_ONLY']),
+      active: z.boolean(),
+    }).strict(),
+  },
+  GenerateReplenishmentPlanCommand: {
+    1: z.object({
+      planId: nonEmpty,
+      facilityId: nonEmpty,
+      locationId: nonEmpty,
+      policyIds: z.array(nonEmpty).min(1).max(500),
+      asOf: nonEmpty,
+      lookbackDays: z.number().int().min(7).max(365),
+      currency: z.string().trim().length(3),
+    }).strict(),
+  },
+  ReviewReplenishmentPlanCommand: {
+    1: z.object({
+      planId: nonEmpty,
+      decision: z.enum(['APPROVE', 'REJECT']),
+      comments: nonEmpty.max(2000),
+    }).strict(),
+  },
+  ExecuteReplenishmentPlanCommand: {
+    1: z.object({
+      planId: nonEmpty,
+      purchaseRequisitionId: nonEmpty.optional(),
+      purchaseRequisitionNumber: nonEmpty.optional(),
+      replenishmentOrderId: nonEmpty.optional(),
+      replenishmentOrderNumber: nonEmpty.optional(),
+      requiredByDate: nonEmpty,
+    }).strict(),
+  },
+  CompleteInternalReplenishmentOrderCommand: {
+    1: z.object({
+      orderId: nonEmpty,
+      stockTransactionIds: z.array(nonEmpty).min(1).max(1000),
+    }).strict(),
+  },
   ReviewSupplierQualificationCommand: {
     1: z.object({
       supplierId: nonEmpty,

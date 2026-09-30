@@ -135,9 +135,6 @@ export async function reviewPurchaseRequisitionEdge(input: {
     input,
     {
       idempotencyKey: `scm-pr-review:${input.requisitionId}:${input.decision}`,
-      offlineQueue: {
-        enabled: false,
-      },
     }
   );
   if (!result.success) {
@@ -159,9 +156,6 @@ export async function convertPurchaseRequisitionToOrderEdge(input: {
     input,
     {
       idempotencyKey: `scm-pr-to-po:${input.requisitionId}`,
-      offlineQueue: {
-        enabled: false,
-      },
     }
   );
   if (!result.success) {
@@ -185,9 +179,6 @@ export async function receivePurchaseOrderEdge(input: {
     input,
     {
       idempotencyKey: `scm-grn:${input.purchaseOrderId}:${input.deliveryNoteNumber}`,
-      offlineQueue: {
-        enabled: false,
-      },
     }
   );
   if (!result.success) {

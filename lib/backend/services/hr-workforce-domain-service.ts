@@ -226,6 +226,21 @@ export class HrWorkforceDomainService {
     return this.credentials.get(credentialId) || null;
   }
 
+  private static async loadShift(
+    tenantId:string,
+    rosterId:string
+  ):Promise<RosterShiftEntry|null>{
+    if(DomainStateRepository.isAvailable()){
+      const persisted=await DomainStateRepository.getById<RosterShiftEntry>(
+        tenantId,'rosterAssignments',rosterId
+      );
+      if(persisted) this.shifts.set(rosterId,persisted);
+      else this.shifts.delete(rosterId);
+      return persisted;
+    }
+    return this.shifts.get(rosterId)||null;
+  }
+
   private static async loadAttendance(
     tenantId: string,
     attendanceId: string

@@ -1226,6 +1226,53 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       rejectionReason: z.string().trim().min(1).max(2000).optional(),
     }).strict(),
   },
+  SetCompensationCommand: {
+    1: z.object({
+      employeeId: nonEmpty.max(100),
+      payBasis: z.enum(['SALARIED','HOURLY']),
+      payFrequency: z.enum(['MONTHLY','SEMI_MONTHLY','BI_WEEKLY']),
+      currency: z.string().trim().length(3),
+      annualSalaryMinorUnits: z.number().int().safe().nonnegative(),
+      hourlyRateMinorUnits: z.number().int().safe().nonnegative(),
+      overtimeMultiplierBasisPoints: z.number().int().min(10000).max(50000),
+      monthlyAllowanceMinorUnits: z.number().int().safe().nonnegative(),
+      deductions: z.array(z.object({
+        code: nonEmpty.max(80),
+        name: nonEmpty.max(200),
+        rateBasisPoints: z.number().int().min(0).max(10000),
+        fixedMinorUnits: z.number().int().safe().nonnegative(),
+      }).strict()).max(50),
+      effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    }).strict(),
+  },
+  ReviewCompensationCommand: {
+    1: z.object({
+      compensationId: nonEmpty.max(180),
+      decision: z.enum(['APPROVE','REJECT']),
+      notes: z.string().trim().max(2000).optional(),
+    }).strict(),
+  },
+  CreatePayrollPeriodCommand: {
+    1: z.object({
+      facilityId: nonEmpty.max(100),
+      periodNumber: nonEmpty.max(100),
+      periodName: nonEmpty.max(250),
+      payFrequency: z.enum(['MONTHLY','SEMI_MONTHLY','BI_WEEKLY']),
+      startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      paymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      currency: z.string().trim().length(3),
+    }).strict(),
+  },
+  EnrollPayrollEmployeeCommand: {
+    1: z.object({periodId: nonEmpty.max(180),employeeId: nonEmpty.max(100)}).strict(),
+  },
+  CalculatePayrollEmployeeCommand: {
+    1: z.object({periodId: nonEmpty.max(180),employeeId: nonEmpty.max(100)}).strict(),
+  },
+  FinalizePayrollPeriodCommand: {
+    1: z.object({periodId: nonEmpty.max(180)}).strict(),
+  },
   SubmitCredentialCommand: {
     1: z.object({
       employeeId: nonEmpty.max(100),

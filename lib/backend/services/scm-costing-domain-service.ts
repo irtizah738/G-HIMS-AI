@@ -197,6 +197,15 @@ export class ScmCostingDomainService {
       );
     }
 
+    if (payload.isBlindCount !== true) {
+      return rejection(
+        commandId,
+        idempotencyKey,
+        'BLIND_CYCLE_COUNT_REQUIRED',
+        'Governed inventory counts must be blind counts; expected quantities cannot be exposed during capture.'
+      );
+    }
+
     if (!payload.lines?.length || payload.lines.length > 500) {
       return rejection(
         commandId,

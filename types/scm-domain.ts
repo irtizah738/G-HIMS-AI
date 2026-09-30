@@ -971,6 +971,8 @@ export type ScmDomainEventType =
   | 'PR_REJECTED'
   | 'PR_CONVERTED_TO_PO'
   | 'PO_GENERATED'
+  | 'PO_APPROVED'
+  | 'PO_REJECTED'
   | 'GRN_INSPECTED_ACCEPTED'
   | 'STOCK_ISSUED'
   | 'STOCK_RECEIVED'

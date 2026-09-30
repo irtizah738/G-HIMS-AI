@@ -679,7 +679,12 @@ export function OpdMasterWorkspace() {
   };
 
   // HANDLER: Save Triage Vitals through authoritative encounter evidence.
+  // The evidence and its dependent stage transition are both replayable offline.
+  // A local evidence reference is deliberately used when the write is queued;
+  // the reconciliation service remaps it to the canonical evidence ID before
+  // replaying AdvanceStageCommand.
   const handleSaveVitals = async (vitals: ComprehensiveVitals) => {
+    const localEvidenceId = `vitals-${activeEncounter.id}-${vitals.measuredAt}`;
     const vitalsResult = await executeActiveTenantCommand<Record<string, unknown>>(
       'RecordVitalsCommand',
       {
@@ -709,7 +714,7 @@ export function OpdMasterWorkspace() {
         offlineQueue: {
           enabled: true,
           collection: 'encounterEvidence',
-          resourceId: `vitals-${activeEncounter.id}-${vitals.measuredAt}`,
+          resourceId: localEvidenceId,
           action: 'CREATE',
           optimisticCache: true,
         },
@@ -725,9 +730,18 @@ export function OpdMasterWorkspace() {
         encounterId: activeEncounter.id,
         currentStage: activeEncounter.currentStage || 'TRIAGE',
         targetStage: 'CONSULTATION',
-        evidenceId: vitalsResult.entityId,
+        evidenceId: vitalsResult.entityId || localEvidenceId,
       },
-      { idempotencyKey: `opd-stage-triage-consult:${activeEncounter.id}` }
+      {
+        idempotencyKey: `opd-stage-triage-consult:${activeEncounter.id}`,
+        offlineQueue: {
+          enabled: true,
+          collection: 'encounters',
+          resourceId: activeEncounter.id,
+          action: 'UPDATE',
+          optimisticCache: false,
+        },
+      }
     );
     if (!transition.success) {
       throw new Error(
@@ -763,6 +777,8 @@ export function OpdMasterWorkspace() {
   };
 
   // HANDLER: Save Consultation SOAP as signed encounter evidence.
+  // As with triage, offline replay preserves ordering by queueing the evidence
+  // before the dependent DAG transition and remapping the local evidence ID.
   const handleSaveConsultation = async (soap: SoapDocumentation) => {
     const noteContent = [
       `Subjective: ${soap.subjective || ''}`,
@@ -770,6 +786,8 @@ export function OpdMasterWorkspace() {
       `Assessment: ${soap.assessment || ''}`,
       `Plan: ${soap.plan || ''}`,
     ].join('\n\n');
+    const noteTimestamp = soap.completedAt || Date.now();
+    const localEvidenceId = `soap-${activeEncounter.id}-${noteTimestamp}`;
 
     const noteResult = await executeActiveTenantCommand<Record<string, unknown>>(
       'SignClinicalNoteCommand',
@@ -785,11 +803,11 @@ export function OpdMasterWorkspace() {
         },
       },
       {
-        idempotencyKey: `opd-soap:${activeEncounter.id}:${soap.completedAt || Date.now()}`,
+        idempotencyKey: `opd-soap:${activeEncounter.id}:${noteTimestamp}`,
         offlineQueue: {
           enabled: true,
           collection: 'encounterEvidence',
-          resourceId: `soap-${activeEncounter.id}-${soap.completedAt || Date.now()}`,
+          resourceId: localEvidenceId,
           action: 'CREATE',
           optimisticCache: true,
         },
@@ -805,9 +823,18 @@ export function OpdMasterWorkspace() {
         encounterId: activeEncounter.id,
         currentStage: activeEncounter.currentStage || 'CONSULTATION',
         targetStage: 'DIAGNOSTICS',
-        evidenceId: noteResult.entityId,
+        evidenceId: noteResult.entityId || localEvidenceId,
       },
-      { idempotencyKey: `opd-stage-consult-diagnostics:${activeEncounter.id}` }
+      {
+        idempotencyKey: `opd-stage-consult-diagnostics:${activeEncounter.id}`,
+        offlineQueue: {
+          enabled: true,
+          collection: 'encounters',
+          resourceId: activeEncounter.id,
+          action: 'UPDATE',
+          optimisticCache: false,
+        },
+      }
     );
     if (!transition.success) {
       throw new Error(

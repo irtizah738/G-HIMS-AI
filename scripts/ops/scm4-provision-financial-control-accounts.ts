@@ -164,6 +164,14 @@ const controls = [
     normalBalance: 'debit',
     description: 'Controlled variance between accrued PO value and approved supplier invoice',
   },
+  {
+    code: '6040',
+    accountName: 'Inventory Shrinkage, Count Variance & Write-Off Expense',
+    category: 'expense',
+    subCategory: 'Clinical Operations Expense',
+    normalBalance: 'debit',
+    description: 'Physical count shortages, approved write-offs, and inventory control variances',
+  },
 ] as const;
 
 const created: string[] = [];

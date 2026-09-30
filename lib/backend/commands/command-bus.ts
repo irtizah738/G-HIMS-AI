@@ -25,6 +25,7 @@ import { ScmPayablesDomainService } from '../services/scm-payables-domain-servic
 import { ScmSourcingDomainService } from '../services/scm-sourcing-domain-service';
 import { ScmPlanningDomainService } from '../services/scm-planning-domain-service';
 import { ScmRecallDispositionDomainService } from '../services/scm-recall-disposition-domain-service';
+import { ScmControlledInventoryDomainService } from '../services/scm-controlled-inventory-domain-service';
 import { ScmCostingDomainService } from '../services/scm-costing-domain-service';
 import { CashReceiptDomainService } from '../services/cash-receipt-domain-service';
 import { DiagnosticResultDomainService } from '../services/diagnostic-result-domain-service';
@@ -630,6 +631,33 @@ export class CommandBus {
 
         case 'ResolveScmRecallCommand':
           result = await ScmRecallDispositionDomainService.resolveRecall(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecordColdChainObservationCommand':
+          result = await ScmControlledInventoryDomainService.recordColdChainObservation(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ReviewColdChainExcursionCommand':
+          result = await ScmControlledInventoryDomainService.reviewColdChainExcursion(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecordControlledCustodyCommand':
+          result = await ScmControlledInventoryDomainService.recordControlledCustody(
             context,
             command.commandId,
             command.idempotencyKey,

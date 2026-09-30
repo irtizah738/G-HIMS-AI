@@ -10,7 +10,7 @@ import {
   AtomicMutationRejectedError,
   TransactionManager,
 } from '../transactions/transaction-manager';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   EmployeeMaster,
   EmployeeAssignmentHistory,
@@ -44,6 +44,12 @@ type CreateEmployeePayload = Omit<
   | 'updatedAt'
   | 'schemaVersion'
 >;
+
+function workforceIdentityId(kind:'EMAIL'|'NATIONAL_ID', value:string):string{
+  const normalized=value.trim().toLowerCase();
+  const digest=createHash('sha256').update(`${kind}\u0000${normalized}`).digest('hex').slice(0,40);
+  return `wid_${kind.toLowerCase()}_${digest}`;
+}
 
 function workforceReject<T>(
   commandId:string,
@@ -91,8 +97,16 @@ function assertEmployeeStructure(payload:CreateEmployeePayload):void{
       'Primary department must be included in the employee department assignments.'
     );
   }
-  if(!Number.isFinite(Date.parse(`${payload.hireDate}T00:00:00.000Z`))){
+  const hireMs=Date.parse(`${payload.hireDate}T00:00:00.000Z`);
+  const birthMs=Date.parse(`${payload.personalInfo.dateOfBirth}T00:00:00.000Z`);
+  if(!Number.isFinite(hireMs)){
     throw new AtomicMutationRejectedError('INVALID_EMPLOYEE_HIRE_DATE','Hire date is invalid.');
+  }
+  if(!Number.isFinite(birthMs)||birthMs>=hireMs||birthMs>Date.now()){
+    throw new AtomicMutationRejectedError(
+      'INVALID_EMPLOYEE_DATE_OF_BIRTH',
+      'Date of birth must be valid, in the past, and precede the hire date.'
+    );
   }
 }
 
@@ -269,6 +283,12 @@ export class HrWorkforceDomainService {
       assertEmployeeStructure(payload);
       assertWorkforceFacilityScope(context,payload.facilityIds);
 
+      const normalizedEmail=payload.personalInfo.contactEmail.trim().toLowerCase();
+      const normalizedNationalId=payload.personalInfo.nationalIdNumber?.trim();
+      const emailIdentityId=workforceIdentityId('EMAIL',normalizedEmail);
+      const nationalIdentityId=normalizedNationalId
+        ? workforceIdentityId('NATIONAL_ID',normalizedNationalId)
+        : undefined;
       const employeeUuid=randomUUID();
       const employeeId=`emp_${employeeUuid}`;
       const employeeNumber=`EMP-${new Date().getUTCFullYear()}-${employeeUuid.replaceAll('-','').slice(0,10).toUpperCase()}`;
@@ -279,6 +299,11 @@ export class HrWorkforceDomainService {
         employeeId,
         employeeNumber,
         tenantId:context.tenantId,
+        personalInfo:{
+          ...payload.personalInfo,
+          contactEmail:normalizedEmail,
+          ...(normalizedNationalId?{nationalIdNumber:normalizedNationalId}:{}),
+        },
         facilityIds:[...new Set(payload.facilityIds)],
         departmentIds:[...new Set(payload.departmentIds)],
         employmentStatus:'ONBOARDING',
@@ -316,14 +341,55 @@ export class HrWorkforceDomainService {
         auditResourceId:employeeId,
         outboxTopic:'g-hims-workforce-events',
         idempotencyKey,commandId,correlationId:context.correlationId,
-        readTargets:[],
-        prepare:()=>({
+        readTargets:[
+          {key:'emailIdentity',entityType:'WORKFORCE_IDENTITY',entityId:emailIdentityId,required:false},
+          ...(nationalIdentityId
+            ? [{key:'nationalIdentity',entityType:'WORKFORCE_IDENTITY',entityId:nationalIdentityId,required:false}]
+            : []),
+        ],
+        prepare:(current)=>{
+          if(current.emailIdentity){
+            throw new AtomicMutationRejectedError(
+              'EMPLOYEE_EMAIL_ALREADY_REGISTERED',
+              'An employee already exists with this normalized contact email.'
+            );
+          }
+          if(nationalIdentityId&&current.nationalIdentity){
+            throw new AtomicMutationRejectedError(
+              'EMPLOYEE_NATIONAL_ID_ALREADY_REGISTERED',
+              'An employee already exists with this national identifier.'
+            );
+          }
+          const identityWrites:Array<{entityType:string;entityId:string;domainState:unknown}>=[
+            {
+              entityType:'WORKFORCE_IDENTITY',
+              entityId:emailIdentityId,
+              domainState:{
+                identityId:emailIdentityId,tenantId:context.tenantId,type:'EMAIL',
+                normalizedValue:normalizedEmail,employeeId,createdAt:now,
+              },
+            },
+          ];
+          if(nationalIdentityId&&normalizedNationalId){
+            identityWrites.push({
+              entityType:'WORKFORCE_IDENTITY',
+              entityId:nationalIdentityId,
+              domainState:{
+                identityId:nationalIdentityId,tenantId:context.tenantId,type:'NATIONAL_ID',
+                normalizedValue:normalizedNationalId.toLowerCase(),employeeId,createdAt:now,
+              },
+            });
+          }
+          return {
           domainState:employee,
-          additionalStateWrites:[{
-            entityType:'EMPLOYEE_ASSIGNMENT',
-            entityId:assignmentId,
-            domainState:assignment,
-          }],
+          additionalStateWrites:[
+            ...identityWrites,
+            {
+              entityType:'EMPLOYEE_ASSIGNMENT',
+              entityId:assignmentId,
+              domainState:assignment,
+            },
+          ],
           eventPayload:{
             employeeId,employeeNumber,
             fullName:assignment.employeeName,
@@ -335,7 +401,8 @@ export class HrWorkforceDomainService {
           },
           auditReason:`Created employee ${employeeNumber} in ONBOARDING under tenant-authoritative workforce master.`,
           resultData:employee,
-        }),
+          };
+        },
       });
       this.employees.set(employeeId,employee);
       return {

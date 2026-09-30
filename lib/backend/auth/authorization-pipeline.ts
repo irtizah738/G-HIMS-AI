@@ -82,8 +82,7 @@ export class AuthorizationPipeline {
       const privileges = context.clinicalPrivileges || [];
       const hasPrivilege =
         privileges.includes(requirement.requiredPrivilege) ||
-        privileges.includes('UNRESTRICTED_CLINICAL_CHIEF') ||
-        context.roles.includes('MEDICAL_DIRECTOR');
+        privileges.includes('UNRESTRICTED_CLINICAL_CHIEF');
 
       if (!hasPrivilege) {
         return {

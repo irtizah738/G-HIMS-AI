@@ -528,6 +528,18 @@ export const DEFAULT_HOSPITAL_COA: Array<Omit<Account, 'id' | 'tenantId' | 'crea
     isSystemLocked: true,
   },
   {
+    accountCode: '6040',
+    accountName: 'Inventory Shrinkage, Count Variance & Write-Off Expense',
+    category: 'expense',
+    subCategory: 'Clinical Operations Expense',
+    normalBalance: 'debit',
+    balance: 0,
+    currency: 'USD',
+    description: 'Physical count shortages, approved write-offs, and inventory control variances',
+    isActive: true,
+    isSystemLocked: true,
+  },
+  {
     accountCode: '6110',
     accountName: 'Hospital Utilities, Oxygen Supply & Clean Power',
     category: 'expense',

@@ -221,6 +221,7 @@ function collectionForEntityType(entityType: string): string {
     CONSIGNMENT_LOT: 'scmConsignmentLots',
     CONSIGNMENT_USAGE: 'scmConsignmentUsages',
     CONSIGNMENT_IDENTITY: 'scmConsignmentIdentities',
+    SCM_INTELLIGENCE_SNAPSHOT: 'scmOperationalSnapshots',
     THREE_WAY_MATCH: 'threeWayMatches',
     SUPPLIER_INVOICE: 'scmSupplierInvoices',
     SUPPLIER_INVOICE_MATCH: 'scmSupplierInvoiceMatches',

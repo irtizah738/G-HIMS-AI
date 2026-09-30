@@ -25,6 +25,11 @@ import {
   recordStockTransactionEdge,
   submitPurchaseRequisitionEdge,
 } from '@/lib/supply-chain/scm-edge-adapter';
+import {
+  initiateScmRecallEdge,
+  executeRecallQuarantineEdge,
+} from '@/lib/supply-chain/scm-recall-edge-adapter';
+import { upsertReplenishmentPolicyEdge } from '@/lib/supply-chain/scm-planning-edge-adapter';
 import { ScmExpiryDashboard } from '@/components/supply-chain/scm-expiry-dashboard';
 import { ScmAuditComplianceView } from '@/components/supply-chain/scm-audit-compliance-view';
 import { ScmProcurementModule } from '@/components/supply-chain/scm-procurement-module';
@@ -521,13 +526,64 @@ export function SupplyChainScmView({ tenantId = 'metro-health' }: SupplyChainScm
     }
   };
 
-  // Recall execution remains blocked until the dedicated governed recall
-  // command is implemented. Never fall back to browser Firestore mutation.
+  // Governed SCM-8 recall initiation + authoritative stock quarantine.
   const handleTriggerBatchRecall = async () => {
-    setIsRecallModalOpen(false);
-    setGovernanceNotice(
-      'Recall execution is temporarily read-only. SCM-4 will provide the governed recall/quarantine command with patient exposure tracing.'
+    const targetBatch = batches.find(
+      (batch) => batch.batchNumber.trim() === recallBatchNum.trim()
     );
+    if (!targetBatch) {
+      setGovernanceNotice('No authoritative batch matches the recall batch number.');
+      return;
+    }
+    const affectedBalances = balances.filter(
+      (balance) =>
+        balance.batchId === targetBatch.batchId &&
+        Number(balance.onHand || 0) > 0
+    );
+    if (!affectedBalances.length) {
+      setGovernanceNotice('The selected batch has no authoritative on-hand balances to quarantine.');
+      return;
+    }
+
+    const recallId = `recall_${crypto.randomUUID()}`;
+    const initiatedAt = new Date().toISOString();
+    try {
+      await initiateScmRecallEdge(
+        {
+          recallId,
+          recallCaseNumber: `RCL-${new Date().getFullYear()}-${Date.now()
+            .toString()
+            .slice(-8)}`,
+          itemId: targetBatch.itemId,
+          scope: 'BATCH_WIDE',
+          targetBatchNumbers: [targetBatch.batchNumber],
+          recallReason: recallReason.trim(),
+          severity: 'URGENT_CLASS_2',
+          initiatedAt,
+        },
+        `scm-recall-init:${recallId}`
+      );
+      await executeRecallQuarantineEdge(
+        {
+          recallId,
+          batchIds: [targetBatch.batchId],
+          balanceIds: affectedBalances.map((balance) => balance.balanceId),
+          finalChunk: true,
+        },
+        `scm-recall-quarantine:${recallId}:final`
+      );
+      setIsRecallModalOpen(false);
+      setRecallBatchNum('');
+      setRecallReason('');
+      setGovernanceNotice(
+        'Recall initiated and affected on-hand stock quarantined through the governed SCM-8 workflow.'
+      );
+      await loadData();
+    } catch (error) {
+      setGovernanceNotice(
+        error instanceof Error ? error.message : 'Governed recall initiation failed.'
+      );
+    }
   };
 
   return (
@@ -1015,11 +1071,41 @@ export function SupplyChainScmView({ tenantId = 'metro-health' }: SupplyChainScm
             items={items}
             locations={locations}
             transactions={transactions}
-            onSaveParLevel={async () => {
-              setGovernanceNotice(
-                'PAR/minimum-stock edits are read-only until a governed configuration command is available. No browser Firestore write was attempted.'
+            onSaveParLevel={async (balanceId, newMin, newReorderPoint) => {
+              const balance = balances.find((row) => row.balanceId === balanceId);
+              const item = balance
+                ? items.find((row) => row.itemId === balance.itemId)
+                : undefined;
+              if (!balance || !item) {
+                throw new Error('Authoritative inventory balance or item master is unavailable.');
+              }
+              const maxQuantity = Math.max(
+                newReorderPoint,
+                newMin,
+                Number(balance.maximumStock || item.maximumStock || 0)
               );
-              throw new Error('SCM_PAR_GOVERNED_COMMAND_REQUIRED');
+              await upsertReplenishmentPolicyEdge(
+                {
+                  policyId: `rpol_${balance.facilityId}_${balance.locationId}_${balance.itemId}`,
+                  facilityId: balance.facilityId,
+                  locationId: balance.locationId,
+                  itemId: balance.itemId,
+                  preferredSupplierId: item.preferredVendorIds?.[0],
+                  minQuantity: newMin,
+                  maxQuantity,
+                  reorderPoint: newReorderPoint,
+                  safetyStockQuantity: Math.max(0, Number(item.safetyStock || newMin)),
+                  safetyStockDays: 2,
+                  leadTimeDays: Math.max(1, Number(item.leadTimeDays || 1)),
+                  mode: 'AUTO',
+                  active: true,
+                },
+                `scm-par-policy:${balance.balanceId}:${newMin}:${newReorderPoint}`
+              );
+              setGovernanceNotice(
+                'PAR/reorder policy saved through the governed SCM-7 replenishment policy command.'
+              );
+              await loadData();
             }}
             onTriggerReorder={(it, qty) => {
               setReqSelectedItem(it.itemId);

@@ -1206,6 +1206,26 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       reason: nonEmpty.max(2000),
     }).strict(),
   },
+  SubmitLeaveRequestCommand: {
+    1: z.object({
+      employeeId: nonEmpty.max(100),
+      leaveType: z.enum([
+        'ANNUAL','SICK','EMERGENCY','MATERNITY','PATERNITY',
+        'STUDY_CME','COMPASSIONATE','UNPAID','OTHER'
+      ]),
+      startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      reason: nonEmpty.max(2000),
+      coveringEmployeeId: z.string().trim().min(1).max(100).optional(),
+    }).strict(),
+  },
+  ApproveLeaveRequestCommand: {
+    1: z.object({
+      leaveId: nonEmpty.max(150),
+      approved: z.boolean(),
+      rejectionReason: z.string().trim().min(1).max(2000).optional(),
+    }).strict(),
+  },
   SubmitCredentialCommand: {
     1: z.object({
       employeeId: nonEmpty.max(100),

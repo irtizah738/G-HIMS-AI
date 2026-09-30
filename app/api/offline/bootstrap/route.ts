@@ -59,6 +59,8 @@ const ADMIN_COLLECTIONS = [
 const HCM_COLLECTIONS = [
   'employees',
   'employeeAssignments',
+  'clinicalCredentials',
+  'clinicalPrivileges',
 ] as const;
 
 const SCM_COLLECTIONS = [
@@ -305,6 +307,24 @@ function scopeOfflineCollections(
     scoped.employeeAssignments = collections.employeeAssignments.filter((assignment) =>
       valueMatchesScope(assignment.facilityId, facilities) &&
       valueMatchesScope(assignment.departmentId, departments)
+    );
+  }
+
+  const scopedEmployeeIds=new Set(
+    (scoped.employees||[]).map(employee=>String(employee.employeeId||'').trim()).filter(Boolean)
+  );
+
+  if(collections.clinicalCredentials){
+    scoped.clinicalCredentials=collections.clinicalCredentials.filter(credential=>
+      scopedEmployeeIds.has(String(credential.employeeId||'').trim())
+    );
+  }
+
+  if(collections.clinicalPrivileges){
+    scoped.clinicalPrivileges=collections.clinicalPrivileges.filter(privilege=>
+      scopedEmployeeIds.has(String(privilege.employeeId||'').trim()) &&
+      valueMatchesScope(privilege.facilityId,facilities) &&
+      valueMatchesScope(privilege.departmentId,departments)
     );
   }
 

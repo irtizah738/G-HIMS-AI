@@ -24,6 +24,16 @@ describe('SCM-5 inventory valuation, costing and period close', () => {
 
     const transactions = [
       {
+        transactionId: 'opening-rx',
+        itemId: 'med-1',
+        transactionType: 'RECEIPT',
+        quantity: 5,
+        normalizedQuantity: 5,
+        unitCost: 2,
+        currency: 'USD',
+        occurredAt: '2026-08-28T10:00:00.000Z',
+      },
+      {
         transactionId: 'rx-1',
         itemId: 'med-1',
         transactionType: 'RECEIPT',
@@ -65,6 +75,8 @@ describe('SCM-5 inventory valuation, costing and period close', () => {
 
     expect(valuation.movementMinorUnitsByAccount['1210']).toBe(1400);
     expect(valuation.movementMinorUnitsByAccount['1220']).toBe(0);
+    expect(valuation.endingValuationMinorUnitsByAccount['1210']).toBe(2400);
+    expect(valuation.endingValuationMinorUnitsByAccount['1220']).toBe(0);
     expect(valuation.transactionCount).toBe(2);
 
     const ledger = buildJournalInventoryMovement({

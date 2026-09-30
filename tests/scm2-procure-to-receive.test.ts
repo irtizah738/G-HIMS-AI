@@ -93,6 +93,31 @@ describe('SCM-2 procure-to-receive integrity', () => {
     expect(method).toContain("'GRN_INSPECTION_STATUS_CONFLICT'");
   });
 
+  test('rejected or damaged receipt quantities do not close purchase demand', async () => {
+    const service = await source(
+      'lib/backend/services/scm-procurement-domain-service.ts'
+    );
+
+    expect(service).toContain(
+      'const newReceived = alreadyReceived + accepted'
+    );
+    expect(service).toContain(
+      'Rejected/damaged units remain open for replacement or supplier credit.'
+    );
+  });
+
+  test('GRN event and document status preserve failed and quarantined outcomes', async () => {
+    const service = await source(
+      'lib/backend/services/scm-procurement-domain-service.ts'
+    );
+
+    expect(service).toContain("'GRN_INSPECTION_FAILED'");
+    expect(service).toContain("'GRN_QUARANTINED'");
+    expect(service).toContain("'GRN_RECORDED'");
+    expect(service).toContain("? 'INSPECTED'");
+    expect(service).toContain(": 'PUTAWAY_COMPLETED'");
+  });
+
   test('receiving reads the existing balance before writing and never trusts client cost', async () => {
     const service = await source(
       'lib/backend/services/scm-procurement-domain-service.ts'

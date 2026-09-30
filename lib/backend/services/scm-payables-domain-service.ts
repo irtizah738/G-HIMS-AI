@@ -1388,11 +1388,13 @@ export class ScmPayablesDomainService {
             sourceAccount.id !== payload.sourceAccountId ||
             !sourceAccount.isActive ||
             sourceAccount.category !== 'asset' ||
-            sourceAccount.normalBalance !== 'debit'
+            sourceAccount.normalBalance !== 'debit' ||
+            sourceAccount.allowSupplierPayments !== true ||
+            sourceAccount.currency.toUpperCase() !== invoice.currency.toUpperCase()
           ) {
             throw new AtomicMutationRejectedError(
               'INVALID_PAYMENT_SOURCE_ACCOUNT',
-              'Supplier payment source must be an active debit-normal asset account from the authoritative chart of accounts.'
+              'Supplier payment source must be an active, payment-enabled debit-normal treasury account in the invoice currency.'
             );
           }
 

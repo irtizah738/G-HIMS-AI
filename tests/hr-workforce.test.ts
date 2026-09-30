@@ -77,7 +77,6 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
           positionId: 'pos_resident',
           positionTitle: 'Resident Physician',
           employmentType: 'FULL_TIME',
-          employmentStatus: 'ACTIVE',
           hireDate: '2026-04-01',
         },
       };
@@ -114,7 +113,6 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
           positionId: 'pos_intern',
           positionTitle: 'Intern',
           employmentType: 'FULL_TIME',
-          employmentStatus: 'ACTIVE',
           hireDate: '2026-04-01',
         },
       };
@@ -153,7 +151,6 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
           positionId: 'pos_attending_genmed',
           positionTitle: 'Attending Physician',
           employmentType: 'FULL_TIME',
-          employmentStatus: 'ACTIVE',
           hireDate: '2026-03-01',
         },
       };

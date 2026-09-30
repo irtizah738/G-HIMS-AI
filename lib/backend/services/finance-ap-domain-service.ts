@@ -5,9 +5,20 @@ import {
 } from '@/lib/backend/transactions/transaction-manager';
 import type { CommandContext, CommandResult } from '@/lib/backend/types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
-import type { FinanceApAgingSnapshot, FinancePeriodRecord, GovernedJournalRecord } from '@/types/finance-domain';
-import type { SupplierInvoiceRecord } from '@/types/scm-payables';
-import { financePeriodId } from '@/lib/finance/finance-engine';
+import type {
+  FinanceApAgingSnapshot,
+  FinancePeriodRecord,
+  GovernedJournalRecord,
+  TaxLedgerItem,
+} from '@/types/finance-domain';
+import type {
+  SupplierInvoiceRecord,
+  SupplierPaymentRecord,
+} from '@/types/scm-payables';
+import {
+  calculateApOutstandingAsOf,
+  financePeriodId,
+} from '@/lib/finance/finance-engine';
 
 export interface GenerateApAgingPayload {
   snapshotId: string;
@@ -54,25 +65,43 @@ export class FinanceApDomainService {
     if(!Number.isFinite(payload.asOf))return reject(commandId,idempotencyKey,'INVALID_AP_AGING_DATE','AP aging date is invalid.');
     const currency=payload.currency.trim().toUpperCase();
     try{
-      const invoices=(await DomainStateRepository.list<SupplierInvoiceRecord>(
-        context.tenantId,'scmSupplierInvoices',200000
-      )).filter(invoice=>
+      const [invoices,journals,payments,credits,taxLedger]=await Promise.all([
+        DomainStateRepository.list<SupplierInvoiceRecord>(context.tenantId,'scmSupplierInvoices',200000),
+        DomainStateRepository.list<GovernedJournalRecord>(context.tenantId,'journalEntries',500000),
+        DomainStateRepository.list<SupplierPaymentRecord>(context.tenantId,'scmSupplierPayments',200000),
+        DomainStateRepository.list<Record<string,unknown>>(context.tenantId,'financeSupplierCredits',200000),
+        DomainStateRepository.list<TaxLedgerItem>(context.tenantId,'financeTaxLedger',200000),
+      ]);
+      const asOf=calculateApOutstandingAsOf({
+        invoices,
+        journals,
+        payments,
+        credits:credits.map(row=>({
+          invoiceId:String(row.invoiceId||''),
+          amountMinorUnits:Number(row.amountMinorUnits||0),
+          postingAt:Number(row.postingAt||0),
+          currency:String(row.currency||''),
+        })),
+        taxLedger,
+        asOf:payload.asOf,
+        currency,
+      });
+      const relevantInvoices=invoices.filter(invoice=>
         invoice.currency===currency &&
-        invoice.balanceMinorUnits>0 &&
-        ['PAYABLE_RECOGNIZED','PARTIALLY_PAID'].includes(invoice.status)
+        (asOf.outstandingByInvoiceId.get(invoice.invoiceId)||0)>0
       );
       const totals={CURRENT:0,'1_30':0,'31_60':0,'61_90':0,OVER_90:0};
-      invoices.forEach(invoice=>{
-        const available=Math.max(0,invoice.balanceMinorUnits-invoice.pendingPaymentMinorUnits);
-        totals[apBucket(invoice.dueDate,payload.asOf)]+=available;
+      relevantInvoices.forEach(invoice=>{
+        totals[apBucket(invoice.dueDate,payload.asOf)]+=
+          asOf.outstandingByInvoiceId.get(invoice.invoiceId)||0;
       });
       const snapshot:FinanceApAgingSnapshot={
         snapshotId:payload.snapshotId,tenantId:context.tenantId,asOf:payload.asOf,currency,
         currentMinorUnits:totals.CURRENT,days1to30MinorUnits:totals['1_30'],
         days31to60MinorUnits:totals['31_60'],days61to90MinorUnits:totals['61_90'],
         over90MinorUnits:totals.OVER_90,
-        totalOutstandingMinorUnits:Object.values(totals).reduce((a,b)=>a+b,0),
-        invoiceCount:invoices.length,generatedAt:new Date().toISOString(),generatedBy:context.actorId,
+        totalOutstandingMinorUnits:asOf.totalOutstandingMinorUnits,
+        invoiceCount:relevantInvoices.length,generatedAt:new Date().toISOString(),generatedBy:context.actorId,
       };
       const tx=await TransactionManager.executeAtomicWrite(context,commandId,idempotencyKey,{
         entityType:'AP_AGING_SNAPSHOT',entityId:payload.snapshotId,

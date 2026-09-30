@@ -130,6 +130,25 @@ describe('P8 main baseline hardening', () => {
     expect(authTypes).toContain("'BREAK_GLASS_REVIEWED'");
   });
 
+  test('authentication never auto-creates tenant or clinical authority', async () => {
+    const sessionRoute = await source('app/api/auth/session/route.ts');
+    const membership = await source('server/auth/tenant-membership.ts');
+    const provisioning = await source('server/auth/user-provisioning-service.ts');
+    const authorization = await source(
+      'lib/backend/auth/authorization-pipeline.ts'
+    );
+
+    expect(sessionRoute).toContain('Authentication never creates authorization');
+    expect(sessionRoute).not.toContain("email.includes('admin')");
+    expect(sessionRoute).not.toContain("credentialStatus: 'VERIFIED'");
+    expect(membership).toContain(": 'UNVERIFIED'");
+    expect(membership).toContain("credentialStatus === 'VERIFIED'");
+    expect(provisioning).toContain("? 'UNVERIFIED'");
+    expect(authorization).not.toContain(
+      "context.roles.includes('MEDICAL_DIRECTOR');"
+    );
+  });
+
   test('credential and PHI artifacts are excluded from git', async () => {
     const gitignore = await source('.gitignore');
 

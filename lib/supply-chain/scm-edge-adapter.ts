@@ -166,6 +166,23 @@ export async function convertPurchaseRequisitionToOrderEdge(input: {
   return po;
 }
 
+export async function reviewPurchaseOrderEdge(input: {
+  purchaseOrderId: string;
+  decision: 'APPROVED' | 'REJECTED';
+  comments?: string;
+}): Promise<void> {
+  const result = await executeActiveTenantCommand(
+    'ReviewPurchaseOrderCommand',
+    input,
+    {
+      idempotencyKey: `scm-po-review:${input.purchaseOrderId}:${input.decision}`,
+    }
+  );
+  if (!result.success) {
+    throw new Error(result.error?.message || 'Purchase order review failed.');
+  }
+}
+
 export async function receivePurchaseOrderEdge(input: {
   purchaseOrderId: string;
   deliveryNoteNumber: string;

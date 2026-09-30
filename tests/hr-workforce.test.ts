@@ -264,6 +264,40 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
     });
 
     test('Verifying a submitted credential requires Medical Director authority', async () => {
+      const employeeCmd: BaseCommand = {
+        commandId: 'cmd_cred_emp_01',
+        idempotencyKey: 'idemp_cred_emp_01',
+        commandType: 'CreateEmployeeCommand',
+        schemaVersion: 1,
+        tenantId: 'central-metro-hospital',
+        actorId: 'usr_hr_lead_01',
+        timestamp: new Date().toISOString(),
+        payload: {
+          personalInfo: {
+            legalFirstName: 'Credential',
+            legalLastName: 'Candidate',
+            dateOfBirth: '1985-02-02',
+            gender: 'FEMALE',
+            contactEmail: 'credential.candidate@hcm2.test',
+            contactPhone: '555-0202',
+            emergencyContact: { name: 'Emergency Contact', relationship: 'Sibling', phone: '555-0203' },
+            residentialAddress: { street: '1 Test Way', city: 'Test City', state: 'TS', postalCode: '10001', country: 'USA' },
+          },
+          primaryFacilityId: 'fac_central',
+          facilityIds: ['fac_central'],
+          primaryDepartmentId: 'dept_general_medicine',
+          primaryDepartmentName: 'General Medicine',
+          departmentIds: ['dept_general_medicine'],
+          positionId: 'pos_credential_candidate',
+          positionTitle: 'Physician',
+          employmentType: 'FULL_TIME',
+          hireDate: '2026-03-01',
+        },
+      };
+      const createdEmployee = await CommandBus.dispatch(hrAdminContext, employeeCmd);
+      expect(createdEmployee.success).toBe(true);
+      const employeeId = createdEmployee.entityId!;
+
       const submitCmd: BaseCommand = {
         commandId: 'cmd_submit_cred_01',
         idempotencyKey: 'idemp_submit_cred_01',
@@ -273,7 +307,7 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
         actorId: 'usr_hr_lead_01',
         timestamp: new Date().toISOString(),
         payload: {
-          employeeId: 'emp_001',
+          employeeId,
           credentialType: 'MEDICAL_LICENSE',
           title: 'Additional Medical Council License',
           issuingAuthority: 'Medical Council',

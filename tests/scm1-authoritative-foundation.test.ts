@@ -81,6 +81,22 @@ describe('SCM-1 authoritative inventory and procurement foundation', () => {
     );
   });
 
+  test('purchase order approval is explicit and separation-of-duties guarded', async () => {
+    const service = await source(
+      'lib/backend/services/scm-offline-domain-service.ts'
+    );
+    const procurement = await source(
+      'components/supply-chain/scm-procurement-module.tsx'
+    );
+
+    expect(service).toContain('reviewPurchaseOrder');
+    expect(service).toContain("'PURCHASE_ORDER_STATE_CONFLICT'");
+    expect(service).toContain("'PURCHASE_ORDER_SELF_APPROVAL_DENIED'");
+    expect(service).toContain("'PO_APPROVED'");
+    expect(procurement).toContain('reviewPurchaseOrderEdge');
+    expect(procurement).toContain('Approve PO');
+  });
+
   test('goods receiving requires an authoritative receivable PO', async () => {
     const service = await source(
       'lib/backend/services/scm-offline-domain-service.ts'
@@ -127,6 +143,7 @@ describe('SCM-1 authoritative inventory and procurement foundation', () => {
       'SubmitPurchaseRequisitionCommand',
       'ReviewPurchaseRequisitionCommand',
       'ConvertPurchaseRequisitionToOrderCommand',
+      'ReviewPurchaseOrderCommand',
       'ReceivePurchaseOrderCommand',
     ]) {
       expect(bus).toContain(command);

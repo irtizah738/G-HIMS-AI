@@ -385,6 +385,20 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "scmOperationalSnapshots",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "facilityId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "asOf",
+          "order": "DESCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []

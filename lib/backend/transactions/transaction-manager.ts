@@ -208,6 +208,7 @@ function collectionForEntityType(entityType: string): string {
     EMPLOYEE_CREDENTIAL: 'clinicalCredentials',
     CREDENTIAL_IDENTITY: 'credentialIdentities',
     CLINICAL_PRIVILEGE: 'clinicalPrivileges',
+    CLINICAL_PRIVILEGE_SLOT: 'clinicalPrivilegeSlots',
     ROSTER_SHIFT: 'rosterAssignments',
     ATTENDANCE_RECORD: 'attendanceRecords',
     LEAVE_REQUEST: 'leaveRequests',

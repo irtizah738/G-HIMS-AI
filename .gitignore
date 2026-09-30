@@ -1,0 +1,37 @@
+# Dependencies and build output
+node_modules/
+.next/
+.vercel/
+coverage/
+playwright-report/
+test-results/
+
+# Environment and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+service-account*.json
+firebase-adminsdk*.json
+google-application-credentials*.json
+
+# Local Firebase / emulator state and logs
+.firebase/
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+
+# Operational evidence may contain PHI, security metadata or infrastructure data
+artifacts/
+backups/
+restore/
+*.backup.json
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -109,7 +109,7 @@
     "provision:hcm": "bun scripts/ops/hcm-provision-controls.ts",
     "validate:hcm-final": "bun run typecheck && bun run lint && bun run test:hcm1 && bun run test:hcm2 && bun run test:hcm3 && bun run test:hcm4 && bun run test:hcm5 && bun run test:hcm6 && bun run test:hcm7-11 && bun run test:finance && bun run test:scm-completion && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",
     "test:fac1": "bun test tests/resource-capacity.test.ts tests/fac1-authoritative-resource-foundation.test.ts",
-    "validate:fac1": "bun run typecheck && bun run lint && bun run test:fac1 && bun run test:hcm1 && bun run test:finance && bun run test:scm-completion && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build"
+    "validate:fac1": "bun run typecheck && bun run lint && bun run test:fac1 && bun run test:hcm1 && bun run test:hcm2 && bun run test:hcm3 && bun run test:hcm4 && bun run test:hcm5 && bun run test:hcm6 && bun run test:hcm7-11 && bun run test:finance && bun run test:scm-completion && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

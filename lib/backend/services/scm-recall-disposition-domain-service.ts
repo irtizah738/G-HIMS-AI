@@ -25,6 +25,7 @@ import type {
   ResolveRecallPayload,
   ReviewInventoryDispositionPayload,
 } from '@/types/scm-recall';
+import type { ColdChainExcursionRecord } from '@/types/scm-controlled';
 import {
   batchMatchesRecall,
   consumptionMatchesRecall,
@@ -584,6 +585,7 @@ export class ScmRecallDispositionDomainService {
       assertDate(payload.requestedAt,'INVALID_DISPOSITION_REQUEST_DATE');
       if(!Number.isFinite(payload.quantity)||payload.quantity<=0) throw new AtomicMutationRejectedError('INVALID_DISPOSITION_QUANTITY','Disposition quantity must be positive.');
       if(payload.dispositionType==='RETURN_TO_SUPPLIER'&&!payload.supplierId?.trim()) throw new AtomicMutationRejectedError('SUPPLIER_RETURN_SUPPLIER_REQUIRED','Return-to-supplier disposition requires supplier identity.');
+      if(payload.reason==='TEMPERATURE_EXCURSION'&&!payload.excursionId?.trim()) throw new AtomicMutationRejectedError('COLD_CHAIN_EXCURSION_REQUIRED','Temperature-excursion disposition requires excursion identity.');
       const periodCloseId=inventoryPeriodCloseId(payload.facilityId,periodKeyFromIso(payload.requestedAt));
       const tx=await TransactionManager.executeAtomicReadModifyMutation({
         tenantId:context.tenantId,actorId:context.actorId,actorRole:context.roles[0]||'AUTHENTICATED_USER',
@@ -595,6 +597,7 @@ export class ScmRecallDispositionDomainService {
           {key:'batch',entityType:'BATCH_LOT',entityId:payload.batchId,required:true},
           {key:'periodClose',entityType:'INVENTORY_PERIOD_CLOSE',entityId:periodCloseId,required:false},
           ...(payload.recallId?[{key:'recall',entityType:'SCM_RECALL',entityId:payload.recallId,required:true}]:[]),
+          ...(payload.excursionId?[{key:'excursion',entityType:'COLD_CHAIN_EXCURSION',entityId:payload.excursionId,required:true}]:[]),
         ],
         prepare:(current)=>{
           const balance=current.balance as unknown as InventoryBalance;
@@ -615,6 +618,21 @@ export class ScmRecallDispositionDomainService {
             const recall=current.recall as unknown as GovernedRecallCase;
             if(recall.itemId!==balance.itemId||!recall.quarantinedBalanceIds.includes(balance.balanceId)) throw new AtomicMutationRejectedError('DISPOSITION_RECALL_SCOPE_MISMATCH','Disposition is not tied to stock quarantined by the recall.');
           }
+          if(payload.excursionId){
+            const excursion=current.excursion as unknown as ColdChainExcursionRecord;
+            if(
+              excursion.status!=='DISPOSITION_REQUIRED' ||
+              excursion.balanceId!==balance.balanceId ||
+              excursion.batchId!==batch.batchId ||
+              excursion.facilityId!==payload.facilityId ||
+              excursion.locationId!==payload.locationId
+            ){
+              throw new AtomicMutationRejectedError('DISPOSITION_COLD_CHAIN_SCOPE_MISMATCH','Disposition is not tied to the authoritative cold-chain excursion.');
+            }
+            if(Number(excursion.affectedQuantity||0)+0.000001<payload.quantity){
+              throw new AtomicMutationRejectedError('DISPOSITION_EXCEEDS_COLD_CHAIN_AFFECTED_QUANTITY','Disposition exceeds excursion-affected quantity.');
+            }
+          }
           const itemCurrency=String(batch.currency||'').trim().toUpperCase();
           if(itemCurrency.length!==3) throw new AtomicMutationRejectedError('DISPOSITION_CURRENCY_INVALID','Batch currency must be a 3-letter code.');
           const unitCostMinorUnits=toMinorUnits(balance.unitCost);
@@ -624,7 +642,7 @@ export class ScmRecallDispositionDomainService {
             itemCode:balance.itemCode,itemName:balance.itemName,itemType:balance.itemType,batchId:batch.batchId,batchNumber:batch.batchNumber,
             quantity:payload.quantity,uom:balance.uom,unitCostMinorUnits,totalValueMinorUnits:Math.round(payload.quantity*unitCostMinorUnits),
             currency:itemCurrency,inventoryAccountCode:inventoryAccountForItemType(balance.itemType),dispositionType:payload.dispositionType,
-            reason:payload.reason,recallId:payload.recallId,supplierId:payload.supplierId,justification:payload.justification,
+            reason:payload.reason,recallId:payload.recallId,excursionId:payload.excursionId,supplierId:payload.supplierId,justification:payload.justification,
             status:'PENDING_APPROVAL',requestedBy:context.actorId,requestedAt:payload.requestedAt,
           };
           return {domainState:order,eventPayload:{orderId:order.orderId,itemId:order.itemId,batchId:order.batchId,quantity:order.quantity,dispositionType:order.dispositionType,reason:order.reason},auditReason:`Requested ${order.dispositionType} disposition ${order.orderNumber} for ${order.quantity} ${order.uom}.`,resultData:order};
@@ -703,6 +721,7 @@ export class ScmRecallDispositionDomainService {
           {key:'batch',entityType:'BATCH_LOT',entityId:preflight.batchId,required:true},
           {key:'periodClose',entityType:'INVENTORY_PERIOD_CLOSE',entityId:closeId,required:false},
           ...(preflight.recallId?[{key:'recall',entityType:'SCM_RECALL',entityId:preflight.recallId,required:true}]:[]),
+          ...(preflight.excursionId?[{key:'excursion',entityType:'COLD_CHAIN_EXCURSION',entityId:preflight.excursionId,required:true}]:[]),
         ],
         prepare:(current)=>{
           const order=current.order as unknown as InventoryDispositionOrder;
@@ -749,6 +768,22 @@ export class ScmRecallDispositionDomainService {
           if(order.recallId){
             const recall=current.recall as unknown as GovernedRecallCase;
             writes.push({entityType:'SCM_RECALL',entityId:recall.recallId,domainState:{...recall,dispositionOrderIds:unique([...recall.dispositionOrderIds,order.orderId]),disposedQuantity:Number(recall.disposedQuantity||0)+order.quantity,updatedAt:now}});
+          }
+          if(order.excursionId){
+            const excursion=current.excursion as unknown as ColdChainExcursionRecord;
+            if(excursion.status!=='DISPOSITION_REQUIRED'){
+              throw new AtomicMutationRejectedError('COLD_CHAIN_EXCURSION_NOT_DISPOSABLE','Cold-chain excursion is not awaiting disposition.');
+            }
+            writes.push({
+              entityType:'COLD_CHAIN_EXCURSION',
+              entityId:excursion.excursionId,
+              domainState:{
+                ...excursion,
+                status:'DISPOSED',
+                disposalOrderId:order.orderId,
+                disposedAt:payload.executedAt,
+              },
+            });
           }
           return {domainState:nextOrder,additionalStateWrites:writes,eventPayload:{orderId:order.orderId,dispositionType:order.dispositionType,quantity:order.quantity,stockTransactionId,journalEntryId,witnessUserId:payload.witnessUserId},auditReason:`Executed inventory disposition ${order.orderNumber} with independent witness ${payload.witnessUserId}.`,resultData:nextOrder};
         },

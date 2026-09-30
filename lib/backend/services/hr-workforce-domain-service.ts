@@ -2071,9 +2071,6 @@ export class HrWorkforceDomainService {
     const attendanceId = `att_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const now = new Date().toISOString();
     const today = now.split('T')[0];
-    const fixtureTenant=String(
-      process.env.GHIMS_HCM_TEST_TENANT || 'central-metro-hospital'
-    ).trim();
 
     const attendance: AttendanceRecord = {
       attendanceId,
@@ -2478,6 +2475,9 @@ export class HrWorkforceDomainService {
 
     const now = new Date().toISOString();
     const today = now.split('T')[0];
+    const fixtureTenant=String(
+      process.env.GHIMS_HCM_TEST_TENANT || 'central-metro-hospital'
+    ).trim();
 
     const sampleEmployees: EmployeeMaster[] = [
       {

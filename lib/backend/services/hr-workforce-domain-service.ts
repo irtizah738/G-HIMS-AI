@@ -24,6 +24,7 @@ import {
   AttendanceOpenSlot,
   AttendanceCorrectionRecord,
   LeaveRequest,
+  LeaveCalendarBucket,
   EmployeeLeaveBalance,
   CompensationStructure,
   PerformanceReview,
@@ -109,6 +110,27 @@ function attendanceOpenSlotId(employeeId:string):string{
     .update(employeeId.trim().toLowerCase())
     .digest('hex')
     .slice(0,40);
+}
+
+function leaveBalanceId(employeeId:string,leaveType:LeaveRequest['leaveType'],year:number):string{
+  return 'lvb_'+createHash('sha256')
+    .update([employeeId,leaveType,String(year)].map(v=>v.trim().toLowerCase()).join('\u0000'))
+    .digest('hex').slice(0,40);
+}
+
+function leaveCalendarId(employeeId:string,year:number):string{
+  return 'lvc_'+createHash('sha256')
+    .update(`${employeeId.trim().toLowerCase()}\u0000${year}`)
+    .digest('hex').slice(0,40);
+}
+
+function leaveDayCount(startDate:string,endDate:string):number{
+  const start=Date.parse(`${startDate}T00:00:00.000Z`);
+  const end=Date.parse(`${endDate}T00:00:00.000Z`);
+  if(!Number.isFinite(start)||!Number.isFinite(end)||end<start){
+    throw new AtomicMutationRejectedError('INVALID_LEAVE_INTERVAL','Leave dates are invalid.');
+  }
+  return Math.floor((end-start)/86_400_000)+1;
 }
 
 function workforceReject<T>(
@@ -2405,134 +2427,243 @@ export class HrWorkforceDomainService {
   // ============================================================================
 
   public static async submitLeaveRequest(
-    context: CommandContext,
-    commandId: string,
-    idempotencyKey: string,
-    payload: Omit<LeaveRequest, 'leaveId' | 'status' | 'createdAt' | 'updatedAt'>
-  ): Promise<CommandResult<LeaveRequest>> {
-    const leaveId = `lve_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const now = new Date().toISOString();
+    context:CommandContext,
+    commandId:string,
+    idempotencyKey:string,
+    payload:{
+      employeeId:string;
+      leaveType:LeaveRequest['leaveType'];
+      startDate:string;
+      endDate:string;
+      reason:string;
+      coveringEmployeeId?:string;
+    }
+  ):Promise<CommandResult<LeaveRequest>>{
+    const employee=await this.loadEmployee(context.tenantId,payload.employeeId);
+    if(!employee){
+      return workforceReject(commandId,idempotencyKey,'EMPLOYEE_NOT_FOUND','Leave employee does not exist.');
+    }
+    try{
+      assertWorkforceFacilityScope(context,employee.facilityIds);
+      if(['TERMINATED','RETIRED','INACTIVE'].includes(employee.employmentStatus)){
+        throw new AtomicMutationRejectedError('EMPLOYEE_NOT_LEAVE_ELIGIBLE','Inactive/terminal employees cannot request leave.');
+      }
+      const totalDays=leaveDayCount(payload.startDate,payload.endDate);
+      const startYear=Number(payload.startDate.slice(0,4));
+      const endYear=Number(payload.endDate.slice(0,4));
+      if(startYear!==endYear){
+        throw new AtomicMutationRejectedError(
+          'CROSS_YEAR_LEAVE_NOT_SUPPORTED',
+          'A leave request must remain within one entitlement year; split cross-year leave into separate requests.'
+        );
+      }
+      const balanceId=leaveBalanceId(employee.employeeId,payload.leaveType,startYear);
+      const calendarId=leaveCalendarId(employee.employeeId,startYear);
+      const leaveId=`lve_${randomUUID()}`;
+      const now=new Date().toISOString();
 
-    const leave: LeaveRequest = {
-      ...payload,
-      leaveId,
-      status: 'SUBMITTED',
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    this.leaveRequests.set(leaveId, leave);
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'LEAVE_REQUEST',
-      entityId: leaveId,
-      eventType: 'LEAVE_REQUESTED',
-      domainState: leave,
-      eventPayload: {
-        leaveId,
-        employeeId: payload.employeeId,
-        leaveType: payload.leaveType,
-        startDate: payload.startDate,
-        endDate: payload.endDate,
-        totalDays: payload.totalDays,
-      },
-      auditReason: `Leave requested by ${payload.employeeName} (${payload.leaveType}, ${payload.totalDays} days)`,
-      outboxTopic: 'g-hims-leave-events',
-    });
-
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: leaveId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: leave,
-    };
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'LEAVE_REQUEST',aggregateId:leaveId,
+        eventType:'LEAVE_REQUESTED',auditAction:'LEAVE_REQUESTED',
+        auditResourceType:'LEAVE_REQUEST',auditResourceId:leaveId,
+        outboxTopic:'g-hims-leave-events',idempotencyKey,commandId,
+        correlationId:context.correlationId,
+        readTargets:[
+          {key:'employee',entityType:'EMPLOYEE_MASTER',entityId:employee.employeeId,required:true},
+          {key:'balance',entityType:'LEAVE_BALANCE',entityId:balanceId,required:true},
+          {key:'calendar',entityType:'LEAVE_CALENDAR',entityId:calendarId,required:false},
+        ],
+        prepare:(current)=>{
+          const currentEmployee=current.employee as unknown as EmployeeMaster;
+          const balance=current.balance as unknown as EmployeeLeaveBalance;
+          const calendar=current.calendar as unknown as LeaveCalendarBucket|null;
+          if(['TERMINATED','RETIRED','INACTIVE'].includes(currentEmployee.employmentStatus)){
+            throw new AtomicMutationRejectedError('EMPLOYEE_NOT_LEAVE_ELIGIBLE','Employee state changed before leave submission.');
+          }
+          const start=Date.parse(`${payload.startDate}T00:00:00.000Z`);
+          const finish=Date.parse(`${payload.endDate}T23:59:59.999Z`);
+          const overlap=(calendar?.entries||[]).some(entry=>{
+            if(['REJECTED','CANCELLED'].includes(entry.status)) return false;
+            const es=Date.parse(`${entry.startDate}T00:00:00.000Z`);
+            const ee=Date.parse(`${entry.endDate}T23:59:59.999Z`);
+            return start<=ee&&finish>=es;
+          });
+          if(overlap){
+            throw new AtomicMutationRejectedError('LEAVE_REQUEST_OVERLAP','Employee already has overlapping active/pending leave.');
+          }
+          if(balance.remainingDays<totalDays){
+            throw new AtomicMutationRejectedError(
+              'INSUFFICIENT_LEAVE_BALANCE',
+              'Leave request exceeds the remaining entitlement.',
+              {remainingDays:balance.remainingDays,requestedDays:totalDays}
+            );
+          }
+          const leave:LeaveRequest={
+            leaveId,tenantId:context.tenantId,employeeId:currentEmployee.employeeId,
+            employeeName:`${currentEmployee.personalInfo.legalFirstName} ${currentEmployee.personalInfo.legalLastName}`,
+            departmentId:currentEmployee.primaryDepartmentId,
+            departmentName:currentEmployee.primaryDepartmentName,
+            leaveType:payload.leaveType,startDate:payload.startDate,endDate:payload.endDate,
+            totalDays,reason:payload.reason,status:'SUBMITTED',
+            coveringEmployeeId:payload.coveringEmployeeId,
+            createdAt:now,updatedAt:now,
+          };
+          const nextBalance:EmployeeLeaveBalance={
+            ...balance,
+            pendingApprovalDays:balance.pendingApprovalDays+totalDays,
+            remainingDays:balance.remainingDays-totalDays,
+            lastUpdated:now,
+          };
+          const nextCalendar:LeaveCalendarBucket={
+            calendarId,tenantId:context.tenantId,employeeId:currentEmployee.employeeId,
+            year:startYear,
+            entries:[...(calendar?.entries||[]),{
+              leaveId,leaveType:payload.leaveType,startDate:payload.startDate,
+              endDate:payload.endDate,status:'SUBMITTED',
+            }],
+            updatedAt:now,
+          };
+          return {
+            domainState:leave,
+            additionalStateWrites:[
+              {entityType:'LEAVE_BALANCE',entityId:balanceId,domainState:nextBalance},
+              {entityType:'LEAVE_CALENDAR',entityId:calendarId,domainState:nextCalendar},
+            ],
+            eventPayload:{leaveId,employeeId:leave.employeeId,leaveType:leave.leaveType,
+              startDate:leave.startDate,endDate:leave.endDate,totalDays},
+            auditReason:`Leave requested by ${leave.employeeName} for ${totalDays} day(s).`,
+            resultData:leave,
+          };
+        },
+      });
+      const leave=tx.resultData as LeaveRequest;
+      this.leaveRequests.set(leave.leaveId,leave);
+      return {success:true,commandId,idempotencyKey,entityId:leave.leaveId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:leave};
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
+    }
   }
 
   public static async approveLeaveRequest(
-    context: CommandContext,
-    commandId: string,
-    idempotencyKey: string,
-    payload: {
-      leaveId: string;
-      approved: boolean;
-      rejectionReason?: string;
-    }
-  ): Promise<CommandResult<LeaveRequest>> {
-    const auth = AuthorizationPipeline.evaluate(context, {
-      requiredRoles: ['HR_ADMIN', 'DEPARTMENT_HEAD', 'MEDICAL_DIRECTOR', 'SYSTEM_ADMIN'],
+    context:CommandContext,
+    commandId:string,
+    idempotencyKey:string,
+    payload:{leaveId:string;approved:boolean;rejectionReason?:string}
+  ):Promise<CommandResult<LeaveRequest>>{
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['HR_ADMIN','DEPARTMENT_HEAD','MEDICAL_DIRECTOR','SYSTEM_ADMIN'],
     });
-
-    if (!auth.authorized) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: 'UNAUTHORIZED', message: 'Department Head or HR approval authority required.' },
-      };
+    if(!auth.authorized){
+      return workforceReject(commandId,idempotencyKey,auth.code||'UNAUTHORIZED',
+        auth.reason||'Department Head or HR approval authority required.');
     }
-
-    const leave = await this.loadLeave(context.tenantId, payload.leaveId);
-    if (!leave) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: 'LEAVE_NOT_FOUND', message: 'Leave request not found.' },
-      };
+    const preflight=await this.loadLeave(context.tenantId,payload.leaveId);
+    if(!preflight){
+      return workforceReject(commandId,idempotencyKey,'LEAVE_NOT_FOUND','Leave request not found.');
     }
-
-    const now = new Date().toISOString();
-    leave.status = payload.approved ? 'APPROVED' : 'REJECTED';
-    leave.reviewedByActorId = context.actorId;
-    leave.reviewedByName = 'Department Head / HR';
-    leave.reviewedAt = now;
-    if (!payload.approved && payload.rejectionReason) {
-      leave.rejectionReason = payload.rejectionReason;
-    }
-    leave.updatedAt = now;
-
-    this.leaveRequests.set(payload.leaveId, leave);
-
-    // Deduct leave balance if approved
-    if (payload.approved) {
-      const balances = this.leaveBalances.get(leave.employeeId) || [];
-      const balance = balances.find((b) => b.leaveType === leave.leaveType);
-      if (balance) {
-        balance.usedDays += leave.totalDays;
-        balance.remainingDays = Math.max(0, balance.annualEntitlement - balance.usedDays);
-        balance.lastUpdated = now;
+    try{
+      const employee=await this.loadEmployee(context.tenantId,preflight.employeeId);
+      if(!employee) throw new AtomicMutationRejectedError('EMPLOYEE_NOT_FOUND','Leave employee no longer exists.');
+      assertWorkforceFacilityScope(context,employee.facilityIds);
+      if(payload.approved){
+        const shifts=(await this.loadShiftsForEmployee(context.tenantId,preflight.employeeId))
+          .filter(shift=>{
+            if(shift.status==='CANCELLED') return false;
+            const ss=Date.parse(shift.startTime);
+            const se=Date.parse(shift.endTime);
+            const ls=Date.parse(`${preflight.startDate}T00:00:00.000Z`);
+            const le=Date.parse(`${preflight.endDate}T23:59:59.999Z`);
+            return ss<=le&&se>=ls;
+          });
+        if(shifts.length){
+          throw new AtomicMutationRejectedError(
+            'LEAVE_ROSTER_CONFLICT',
+            'Leave cannot be approved while active roster assignments overlap the leave interval.',
+            {rosterIds:shifts.map(shift=>shift.rosterId)}
+          );
+        }
       }
+      const year=Number(preflight.startDate.slice(0,4));
+      const balanceId=leaveBalanceId(preflight.employeeId,preflight.leaveType,year);
+      const calendarId=leaveCalendarId(preflight.employeeId,year);
+      const now=new Date().toISOString();
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'LEAVE_REQUEST',aggregateId:payload.leaveId,
+        eventType:payload.approved?'LEAVE_APPROVED':'LEAVE_REJECTED',
+        auditAction:payload.approved?'LEAVE_APPROVED':'LEAVE_REJECTED',
+        auditResourceType:'LEAVE_REQUEST',auditResourceId:payload.leaveId,
+        outboxTopic:'g-hims-leave-events',idempotencyKey,commandId,
+        correlationId:context.correlationId,
+        readTargets:[
+          {key:'leave',entityType:'LEAVE_REQUEST',entityId:payload.leaveId,required:true},
+          {key:'balance',entityType:'LEAVE_BALANCE',entityId:balanceId,required:true},
+          {key:'calendar',entityType:'LEAVE_CALENDAR',entityId:calendarId,required:true},
+        ],
+        prepare:(current)=>{
+          const leave=current.leave as unknown as LeaveRequest;
+          const balance=current.balance as unknown as EmployeeLeaveBalance;
+          const calendar=current.calendar as unknown as LeaveCalendarBucket;
+          if(leave.status!=='SUBMITTED'){
+            throw new AtomicMutationRejectedError('LEAVE_NOT_REVIEWABLE','Only submitted leave can be reviewed.');
+          }
+          const nextStatus:LeaveRequest['status']=payload.approved?'APPROVED':'REJECTED';
+          const nextLeave:LeaveRequest={
+            ...leave,status:nextStatus,reviewedByActorId:context.actorId,
+            reviewedByName:'Department Head / HR',reviewedAt:now,
+            ...(!payload.approved?{rejectionReason:payload.rejectionReason||'Rejected'}:{}),
+            updatedAt:now,
+          };
+          const nextBalance:EmployeeLeaveBalance=payload.approved
+            ? {
+                ...balance,
+                pendingApprovalDays:Math.max(0,balance.pendingApprovalDays-leave.totalDays),
+                usedDays:balance.usedDays+leave.totalDays,
+                lastUpdated:now,
+              }
+            : {
+                ...balance,
+                pendingApprovalDays:Math.max(0,balance.pendingApprovalDays-leave.totalDays),
+                remainingDays:balance.remainingDays+leave.totalDays,
+                lastUpdated:now,
+              };
+          const nextCalendar:LeaveCalendarBucket={
+            ...calendar,
+            entries:calendar.entries.map(entry=>
+              entry.leaveId===leave.leaveId?{...entry,status:nextStatus}:entry
+            ),
+            updatedAt:now,
+          };
+          return {
+            domainState:nextLeave,
+            additionalStateWrites:[
+              {entityType:'LEAVE_BALANCE',entityId:balanceId,domainState:nextBalance},
+              {entityType:'LEAVE_CALENDAR',entityId:calendarId,domainState:nextCalendar},
+            ],
+            eventPayload:{leaveId:leave.leaveId,employeeId:leave.employeeId,
+              approved:payload.approved,rejectionReason:payload.rejectionReason},
+            auditReason:`Leave ${leave.leaveId} was ${nextStatus} by ${context.actorId}.`,
+            resultData:nextLeave,
+          };
+        },
+      });
+      const next=tx.resultData as LeaveRequest;
+      this.leaveRequests.set(next.leaveId,next);
+      return {success:true,commandId,idempotencyKey,entityId:next.leaveId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:next};
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
     }
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'LEAVE_REQUEST',
-      entityId: payload.leaveId,
-      eventType: payload.approved ? 'LEAVE_APPROVED' : 'LEAVE_REJECTED',
-      domainState: leave,
-      eventPayload: {
-        leaveId: payload.leaveId,
-        employeeId: leave.employeeId,
-        approved: payload.approved,
-        rejectionReason: payload.rejectionReason,
-      },
-      auditReason: `Leave ${payload.leaveId} was ${leave.status} by ${context.actorId}`,
-      outboxTopic: 'g-hims-leave-events',
-    });
-
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: payload.leaveId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: leave,
-    };
   }
 
   // ============================================================================

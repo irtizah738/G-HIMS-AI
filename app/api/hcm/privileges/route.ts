@@ -21,11 +21,13 @@ export async function POST(req: NextRequest) {
         ? 'VerifyCredentialCommand'
         : action === 'GRANT_PRIVILEGE'
           ? 'GrantClinicalPrivilegeCommand'
-          : '';
+          : action === 'CHANGE_PRIVILEGE_STATUS'
+            ? 'ChangeClinicalPrivilegeStatusCommand'
+            : '';
 
     if (!commandType) {
       return NextResponse.json(
-        { success: false, error: { code: 'INVALID_ACTION', message: 'Action must be VERIFY_CREDENTIAL or GRANT_PRIVILEGE.' } },
+        { success: false, error: { code: 'INVALID_ACTION', message: 'Action must be VERIFY_CREDENTIAL, GRANT_PRIVILEGE, or CHANGE_PRIVILEGE_STATUS.' } },
         { status: 400 }
       );
     }

@@ -179,20 +179,18 @@ export default function FixedAssetsPage() {
       if (!eligibleAssetIds.length) {
         throw new Error('No active depreciable assets are available for this period.');
       }
-      if (eligibleAssetIds.length > 200) {
-        throw new Error(
-          'Depreciation runs are limited to 200 assets per atomic run. Split the asset set by controlled batch.'
-        );
+      let latestResult: DepreciationRunLog | null = null;
+      for (let offset = 0; offset < eligibleAssetIds.length; offset += 200) {
+        const assetIds = eligibleAssetIds.slice(offset, offset + 200);
+        latestResult = await runDepreciationEdge({
+          runId: `dep_${fiscalPeriod}_${crypto.randomUUID()}`,
+          fiscalYear,
+          postingPeriod,
+          currency: assetCurrency.trim().toUpperCase(),
+          assetIds,
+        });
       }
-
-      const result = await runDepreciationEdge({
-        runId: `dep_${fiscalPeriod}_${crypto.randomUUID()}`,
-        fiscalYear,
-        postingPeriod,
-        currency: assetCurrency.trim().toUpperCase(),
-        assetIds: eligibleAssetIds,
-      });
-      setLatestRunSuccess(result);
+      setLatestRunSuccess(latestResult);
       await loadGovernedFinanceAssets();
     } catch (err: any) {
       setRunError(err.message || 'Depreciation execution failed.');

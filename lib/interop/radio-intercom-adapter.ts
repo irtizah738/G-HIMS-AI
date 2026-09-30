@@ -11,6 +11,7 @@
 
 import { CommandContext } from '../backend/types';
 import { TransactionManager } from '../backend/transactions/transaction-manager';
+import { IdempotencyService } from '../backend/idempotency/idempotency-service';
 
 export type ChannelType = 'HEAR_RADIO' | 'MED_NET_TACTICAL' | 'SAT_PHONE' | 'SECURE_VOIP_BRIDGE';
 
@@ -84,11 +85,22 @@ export class RadioIntercomAdapter {
 
     this.transmissions.set(transmissionId, record);
 
+    const cmdId = `cmd_${transmissionId}`;
+    const idempKey = `idemp_${transmissionId}`;
+
+    await IdempotencyService.acquireExecution(
+      context.tenantId,
+      idempKey,
+      'LogRadioTransmissionCommand',
+      { transmissionId, timestamp, channel: record.channel },
+      cmdId
+    );
+
     // Record immutable audit event
     await TransactionManager.executeAtomicWrite(
       context,
-      `cmd_${transmissionId}`,
-      `idemp_${transmissionId}`,
+      cmdId,
+      idempKey,
       {
         entityType: 'RADIO_TRANSMISSION',
         entityId: transmissionId,

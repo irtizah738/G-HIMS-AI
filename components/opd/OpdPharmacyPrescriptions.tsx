@@ -24,7 +24,7 @@ import { AuthClient } from '@/lib/auth/auth-client';
 interface OpdPharmacyPrescriptionsProps {
   encounter: ComprehensiveOpdEncounter;
   prescriptions: PharmacyPrescriptionItem[];
-  onAddPrescription: (item: PharmacyPrescriptionItem) => void;
+  onAddPrescription: (item: PharmacyPrescriptionItem) => Promise<void> | void;
   onDispensePrescription: (prescriptionId: string, dispensedBy: string) => void;
 }
 
@@ -83,7 +83,9 @@ export function OpdPharmacyPrescriptions({
   const [specialInstructions, setSpecialInstructions] = useState<string>('Take with a full glass of water in the morning.');
   const [allowGeneric, setAllowGeneric] = useState<boolean>(true);
 
-  // Pharmacist Dispense Modal
+  // State for prescription submission error
+  const [prescriptionError, setPrescriptionError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [dispenseModalItem, setDispenseModalItem] = useState<PharmacyPrescriptionItem | null>(null);
   const [pharmacistName, setPharmacistName] = useState<string>('Pharm. Tariq Bilal (R.Ph)');
 
@@ -165,8 +167,9 @@ export function OpdPharmacyPrescriptions({
     }
   };
 
-  const handleCreatePrescription = (e: React.FormEvent) => {
+  const handleCreatePrescription = async (e: React.FormEvent) => {
     e.preventDefault();
+    setPrescriptionError(null);
 
     if (hasAllergyConflict) {
       const proceed = confirm(
@@ -199,7 +202,15 @@ export function OpdPharmacyPrescriptions({
       prescribedBy: 'Authenticated Clinician',
     };
 
-    onAddPrescription(newPrescription);
+    setIsSubmitting(true);
+    try {
+      await onAddPrescription(newPrescription);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Prescription authorization failed.';
+      setPrescriptionError(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -226,6 +237,25 @@ export function OpdPharmacyPrescriptions({
                 {selectedDrug?.drugName || 'Selected medication'} is a Penicillin-class derivative. Patient has documented allergy: {encounter.knownAllergies?.join(', ')}.
               </span>
             </div>
+          </div>
+        )}
+
+        {prescriptionError && (
+          <div className="p-4 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-900 dark:text-rose-200 flex items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+              <div>
+                <strong className="block font-bold">Clinical Prescribing Exception:</strong>
+                <span>{prescriptionError}</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPrescriptionError(null)}
+              className="text-xs text-rose-600 dark:text-rose-400 hover:underline cursor-pointer font-semibold"
+            >
+              Dismiss
+            </button>
           </div>
         )}
 
@@ -330,11 +360,11 @@ export function OpdPharmacyPrescriptions({
             </div>
             <button
               type="submit"
-              disabled={!selectedDrug}
-              className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
+              disabled={!selectedDrug || isSubmitting}
+              className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
             >
               <Plus className="w-4 h-4" />
-              Authorize e-Prescription (e-Rx)
+              {isSubmitting ? 'Authorizing...' : 'Authorize e-Prescription (e-Rx)'}
             </button>
           </div>
         </form>

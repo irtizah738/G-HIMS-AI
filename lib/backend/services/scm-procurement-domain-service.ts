@@ -1110,6 +1110,13 @@ export class ScmProcurementDomainService {
         correlationId: context.correlationId,
         readTargets,
         prepare: (current) => {
+          if (isInventoryPeriodBlocked(current.periodClose)) {
+            throw new AtomicMutationRejectedError(
+              'INVENTORY_PERIOD_BLOCKED',
+              'Goods receipt cannot post into an inventory period that is closing or closed.'
+            );
+          }
+
           const po = current.po as unknown as PurchaseOrderRecord;
           const destination =
             current.destination as unknown as InventoryLocation;

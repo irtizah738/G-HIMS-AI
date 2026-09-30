@@ -212,7 +212,7 @@ export interface JobDefinition {
 export interface EmployeeMaster {
   employeeId: string;
   employeeNumber: string; // e.g. "EMP-2026-0814"
-  userId?: string; // Linked Firebase Auth UID (untrusted client link)
+  userId?: string; // Linked Firebase Auth UID. Server-managed identity link only.
   tenantId: string;
   facilityIds: string[];
   primaryFacilityId: string;
@@ -228,6 +228,7 @@ export interface EmployeeMaster {
   managerId?: string;
   managerName?: string;
   supervisorId?: string;
+  currentAssignmentId?: string;
   personalInfo: {
     legalFirstName: string;
     legalLastName: string;

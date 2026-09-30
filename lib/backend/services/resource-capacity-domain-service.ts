@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 /**
  * G-HIMS Master Resource Management & Capacity Domain Service
  * Production-grade hospital resource & asset operating engine.
@@ -20,6 +21,41 @@ import {
   OperationalMatchResult,
 } from '@/types/resource-management';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
+
+function deterministicId(
+  prefix: string,
+  tenantId: string,
+  commandId: string
+): string {
+  const digest = createHash('sha256')
+    .update(`${tenantId}\u0000${commandId}`)
+    .digest('hex')
+    .slice(0, 24);
+  return `${prefix}_${digest}`;
+}
+
+function assertFacilityScope(
+  context: CommandContext,
+  facilityId: string
+): void {
+  const admin = context.roles.some((role) =>
+    ['SYSTEM_ADMIN', 'ADMINISTRATOR'].includes(role)
+  );
+  if (
+    !admin &&
+    context.facilityIds?.length &&
+    !context.facilityIds.includes(facilityId)
+  ) {
+    throw new Error('FACILITY_SCOPE_MISMATCH');
+  }
+}
+
+function repositoryRequiredOutsideTests(): void {
+  if (!DomainStateRepository.isAvailable() && process.env.NODE_ENV !== 'test') {
+    throw new Error('RESOURCE_PERSISTENCE_UNAVAILABLE');
+  }
+}
+
 
 export class ResourceCapacityDomainService {
   private static resources: Map<string, ResourceMaster> = new Map();
@@ -110,8 +146,25 @@ export class ResourceCapacityDomainService {
       };
     }
 
-    const resourceId = `res_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const resourceNumber = (payload as any).resourceNumber || `RES-${payload.resourceType.substring(0, 3)}-${Math.floor(1000 + Math.random() * 9000)}`;
+    repositoryRequiredOutsideTests();
+    try {
+      assertFacilityScope(context, payload.facilityId);
+    } catch {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'FACILITY_SCOPE_MISMATCH',
+          message: 'Resource registration is outside the actor facility scope.',
+        },
+      };
+    }
+
+    const resourceId = deterministicId('res', context.tenantId, commandId);
+    const resourceNumber =
+      payload.resourceNumber ||
+      `RES-${payload.resourceType.substring(0, 3)}-${resourceId.slice(-8).toUpperCase()}`;
     const now = new Date().toISOString();
 
     const resource: ResourceMaster = {
@@ -176,7 +229,22 @@ export class ResourceCapacityDomainService {
       };
     }
 
-    const roomId = `rm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    repositoryRequiredOutsideTests();
+    try {
+      assertFacilityScope(context, payload.facilityId);
+    } catch {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'FACILITY_SCOPE_MISMATCH',
+          message: 'Room registration is outside the actor facility scope.',
+        },
+      };
+    }
+
+    const roomId = deterministicId('room', context.tenantId, commandId);
     const now = new Date().toISOString();
 
     const room: HospitalRoom = {
@@ -240,7 +308,32 @@ export class ResourceCapacityDomainService {
 
     // Check resource status and calibration lockout
     const resource = await this.loadResource(context.tenantId, payload.resourceId);
-    if (resource) {
+    if (!resource) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'RESOURCE_NOT_FOUND',
+          message: `Resource ${payload.resourceId} does not exist.`,
+        },
+      };
+    }
+    if (
+      resource.facilityId !== payload.facilityId ||
+      resource.resourceType !== payload.resourceType
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'RESOURCE_RESERVATION_SCOPE_MISMATCH',
+          message: 'Reservation resource identity does not match the authoritative resource master.',
+        },
+      };
+    }
+    {
       if (resource.status === 'OUT_OF_SERVICE' || resource.status === 'MAINTENANCE') {
         return {
           success: false,
@@ -294,7 +387,22 @@ export class ResourceCapacityDomainService {
       }
     }
 
-    const reservationId = `resv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    repositoryRequiredOutsideTests();
+    try {
+      assertFacilityScope(context, payload.facilityId);
+    } catch {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'FACILITY_SCOPE_MISMATCH',
+          message: 'Resource reservation is outside the actor facility scope.',
+        },
+      };
+    }
+
+    const reservationId = deterministicId('resv', context.tenantId, commandId);
     const now = new Date().toISOString();
 
     const reservation: ResourceReservation = {
@@ -375,26 +483,44 @@ export class ResourceCapacityDomainService {
       };
     }
 
+    try {
+      assertFacilityScope(context, resource.facilityId);
+      assertFacilityScope(context, payload.toFacilityId);
+    } catch {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'FACILITY_SCOPE_MISMATCH',
+          message: 'Resource transfer source or destination is outside the actor facility scope.',
+        },
+      };
+    }
+
     const previousLocation = { ...resource.location };
     const previousDept = { id: resource.departmentId, name: resource.departmentName };
 
-    resource.departmentId = payload.toDepartmentId;
-    resource.departmentName = payload.toDepartmentName;
-    resource.facilityId = payload.toFacilityId;
-    resource.facilityName = payload.toFacilityName;
-    resource.location = payload.toLocation;
-    if (payload.custodianName) {
-      resource.currentCustodianName = payload.custodianName;
-    }
-    resource.updatedAt = new Date().toISOString();
+    const updatedResource: ResourceMaster = {
+      ...resource,
+      departmentId: payload.toDepartmentId,
+      departmentName: payload.toDepartmentName,
+      facilityId: payload.toFacilityId,
+      facilityName: payload.toFacilityName,
+      location: payload.toLocation,
+      ...(payload.custodianName
+        ? { currentCustodianName: payload.custodianName }
+        : {}),
+      updatedAt: new Date().toISOString(),
+    };
 
-    this.resources.set(payload.resourceId, resource);
+    this.resources.set(payload.resourceId, updatedResource);
 
     const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
       entityType: 'RESOURCE_MASTER',
       entityId: payload.resourceId,
       eventType: 'RESOURCE_TRANSFERRED',
-      domainState: resource,
+      domainState: updatedResource,
       eventPayload: {
         resourceId: payload.resourceId,
         previousDept,
@@ -403,7 +529,7 @@ export class ResourceCapacityDomainService {
         newLocation: payload.toLocation,
         reason: payload.reason,
       },
-      auditReason: `Resource ${resource.name} (${resource.resourceNumber}) transferred to ${payload.toDepartmentName}: ${payload.reason}`,
+      auditReason: `Resource ${updatedResource.name} (${updatedResource.resourceNumber}) transferred to ${payload.toDepartmentName}: ${payload.reason}`,
       outboxTopic: 'g-hims-facility-events',
     });
 
@@ -415,7 +541,7 @@ export class ResourceCapacityDomainService {
       eventId: tx.event.eventId,
       auditId: tx.audit.auditId,
       outboxId: tx.outbox.outboxId,
-      data: resource,
+      data: updatedResource,
     };
   }
 
@@ -451,8 +577,24 @@ export class ResourceCapacityDomainService {
       };
     }
 
-    const workOrderId = `wo_${crypto.randomUUID()}`;
-    const workOrderNumber = `WO-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    repositoryRequiredOutsideTests();
+    try {
+      assertFacilityScope(context, resource.facilityId);
+    } catch {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'FACILITY_SCOPE_MISMATCH',
+          message: 'Maintenance work order is outside the actor facility scope.',
+        },
+      };
+    }
+
+    const workOrderId = deterministicId('wo', context.tenantId, commandId);
+    const workOrderNumber =
+      `WO-${new Date().getUTCFullYear()}-${workOrderId.slice(-8).toUpperCase()}`;
     const now = new Date().toISOString();
 
     const workOrder: MaintenanceWorkOrder = {
@@ -654,7 +796,22 @@ export class ResourceCapacityDomainService {
       };
     }
 
-    const calibrationId = `cal_${crypto.randomUUID()}`;
+    repositoryRequiredOutsideTests();
+    try {
+      assertFacilityScope(context, resource.facilityId);
+    } catch {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'FACILITY_SCOPE_MISMATCH',
+          message: 'Calibration record is outside the actor facility scope.',
+        },
+      };
+    }
+
+    const calibrationId = deterministicId('cal', context.tenantId, commandId);
     const now = new Date().toISOString();
     const isPassed = payload.result === 'PASS' || payload.result === 'CONDITIONAL_PASS';
 
@@ -773,6 +930,15 @@ export class ResourceCapacityDomainService {
   }
 
   public static ensureInitialized(): void {
+    // Production initialization is intentionally empty.
+    // Authoritative state must come from tenant-scoped persisted read models.
+    repositoryRequiredOutsideTests();
+  }
+
+  public static seedTestFixtures(): void {
+    if (process.env.NODE_ENV !== 'test') {
+      throw new Error('TEST_FIXTURE_SEED_FORBIDDEN_OUTSIDE_TESTS');
+    }
     if (this.resources.size > 0) return;
 
     const now = new Date().toISOString();
@@ -952,27 +1118,22 @@ export class ResourceCapacityDomainService {
   }
 
   public static getResources(): ResourceMaster[] {
-    this.ensureInitialized();
     return Array.from(this.resources.values());
   }
 
   public static getRooms(): HospitalRoom[] {
-    this.ensureInitialized();
     return Array.from(this.rooms.values());
   }
 
   public static getWorkOrders(): MaintenanceWorkOrder[] {
-    this.ensureInitialized();
     return Array.from(this.workOrders.values());
   }
 
   public static getCalibrations(): CalibrationRecord[] {
-    this.ensureInitialized();
     return Array.from(this.calibrations.values());
   }
 
   public static getReservations(): ResourceReservation[] {
-    this.ensureInitialized();
     return Array.from(this.reservations.values());
   }
 }

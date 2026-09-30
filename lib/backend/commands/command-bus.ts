@@ -22,6 +22,7 @@ import { RevenueIntegrityDomainService } from '../services/revenue-integrity-dom
 import { ScmOfflineDomainService } from '../services/scm-offline-domain-service';
 import { ScmProcurementDomainService } from '../services/scm-procurement-domain-service';
 import { ScmPayablesDomainService } from '../services/scm-payables-domain-service';
+import { ScmSourcingDomainService } from '../services/scm-sourcing-domain-service';
 import { ScmCostingDomainService } from '../services/scm-costing-domain-service';
 import { CashReceiptDomainService } from '../services/cash-receipt-domain-service';
 import { DiagnosticResultDomainService } from '../services/diagnostic-result-domain-service';
@@ -555,6 +556,60 @@ export class CommandBus {
 
         case 'RecordGoodsReceiptCommand':
           result = await ScmProcurementDomainService.recordGoodsReceipt(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ReviewSupplierQualificationCommand':
+          result = await ScmSourcingDomainService.reviewSupplierQualification(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'CreateScmRfqCommand':
+          result = await ScmSourcingDomainService.createRfq(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecordSupplierQuotationCommand':
+          result = await ScmSourcingDomainService.recordSupplierQuotation(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'AwardSupplierContractCommand':
+          result = await ScmSourcingDomainService.awardSupplierContract(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ApproveSupplierContractCommand':
+          result = await ScmSourcingDomainService.approveSupplierContract(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ChangeSupplierContractStatusCommand':
+          result = await ScmSourcingDomainService.changeSupplierContractStatus(
             context,
             command.commandId,
             command.idempotencyKey,

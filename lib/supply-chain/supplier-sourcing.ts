@@ -133,6 +133,7 @@ export function validatePurchaseOrderAgainstContract(params: {
   }
 
   const lines = new Map(contract.lines.map((line) => [line.itemId, line]));
+  let orderSpendMinorUnits = 0;
   for (const line of po.lines) {
     const contracted = lines.get(line.itemId);
     if (!contracted) {
@@ -144,9 +145,32 @@ export function validatePurchaseOrderAgainstContract(params: {
     if (line.unitPriceMinorUnits > contracted.maxUnitPriceMinorUnits) {
       throw new Error(`SUPPLIER_CONTRACT_PRICE_EXCEEDED:${line.itemId}`);
     }
-    if (line.quantity <= 0 || line.quantity > contracted.contractedQuantity) {
+    const reservedQuantity = Number(
+      contract.reservedQuantityByItem?.[line.itemId] || 0
+    );
+    const committedQuantity = Number(
+      contract.committedQuantityByItem?.[line.itemId] || 0
+    );
+    if (
+      line.quantity <= 0 ||
+      committedQuantity + reservedQuantity + line.quantity >
+        contracted.contractedQuantity
+    ) {
       throw new Error(`SUPPLIER_CONTRACT_QUANTITY_EXCEEDED:${line.itemId}`);
     }
+    orderSpendMinorUnits += Math.round(
+      line.quantity * line.unitPriceMinorUnits
+    );
+  }
+
+  if (
+    contract.maxSpendMinorUnits !== undefined &&
+    contract.committedSpendMinorUnits +
+      contract.reservedSpendMinorUnits +
+      orderSpendMinorUnits >
+      contract.maxSpendMinorUnits
+  ) {
+    throw new Error('SUPPLIER_CONTRACT_SPEND_CEILING_EXCEEDED');
   }
 
   return { valid: true };

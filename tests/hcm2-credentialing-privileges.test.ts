@@ -65,6 +65,8 @@ describe('HCM-2 credentialing and clinical privileges',()=>{
     expect(service).toContain('CREDENTIAL_NUMBER_ALREADY_REGISTERED');
     expect(service).toContain('HCM_SEGREGATION_OF_DUTIES');
     expect(service).toContain('CREDENTIAL_ALREADY_EXPIRED');
+    expect(service).toContain('credentialRevision');
+    expect(service).toContain('CREDENTIAL_SET_CHANGED_RETRY');
     expect(service).toContain('executeAtomicReadModifyMutation');
     expect(service).toContain('submittedByActorId:context.actorId');
     expect(tx).toContain("CREDENTIAL_IDENTITY: 'credentialIdentities'");

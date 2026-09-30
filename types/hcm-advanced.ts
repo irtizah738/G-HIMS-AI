@@ -703,6 +703,31 @@ export interface PayrollPeriodRecord {
   updatedAt: string;
 }
 
+export interface PayrollCalendarEntry {
+  periodId: string;
+  startDate: string;
+  endDate: string;
+  status: PayrollPeriodRecord['status'];
+}
+
+export interface PayrollCalendarBucket {
+  calendarId: string;
+  tenantId: string;
+  facilityId: string;
+  year: number;
+  entries: PayrollCalendarEntry[];
+  updatedAt: string;
+}
+
+export interface PayrollAttendanceLockRecord {
+  lockId: string;
+  tenantId: string;
+  employeeId: string;
+  lockedThroughDate: string;
+  periodId: string;
+  updatedAt: string;
+}
+
 export interface PayrollEmployeeSlotRecord {
   slotId: string;
   tenantId: string;

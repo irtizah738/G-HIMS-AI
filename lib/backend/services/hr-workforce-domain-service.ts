@@ -494,7 +494,7 @@ export class HrWorkforceDomainService {
         idempotencyKey,commandId,correlationId:context.correlationId,
         readTargets,
         prepare:(current)=>{
-          const employee=((current.employee as unknown as EmployeeMaster)|null)||preflight;
+          const employee=(current.employee as unknown as EmployeeMaster | null)||preflight;
           if(['TERMINATED','RETIRED','INACTIVE'].includes(employee.employmentStatus)){
             throw new AtomicMutationRejectedError('EMPLOYEE_NOT_TRANSFERABLE','Inactive/terminal employees cannot be transferred.');
           }

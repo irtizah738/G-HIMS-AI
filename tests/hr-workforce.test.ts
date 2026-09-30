@@ -439,6 +439,10 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
       expect(inResult.success).toBe(true);
       const attId = inResult.entityId;
 
+      // Production rejects a zero-duration attendance interval. Ensure this
+      // regression test crosses the millisecond boundary before clock-out.
+      await Bun.sleep(5);
+
       const clockOutCmd: BaseCommand = {
         commandId: 'cmd_cout_01',
         idempotencyKey: 'idemp_cout_01',

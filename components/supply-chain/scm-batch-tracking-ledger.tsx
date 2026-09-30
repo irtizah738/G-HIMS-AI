@@ -8,7 +8,6 @@ import {
   InventoryLocation,
   InventoryBalance,
 } from '@/types/scm-domain';
-import { createBatchRecord } from '@/lib/firebase/services/scm-firestore-service';
 import { recordStockTransactionEdge } from '@/lib/supply-chain/scm-edge-adapter';
 import {
   Layers,
@@ -125,59 +124,17 @@ export function ScmBatchTrackingLedger({
     });
   }, [items, searchQuery]);
 
-  // Handle Register New Batch
+  // Batch creation is not a free-standing client action. New lots enter
+  // authoritative inventory only from an inspected GRN followed by governed
+  // putaway/release. The legacy modal remains informational until SCM-2 wires
+  // that controlled receiving transition.
   const handleRegisterNewBatch = async () => {
-    if (!selectedBatchItem || !batchNumberInput.trim()) return;
-    setIsSubmittingBatch(true);
-    setFeedback(null);
-
-    const newBatchId = `btc-${Date.now()}`;
-    const newBatch: BatchLotRecord = {
-      batchId: newBatchId,
-      tenantId,
-      itemId: selectedBatchItem.itemId,
-      itemCode: selectedBatchItem.itemCode,
-      itemName: selectedBatchItem.name,
-      batchNumber: batchNumberInput.trim().toUpperCase(),
-      manufacturer: batchManufacturer,
-      manufactureDate: new Date(batchMfgDate).toISOString(),
-      expiryDate: new Date(batchExpDate).toISOString(),
-      receivedDate: new Date().toISOString(),
-      supplierId: 'vnd-direct',
-      supplierName: 'Direct Manufacturer / Primary Distributor',
-      unitCost: selectedBatchItem.unitCost,
-      currency: 'USD',
-      quantityReceived: batchQty,
-      quantityRemaining: batchQty,
-      quantityReserved: 0,
-      storageCondition: selectedBatchItem.storageRequirements || 'Standard Climate Controlled',
-      status: 'AVAILABLE',
-      temperatureExcursionDetected: false,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    try {
-      await createBatchRecord(tenantId, newBatch, {
-        userId: 'usr_dock_inspector',
-        userName: 'David Miller (Receiving QA)',
-        role: 'Dock Inspector',
-      });
-      setFeedback({
-        type: 'success',
-        text: `Batch ${newBatch.batchNumber} registered for ${selectedBatchItem.name}. Expiry tracked: ${batchExpDate}.`,
-      });
-      setIsNewBatchOpen(false);
-      setBatchNumberInput('');
-      await onRefresh();
-    } catch (err: unknown) {
-      setFeedback({
-        type: 'error',
-        text: err instanceof Error ? err.message : 'Failed to register batch.',
-      });
-    } finally {
-      setIsSubmittingBatch(false);
-    }
+    setFeedback({
+      type: 'error',
+      text:
+        'Direct batch registration is retired. Receive the lot against an approved Purchase Order and complete governed GRN putaway/release.',
+    });
+    setIsNewBatchOpen(false);
   };
 
   // Handle Record Stock Transaction

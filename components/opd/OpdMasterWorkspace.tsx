@@ -1038,7 +1038,7 @@ export function OpdMasterWorkspace() {
     }
 
     const currentPaid = activeEncounter.invoice.payments.reduce(
-      (sum, item) => sum + item.amountMinorUnits,
+      (sum: number, item: PaymentTransaction) => sum + item.amountMinorUnits,
       0
     );
     const currentBalance = Math.max(

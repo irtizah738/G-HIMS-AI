@@ -2,11 +2,17 @@ import { createHash } from 'node:crypto';
 import type {
   FinanceAccountRecord,
   FinanceArOpenItem,
+  FinanceArAdjustment,
   FinanceIntelligenceSnapshot,
+  TaxLedgerItem,
   GovernedJournalLine,
   GovernedJournalRecord,
   TrialBalanceLine,
 } from '@/types/finance-domain';
+import type {
+  SupplierInvoiceRecord,
+  SupplierPaymentRecord,
+} from '@/types/scm-payables';
 
 export function stableFinanceFingerprint(value: unknown): string {
   const stable = (input: unknown): unknown => {
@@ -169,6 +175,169 @@ export function arAgingBucket(item: FinanceArOpenItem, asOf: number):
   if (daysPastDue <= 60) return '31_60';
   if (daysPastDue <= 90) return '61_90';
   return 'OVER_90';
+}
+
+export interface FinanceArReceiptEvidence {
+  openItemId: string;
+  amountMinorUnits: number;
+  receivedAt: number;
+  currency: string;
+}
+
+export interface FinanceSupplierCreditEvidence {
+  invoiceId: string;
+  amountMinorUnits: number;
+  postingAt: number;
+  currency: string;
+}
+
+export function calculateArOutstandingAsOf(params: {
+  openItems: FinanceArOpenItem[];
+  receipts: FinanceArReceiptEvidence[];
+  adjustments: FinanceArAdjustment[];
+  asOf: number;
+  currency: string;
+}): {
+  outstandingByOpenItemId: Map<string, number>;
+  totalOutstandingMinorUnits: number;
+} {
+  if (!Number.isFinite(params.asOf)) throw new Error('INVALID_AR_AS_OF');
+  const currency = params.currency.trim().toUpperCase();
+  const outstandingByOpenItemId = new Map<string, number>();
+
+  for (const item of params.openItems) {
+    if (
+      item.currency.trim().toUpperCase() !== currency ||
+      item.issueAt > params.asOf
+    ) continue;
+    assertMinorUnits(item.originalMinorUnits, 'INVALID_AR_ORIGINAL_AMOUNT');
+    outstandingByOpenItemId.set(item.openItemId, item.originalMinorUnits);
+  }
+
+  for (const receipt of params.receipts) {
+    if (
+      receipt.currency.trim().toUpperCase() !== currency ||
+      receipt.receivedAt > params.asOf ||
+      !outstandingByOpenItemId.has(receipt.openItemId)
+    ) continue;
+    assertMinorUnits(receipt.amountMinorUnits, 'INVALID_AR_RECEIPT_AMOUNT');
+    const next =
+      (outstandingByOpenItemId.get(receipt.openItemId) || 0) -
+      receipt.amountMinorUnits;
+    if (next < 0) throw new Error('AR_AS_OF_RECEIPT_OVERALLOCATION');
+    outstandingByOpenItemId.set(receipt.openItemId, next);
+  }
+
+  for (const adjustment of params.adjustments) {
+    if (
+      adjustment.postingAt > params.asOf ||
+      !outstandingByOpenItemId.has(adjustment.openItemId)
+    ) continue;
+    assertMinorUnits(adjustment.amountMinorUnits, 'INVALID_AR_ADJUSTMENT_AMOUNT');
+    const current = outstandingByOpenItemId.get(adjustment.openItemId) || 0;
+    const next =
+      adjustment.type === 'REFUND'
+        ? current + adjustment.amountMinorUnits
+        : current - adjustment.amountMinorUnits;
+    if (next < 0) throw new Error('AR_AS_OF_ADJUSTMENT_OVERALLOCATION');
+    outstandingByOpenItemId.set(adjustment.openItemId, next);
+  }
+
+  const totalOutstandingMinorUnits = [...outstandingByOpenItemId.values()]
+    .reduce((sum, value) => sum + value, 0);
+  if (!Number.isSafeInteger(totalOutstandingMinorUnits)) {
+    throw new Error('AR_AS_OF_TOTAL_OVERFLOW');
+  }
+  return { outstandingByOpenItemId, totalOutstandingMinorUnits };
+}
+
+export function calculateApOutstandingAsOf(params: {
+  invoices: SupplierInvoiceRecord[];
+  journals: GovernedJournalRecord[];
+  payments: SupplierPaymentRecord[];
+  credits: FinanceSupplierCreditEvidence[];
+  taxLedger: TaxLedgerItem[];
+  asOf: number;
+  currency: string;
+}): {
+  outstandingByInvoiceId: Map<string, number>;
+  totalOutstandingMinorUnits: number;
+} {
+  if (!Number.isFinite(params.asOf)) throw new Error('INVALID_AP_AS_OF');
+  const currency = params.currency.trim().toUpperCase();
+  const recognitionJournalById = new Map(
+    params.journals
+      .filter(
+        (journal) =>
+          journal.status === 'POSTED' &&
+          journal.currency.trim().toUpperCase() === currency &&
+          journal.postingDate <= params.asOf
+      )
+      .map((journal) => [journal.journalId, journal])
+  );
+  const outstandingByInvoiceId = new Map<string, number>();
+
+  for (const invoice of params.invoices) {
+    if (
+      invoice.currency.trim().toUpperCase() !== currency ||
+      !invoice.journalEntryId ||
+      !recognitionJournalById.has(invoice.journalEntryId)
+    ) continue;
+    assertMinorUnits(invoice.totalAmountMinorUnits, 'INVALID_AP_INVOICE_AMOUNT');
+    outstandingByInvoiceId.set(invoice.invoiceId, invoice.totalAmountMinorUnits);
+  }
+
+  for (const payment of params.payments) {
+    const settledAt = Date.parse(payment.settledAt);
+    if (
+      payment.currency.trim().toUpperCase() !== currency ||
+      !Number.isFinite(settledAt) ||
+      settledAt > params.asOf ||
+      !outstandingByInvoiceId.has(payment.invoiceId)
+    ) continue;
+    assertMinorUnits(payment.amountMinorUnits, 'INVALID_AP_PAYMENT_AMOUNT');
+    const next =
+      (outstandingByInvoiceId.get(payment.invoiceId) || 0) -
+      payment.amountMinorUnits;
+    if (next < 0) throw new Error('AP_AS_OF_PAYMENT_OVERALLOCATION');
+    outstandingByInvoiceId.set(payment.invoiceId, next);
+  }
+
+  for (const credit of params.credits) {
+    if (
+      credit.currency.trim().toUpperCase() !== currency ||
+      credit.postingAt > params.asOf ||
+      !outstandingByInvoiceId.has(credit.invoiceId)
+    ) continue;
+    assertMinorUnits(credit.amountMinorUnits, 'INVALID_AP_CREDIT_AMOUNT');
+    const next =
+      (outstandingByInvoiceId.get(credit.invoiceId) || 0) -
+      credit.amountMinorUnits;
+    if (next < 0) throw new Error('AP_AS_OF_CREDIT_OVERALLOCATION');
+    outstandingByInvoiceId.set(credit.invoiceId, next);
+  }
+
+  for (const tax of params.taxLedger) {
+    if (
+      tax.sourceType !== 'SUPPLIER_INVOICE' ||
+      tax.currency.trim().toUpperCase() !== currency ||
+      tax.postingAt > params.asOf ||
+      !outstandingByInvoiceId.has(tax.sourceId)
+    ) continue;
+    assertMinorUnits(tax.taxMinorUnits, 'INVALID_AP_WITHHOLDING_AMOUNT');
+    const next =
+      (outstandingByInvoiceId.get(tax.sourceId) || 0) -
+      tax.taxMinorUnits;
+    if (next < 0) throw new Error('AP_AS_OF_WITHHOLDING_OVERALLOCATION');
+    outstandingByInvoiceId.set(tax.sourceId, next);
+  }
+
+  const totalOutstandingMinorUnits = [...outstandingByInvoiceId.values()]
+    .reduce((sum, value) => sum + value, 0);
+  if (!Number.isSafeInteger(totalOutstandingMinorUnits)) {
+    throw new Error('AP_AS_OF_TOTAL_OVERFLOW');
+  }
+  return { outstandingByInvoiceId, totalOutstandingMinorUnits };
 }
 
 export function straightLineMonthlyDepreciationMinorUnits(params: {

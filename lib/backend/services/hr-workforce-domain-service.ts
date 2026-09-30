@@ -1571,6 +1571,17 @@ export class HrWorkforceDomainService {
   public static ensureInitialized(): void {
     if (this.employees.size > 0) return;
 
+    const runtimeMode=String(
+      process.env.GHIMS_RUNTIME_MODE ||
+      process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE ||
+      ''
+    ).trim().toUpperCase();
+    const testRuntime=
+      runtimeMode==='TEST' ||
+      runtimeMode==='DEMO' ||
+      process.env.NODE_ENV==='test';
+    if(!testRuntime) return;
+
     const now = new Date().toISOString();
     const today = now.split('T')[0];
 

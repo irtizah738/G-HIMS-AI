@@ -5,6 +5,7 @@
 
 import { AuthenticatedUser, TenantMembership, UserSessionRecord } from '@/lib/auth/auth-types';
 import { clearOfflineReadModelsForTenant } from '@/lib/offline/db';
+import { decryptEdgeJson, encryptEdgeJson, type EncryptedEdgeEnvelope } from '@/lib/offline/crypto';
 
 const DB_NAME = 'ghims_offline_auth_db';
 const DB_VERSION = 1;
@@ -14,10 +15,26 @@ const STORE_AUDIT_QUEUE = 'offline_audit_queue';
 
 interface CachedAuthRecord {
   id: string;
-  user: AuthenticatedUser;
-  session: UserSessionRecord;
+  tenantId: string;
+  actorId: string;
+  encryptedPayload: EncryptedEdgeEnvelope;
   cachedAt: string;
   expiresAt: string;
+}
+
+interface CachedMembershipRecord {
+  tenantId: string;
+  cryptoTenantId: string;
+  actorId: string;
+  encryptedPayload: EncryptedEdgeEnvelope;
+}
+
+interface CachedAuditRecord {
+  id?: number;
+  tenantId: string;
+  actorId: string;
+  encryptedPayload: EncryptedEdgeEnvelope;
+  queuedAt: string;
 }
 
 function openDatabase(): Promise<IDBDatabase> {
@@ -80,8 +97,12 @@ export async function saveCachedAuthSession(user: AuthenticatedUser, session: Us
 
     const record: CachedAuthRecord = {
       id: 'current_active_session',
-      user,
-      session,
+      tenantId: user.tenantId,
+      actorId: user.uid,
+      encryptedPayload: await encryptEdgeJson(user.tenantId, user.uid, {
+        user,
+        session,
+      }),
       cachedAt: new Date().toISOString(),
       expiresAt: session.expiresAt,
     };
@@ -126,7 +147,10 @@ export async function getCachedAuthSession(): Promise<{ user: AuthenticatedUser;
       const timer = setTimeout(() => resolve(null), 1000);
       request.onsuccess = () => {
         clearTimeout(timer);
-        const record = request.result as CachedAuthRecord | undefined;
+        const record = request.result as (CachedAuthRecord & {
+          user?: AuthenticatedUser;
+          session?: UserSessionRecord;
+        }) | undefined;
         if (!record) {
           resolve(null);
           return;
@@ -138,7 +162,24 @@ export async function getCachedAuthSession(): Promise<{ user: AuthenticatedUser;
           return;
         }
 
-        resolve({ user: record.user, session: record.session });
+        // One-release migration path for pre-P8 plaintext records.
+        if (record.user && record.session) {
+          const legacy = { user: record.user, session: record.session };
+          void saveCachedAuthSession(record.user, record.session).catch(() => {});
+          resolve(legacy);
+          return;
+        }
+
+        if (!record.encryptedPayload || !record.tenantId || !record.actorId) {
+          resolve(null);
+          return;
+        }
+
+        decryptEdgeJson<{ user: AuthenticatedUser; session: UserSessionRecord }>(
+          record.encryptedPayload
+        )
+          .then((decoded) => resolve(decoded))
+          .catch(() => resolve(null));
       };
       request.onerror = () => {
         clearTimeout(timer);
@@ -174,7 +215,7 @@ export async function clearCachedAuthSession(): Promise<void> {
       request.onsuccess = () => resolve(request.result as CachedAuthRecord | undefined);
       request.onerror = () => resolve(undefined);
     });
-    tenantId = existing?.user?.tenantId || '';
+    tenantId = existing?.tenantId || '';
 
     const tx = db.transaction([STORE_SESSION, STORE_MEMBERSHIPS], 'readwrite');
     tx.objectStore(STORE_SESSION).clear();
@@ -196,29 +237,58 @@ export async function clearCachedAuthSession(): Promise<void> {
 
 export async function saveCachedTenantMemberships(memberships: TenantMembership[]): Promise<void> {
   try {
+    const cached = await getCachedAuthSession();
+    if (!cached) return;
+
     const db = await openDatabase();
     const tx = db.transaction(STORE_MEMBERSHIPS, 'readwrite');
     const store = tx.objectStore(STORE_MEMBERSHIPS);
     store.clear();
     for (const item of memberships) {
-      store.put(item);
+      const record: CachedMembershipRecord = {
+        tenantId: item.tenantId,
+        cryptoTenantId: cached.user.tenantId,
+        actorId: cached.user.uid,
+        encryptedPayload: await encryptEdgeJson(
+          cached.user.tenantId,
+          cached.user.uid,
+          item
+        ),
+      };
+      store.put(record);
     }
   } catch {
-    // Membership cache is optional; never downgrade to localStorage on shared devices.
+    // Membership cache is optional; never downgrade to plaintext/localStorage.
   }
 }
 
 export async function getCachedTenantMemberships(): Promise<TenantMembership[]> {
   try {
+    const cached = await getCachedAuthSession();
+    if (!cached) return [];
+
     const db = await openDatabase();
     const tx = db.transaction(STORE_MEMBERSHIPS, 'readonly');
-    const store = tx.objectStore(STORE_MEMBERSHIPS);
-    const request = store.getAll();
-
-    return new Promise((resolve) => {
+    const request = tx.objectStore(STORE_MEMBERSHIPS).getAll();
+    const rows = await new Promise<Array<CachedMembershipRecord & Partial<TenantMembership>>>((resolve) => {
       request.onsuccess = () => resolve(request.result || []);
       request.onerror = () => resolve([]);
     });
+
+    const decoded: TenantMembership[] = [];
+    for (const row of rows) {
+      if (row.encryptedPayload) {
+        try {
+          decoded.push(await decryptEdgeJson<TenantMembership>(row.encryptedPayload));
+        } catch {
+          // Ignore unreadable records from another actor/key.
+        }
+      } else if ((row as Partial<TenantMembership>).status) {
+        // Legacy plaintext record: return for this session and let next save migrate.
+        decoded.push(row as unknown as TenantMembership);
+      }
+    }
+    return decoded;
   } catch {
     return [];
   }
@@ -226,14 +296,24 @@ export async function getCachedTenantMemberships(): Promise<TenantMembership[]> 
 
 export async function queueOfflineAuditLog(auditEvent: Record<string, unknown>): Promise<void> {
   try {
+    const cached = await getCachedAuthSession();
+    if (!cached) return;
+
     const db = await openDatabase();
     const tx = db.transaction(STORE_AUDIT_QUEUE, 'readwrite');
     const store = tx.objectStore(STORE_AUDIT_QUEUE);
-    store.add({
-      ...auditEvent,
+    const row: CachedAuditRecord = {
+      tenantId: cached.user.tenantId,
+      actorId: cached.user.uid,
+      encryptedPayload: await encryptEdgeJson(
+        cached.user.tenantId,
+        cached.user.uid,
+        auditEvent
+      ),
       queuedAt: new Date().toISOString(),
-    });
+    };
+    store.add(row);
   } catch {
-    // Memory fallback
+    // Audit persistence must never downgrade PHI/security context to plaintext.
   }
 }

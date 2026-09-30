@@ -63,6 +63,7 @@ export async function loadLocalEdgeSnapshot(tenantId: string): Promise<EdgeSnaps
     'scmReplenishmentPolicies',
     'scmReplenishmentPlans',
     'scmReplenishmentOrders',
+    'scmSupplierContracts',
     'scmOperationalSnapshots',
   ];
 

@@ -110,6 +110,15 @@ describe('SCM-1 authoritative inventory and procurement foundation', () => {
     );
   });
 
+  test('free-standing browser batch creation is retired', async () => {
+    const ledger = await source(
+      'components/supply-chain/scm-batch-tracking-ledger.tsx'
+    );
+    expect(ledger).not.toContain('createBatchRecord');
+    expect(ledger).toContain('Direct batch registration is retired');
+    expect(ledger).toContain('governed GRN putaway/release');
+  });
+
   test('SCM procurement UI uses governed edge commands', async () => {
     const procurement = await source(
       'components/supply-chain/scm-procurement-module.tsx'

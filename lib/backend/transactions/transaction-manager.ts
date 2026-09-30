@@ -193,6 +193,7 @@ function collectionForEntityType(entityType: string): string {
     ENCOUNTER_CHARGE: 'encounterCharges',
     AI_DRAFT: 'aiDrafts',
     ITEM_MASTER: 'items',
+    BATCH_LOT: 'batches',
     STOCK_TRANSACTION: 'stockTransactions',
     INVENTORY_BALANCE: 'inventoryBalances',
     PATIENT_CONSUMPTION: 'patientConsumptions',

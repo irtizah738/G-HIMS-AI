@@ -14,7 +14,6 @@ import {
   FEFOAllocationResult,
   ExpiryAlertCategory,
 } from '@/lib/supply-chain/scm-engine';
-import { quarantineBatchRecord } from '@/lib/firebase/services/scm-firestore-service';
 import { recordStockTransactionEdge } from '@/lib/supply-chain/scm-edge-adapter';
 import {
   Clock,
@@ -150,26 +149,72 @@ export function ScmExpiryDashboard({
     return allocateFefoBatches(itemBatches, fefoQuantity);
   }, [batches, selectedFefoItem, fefoQuantity]);
 
-  // Quarantine Batch Action Handler
+  // Quarantine is an authoritative stock transition. It updates the batch
+  // lifecycle and derived balance in the same server transaction.
   const handleQuarantineBatch = async (batchId: string, batchNumber: string) => {
     if (!confirm(`Confirm immediate quarantine of batch ${batchNumber}? This locks the lot from all dispensing.`)) {
       return;
     }
+
+    const batch = batches.find((item) => item.batchId === batchId);
+    const item = batch ? items.find((candidate) => candidate.itemId === batch.itemId) : null;
+    const balance = batch
+      ? balances.find(
+          (candidate) =>
+            candidate.batchId === batch.batchId &&
+            candidate.itemId === batch.itemId &&
+            candidate.available > 0
+        )
+      : null;
+
+    if (!batch || !item || !balance || balance.available <= 0) {
+      setStatusMessage({
+        type: 'error',
+        text: 'Authoritative available stock for this batch/location could not be resolved.',
+      });
+      return;
+    }
+
     setActionLoading(true);
     try {
-      await quarantineBatchRecord(
+      const transactionId = `txn_quarantine_${crypto.randomUUID()}`;
+      await recordStockTransactionEdge({
+        transactionId,
         tenantId,
-        batchId,
-        'MANDATORY EXPIRY / SHELF-LIFE BREACH: Quarantined by SCM Expiry Engine',
-        {
-          userId: 'usr_scm_expiry_officer',
-          userName: 'Clinical SCM Expiry Officer',
-          role: 'Supply Chain Specialist',
-        }
-      );
+        facilityId: balance.facilityId,
+        itemId: item.itemId,
+        itemCode: item.itemCode,
+        itemName: item.name,
+        batchId: batch.batchId,
+        batchNumber: batch.batchNumber,
+        manufactureDate: batch.manufactureDate,
+        expirationDate: batch.expiryDate,
+        fromLocationId: balance.locationId,
+        fromLocationName: balance.locationName,
+        quantity: balance.available,
+        normalizedQuantity: balance.available,
+        uom: item.unitOfMeasure,
+        unitCost: batch.unitCost,
+        totalCost: Math.round(batch.unitCost * balance.available * 100) / 100,
+        currency: batch.currency,
+        transactionType: 'QUARANTINE',
+        referenceType: 'MANUAL_OVERRIDE',
+        referenceId: `EXPIRY-${batch.batchId}`,
+        reasonCode: 'MANDATORY_EXPIRY_SHELF_LIFE_BREACH',
+        performedBy: {
+          userId: 'server-resolved',
+          userName: 'Authenticated SCM actor',
+          role: 'SCM',
+        },
+        occurredAt: new Date().toISOString(),
+        recordedAt: new Date().toISOString(),
+        idempotencyKey: `quarantine:${batch.batchId}:${balance.balanceId}`,
+        source: 'ONLINE',
+      });
+
       setStatusMessage({
         type: 'success',
-        text: `Batch ${batchNumber} successfully quarantined and locked from clinical dispensing.`,
+        text: `Batch ${batchNumber} quarantined through the authoritative inventory ledger.`,
       });
       await onRefresh();
     } catch (err: unknown) {

@@ -137,11 +137,17 @@ export class FinanceFixedAssetDomainService {
       const currency=payload.currency.trim().toUpperCase();
       const period=await DomainStateRepository.getById<FinancePeriodRecord>(context.tenantId,'accountingPeriods',periodId);
       if(!period||!['OPEN','SOFT_CLOSE'].includes(period.status))throw new AtomicMutationRejectedError('FINANCE_PERIOD_NOT_POSTABLE','Depreciation period is not open.');
-      const existing=(await DomainStateRepository.list<DepreciationRunRecord>(context.tenantId,'financeDepreciationRuns',10000))
-        .find(run=>run.fiscalYear===payload.fiscalYear&&run.postingPeriod===payload.postingPeriod&&run.currency===currency);
-      if(existing)throw new AtomicMutationRejectedError('DEPRECIATION_PERIOD_ALREADY_POSTED','A depreciation run already exists for this period/currency.');
+      const periodRuns=(await DomainStateRepository.list<DepreciationRunRecord>(context.tenantId,'financeDepreciationRuns',10000))
+        .filter(run=>run.fiscalYear===payload.fiscalYear&&run.postingPeriod===payload.postingPeriod&&run.currency===currency);
+      const alreadyProcessed=new Set(periodRuns.flatMap(run=>run.assetIds||[]));
+      const duplicateAssets=unique.filter(assetId=>alreadyProcessed.has(assetId));
+      if(duplicateAssets.length)throw new AtomicMutationRejectedError(
+        'DEPRECIATION_ASSET_ALREADY_POSTED',
+        'One or more assets already have depreciation posted for this period.',
+        {assetIds:duplicateAssets}
+      );
 
-      const writes:any[]=[];const journalIds:string[]=[];let total=0;
+      const writes:any[]=[];const journalIds:string[]=[];const processedAssetIds:string[]=[];let total=0;
       for(const asset of assets as FinanceFixedAssetRecord[]){
         if(asset.currency!==currency||asset.status!=='ACTIVE')continue;
         if(asset.inServiceAt>period.endAt)continue;
@@ -174,11 +180,15 @@ export class FinanceFixedAssetDomainService {
           {entityType:'FIXED_ASSET',entityId:asset.assetId,domainState:next},
           {entityType:'JOURNAL_ENTRY',entityId:journalId,domainState:journal},
         );
-        journalIds.push(journalId);total+=amount;
+        journalIds.push(journalId);processedAssetIds.push(asset.assetId);total+=amount;
       }
+      if(!processedAssetIds.length)throw new AtomicMutationRejectedError(
+        'NO_DEPRECIATION_ELIGIBLE_ASSETS',
+        'No requested assets are eligible for depreciation in this period.'
+      );
       const run:DepreciationRunRecord={
         runId:payload.runId,tenantId:context.tenantId,fiscalYear:payload.fiscalYear,postingPeriod:payload.postingPeriod,
-        currency,assetIds:unique,totalDepreciationMinorUnits:total,journalIds,postedBy:context.actorId,postedAt:new Date().toISOString(),
+        currency,assetIds:processedAssetIds,totalDepreciationMinorUnits:total,journalIds,postedBy:context.actorId,postedAt:new Date().toISOString(),
       };
       const tx=await TransactionManager.executeAtomicMutation({
         tenantId:context.tenantId,actorId:context.actorId,actorRole:context.roles[0]||'ACCOUNTANT',

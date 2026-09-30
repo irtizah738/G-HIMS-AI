@@ -17,6 +17,7 @@ import {
   EmployeeCredential,
   ClinicalPrivilege,
   RosterShiftEntry,
+  RosterTimelineBucket,
   StaffingGapAnalysis,
   AttendanceRecord,
   LeaveRequest,
@@ -77,6 +78,27 @@ function privilegeSlotId(params:{
     ].map(v=>v.trim().toLowerCase()).join('\u0000'))
     .digest('hex')
     .slice(0,40);
+}
+
+function rosterMonthKey(timestamp:number):string{
+  const date=new Date(timestamp);
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth()+1).padStart(2,'0')}`;
+}
+
+function rosterTimelineId(employeeId:string,monthKey:string):string{
+  const digest=createHash('sha256')
+    .update(`${employeeId.trim().toLowerCase()}\u0000${monthKey}`)
+    .digest('hex').slice(0,32);
+  return `rtl_${digest}`;
+}
+
+function rosterRelevantMonthKeys(startMs:number,endMs:number,minRestMs:number):string[]{
+  return [...new Set([
+    rosterMonthKey(startMs-minRestMs),
+    rosterMonthKey(startMs),
+    rosterMonthKey(endMs),
+    rosterMonthKey(endMs+minRestMs),
+  ])];
 }
 
 function workforceReject<T>(
@@ -1351,119 +1373,260 @@ export class HrWorkforceDomainService {
     idempotencyKey: string,
     payload: Omit<RosterShiftEntry, 'rosterId' | 'status' | 'createdAt' | 'updatedAt'>
   ): Promise<CommandResult<RosterShiftEntry>> {
-    const auth = AuthorizationPipeline.evaluate(context, {
-      requiredRoles: ['HR_ADMIN', 'NURSE_MANAGER', 'DEPARTMENT_HEAD', 'SYSTEM_ADMIN'],
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['HR_ADMIN','NURSE_MANAGER','DEPARTMENT_HEAD','SYSTEM_ADMIN'],
     });
-
-    if (!auth.authorized) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: 'UNAUTHORIZED', message: 'Department Head / Nurse Manager role required.' },
-      };
+    if(!auth.authorized){
+      return workforceReject(
+        commandId,idempotencyKey,auth.code||'UNAUTHORIZED',
+        auth.reason||'Department Head / Nurse Manager role required.'
+      );
     }
 
-    // Check credential lockout for clinical shifts
-    await this.hydrateClinicalEligibility(context.tenantId, payload.employeeId);
-    const eligibility = this.checkClinicalEligibility(payload.employeeId);
-    if (!eligibility.isEligible) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: {
-          code: 'CLINICAL_CREDENTIAL_EXPIRED',
-          message: `Cannot assign clinical shift: ${eligibility.reason}`,
+    const employee=await this.loadEmployee(context.tenantId,payload.employeeId);
+    if(!employee){
+      return workforceReject(commandId,idempotencyKey,'EMPLOYEE_NOT_FOUND','Shift employee does not exist.');
+    }
+
+    try{
+      assertWorkforceFacilityScope(context,[payload.facilityId]);
+      if(
+        !employee.facilityIds.includes(payload.facilityId) ||
+        !employee.departmentIds.includes(payload.departmentId)
+      ){
+        throw new AtomicMutationRejectedError(
+          'ROSTER_SCOPE_OUTSIDE_EMPLOYEE_ASSIGNMENT',
+          'Roster shift facility/department must be within the employee workforce assignment.'
+        );
+      }
+      if(!['ACTIVE','ONBOARDING'].includes(employee.employmentStatus)){
+        throw new AtomicMutationRejectedError(
+          'EMPLOYEE_NOT_ROSTERABLE',
+          `Employee status ${employee.employmentStatus} is not rosterable.`
+        );
+      }
+
+      const startMs=Date.parse(payload.startTime);
+      const endMs=Date.parse(payload.endTime);
+      if(!Number.isFinite(startMs)||!Number.isFinite(endMs)||endMs<=startMs){
+        throw new AtomicMutationRejectedError(
+          'INVALID_SHIFT_INTERVAL',
+          'Roster shift requires a valid end time after its start time.'
+        );
+      }
+      const durationHours=(endMs-startMs)/3_600_000;
+      if(durationHours>24){
+        throw new AtomicMutationRejectedError(
+          'SHIFT_DURATION_EXCEEDS_LIMIT',
+          'A single roster assignment cannot exceed 24 hours.'
+        );
+      }
+      const expectedDate=new Date(startMs).toISOString().slice(0,10);
+      if(payload.date!==expectedDate){
+        throw new AtomicMutationRejectedError(
+          'SHIFT_DATE_MISMATCH',
+          'Roster date must match the UTC date of the scheduled start.'
+        );
+      }
+
+      const minRestMs=10*60*60*1000;
+      const expectedCredentialRevision=Number(employee.credentialRevision||0);
+      const credentials=DomainStateRepository.isAvailable()
+        ? await DomainStateRepository.queryEqual<EmployeeCredential>(
+            context.tenantId,'clinicalCredentials','employeeId',payload.employeeId
+          )
+        : Array.from(this.credentials.values()).filter(
+            credential=>credential.employeeId===payload.employeeId
+          );
+      const credentialTargets=credentials.map((credential,index)=>({
+        key:`credential:${index}`,
+        entityType:'EMPLOYEE_CREDENTIAL',
+        entityId:credential.credentialId,
+        required:true,
+      }));
+
+      const baselineShifts=(await this.loadShiftsForEmployee(
+        context.tenantId,payload.employeeId
+      )).filter(shift=>shift.status!=='CANCELLED');
+
+      const monthKeys=rosterRelevantMonthKeys(startMs,endMs,minRestMs);
+      const timelineTargets=monthKeys.map((monthKey,index)=>({
+        key:`timeline:${index}`,
+        entityType:'ROSTER_TIMELINE',
+        entityId:rosterTimelineId(payload.employeeId,monthKey),
+        required:false,
+      }));
+      const rosterId=`rst_${randomUUID()}`;
+      const now=new Date().toISOString();
+
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,
+        actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'ROSTER_SHIFT',
+        aggregateId:rosterId,
+        eventType:'SHIFT_ASSIGNED',
+        auditAction:'SHIFT_ASSIGNED',
+        auditResourceType:'ROSTER_SHIFT',
+        auditResourceId:rosterId,
+        outboxTopic:'g-hims-roster-events',
+        idempotencyKey,commandId,correlationId:context.correlationId,
+        readTargets:[
+          {key:'employee',entityType:'EMPLOYEE_MASTER',entityId:payload.employeeId,required:true},
+          ...credentialTargets,
+          ...timelineTargets,
+        ],
+        prepare:(current)=>{
+          const currentEmployee=current.employee as unknown as EmployeeMaster;
+          if(
+            !['ACTIVE','ONBOARDING'].includes(currentEmployee.employmentStatus) ||
+            !currentEmployee.facilityIds.includes(payload.facilityId) ||
+            !currentEmployee.departmentIds.includes(payload.departmentId)
+          ){
+            throw new AtomicMutationRejectedError(
+              'EMPLOYEE_ASSIGNMENT_CHANGED_RETRY',
+              'Employee workforce assignment/status changed before roster commit.'
+            );
+          }
+          if(Number(currentEmployee.credentialRevision||0)!==expectedCredentialRevision){
+            throw new AtomicMutationRejectedError(
+              'CREDENTIAL_SET_CHANGED_RETRY',
+              'Credential set changed during roster evaluation; retry with fresh credential evidence.'
+            );
+          }
+
+          const currentCredentials=credentialTargets.map(
+            target=>current[target.key] as unknown as EmployeeCredential
+          );
+          const mandatory=currentCredentials.filter(
+            credential=>credential.isMandatoryForPractice
+          );
+          const today=new Date().toISOString().slice(0,10);
+          const invalidMandatory=mandatory.filter(credential=>
+            credential.verificationStatus!=='VERIFIED' ||
+            !credential.expiryDate ||
+            credential.expiryDate<today
+          );
+          const clinicalRole=/doctor|physician|surgeon|nurse|pharmac|lab|technician/i.test(
+            `${currentEmployee.positionTitle} ${currentEmployee.specialty||''}`
+          );
+          if(clinicalRole&&(mandatory.length===0||invalidMandatory.length>0)){
+            throw new AtomicMutationRejectedError(
+              'CLINICAL_CREDENTIAL_EXPIRED',
+              mandatory.length===0
+                ? 'Cannot assign clinical shift: no mandatory verified credential is on file.'
+                : `Cannot assign clinical shift: ${invalidMandatory.length} mandatory credential(s) are expired or unverified.`
+            );
+          }
+
+          const timelineShifts=timelineTargets.flatMap(target=>{
+            const bucket=current[target.key] as unknown as RosterTimelineBucket|null;
+            return bucket?.shifts||[];
+          });
+          const allExisting=new Map<string,{rosterId:string;startTime:string;endTime:string;status:string}>();
+          for(const shift of baselineShifts){
+            allExisting.set(shift.rosterId,{
+              rosterId:shift.rosterId,startTime:shift.startTime,endTime:shift.endTime,status:shift.status,
+            });
+          }
+          for(const shift of timelineShifts) allExisting.set(shift.rosterId,shift);
+
+          for(const existing of allExisting.values()){
+            if(existing.status==='CANCELLED') continue;
+            const existingStart=Date.parse(existing.startTime);
+            const existingEnd=Date.parse(existing.endTime);
+            if(!Number.isFinite(existingStart)||!Number.isFinite(existingEnd)) continue;
+            if(startMs<existingEnd&&endMs>existingStart){
+              throw new AtomicMutationRejectedError(
+                'SHIFT_DOUBLE_BOOKING_CONFLICT',
+                'Employee already has an overlapping roster assignment.'
+              );
+            }
+            const restBefore=startMs-existingEnd;
+            const restAfter=existingStart-endMs;
+            if(
+              (restBefore>0&&restBefore<minRestMs) ||
+              (restAfter>0&&restAfter<minRestMs)
+            ){
+              throw new AtomicMutationRejectedError(
+                'FATIGUE_COMPLIANCE_VIOLATION',
+                'Roster assignment violates the mandatory 10-hour rest interval.'
+              );
+            }
+          }
+
+          const shiftEntry:RosterShiftEntry={
+            ...payload,
+            rosterId,
+            tenantId:context.tenantId,
+            durationHours,
+            status:'PUBLISHED',
+            publishedAt:now,
+            publishedBy:context.actorId,
+            createdAt:now,
+            updatedAt:now,
+          };
+
+          const primaryMonth=rosterMonthKey(startMs);
+          const targetIndex=monthKeys.indexOf(primaryMonth);
+          const targetKey=`timeline:${targetIndex}`;
+          const existingBucket=current[targetKey] as unknown as RosterTimelineBucket|null;
+          const baselineForMonth=baselineShifts
+            .filter(shift=>rosterMonthKey(Date.parse(shift.startTime))===primaryMonth)
+            .map(shift=>({
+              rosterId:shift.rosterId,startTime:shift.startTime,endTime:shift.endTime,status:shift.status,
+            }));
+          const merged=new Map(
+            [...(existingBucket?.shifts||[]),...baselineForMonth]
+              .map(shift=>[shift.rosterId,shift] as const)
+          );
+          merged.set(rosterId,{
+            rosterId,startTime:payload.startTime,endTime:payload.endTime,status:'PUBLISHED',
+          });
+          const timeline:RosterTimelineBucket={
+            timelineId:rosterTimelineId(payload.employeeId,primaryMonth),
+            tenantId:context.tenantId,
+            employeeId:payload.employeeId,
+            monthKey:primaryMonth,
+            shifts:[...merged.values()].sort((a,b)=>a.startTime.localeCompare(b.startTime)),
+            updatedAt:now,
+          };
+
+          return {
+            domainState:shiftEntry,
+            additionalStateWrites:[{
+              entityType:'ROSTER_TIMELINE',
+              entityId:timeline.timelineId,
+              domainState:timeline,
+            }],
+            eventPayload:{
+              rosterId,
+              employeeId:payload.employeeId,
+              departmentId:payload.departmentId,
+              facilityId:payload.facilityId,
+              date:payload.date,
+              shiftName:payload.shiftName,
+              startTime:payload.startTime,
+              endTime:payload.endTime,
+            },
+            auditReason:`Assigned ${payload.shiftName} shift to ${payload.employeeName} on ${payload.date}.`,
+            resultData:shiftEntry,
+          };
         },
+      });
+
+      const shiftEntry=tx.resultData as RosterShiftEntry;
+      this.shifts.set(rosterId,shiftEntry);
+      return {
+        success:true,commandId,idempotencyKey,entityId:rosterId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:shiftEntry,
       };
-    }
-
-    // Fatigue compliance: Check for rest period violation (< 10 hours rest between consecutive shifts)
-    const existingEmployeeShifts = (await this.loadShiftsForEmployee(
-      context.tenantId,
-      payload.employeeId
-    )).filter((shift) => shift.status !== 'CANCELLED');
-
-    const proposedStart = new Date(payload.startTime).getTime();
-    const minRestMs = 10 * 60 * 60 * 1000; // 10 hours
-
-    for (const existing of existingEmployeeShifts) {
-      const existingEnd = new Date(existing.endTime).getTime();
-      const existingStart = new Date(existing.startTime).getTime();
-
-      // Double-booking check
-      if (
-        (proposedStart >= existingStart && proposedStart < existingEnd) ||
-        (new Date(payload.endTime).getTime() > existingStart && new Date(payload.endTime).getTime() <= existingEnd)
-      ) {
-        return {
-          success: false,
-          commandId,
-          idempotencyKey,
-          error: {
-            code: 'SHIFT_DOUBLE_BOOKING_CONFLICT',
-            message: `Staff member ${payload.employeeName} is already rostered for shift ${existing.shiftName} (${existing.startTime} - ${existing.endTime}).`,
-          },
-        };
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
       }
-
-      // Rest period check
-      const restGap = proposedStart - existingEnd;
-      if (restGap > 0 && restGap < minRestMs) {
-        return {
-          success: false,
-          commandId,
-          idempotencyKey,
-          error: {
-            code: 'FATIGUE_COMPLIANCE_VIOLATION',
-            message: `Mandatory rest violation: Only ${(restGap / (1000 * 60 * 60)).toFixed(1)}h rest between shifts. Minimum required is 10 hours.`,
-          },
-        };
-      }
+      throw error;
     }
-
-    const rosterId = `rst_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const now = new Date().toISOString();
-
-    const shiftEntry: RosterShiftEntry = {
-      ...payload,
-      rosterId,
-      status: 'PUBLISHED',
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    this.shifts.set(rosterId, shiftEntry);
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'ROSTER_SHIFT',
-      entityId: rosterId,
-      eventType: 'SHIFT_ASSIGNED',
-      domainState: shiftEntry,
-      eventPayload: {
-        rosterId,
-        employeeId: payload.employeeId,
-        departmentId: payload.departmentId,
-        date: payload.date,
-        shiftName: payload.shiftName,
-        startTime: payload.startTime,
-        endTime: payload.endTime,
-      },
-      auditReason: `Assigned ${payload.shiftName} shift to ${payload.employeeName} on ${payload.date}`,
-      outboxTopic: 'g-hims-roster-events',
-    });
-
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: rosterId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: shiftEntry,
-    };
   }
 
   public static calculateStaffingGaps(

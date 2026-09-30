@@ -160,6 +160,7 @@ export interface InventoryDispositionOrder {
   dispositionType: InventoryDispositionType;
   reason: InventoryDispositionReason;
   recallId?: string;
+  excursionId?: string;
   supplierId?: string;
   justification: string;
   status:

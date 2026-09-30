@@ -232,6 +232,7 @@ export class ScmRecallDispositionDomainService {
             quarantinedBatchIds: [],
             quarantinedBalanceIds: [],
             quarantinedQuantity: 0,
+            affectedOnHandQuantity: 0,
             disposedQuantity: 0,
             exposureCount: 0,
             notifiedExposureCount: 0,
@@ -342,6 +343,7 @@ export class ScmRecallDispositionDomainService {
           const now=new Date().toISOString();
           const writes:Array<{entityType:string;entityId:string;domainState:unknown}>=[];
           let newlyQuarantined=0;
+          let newlyAffectedOnHand=0;
 
           selectedBatches.forEach((batch)=>{
             writes.push({
@@ -361,6 +363,8 @@ export class ScmRecallDispositionDomainService {
             if(!selectedBatchIds.has(balance.batchId) || balance.itemId!==recall.itemId) {
               throw new AtomicMutationRejectedError('RECALL_BALANCE_SCOPE_MISMATCH',`Balance ${balance.balanceId} does not belong to an affected batch.`);
             }
+            const wasAlreadyTracked=recall.quarantinedBalanceIds.includes(balance.balanceId);
+            if(!wasAlreadyTracked) newlyAffectedOnHand+=Number(balance.onHand||0);
             const targetQuarantine=Math.max(
               Number(balance.quarantined || 0),
               Math.max(0,Number(balance.onHand||0)-Number(balance.damaged||0)-Number(balance.expired||0))
@@ -429,12 +433,13 @@ export class ScmRecallDispositionDomainService {
             quarantinedBatchIds:mergedBatchIds,
             quarantinedBalanceIds:mergedBalanceIds,
             quarantinedQuantity:Number(recall.quarantinedQuantity||0)+newlyQuarantined,
+            affectedOnHandQuantity:Number(recall.affectedOnHandQuantity||0)+newlyAffectedOnHand,
             updatedAt:now,
           };
           return {
             domainState:next,
             additionalStateWrites:writes,
-            eventPayload:{recallId:recall.recallId,batchIds,balanceIds,newlyQuarantined,finalChunk:payload.finalChunk},
+            eventPayload:{recallId:recall.recallId,batchIds,balanceIds,newlyQuarantined,newlyAffectedOnHand,finalChunk:payload.finalChunk},
             auditReason:`Committed recall quarantine chunk for ${recall.recallCaseNumber}; ${newlyQuarantined} units newly blocked.`,
             resultData:next,
           };
@@ -781,7 +786,7 @@ export class ScmRecallDispositionDomainService {
           const recall=current.recall as unknown as GovernedRecallCase;
           if(!['QUARANTINE_EXECUTED','PATIENTS_IDENTIFIED'].includes(recall.status)) throw new AtomicMutationRejectedError('RECALL_NOT_RESOLVABLE',`Recall status ${recall.status} cannot be resolved.`);
           if(recall.exposureCount!==recall.notifiedExposureCount) throw new AtomicMutationRejectedError('RECALL_PATIENT_NOTIFICATIONS_INCOMPLETE','Every identified patient exposure must be notified before recall resolution.');
-          if(Number(recall.disposedQuantity||0)+0.000001<Number(recall.quarantinedQuantity||0)) throw new AtomicMutationRejectedError('RECALL_QUARANTINED_STOCK_NOT_DISPOSED','All quarantined recall stock must be destroyed or returned to supplier before resolution.');
+          if(Number(recall.disposedQuantity||0)+0.000001<Number(recall.affectedOnHandQuantity||0)) throw new AtomicMutationRejectedError('RECALL_AFFECTED_STOCK_NOT_DISPOSED','All affected on-hand recall stock must be destroyed or returned to supplier before resolution.');
           const authoritativeIds=unique(recall.dispositionOrderIds).sort();
           const supplied=ids.sort();
           if(authoritativeIds.length!==supplied.length||authoritativeIds.some((id,index)=>id!==supplied[index])) throw new AtomicMutationRejectedError('RECALL_DISPOSITION_SET_MISMATCH','Resolution must include every disposition order linked to the recall.');

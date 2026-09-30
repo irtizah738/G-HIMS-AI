@@ -11,16 +11,25 @@ import type {
   DepreciationRunRecord,
   FinanceAccountRecord,
   FinanceArOpenItem,
+  FinanceArAdjustment,
   FinanceCloseRecord,
   FinanceFixedAssetRecord,
   FinancePeriodRecord,
   FinancialStatementSnapshot,
   GovernedJournalRecord,
+  TaxLedgerItem,
+  TreasuryAccountRecord,
 } from '@/types/finance-domain';
 import type { InventoryPeriodCloseRecord } from '@/types/scm-costing';
-import type { SupplierInvoiceRecord } from '@/types/scm-payables';
+import type { InventoryBalance } from '@/types/scm-domain';
+import type {
+  SupplierInvoiceRecord,
+  SupplierPaymentRecord,
+} from '@/types/scm-payables';
 import {
   buildTrialBalance,
+  calculateApOutstandingAsOf,
+  calculateArOutstandingAsOf,
   financePeriodId,
   stableFinanceFingerprint,
 } from '@/lib/finance/finance-engine';
@@ -96,13 +105,24 @@ export class FinanceCloseDomainService {
     try{
       const periodId=financePeriodId(payload.fiscalYear,payload.postingPeriod);
       const currency=payload.currency.toUpperCase();
-      const [accounts,journals,arItems,apInvoices,inventoryCloses,bankRecons,cashShifts,depreciationRuns,assets]=await Promise.all([
+      const [
+        accounts,journals,arItems,arReceipts,arAdjustments,apInvoices,apPayments,
+        apCredits,taxLedger,inventoryCloses,inventoryBalances,bankRecons,treasuryAccounts,
+        cashShifts,depreciationRuns,assets
+      ]=await Promise.all([
         DomainStateRepository.list<FinanceAccountRecord>(context.tenantId,'accounts',50000),
         DomainStateRepository.queryAllEqual<GovernedJournalRecord>(context.tenantId,'journalEntries','fiscalYear',payload.fiscalYear,{pageSize:500,maxRows:500000}),
         DomainStateRepository.list<FinanceArOpenItem>(context.tenantId,'arOpenItems',200000),
+        DomainStateRepository.list<Record<string,unknown>>(context.tenantId,'financeArReceipts',200000),
+        DomainStateRepository.list<FinanceArAdjustment>(context.tenantId,'financeArAdjustments',200000),
         DomainStateRepository.list<SupplierInvoiceRecord>(context.tenantId,'scmSupplierInvoices',200000),
+        DomainStateRepository.list<SupplierPaymentRecord>(context.tenantId,'scmSupplierPayments',200000),
+        DomainStateRepository.list<Record<string,unknown>>(context.tenantId,'financeSupplierCredits',200000),
+        DomainStateRepository.list<TaxLedgerItem>(context.tenantId,'financeTaxLedger',200000),
         DomainStateRepository.list<InventoryPeriodCloseRecord>(context.tenantId,'scmInventoryPeriodCloses',50000),
+        DomainStateRepository.list<InventoryBalance>(context.tenantId,'inventoryBalances',200000),
         DomainStateRepository.list<BankReconciliationRecord>(context.tenantId,'financeBankReconciliations',50000),
+        DomainStateRepository.list<TreasuryAccountRecord>(context.tenantId,'treasuryAccounts',50000),
         DomainStateRepository.list<CashShiftRecord>(context.tenantId,'cashRegisterShifts',100000),
         DomainStateRepository.list<DepreciationRunRecord>(context.tenantId,'financeDepreciationRuns',10000),
         DomainStateRepository.list<FinanceFixedAssetRecord>(context.tenantId,'financeFixedAssets',100000),
@@ -111,10 +131,36 @@ export class FinanceCloseDomainService {
       const trial=buildTrialBalance({journals,accounts:relevantAccounts,fiscalYear:payload.fiscalYear,throughPostingPeriod:payload.postingPeriod,currency});
       if(!trial.balanced)throw new AtomicMutationRejectedError('TRIAL_BALANCE_IMBALANCED','Finance close requires balanced Universal Journal.');
 
+      const periodStart=Date.UTC(payload.fiscalYear,payload.postingPeriod-1,1,0,0,0,0);
       const periodEnd=Date.UTC(payload.fiscalYear,payload.postingPeriod,0,23,59,59,999);
-      const arOutstanding=arItems.filter(i=>i.currency===currency&&i.issueAt<=periodEnd).reduce((sum,i)=>sum+i.outstandingMinorUnits,0);
-      const apOutstanding=apInvoices.filter(i=>i.currency===currency&&['PAYABLE_RECOGNIZED','PARTIALLY_PAID'].includes(i.status))
-        .reduce((sum,i)=>sum+i.balanceMinorUnits,0);
+      const arAsOf=calculateArOutstandingAsOf({
+        openItems:arItems,
+        receipts:arReceipts.map(row=>({
+          openItemId:String(row.openItemId||''),
+          amountMinorUnits:Number(row.amountMinorUnits||0),
+          receivedAt:Number(row.receivedAt||0),
+          currency:String(row.currency||''),
+        })),
+        adjustments:arAdjustments,
+        asOf:periodEnd,
+        currency,
+      });
+      const apAsOf=calculateApOutstandingAsOf({
+        invoices:apInvoices,
+        journals,
+        payments:apPayments,
+        credits:apCredits.map(row=>({
+          invoiceId:String(row.invoiceId||''),
+          amountMinorUnits:Number(row.amountMinorUnits||0),
+          postingAt:Number(row.postingAt||0),
+          currency:String(row.currency||''),
+        })),
+        taxLedger,
+        asOf:periodEnd,
+        currency,
+      });
+      const arOutstanding=arAsOf.totalOutstandingMinorUnits;
+      const apOutstanding=apAsOf.totalOutstandingMinorUnits;
       const arGl=accountEnding(trial.lines,'1110');
       const apGl=accountEnding(trial.lines,'2010');
       const arReconciled=Math.abs(arGl-arOutstanding)<=1;
@@ -126,20 +172,54 @@ export class FinanceCloseDomainService {
       );
 
       const periodKey=`${payload.fiscalYear}-${String(payload.postingPeriod).padStart(2,'0')}`;
+      const inventoryFacilities=[...new Set(
+        inventoryBalances
+          .filter(balance=>Number(balance.onHand||0)!==0)
+          .map(balance=>balance.facilityId)
+          .filter(Boolean)
+      )];
       const inventoryForPeriod=inventoryCloses.filter(c=>c.periodKey===periodKey);
-      const inventoryClosed=inventoryForPeriod.length>0&&inventoryForPeriod.every(c=>c.status==='CLOSED');
-      if(!inventoryClosed)throw new AtomicMutationRejectedError('INVENTORY_SUBLEDGER_NOT_CLOSED','Inventory period close must complete before finance close.');
+      const closedInventoryFacilities=new Set(
+        inventoryForPeriod.filter(close=>close.status==='CLOSED').map(close=>close.facilityId)
+      );
+      const missingInventoryFacilities=inventoryFacilities.filter(
+        facilityId=>!closedInventoryFacilities.has(facilityId)
+      );
+      const inventoryClosed=missingInventoryFacilities.length===0;
+      if(!inventoryClosed)throw new AtomicMutationRejectedError(
+        'INVENTORY_SUBLEDGER_NOT_CLOSED',
+        'Every facility with on-hand inventory must complete inventory period close before finance close.',
+        {facilityIds:missingInventoryFacilities}
+      );
 
+      const currencyTreasuryAccounts=treasuryAccounts.filter(
+        account=>account.isActive&&account.currency===currency
+      );
+      const activeBankAccounts=currencyTreasuryAccounts.filter(account=>account.kind==='BANK');
       const bankForPeriod=bankRecons.filter(r=>{
         const d=new Date(r.statementDate);
         return d.getUTCFullYear()===payload.fiscalYear&&d.getUTCMonth()+1===payload.postingPeriod&&r.currency===currency;
       });
-      const relevantShifts=cashShifts.filter(s=>{
-        const d=new Date(s.openedAt);
-        return d.getUTCFullYear()===payload.fiscalYear&&d.getUTCMonth()+1===payload.postingPeriod;
-      });
-      const cashReconciled=bankForPeriod.every(r=>r.status==='APPROVED'&&r.varianceMinorUnits===0)&&relevantShifts.every(s=>s.status==='CLOSED');
-      if(!cashReconciled)throw new AtomicMutationRejectedError('TREASURY_NOT_RECONCILED','All period bank reconciliations and cash shifts must be approved/closed.');
+      const unreconciledBankAccountIds=activeBankAccounts
+        .filter(account=>!bankForPeriod.some(r=>
+          r.treasuryAccountId===account.treasuryAccountId&&
+          r.status==='APPROVED'&&
+          r.varianceMinorUnits===0
+        ))
+        .map(account=>account.treasuryAccountId);
+      const currencyTreasuryIds=new Set(currencyTreasuryAccounts.map(a=>a.treasuryAccountId));
+      const relevantShifts=cashShifts.filter(s=>
+        currencyTreasuryIds.has(s.treasuryAccountId)&&
+        s.openedAt<=periodEnd&&
+        (s.closedAt===undefined||s.closedAt>=periodStart)
+      );
+      const openCashShiftIds=relevantShifts.filter(s=>s.status!=='CLOSED').map(s=>s.shiftId);
+      const cashReconciled=unreconciledBankAccountIds.length===0&&openCashShiftIds.length===0;
+      if(!cashReconciled)throw new AtomicMutationRejectedError(
+        'TREASURY_NOT_RECONCILED',
+        'All active bank accounts must have zero-variance approved reconciliation and all overlapping cash shifts must be closed.',
+        {bankAccountIds:unreconciledBankAccountIds,cashShiftIds:openCashShiftIds}
+      );
 
       const depreciableAssets=assets.filter(a=>a.currency===currency&&a.status==='ACTIVE'&&a.inServiceAt<=periodEnd);
       const periodDepreciationRuns=depreciationRuns.filter(

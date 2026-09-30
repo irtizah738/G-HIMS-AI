@@ -22,10 +22,10 @@ import {
 } from 'lucide-react';
 import { Account, JournalEntry, JournalLine } from '@/types/erp-finance';
 import {
-  subscribeToAccounts,
-  subscribeToJournalEntries,
-  postJournalEntry,
-} from '@/lib/firebase/services/erp-finance';
+  hydrateFinanceLedger,
+  loadLocalFinanceLedger,
+  postManualJournalEdge,
+} from '@/lib/finance/finance-edge-adapter';
 import { validateJournalEntry } from '@/lib/finance/double-entry';
 
 interface EditableLine {
@@ -39,7 +39,7 @@ interface EditableLine {
 
 export default function JournalEntriesPage() {
   const params = useParams();
-  const tenantId = (params?.tenantId as string) || 'metro-health';
+  const tenantId = String(params?.tenantId || '').trim();
 
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [entries, setEntries] = useState<JournalEntry[]>([]);
@@ -76,21 +76,34 @@ export default function JournalEntriesPage() {
   const [posting, setPosting] = useState(false);
   const [postError, setPostError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const applyLedger = (data: Awaited<ReturnType<typeof loadLocalFinanceLedger>>) => {
+    setAccounts(data.accounts);
+    setEntries(data.journals);
+  };
+
+  const loadLedger = async () => {
     setLoading(true);
-    const unsubAccounts = subscribeToAccounts(tenantId, (data) => {
-      setAccounts(data);
-    });
-
-    const unsubEntries = subscribeToJournalEntries(tenantId, (data) => {
-      setEntries(data);
+    try {
+      if (!tenantId) {
+        setPostError('TENANT_CONTEXT_REQUIRED: Finance requires an explicit tenant route.');
+        setAccounts([]);
+        setEntries([]);
+        return;
+      }
+      applyLedger(await loadLocalFinanceLedger(tenantId));
+      applyLedger(await hydrateFinanceLedger(tenantId));
+    } catch (error) {
+      setPostError(
+        error instanceof Error ? error.message : 'Failed to load governed finance ledger.'
+      );
+    } finally {
       setLoading(false);
-    });
+    }
+  };
 
-    return () => {
-      unsubAccounts();
-      unsubEntries();
-    };
+  useEffect(() => {
+    void loadLedger();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId]);
 
   // Real-time double-entry line validation
@@ -290,27 +303,54 @@ export default function JournalEntriesPage() {
       return;
     }
 
+    if (!tenantId) {
+      setPostError('TENANT_CONTEXT_REQUIRED: Finance requires an explicit tenant route.');
+      return;
+    }
+    if (sourceModule !== 'manual') {
+      setPostError(
+        'System subledger journals cannot be created from the manual journal screen. Use the originating governed module.'
+      );
+      return;
+    }
+    const postingAt = Date.parse(`${postingDate}T00:00:00.000Z`);
+    if (!Number.isFinite(postingAt)) {
+      setPostError('Posting date is invalid.');
+      return;
+    }
+    const currencies = [...new Set(
+      lines
+        .map((line) => accounts.find((account) => account.accountCode === line.accountCode)?.currency)
+        .filter(Boolean)
+    )];
+    if (currencies.length !== 1) {
+      setPostError('All journal accounts must resolve to one authoritative currency.');
+      return;
+    }
+
     setPosting(true);
     try {
-      await postJournalEntry(tenantId, {
-        postingDate,
-        referenceNumber: referenceNumber.trim() || `REF-${Date.now()}`,
-        description: description.trim(),
-        sourceModule,
-        lines: lines.map((l) => ({
-          id: l.id,
-          accountCode: l.accountCode,
-          accountName: l.accountName,
-          description: l.description.trim() || description.trim(),
-          debit: Number(l.debit) || 0,
-          credit: Number(l.credit) || 0,
+      await postManualJournalEdge({
+        fiscalYear: new Date(postingAt).getUTCFullYear(),
+        postingPeriod: new Date(postingAt).getUTCMonth() + 1,
+        documentDate: postingAt,
+        postingDate: postingAt,
+        referenceDocumentId: referenceNumber.trim() || `REF-${Date.now()}`,
+        documentHeader: description.trim(),
+        currency: String(currencies[0]),
+        lines: lines.map((line) => ({
+          glAccountId: line.accountCode,
+          glAccountName: line.accountName,
+          debitMinorUnits: Math.round((Number(line.debit) || 0) * 100),
+          creditMinorUnits: Math.round((Number(line.credit) || 0) * 100),
+          lineDescription: line.description.trim() || description.trim(),
         })),
-        postedBy: postedBy.trim() || 'Finance Admin',
       });
 
       setShowNewModal(false);
       setDescription('');
       setReferenceNumber('');
+      await loadLedger();
       setLines([
         {
           id: '1',

@@ -1117,6 +1117,24 @@ export class CommandBus {
           );
           break;
 
+        case 'CancelShiftCommand':
+          result = await HrWorkforceDomainService.cancelShift(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ExecuteRosterSwapCommand':
+          result = await HrWorkforceDomainService.executeRosterSwap(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
         case 'RecordClockInCommand':
           result = await HrWorkforceDomainService.recordClockIn(
             context,

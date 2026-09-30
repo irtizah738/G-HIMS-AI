@@ -8,6 +8,7 @@ import {
   SupplierMaster,
   InventoryLocation,
 } from '@/types/scm-domain';
+import type { SupplierContract } from '@/types/scm-sourcing';
 import {
   approvePurchaseRequisitionEdge,
   createPurchaseOrderEdge,
@@ -40,6 +41,7 @@ interface ScmProcurementModuleProps {
   requisitions: PurchaseRequisition[];
   purchaseOrders: PurchaseOrderRecord[];
   suppliers: SupplierMaster[];
+  supplierContracts: SupplierContract[];
   locations: InventoryLocation[];
   onRefresh: () => Promise<void>;
 }
@@ -50,6 +52,7 @@ export function ScmProcurementModule({
   requisitions,
   purchaseOrders,
   suppliers,
+  supplierContracts,
   locations,
   onRefresh,
 }: ScmProcurementModuleProps) {
@@ -246,12 +249,45 @@ export function ScmProcurementModule({
         );
       }
 
+      const now = Date.now();
+      const contract = supplierContracts.find((candidate) => {
+        const effectiveAt = Date.parse(candidate.effectiveAt);
+        const expiresAt = Date.parse(candidate.expiresAt);
+        const lineItems = new Set(candidate.lines.map((line) => line.itemId));
+        return (
+          candidate.status === 'ACTIVE' &&
+          candidate.supplierId === chosenSupplier.supplierId &&
+          candidate.currency.toUpperCase() === selectedReqForPo.currency.toUpperCase() &&
+          candidate.paymentTerms === poPaymentTerms &&
+          Number.isFinite(effectiveAt) &&
+          Number.isFinite(expiresAt) &&
+          effectiveAt <= now &&
+          expiresAt >= now &&
+          selectedReqForPo.items.every((line) => lineItems.has(line.itemId))
+        );
+      });
+
+      const emergencyWaiverReason =
+        selectedReqForPo.priority === 'EMERGENCY' && !contract
+          ? (poNotes.trim().length >= 20
+              ? poNotes.trim()
+              : 'Emergency clinical procurement required to prevent immediate stockout and patient-care interruption.')
+          : undefined;
+
+      if (!contract && selectedReqForPo.priority !== 'EMERGENCY') {
+        throw new Error(
+          'No active supplier contract covers this requisition. Complete SCM-6 sourcing/contract approval before creating the purchase order.'
+        );
+      }
+
       const poId = `po_${crypto.randomUUID()}`;
       const generatedPo = await createPurchaseOrderEdge({
         poId,
         poNumber: `PO-${new Date().getFullYear()}-${Date.now().toString().slice(-8)}`,
         requisitionId: selectedReqForPo.requisitionId,
         supplierId: chosenSupplier.supplierId,
+        contractId: contract?.contractId,
+        emergencyWaiverReason,
         currency: selectedReqForPo.currency,
         paymentTerms: poPaymentTerms,
         expectedDeliveryDate: new Date(

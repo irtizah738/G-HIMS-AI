@@ -4,6 +4,103 @@ import type { BaseCommand } from '@/lib/backend/types';
 const nonEmpty = z.string().trim().min(1);
 
 const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>> = {
+  RecordStockTransactionCommand: {
+    1: z.object({
+      transactionId: nonEmpty,
+      facilityId: nonEmpty,
+      itemId: nonEmpty,
+      transactionType: z.enum([
+        'RECEIPT',
+        'ISSUE',
+        'TRANSFER_OUT',
+        'TRANSFER_IN',
+        'RETURN',
+        'ADJUSTMENT_IN',
+        'ADJUSTMENT_OUT',
+        'DAMAGE',
+        'EXPIRY',
+        'QUARANTINE',
+        'RELEASE',
+        'RESERVATION',
+        'UNRESERVATION',
+        'CONSUMPTION',
+        'DISPENSE',
+        'RECALL',
+        'WRITE_OFF',
+      ]),
+      quantity: z.number().finite().positive(),
+      uom: nonEmpty,
+      itemCode: z.string().optional(),
+      itemName: z.string().optional(),
+      batchId: z.string().trim().min(1).optional(),
+      batchNumber: z.string().optional(),
+      fromLocationId: z.string().trim().min(1).optional(),
+      fromLocationName: z.string().optional(),
+      toLocationId: z.string().trim().min(1).optional(),
+      toLocationName: z.string().optional(),
+      normalizedQuantity: z.number().finite().positive().optional(),
+      unitCost: z.number().finite().nonnegative().optional(),
+      totalCost: z.number().finite().nonnegative().optional(),
+      currency: z.string().trim().length(3).optional(),
+      referenceType: nonEmpty,
+      referenceId: nonEmpty,
+      patientId: z.string().optional(),
+      encounterId: z.string().optional(),
+      procedureId: z.string().optional(),
+      occurredAt: z.string().optional(),
+      source: z.enum(['ONLINE', 'OFFLINE_SYNC', 'SYSTEM']).optional(),
+      performedBy: z.record(z.string(), z.unknown()).optional(),
+      metadata: z.record(z.string(), z.unknown()).optional(),
+    }).passthrough().superRefine((value, ctx) => {
+      if (
+        (value.transactionType === 'TRANSFER_OUT' ||
+          value.transactionType === 'TRANSFER_IN') &&
+        (!value.fromLocationId ||
+          !value.toLocationId ||
+          value.fromLocationId === value.toLocationId)
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Stock transfers require distinct source and destination locations.',
+          path: ['toLocationId'],
+        });
+      }
+    }),
+  },
+  SubmitPurchaseRequisitionCommand: {
+    1: z.object({
+      requisitionId: nonEmpty,
+      requisitionNumber: nonEmpty,
+      facilityId: nonEmpty,
+      requestingDepartment: nonEmpty,
+      requestingLocationId: nonEmpty,
+      priority: z.enum(['EMERGENCY', 'URGENT', 'NORMAL', 'PLANNED']),
+      items: z.array(z.object({
+        itemId: nonEmpty,
+        itemCode: nonEmpty,
+        itemName: nonEmpty,
+        requestedQuantity: z.number().finite().positive(),
+        uom: nonEmpty,
+        currentStock: z.number().finite().nonnegative(),
+        reorderPoint: z.number().finite().nonnegative(),
+        suggestedQuantity: z.number().finite().nonnegative(),
+        estimatedUnitCost: z.number().finite().nonnegative(),
+        estimatedTotal: z.number().finite().nonnegative(),
+        approvedQuantity: z.number().finite().nonnegative().optional(),
+        justification: z.string().optional(),
+      }).passthrough()).min(1).max(500),
+      justification: nonEmpty,
+      requiredByDate: nonEmpty,
+      estimatedTotalCost: z.number().finite().nonnegative(),
+      currency: z.string().trim().length(3),
+      clinicalCriticality: z.enum(['VITAL', 'ESSENTIAL', 'DESIRABLE']),
+      status: z.string().optional(),
+      requestedBy: z.record(z.string(), z.unknown()).optional(),
+      approvalHistory: z.array(z.unknown()).optional(),
+      createdAt: z.string().optional(),
+      updatedAt: z.string().optional(),
+    }).passthrough(),
+  },
   RecordCashReceiptCommand: {
     1: z.object({
       receiptId: nonEmpty,

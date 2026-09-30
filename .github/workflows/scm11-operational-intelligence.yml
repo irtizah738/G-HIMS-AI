@@ -1,0 +1,61 @@
+name: SCM-11 Operational SCM Intelligence
+
+on:
+  push:
+    branches:
+      - scm/scm11-operational-intelligence
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scm11-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scm11:
+    name: SCM-11 full SCM completion gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-scm11-ci
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-scm11-ci
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-scm11-ci
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-scm11-ci
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      GHIMS_INTEGRATION_HL7_STATE: DISABLED
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_INTEGRATION_DICOMWEB_STATE: DISABLED
+      GHIMS_INTEGRATION_DEVICE_TELEMETRY_STATE: DISABLED
+      GHIMS_INTEGRATION_EDI_X12_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run lint
+      - run: bun run test:scm1
+      - run: bun run test:scm2
+      - run: bun run test:scm3
+      - run: bun run test:scm4
+      - run: bun run test:scm5
+      - run: bun run test:scm6
+      - run: bun run test:scm7
+      - run: bun run test:scm8
+      - run: bun run test:scm9
+      - run: bun run test:scm10
+      - run: bun run test:scm11
+      - run: bun run test:p8
+      - run: bun run test:p6
+      - run: bun run test:security
+      - run: bun run build

@@ -24,6 +24,8 @@ export interface StaffMember {
   fullName: string;
   email: string;
   phone?: string;
+  facilityId?: string;
+  facilityName?: string;
   departmentId: string;
   departmentName: string;
   primaryRole: StaffRole;

@@ -436,6 +436,12 @@ export interface PurchaseOrderRecord {
   requisitionNumber?: string;
   supplierId: string;
   supplierName: string;
+  contractId?: string;
+  contractNumber?: string;
+  emergencyContractWaiver?: {
+    reason: string;
+    approvedBy?: string;
+  };
   items: POLineItem[];
   currency: string;
   subtotal?: number;

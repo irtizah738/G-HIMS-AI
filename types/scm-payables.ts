@@ -61,6 +61,7 @@ export interface SupplierInvoiceRecord {
   totalAmountMinorUnits: number;
   amountPaidMinorUnits: number;
   balanceMinorUnits: number;
+  pendingPaymentMinorUnits: number;
   matchId: string;
   matchStatus: SupplierInvoiceMatchStatus;
   status: SupplierInvoiceStatus;
@@ -215,6 +216,7 @@ export interface RequestSupplierPaymentAuthorizationPayload {
 
 export interface ApproveSupplierPaymentAuthorizationPayload {
   authorizationId: string;
+  invoiceId: string;
   decision: 'APPROVE' | 'REJECT';
   comments?: string;
 }
@@ -225,7 +227,6 @@ export interface RecordSupplierPaymentPayload {
   paymentReference: string;
   paymentMethod: SupplierPaymentRecord['paymentMethod'];
   sourceAccountId: string;
-  sourceAccountName: string;
   settledAt: string;
   fiscalYear: number;
   postingPeriod: number;

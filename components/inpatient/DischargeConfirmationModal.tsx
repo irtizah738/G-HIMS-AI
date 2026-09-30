@@ -171,7 +171,7 @@ export const DischargeConfirmationModal: React.FC<DischargeConfirmationModalProp
             </div>
 
             <p className="mt-1 text-[11px] text-amber-800/80 dark:text-amber-300/80">
-              These checkboxes are review prompts only. They do not authorize discharge. The server verifies clinical evidence, credentials, medication reconciliation, diagnostics, and deterioration risk independently. Financial status is tracked separately from clinical discharge safety.
+              These checkboxes are review prompts only. They do not authorize discharge. The governed workflow first persists the signed discharge summary as an immutable clinical event, then requires the current Patient 360 / CI-7 assessment to be reviewed and acknowledged by a credentialed clinician before the final discharge command can execute. Financial status is tracked separately from clinical discharge safety.
             </p>
 
             <div className="mt-3 space-y-2 text-xs">
@@ -358,7 +358,7 @@ export const DischargeConfirmationModal: React.FC<DischargeConfirmationModalProp
               className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-5 py-2 text-xs font-semibold text-white shadow-xs hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-all"
             >
               <LogOut className="h-4 w-4" />
-              <span>{isSubmitting ? 'Finalizing Discharge...' : 'Submit Governed Discharge'}</span>
+              <span>{isSubmitting ? 'Processing Governed Discharge...' : 'Continue Governed Discharge'}</span>
             </button>
           </div>
         </form>

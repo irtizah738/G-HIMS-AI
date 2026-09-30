@@ -617,6 +617,10 @@ service cloud.firestore {
         allow read: if canReadHcm(tenantId) || canReadFinance(tenantId);
         allow write: if false;
       }
+      match /payrollComplianceSnapshots/{id} {
+        allow read: if canReadHcm(tenantId) || canReadFinance(tenantId) || canReadAudit(tenantId);
+        allow write: if false;
+      }
       match /hcmIntelligenceSnapshots/{id} {
         allow read: if canReadHcm(tenantId) || canReadAudit(tenantId);
         allow write: if false;

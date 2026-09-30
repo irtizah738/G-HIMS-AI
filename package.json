@@ -94,7 +94,9 @@
     "test:finance": "bun test tests/finance-fin1-fin11.test.ts",
     "validate:finance": "bun run typecheck && bun run lint && bun run test:finance && bun run test:scm-completion && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",
     "test:hcm1": "bun test tests/hr-workforce.test.ts tests/hcm1-workforce-trust-boundary.test.ts",
-    "validate:hcm1": "bun run typecheck && bun run lint && bun run test:hcm1 && bun run test:finance && bun run test:scm-completion && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build"
+    "validate:hcm1": "bun run typecheck && bun run lint && bun run test:hcm1 && bun run test:finance && bun run test:scm-completion && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",
+    "test:hcm2": "bun test tests/hcm2-credentialing-privileges.test.ts",
+    "validate:hcm2": "bun run typecheck && bun run lint && bun run test:hcm1 && bun run test:hcm2 && bun run test:finance && bun run test:scm-completion && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

@@ -4,6 +4,8 @@ import path from 'node:path';
 import {
   buildFinanceAnomalies,
   buildTrialBalance,
+  calculateApOutstandingAsOf,
+  calculateArOutstandingAsOf,
   financePeriodId,
   periodKey,
   straightLineMonthlyDepreciationMinorUnits,
@@ -63,6 +65,60 @@ describe('FIN-1 through FIN-11 enterprise finance completion',()=>{
     expect(trial.totalCreditsMinorUnits).toBe(100);
   });
 
+  test('historical AR/AP balances replay immutable evidence through the requested cutoff',()=>{
+    const ar=calculateArOutstandingAsOf({
+      openItems:[{
+        openItemId:'ar1',tenantId:'t',invoiceId:'i1',debtorType:'PATIENT',debtorId:'p',
+        patientId:'p',issueAt:1,dueAt:10,currency:'USD',originalMinorUnits:1000,
+        allocatedMinorUnits:700,writtenOffMinorUnits:0,refundedMinorUnits:0,
+        outstandingMinorUnits:300,status:'PARTIALLY_SETTLED',createdAt:'',updatedAt:''
+      }] as any,
+      receipts:[
+        {openItemId:'ar1',amountMinorUnits:400,receivedAt:20,currency:'USD'},
+        {openItemId:'ar1',amountMinorUnits:300,receivedAt:40,currency:'USD'},
+      ],
+      adjustments:[],
+      asOf:30,
+      currency:'USD',
+    });
+    expect(ar.totalOutstandingMinorUnits).toBe(600);
+
+    const ap=calculateApOutstandingAsOf({
+      invoices:[{
+        invoiceId:'ap1',tenantId:'t',facilityId:'f',invoiceNumber:'x',supplierId:'s',
+        supplierName:'S',poId:'p',poNumber:'P',grnIds:[],currency:'USD',issueDate:'',
+        dueDate:'',lines:[],subtotalMinorUnits:1000,discountMinorUnits:0,taxMinorUnits:0,
+        shippingMinorUnits:0,totalAmountMinorUnits:1000,amountPaidMinorUnits:800,
+        balanceMinorUnits:200,pendingPaymentMinorUnits:0,matchId:'m',matchStatus:'FULLY_MATCHED',
+        status:'PARTIALLY_PAID',capturedBy:'u',capturedAt:'',journalEntryId:'j-rec',
+        createdAt:'',updatedAt:''
+      }] as any,
+      journals:[{
+        journalId:'j-rec',tenantId:'t',fiscalYear:2026,postingPeriod:9,
+        documentDate:10,postingDate:10,documentHeader:'',currency:'USD',
+        totalAmountMinorUnits:1000,lines:[],sourceModule:'AP',status:'POSTED',
+        postedBy:'u',postedAt:10
+      }] as any,
+      payments:[
+        {paymentId:'pay1',tenantId:'t',invoiceId:'ap1',invoiceNumber:'x',authorizationId:'a',
+        supplierId:'s',supplierName:'S',currency:'USD',amountMinorUnits:300,
+        paymentMethod:'BANK_TRANSFER',sourceAccountId:'1010',sourceAccountName:'Bank',
+        paymentReference:'r1',settledAt:'1970-01-01T00:00:00.020Z',recordedBy:'u',
+        journalEntryId:'jp1',createdAt:''},
+        {paymentId:'pay2',tenantId:'t',invoiceId:'ap1',invoiceNumber:'x',authorizationId:'b',
+        supplierId:'s',supplierName:'S',currency:'USD',amountMinorUnits:500,
+        paymentMethod:'BANK_TRANSFER',sourceAccountId:'1010',sourceAccountName:'Bank',
+        paymentReference:'r2',settledAt:'1970-01-01T00:00:00.040Z',recordedBy:'u',
+        journalEntryId:'jp2',createdAt:''},
+      ] as any,
+      credits:[],
+      taxLedger:[],
+      asOf:30,
+      currency:'USD',
+    });
+    expect(ap.totalOutstandingMinorUnits).toBe(700);
+  });
+
   test('FIN-2/5 AR and revenue are governed, period-aware and journal-backed',async()=>{
     const s=await source('lib/backend/services/finance-ar-revenue-domain-service.ts');
     expect(s).toContain('FinanceArRevenueDomainService');
@@ -118,6 +174,18 @@ describe('FIN-1 through FIN-11 enterprise finance completion',()=>{
     expect(s).toContain('FINANCE_PERIOD_NOT_POSTABLE');
   });
 
+  test('generic period administration cannot bypass governed close/lock',async()=>{
+    const gl=await source('lib/backend/services/finance-gl-domain-service.ts');
+    const schema=await source('lib/backend/commands/command-schema-registry.ts');
+    const start=schema.indexOf('ChangeFinancePeriodStatusCommand');
+    const block=schema.slice(start,start+500);
+    expect(block).toContain("z.enum(['SOFT_CLOSE','OPEN'])");
+    expect(block).not.toContain("'CLOSED'");
+    expect(block).not.toContain("'LOCKED'");
+    expect(gl).toContain("OPEN: ['SOFT_CLOSE']");
+    expect(gl).toContain("SOFT_CLOSE: ['OPEN']");
+  });
+
   test('FIN-9 close requires reconciliations and locks period after statements',async()=>{
     const s=await source('lib/backend/services/finance-close-domain-service.ts');
     expect(s).toContain('trialBalanceBalanced');
@@ -125,6 +193,10 @@ describe('FIN-1 through FIN-11 enterprise finance completion',()=>{
     expect(s).toContain('apReconciled');
     expect(s).toContain('arReconciled');
     expect(s).toContain('cashReconciled');
+    expect(s).toContain('calculateArOutstandingAsOf');
+    expect(s).toContain('calculateApOutstandingAsOf');
+    expect(s).toContain('missingInventoryFacilities');
+    expect(s).toContain('unreconciledBankAccountIds');
     expect(s).toContain('depreciationPosted');
     expect(s).toContain('FINANCIAL_STATEMENT_SNAPSHOT');
     expect(s).toContain("status:'LOCKED'");

@@ -21,6 +21,8 @@ import {
   RosterSwapRecord,
   StaffingGapAnalysis,
   AttendanceRecord,
+  AttendanceOpenSlot,
+  AttendanceCorrectionRecord,
   LeaveRequest,
   EmployeeLeaveBalance,
   CompensationStructure,
@@ -100,6 +102,13 @@ function rosterRelevantMonthKeys(startMs:number,endMs:number,minRestMs:number):s
     rosterMonthKey(endMs),
     rosterMonthKey(endMs+minRestMs),
   ])];
+}
+
+function attendanceOpenSlotId(employeeId:string):string{
+  return 'att_open_'+createHash('sha256')
+    .update(employeeId.trim().toLowerCase())
+    .digest('hex')
+    .slice(0,40);
 }
 
 function workforceReject<T>(
@@ -2056,227 +2065,339 @@ export class HrWorkforceDomainService {
   // ============================================================================
 
   public static async recordClockIn(
-    context: CommandContext,
-    commandId: string,
-    idempotencyKey: string,
-    payload: {
-      employeeId: string;
-      employeeName: string;
-      facilityId: string;
-      departmentId: string;
-      source: AttendanceRecord['source'];
-      deviceIdentifier?: string;
+    context:CommandContext,
+    commandId:string,
+    idempotencyKey:string,
+    payload:{
+      employeeId:string;
+      source:AttendanceRecord['source'];
+      deviceIdentifier?:string;
+      scheduledShiftId?:string;
     }
-  ): Promise<CommandResult<AttendanceRecord>> {
-    const attendanceId = `att_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const now = new Date().toISOString();
-    const today = now.split('T')[0];
+  ):Promise<CommandResult<AttendanceRecord>>{
+    const employee=await this.loadEmployee(context.tenantId,payload.employeeId);
+    if(!employee){
+      return workforceReject(commandId,idempotencyKey,'EMPLOYEE_NOT_FOUND','Attendance employee does not exist.');
+    }
+    try{
+      assertWorkforceFacilityScope(context,employee.facilityIds);
+      if(!['ACTIVE','ONBOARDING','ON_LEAVE'].includes(employee.employmentStatus)){
+        throw new AtomicMutationRejectedError(
+          'EMPLOYEE_NOT_ATTENDANCE_ELIGIBLE',
+          `Employee status ${employee.employmentStatus} cannot clock in.`
+        );
+      }
+      const scheduledShift=payload.scheduledShiftId
+        ? await this.loadShift(context.tenantId,payload.scheduledShiftId)
+        : null;
+      if(payload.scheduledShiftId&&!scheduledShift){
+        throw new AtomicMutationRejectedError('ROSTER_SHIFT_NOT_FOUND','Scheduled shift does not exist.');
+      }
+      if(
+        scheduledShift &&
+        (
+          scheduledShift.employeeId!==employee.employeeId ||
+          scheduledShift.status==='CANCELLED'
+        )
+      ){
+        throw new AtomicMutationRejectedError(
+          'ATTENDANCE_SHIFT_MISMATCH',
+          'Scheduled shift does not belong to this active employee assignment.'
+        );
+      }
 
-    const attendance: AttendanceRecord = {
-      attendanceId,
-      tenantId: context.tenantId,
-      employeeId: payload.employeeId,
-      employeeName: payload.employeeName,
-      facilityId: payload.facilityId,
-      departmentId: payload.departmentId,
-      date: today,
-      clockInTime: now,
-      totalHoursWorked: 0,
-      overtimeHours: 0,
-      overtimeApproved: false,
-      source: payload.source,
-      deviceIdentifier: payload.deviceIdentifier,
-      status: 'ON_TIME',
-      isCorrected: false,
-      createdAt: now,
-      updatedAt: now,
-    };
+      const attendanceId=`att_${randomUUID()}`;
+      const slotId=attendanceOpenSlotId(employee.employeeId);
+      const now=new Date().toISOString();
+      const nowMs=Date.parse(now);
+      const status:AttendanceRecord['status']=
+        scheduledShift && nowMs-Date.parse(scheduledShift.startTime)>15*60*1000
+          ? 'LATE_ARRIVAL'
+          : 'ON_TIME';
 
-    this.attendanceRecords.set(attendanceId, attendance);
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'ATTENDANCE_RECORD',aggregateId:attendanceId,
+        eventType:'EMPLOYEE_CLOCKED_IN',auditAction:'EMPLOYEE_CLOCKED_IN',
+        auditResourceType:'ATTENDANCE_RECORD',auditResourceId:attendanceId,
+        outboxTopic:'g-hims-attendance-events',idempotencyKey,commandId,
+        correlationId:context.correlationId,
+        readTargets:[
+          {key:'employee',entityType:'EMPLOYEE_MASTER',entityId:employee.employeeId,required:true},
+          {key:'slot',entityType:'ATTENDANCE_OPEN_SLOT',entityId:slotId,required:false},
+          ...(scheduledShift?[{key:'shift',entityType:'ROSTER_SHIFT',entityId:scheduledShift.rosterId,required:true}]:[]),
+        ],
+        prepare:(current)=>{
+          const currentEmployee=current.employee as unknown as EmployeeMaster;
+          if(!['ACTIVE','ONBOARDING','ON_LEAVE'].includes(currentEmployee.employmentStatus)){
+            throw new AtomicMutationRejectedError(
+              'EMPLOYEE_NOT_ATTENDANCE_ELIGIBLE',
+              'Employee status changed before clock-in commit.'
+            );
+          }
+          const slot=current.slot as unknown as AttendanceOpenSlot|null;
+          if(slot?.status==='OPEN'){
+            throw new AtomicMutationRejectedError(
+              'ATTENDANCE_ALREADY_OPEN',
+              'Employee already has an open attendance record.'
+            );
+          }
+          const shift=current.shift as unknown as RosterShiftEntry|null;
+          if(
+            shift &&
+            (shift.employeeId!==currentEmployee.employeeId||shift.status==='CANCELLED')
+          ){
+            throw new AtomicMutationRejectedError(
+              'ATTENDANCE_SHIFT_MISMATCH',
+              'Scheduled shift changed before clock-in commit.'
+            );
+          }
 
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'ATTENDANCE_RECORD',
-      entityId: attendanceId,
-      eventType: 'EMPLOYEE_CLOCKED_IN',
-      domainState: attendance,
-      eventPayload: {
-        attendanceId,
-        employeeId: payload.employeeId,
-        clockInTime: now,
-        source: payload.source,
-      },
-      auditReason: `Employee ${payload.employeeName} clocked in via ${payload.source}`,
-      outboxTopic: 'g-hims-attendance-events',
-    });
-
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: attendanceId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: attendance,
-    };
+          const attendance:AttendanceRecord={
+            attendanceId,tenantId:context.tenantId,
+            employeeId:currentEmployee.employeeId,
+            employeeName:`${currentEmployee.personalInfo.legalFirstName} ${currentEmployee.personalInfo.legalLastName}`,
+            facilityId:shift?.facilityId||currentEmployee.primaryFacilityId,
+            departmentId:shift?.departmentId||currentEmployee.primaryDepartmentId,
+            date:now.slice(0,10),
+            ...(shift?{
+              scheduledShiftId:shift.rosterId,
+              scheduledShiftName:shift.shiftName,
+              scheduledStartTime:shift.startTime,
+              scheduledEndTime:shift.endTime,
+            }:{}),
+            clockInTime:now,totalHoursWorked:0,overtimeHours:0,
+            overtimeApproved:false,source:payload.source,
+            deviceIdentifier:payload.deviceIdentifier,status,
+            isCorrected:false,createdAt:now,updatedAt:now,
+          };
+          const openSlot:AttendanceOpenSlot={
+            slotId,tenantId:context.tenantId,employeeId:currentEmployee.employeeId,
+            attendanceId,status:'OPEN',openedAt:now,
+          };
+          return {
+            domainState:attendance,
+            additionalStateWrites:[
+              {entityType:'ATTENDANCE_OPEN_SLOT',entityId:slotId,domainState:openSlot},
+            ],
+            eventPayload:{
+              attendanceId,employeeId:attendance.employeeId,
+              clockInTime:attendance.clockInTime,source:attendance.source,
+              scheduledShiftId:attendance.scheduledShiftId,
+            },
+            auditReason:`Employee ${attendance.employeeName} clocked in via ${attendance.source}.`,
+            resultData:attendance,
+          };
+        },
+      });
+      const attendance=tx.resultData as AttendanceRecord;
+      this.attendanceRecords.set(attendance.attendanceId,attendance);
+      return {success:true,commandId,idempotencyKey,entityId:attendance.attendanceId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:attendance};
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
+    }
   }
 
   public static async recordClockOut(
-    context: CommandContext,
-    commandId: string,
-    idempotencyKey: string,
-    payload: {
-      attendanceId: string;
+    context:CommandContext,
+    commandId:string,
+    idempotencyKey:string,
+    payload:{attendanceId:string}
+  ):Promise<CommandResult<AttendanceRecord>>{
+    const preflight=await this.loadAttendance(context.tenantId,payload.attendanceId);
+    if(!preflight){
+      return workforceReject(commandId,idempotencyKey,'RECORD_NOT_FOUND','Attendance record not found.');
     }
-  ): Promise<CommandResult<AttendanceRecord>> {
-    const attendance = await this.loadAttendance(context.tenantId, payload.attendanceId);
-    if (!attendance) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: 'RECORD_NOT_FOUND', message: 'Attendance record not found.' },
-      };
+    const slotId=attendanceOpenSlotId(preflight.employeeId);
+    try{
+      assertWorkforceFacilityScope(context,[preflight.facilityId]);
+      const now=new Date().toISOString();
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'ATTENDANCE_RECORD',aggregateId:payload.attendanceId,
+        eventType:'EMPLOYEE_CLOCKED_OUT',auditAction:'EMPLOYEE_CLOCKED_OUT',
+        auditResourceType:'ATTENDANCE_RECORD',auditResourceId:payload.attendanceId,
+        outboxTopic:'g-hims-attendance-events',idempotencyKey,commandId,
+        correlationId:context.correlationId,
+        readTargets:[
+          {key:'attendance',entityType:'ATTENDANCE_RECORD',entityId:payload.attendanceId,required:true},
+          {key:'slot',entityType:'ATTENDANCE_OPEN_SLOT',entityId:slotId,required:true},
+        ],
+        prepare:(current)=>{
+          const attendance=current.attendance as unknown as AttendanceRecord;
+          const slot=current.slot as unknown as AttendanceOpenSlot;
+          if(attendance.clockOutTime){
+            throw new AtomicMutationRejectedError('ATTENDANCE_ALREADY_CLOSED','Attendance record is already clocked out.');
+          }
+          if(slot.status!=='OPEN'||slot.attendanceId!==attendance.attendanceId){
+            throw new AtomicMutationRejectedError('ATTENDANCE_OPEN_SLOT_MISMATCH','Attendance open-slot state is inconsistent.');
+          }
+          const inMs=Date.parse(attendance.clockInTime);
+          const outMs=Date.parse(now);
+          if(!Number.isFinite(inMs)||outMs<=inMs){
+            throw new AtomicMutationRejectedError('INVALID_ATTENDANCE_INTERVAL','Clock-out must occur after clock-in.');
+          }
+          const hoursWorked=(outMs-inMs)/3_600_000;
+          const overtimeHours=Math.max(0,hoursWorked-8);
+          const scheduledEnd=attendance.scheduledEndTime?Date.parse(attendance.scheduledEndTime):NaN;
+          const status:AttendanceRecord['status']=
+            overtimeHours>0?'OVERTIME':
+            Number.isFinite(scheduledEnd)&&outMs<scheduledEnd-15*60*1000
+              ? 'EARLY_DEPARTURE'
+              : attendance.status;
+          const next:AttendanceRecord={
+            ...attendance,clockOutTime:now,
+            totalHoursWorked:Number(hoursWorked.toFixed(2)),
+            overtimeHours:Number(overtimeHours.toFixed(2)),
+            status,updatedAt:now,
+          };
+          const closedSlot:AttendanceOpenSlot={
+            ...slot,status:'CLOSED',closedAt:now,
+          };
+          return {
+            domainState:next,
+            additionalStateWrites:[
+              {entityType:'ATTENDANCE_OPEN_SLOT',entityId:slotId,domainState:closedSlot},
+            ],
+            eventPayload:{
+              attendanceId:next.attendanceId,employeeId:next.employeeId,
+              clockOutTime:now,totalHoursWorked:next.totalHoursWorked,
+              overtimeHours:next.overtimeHours,status:next.status,
+            },
+            auditReason:`Employee ${next.employeeName} clocked out after ${next.totalHoursWorked} hours.`,
+            resultData:next,
+          };
+        },
+      });
+      const next=tx.resultData as AttendanceRecord;
+      this.attendanceRecords.set(next.attendanceId,next);
+      return {success:true,commandId,idempotencyKey,entityId:next.attendanceId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:next};
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
     }
-
-    const now = new Date().toISOString();
-    const clockInMs = new Date(attendance.clockInTime).getTime();
-    const clockOutMs = new Date(now).getTime();
-    const hoursWorked = Math.max(0, (clockOutMs - clockInMs) / (1000 * 60 * 60));
-    const overtimeHours = Math.max(0, hoursWorked - 8.0);
-
-    attendance.clockOutTime = now;
-    attendance.totalHoursWorked = Number(hoursWorked.toFixed(2));
-    attendance.overtimeHours = Number(overtimeHours.toFixed(2));
-    attendance.updatedAt = now;
-
-    this.attendanceRecords.set(payload.attendanceId, attendance);
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'ATTENDANCE_RECORD',
-      entityId: payload.attendanceId,
-      eventType: 'EMPLOYEE_CLOCKED_OUT',
-      domainState: attendance,
-      eventPayload: {
-        attendanceId: payload.attendanceId,
-        employeeId: attendance.employeeId,
-        clockOutTime: now,
-        totalHoursWorked: attendance.totalHoursWorked,
-        overtimeHours: attendance.overtimeHours,
-      },
-      auditReason: `Employee ${attendance.employeeName} clocked out. Total hours: ${attendance.totalHoursWorked}`,
-      outboxTopic: 'g-hims-attendance-events',
-    });
-
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: payload.attendanceId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: attendance,
-    };
   }
 
   public static async correctAttendanceTime(
-    context: CommandContext,
-    commandId: string,
-    idempotencyKey: string,
-    payload: {
-      attendanceId: string;
-      newClockInTime: string;
-      newClockOutTime?: string;
-      reason: string;
+    context:CommandContext,
+    commandId:string,
+    idempotencyKey:string,
+    payload:{
+      attendanceId:string;
+      newClockInTime:string;
+      newClockOutTime?:string;
+      reason:string;
     }
-  ): Promise<CommandResult<AttendanceRecord>> {
-    const auth = AuthorizationPipeline.evaluate(context, {
-      requiredRoles: ['HR_ADMIN', 'SUPERVISOR', 'DEPARTMENT_HEAD', 'SYSTEM_ADMIN'],
+  ):Promise<CommandResult<AttendanceRecord>>{
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['HR_ADMIN','SUPERVISOR','DEPARTMENT_HEAD','SYSTEM_ADMIN'],
     });
-
-    if (!auth.authorized) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: 'UNAUTHORIZED', message: 'Supervisor / HR authorization required for time corrections.' },
-      };
+    if(!auth.authorized){
+      return workforceReject(commandId,idempotencyKey,auth.code||'UNAUTHORIZED',
+        auth.reason||'Supervisor / HR authorization required for time corrections.');
     }
-
-    const record = await this.loadAttendance(context.tenantId, payload.attendanceId);
-    if (!record) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: 'RECORD_NOT_FOUND', message: 'Attendance record not found.' },
-      };
+    const preflight=await this.loadAttendance(context.tenantId,payload.attendanceId);
+    if(!preflight){
+      return workforceReject(commandId,idempotencyKey,'RECORD_NOT_FOUND','Attendance record not found.');
     }
-
-    const previousClockIn = record.clockInTime;
-    const correctionId = `cor_${Date.now()}`;
-    const now = new Date().toISOString();
-
-    if (!record.originalClockInTime) {
-      record.originalClockInTime = record.clockInTime;
+    try{
+      assertWorkforceFacilityScope(context,[preflight.facilityId]);
+      const inMs=Date.parse(payload.newClockInTime);
+      const outMs=payload.newClockOutTime?Date.parse(payload.newClockOutTime):NaN;
+      if(!Number.isFinite(inMs)||(payload.newClockOutTime&&(!Number.isFinite(outMs)||outMs<=inMs))){
+        throw new AtomicMutationRejectedError(
+          'INVALID_ATTENDANCE_CORRECTION_INTERVAL',
+          'Corrected attendance timestamps are invalid.'
+        );
+      }
+      const correctionId=`acor_${randomUUID()}`;
+      const now=new Date().toISOString();
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'ATTENDANCE_CORRECTION',aggregateId:correctionId,
+        eventType:'ATTENDANCE_CORRECTED',auditAction:'ATTENDANCE_CORRECTED',
+        auditResourceType:'ATTENDANCE_CORRECTION',auditResourceId:correctionId,
+        outboxTopic:'g-hims-attendance-events',idempotencyKey,commandId,
+        correlationId:context.correlationId,
+        readTargets:[
+          {key:'attendance',entityType:'ATTENDANCE_RECORD',entityId:payload.attendanceId,required:true},
+        ],
+        prepare:(current)=>{
+          const record=current.attendance as unknown as AttendanceRecord;
+          const correction:AttendanceCorrectionRecord={
+            correctionId,tenantId:context.tenantId,
+            attendanceId:record.attendanceId,employeeId:record.employeeId,
+            previousClockInTime:record.clockInTime,
+            previousClockOutTime:record.clockOutTime,
+            newClockInTime:payload.newClockInTime,
+            newClockOutTime:payload.newClockOutTime,
+            reason:payload.reason,correctedByActorId:context.actorId,correctedAt:now,
+          };
+          const effectiveOut=payload.newClockOutTime||record.clockOutTime;
+          let totalHoursWorked=record.totalHoursWorked;
+          let overtimeHours=record.overtimeHours;
+          if(effectiveOut){
+            const effectiveOutMs=Date.parse(effectiveOut);
+            if(effectiveOutMs<=inMs){
+              throw new AtomicMutationRejectedError(
+                'INVALID_ATTENDANCE_CORRECTION_INTERVAL',
+                'Corrected clock-out must be after corrected clock-in.'
+              );
+            }
+            totalHoursWorked=Number(((effectiveOutMs-inMs)/3_600_000).toFixed(2));
+            overtimeHours=Number(Math.max(0,totalHoursWorked-8).toFixed(2));
+          }
+          const history=[...(record.correctionHistory||[]),{
+            correctionId,correctedByActorId:context.actorId,
+            correctedByName:'Supervisor / HR Admin',correctedAt:now,
+            previousClockIn:record.clockInTime,newClockIn:payload.newClockInTime,
+            reason:payload.reason,
+          }];
+          const next:AttendanceRecord={
+            ...record,
+            originalClockInTime:record.originalClockInTime||record.clockInTime,
+            originalClockOutTime:record.originalClockOutTime||record.clockOutTime,
+            clockInTime:payload.newClockInTime,
+            ...(payload.newClockOutTime?{clockOutTime:payload.newClockOutTime}:{}),
+            totalHoursWorked,overtimeHours,isCorrected:true,status:'CORRECTED',
+            correctionHistory:history,updatedAt:now,
+          };
+          return {
+            domainState:correction,
+            additionalStateWrites:[
+              {entityType:'ATTENDANCE_RECORD',entityId:record.attendanceId,domainState:next},
+            ],
+            eventPayload:{
+              correctionId,attendanceId:record.attendanceId,employeeId:record.employeeId,
+              previousClockIn:record.clockInTime,newClockIn:payload.newClockInTime,
+              previousClockOut:record.clockOutTime,newClockOut:payload.newClockOutTime,
+              reason:payload.reason,
+            },
+            auditReason:`Attendance correction for ${record.attendanceId}: ${payload.reason}.`,
+            resultData:next,
+          };
+        },
+      });
+      const next=tx.resultData as AttendanceRecord;
+      this.attendanceRecords.set(next.attendanceId,next);
+      return {success:true,commandId,idempotencyKey,entityId:next.attendanceId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:next};
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
     }
-    if (!record.originalClockOutTime && record.clockOutTime) {
-      record.originalClockOutTime = record.clockOutTime;
-    }
-
-    record.clockInTime = payload.newClockInTime;
-    if (payload.newClockOutTime) {
-      record.clockOutTime = payload.newClockOutTime;
-      const inMs = new Date(payload.newClockInTime).getTime();
-      const outMs = new Date(payload.newClockOutTime).getTime();
-      record.totalHoursWorked = Number(Math.max(0, (outMs - inMs) / (1000 * 60 * 60)).toFixed(2));
-      record.overtimeHours = Number(Math.max(0, record.totalHoursWorked - 8).toFixed(2));
-    }
-
-    record.isCorrected = true;
-    record.status = 'CORRECTED';
-    record.updatedAt = now;
-
-    if (!record.correctionHistory) record.correctionHistory = [];
-    record.correctionHistory.push({
-      correctionId,
-      correctedByActorId: context.actorId,
-      correctedByName: 'Supervisor / HR Admin',
-      correctedAt: now,
-      previousClockIn,
-      newClockIn: payload.newClockInTime,
-      reason: payload.reason,
-    });
-
-    this.attendanceRecords.set(payload.attendanceId, record);
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'ATTENDANCE_RECORD',
-      entityId: payload.attendanceId,
-      eventType: 'ATTENDANCE_CORRECTED',
-      domainState: record,
-      eventPayload: {
-        attendanceId: payload.attendanceId,
-        previousClockIn,
-        newClockIn: payload.newClockInTime,
-        reason: payload.reason,
-        correctedBy: context.actorId,
-      },
-      auditReason: `Attendance correction: ${payload.reason}`,
-      outboxTopic: 'g-hims-attendance-events',
-    });
-
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: payload.attendanceId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: record,
-    };
   }
 
   // ============================================================================

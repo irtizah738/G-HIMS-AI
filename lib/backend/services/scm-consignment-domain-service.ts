@@ -150,6 +150,14 @@ export class ScmConsignmentDomainService {
         readTargets:[
           {key:'agreement',entityType:'CONSIGNMENT_AGREEMENT',entityId:payload.agreementId,required:true},
           {key:'item',entityType:'ITEM_MASTER',entityId:payload.itemId,required:true},
+          ...(payload.serialNumbers||[]).map((value,index)=>({
+            key:`serial:${index}`,entityType:'CONSIGNMENT_IDENTITY',
+            entityId:`serial_${value.trim()}`,required:false,
+          })),
+          ...(payload.udis||[]).map((value,index)=>({
+            key:`udi:${index}`,entityType:'CONSIGNMENT_IDENTITY',
+            entityId:`udi_${value.trim()}`,required:false,
+          })),
         ],
         prepare:(current)=>{
           const agreement=current.agreement as unknown as ConsignmentAgreement;
@@ -172,10 +180,45 @@ export class ScmConsignmentDomainService {
           }
           try{validateHighValueIdentity({quantity:payload.quantity,requiresSerial:line.requiresSerial,requiresUdi:line.requiresUdi,serialNumbers:payload.serialNumbers,udis:payload.udis});}
           catch(error){throw new AtomicMutationRejectedError(String((error as Error).message),'High-value identity validation failed.');}
+          const serials=(payload.serialNumbers||[]).map(value=>value.trim()).filter(Boolean);
+          const udis=(payload.udis||[]).map(value=>value.trim()).filter(Boolean);
+          serials.forEach((value,index)=>{
+            if(current[`serial:${index}`]){
+              throw new AtomicMutationRejectedError(
+                'CONSIGNMENT_SERIAL_ALREADY_REGISTERED',
+                `Serial ${value} is already registered to consignment inventory.`
+              );
+            }
+          });
+          udis.forEach((value,index)=>{
+            if(current[`udi:${index}`]){
+              throw new AtomicMutationRejectedError(
+                'CONSIGNMENT_UDI_ALREADY_REGISTERED',
+                `UDI ${value} is already registered to consignment inventory.`
+              );
+            }
+          });
           const now=new Date().toISOString();
-          const lot:ConsignmentLotRecord={...payload,tenantId:context.tenantId,quantityAvailable:payload.quantity,quantityConsumed:0,status:'AVAILABLE',receivedBy:context.actorId,createdAt:now};
-          return {domainState:lot,eventPayload:{lotId:lot.lotId,itemId:lot.itemId,quantity:lot.quantity,supplierId:lot.supplierId},
-            auditReason:`Received vendor-owned consignment lot ${lot.lotId}; no inventory asset was recognized.`,resultData:lot};
+          const lot:ConsignmentLotRecord={
+            ...payload,tenantId:context.tenantId,quantityAvailable:payload.quantity,
+            quantityConsumed:0,status:'AVAILABLE',serialNumbersConsumed:[],udisConsumed:[],
+            receivedBy:context.actorId,createdAt:now
+          };
+          const identityWrites=[
+            ...serials.map(value=>({
+              entityType:'CONSIGNMENT_IDENTITY',entityId:`serial_${value}`,
+              domainState:{identityId:`serial_${value}`,tenantId:context.tenantId,type:'SERIAL',value,lotId:payload.lotId,itemId:payload.itemId,status:'AVAILABLE',createdAt:now},
+            })),
+            ...udis.map(value=>({
+              entityType:'CONSIGNMENT_IDENTITY',entityId:`udi_${value}`,
+              domainState:{identityId:`udi_${value}`,tenantId:context.tenantId,type:'UDI',value,lotId:payload.lotId,itemId:payload.itemId,status:'AVAILABLE',createdAt:now},
+            })),
+          ];
+          return {
+            domainState:lot,additionalStateWrites:identityWrites,
+            eventPayload:{lotId:lot.lotId,itemId:lot.itemId,quantity:lot.quantity,supplierId:lot.supplierId,serialCount:serials.length,udiCount:udis.length},
+            auditReason:`Received vendor-owned consignment lot ${lot.lotId}; no inventory asset was recognized.`,resultData:lot
+          };
         },
       });
       return {success:true,commandId,idempotencyKey,entityId:payload.lotId,eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:tx.resultData};
@@ -200,6 +243,12 @@ export class ScmConsignmentDomainService {
           {key:'lot',entityType:'CONSIGNMENT_LOT',entityId:payload.lotId,required:true},
           {key:'agreement',entityType:'CONSIGNMENT_AGREEMENT',entityId:payload.agreementId,required:true},
           {key:'item',entityType:'ITEM_MASTER',entityId:payload.itemId,required:true},
+          ...(payload.serialNumbers||[]).map((value,index)=>({
+            key:`serial:${index}`,entityType:'CONSIGNMENT_IDENTITY',entityId:`serial_${value.trim()}`,required:true,
+          })),
+          ...(payload.udis||[]).map((value,index)=>({
+            key:`udi:${index}`,entityType:'CONSIGNMENT_IDENTITY',entityId:`udi_${value.trim()}`,required:true,
+          })),
           ...(payload.patientId?[{key:'patient',entityType:'PATIENT_MPI',entityId:payload.patientId,required:true}]:[]),
           ...(payload.encounterId?[{key:'encounter',entityType:'ENCOUNTER',entityId:payload.encounterId,required:true}]:[]),
         ],
@@ -220,6 +269,20 @@ export class ScmConsignmentDomainService {
           }
           try{validateHighValueIdentity({quantity:payload.quantity,requiresSerial:line.requiresSerial,requiresUdi:line.requiresUdi,serialNumbers:payload.serialNumbers,udis:payload.udis});}
           catch(error){throw new AtomicMutationRejectedError(String((error as Error).message),'High-value usage identity validation failed.');}
+          const serials=(payload.serialNumbers||[]).map(value=>value.trim()).filter(Boolean);
+          const udis=(payload.udis||[]).map(value=>value.trim()).filter(Boolean);
+          serials.forEach((value,index)=>{
+            const identity=current[`serial:${index}`] as any;
+            if(identity.lotId!==lot.lotId||identity.status!=='AVAILABLE'){
+              throw new AtomicMutationRejectedError('CONSIGNMENT_SERIAL_NOT_AVAILABLE',`Serial ${value} is not available on this lot.`);
+            }
+          });
+          udis.forEach((value,index)=>{
+            const identity=current[`udi:${index}`] as any;
+            if(identity.lotId!==lot.lotId||identity.status!=='AVAILABLE'){
+              throw new AtomicMutationRejectedError('CONSIGNMENT_UDI_NOT_AVAILABLE',`UDI ${value} is not available on this lot.`);
+            }
+          });
           if(payload.encounterId&&String((current.encounter as any)?.patientId||'')!==payload.patientId){
             throw new AtomicMutationRejectedError('CONSIGNMENT_ENCOUNTER_PATIENT_MISMATCH','Encounter does not belong to supplied patient.');
           }
@@ -227,11 +290,28 @@ export class ScmConsignmentDomainService {
           const journalId=`je_consignment_${payload.usageId}`;
           const now=new Date().toISOString();
           const usage:ConsignmentUsageRecord={...payload,tenantId:context.tenantId,supplierId:lot.supplierId,currency:lot.currency.toUpperCase(),unitCostMinorUnits:lot.unitCostMinorUnits,totalCostMinorUnits,recordedBy:context.actorId,recordedAt:now,accrualJournalId:journalId,status:'ACCRUED_AWAITING_SUPPLIER_INVOICE'};
-          const nextLot:ConsignmentLotRecord={...lot,quantityAvailable:lot.quantityAvailable-payload.quantity,quantityConsumed:lot.quantityConsumed+payload.quantity,status:lot.quantityAvailable-payload.quantity<=0?'DEPLETED':'AVAILABLE'};
+          const nextLot:ConsignmentLotRecord={
+            ...lot,quantityAvailable:lot.quantityAvailable-payload.quantity,
+            quantityConsumed:lot.quantityConsumed+payload.quantity,
+            status:lot.quantityAvailable-payload.quantity<=0?'DEPLETED':'AVAILABLE',
+            serialNumbersConsumed:[...(lot.serialNumbersConsumed||[]),...serials],
+            udisConsumed:[...(lot.udisConsumed||[]),...udis],
+          };
+          const identityWrites=[
+            ...serials.map((value,index)=>{
+              const identity=current[`serial:${index}`] as any;
+              return {entityType:'CONSIGNMENT_IDENTITY',entityId:`serial_${value}`,domainState:{...identity,status:'CONSUMED',usageId:payload.usageId,consumedAt:payload.usedAt}};
+            }),
+            ...udis.map((value,index)=>{
+              const identity=current[`udi:${index}`] as any;
+              return {entityType:'CONSIGNMENT_IDENTITY',entityId:`udi_${value}`,domainState:{...identity,status:'CONSUMED',usageId:payload.usageId,consumedAt:payload.usedAt}};
+            }),
+          ];
           return {
             domainState:usage,
             additionalStateWrites:[
               {entityType:'CONSIGNMENT_LOT',entityId:lot.lotId,domainState:nextLot},
+              ...identityWrites,
               {entityType:'JOURNAL_ENTRY',entityId:journalId,domainState:buildAccrualJournal({journalId,tenantId:context.tenantId,usage,postedBy:context.actorId})},
             ],
             eventPayload:{usageId:usage.usageId,lotId:usage.lotId,itemId:usage.itemId,quantity:usage.quantity,totalCostMinorUnits,journalId},

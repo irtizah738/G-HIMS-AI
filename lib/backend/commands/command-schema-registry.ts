@@ -288,7 +288,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       locationId: nonEmpty,
       locationName: z.string().trim().max(250).optional(),
       countedAt: nonEmpty,
-      isBlindCount: z.boolean(),
+      isBlindCount: z.literal(true),
       lines: z.array(z.object({
         balanceId: nonEmpty,
         countedQuantity: z.number().finite().nonnegative(),

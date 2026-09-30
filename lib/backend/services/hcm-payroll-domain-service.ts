@@ -17,7 +17,11 @@ import type {
   PayrollPayslipRecord,
   PayrollPeriodRecord,
 } from '@/types/hcm-advanced';
-import type { PayrollStatutoryLiabilityRecord } from '@/types/hcm-enterprise';
+import type {
+  PayrollComplianceSnapshotRecord,
+  PayrollStatutoryLiabilityRecord,
+} from '@/types/hcm-enterprise';
+import { stableHcmFingerprint } from '@/lib/hcm/hcm-intelligence-engine';
 import type {
   FinanceAccountRecord,
   FinancePeriodRecord,
@@ -1036,6 +1040,59 @@ export class HcmPayrollDomainService {
       if(error instanceof AtomicMutationRejectedError)return reject(commandId,idempotencyKey,error.code,error.message,error.details);
       throw error;
     }
+  }
+
+
+  public static async generatePayrollComplianceSnapshot(
+    context:CommandContext,commandId:string,idempotencyKey:string,
+    payload:{snapshotId:string;asOf:string;currency:string}
+  ):Promise<CommandResult<PayrollComplianceSnapshotRecord>>{
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['HR_ADMIN','PAYROLL_MANAGER','FINANCE_MANAGER','SYSTEM_ADMIN'],
+    });
+    if(!auth.authorized)return reject(commandId,idempotencyKey,auth.code||'UNAUTHORIZED',auth.reason||'Payroll compliance reporting authority required.');
+    const asOfMs=Date.parse(payload.asOf);
+    const currency=payload.currency.trim().toUpperCase();
+    if(!Number.isFinite(asOfMs)||currency.length!==3){
+      return reject(commandId,idempotencyKey,'INVALID_PAYROLL_COMPLIANCE_SCOPE','Payroll compliance as-of/currency is invalid.');
+    }
+    const liabilities=(await DomainStateRepository.list<PayrollStatutoryLiabilityRecord>(
+      context.tenantId,'payrollStatutoryLiabilities',100000
+    )).filter(row=>
+      row.currency===currency &&
+      Date.parse(row.createdAt)<=asOfMs
+    );
+    const accrued=liabilities.filter(row=>row.status==='ACCRUED');
+    const remitted=liabilities.filter(row=>
+      row.status==='REMITTED' &&
+      !!row.remittedAt &&
+      Date.parse(row.remittedAt)<=asOfMs
+    );
+    const snapshot:PayrollComplianceSnapshotRecord={
+      snapshotId:payload.snapshotId,tenantId:context.tenantId,asOf:payload.asOf,currency,
+      accruedLiabilityMinorUnits:accrued.reduce((sum,row)=>sum+row.amountMinorUnits,0),
+      remittedLiabilityMinorUnits:remitted.reduce((sum,row)=>sum+row.amountMinorUnits,0),
+      openLiabilityCount:accrued.length,remittedLiabilityCount:remitted.length,
+      generatedAt:new Date().toISOString(),generatedBy:context.actorId,
+      inputFingerprint:stableHcmFingerprint(liabilities.map(row=>[
+        row.liabilityId,row.periodId,row.code,row.liabilityAccountCode,row.amountMinorUnits,
+        row.status,row.createdAt,row.remittedAt||''
+      ])),
+    };
+    const tx=await TransactionManager.executeAtomicMutation({
+      tenantId:context.tenantId,actorId:context.actorId,
+      actorRole:context.roles[0]||'AUTHENTICATED_USER',
+      aggregateType:'PAYROLL_COMPLIANCE_SNAPSHOT',aggregateId:payload.snapshotId,
+      eventType:'PAYROLL_COMPLIANCE_SNAPSHOT_GENERATED',
+      eventPayload:{snapshotId:payload.snapshotId,asOf:payload.asOf,currency,inputFingerprint:snapshot.inputFingerprint},
+      auditAction:'PAYROLL_COMPLIANCE_SNAPSHOT_GENERATED',
+      auditResourceType:'PAYROLL_COMPLIANCE_SNAPSHOT',auditResourceId:payload.snapshotId,
+      auditReason:'Generated immutable payroll statutory compliance snapshot.',
+      outboxTopic:'g-hims-payroll-compliance-events',idempotencyKey,commandId,
+      correlationId:context.correlationId,domainState:snapshot,
+    });
+    return {success:true,commandId,idempotencyKey,entityId:payload.snapshotId,
+      eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:snapshot};
   }
 
 }

@@ -670,6 +670,376 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       currency: z.string().trim().length(3),
     }).strict(),
   },
+  CreateFinanceAccountCommand: {
+    1: z.object({
+      accountCode: nonEmpty.max(20),
+      accountName: nonEmpty.max(250),
+      category: z.enum(['asset','liability','equity','revenue','expense']),
+      subCategory: nonEmpty.max(250),
+      normalBalance: z.enum(['debit','credit']),
+      currency: z.string().trim().length(3),
+      parentAccountCode: z.string().trim().max(20).optional(),
+      costCenterRequired: z.boolean().optional(),
+      profitCenterRequired: z.boolean().optional(),
+      allowManualPosting: z.boolean(),
+      allowCashReceipts: z.boolean().optional(),
+      allowSupplierPayments: z.boolean().optional(),
+      isSystemLocked: z.boolean().optional(),
+    }).strict(),
+  },
+  CreateFinancePeriodCommand: {
+    1: z.object({
+      fiscalYear: z.number().int().min(2000).max(2200),
+      postingPeriod: z.number().int().min(1).max(12),
+      periodName: nonEmpty.max(200),
+      startAt: z.number().finite().positive(),
+      endAt: z.number().finite().positive(),
+    }).strict(),
+  },
+  ChangeFinancePeriodStatusCommand: {
+    1: z.object({
+      fiscalYear: z.number().int().min(2000).max(2200),
+      postingPeriod: z.number().int().min(1).max(12),
+      nextStatus: z.enum(['SOFT_CLOSE','OPEN','CLOSED','LOCKED']),
+      reason: nonEmpty.max(2000),
+    }).strict(),
+  },
+  ReverseJournalCommand: {
+    1: z.object({
+      originalJournalId: nonEmpty,
+      fiscalYear: z.number().int().min(2000).max(2200),
+      postingPeriod: z.number().int().min(1).max(12),
+      reversalPostingAt: z.number().finite().positive(),
+      reversalReason: nonEmpty.max(2000),
+    }).strict(),
+  },
+  GenerateTrialBalanceCommand: {
+    1: z.object({
+      snapshotId: nonEmpty,
+      fiscalYear: z.number().int().min(2000).max(2200),
+      throughPostingPeriod: z.number().int().min(1).max(12),
+      currency: z.string().trim().length(3),
+    }).strict(),
+  },
+  RecognizePatientInvoiceCommand: {
+    1: z.object({
+      invoiceId: nonEmpty,
+      patientId: nonEmpty,
+      encounterId: z.string().trim().min(1).optional(),
+      payerId: z.string().trim().min(1).optional(),
+      issueAt: z.number().finite().positive(),
+      dueAt: z.number().finite().positive(),
+      currency: z.string().trim().length(3),
+      patientResponsibilityMinorUnits: z.number().int().safe().nonnegative(),
+      payerResponsibilityMinorUnits: z.number().int().safe().nonnegative(),
+      lines: z.array(z.object({
+        lineId: nonEmpty,
+        description: nonEmpty.max(500),
+        revenueAccountCode: nonEmpty.max(20),
+        amountMinorUnits: z.number().int().safe().nonnegative(),
+        costCenterId: z.string().trim().min(1).optional(),
+        profitCenterId: z.string().trim().min(1).optional(),
+      }).strict()).min(1).max(500),
+    }).strict(),
+  },
+  AdjustArOpenItemCommand: {
+    1: z.object({
+      adjustmentId: nonEmpty,
+      openItemId: nonEmpty,
+      type: z.enum(['CREDIT_NOTE','WRITE_OFF','REFUND']),
+      amountMinorUnits: z.number().int().safe().positive(),
+      reason: nonEmpty.max(2000),
+      postingAt: z.number().finite().positive(),
+    }).strict(),
+  },
+  GenerateArAgingCommand: {
+    1: z.object({
+      snapshotId: nonEmpty,
+      asOf: z.number().finite().positive(),
+      currency: z.string().trim().length(3),
+    }).strict(),
+  },
+  RegisterTreasuryAccountCommand: {
+    1: z.object({
+      treasuryAccountId: nonEmpty,
+      accountCode: nonEmpty.max(20),
+      accountName: nonEmpty.max(250),
+      currency: z.string().trim().length(3),
+      kind: z.enum(['CASH_DRAWER','BANK']),
+      bankName: z.string().trim().max(250).optional(),
+      maskedAccountNumber: z.string().trim().max(100).optional(),
+      facilityId: z.string().trim().min(1).optional(),
+      allowReceipts: z.boolean(),
+      allowPayments: z.boolean(),
+    }).strict(),
+  },
+  OpenCashShiftCommand: {
+    1: z.object({
+      shiftId: nonEmpty,
+      facilityId: nonEmpty,
+      registerId: nonEmpty,
+      treasuryAccountId: nonEmpty,
+      openedAt: z.number().finite().positive(),
+      openingFloatMinorUnits: z.number().int().safe().nonnegative(),
+    }).strict(),
+  },
+  CloseCashShiftCommand: {
+    1: z.object({
+      shiftId: nonEmpty,
+      countedClosingMinorUnits: z.number().int().safe().nonnegative(),
+      closedAt: z.number().finite().positive(),
+    }).strict(),
+  },
+  ReviewCashShiftCommand: {
+    1: z.object({
+      shiftId: nonEmpty,
+      decision: z.enum(['APPROVE','REJECT']),
+      reason: nonEmpty.max(2000),
+    }).strict(),
+  },
+  TreasuryTransferCommand: {
+    1: z.object({
+      transferId: nonEmpty,
+      fromTreasuryAccountId: nonEmpty,
+      toTreasuryAccountId: nonEmpty,
+      amountMinorUnits: z.number().int().safe().positive(),
+      currency: z.string().trim().length(3),
+      transferredAt: z.number().finite().positive(),
+      reference: nonEmpty.max(200),
+    }).strict(),
+  },
+  PrepareBankReconciliationCommand: {
+    1: z.object({
+      reconciliationId: nonEmpty,
+      treasuryAccountId: nonEmpty,
+      statementDate: z.number().finite().positive(),
+      statementEndingMinorUnits: z.number().int().safe(),
+      depositsInTransitMinorUnits: z.number().int().safe(),
+      outstandingPaymentsMinorUnits: z.number().int().safe(),
+      currency: z.string().trim().length(3),
+    }).strict(),
+  },
+  ApproveBankReconciliationCommand: {
+    1: z.object({
+      reconciliationId: nonEmpty,
+      notes: z.string().trim().max(2000).optional(),
+    }).strict(),
+  },
+  GenerateApAgingCommand: {
+    1: z.object({
+      snapshotId: nonEmpty,
+      asOf: z.number().finite().positive(),
+      currency: z.string().trim().length(3),
+    }).strict(),
+  },
+  ApplySupplierCreditCommand: {
+    1: z.object({
+      creditId: nonEmpty,
+      invoiceId: nonEmpty,
+      creditType: z.enum(['RETURN_CREDIT','PRICE_CREDIT']),
+      amountMinorUnits: z.number().int().safe().positive(),
+      postingAt: z.number().finite().positive(),
+      supplierReference: nonEmpty.max(200),
+      reason: nonEmpty.max(2000),
+    }).strict(),
+  },
+  CreateCostCenterCommand: {
+    1: z.object({
+      costCenterId: nonEmpty,
+      code: nonEmpty.max(50),
+      name: nonEmpty.max(250),
+      department: nonEmpty.max(250),
+      facilityId: z.string().trim().min(1).optional(),
+      managerUserId: z.string().trim().min(1).optional(),
+    }).strict(),
+  },
+  CreateCostAllocationRuleCommand: {
+    1: z.object({
+      ruleId: nonEmpty,
+      sourceCostCenterId: nonEmpty,
+      expenseAccountCode: nonEmpty.max(20),
+      allocationBasis: z.enum(['PERCENT','HEADCOUNT','AREA','ENCOUNTERS']),
+      targets: z.array(z.object({
+        costCenterId: nonEmpty,
+        percentBasisPoints: z.number().int().min(1).max(10000),
+      }).strict()).min(1).max(100),
+      effectiveFrom: z.number().finite().positive(),
+      effectiveTo: z.number().finite().positive().optional(),
+    }).strict(),
+  },
+  RunCostAllocationCommand: {
+    1: z.object({
+      runId: nonEmpty,
+      fiscalYear: z.number().int().min(2000).max(2200),
+      postingPeriod: z.number().int().min(1).max(12),
+      currency: z.string().trim().length(3),
+      ruleIds: z.array(nonEmpty).min(1).max(100),
+    }).strict(),
+  },
+  CreateBudgetEnvelopeCommand: {
+    1: z.object({
+      budgetId: nonEmpty,
+      fiscalYear: z.number().int().min(2000).max(2200),
+      costCenterId: nonEmpty,
+      accountCode: nonEmpty.max(20),
+      currency: z.string().trim().length(3),
+      approvedMinorUnits: z.number().int().safe().positive(),
+    }).strict(),
+  },
+  ApproveBudgetEnvelopeCommand: {
+    1: z.object({
+      budgetId: nonEmpty,
+      decision: z.enum(['APPROVE','REJECT']),
+      reason: nonEmpty.max(2000),
+    }).strict(),
+  },
+  CommitBudgetCommand: {
+    1: z.object({
+      commitmentId: nonEmpty,
+      budgetId: nonEmpty,
+      referenceType: z.enum(['PURCHASE_REQUISITION','PURCHASE_ORDER','CONTRACT','MANUAL']),
+      referenceId: nonEmpty,
+      amountMinorUnits: z.number().int().safe().positive(),
+      committedAt: z.number().finite().positive(),
+    }).strict(),
+  },
+  ReleaseBudgetCommitmentCommand: {
+    1: z.object({
+      commitmentId: nonEmpty,
+      reason: nonEmpty.max(2000),
+    }).strict(),
+  },
+  ConsumeBudgetCommitmentCommand: {
+    1: z.object({
+      commitmentId: nonEmpty,
+      journalId: nonEmpty,
+    }).strict(),
+  },
+  CapitalizeFixedAssetCommand: {
+    1: z.object({
+      assetId: nonEmpty,
+      assetTag: nonEmpty.max(100),
+      serialNumber: z.string().trim().max(200).optional(),
+      assetName: nonEmpty.max(250),
+      assetCategory: z.enum(['MEDICAL_EQUIPMENT','IT_HARDWARE','FACILITY','VEHICLE','OTHER']),
+      facilityId: nonEmpty,
+      costCenterId: nonEmpty,
+      acquisitionAt: z.number().finite().positive(),
+      inServiceAt: z.number().finite().positive(),
+      acquisitionCostMinorUnits: z.number().int().safe().positive(),
+      salvageValueMinorUnits: z.number().int().safe().nonnegative(),
+      usefulLifeMonths: z.number().int().min(1).max(1200),
+      assetAccountCode: nonEmpty.max(20),
+      accumulatedDepreciationAccountCode: nonEmpty.max(20),
+      depreciationExpenseAccountCode: nonEmpty.max(20),
+      currency: z.string().trim().length(3),
+      sourceReferenceId: nonEmpty,
+    }).strict(),
+  },
+  RunDepreciationCommand: {
+    1: z.object({
+      runId: nonEmpty,
+      fiscalYear: z.number().int().min(2000).max(2200),
+      postingPeriod: z.number().int().min(1).max(12),
+      currency: z.string().trim().length(3),
+      assetIds: z.array(nonEmpty).min(1).max(500),
+    }).strict(),
+  },
+  TransferFixedAssetCommand: {
+    1: z.object({
+      assetId: nonEmpty,
+      facilityId: nonEmpty,
+      costCenterId: nonEmpty,
+      transferredAt: z.number().finite().positive(),
+      reason: nonEmpty.max(2000),
+    }).strict(),
+  },
+  DisposeFixedAssetCommand: {
+    1: z.object({
+      assetId: nonEmpty,
+      disposedAt: z.number().finite().positive(),
+      proceedsMinorUnits: z.number().int().safe().nonnegative(),
+      treasuryAccountCode: z.string().trim().min(1).max(20).optional(),
+      reason: nonEmpty.max(2000),
+    }).strict(),
+  },
+  StartFinanceCloseCommand: {
+    1: z.object({
+      closeId: nonEmpty,
+      fiscalYear: z.number().int().min(2000).max(2200),
+      postingPeriod: z.number().int().min(1).max(12),
+      currency: z.string().trim().length(3),
+    }).strict(),
+  },
+  FinalizeFinanceCloseCommand: {
+    1: z.object({
+      closeId: nonEmpty,
+      fiscalYear: z.number().int().min(2000).max(2200),
+      postingPeriod: z.number().int().min(1).max(12),
+      currency: z.string().trim().length(3),
+      statementSnapshotId: nonEmpty,
+    }).strict(),
+  },
+  LockFinancePeriodCommand: {
+    1: z.object({
+      closeId: nonEmpty,
+      fiscalYear: z.number().int().min(2000).max(2200),
+      postingPeriod: z.number().int().min(1).max(12),
+      reason: nonEmpty.max(2000),
+    }).strict(),
+  },
+  CreateTaxCodeCommand: {
+    1: z.object({
+      taxCodeId: nonEmpty,
+      code: nonEmpty.max(50),
+      description: nonEmpty.max(500),
+      jurisdiction: nonEmpty.max(250),
+      taxType: z.enum(['OUTPUT','INPUT','WITHHOLDING']),
+      rateBasisPoints: z.number().int().min(0).max(10000),
+      recoverablePercentBasisPoints: z.number().int().min(0).max(10000).optional(),
+      payableAccountCode: nonEmpty.max(20),
+      recoverableAccountCode: z.string().trim().min(1).max(20).optional(),
+      expenseAccountCode: z.string().trim().min(1).max(20).optional(),
+      effectiveFrom: z.number().finite().positive(),
+      effectiveTo: z.number().finite().positive().optional(),
+    }).strict(),
+  },
+  RecordSupplierWithholdingCommand: {
+    1: z.object({
+      taxLedgerItemId: nonEmpty,
+      taxCodeId: nonEmpty,
+      invoiceId: nonEmpty,
+      taxableMinorUnits: z.number().int().safe().positive(),
+      postingAt: z.number().finite().positive(),
+    }).strict(),
+  },
+  RemitTaxLiabilityCommand: {
+    1: z.object({
+      remittanceId: nonEmpty,
+      taxCodeId: nonEmpty,
+      amountMinorUnits: z.number().int().safe().positive(),
+      treasuryAccountCode: nonEmpty.max(20),
+      postingAt: z.number().finite().positive(),
+      reference: nonEmpty.max(200),
+    }).strict(),
+  },
+  GenerateTaxSummaryCommand: {
+    1: z.object({
+      snapshotId: nonEmpty,
+      fiscalYear: z.number().int().min(2000).max(2200),
+      throughPostingPeriod: z.number().int().min(1).max(12),
+      currency: z.string().trim().length(3),
+    }).strict(),
+  },
+  GenerateFinanceIntelligenceCommand: {
+    1: z.object({
+      snapshotId: nonEmpty,
+      asOf: z.number().finite().positive(),
+      fiscalYear: z.number().int().min(2000).max(2200),
+      throughPostingPeriod: z.number().int().min(1).max(12),
+      currency: z.string().trim().length(3),
+    }).strict(),
+  },
   RecordCashReceiptCommand: {
     1: z.object({
       receiptId: nonEmpty,
@@ -692,6 +1062,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       referenceDocumentId: z.string().trim().max(200).optional(),
       documentHeader: nonEmpty.max(500),
       currency: z.string().trim().length(3),
+      sourceModule: z.enum(['MANUAL','BILLING','AR','AP','TREASURY','SCM','PAYROLL','ASSETS','COSTING','TAX','CLOSE']).optional(),
       lines: z.array(z.object({
         glAccountId: nonEmpty.max(100),
         glAccountName: nonEmpty.max(250),

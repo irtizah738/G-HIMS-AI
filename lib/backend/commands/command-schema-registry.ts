@@ -1074,7 +1074,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       referenceDocumentId: z.string().trim().max(200).optional(),
       documentHeader: nonEmpty.max(500),
       currency: z.string().trim().length(3),
-      sourceModule: z.enum(['MANUAL','BILLING','AR','AP','TREASURY','SCM','PAYROLL','ASSETS','COSTING','TAX','CLOSE']).optional(),
+      sourceModule: z.literal('MANUAL').optional(),
       lines: z.array(z.object({
         glAccountId: nonEmpty.max(100),
         glAccountName: nonEmpty.max(250),

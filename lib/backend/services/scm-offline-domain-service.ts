@@ -76,13 +76,34 @@ export class ScmOfflineDomainService {
     }
 
     const txn = payload as unknown as StockTransaction;
+    const allowedTransactionTypes = new Set([
+      'RECEIPT',
+      'ISSUE',
+      'TRANSFER_OUT',
+      'TRANSFER_IN',
+      'RETURN',
+      'ADJUSTMENT_IN',
+      'ADJUSTMENT_OUT',
+      'DAMAGE',
+      'EXPIRY',
+      'QUARANTINE',
+      'RELEASE',
+      'RESERVATION',
+      'UNRESERVATION',
+      'CONSUMPTION',
+      'DISPENSE',
+      'RECALL',
+      'WRITE_OFF',
+    ]);
     if (
       !txn.transactionId ||
       !txn.itemId ||
-      !txn.transactionType ||
+      !allowedTransactionTypes.has(String(txn.transactionType || '')) ||
       !Number.isFinite(txn.quantity) ||
       txn.quantity <= 0 ||
-      !txn.uom
+      !txn.uom ||
+      !txn.referenceType ||
+      !txn.referenceId
     ) {
       return {
         success: false,
@@ -91,7 +112,31 @@ export class ScmOfflineDomainService {
         error: {
           code: 'INVALID_STOCK_TRANSACTION',
           message:
-            'Stock transaction identity, item, type, UOM and positive quantity are required.',
+            'Stock transaction identity, item, supported type, UOM, reference and positive quantity are required.',
+        },
+      };
+    }
+
+    const privilegedAcrossFacilities = context.roles.some((role) =>
+      ['SYSTEM_ADMIN', 'ADMINISTRATOR'].includes(role.toUpperCase())
+    );
+    const facilityScope = new Set(
+      (context.facilityIds || [])
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    );
+    if (
+      !privilegedAcrossFacilities &&
+      facilityScope.size > 0 &&
+      !facilityScope.has(String(txn.facilityId || '').trim())
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'FACILITY_SCOPE_MISMATCH',
+          message: 'Inventory movement is outside the actor assigned facility scope.',
         },
       };
     }
@@ -512,6 +557,30 @@ export class ScmOfflineDomainService {
           code: 'INVALID_REQUISITION',
           message:
             'Requisition identity, facility, department, location, priority and at least one line item are required.',
+        },
+      };
+    }
+
+    const requisitionFacilityScope = new Set(
+      (context.facilityIds || [])
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    );
+    const requisitionAdmin = context.roles.some((role) =>
+      ['SYSTEM_ADMIN', 'ADMINISTRATOR'].includes(role.toUpperCase())
+    );
+    if (
+      !requisitionAdmin &&
+      requisitionFacilityScope.size > 0 &&
+      !requisitionFacilityScope.has(requisition.facilityId)
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'FACILITY_SCOPE_MISMATCH',
+          message: 'Purchase requisition is outside the actor assigned facility scope.',
         },
       };
     }

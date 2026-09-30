@@ -68,4 +68,36 @@ describe('OPD clinical workflow runtime integration', () => {
     expect(registration).toContain('MPI_IDENTITY_CONFLICT');
     expect(registration).toContain('transaction.create(canonicalOutboxRef');
   });
+  test('OPD disposition cannot bypass the authoritative terminal workflow stage', async () => {
+    const encounter = await source(
+      'lib/backend/services/encounter-domain-service.ts'
+    );
+
+    expect(encounter).toContain('OPD_DISPOSITION_STAGE_NOT_READY');
+    expect(encounter).toContain(
+      "authoritativeStage !== 'DISCHARGE_OR_REFERRAL'"
+    );
+  });
+
+  test('offline triage and consultation queue their dependent DAG transitions', async () => {
+    const workspace = await source('components/opd/OpdMasterWorkspace.tsx');
+
+    expect(workspace).toContain('evidenceId: vitalsResult.entityId || localEvidenceId');
+    expect(workspace).toContain('evidenceId: noteResult.entityId || localEvidenceId');
+    expect(workspace).toContain("collection: 'encounters'");
+    expect(workspace).toContain("optimisticCache: false");
+  });
+
+  test('billing stays in billing until fully settled and then advances through the DAG', async () => {
+    const workspace = await source('components/opd/OpdMasterWorkspace.tsx');
+
+    expect(workspace).toContain("'PAYMENT_EXCEEDS_BALANCE'");
+    expect(workspace).toContain("targetStage: 'BILLING_SETTLEMENT'");
+    expect(workspace).toContain("targetStage: 'DISCHARGE_OR_REFERRAL'");
+    expect(workspace).toContain("setActiveTab(isSettled ? 'DISPOSITION' : 'BILLING')");
+    expect(workspace).toContain(
+      "currentStage: isSettled ? 'DISPOSITION_CLOSURE' : 'BILLING_SETTLEMENT'"
+    );
+  });
+
 });

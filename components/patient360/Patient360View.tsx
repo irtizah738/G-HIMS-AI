@@ -134,6 +134,38 @@ function readinessStateClass(state: string): string {
   }
 }
 
+function deteriorationStateText(state: string): string {
+  switch (state) {
+    case 'STABLE':
+      return 'Stable';
+    case 'WATCH':
+      return 'Watch';
+    case 'ESCALATION_REQUIRED':
+      return 'Escalation review required';
+    case 'CRITICAL_REVIEW_REQUIRED':
+      return 'Critical review required';
+    case 'NOT_APPLICABLE':
+      return 'Not applicable';
+    default:
+      return 'Not evaluated';
+  }
+}
+
+function deteriorationStateClass(state: string): string {
+  switch (state) {
+    case 'CRITICAL_REVIEW_REQUIRED':
+      return 'border-rose-300 bg-rose-50 text-rose-900';
+    case 'ESCALATION_REQUIRED':
+      return 'border-orange-300 bg-orange-50 text-orange-900';
+    case 'WATCH':
+      return 'border-amber-200 bg-amber-50 text-amber-900';
+    case 'STABLE':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-900';
+    default:
+      return 'border-slate-200 bg-slate-50 text-slate-700';
+  }
+}
+
 function EmptyState({ children }: { children: React.ReactNode }) {
   return (
     <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-500">
@@ -419,6 +451,153 @@ export function Patient360View({
             </div>
           )}
         </section>
+
+        {projection.activeEncounter && (
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Activity className="h-5 w-5 text-rose-600" />
+                  <h2 className="text-sm font-bold">
+                    Clinical Deterioration & Escalation Intelligence
+                  </h2>
+                </div>
+                <p className="mt-1 max-w-3xl text-xs text-slate-500">
+                  Deterministic Patient 360 surveillance. CI-8 surfaces explainable deterioration signals and provenance; it does not diagnose disease, prescribe treatment, or autonomously escalate care.
+                </p>
+              </div>
+              {view.deterioration ? (
+                <span
+                  className={`inline-flex w-fit rounded-full border px-3 py-1 text-xs font-bold ${deteriorationStateClass(
+                    view.deterioration.state
+                  )}`}
+                >
+                  {deteriorationStateText(view.deterioration.state)}
+                </span>
+              ) : (
+                <span className="inline-flex w-fit rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
+                  Not evaluated
+                </span>
+              )}
+            </div>
+
+            {offline && (
+              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                This is the last synchronized deterioration assessment. New offline clinical events are not authoritative until synchronization and server re-evaluation complete.
+              </div>
+            )}
+
+            {view.deterioration ? (
+              <>
+                <div className="mt-4 grid gap-2 sm:grid-cols-5">
+                  <div className="rounded-xl bg-rose-50 p-3">
+                    <div className="text-[10px] uppercase tracking-wide text-rose-500">Critical</div>
+                    <div className="mt-1 text-xl font-bold text-rose-800">
+                      {view.deterioration.critical.length}
+                    </div>
+                  </div>
+                  <div className="rounded-xl bg-orange-50 p-3">
+                    <div className="text-[10px] uppercase tracking-wide text-orange-500">Escalations</div>
+                    <div className="mt-1 text-xl font-bold text-orange-800">
+                      {view.deterioration.escalations.length}
+                    </div>
+                  </div>
+                  <div className="rounded-xl bg-amber-50 p-3">
+                    <div className="text-[10px] uppercase tracking-wide text-amber-500">Warnings</div>
+                    <div className="mt-1 text-xl font-bold text-amber-800">
+                      {view.deterioration.warnings.length}
+                    </div>
+                  </div>
+                  <div className="rounded-xl bg-slate-50 p-3">
+                    <div className="text-[10px] uppercase tracking-wide text-slate-400">Ruleset</div>
+                    <div className="mt-1 font-mono text-xs font-semibold text-slate-700">
+                      {view.deterioration.rulesetVersion}
+                    </div>
+                  </div>
+                  <div className="rounded-xl bg-slate-50 p-3">
+                    <div className="text-[10px] uppercase tracking-wide text-slate-400">Evaluated</div>
+                    <div className="mt-1 text-xs font-semibold text-slate-700">
+                      {dateTime(view.deterioration.evaluatedAt)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 space-y-2">
+                  {[
+                    ...view.deterioration.critical,
+                    ...view.deterioration.escalations,
+                    ...view.deterioration.warnings,
+                    ...view.deterioration.information,
+                  ].map((finding) => (
+                    <details
+                      key={finding.findingId}
+                      className="group rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3"
+                    >
+                      <summary className="cursor-pointer list-none">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span
+                                className={
+                                  finding.severity === 'CRITICAL'
+                                    ? 'rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-800'
+                                    : finding.severity === 'ESCALATION'
+                                      ? 'rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-bold text-orange-800'
+                                      : finding.severity === 'WARNING'
+                                        ? 'rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800'
+                                        : 'rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700'
+                                }
+                              >
+                                {finding.severity}
+                              </span>
+                              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                                {finding.domain}
+                              </span>
+                            </div>
+                            <div className="mt-1 text-sm font-semibold text-slate-900">
+                              {finding.title}
+                            </div>
+                            <p className="mt-1 text-xs text-slate-600">
+                              {finding.explanation}
+                            </p>
+                          </div>
+                          <span className="shrink-0 font-mono text-[10px] text-slate-400">
+                            {finding.ruleId}
+                          </span>
+                        </div>
+                      </summary>
+                      <div className="mt-3 border-t border-slate-200 pt-3">
+                        <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                          Evidence & provenance
+                        </div>
+                        <div className="mt-2 space-y-1">
+                          {finding.evidence.map((item, index) => (
+                            <div
+                              key={`${finding.findingId}-${item.entityId}-${index}`}
+                              className="rounded-lg bg-white px-3 py-2 font-mono text-[10px] text-slate-600"
+                            >
+                              {item.source} · {item.entityType} · {item.entityId}
+                              {item.label ? ` · ${item.label}` : ''}
+                              {item.occurredAt ? ` · ${dateTime(item.occurredAt)}` : ''}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </details>
+                  ))}
+                </div>
+
+                <div className="mt-4 text-[10px] text-slate-400">
+                  Evaluation {view.deterioration.evaluationId} · Patient 360 rev {view.deterioration.patient360Revision}
+                </div>
+              </>
+            ) : (
+              <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
+                No CI-8 assessment is available for this active encounter yet. A relevant authoritative clinical event will trigger evaluation.
+              </div>
+            )}
+          </section>
+        )}
 
         {projection.activeEncounter?.encounterType?.toUpperCase() === 'IPD' && (
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">

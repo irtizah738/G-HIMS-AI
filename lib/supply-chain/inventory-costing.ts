@@ -35,7 +35,7 @@ export function isInventoryPeriodBlocked(
 }
 
 export function isGovernedAdjustmentType(type: StockTransaction['transactionType']): boolean {
-  return ['ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'WRITE_OFF'].includes(type);
+  return ['ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'WRITE_OFF', 'RETURN_TO_SUPPLIER'].includes(type);
 }
 
 export function isExpensedOutboundType(type: StockTransaction['transactionType']): boolean {
@@ -44,7 +44,7 @@ export function isExpensedOutboundType(type: StockTransaction['transactionType']
 
 export function movementSign(type: StockTransaction['transactionType']): -1 | 0 | 1 {
   if (['RECEIPT', 'ADJUSTMENT_IN', 'RETURN'].includes(type)) return 1;
-  if (['ISSUE', 'ADJUSTMENT_OUT', 'CONSUMPTION', 'DISPENSE', 'WRITE_OFF'].includes(type)) return -1;
+  if (['ISSUE', 'ADJUSTMENT_OUT', 'CONSUMPTION', 'DISPENSE', 'WRITE_OFF', 'RETURN_TO_SUPPLIER'].includes(type)) return -1;
   return 0;
 }
 

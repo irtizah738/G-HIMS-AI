@@ -23,6 +23,7 @@ import { ScmOfflineDomainService } from '../services/scm-offline-domain-service'
 import { ScmProcurementDomainService } from '../services/scm-procurement-domain-service';
 import { ScmPayablesDomainService } from '../services/scm-payables-domain-service';
 import { ScmSourcingDomainService } from '../services/scm-sourcing-domain-service';
+import { ScmPlanningDomainService } from '../services/scm-planning-domain-service';
 import { ScmCostingDomainService } from '../services/scm-costing-domain-service';
 import { CashReceiptDomainService } from '../services/cash-receipt-domain-service';
 import { DiagnosticResultDomainService } from '../services/diagnostic-result-domain-service';
@@ -556,6 +557,51 @@ export class CommandBus {
 
         case 'RecordGoodsReceiptCommand':
           result = await ScmProcurementDomainService.recordGoodsReceipt(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'UpsertReplenishmentPolicyCommand':
+          result = await ScmPlanningDomainService.upsertReplenishmentPolicy(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'GenerateReplenishmentPlanCommand':
+          result = await ScmPlanningDomainService.generateReplenishmentPlan(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ReviewReplenishmentPlanCommand':
+          result = await ScmPlanningDomainService.reviewReplenishmentPlan(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ExecuteReplenishmentPlanCommand':
+          result = await ScmPlanningDomainService.executeReplenishmentPlan(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'CompleteInternalReplenishmentOrderCommand':
+          result = await ScmPlanningDomainService.completeInternalReplenishmentOrder(
             context,
             command.commandId,
             command.idempotencyKey,

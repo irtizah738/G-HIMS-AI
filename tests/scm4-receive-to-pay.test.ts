@@ -195,8 +195,7 @@ describe('SCM-4 receive-to-pay financial integrity', () => {
         invoiceId: 'inv-1',
         paymentReference: 'BANK-REF-1',
         paymentMethod: 'WIRE',
-        sourceAccountId: '1010',
-        sourceAccountName: 'Bank',
+        sourceAccountId: 'bank-1010',
         settledAt: '2026-09-30T00:00:00.000Z',
         fiscalYear: 2026,
         postingPeriod: 9,
@@ -250,6 +249,35 @@ describe('SCM-4 receive-to-pay financial integrity', () => {
     expect(tx).toContain("SUPPLIER_INVOICE_MATCH: 'scmSupplierInvoiceMatches'");
     expect(tx).toContain("AP_PAYMENT_AUTHORIZATION: 'scmPaymentAuthorizations'");
     expect(tx).toContain("SUPPLIER_PAYMENT: 'scmSupplierPayments'");
+    expect(tx).toContain("GL_ACCOUNT: 'accounts'");
+  });
+
+  test('payment authorization reserves balance and settlement locks the authoritative GL account', async () => {
+    const service = await source(
+      'lib/backend/services/scm-payables-domain-service.ts'
+    );
+
+    const requestStart = service.indexOf(
+      'public static async requestSupplierPaymentAuthorization'
+    );
+    const approvalStart = service.indexOf(
+      'public static async approveSupplierPaymentAuthorization',
+      requestStart
+    );
+    const requestMethod = service.slice(requestStart, approvalStart);
+    expect(requestMethod).toContain('pendingPaymentMinorUnits');
+    expect(requestMethod).toContain('PAYMENT_AMOUNT_EXCEEDS_AVAILABLE_BALANCE');
+    expect(requestMethod).not.toContain("key: 'sourceAccount'");
+
+    const paymentStart = service.indexOf(
+      'public static async recordSupplierPayment'
+    );
+    const paymentMethod = service.slice(paymentStart);
+    expect(paymentMethod).toContain("key: 'sourceAccount'");
+    expect(paymentMethod).toContain("entityType: 'GL_ACCOUNT'");
+    expect(paymentMethod).toContain('INVALID_PAYMENT_SETTLEMENT_DATE');
+    expect(paymentMethod).toContain('sourceAccount.category');
+    expect(paymentMethod).toContain('sourceAccount.normalBalance');
   });
 
   test('AP read models are finance-scoped, server-write-only, and excluded from generic offline hydration', async () => {

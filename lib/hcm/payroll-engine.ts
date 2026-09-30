@@ -122,7 +122,12 @@ export function calculatePayrollLine(params:{
     const amountMinorUnits=Math.round(
       grossPayMinorUnits*rule.rateBasisPoints/10000+rule.fixedMinorUnits
     );
-    return {code:rule.code,name:rule.name,amountMinorUnits};
+    return {
+      code:rule.code,
+      name:rule.name,
+      amountMinorUnits,
+      liabilityAccountCode:rule.liabilityAccountCode,
+    };
   });
   const totalDeductionsMinorUnits=deductions.reduce((sum,row)=>sum+row.amountMinorUnits,0);
   if(totalDeductionsMinorUnits>grossPayMinorUnits) throw new Error('PAYROLL_DEDUCTIONS_EXCEED_GROSS');

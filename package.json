@@ -102,7 +102,9 @@
     "test:hcm4": "bun test tests/hcm4-time-attendance.test.ts",
     "validate:hcm4": "bun run typecheck && bun run lint && bun run test:hcm1 && bun run test:hcm2 && bun run test:hcm3 && bun run test:hcm4 && bun run test:finance && bun run test:scm-completion && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",
     "test:hcm5": "bun test tests/hcm5-leave-availability.test.ts",
-    "validate:hcm5": "bun run typecheck && bun run lint && bun run test:hcm1 && bun run test:hcm2 && bun run test:hcm3 && bun run test:hcm4 && bun run test:hcm5 && bun run test:finance && bun run test:scm-completion && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build"
+    "validate:hcm5": "bun run typecheck && bun run lint && bun run test:hcm1 && bun run test:hcm2 && bun run test:hcm3 && bun run test:hcm4 && bun run test:hcm5 && bun run test:finance && bun run test:scm-completion && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",
+    "test:hcm6": "bun test tests/hcm6-payroll-engine.test.ts",
+    "validate:hcm6": "bun run typecheck && bun run lint && bun run test:hcm1 && bun run test:hcm2 && bun run test:hcm3 && bun run test:hcm4 && bun run test:hcm5 && bun run test:hcm6 && bun run test:finance && bun run test:scm-completion && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

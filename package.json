@@ -65,7 +65,9 @@
     "test:scm1": "bun test tests/scm1-inventory-integrity.test.ts",
     "validate:scm1": "bun run typecheck && bun run lint && bun run test:scm1 && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",
     "test:scm2": "bun test tests/scm2-procure-to-receive.test.ts",
-    "validate:scm2": "bun run typecheck && bun run lint && bun run test:scm1 && bun run test:scm2 && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build"
+    "validate:scm2": "bun run typecheck && bun run lint && bun run test:scm1 && bun run test:scm2 && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",
+    "test:scm3": "bun test tests/scm3-tenant-boundary.test.ts",
+    "validate:scm3": "bun run typecheck && bun run lint && bun run test:scm1 && bun run test:scm2 && bun run test:scm3 && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",
@@ -105,4 +107,4 @@
     "typescript": "^5.7.3"
   },
   "packageManager": "bun@1.4.2"
-}
+}\n

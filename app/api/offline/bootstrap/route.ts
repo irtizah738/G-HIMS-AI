@@ -61,6 +61,7 @@ const HCM_COLLECTIONS = [
   'employeeAssignments',
   'clinicalCredentials',
   'clinicalPrivileges',
+  'rosterAssignments',
 ] as const;
 
 const SCM_COLLECTIONS = [
@@ -325,6 +326,14 @@ function scopeOfflineCollections(
       scopedEmployeeIds.has(String(privilege.employeeId||'').trim()) &&
       valueMatchesScope(privilege.facilityId,facilities) &&
       valueMatchesScope(privilege.departmentId,departments)
+    );
+  }
+
+  if(collections.rosterAssignments){
+    scoped.rosterAssignments=collections.rosterAssignments.filter(shift=>
+      scopedEmployeeIds.has(String(shift.employeeId||'').trim()) &&
+      valueMatchesScope(shift.facilityId,facilities) &&
+      valueMatchesScope(shift.departmentId,departments)
     );
   }
 

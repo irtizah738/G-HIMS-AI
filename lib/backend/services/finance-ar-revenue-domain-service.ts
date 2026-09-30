@@ -119,14 +119,22 @@ export class FinanceArRevenueDomainService {
       }
 
       const totalReceivable=patientMinor+payerMinor;
+      const outputTaxMinor=minor(invoice.totalTax);
+      if(outputTaxMinor>totalReceivable){
+        throw new AtomicMutationRejectedError(
+          'INVOICE_TAX_EXCEEDS_RECEIVABLE',
+          'Authoritative invoice tax exceeds total receivable.'
+        );
+      }
+      const revenueBaseMinor=totalReceivable-outputTaxMinor;
       const revenueTotal=payload.lines.reduce((sum,line)=>{
         assertMinorUnits(line.amountMinorUnits,'INVALID_REVENUE_LINE_AMOUNT');
         return sum+line.amountMinorUnits;
       },0);
-      if(!Number.isSafeInteger(revenueTotal)||revenueTotal<=0||revenueTotal!==totalReceivable){
+      if(!Number.isSafeInteger(revenueTotal)||revenueTotal<0||revenueTotal!==revenueBaseMinor){
         throw new AtomicMutationRejectedError(
           'REVENUE_RECOGNITION_TOTAL_MISMATCH',
-          'Revenue lines must equal authoritative patient + payer responsibility.'
+          'Revenue lines must equal authoritative receivable less output tax.'
         );
       }
 
@@ -147,9 +155,21 @@ export class FinanceArRevenueDomainService {
         )
       );
       const arAccount=await resolveAccount(context.tenantId,'1110');
+      const outputTaxAccount=outputTaxMinor>0
+        ? await resolveAccount(context.tenantId,'2040')
+        : undefined;
       if(arAccount.category!=='asset'||arAccount.currency!==currency){
         throw new AtomicMutationRejectedError(
           'AR_CONTROL_ACCOUNT_INVALID','AR control account 1110 is invalid.'
+        );
+      }
+      if(
+        outputTaxAccount &&
+        (outputTaxAccount.category!=='liability'||outputTaxAccount.currency!==currency)
+      ){
+        throw new AtomicMutationRejectedError(
+          'OUTPUT_TAX_CONTROL_ACCOUNT_INVALID',
+          'Output tax payable account 2040 is invalid.'
         );
       }
       for(const account of revenueAccounts){
@@ -185,6 +205,13 @@ export class FinanceArRevenueDomainService {
             debitMinorUnits:0,creditMinorUnits:line.amountMinorUnits,
             lineDescription:line.description,
           })),
+          ...(outputTaxMinor>0?[{
+            glAccountId:'2040',
+            glAccountName:outputTaxAccount?.accountName||'Output Tax Payable',
+            debitMinorUnits:0,
+            creditMinorUnits:outputTaxMinor,
+            lineDescription:`Output tax for invoice ${invoice.invoiceNumber}`,
+          }]:[]),
         ],
         sourceModule:'BILLING',status:'POSTED',postedBy:context.actorId,postedAt:Date.now(),
       };
@@ -254,7 +281,7 @@ export class FinanceArRevenueDomainService {
           ];
           return {
             domainState:recognition,additionalStateWrites:writes,
-            eventPayload:{recognitionId,invoiceId:payload.invoiceId,journalId,totalReceivable,currency},
+            eventPayload:{recognitionId,invoiceId:payload.invoiceId,journalId,totalReceivable,revenueBaseMinor,outputTaxMinor,currency},
             auditReason:`Recognized invoice ${invoice.invoiceNumber} into AR and service revenue.`,
             resultData:{recognition,journal,patientOpenItem,payerOpenItem},
           };

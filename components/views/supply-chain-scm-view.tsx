@@ -86,10 +86,10 @@ import {
 } from 'lucide-react';
 
 interface SupplyChainScmViewProps {
-  tenantId?: string;
+  tenantId: string;
 }
 
-export function SupplyChainScmView({ tenantId = 'metro-health' }: SupplyChainScmViewProps) {
+export function SupplyChainScmView({ tenantId }: SupplyChainScmViewProps) {
   // Navigation Tabs
   const [activeTab, setActiveTab] = useState<
     | 'dashboard'

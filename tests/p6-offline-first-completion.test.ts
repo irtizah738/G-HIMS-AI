@@ -171,7 +171,7 @@ describe('G-HIMS P6 full offline-first completion', () => {
     expect(bus).toContain("'RecordStockTransactionCommand'");
     expect(bus).toContain("'RecordPatientConsumptionCommand'");
     expect(bus).toContain("'SubmitPurchaseRequisitionCommand'");
-    expect(service).toContain('TransactionManager.executeAtomicMutation');
+    expect(service).toContain('TransactionManager.executeAtomicReadModifyMutation');
     expect(service).toContain('TransactionManager.executeAtomicWrite');
 
     expect(view).toContain('loadLocalScmEdgeData');

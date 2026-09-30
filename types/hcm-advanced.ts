@@ -638,12 +638,14 @@ export interface CompensationStructure {
 }
 
 export type CompensationPayBasis = 'SALARIED' | 'HOURLY';
+export type PayrollFrequency = 'MONTHLY' | 'SEMI_MONTHLY' | 'BI_WEEKLY';
 
 export interface CompensationProfileRecord {
   compensationId: string;
   tenantId: string;
   employeeId: string;
   payBasis: CompensationPayBasis;
+  payFrequency: PayrollFrequency;
   currency: string;
   annualSalaryMinorUnits: number;
   hourlyRateMinorUnits: number;
@@ -679,6 +681,7 @@ export interface PayrollPeriodRecord {
   facilityId: string;
   periodNumber: string;
   periodName: string;
+  payFrequency: PayrollFrequency;
   startDate: string;
   endDate: string;
   paymentDate: string;

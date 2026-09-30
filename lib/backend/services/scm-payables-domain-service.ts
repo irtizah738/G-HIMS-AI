@@ -11,6 +11,12 @@ import type {
   SupplierMaster,
 } from '@/types/scm-domain';
 import type {
+  ApproveSupplierPaymentAuthorizationPayload,
+  RecognizeSupplierInvoicePayablePayload,
+  RecordSupplierInvoicePayload,
+  RecordSupplierPaymentPayload,
+  RequestSupplierPaymentAuthorizationPayload,
+  ResolveSupplierInvoiceMatchPayload,
   SupplierInvoiceMatchRecord,
   SupplierInvoiceRecord,
   SupplierPaymentAuthorization,
@@ -20,62 +26,6 @@ import {
   evaluateSupplierInvoiceMatch,
   type SupplierInvoiceInputLine,
 } from '@/lib/supply-chain/receive-to-pay';
-
-export interface RecordSupplierInvoicePayload {
-  facilityId: string;
-  supplierId: string;
-  invoiceNumber: string;
-  poId: string;
-  grnIds: string[];
-  issueDate: string;
-  dueDate: string;
-  currency: string;
-  shippingMinorUnits?: number;
-  priceToleranceBasisPoints?: number;
-  quantityTolerance?: number;
-  lines: SupplierInvoiceInputLine[];
-}
-
-export interface ResolveSupplierInvoiceMatchPayload {
-  invoiceId: string;
-  poId: string;
-  decision: 'APPROVE' | 'REJECT';
-  notes: string;
-}
-
-export interface RecognizeSupplierInvoicePayablePayload {
-  invoiceId: string;
-  poId: string;
-  fiscalYear: number;
-  postingPeriod: number;
-  documentDate: number;
-  postingDate: number;
-}
-
-export interface RequestSupplierPaymentAuthorizationPayload {
-  authorizationId: string;
-  invoiceId: string;
-  amountMinorUnits: number;
-  reason: string;
-}
-
-export interface ApproveSupplierPaymentAuthorizationPayload {
-  authorizationId: string;
-  decision: 'APPROVE' | 'REJECT';
-  comments?: string;
-}
-
-export interface RecordSupplierPaymentPayload {
-  authorizationId: string;
-  invoiceId: string;
-  paymentReference: string;
-  paymentMethod: SupplierPaymentRecord['paymentMethod'];
-  sourceAccountId: string;
-  sourceAccountName: string;
-  settledAt: string;
-  fiscalYear: number;
-  postingPeriod: number;
-}
 
 const AP_ACCOUNT = {
   id: '2100',

@@ -50,6 +50,7 @@ type AccountShape = {
   normalBalance?: string;
   currency?: string;
   isActive?: boolean;
+  allowSupplierPayments?: boolean;
 };
 
 const accounts = db
@@ -93,6 +94,11 @@ async function requireExistingAccount(params: {
   return existing;
 }
 
+const operatingTreasuryAccount = await requireExistingAccount({
+  code: '1010',
+  category: 'asset',
+  normalBalance: 'debit',
+});
 const apAccount = await requireExistingAccount({
   code: '2010',
   category: 'liability',
@@ -115,6 +121,23 @@ if (!currency || currency.length !== 3) {
     'SCM4_COA_CURRENCY_INVALID: authoritative AP account must define a 3-letter currency.'
   );
 }
+
+if (
+  String(operatingTreasuryAccount.data.currency || '').trim().toUpperCase() !==
+  currency
+) {
+  throw new Error(
+    'SCM4_COA_TREASURY_CURRENCY_MISMATCH: operating treasury and AP accounts must use the same currency.'
+  );
+}
+
+await accounts.doc(operatingTreasuryAccount.docId).set(
+  {
+    allowSupplierPayments: true,
+    updatedAt: new Date().toISOString(),
+  },
+  { merge: true }
+);
 
 const controls = [
   {
@@ -210,7 +233,8 @@ process.stdout.write(
       projectId: activeProject,
       tenantId,
       currency,
-      requiredAccountsVerified: ['2010', '1210', '1220'],
+      requiredAccountsVerified: ['1010', '2010', '1210', '1220'],
+      supplierPaymentSourceEnabled: '1010',
       controlAccountsCreated: created,
       controlAccountsAlreadyPresent: verified,
     },

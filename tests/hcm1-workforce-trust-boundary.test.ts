@@ -95,6 +95,8 @@ describe('HCM-1 workforce master and trust boundary',()=>{
     expect(lifecycle).toContain("['TERMINATED','RETIRED','INACTIVE'].includes");
     expect(lifecycle).toContain('EMPLOYEE_NOT_TRANSFERABLE');
     expect(lifecycle).toContain('FUTURE_TRANSFER_REQUIRES_SCHEDULING');
+    expect(lifecycle).toContain('assignmentConcluded');
+    expect(lifecycle).toContain("status:'CONCLUDED'");
     expect(lifecycle).not.toContain("offboardingStage:'RESIGNED'");
   });
 

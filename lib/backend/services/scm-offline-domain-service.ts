@@ -504,51 +504,288 @@ export class ScmOfflineDomainService {
     payload: Record<string, unknown>
   ): Promise<CommandResult> {
     const auth = AuthorizationPipeline.evaluate(context, {
-      requiredRoles: ['NURSE', 'DOCTOR', 'CONSULTANT', 'PHARMACIST', 'SYSTEM_ADMIN'],
+      requiredRoles: [
+        'NURSE',
+        'DOCTOR',
+        'CONSULTANT',
+        'PHARMACIST',
+        'SURGEON',
+        'SYSTEM_ADMIN',
+      ],
     });
     if (!auth.authorized) {
-      return { success:false, commandId, idempotencyKey, error:{ code:auth.code || 'UNAUTHORIZED', message:auth.reason || 'Clinical consumption authority required.' } };
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Clinical consumption authority required.',
+        },
+      };
     }
 
-    const consumption = payload as unknown as PatientConsumptionRecord;
-    if (!consumption.consumptionId || !consumption.patientId || !consumption.itemId || !(consumption.quantity > 0)) {
-      return { success:false, commandId, idempotencyKey, error:{ code:'INVALID_PATIENT_CONSUMPTION', message:'Consumption identity, patient, item and positive quantity are required.' } };
+    const consumption = payload as unknown as PatientConsumptionRecord & {
+      facilityId?: string;
+      sourceLocationId?: string;
+      sourceLocationName?: string;
+      stockTransactionId?: string;
+    };
+
+    const facilityId = String(
+      consumption.facilityId || context.facilityIds?.[0] || ''
+    ).trim();
+    const sourceLocationId = String(
+      consumption.sourceLocationId || ''
+    ).trim();
+    const batchId = String(consumption.batchId || '').trim();
+    const quantity = Number(consumption.quantity);
+
+    if (
+      !consumption.consumptionId ||
+      !consumption.patientId ||
+      !consumption.encounterId ||
+      !consumption.itemId ||
+      !batchId ||
+      !facilityId ||
+      !sourceLocationId ||
+      !Number.isFinite(quantity) ||
+      quantity <= 0
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INVALID_PATIENT_CONSUMPTION',
+          message:
+            'Consumption identity, patient, encounter, facility, source location, batch, item and positive quantity are required.',
+        },
+      };
     }
 
-    const canonical = {
-      ...consumption,
-      tenantId: context.tenantId,
-      documentedBy: context.actorId,
-      consumedAt: consumption.consumedAt || new Date().toISOString(),
-    };
+    const balanceId = stockBalanceId(
+      context.tenantId,
+      facilityId,
+      sourceLocationId,
+      consumption.itemId,
+      batchId
+    );
+    const stockTransactionId =
+      consumption.stockTransactionId ||
+      `txn_consumption_${consumption.consumptionId}`;
 
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'PATIENT_CONSUMPTION',
-      entityId: canonical.consumptionId,
-      eventType: 'PATIENT_CONSUMPTION_RECORDED',
-      domainState: canonical,
-      eventPayload: {
-        consumptionId: canonical.consumptionId,
-        patientId: canonical.patientId,
-        encounterId: canonical.encounterId,
-        itemId: canonical.itemId,
-        batchId: canonical.batchId,
-        quantity: canonical.quantity,
-      },
-      auditReason: `Recorded patient consumption of ${canonical.itemName}`,
-      outboxTopic: 'g-hims-scm-events',
-    });
+    try {
+      const tx = await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.roles[0] || 'AUTHENTICATED_USER',
+        aggregateType: 'PATIENT_CONSUMPTION',
+        aggregateId: consumption.consumptionId,
+        eventType: 'PATIENT_CONSUMPTION_STOCK_COMMITTED',
+        auditAction: 'PATIENT_CONSUMPTION_STOCK_COMMITTED',
+        auditResourceType: 'PATIENT_CONSUMPTION',
+        auditResourceId: consumption.consumptionId,
+        outboxTopic: 'g-hims-scm-events',
+        idempotencyKey,
+        commandId,
+        correlationId: context.correlationId,
+        readTargets: [
+          {
+            key: 'patient',
+            entityType: 'PATIENT_MPI',
+            entityId: consumption.patientId,
+            required: true,
+          },
+          {
+            key: 'encounter',
+            entityType: 'ENCOUNTER',
+            entityId: consumption.encounterId,
+            required: true,
+          },
+          {
+            key: 'item',
+            entityType: 'ITEM_MASTER',
+            entityId: consumption.itemId,
+            required: true,
+          },
+          {
+            key: 'batch',
+            entityType: 'BATCH_LOT',
+            entityId: batchId,
+            required: true,
+          },
+          {
+            key: 'balance',
+            entityType: 'INVENTORY_BALANCE',
+            entityId: balanceId,
+            required: true,
+          },
+        ],
+        prepare: (current) => {
+          const encounter = current.encounter || {};
+          if (
+            String(encounter.patientId || '') !== consumption.patientId
+          ) {
+            throw new AtomicMutationRejectedError(
+              'SCM_ENCOUNTER_PATIENT_MISMATCH',
+              'Encounter does not belong to the supplied patient.'
+            );
+          }
 
-    return {
-      success:true,
-      commandId,
-      idempotencyKey,
-      entityId: canonical.consumptionId,
-      eventId:tx.event.eventId,
-      auditId:tx.audit.auditId,
-      outboxId:tx.outbox.outboxId,
-      data:canonical,
-    };
+          const item = current.item as unknown as ItemMaster;
+          const batch = current.batch as unknown as BatchLotRecord;
+          const balance = current.balance as unknown as InventoryBalance;
+
+          if (!item || item.isActive === false) {
+            throw new AtomicMutationRejectedError(
+              'SCM_ITEM_NOT_ACTIVE',
+              'The authoritative item master is inactive.'
+            );
+          }
+          if (batch.itemId !== item.itemId) {
+            throw new AtomicMutationRejectedError(
+              'SCM_BATCH_ITEM_MISMATCH',
+              'Batch does not belong to the authoritative item.'
+            );
+          }
+          if (batch.status !== 'AVAILABLE') {
+            throw new AtomicMutationRejectedError(
+              'SCM_BATCH_NOT_ISSUABLE',
+              `Batch status ${batch.status} blocks patient consumption.`
+            );
+          }
+
+          validateMovementAgainstBalance(
+            balance,
+            'CONSUMPTION',
+            quantity
+          );
+
+          const now = new Date().toISOString();
+          const stockTxn: StockTransaction = {
+            transactionId: stockTransactionId,
+            tenantId: context.tenantId,
+            facilityId,
+            itemId: item.itemId,
+            itemCode: item.itemCode,
+            itemName: item.name,
+            batchId,
+            batchNumber: batch.batchNumber,
+            expirationDate: batch.expiryDate,
+            serialId: consumption.serialNumber,
+            fromLocationId: sourceLocationId,
+            fromLocationName:
+              consumption.sourceLocationName || balance.locationName,
+            quantity,
+            uom: consumption.uom,
+            normalizedQuantity: quantity,
+            unitCost: Number(batch.unitCost || item.unitCost || 0),
+            totalCost:
+              quantity * Number(batch.unitCost || item.unitCost || 0),
+            currency: String(batch.currency || item.currency || '').toUpperCase(),
+            transactionType: 'CONSUMPTION',
+            referenceType: consumption.procedureId
+              ? 'SURGICAL_PROCEDURE'
+              : 'PATIENT_ENCOUNTER',
+            referenceId:
+              consumption.procedureId || consumption.encounterId,
+            patientId: consumption.patientId,
+            encounterId: consumption.encounterId,
+            procedureId: consumption.procedureId,
+            performedBy: {
+              userId: context.actorId,
+              userName: context.actorId,
+              role: context.roles[0] || 'AUTHENTICATED_USER',
+            },
+            occurredAt: consumption.consumedAt || now,
+            recordedAt: now,
+            idempotencyKey,
+            source: 'ONLINE',
+            metadata: {
+              consumptionId: consumption.consumptionId,
+            },
+          };
+
+          const nextBalance = calculateDerivedBalance(balance, stockTxn);
+
+          const canonicalConsumption: PatientConsumptionRecord = {
+            ...consumption,
+            tenantId: context.tenantId,
+            itemCode: item.itemCode,
+            itemName: item.name,
+            itemType: item.itemType,
+            batchNumber: batch.batchNumber,
+            supplierId: batch.supplierId,
+            supplierName: batch.supplierName,
+            purchaseOrderId: batch.purchaseOrderId,
+            grnId: batch.grnId,
+            quantity,
+            documentedBy: context.actorId,
+            consumedAt: consumption.consumedAt || now,
+          };
+
+          return {
+            domainState: canonicalConsumption,
+            additionalStateWrites: [
+              {
+                entityType: 'STOCK_TRANSACTION',
+                entityId: stockTransactionId,
+                domainState: stockTxn,
+              },
+              {
+                entityType: 'INVENTORY_BALANCE',
+                entityId: balanceId,
+                domainState: nextBalance,
+              },
+            ],
+            eventPayload: {
+              consumptionId: canonicalConsumption.consumptionId,
+              stockTransactionId,
+              patientId: canonicalConsumption.patientId,
+              encounterId: canonicalConsumption.encounterId,
+              procedureId: canonicalConsumption.procedureId,
+              itemId: canonicalConsumption.itemId,
+              batchId,
+              sourceLocationId,
+              quantity,
+              balanceId,
+            },
+            auditReason: `Consumed ${quantity} ${canonicalConsumption.uom} of ${item.name} for patient encounter ${canonicalConsumption.encounterId}`,
+            resultData: {
+              consumption: canonicalConsumption,
+              transaction: stockTxn,
+              balance: nextBalance,
+            },
+          };
+        },
+      });
+
+      return {
+        success: true,
+        commandId,
+        idempotencyKey,
+        entityId: consumption.consumptionId,
+        eventId: tx.eventId,
+        auditId: tx.auditId,
+        outboxId: tx.outboxId,
+        data: tx.resultData,
+      };
+    } catch (error) {
+      if (error instanceof AtomicMutationRejectedError) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+          },
+        };
+      }
+      throw error;
+    }
   }
 
   public static async submitPurchaseRequisition(

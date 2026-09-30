@@ -700,7 +700,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
     1: z.object({
       fiscalYear: z.number().int().min(2000).max(2200),
       postingPeriod: z.number().int().min(1).max(12),
-      nextStatus: z.enum(['SOFT_CLOSE','OPEN','CLOSED','LOCKED']),
+      nextStatus: z.enum(['SOFT_CLOSE','OPEN']),
       reason: nonEmpty.max(2000),
     }).strict(),
   },

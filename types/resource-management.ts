@@ -48,7 +48,12 @@ export type MaintenanceStatus =
   | 'VERIFIED'
   | 'CANCELLED';
 
-export type CalibrationStatus = 'VALID' | 'EXPIRING_SOON' | 'CALIBRATION_REQUIRED' | 'FAILED';
+export type CalibrationStatus =
+  | 'NOT_REQUIRED'
+  | 'VALID'
+  | 'EXPIRING_SOON'
+  | 'CALIBRATION_REQUIRED'
+  | 'FAILED';
 
 export type ReservationStatus =
   | 'REQUESTED'

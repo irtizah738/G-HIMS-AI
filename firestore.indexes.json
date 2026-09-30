@@ -399,6 +399,116 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "financeArAgingSnapshots",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "currency",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "asOf",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "financeApAgingSnapshots",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "currency",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "asOf",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "financeBankReconciliations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "treasuryAccountId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "statementDate",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "financeBudgets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "fiscalYear",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "costCenterId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "financeFixedAssets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "facilityId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "assetTag",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "financeStatementSnapshots",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "fiscalYear",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "postingPeriod",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "currency",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "financeIntelligenceSnapshots",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "currency",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "asOf",
+          "order": "DESCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []

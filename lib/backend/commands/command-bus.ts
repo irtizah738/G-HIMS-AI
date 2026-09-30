@@ -8,7 +8,15 @@ import { EncounterDomainService } from '../services/encounter-domain-service';
 import { ClinicalOrderDomainService } from '../services/clinical-order-domain-service';
 import { ClinicalDocumentationDomainService } from '../services/clinical-documentation-domain-service';
 import { OpdQueueDomainService } from '../services/opd-queue-domain-service';
-import { FinancialLedgerDomainService } from '../services/financial-ledger-domain-service';
+import { FinanceGlDomainService } from '../services/finance-gl-domain-service';
+import { FinanceArRevenueDomainService } from '../services/finance-ar-revenue-domain-service';
+import { FinanceTreasuryDomainService } from '../services/finance-treasury-domain-service';
+import { FinanceApDomainService } from '../services/finance-ap-domain-service';
+import { FinanceCostBudgetDomainService } from '../services/finance-cost-budget-domain-service';
+import { FinanceFixedAssetDomainService } from '../services/finance-fixed-asset-domain-service';
+import { FinanceCloseDomainService } from '../services/finance-close-domain-service';
+import { FinanceTaxDomainService } from '../services/finance-tax-domain-service';
+import { FinanceIntelligenceDomainService } from '../services/finance-intelligence-domain-service';
 import { HcmPrivilegeDomainService } from '../services/hcm-privilege-domain-service';
 import { HrWorkforceDomainService } from '../services/hr-workforce-domain-service';
 import { ResourceCapacityDomainService } from '../services/resource-capacity-domain-service';
@@ -477,13 +485,122 @@ export class CommandBus {
           break;
 
         // --- Finance Domain ---
+        case 'CreateFinanceAccountCommand':
+          result = await FinanceGlDomainService.createAccount(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'CreateFinancePeriodCommand':
+          result = await FinanceGlDomainService.createPeriod(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'ChangeFinancePeriodStatusCommand':
+          result = await FinanceGlDomainService.changePeriodStatus(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
         case 'PostJournalCommand':
-          result = await FinancialLedgerDomainService.postUniversalJournal(
-            context,
-            command.commandId,
-            command.idempotencyKey,
-            command.payload as any
-          );
+          result = await FinanceGlDomainService.postJournal(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'ReverseJournalCommand':
+          result = await FinanceGlDomainService.reverseJournal(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'GenerateTrialBalanceCommand':
+          result = await FinanceGlDomainService.generateTrialBalance(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'RecognizePatientInvoiceCommand':
+          result = await FinanceArRevenueDomainService.recognizeInvoice(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'AdjustArOpenItemCommand':
+          result = await FinanceArRevenueDomainService.adjustOpenItem(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'RecordArReceiptCommand':
+          result = await FinanceArRevenueDomainService.recordArReceipt(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'GenerateArAgingCommand':
+          result = await FinanceArRevenueDomainService.generateAging(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'RegisterTreasuryAccountCommand':
+          result = await FinanceTreasuryDomainService.registerTreasuryAccount(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'OpenCashShiftCommand':
+          result = await FinanceTreasuryDomainService.openCashShift(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'CloseCashShiftCommand':
+          result = await FinanceTreasuryDomainService.closeCashShift(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'ReviewCashShiftCommand':
+          result = await FinanceTreasuryDomainService.reviewCashShift(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'TreasuryTransferCommand':
+          result = await FinanceTreasuryDomainService.transfer(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'PrepareBankReconciliationCommand':
+          result = await FinanceTreasuryDomainService.prepareBankReconciliation(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'ApproveBankReconciliationCommand':
+          result = await FinanceTreasuryDomainService.approveBankReconciliation(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'GenerateApAgingCommand':
+          result = await FinanceApDomainService.generateAging(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'ApplySupplierCreditCommand':
+          result = await FinanceApDomainService.applySupplierCredit(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'CreateCostCenterCommand':
+          result = await FinanceCostBudgetDomainService.createCostCenter(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'CreateCostAllocationRuleCommand':
+          result = await FinanceCostBudgetDomainService.createAllocationRule(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'RunCostAllocationCommand':
+          result = await FinanceCostBudgetDomainService.runCostAllocation(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'CreateBudgetEnvelopeCommand':
+          result = await FinanceCostBudgetDomainService.createBudget(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'ApproveBudgetEnvelopeCommand':
+          result = await FinanceCostBudgetDomainService.approveBudget(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'CommitBudgetCommand':
+          result = await FinanceCostBudgetDomainService.commitBudget(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'ReleaseBudgetCommitmentCommand':
+          result = await FinanceCostBudgetDomainService.releaseBudgetCommitment(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'ConsumeBudgetCommitmentCommand':
+          result = await FinanceCostBudgetDomainService.consumeBudgetCommitment(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'CapitalizeFixedAssetCommand':
+          result = await FinanceFixedAssetDomainService.capitalize(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'RunDepreciationCommand':
+          result = await FinanceFixedAssetDomainService.runDepreciation(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'TransferFixedAssetCommand':
+          result = await FinanceFixedAssetDomainService.transferAsset(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'DisposeFixedAssetCommand':
+          result = await FinanceFixedAssetDomainService.disposeAsset(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'StartFinanceCloseCommand':
+          result = await FinanceCloseDomainService.startClose(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'FinalizeFinanceCloseCommand':
+          result = await FinanceCloseDomainService.finalizeClose(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'LockFinancePeriodCommand':
+          result = await FinanceCloseDomainService.lockPeriod(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'CreateTaxCodeCommand':
+          result = await FinanceTaxDomainService.createTaxCode(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'RecordSupplierWithholdingCommand':
+          result = await FinanceTaxDomainService.recordSupplierWithholding(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'RemitTaxLiabilityCommand':
+          result = await FinanceTaxDomainService.remitTax(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'GenerateTaxSummaryCommand':
+          result = await FinanceTaxDomainService.generateTaxSummary(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
+        case 'GenerateFinanceIntelligenceCommand':
+          result = await FinanceIntelligenceDomainService.generate(context, command.commandId, command.idempotencyKey, command.payload as any);
           break;
 
         case 'ReconcileRevenueIntegrityFindingCommand':

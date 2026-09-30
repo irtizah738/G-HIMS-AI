@@ -1,6 +1,13 @@
 import { AuthorizationPipeline } from '@/lib/backend/auth/authorization-pipeline';
 import { AtomicMutationRejectedError, TransactionManager } from '@/lib/backend/transactions/transaction-manager';
 import type { CommandContext, CommandResult } from '@/lib/backend/types';
+import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
+import type {
+  FinanceAccountRecord,
+  FinanceArOpenItem,
+  FinancePeriodRecord,
+} from '@/types/finance-domain';
+import { financePeriodId } from '@/lib/finance/finance-engine';
 
 export interface RecordCashReceiptPayload {
   receiptId: string;
@@ -63,6 +70,63 @@ export class CashReceiptDomainService {
     }
 
     const currency = String(payload.currency || 'PKR').toUpperCase();
+    const patientOpenItemId = `ar_patient_${payload.invoiceId}`;
+    const postingDate = new Date(payload.collectedAt);
+    const fiscalYear = postingDate.getUTCFullYear();
+    const postingPeriod = postingDate.getUTCMonth() + 1;
+    const periodId = financePeriodId(fiscalYear, postingPeriod);
+
+    const cashAccounts =
+      await DomainStateRepository.queryAllEqual<FinanceAccountRecord>(
+        context.tenantId,
+        'accounts',
+        'accountCode',
+        '1010',
+        { pageSize: 10, maxRows: 10 }
+      );
+    if (
+      cashAccounts.length !== 1 ||
+      cashAccounts[0].isActive !== true ||
+      cashAccounts[0].currency.trim().toUpperCase() !== currency ||
+      cashAccounts[0].allowCashReceipts !== true
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'CASH_CONTROL_ACCOUNT_INVALID',
+          message:
+            'Cash control account 1010 must be uniquely active, currency-compatible, and receipt-enabled.',
+        },
+      };
+    }
+
+    const arAccounts =
+      await DomainStateRepository.queryAllEqual<FinanceAccountRecord>(
+        context.tenantId,
+        'accounts',
+        'accountCode',
+        '1110',
+        { pageSize: 10, maxRows: 10 }
+      );
+    if (
+      arAccounts.length !== 1 ||
+      arAccounts[0].isActive !== true ||
+      arAccounts[0].currency.trim().toUpperCase() !== currency
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'AR_CONTROL_ACCOUNT_INVALID',
+          message:
+            'Accounts Receivable control account 1110 must be uniquely active and currency-compatible.',
+        },
+      };
+    }
+
     const journalId = `je_cash_${payload.receiptId}`;
     const receiptState = {
       receiptId: payload.receiptId,
@@ -85,8 +149,8 @@ export class CashReceiptDomainService {
     const journalState = {
       journalId,
       tenantId: context.tenantId,
-      fiscalYear: new Date(payload.collectedAt).getUTCFullYear(),
-      postingPeriod: new Date(payload.collectedAt).getUTCMonth() + 1,
+      fiscalYear,
+      postingPeriod,
       documentDate: payload.collectedAt,
       postingDate: payload.collectedAt,
       referenceDocumentId: payload.receiptId,
@@ -95,18 +159,18 @@ export class CashReceiptDomainService {
       totalAmountMinorUnits: payload.amountMinorUnits,
       lines: [
         {
-          glAccountId: '1001',
-          glAccountName: 'Cash on Hand',
+          glAccountId: '1010',
+          glAccountName: cashAccounts[0].accountName,
           debitMinorUnits: payload.amountMinorUnits,
           creditMinorUnits: 0,
           lineDescription: `Cash received for invoice ${payload.invoiceId}`,
         },
         {
-          glAccountId: '4001',
-          glAccountName: 'Patient Service Revenue',
+          glAccountId: '1110',
+          glAccountName: arAccounts[0].accountName,
           debitMinorUnits: 0,
           creditMinorUnits: payload.amountMinorUnits,
-          lineDescription: `Patient service settlement for invoice ${payload.invoiceId}`,
+          lineDescription: `Clear patient receivable for invoice ${payload.invoiceId}`,
         },
       ],
       status: 'POSTED',
@@ -145,6 +209,18 @@ export class CashReceiptDomainService {
         correlationId: context.correlationId,
         readTargets: [
           {
+            key: 'period',
+            entityType: 'FINANCE_PERIOD',
+            entityId: periodId,
+            required: true,
+          },
+          {
+            key: 'arOpenItem',
+            entityType: 'AR_OPEN_ITEM',
+            entityId: patientOpenItemId,
+            required: true,
+          },
+          {
             key: 'invoice',
             entityType: 'INVOICE',
             entityId: payload.invoiceId,
@@ -158,6 +234,33 @@ export class CashReceiptDomainService {
           },
         ],
         prepare: (current) => {
+          const period = current.period as unknown as FinancePeriodRecord;
+          if (!['OPEN', 'SOFT_CLOSE'].includes(period.status)) {
+            throw new AtomicMutationRejectedError(
+              'FINANCE_PERIOD_NOT_POSTABLE',
+              `Finance period ${period.periodKey} is ${period.status}.`
+            );
+          }
+          const arOpenItem = current.arOpenItem as unknown as FinanceArOpenItem;
+          if (
+            arOpenItem.invoiceId !== payload.invoiceId ||
+            arOpenItem.debtorType !== 'PATIENT' ||
+            arOpenItem.patientId !== payload.patientId ||
+            arOpenItem.currency !== currency
+          ) {
+            throw new AtomicMutationRejectedError(
+              'AR_OPEN_ITEM_SCOPE_MISMATCH',
+              'Cash receipt does not match the recognized patient AR open item.'
+            );
+          }
+          if (payload.amountMinorUnits > arOpenItem.outstandingMinorUnits) {
+            throw new AtomicMutationRejectedError(
+              'PAYMENT_EXCEEDS_AR_OPEN_ITEM',
+              'Cash receipt exceeds the authoritative patient AR open item.',
+              { outstandingMinorUnits: arOpenItem.outstandingMinorUnits }
+            );
+          }
+
           const invoice = current.invoice || {};
           const invoicePatientId = String(invoice.patientId || '');
           const invoiceEncounterId = String(invoice.encounterId || '');
@@ -232,6 +335,17 @@ export class CashReceiptDomainService {
 
           const newBalanceMinorUnits = outstandingMinorUnits - payload.amountMinorUnits;
           const newPaidMinorUnits = Math.round(authoritativePaidMajor * 100) + payload.amountMinorUnits;
+          const nextArOutstanding =
+            arOpenItem.outstandingMinorUnits - payload.amountMinorUnits;
+          const nextArOpenItem: FinanceArOpenItem = {
+            ...arOpenItem,
+            allocatedMinorUnits:
+              arOpenItem.allocatedMinorUnits + payload.amountMinorUnits,
+            outstandingMinorUnits: nextArOutstanding,
+            status:
+              nextArOutstanding === 0 ? 'SETTLED' : 'PARTIALLY_SETTLED',
+            updatedAt: new Date().toISOString(),
+          };
           const nextInvoice = {
             ...invoice,
             totalPaid: newPaidMinorUnits / 100,
@@ -269,6 +383,11 @@ export class CashReceiptDomainService {
                 domainState: journalState,
               },
               {
+                entityType: 'AR_OPEN_ITEM',
+                entityId: patientOpenItemId,
+                domainState: nextArOpenItem,
+              },
+              {
                 entityType: 'INVOICE_SETTLEMENT',
                 entityId: payload.invoiceId,
                 domainState: settlementState,
@@ -289,6 +408,8 @@ export class CashReceiptDomainService {
               cumulativeCashReceivedMinorUnits: settlementState.cashReceivedMinorUnits,
               currency,
               journalId,
+              arOpenItemId: patientOpenItemId,
+              arOutstandingMinorUnits: nextArOutstanding,
             },
             auditReason: `Captured cash receipt ${payload.referenceNumber} for ${payload.amountMinorUnits / 100} ${currency}`,
             resultData: {
@@ -296,6 +417,7 @@ export class CashReceiptDomainService {
               journal: journalState,
               settlement: settlementState,
               invoice: nextInvoice,
+              arOpenItem: nextArOpenItem,
             },
           };
         },

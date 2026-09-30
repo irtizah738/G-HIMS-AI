@@ -1,0 +1,302 @@
+import { describe, expect, test } from 'bun:test';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import {
+  buildFinanceAnomalies,
+  buildTrialBalance,
+  calculateApOutstandingAsOf,
+  calculateArOutstandingAsOf,
+  financePeriodId,
+  periodKey,
+  straightLineMonthlyDepreciationMinorUnits,
+  validateGovernedJournal,
+} from '@/lib/finance/finance-engine';
+
+const source=(file:string)=>readFile(path.join(process.cwd(),file),'utf8');
+
+describe('FIN-1 through FIN-11 enterprise finance completion',()=>{
+  test('FIN-1 GL enforces deterministic periods and balanced journals',()=>{
+    expect(periodKey(2026,9)).toBe('2026-09');
+    expect(financePeriodId(2026,9)).toBe('fin_period_2026-09');
+    expect(()=>validateGovernedJournal({
+      lines:[
+        {glAccountId:'1010',glAccountName:'Cash',debitMinorUnits:100,creditMinorUnits:0,lineDescription:'d'},
+        {glAccountId:'4010',glAccountName:'Revenue',debitMinorUnits:0,creditMinorUnits:100,lineDescription:'c'},
+      ] as any,
+      accounts:[
+        {accountCode:'1010',accountName:'Cash',category:'asset',normalBalance:'debit',isActive:true,currency:'USD'} as any,
+        {accountCode:'4010',accountName:'Revenue',category:'revenue',normalBalance:'credit',isActive:true,currency:'USD'} as any,
+      ],
+      currency:'USD',
+    })).not.toThrow();
+    expect(()=>validateGovernedJournal({
+      lines:[
+        {glAccountId:'1010',glAccountName:'Cash',debitMinorUnits:100,creditMinorUnits:0,lineDescription:'d'},
+        {glAccountId:'4010',glAccountName:'Revenue',debitMinorUnits:0,creditMinorUnits:99,lineDescription:'c'},
+      ] as any,
+      accounts:[
+        {accountCode:'1010',accountName:'Cash',category:'asset',normalBalance:'debit',isActive:true,currency:'USD'} as any,
+        {accountCode:'4010',accountName:'Revenue',category:'revenue',normalBalance:'credit',isActive:true,currency:'USD'} as any,
+      ],
+      currency:'USD',
+    })).toThrow('UNBALANCED_JOURNAL_POSTING');
+  });
+
+  test('FIN-1 trial balance derives from immutable posted journals',()=>{
+    const trial=buildTrialBalance({
+      journals:[{
+        journalId:'j1',tenantId:'t',fiscalYear:2026,postingPeriod:9,
+        documentDate:1,postingDate:1,documentHeader:'x',currency:'USD',
+        totalAmountMinorUnits:100,sourceModule:'GENERAL_LEDGER',status:'POSTED',
+        lines:[
+          {glAccountId:'1010',glAccountName:'Cash',debitMinorUnits:100,creditMinorUnits:0,lineDescription:'x'},
+          {glAccountId:'4010',glAccountName:'Revenue',debitMinorUnits:0,creditMinorUnits:100,lineDescription:'x'},
+        ],
+        postedBy:'u',postedAt:1,
+      }] as any,
+      accounts:[
+        {accountCode:'1010',accountName:'Cash',category:'asset',normalBalance:'debit',isActive:true,currency:'USD'} as any,
+        {accountCode:'4010',accountName:'Revenue',category:'revenue',normalBalance:'credit',isActive:true,currency:'USD'} as any,
+      ],
+      fiscalYear:2026,throughPostingPeriod:9,currency:'USD',
+    });
+    expect(trial.balanced).toBe(true);
+    expect(trial.totalDebitMinorUnits).toBe(100);
+    expect(trial.totalCreditMinorUnits).toBe(100);
+  });
+
+  test('historical AR/AP balances replay immutable evidence through the requested cutoff',()=>{
+    const ar=calculateArOutstandingAsOf({
+      openItems:[{
+        openItemId:'ar1',tenantId:'t',invoiceId:'i1',debtorType:'PATIENT',debtorId:'p',
+        patientId:'p',issueAt:1,dueAt:10,currency:'USD',originalMinorUnits:1000,
+        allocatedMinorUnits:700,writtenOffMinorUnits:0,refundedMinorUnits:0,
+        outstandingMinorUnits:300,status:'PARTIALLY_SETTLED',createdAt:'',updatedAt:''
+      }] as any,
+      receipts:[
+        {openItemId:'ar1',amountMinorUnits:400,receivedAt:20,currency:'USD'},
+        {openItemId:'ar1',amountMinorUnits:300,receivedAt:40,currency:'USD'},
+      ],
+      adjustments:[],
+      asOf:30,
+      currency:'USD',
+    });
+    expect(ar.totalOutstandingMinorUnits).toBe(600);
+
+    const ap=calculateApOutstandingAsOf({
+      invoices:[{
+        invoiceId:'ap1',tenantId:'t',facilityId:'f',invoiceNumber:'x',supplierId:'s',
+        supplierName:'S',poId:'p',poNumber:'P',grnIds:[],currency:'USD',issueDate:'',
+        dueDate:'',lines:[],subtotalMinorUnits:1000,discountMinorUnits:0,taxMinorUnits:0,
+        shippingMinorUnits:0,totalAmountMinorUnits:1000,amountPaidMinorUnits:800,
+        balanceMinorUnits:200,pendingPaymentMinorUnits:0,matchId:'m',matchStatus:'FULLY_MATCHED',
+        status:'PARTIALLY_PAID',capturedBy:'u',capturedAt:'',journalEntryId:'j-rec',
+        createdAt:'',updatedAt:''
+      }] as any,
+      journals:[{
+        journalId:'j-rec',tenantId:'t',fiscalYear:2026,postingPeriod:9,
+        documentDate:10,postingDate:10,documentHeader:'',currency:'USD',
+        totalAmountMinorUnits:1000,lines:[],sourceModule:'AP',status:'POSTED',
+        postedBy:'u',postedAt:10
+      }] as any,
+      payments:[
+        {paymentId:'pay1',tenantId:'t',invoiceId:'ap1',invoiceNumber:'x',authorizationId:'a',
+        supplierId:'s',supplierName:'S',currency:'USD',amountMinorUnits:300,
+        paymentMethod:'BANK_TRANSFER',sourceAccountId:'1010',sourceAccountName:'Bank',
+        paymentReference:'r1',settledAt:'1970-01-01T00:00:00.020Z',recordedBy:'u',
+        journalEntryId:'jp1',createdAt:''},
+        {paymentId:'pay2',tenantId:'t',invoiceId:'ap1',invoiceNumber:'x',authorizationId:'b',
+        supplierId:'s',supplierName:'S',currency:'USD',amountMinorUnits:500,
+        paymentMethod:'BANK_TRANSFER',sourceAccountId:'1010',sourceAccountName:'Bank',
+        paymentReference:'r2',settledAt:'1970-01-01T00:00:00.040Z',recordedBy:'u',
+        journalEntryId:'jp2',createdAt:''},
+      ] as any,
+      credits:[],
+      taxLedger:[],
+      asOf:30,
+      currency:'USD',
+    });
+    expect(ap.totalOutstandingMinorUnits).toBe(700);
+  });
+
+  test('FIN-2/5 AR and revenue are governed, period-aware and journal-backed',async()=>{
+    const s=await source('lib/backend/services/finance-ar-revenue-domain-service.ts');
+    expect(s).toContain('FinanceArRevenueDomainService');
+    expect(s).toContain('REVENUE_RECOGNITION');
+    expect(s).toContain('AR_OPEN_ITEM');
+    expect(s).toContain('AR_ADJUSTMENT');
+    expect(s).toContain('AR_RECEIPT');
+    expect(s).toContain('FINANCE_PERIOD_NOT_POSTABLE');
+    expect(s).toContain("entityType:'JOURNAL_ENTRY'");
+    expect(s).toContain('INVOICE_CHANGED_BEFORE_RECOGNITION');
+  });
+
+  test('FIN-3 treasury uses maker-checker and bank reconciliation controls',async()=>{
+    const s=await source('lib/backend/services/finance-treasury-domain-service.ts');
+    expect(s).toContain('TREASURY_ACCOUNT');
+    expect(s).toContain('CASH_SHIFT');
+    expect(s).toContain('TREASURY_TRANSFER');
+    expect(s).toContain('BANK_RECONCILIATION');
+    expect(s).toContain('FINANCE_SEGREGATION_OF_DUTIES');
+    expect(s).toContain('FINANCE_PERIOD_NOT_POSTABLE');
+    expect(s).toContain("entityType:'JOURNAL_ENTRY'");
+  });
+
+  test('FIN-4 AP extends SCM payables without creating a parallel payable ledger',async()=>{
+    const s=await source('lib/backend/services/finance-ap-domain-service.ts');
+    expect(s).toContain('scmSupplierInvoices');
+    expect(s).toContain('AP_AGING_SNAPSHOT');
+    expect(s).toContain('SUPPLIER_CREDIT');
+    expect(s).not.toContain("entityType:'FINANCE_SUPPLIER_INVOICE'");
+  });
+
+  test('FIN-6/7 costing and budgets are immutable controlled projections',async()=>{
+    const s=await source('lib/backend/services/finance-cost-budget-domain-service.ts');
+    for(const marker of [
+      'COST_CENTER','COST_ALLOCATION_RULE','COST_ALLOCATION_RUN',
+      'BUDGET_ENVELOPE','BUDGET_COMMITMENT'
+    ]) expect(s).toContain(marker);
+    expect(s).toContain('BUDGET_INSUFFICIENT_AVAILABLE');
+    expect(s).toContain('FINANCE_SEGREGATION_OF_DUTIES');
+  });
+
+  test('FIN-8 fixed assets use deterministic straight-line depreciation and journals',async()=>{
+    expect(straightLineMonthlyDepreciationMinorUnits({
+      acquisitionCostMinorUnits:1200,
+      salvageValueMinorUnits:0,
+      usefulLifeMonths:12,
+      monthsDepreciated:0,
+    })).toBe(100);
+    const s=await source('lib/backend/services/finance-fixed-asset-domain-service.ts');
+    expect(s).toContain('FIXED_ASSET');
+    expect(s).toContain('DEPRECIATION_RUN');
+    expect(s).toContain("entityType:'JOURNAL_ENTRY'");
+    expect(s).toContain('FINANCE_PERIOD_NOT_POSTABLE');
+  });
+
+  test('generic period administration cannot bypass governed close/lock',async()=>{
+    const gl=await source('lib/backend/services/finance-gl-domain-service.ts');
+    const schema=await source('lib/backend/commands/command-schema-registry.ts');
+    const start=schema.indexOf('ChangeFinancePeriodStatusCommand');
+    const end=schema.indexOf('ReverseJournalCommand',start);
+    const block=schema.slice(start,end);
+    expect(block).toContain("z.enum(['SOFT_CLOSE','OPEN'])");
+    expect(block).not.toContain("'CLOSED'");
+    expect(block).not.toContain("'LOCKED'");
+    expect(gl).toContain("OPEN: ['SOFT_CLOSE']");
+    expect(gl).toContain("SOFT_CLOSE: ['OPEN']");
+  });
+
+  test('FIN-9 close requires reconciliations and locks period after statements',async()=>{
+    const s=await source('lib/backend/services/finance-close-domain-service.ts');
+    expect(s).toContain('trialBalanceBalanced');
+    expect(s).toContain('inventoryClosed');
+    expect(s).toContain('apReconciled');
+    expect(s).toContain('arReconciled');
+    expect(s).toContain('cashReconciled');
+    expect(s).toContain('calculateArOutstandingAsOf');
+    expect(s).toContain('calculateApOutstandingAsOf');
+    expect(s).toContain('missingInventoryFacilities');
+    expect(s).toContain('unreconciledBankAccountIds');
+    expect(s).toContain('depreciationPosted');
+    expect(s).toContain('FINANCIAL_STATEMENT_SNAPSHOT');
+    expect(s).toContain("status:'LOCKED'");
+  });
+
+  test('FIN-10 tax postings are period-gated and journal-backed',async()=>{
+    const s=await source('lib/backend/services/finance-tax-domain-service.ts');
+    expect(s).toContain('TAX_CODE');
+    expect(s).toContain('TAX_LEDGER_ITEM');
+    expect(s).toContain('TAX_REMITTANCE');
+    expect(s).toContain('TAX_SUMMARY_SNAPSHOT');
+    expect(s).toContain('FINANCE_PERIOD_NOT_POSTABLE');
+    expect(s).toContain("entityType:'JOURNAL_ENTRY'");
+  });
+
+  test('FIN-11 intelligence is deterministic and explanatory',()=>{
+    const anomalies=buildFinanceAnomalies({
+      revenueMinorUnits:100,
+      expenseMinorUnits:150,
+      netIncomeMinorUnits:-50,
+      currentAssetsMinorUnits:100,
+      currentLiabilitiesMinorUnits:200,
+      workingCapitalMinorUnits:-100,
+      budgetAvailableMinorUnits:-10,
+      overdueArMinorUnits:25,
+      overdueApMinorUnits:30,
+      unreconciledBankMinorUnits:5,
+    },false);
+    expect(anomalies.some(a=>a.code==='TRIAL_BALANCE_IMBALANCE')).toBe(true);
+    expect(anomalies.some(a=>a.code==='BUDGET_EXHAUSTED')).toBe(true);
+    expect(anomalies.every(a=>a.explanation.length>10)).toBe(true);
+  });
+
+  test('all Finance commands are routed through governed command bus',async()=>{
+    const bus=await source('lib/backend/commands/command-bus.ts');
+    for(const command of [
+      'CreateFinanceAccountCommand','CreateFinancePeriodCommand','ChangeFinancePeriodStatusCommand',
+      'PostJournalCommand','ReverseJournalCommand','GenerateTrialBalanceCommand',
+      'RecognizePatientInvoiceCommand','AdjustArOpenItemCommand','RecordArReceiptCommand','GenerateArAgingCommand',
+      'RegisterTreasuryAccountCommand','OpenCashShiftCommand','CloseCashShiftCommand','ReviewCashShiftCommand',
+      'TreasuryTransferCommand','PrepareBankReconciliationCommand','ApproveBankReconciliationCommand',
+      'GenerateApAgingCommand','ApplySupplierCreditCommand',
+      'CreateCostCenterCommand','CreateCostAllocationRuleCommand','RunCostAllocationCommand',
+      'CreateBudgetEnvelopeCommand','ApproveBudgetEnvelopeCommand','CommitBudgetCommand',
+      'ReleaseBudgetCommitmentCommand','ConsumeBudgetCommitmentCommand',
+      'CapitalizeFixedAssetCommand','RunDepreciationCommand','TransferFixedAssetCommand','DisposeFixedAssetCommand',
+      'StartFinanceCloseCommand','FinalizeFinanceCloseCommand','LockFinancePeriodCommand',
+      'CreateTaxCodeCommand','RecordSupplierWithholdingCommand','RemitTaxLiabilityCommand','GenerateTaxSummaryCommand',
+      'GenerateFinanceIntelligenceCommand'
+    ]) expect(bus).toContain(`case '${command}'`);
+  });
+
+  test('Finance primary UI cannot bypass governed command authority',async()=>{
+    const coa=await source('app/[tenantId]/erp/chart-of-accounts/page.tsx');
+    const journals=await source('app/[tenantId]/erp/journal-entries/page.tsx');
+    const adapter=await source('lib/finance/finance-edge-adapter.ts');
+    const gl=await source('lib/backend/services/finance-gl-domain-service.ts');
+
+    for(const page of [coa,journals]){
+      expect(page).not.toContain("from '@/lib/firebase/services/erp-finance'");
+      expect(page).not.toContain("|| 'metro-health'");
+      expect(page).not.toContain("|| 'central-metro-hospital'");
+    }
+    expect(coa).toContain('createFinanceAccountEdge');
+    expect(coa).toContain('Opening balances cannot be written onto an account master');
+    expect(journals).toContain('postManualJournalEdge');
+    expect(adapter).toContain("'CreateFinanceAccountCommand'");
+    expect(adapter).toContain("'PostJournalCommand'");
+    expect(adapter).toContain("sourceModule:'MANUAL'");
+    expect(gl).toContain('GENERIC_JOURNAL_SOURCE_MODULE_FORBIDDEN');
+  });
+
+  test('Finance read models are tenant scoped, server-write-only, and available offline where safe',async()=>{
+    const rules=await source('firestore.rules');
+    const hydration=await source('lib/offline/hydration.ts');
+    for(const collection of [
+      'financeTrialBalanceSnapshots','financeRevenueRecognitions','financeArAdjustments',
+      'financeArReceipts','financeArAgingSnapshots','treasuryAccounts','financeBankReconciliations',
+      'financeApAgingSnapshots','financeCostCenters','financeBudgets','financeBudgetCommitments',
+      'financeFixedAssets','financeDepreciationRuns','financeStatementSnapshots',
+      'financeTaxSummarySnapshots','financeIntelligenceSnapshots'
+    ]){
+      const start=rules.indexOf(`match /${collection}/{id}`);
+      expect(start).toBeGreaterThan(-1);
+      expect(rules.slice(start,start+240)).toContain('allow write: if false;');
+    }
+    for(const collection of [
+      'accountingPeriods','financeArAgingSnapshots','treasuryAccounts',
+      'financeBankReconciliations','financeApAgingSnapshots','financeBudgets',
+      'financeFixedAssets','financeStatementSnapshots','financeTaxSummarySnapshots',
+      'financeIntelligenceSnapshots'
+    ]) expect(hydration).toContain(`'${collection}'`);
+  });
+
+  test('finance provisioning is guarded for explicit tenant/project/runtime',async()=>{
+    const s=await source('scripts/ops/finance-provision-controls.ts');
+    expect(s).toContain('GHIMS_FINANCE_PROVISION_TENANT');
+    expect(s).toContain('GHIMS_ALLOW_FINANCE_PROVISION');
+    expect(s).toContain('GHIMS_BOOTSTRAP_CONFIRM_PROJECT');
+    expect(s).toContain('PRODUCTION');
+  });
+});

@@ -26,6 +26,12 @@ export interface Account {
   isSystemLocked?: boolean; // Prevents accidental deletion of core GL accounts
   /** Explicit treasury capability; supplier settlement cannot use arbitrary asset accounts. */
   allowSupplierPayments?: boolean;
+  /** Explicit receipt capability; cash/bank collections cannot use arbitrary asset accounts. */
+  allowCashReceipts?: boolean;
+  /** Manual journals are blocked unless the account explicitly permits them. */
+  allowManualPosting?: boolean;
+  costCenterRequired?: boolean;
+  profitCenterRequired?: boolean;
   parentAccountCode?: string | null;
   tenantId: string;
   createdAt: string;

@@ -174,6 +174,7 @@ function collectionForEntityType(entityType: string): string {
     INPATIENT_ORDER: 'inpatientOrders',
     MEDICATION_ADMINISTRATION: 'medicationAdministrations',
     JOURNAL_ENTRY: 'journalEntries',
+    GL_ACCOUNT: 'accounts',
     EMPLOYEE_MASTER: 'employees',
     EMPLOYEE_CREDENTIAL: 'clinicalCredentials',
     CLINICAL_PRIVILEGE: 'clinicalPrivileges',

@@ -503,7 +503,7 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
       'const getBedNEWS2 = (bed: Bed) =>'
     );
     const resolverEnd = board.indexOf(
-      'const hasHighRecordedNEWS2',
+      'const getBedDeterioration',
       resolverStart
     );
     const resolver = board.slice(resolverStart, resolverEnd);

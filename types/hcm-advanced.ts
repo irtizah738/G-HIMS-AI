@@ -307,6 +307,8 @@ export interface EmployeeCredential {
   documentHash?: string;
   notes?: string;
   isMandatoryForPractice: boolean;
+  submittedByActorId?: string;
+  submittedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -328,6 +330,9 @@ export interface ClinicalPrivilege {
   grantedByName?: string;
   reviewedAt?: string;
   restrictionNotes?: string;
+  statusReason?: string;
+  statusChangedByActorId?: string;
+  statusChangedAt?: string;
   createdAt: string;
   updatedAt: string;
 }

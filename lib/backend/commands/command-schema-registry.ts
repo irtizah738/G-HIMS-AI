@@ -942,7 +942,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       fiscalYear: z.number().int().min(2000).max(2200),
       postingPeriod: z.number().int().min(1).max(12),
       currency: z.string().trim().length(3),
-      assetIds: z.array(nonEmpty).min(1).max(500),
+      assetIds: z.array(nonEmpty).min(1).max(200),
     }).strict(),
   },
   TransferFixedAssetCommand: {
@@ -1019,6 +1019,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       taxCodeId: nonEmpty,
       amountMinorUnits: z.number().int().safe().positive(),
       treasuryAccountCode: nonEmpty.max(20),
+      currency: z.string().trim().length(3),
       postingAt: z.number().finite().positive(),
       reference: nonEmpty.max(200),
     }).strict(),

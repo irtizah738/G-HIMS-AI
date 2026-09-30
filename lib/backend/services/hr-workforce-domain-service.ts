@@ -2071,6 +2071,9 @@ export class HrWorkforceDomainService {
     const attendanceId = `att_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const now = new Date().toISOString();
     const today = now.split('T')[0];
+    const fixtureTenant=String(
+      process.env.GHIMS_HCM_TEST_TENANT || 'central-metro-hospital'
+    ).trim();
 
     const attendance: AttendanceRecord = {
       attendanceId,
@@ -2567,8 +2570,12 @@ export class HrWorkforceDomainService {
     ];
 
     sampleEmployees.forEach((emp) => {
-      this.employees.set(emp.employeeId, emp);
-      this.seedDefaultLeaveBalances(emp.employeeId);
+      const normalized={...emp,tenantId:fixtureTenant};
+      this.employees.set(normalized.employeeId,normalized);
+      TransactionManager.seedEphemeralStateForTesting(
+        fixtureTenant,'EMPLOYEE_MASTER',normalized.employeeId,normalized
+      );
+      this.seedDefaultLeaveBalances(normalized.employeeId);
     });
 
     // Sample Credentials
@@ -2626,7 +2633,12 @@ export class HrWorkforceDomainService {
       },
     ];
 
-    sampleCreds.forEach((c) => this.credentials.set(c.credentialId, c));
+    sampleCreds.forEach((credential) => {
+      this.credentials.set(credential.credentialId,credential);
+      TransactionManager.seedEphemeralStateForTesting(
+        fixtureTenant,'EMPLOYEE_CREDENTIAL',credential.credentialId,credential
+      );
+    });
 
     // Sample Privileges
     const samplePrivs: ClinicalPrivilege[] = [
@@ -2686,7 +2698,12 @@ export class HrWorkforceDomainService {
       },
     ];
 
-    samplePrivs.forEach((p) => this.privileges.set(p.privilegeId, p));
+    samplePrivs.forEach((privilege) => {
+      this.privileges.set(privilege.privilegeId,privilege);
+      TransactionManager.seedEphemeralStateForTesting(
+        fixtureTenant,'CLINICAL_PRIVILEGE',privilege.privilegeId,privilege
+      );
+    });
 
     // Sample Shifts
     const sampleShift: RosterShiftEntry = {
@@ -2710,7 +2727,11 @@ export class HrWorkforceDomainService {
       createdAt: now,
       updatedAt: now,
     };
-    this.shifts.set(sampleShift.rosterId, sampleShift);
+    const normalizedShift={...sampleShift,tenantId:fixtureTenant};
+    this.shifts.set(normalizedShift.rosterId,normalizedShift);
+    TransactionManager.seedEphemeralStateForTesting(
+      fixtureTenant,'ROSTER_SHIFT',normalizedShift.rosterId,normalizedShift
+    );
   }
 
   public static resetForTesting(): void {

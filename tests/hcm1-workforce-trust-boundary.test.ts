@@ -100,6 +100,18 @@ describe('HCM-1 workforce master and trust boundary',()=>{
     expect(lifecycle).not.toContain("offboardingStage:'RESIGNED'");
   });
 
+  test('sample workforce bootstrap is impossible outside explicit test/demo runtime',async()=>{
+    const service=await source('lib/backend/services/hr-workforce-domain-service.ts');
+    expect(service).toContain("runtimeMode==='TEST'");
+    expect(service).toContain("runtimeMode==='DEMO'");
+    expect(service).toContain("process.env.NODE_ENV==='test'");
+    const start=service.indexOf('public static ensureInitialized');
+    const end=service.indexOf('public static resetForTesting',start);
+    const bootstrap=service.slice(start,end);
+    expect(bootstrap).toContain('if(!testRuntime) return;');
+    expect(bootstrap).toContain("tenantId: 'tenant_default'");
+  });
+
   test('workforce UI reads governed edge projection and no longer owns mock employees',async()=>{
     const ui=await source('components/views/hr-management-view.tsx');
     const adapter=await source('lib/hcm/hcm-edge-adapter.ts');

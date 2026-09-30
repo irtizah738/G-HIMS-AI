@@ -1274,6 +1274,33 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
   FinalizePayrollPeriodCommand: {
     1: z.object({periodId: nonEmpty.max(180)}).strict(),
   },
+  ApprovePayrollPeriodCommand: {
+    1: z.object({
+      periodId: nonEmpty.max(180),
+      notes: z.string().trim().max(2000).optional(),
+    }).strict(),
+  },
+  PostPayrollPeriodCommand: {
+    1: z.object({
+      periodId: nonEmpty.max(180),
+    }).strict(),
+  },
+  SettlePayrollPeriodCommand: {
+    1: z.object({
+      periodId: nonEmpty.max(180),
+      treasuryAccountId: nonEmpty.max(180),
+      settlementReference: nonEmpty.max(250),
+      settledAt: nonEmpty,
+    }).strict(),
+  },
+  RemitPayrollLiabilityCommand: {
+    1: z.object({
+      liabilityId: nonEmpty.max(220),
+      treasuryAccountId: nonEmpty.max(180),
+      remittanceReference: nonEmpty.max(250),
+      remittedAt: nonEmpty,
+    }).strict(),
+  },
   SubmitCredentialCommand: {
     1: z.object({
       employeeId: nonEmpty.max(100),

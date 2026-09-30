@@ -640,6 +640,16 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       usedAt: nonEmpty,
     }).strict(),
   },
+  GenerateScmIntelligenceSnapshotCommand: {
+    1: z.object({
+      snapshotId: nonEmpty,
+      facilityId: nonEmpty,
+      asOf: nonEmpty,
+      lookbackDays: z.number().int().min(7).max(3650),
+      expiryHorizonDays: z.number().int().min(1).max(730),
+      currency: z.string().trim().length(3),
+    }).strict(),
+  },
   RecordCashReceiptCommand: {
     1: z.object({
       receiptId: nonEmpty,

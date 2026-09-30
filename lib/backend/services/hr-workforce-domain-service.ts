@@ -469,7 +469,7 @@ export class HrWorkforceDomainService {
             updatedAt:now,
             ...(payload.newStatus==='ACTIVE'?{onboardingStage:'ACTIVE' as const}:{}),
             ...(['TERMINATED','RETIRED'].includes(payload.newStatus)
-              ? {terminationDate:now.slice(0,10),offboardingStage:'RESIGNED' as const}
+              ? {terminationDate:now.slice(0,10)}
               : {}),
           };
           return {
@@ -534,10 +534,17 @@ export class HrWorkforceDomainService {
       assertWorkforceFacilityScope(context,[targetFacilityId]);
       const effectiveMs=Date.parse(`${payload.effectiveDate}T00:00:00.000Z`);
       const hireMs=Date.parse(`${preflight.hireDate}T00:00:00.000Z`);
+      const todayUtc=Date.parse(`${new Date().toISOString().slice(0,10)}T00:00:00.000Z`);
       if(!Number.isFinite(effectiveMs)||effectiveMs<hireMs){
         throw new AtomicMutationRejectedError(
           'INVALID_TRANSFER_EFFECTIVE_DATE',
           'Transfer effective date must be valid and not precede hire date.'
+        );
+      }
+      if(effectiveMs>todayUtc){
+        throw new AtomicMutationRejectedError(
+          'FUTURE_TRANSFER_REQUIRES_SCHEDULING',
+          'Future-dated transfers cannot mutate the current assignment. Use a scheduled workforce action when that capability is enabled.'
         );
       }
       const nextAssignmentId=`asg_${randomUUID()}`;

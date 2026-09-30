@@ -278,6 +278,15 @@ export const remitPayrollLiabilityEdge=(
   idempotencyKey?:string
 )=>run('RemitPayrollLiabilityCommand',payload as unknown as Record<string,unknown>,idempotencyKey);
 
+export const generateHcmIntelligenceEdge=(
+  payload:{snapshotId:string;asOf:string;lookbackDays:number;facilityId?:string},
+  idempotencyKey?:string
+)=>run(
+  'GenerateHcmIntelligenceCommand',
+  payload as unknown as Record<string,unknown>,
+  idempotencyKey
+);
+
 export const submitLeaveRequestEdge=(
   payload:{
     employeeId:string;

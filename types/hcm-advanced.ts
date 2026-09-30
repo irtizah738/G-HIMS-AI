@@ -475,6 +475,19 @@ export interface RosterShiftEntry {
   updatedAt: string;
 }
 
+export interface RosterSwapRecord {
+  swapId: string;
+  tenantId: string;
+  shiftAId: string;
+  shiftBId: string;
+  employeeAId: string;
+  employeeBId: string;
+  reason: string;
+  executedBy: string;
+  executedAt: string;
+  status: 'COMPLETED';
+}
+
 // ============================================================================
 // 6. ATTENDANCE, TIME TRACKING & CORRECTIONS
 // ============================================================================

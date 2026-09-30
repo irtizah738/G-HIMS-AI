@@ -283,6 +283,8 @@ describe('SCM-4 receive-to-pay financial integrity', () => {
     expect(paymentMethod).toContain('INVALID_PAYMENT_SETTLEMENT_DATE');
     expect(paymentMethod).toContain('sourceAccount.category');
     expect(paymentMethod).toContain('sourceAccount.normalBalance');
+    expect(paymentMethod).toContain('sourceAccount.allowSupplierPayments');
+    expect(paymentMethod).toContain('sourceAccount.currency');
   });
 
   test('SCM-4 financial control accounts are explicit and tenant-scoped for existing deployments', async () => {
@@ -300,6 +302,9 @@ describe('SCM-4 receive-to-pay financial integrity', () => {
     expect(provisioner).toContain('GHIMS_BOOTSTRAP_CONFIRM_PROJECT');
     expect(provisioner).toContain('GHIMS_ALLOW_PRODUCTION_SCM4_FINANCE_PROVISION');
     expect(provisioner).toContain('SCM4_COA_DUPLICATE_CODE');
+    expect(provisioner).toContain("code: '1010'");
+    expect(provisioner).toContain('allowSupplierPayments: true');
+    expect(coa).toContain('allowSupplierPayments: true');
     expect(pkg).toContain('"ops:scm4:provision-finance"');
   });
 

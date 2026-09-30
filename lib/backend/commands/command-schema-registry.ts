@@ -64,6 +64,25 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       dischargeSummaryEvidenceId: z.string().trim().min(1).optional(),
     }).strict(),
   },
+  SubmitPurchaseRequisitionCommand: {
+    1: z.object({
+      requisitionId: nonEmpty,
+      requisitionNumber: nonEmpty,
+      facilityId: nonEmpty,
+      requestingDepartment: nonEmpty,
+      requestingLocationId: nonEmpty,
+      priority: z.enum(['EMERGENCY', 'URGENT', 'NORMAL', 'PLANNED']),
+      items: z.array(z.object({
+        itemId: nonEmpty,
+        requestedQuantity: z.number().finite().positive(),
+        justification: z.string().optional(),
+      }).passthrough()).min(1).max(500),
+      justification: z.string().trim().min(1).max(4000),
+      requiredByDate: nonEmpty,
+      currency: z.string().trim().length(3),
+      clinicalCriticality: z.enum(['VITAL', 'ESSENTIAL', 'DESIRABLE']),
+    }).passthrough(),
+  },
   RecordStockTransactionCommand: {
     1: z.object({
       transactionId: nonEmpty,

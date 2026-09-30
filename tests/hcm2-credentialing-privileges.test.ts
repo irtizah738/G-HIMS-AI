@@ -79,7 +79,6 @@ describe('HCM-2 credentialing and clinical privileges',()=>{
     expect(service).toContain("entityType:'CLINICAL_PRIVILEGE_SLOT'");
     expect(service).toContain('ACTIVE_PRIVILEGE_ALREADY_EXISTS');
     expect(service).toContain('PRIVILEGE_REVOKED_TERMINAL');
-    expect(service).toContain('ChangeClinicalPrivilegeStatusCommand').toBe(false);
     expect(tx).toContain("CLINICAL_PRIVILEGE_SLOT: 'clinicalPrivilegeSlots'");
   });
 

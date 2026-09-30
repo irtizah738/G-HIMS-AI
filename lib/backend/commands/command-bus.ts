@@ -332,6 +332,12 @@ export class CommandBus {
           );
           break;
 
+        case 'GeneratePayrollComplianceSnapshotCommand':
+          result = await HcmPayrollDomainService.generatePayrollComplianceSnapshot(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
         case 'RecordVitalsCommand':
           result = await ClinicalDocumentationDomainService.recordVitals(
             context,

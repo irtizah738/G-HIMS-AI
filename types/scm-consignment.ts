@@ -92,5 +92,26 @@ export interface ConsignmentUsageRecord
   recordedBy: string;
   recordedAt: string;
   accrualJournalId: string;
-  status: 'ACCRUED_AWAITING_SUPPLIER_INVOICE';
+  status:
+    | 'ACCRUED_AWAITING_SUPPLIER_INVOICE'
+    | 'INVOICE_CAPTURED_PENDING_APPROVAL'
+    | 'INVOICED_PAYABLE_RECOGNIZED';
+  supplierInvoiceId?: string;
+}
+
+export interface CaptureConsignmentSupplierInvoicePayload {
+  facilityId: string;
+  supplierId: string;
+  agreementId: string;
+  invoiceNumber: string;
+  usageIds: string[];
+  issueDate: string;
+  dueDate: string;
+  currency: string;
+}
+
+export interface ReviewConsignmentSupplierInvoicePayload {
+  invoiceId: string;
+  decision: 'APPROVE' | 'REJECT';
+  notes: string;
 }

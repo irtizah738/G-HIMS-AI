@@ -66,6 +66,7 @@ import { MRNQuickLookup } from '@/components/inpatient/MRNQuickLookup';
 import { executeActiveTenantCommand } from '@/lib/api/command-client';
 import { loadActiveDeteriorationCensus } from '@/lib/clinical/intelligence/clinical-deterioration-client';
 import type { DeteriorationProjection } from '@/types/clinical-deterioration';
+import { loadPatient360ClinicalView } from '@/lib/clinical/patient360/patient360-client';
 
 const IS_DEMO_RUNTIME = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
 
@@ -480,9 +481,11 @@ export default function InpatientBedBoardPage() {
     setDischargeModalOpen(true);
   };
 
-  // Bed Board never releases census directly. It creates the signed summary
-  // then submits the governed encounter discharge; the server re-checks all CI-7
-  // safety evidence regardless of UI review prompts.
+  // Bed Board never releases census directly.
+  // Discharge is deliberately two-phase:
+  //   1) prepare/sign discharge evidence;
+  //   2) allow Patient 360 -> CI-7 to project that event and require explicit
+  //      clinician acknowledgement before the final governed command.
   const handleConfirmDischargeModal = async (formData: {
     dischargedBy: string;
     disposition: string;
@@ -503,26 +506,62 @@ export default function InpatientBedBoardPage() {
       setIsSubmitting(true);
       setErrorMsg(null);
 
-      const summary = await executeActiveTenantCommand<Record<string, unknown>>(
-        'SignClinicalNoteCommand',
-        {
-          encounterId: selectedBed.currentEncounterId,
-          patientId: selectedBed.currentPatientId,
-          category: 'DISCHARGE',
-          content: formData.notes,
-        }
+      const patient360 = await loadPatient360ClinicalView(
+        tenantId,
+        selectedBed.currentPatientId
       );
-      if (!summary.success) {
-        throw new Error(summary.error?.message || 'Discharge summary signing failed.');
+      if (patient360.source !== 'SERVER') {
+        throw new Error(
+          'ONLINE_PATIENT360_REQUIRED: final inpatient discharge requires the current authoritative Patient 360 and CI-7 assessment.'
+        );
       }
 
-      const dischargeSummaryEvidenceId = String(
-        summary.entityId ||
-          (summary.data as Record<string, unknown> | undefined)?.evidenceId ||
-          ''
-      );
-      if (!dischargeSummaryEvidenceId) {
-        throw new Error('SIGNED_DISCHARGE_SUMMARY_ID_MISSING');
+      const readiness = patient360.dischargeReadiness;
+      const needsSummary =
+        !readiness ||
+        readiness.blockers.some(
+          (finding) => finding.code === 'DISCHARGE_SUMMARY_REQUIRED'
+        );
+
+      if (needsSummary) {
+        const summary = await executeActiveTenantCommand<Record<string, unknown>>(
+          'SignClinicalNoteCommand',
+          {
+            encounterId: selectedBed.currentEncounterId,
+            patientId: selectedBed.currentPatientId,
+            category: 'DISCHARGE',
+            content: formData.notes,
+          },
+          {
+            idempotencyKey:
+              `ipd-discharge-summary:${selectedBed.currentEncounterId}:${formData.notes.length}`,
+          }
+        );
+        if (!summary.success) {
+          throw new Error(
+            summary.error?.message || 'Discharge summary signing failed.'
+          );
+        }
+
+        setSuccessMsg(
+          'Discharge summary signed as an immutable clinical event. CI-7 must now rebuild from Patient 360 and be acknowledged by the clinician before the final discharge command.'
+        );
+        setDischargeModalOpen(false);
+        setSelectedBed(null);
+        window.location.assign(
+          `/${encodeURIComponent(tenantId)}/patients/${encodeURIComponent(
+            patient360.patientId
+          )}/360`
+        );
+        return;
+      }
+
+      if (readiness.blockers.length > 0) {
+        throw new Error(
+          `CI-7_BLOCKED: ${readiness.blockers
+            .map((finding) => finding.title)
+            .join('; ')}`
+        );
       }
 
       const discharge = await executeActiveTenantCommand<Record<string, unknown>>(
@@ -531,21 +570,22 @@ export default function InpatientBedBoardPage() {
           encounterId: selectedBed.currentEncounterId,
           bedId: selectedBed.id,
           disposition: formData.disposition,
-          dischargeSummaryEvidenceId,
           followUpInstructions: formData.followUpInstructions,
           notes: formData.notes,
         },
         {
           idempotencyKey:
-            `ipd-discharge:${selectedBed.currentEncounterId}:${dischargeSummaryEvidenceId}`,
+            `ipd-discharge:${selectedBed.currentEncounterId}:${readiness.evaluationId}`,
         }
       );
       if (!discharge.success) {
-        throw new Error(discharge.error?.message || 'Governed inpatient discharge failed.');
+        throw new Error(
+          discharge.error?.message || 'Governed inpatient discharge failed.'
+        );
       }
 
       setSuccessMsg(
-        `Patient ${selectedBed.patientName || selectedBed.currentPatientId} discharged through the governed encounter workflow. Bed ${selectedBed.bedNumber} is now queued for cleaning.`
+        `Patient ${selectedBed.patientName || selectedBed.currentPatientId} discharged after current Patient 360 / CI-7 review. Bed ${selectedBed.bedNumber} is now queued for cleaning.`
       );
       setDischargeModalOpen(false);
       setSelectedBed(null);
@@ -555,6 +595,7 @@ export default function InpatientBedBoardPage() {
       setIsSubmitting(false);
     }
   };
+
 
   const updateOperationalBedStatus = async (
     bed: Bed,

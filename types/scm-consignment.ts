@@ -61,6 +61,8 @@ export interface ConsignmentLotRecord
   quantityAvailable: number;
   quantityConsumed: number;
   status: 'AVAILABLE' | 'DEPLETED' | 'SUSPENDED';
+  serialNumbersConsumed: string[];
+  udisConsumed: string[];
   receivedBy: string;
   createdAt: string;
 }

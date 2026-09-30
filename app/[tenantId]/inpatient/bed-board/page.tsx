@@ -64,6 +64,8 @@ import { OfflineActivityStreamDrawer } from '@/components/offline/OfflineActivit
 import { DischargeConfirmationModal } from '@/components/inpatient/DischargeConfirmationModal';
 import { MRNQuickLookup } from '@/components/inpatient/MRNQuickLookup';
 import { executeActiveTenantCommand } from '@/lib/api/command-client';
+import { loadActiveDeteriorationCensus } from '@/lib/clinical/intelligence/clinical-deterioration-client';
+import type { DeteriorationProjection } from '@/types/clinical-deterioration';
 
 const IS_DEMO_RUNTIME = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
 
@@ -85,6 +87,12 @@ export default function InpatientBedBoardPage() {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [deteriorationByEncounter, setDeteriorationByEncounter] = useState<
+    Record<string, DeteriorationProjection>
+  >({});
+  const [deteriorationSource, setDeteriorationSource] = useState<
+    'SERVER' | 'LOCAL_EDGE' | 'UNAVAILABLE'
+  >('UNAVAILABLE');
 
   // Filters & View State
   const [selectedWardId, setSelectedWardId] = useState<string>('all');
@@ -172,6 +180,45 @@ export default function InpatientBedBoardPage() {
     };
   }, [tenantId]);
 
+  // Clinical escalation on the Bed Board is a projection of CI-8, never a
+  // local re-classification of bed metadata or a duplicated NEWS2 rule.
+  useEffect(() => {
+    let cancelled = false;
+
+    const refreshDeterioration = async () => {
+      try {
+        const census = await loadActiveDeteriorationCensus(tenantId);
+        if (cancelled) return;
+        const next: Record<string, DeteriorationProjection> = {};
+        for (const projection of census.projections) {
+          next[projection.encounterId] = projection;
+        }
+        setDeteriorationByEncounter(next);
+        setDeteriorationSource(census.source);
+      } catch {
+        if (!cancelled) {
+          setDeteriorationByEncounter({});
+          setDeteriorationSource('UNAVAILABLE');
+        }
+      }
+    };
+
+    void refreshDeterioration();
+    const interval = window.setInterval(() => {
+      void refreshDeterioration();
+    }, 30_000);
+    const onSync = () => {
+      void refreshDeterioration();
+    };
+    window.addEventListener('ghims:edge-sync-complete', onSync);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('ghims:edge-sync-complete', onSync);
+    };
+  }, [tenantId]);
+
   // Notifications timeout
   useEffect(() => {
     if (successMsg) {
@@ -194,14 +241,25 @@ export default function InpatientBedBoardPage() {
     return { score: null, riskLevel: null };
   };
 
-  const hasHighRecordedNEWS2 = (bed: Bed): boolean => {
-    const score = getBedNEWS2(bed).score;
-    return bed.status === 'occupied' && typeof score === 'number' && score >= 5;
+  const getBedDeterioration = (
+    bed: Bed
+  ): DeteriorationProjection | null => {
+    const encounterId = String(bed.currentEncounterId || '').trim();
+    return encounterId ? deteriorationByEncounter[encounterId] || null : null;
   };
 
-  const criticalNEWS2Beds = useMemo(
-    () => beds.filter(hasHighRecordedNEWS2),
-    [beds]
+  const hasCi8Escalation = (bed: Bed): boolean => {
+    const state = getBedDeterioration(bed)?.state;
+    return (
+      bed.status === 'occupied' &&
+      (state === 'ESCALATION_REQUIRED' ||
+        state === 'CRITICAL_REVIEW_REQUIRED')
+    );
+  };
+
+  const escalationBeds = useMemo(
+    () => beds.filter(hasCi8Escalation),
+    [beds, deteriorationByEncounter]
   );
 
   // Statistics Calculations
@@ -213,7 +271,7 @@ export default function InpatientBedBoardPage() {
     const maintenance = beds.filter((b) => b.status === 'maintenance').length;
     const reserved = beds.filter((b) => b.status === 'reserved').length;
     const occupancyRate = total > 0 ? Math.round((occupied / total) * 100) : 0;
-    const criticalAlerts = beds.filter(hasHighRecordedNEWS2).length;
+    const criticalAlerts = beds.filter(hasCi8Escalation).length;
 
     return {
       total,
@@ -225,7 +283,7 @@ export default function InpatientBedBoardPage() {
       occupancyRate,
       criticalAlerts,
     };
-  }, [beds]);
+  }, [beds, deteriorationByEncounter]);
 
   // Filtered beds
   const filteredBeds = useMemo(() => {
@@ -233,7 +291,7 @@ export default function InpatientBedBoardPage() {
       if (selectedWardId !== 'all' && bed.wardId !== selectedWardId) return false;
       if (selectedStatus !== 'all' && bed.status !== selectedStatus) return false;
       if (selectedClass !== 'all' && bed.class !== selectedClass) return false;
-      if (filterCriticalOnly && !hasHighRecordedNEWS2(bed)) return false;
+      if (filterCriticalOnly && !hasCi8Escalation(bed)) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchBed = bed.bedNumber.toLowerCase().includes(q) || bed.roomNumber.toLowerCase().includes(q);
@@ -246,7 +304,7 @@ export default function InpatientBedBoardPage() {
       }
       return true;
     });
-  }, [beds, selectedWardId, selectedStatus, selectedClass, searchQuery, filterCriticalOnly]);
+  }, [beds, selectedWardId, selectedStatus, selectedClass, searchQuery, filterCriticalOnly, deteriorationByEncounter]);
 
   // Group beds by ward
   const bedsByWard = useMemo(() => {
@@ -727,8 +785,8 @@ export default function InpatientBedBoardPage() {
             </div>
           </div>
 
-          {/* Real-Time NEWS2 Deterioration Alert Banner */}
-          {criticalNEWS2Beds.length > 0 && (
+          {/* Authoritative CI-8 Deterioration Intelligence Banner */}
+          {escalationBeds.length > 0 && (
             <div className="mt-4 rounded-xl border border-rose-300 bg-rose-500/10 p-4 backdrop-blur-xs dark:border-rose-800 dark:bg-rose-950/40 animate-in fade-in">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-start sm:items-center gap-3">
@@ -738,16 +796,21 @@ export default function InpatientBedBoardPage() {
                   <div>
                     <div className="flex items-center gap-2">
                       <h3 className="text-sm font-bold text-rose-950 dark:text-rose-100">
-                        Critical NEWS2 Acuity Alert Active ({criticalNEWS2Beds.length} High-Risk Patient{criticalNEWS2Beds.length > 1 ? 's' : ''} with NEWS2 ≥ 5)
+                        CI-8 Clinical Escalation Review ({escalationBeds.length} Patient{escalationBeds.length > 1 ? 's' : ''})
                       </h3>
                       <span className="inline-flex items-center rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-extrabold text-white animate-pulse">
-                        PULSING BEDS
+                        PATIENT 360 · CI-8
                       </span>
                     </div>
                     <p className="mt-0.5 text-xs text-rose-800 dark:text-rose-300">
-                      Immediate clinical escalation and vitals review required for:{' '}
+                      Current Patient 360 intelligence requires clinical review for:{' '}
                       <span className="font-semibold">
-                        {criticalNEWS2Beds.map((b) => `Bed ${b.bedNumber} (${b.patientName || 'Patient'}, NEWS2: ${getBedNEWS2(b).score})`).join(' • ')}
+                        {escalationBeds
+                          .map((b) => {
+                            const ci8 = getBedDeterioration(b);
+                            return `Bed ${b.bedNumber} (${b.patientName || 'Patient'}, ${ci8?.state || 'review required'})`;
+                          })
+                          .join(' • ')}
                       </span>
                     </p>
                   </div>
@@ -764,14 +827,22 @@ export default function InpatientBedBoardPage() {
                     }`}
                   >
                     <Filter className="h-3.5 w-3.5" />
-                    <span>{filterCriticalOnly ? 'Show All Hospital Beds' : `Filter ${criticalNEWS2Beds.length} Critical Bed${criticalNEWS2Beds.length > 1 ? 's' : ''}`}</span>
+                    <span>{filterCriticalOnly ? 'Show All Hospital Beds' : `Filter ${escalationBeds.length} CI-8 Alert${escalationBeds.length > 1 ? 's' : ''}`}</span>
                   </button>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Success / Error Notification Banners */}
+          {deteriorationSource !== 'SERVER' && (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+              {deteriorationSource === 'LOCAL_EDGE'
+                ? 'CI-8 escalation indicators are from the last encrypted offline Patient 360 snapshot and may be stale until synchronization completes.'
+                : 'CI-8 escalation intelligence is currently unavailable. The Bed Board will not infer escalation from raw bed or NEWS2 metadata.'}
+            </div>
+          )}
+
+                    {/* Success / Error Notification Banners */}
           {successMsg && (
             <div className="mt-4 flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
               <div className="flex items-center gap-2">
@@ -1182,13 +1253,14 @@ export default function InpatientBedBoardPage() {
                               : {
                                   bg: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
                                 };
-                          const isHighNEWS2Acuity = hasHighRecordedNEWS2(bed);
+                          const hasCi8Alert = hasCi8Escalation(bed);
+                          const ci8 = getBedDeterioration(bed);
 
                           return (
                             <div
                               key={bed.id}
                               className={`relative flex flex-col justify-between rounded-xl border p-4 shadow-2xs transition-all hover:shadow-md ${
-                                isHighNEWS2Acuity
+                                hasCi8Alert
                                   ? 'border-rose-400 bg-rose-50/30 dark:border-rose-600 dark:bg-rose-950/20 ring-2 ring-rose-500 shadow-md shadow-rose-200/50 dark:shadow-rose-950/50 animate-pulse'
                                   : bed.status === 'occupied'
                                   ? 'border-rose-200 bg-rose-50/15 dark:border-rose-900/40 dark:bg-rose-950/10'
@@ -1202,14 +1274,14 @@ export default function InpatientBedBoardPage() {
                               }`}
                             >
                               {/* NEWS2 >= 5 High Acuity Emergency Alert Pulsing Header */}
-                              {isHighNEWS2Acuity && (
+                              {hasCi8Alert && (
                                 <div className="mb-2.5 flex items-center justify-between rounded-lg bg-rose-600 px-2.5 py-1 text-white shadow-xs animate-pulse">
                                   <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide">
                                     <HeartPulse className="h-3.5 w-3.5 animate-bounce" />
-                                    <span>NEWS2: {news.score} • IMMEDIATE ATTENTION</span>
+                                    <span>{ci8?.state || 'CI-8 REVIEW REQUIRED'}</span>
                                   </div>
                                   <span className="rounded bg-rose-800/80 px-1.5 py-0.2 text-[9px] font-extrabold uppercase">
-                                    {news.riskLevel || 'Not recorded'}
+                                    CI-8
                                   </span>
                                 </div>
                               )}
@@ -1461,20 +1533,21 @@ export default function InpatientBedBoardPage() {
                                   bg: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
                                 };
 
-                    const isCriticalNEWS2 = hasHighRecordedNEWS2(b);
+                    const hasCi8Alert = hasCi8Escalation(b);
+                    const ci8 = getBedDeterioration(b);
 
                     return (
                       <tr
                         key={b.id}
                         className={`transition-colors ${
-                          isCriticalNEWS2
+                          hasCi8Alert
                             ? 'bg-rose-50/70 dark:bg-rose-950/40 ring-1 ring-inset ring-rose-400 font-medium'
                             : 'hover:bg-slate-50/80 dark:hover:bg-slate-850'
                         }`}
                       >
                         <td className="px-4 py-3 font-mono font-bold text-slate-900 dark:text-white">
                           <div className="flex items-center gap-1.5">
-                            {isCriticalNEWS2 && <HeartPulse className="h-3.5 w-3.5 text-rose-600 animate-pulse shrink-0" />}
+                            {hasCi8Alert && <HeartPulse className="h-3.5 w-3.5 text-rose-600 animate-pulse shrink-0" />}
                             <span>{b.bedNumber}</span>
                           </div>
                         </td>

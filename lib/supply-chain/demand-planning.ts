@@ -109,8 +109,7 @@ export function calculateDemandPlanLine(
       : Number.POSITIVE_INFINITY;
   const urgency: ReplenishmentPlanLine['urgency'] =
     input.policy.criticality === 'VITAL' &&
-    recommendedQuantity > 0 &&
-    daysCover <= input.policy.leadTimeDays
+    recommendedQuantity > 0
       ? 'CRITICAL'
       : recommendedQuantity > 0 && daysCover <= input.policy.leadTimeDays
         ? 'HIGH'

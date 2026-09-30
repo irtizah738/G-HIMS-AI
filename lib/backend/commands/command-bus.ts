@@ -509,6 +509,9 @@ export class CommandBus {
         case 'AdjustArOpenItemCommand':
           result = await FinanceArRevenueDomainService.adjustOpenItem(context, command.commandId, command.idempotencyKey, command.payload as any);
           break;
+        case 'RecordArReceiptCommand':
+          result = await FinanceArRevenueDomainService.recordArReceipt(context, command.commandId, command.idempotencyKey, command.payload as any);
+          break;
         case 'GenerateArAgingCommand':
           result = await FinanceArRevenueDomainService.generateAging(context, command.commandId, command.idempotencyKey, command.payload as any);
           break;

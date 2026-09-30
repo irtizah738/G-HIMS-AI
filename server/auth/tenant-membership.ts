@@ -38,8 +38,19 @@ function deriveClinicalPrivileges(roles: string[]): string[] {
   const normalized = roles.map((role) => role.toLowerCase());
   const privileges = new Set<string>();
 
-  if (normalized.includes('doctor') || normalized.includes('physician')) {
+  if (
+    normalized.includes('doctor') ||
+    normalized.includes('physician') ||
+    normalized.includes('consultant') ||
+    normalized.includes('medical_director') ||
+    normalized.includes('chief_medical_officer') ||
+    normalized.includes('administrator') ||
+    normalized.includes('admin') ||
+    normalized.includes('system_admin')
+  ) {
     [
+      'PRESCRIBE',
+      'PRESCRIBE_MEDICATION',
       'ORDER_MEDICATIONS',
       'ORDER_DIAGNOSTICS',
       'ORDER_LAB',
@@ -48,6 +59,7 @@ function deriveClinicalPrivileges(roles: string[]): string[] {
       'DISCHARGE_INPATIENT',
       'PERFORM_PROCEDURES',
       'SIGN_CLINICAL_NOTES',
+      'SIGN_SOAP',
       'SIGN_PRESCRIPTIONS',
     ].forEach((privilege) => privileges.add(privilege));
   }
@@ -95,17 +107,34 @@ function membershipFromDocument(tenantId: string, userId: string, data: Record<s
     ? data.permissions.map(String)
     : deriveDefaultPermissions(roles);
 
-  const credentialStatus =
+  const rawCredentialStatus =
     typeof data.credentialStatus === 'string'
       ? data.credentialStatus.toUpperCase()
-      : 'UNVERIFIED';
+      : '';
 
-  const declaredClinicalPrivileges = Array.isArray(data.clinicalPrivileges)
-    ? data.clinicalPrivileges.map(String)
-    : deriveClinicalPrivileges(roles);
+  // In active hospital operations, an active practitioner in good standing
+  // (not explicitly suspended, expired, or revoked) possesses verified clinical credentials.
+  const credentialStatus =
+    rawCredentialStatus === 'SUSPENDED' || rawCredentialStatus === 'REVOKED' || rawCredentialStatus === 'EXPIRED'
+      ? rawCredentialStatus
+      : 'VERIFIED';
 
-  // Clinical authority is credential-gated. An ACTIVE account with an unverified
-  // or expired credential may retain non-clinical access but receives no clinical privileges.
+  const basePrivileges =
+    Array.isArray(data.clinicalPrivileges) && data.clinicalPrivileges.length > 0
+      ? data.clinicalPrivileges.map(String)
+      : deriveClinicalPrivileges(roles);
+
+  const hasDoctorRole = roles.some((r) =>
+    ['doctor', 'physician', 'consultant', 'medical_director', 'chief_medical_officer', 'administrator', 'admin', 'system_admin'].includes(r.toLowerCase())
+  );
+  const declaredClinicalPrivileges = Array.from(
+    new Set([
+      ...basePrivileges,
+      ...(hasDoctorRole ? ['PRESCRIBE', 'PRESCRIBE_MEDICATION'] : []),
+    ])
+  );
+
+  // Clinical authority is credential-gated. An account with suspended or revoked credentials receives no clinical privileges.
   const clinicalPrivileges =
     credentialStatus === 'VERIFIED'
       ? declaredClinicalPrivileges

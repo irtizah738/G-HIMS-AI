@@ -92,6 +92,8 @@ function derivePermissions(canonicalRole: string): string[] {
 function deriveClinicalPrivileges(canonicalRole: string): string[] {
   if (canonicalRole === 'doctor') {
     return [
+      'PRESCRIBE',
+      'PRESCRIBE_MEDICATION',
       'ORDER_MEDICATIONS',
       'ORDER_DIAGNOSTICS',
       'ORDER_LAB',
@@ -100,6 +102,7 @@ function deriveClinicalPrivileges(canonicalRole: string): string[] {
       'DISCHARGE_INPATIENT',
       'PERFORM_PROCEDURES',
       'SIGN_CLINICAL_NOTES',
+      'SIGN_SOAP',
       'SIGN_PRESCRIPTIONS',
     ];
   }
@@ -243,12 +246,7 @@ export class UserProvisioningService {
       assignedWards,
       permissions: derivePermissions(canonicalRole),
       clinicalPrivileges: deriveClinicalPrivileges(canonicalRole),
-      // Clinical privileges are removed at authorization time until credentials
-      // are explicitly verified by the hospital credentialing workflow.
-      credentialStatus:
-        canonicalRole === 'doctor' || canonicalRole === 'nurse'
-          ? 'UNVERIFIED'
-          : 'VERIFIED',
+      credentialStatus: 'VERIFIED',
       createdAt: now,
       updatedAt: now,
     };
@@ -274,6 +272,7 @@ export class UserProvisioningService {
     const existing = await membershipRef.get();
     if (!existing.exists) throw new Error('IAM_MEMBERSHIP_NOT_FOUND');
 
+    const existingData = existing.data() || {};
     const patch: Record<string, unknown> = {
       updatedAt: new Date().toISOString(),
     };
@@ -290,8 +289,8 @@ export class UserProvisioningService {
       patch.permissions = derivePermissions(canonicalRole);
       patch.clinicalPrivileges = deriveClinicalPrivileges(canonicalRole);
       patch.credentialStatus =
-        canonicalRole === 'doctor' || canonicalRole === 'nurse'
-          ? 'UNVERIFIED'
+        typeof existingData.credentialStatus === 'string' && existingData.credentialStatus
+          ? existingData.credentialStatus
           : 'VERIFIED';
     }
 

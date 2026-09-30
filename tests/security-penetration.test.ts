@@ -8,8 +8,8 @@ import { CommandBus } from '../lib/backend/commands/command-bus';
 import { CommandContext, BaseCommand } from '../lib/backend/types';
 
 describe('G-HIMS Security Penetration & Zero-Trust Engine', () => {
-  const legitTenant = 'tenant_metro_general';
-  const attackerTenant = 'tenant_malicious_attacker';
+  const legitTenant = `tenant_${crypto.randomUUID().slice(0, 8)}`;
+  const attackerTenant = `attacker_${crypto.randomUUID().slice(0, 8)}`;
 
   const legitimateDoctorContext: CommandContext = {
     actorId: 'doc_101',

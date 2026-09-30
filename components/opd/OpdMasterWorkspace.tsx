@@ -927,52 +927,57 @@ export function OpdMasterWorkspace() {
 
   // HANDLER: Add Prescription Item through credential-gated prescribing.
   const handleAddPrescription = async (item: PharmacyPrescriptionItem) => {
-    const result = await executeActiveTenantCommand<Record<string, unknown>>(
-      'PrescribeMedicationCommand',
-      {
-        encounterId: activeEncounter.id,
-        patientId: activeEncounter.patientId,
-        drugCode: item.medicationCode || item.id,
-        drugName: item.drugName,
-        dosage: item.dosage,
-        route: item.route,
-        frequency: item.frequency,
-        durationDays: item.durationDays,
-        quantityPrescribed: item.quantity || item.quantityPrescribed,
-        unitOfMeasure: item.formulation || 'UNIT',
-        unitPriceMinorUnits: item.unitPriceMinorUnits,
-        inventoryItemId: item.medicationCode || item.id,
-        instructions: item.instructions || item.specialInstructions,
-      },
-      {
-        idempotencyKey: `opd-rx:${activeEncounter.id}:${item.id}`,
-        offlineQueue: {
-          enabled: true,
-          collection: 'prescriptions',
-          resourceId: item.id,
-          action: 'CREATE',
-          optimisticCache: true,
+    try {
+      const result = await executeActiveTenantCommand<Record<string, unknown>>(
+        'PrescribeMedicationCommand',
+        {
+          encounterId: activeEncounter.id,
+          patientId: activeEncounter.patientId,
+          drugCode: item.medicationCode || item.id,
+          drugName: item.drugName,
+          dosage: item.dosage,
+          route: item.route,
+          frequency: item.frequency,
+          durationDays: item.durationDays,
+          quantityPrescribed: item.quantity || item.quantityPrescribed,
+          unitOfMeasure: item.formulation || 'UNIT',
+          unitPriceMinorUnits: item.unitPriceMinorUnits,
+          inventoryItemId: item.medicationCode || item.id,
+          instructions: item.instructions || item.specialInstructions,
         },
+        {
+          idempotencyKey: `opd-rx:${activeEncounter.id}:${item.id}`,
+          offlineQueue: {
+            enabled: true,
+            collection: 'prescriptions',
+            resourceId: item.id,
+            action: 'CREATE',
+            optimisticCache: true,
+          },
+        }
+      );
+      if (!result.success) {
+        throw new Error(result.error?.message || 'Prescription failed.');
       }
-    );
-    if (!result.success) {
-      throw new Error(result.error?.message || 'Prescription failed.');
-    }
 
-    const governedPrescription: PharmacyPrescriptionItem = {
-      ...item,
-      id: result.entityId || item.id,
-      encounterId: activeEncounter.id,
-      status: 'PRESCRIBED',
-    };
-    setEncounters((prev) =>
-      prev.map((e) =>
-        e.id === activeEncounter.id
-          ? { ...e, prescriptions: [...e.prescriptions, governedPrescription] }
-          : e
-      )
-    );
-    recordEvent('PRESCRIPTION_ISSUED', `Prescription ${governedPrescription.id} committed.`, governedPrescription);
+      const governedPrescription: PharmacyPrescriptionItem = {
+        ...item,
+        id: result.entityId || item.id,
+        encounterId: activeEncounter.id,
+        status: 'PRESCRIBED',
+      };
+      setEncounters((prev) =>
+        prev.map((e) =>
+          e.id === activeEncounter.id
+            ? { ...e, prescriptions: [...e.prescriptions, governedPrescription] }
+            : e
+        )
+      );
+      recordEvent('PRESCRIPTION_ISSUED', `Prescription ${governedPrescription.id} committed.`, governedPrescription);
+    } catch (rxError) {
+      console.warn('[OpdMasterWorkspace] PrescribeMedication error handled:', rxError);
+      throw rxError;
+    }
   };
 
   // HANDLER: Dispense Prescription through the pharmacy domain.

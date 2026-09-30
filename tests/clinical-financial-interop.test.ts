@@ -12,7 +12,7 @@ import { RadioIntercomAdapter } from '../lib/interop/radio-intercom-adapter';
 import { ReconciliationDomainService } from '../lib/backend/services/reconciliation-domain-service';
 
 describe('G-HIMS Clinical Safety, Financial & Interoperability Engine', () => {
-  const tenantId = 'tenant_memorial_hospital';
+  const tenantId = `tenant_${crypto.randomUUID().slice(0, 8)}`;
 
   const doctorContext: CommandContext = {
     actorId: 'doc_sarah_connor',

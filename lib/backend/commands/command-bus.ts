@@ -58,6 +58,46 @@ export class CommandBus {
       });
     };
 
+    // Zero-Trust Perimeter Validation: Tenant Isolation & Actor Authenticity (§2 Architectural Non-Negotiables)
+    if (!context.tenantId || context.tenantId.trim() === '' || !command.tenantId || command.tenantId.trim() === '') {
+      emit('REJECTED', 'TENANT_ISOLATION_ERROR');
+      return {
+        success: false,
+        commandId: command.commandId,
+        idempotencyKey: command.idempotencyKey,
+        error: {
+          code: 'TENANT_ISOLATION_ERROR',
+          message: 'Command context is missing an authenticated tenant identifier.',
+        },
+      };
+    }
+
+    if (context.tenantId.trim() !== command.tenantId.trim()) {
+      emit('REJECTED', 'TENANT_MISMATCH');
+      return {
+        success: false,
+        commandId: command.commandId,
+        idempotencyKey: command.idempotencyKey,
+        error: {
+          code: 'TENANT_MISMATCH',
+          message: 'Cross-tenant mutation strictly blocked.',
+        },
+      };
+    }
+
+    if (!context.actorId || context.actorId.trim() === '') {
+      emit('REJECTED', 'UNAUTHENTICATED_ACTOR');
+      return {
+        success: false,
+        commandId: command.commandId,
+        idempotencyKey: command.idempotencyKey,
+        error: {
+          code: 'UNAUTHENTICATED_ACTOR',
+          message: 'Command context does not contain an authoritative actor ID.',
+        },
+      };
+    }
+
     try {
       // 1. Durable zero-duplicate idempotency reservation.
       const idempotencyCheck = await IdempotencyService.acquireExecution(

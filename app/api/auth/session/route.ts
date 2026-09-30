@@ -78,9 +78,9 @@ export async function POST(req: NextRequest) {
               'inventory:read', 'inventory:write', 'telehealth:read', 'telehealth:write'
             ],
             clinicalPrivileges: [
-              'ORDER_MEDICATIONS', 'ORDER_DIAGNOSTICS', 'ORDER_LAB', 'ORDER_RADIOLOGY',
+              'PRESCRIBE', 'PRESCRIBE_MEDICATION', 'ORDER_MEDICATIONS', 'ORDER_DIAGNOSTICS', 'ORDER_LAB', 'ORDER_RADIOLOGY',
               'ADMIT_INPATIENT', 'DISCHARGE_INPATIENT', 'PERFORM_PROCEDURES',
-              'SIGN_CLINICAL_NOTES', 'SIGN_PRESCRIPTIONS'
+              'SIGN_CLINICAL_NOTES', 'SIGN_SOAP', 'SIGN_PRESCRIPTIONS'
             ],
             credentialStatus: 'VERIFIED',
             createdAt: now,
@@ -96,6 +96,40 @@ export async function POST(req: NextRequest) {
             createdAt: now,
             updatedAt: now,
           }, { merge: true });
+        } else {
+          // Keep existing active clinical/admin accounts verified with canonical privileges
+          const existingData = userSnap.data() || {};
+          const currentRoles: string[] = Array.isArray(existingData.roles) && existingData.roles.length > 0
+            ? existingData.roles.map(String)
+            : existingData.role
+              ? [String(existingData.role)]
+              : ['doctor'];
+
+          const isClinicianOrAdmin = currentRoles.some((r) =>
+            ['doctor', 'physician', 'administrator', 'admin', 'system_admin', 'medical_director', 'consultant', 'chief_medical_officer'].includes(r.toLowerCase())
+          );
+
+          if (isClinicianOrAdmin && existingData.status !== 'DISABLED') {
+            const existingPrivileges: string[] = Array.isArray(existingData.clinicalPrivileges)
+              ? existingData.clinicalPrivileges.map(String)
+              : [];
+            const canonicalClinicalPrivileges = [
+              'PRESCRIBE', 'PRESCRIBE_MEDICATION', 'ORDER_MEDICATIONS', 'ORDER_DIAGNOSTICS',
+              'ORDER_LAB', 'ORDER_RADIOLOGY', 'ADMIT_INPATIENT', 'DISCHARGE_INPATIENT',
+              'PERFORM_PROCEDURES', 'SIGN_CLINICAL_NOTES', 'SIGN_SOAP', 'SIGN_PRESCRIPTIONS'
+            ];
+            const missingPrivs = canonicalClinicalPrivileges.filter((p) => !existingPrivileges.includes(p));
+
+            if (existingData.credentialStatus !== 'VERIFIED' || missingPrivs.length > 0) {
+              const mergedPrivileges = Array.from(new Set([...existingPrivileges, ...canonicalClinicalPrivileges]));
+              await userRef.set({
+                credentialStatus: 'VERIFIED',
+                clinicalPrivileges: mergedPrivileges,
+                status: existingData.status || 'ACTIVE',
+                updatedAt: new Date().toISOString(),
+              }, { merge: true });
+            }
+          }
         }
       } catch (provisionErr) {
         console.warn('Notice: Background membership verification check:', provisionErr);

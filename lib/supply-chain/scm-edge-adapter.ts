@@ -157,6 +157,8 @@ export async function createPurchaseOrderEdge(input: {
   poNumber: string;
   requisitionId: string;
   supplierId: string;
+  contractId?: string;
+  emergencyWaiverReason?: string;
   currency: string;
   paymentTerms: string;
   expectedDeliveryDate: string;

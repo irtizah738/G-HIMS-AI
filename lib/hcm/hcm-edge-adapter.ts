@@ -14,6 +14,10 @@ import type {
   RosterSwapRecord,
   AttendanceRecord,
   LeaveRequest,
+  CompensationProfileRecord,
+  PayrollEmployeeSlotRecord,
+  PayrollPayslipRecord,
+  PayrollPeriodRecord,
 } from '@/types/hcm-advanced';
 import type {
   ClinicalCredential,
@@ -206,6 +210,45 @@ export type AssignShiftEdgePayload = Omit<
   | 'createdAt'
   | 'updatedAt'
 >;
+
+export const setCompensationEdge=(
+  payload:{
+    employeeId:string;
+    payBasis:'SALARIED'|'HOURLY';
+    payFrequency:'MONTHLY'|'SEMI_MONTHLY'|'BI_WEEKLY';
+    currency:string;
+    annualSalaryMinorUnits:number;
+    hourlyRateMinorUnits:number;
+    overtimeMultiplierBasisPoints:number;
+    monthlyAllowanceMinorUnits:number;
+    deductions:Array<{code:string;name:string;rateBasisPoints:number;fixedMinorUnits:number}>;
+    effectiveFrom:string;
+  },idempotencyKey?:string
+)=>run<CompensationProfileRecord>('SetCompensationCommand',payload as unknown as Record<string,unknown>,idempotencyKey);
+
+export const reviewCompensationEdge=(
+  payload:{compensationId:string;decision:'APPROVE'|'REJECT';notes?:string},idempotencyKey?:string
+)=>run<CompensationProfileRecord>('ReviewCompensationCommand',payload as unknown as Record<string,unknown>,idempotencyKey);
+
+export const createPayrollPeriodEdge=(
+  payload:{
+    facilityId:string;periodNumber:string;periodName:string;
+    payFrequency:'MONTHLY'|'SEMI_MONTHLY'|'BI_WEEKLY';
+    startDate:string;endDate:string;paymentDate:string;currency:string;
+  },idempotencyKey?:string
+)=>run<PayrollPeriodRecord>('CreatePayrollPeriodCommand',payload as unknown as Record<string,unknown>,idempotencyKey);
+
+export const enrollPayrollEmployeeEdge=(
+  payload:{periodId:string;employeeId:string},idempotencyKey?:string
+)=>run<PayrollEmployeeSlotRecord>('EnrollPayrollEmployeeCommand',payload as unknown as Record<string,unknown>,idempotencyKey);
+
+export const calculatePayrollEmployeeEdge=(
+  payload:{periodId:string;employeeId:string},idempotencyKey?:string
+)=>run<PayrollPayslipRecord>('CalculatePayrollEmployeeCommand',payload as unknown as Record<string,unknown>,idempotencyKey);
+
+export const finalizePayrollPeriodEdge=(
+  payload:{periodId:string},idempotencyKey?:string
+)=>run<PayrollPeriodRecord>('FinalizePayrollPeriodCommand',payload as unknown as Record<string,unknown>,idempotencyKey);
 
 export const submitLeaveRequestEdge=(
   payload:{

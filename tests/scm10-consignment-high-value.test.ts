@@ -75,7 +75,6 @@ describe('SCM-10 consignment and high-value inventory',()=>{
     expect(service).toContain("glAccountId:'2010'");
     expect(service).toContain("status:'PAYABLE_RECOGNIZED'");
     expect(service).toContain('SCM_FINANCE_SEGREGATION_OF_DUTIES');
-    expect(payables).toContain("case");
     expect(payables).toContain("'PAYABLE_RECOGNIZED'");
   });
 

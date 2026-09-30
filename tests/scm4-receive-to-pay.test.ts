@@ -212,7 +212,7 @@ describe('SCM-4 receive-to-pay financial integrity', () => {
     expect(service).toContain('grniAccrualMinorUnits');
     expect(service).toContain('je_grni_');
     expect(service).toContain("glAccountId: '1210'");
-    expect(service).toContain("glAccountId: '2110'");
+    expect(service).toContain("glAccountId: '2030'");
     expect(service).toContain("entityType: 'JOURNAL_ENTRY'");
   });
 
@@ -241,6 +241,11 @@ describe('SCM-4 receive-to-pay financial integrity', () => {
     expect(service).toContain("'SUPPLIER_PAYMENT_RECORDED'");
     expect(service).toContain("glAccountId: AP_ACCOUNT.id");
     expect(service).toContain("glAccountId: GRNI_ACCOUNT.id");
+    expect(service).toContain("id: '2010'");
+    expect(service).toContain("id: '2030'");
+    expect(service).toContain("id: '1230'");
+    expect(service).toContain("id: '1240'");
+    expect(service).toContain("id: '6030'");
   });
 
   test('payables aggregates are tenant-scoped on the transaction boundary', async () => {
@@ -278,6 +283,24 @@ describe('SCM-4 receive-to-pay financial integrity', () => {
     expect(paymentMethod).toContain('INVALID_PAYMENT_SETTLEMENT_DATE');
     expect(paymentMethod).toContain('sourceAccount.category');
     expect(paymentMethod).toContain('sourceAccount.normalBalance');
+  });
+
+  test('SCM-4 financial control accounts are explicit and tenant-scoped for existing deployments', async () => {
+    const coa = await source('lib/finance/double-entry.ts');
+    const provisioner = await source(
+      'scripts/ops/scm4-provision-financial-control-accounts.ts'
+    );
+    const pkg = await source('package.json');
+
+    for (const code of ['1230', '1240', '2030', '6030']) {
+      expect(coa).toContain(`accountCode: '${code}'`);
+      expect(provisioner).toContain(`code: '${code}'`);
+    }
+    expect(provisioner).toContain('GHIMS_SCM4_PROVISION_TENANT');
+    expect(provisioner).toContain('GHIMS_BOOTSTRAP_CONFIRM_PROJECT');
+    expect(provisioner).toContain('GHIMS_ALLOW_PRODUCTION_SCM4_FINANCE_PROVISION');
+    expect(provisioner).toContain('SCM4_COA_DUPLICATE_CODE');
+    expect(pkg).toContain('"ops:scm4:provision-finance"');
   });
 
   test('AP read models are finance-scoped, server-write-only, and excluded from generic offline hydration', async () => {

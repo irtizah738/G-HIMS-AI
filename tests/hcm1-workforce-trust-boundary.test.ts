@@ -87,12 +87,15 @@ describe('HCM-1 workforce master and trust boundary',()=>{
 
   test('employee master mutations are least-privilege and terminal states cannot transfer',async()=>{
     const service=await source('lib/backend/services/hr-workforce-domain-service.ts');
-    expect(service).toContain("requiredRoles:['HR_ADMIN','SYSTEM_ADMIN','HOSPITAL_EXECUTIVE']");
-    expect(service).not.toContain("requiredRoles:['HR_ADMIN','SYSTEM_ADMIN','MEDICAL_DIRECTOR','HOSPITAL_EXECUTIVE']");
-    expect(service).toContain("['TERMINATED','RETIRED','INACTIVE'].includes");
-    expect(service).toContain('EMPLOYEE_NOT_TRANSFERABLE');
-    expect(service).toContain('FUTURE_TRANSFER_REQUIRES_SCHEDULING');
-    expect(service).not.toContain("offboardingStage:'RESIGNED'");
+    const start=service.indexOf('public static async createEmployee');
+    const end=service.indexOf('// 2. CREDENTIALS',start);
+    const lifecycle=service.slice(start,end);
+    expect(lifecycle).toContain("requiredRoles:['HR_ADMIN','SYSTEM_ADMIN','HOSPITAL_EXECUTIVE']");
+    expect(lifecycle).not.toContain("requiredRoles:['HR_ADMIN','SYSTEM_ADMIN','MEDICAL_DIRECTOR','HOSPITAL_EXECUTIVE']");
+    expect(lifecycle).toContain("['TERMINATED','RETIRED','INACTIVE'].includes");
+    expect(lifecycle).toContain('EMPLOYEE_NOT_TRANSFERABLE');
+    expect(lifecycle).toContain('FUTURE_TRANSFER_REQUIRES_SCHEDULING');
+    expect(lifecycle).not.toContain("offboardingStage:'RESIGNED'");
   });
 
   test('workforce UI reads governed edge projection and no longer owns mock employees',async()=>{

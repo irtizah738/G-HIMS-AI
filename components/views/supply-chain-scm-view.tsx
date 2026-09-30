@@ -18,15 +18,10 @@ import {
   AISCMRecommendation,
 } from '@/types/scm-domain';
 import {
-  updateRequisitionStatus,
-  createGoodsReceiptNote,
-  completeStockTransfer,
-  executeBatchRecall,
-  updateBalanceReorderParameters,
-} from '@/lib/firebase/services/scm-firestore-service';
-import {
   hydrateScmEdgeData,
   loadLocalScmEdgeData,
+  approvePurchaseRequisitionEdge,
+  recordGoodsReceiptEdge,
   recordStockTransactionEdge,
   submitPurchaseRequisitionEdge,
 } from '@/lib/supply-chain/scm-edge-adapter';
@@ -85,10 +80,10 @@ import {
 } from 'lucide-react';
 
 interface SupplyChainScmViewProps {
-  tenantId: string;
+  tenantId?: string;
 }
 
-export function SupplyChainScmView({ tenantId }: SupplyChainScmViewProps) {
+export function SupplyChainScmView({ tenantId = 'metro-health' }: SupplyChainScmViewProps) {
   // Navigation Tabs
   const [activeTab, setActiveTab] = useState<
     | 'dashboard'
@@ -122,6 +117,7 @@ export function SupplyChainScmView({ tenantId }: SupplyChainScmViewProps) {
   const [suppliers, setSuppliers] = useState<SupplierMaster[]>([]);
   const [threeWayMatches, setThreeWayMatches] = useState<ThreeWayMatchResult[]>([]);
   const [loading, setLoading] = useState(true);
+  const [governanceNotice, setGovernanceNotice] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedLocationFilter, setSelectedLocationFilter] = useState<string>('ALL');
   const [selectedParChartItemId, setSelectedParChartItemId] = useState<string>('ALL');
@@ -335,10 +331,18 @@ export function SupplyChainScmView({ tenantId }: SupplyChainScmViewProps) {
 
   // Handle Requisition Approval
   const handleApproveRequisition = async (reqId: string) => {
-    await updateRequisitionStatus(tenantId, reqId, 'APPROVED', {
-      name: 'Dr. Sarah Jenkins, MD',
-      role: 'Clinical Chief of Staff',
-      comments: 'Clinically indicated and authorized for procurement execution.',
+    const requisition = requisitions.find((item) => item.requisitionId === reqId);
+    if (!requisition) return;
+
+    await approvePurchaseRequisitionEdge({
+      requisitionId: reqId,
+      decision: 'APPROVED',
+      comments:
+        'Approved through the authenticated SCM governance workflow.',
+      approvedLines: requisition.items.map((line) => ({
+        itemId: line.itemId,
+        approvedQuantity: line.requestedQuantity,
+      })),
     });
     await loadData();
   };
@@ -421,94 +425,109 @@ export function SupplyChainScmView({ tenantId }: SupplyChainScmViewProps) {
     await loadData();
   };
 
-  // Handle Goods Receipt Note (GRN) Submission
+  // Handle Goods Receipt Note (GRN) through the governed SCM-2 command.
   const handleCreateGoodsReceiptNote = async () => {
-    const selectedItem = items.find((i) => i.itemId === grnItemId) || items[0];
-    if (!selectedItem) return;
-    setIsSubmittingGrn(true);
+    const matchingPo = purchaseOrders.find(
+      (po) => po.poNumber === grnPoNumber
+    );
+    if (!matchingPo) {
+      setGovernanceNotice(
+        'Select an authoritative purchase order before receiving goods.'
+      );
+      return;
+    }
 
-    const grnId = `grn-${Date.now()}`;
-    const newGrn: GoodsReceiptNote = {
-      grnId,
-      tenantId,
-      facilityId: 'FAC-MAIN',
-      grnNumber: `GRN-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
-      purchaseOrderId: `po-${Date.now()}`,
-      poNumber: grnPoNumber,
-      supplierId: 'sup-pfizer',
-      supplierName: grnSupplierName,
-      deliveryNoteNumber: grnDeliveryNote,
-      receivedAt: new Date().toISOString(),
-      receivedBy: {
-        userId: 'usr-receiving-officer',
-        userName: 'David Miller',
-      },
-      carrier: 'MediExpress Cold-Chain Logistics',
-      inspectionStatus: grnInspectionStatus as 'PASSED' | 'FAILED' | 'PARTIAL' | 'QUARANTINED',
-      status: 'INSPECTED',
-      items: [
-        {
-          itemId: selectedItem.itemId,
-          itemCode: selectedItem.itemCode,
-          itemName: selectedItem.name,
-          quantityOrdered: grnQuantity,
-          quantityReceived: grnQuantity,
-          quantityAccepted: grnInspectionStatus === 'PASSED' ? grnQuantity : 0,
-          quantityRejected: grnInspectionStatus === 'FAILED' ? grnQuantity : 0,
-          quantityDamaged: 0,
-          uom: selectedItem.unitOfMeasure,
-          batchNumber: grnBatchNumber,
-          lotNumber: grnBatchNumber,
-          manufacturer: grnSupplierName,
-          manufactureDate: new Date(grnManufactureDate).toISOString(),
-          expiryDate: new Date(grnExpirationDate).toISOString(),
-          temperatureExcursion: grnInspectionStatus === 'FAILED' || grnTempCelsius > 8 || grnTempCelsius < 2,
-          recordedTemperatureCelsius: grnTempCelsius,
-          rejectionReason: grnInspectionStatus === 'FAILED' ? 'Temperature excursion on dock inspection' : undefined,
-          inspectionPassed: grnInspectionStatus === 'PASSED',
-          putawayLocationId: 'loc-pharmacy-main',
-          unitCost: selectedItem.unitCost,
-        },
-      ],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+    const selectedItem = items.find((item) => item.itemId === grnItemId);
+    const poLine = matchingPo.items.find(
+      (line) => line.itemId === selectedItem?.itemId
+    );
+    const destination = locations.find(
+      (location) =>
+        location.locationId === matchingPo.destinationLocationId &&
+        location.active
+    );
+
+    if (!selectedItem || !poLine || !destination) {
+      setGovernanceNotice(
+        'The selected item or destination is not part of the authoritative purchase order.'
+      );
+      return;
+    }
+
+    setIsSubmittingGrn(true);
+    setGovernanceNotice(null);
+
+    const receivedAt = new Date().toISOString();
+    const failed = grnInspectionStatus === 'FAILED';
+    const temperatureExcursion =
+      grnTempCelsius > 8 || grnTempCelsius < 2;
+    const batchId = `batch:${selectedItem.itemId}:${grnBatchNumber}`;
 
     try {
-      await createGoodsReceiptNote(tenantId, newGrn);
+      await recordGoodsReceiptEdge({
+        grnId: `grn_${crypto.randomUUID()}`,
+        grnNumber: `GRN-${new Date().getFullYear()}-${Date.now()
+          .toString()
+          .slice(-8)}`,
+        purchaseOrderId: matchingPo.poId,
+        facilityId: matchingPo.facilityId,
+        deliveryNoteNumber: grnDeliveryNote.trim(),
+        receivedAt,
+        inspectionStatus: failed
+          ? 'FAILED'
+          : temperatureExcursion
+            ? 'QUARANTINED'
+            : 'PASSED',
+        destinationLocationId: destination.locationId,
+        destinationLocationName: destination.name,
+        items: [
+          {
+            itemId: selectedItem.itemId,
+            batchId,
+            batchNumber: grnBatchNumber.trim(),
+            lotNumber: grnBatchNumber.trim(),
+            quantityReceived: grnQuantity,
+            quantityAccepted: failed ? 0 : grnQuantity,
+            quantityRejected: failed ? grnQuantity : 0,
+            quantityDamaged: 0,
+            uom: poLine.uom,
+            expiryDate: new Date(grnExpirationDate).toISOString(),
+            manufactureDate: new Date(grnManufactureDate).toISOString(),
+            manufacturer: matchingPo.supplierName,
+            recordedTemperatureCelsius: grnTempCelsius,
+            temperatureExcursion,
+            inspectionPassed: !failed,
+            inspectionNotes: failed
+              ? 'Dock inspection failed; no stock accepted.'
+              : temperatureExcursion
+                ? 'Temperature excursion detected; accepted stock quarantined.'
+                : 'Dock inspection passed.',
+            unitCost: Number(poLine.unitPrice),
+          },
+        ],
+      });
+
       setIsNewGrnOpen(false);
+      setGovernanceNotice(
+        'Goods receipt committed through SCM-2. Inventory balances will refresh from the authoritative event projection.'
+      );
       await loadData();
-    } catch (err) {
-      console.error('Failed to create GRN:', err);
+    } catch (error) {
+      setGovernanceNotice(
+        error instanceof Error ? error.message : 'Governed goods receipt failed.'
+      );
     } finally {
       setIsSubmittingGrn(false);
     }
   };
 
-  // Handle Emergency Recall Trigger
+  // Recall execution remains blocked until the dedicated governed recall
+  // command is implemented. Never fall back to browser Firestore mutation.
   const handleTriggerBatchRecall = async () => {
-    if (!recallBatchNum || !recallReason) return;
-    const targetBatch = batches.find((b) => b.batchNumber === recallBatchNum);
-    if (!targetBatch) {
-      alert('Batch number not found in system!');
-      return;
-    }
-
-    await executeBatchRecall(tenantId, {
-      itemId: targetBatch.itemId,
-      itemCode: targetBatch.itemCode,
-      itemName: targetBatch.itemName,
-      targetBatchNumbers: [recallBatchNum],
-      recallReason,
-      severity: 'CRITICAL_CLASS_1',
-      triggeredBy: 'Dr. Sarah Jenkins, MD (Medical Director)',
-    });
-
     setIsRecallModalOpen(false);
-    setRecallBatchNum('');
-    setRecallReason('');
-    await loadData();
-    setActiveTab('recalls');
+    setGovernanceNotice(
+      'Recall execution is temporarily read-only. SCM-4 will provide the governed recall/quarantine command with patient exposure tracing.'
+    );
   };
 
   return (
@@ -583,7 +602,20 @@ export function SupplyChainScmView({ tenantId }: SupplyChainScmViewProps) {
         </div>
       </div>
 
-      {/* KPI Overview Banner */}
+      {governanceNotice && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200 flex items-center justify-between gap-3">
+          <span>{governanceNotice}</span>
+          <button
+            type="button"
+            onClick={() => setGovernanceNotice(null)}
+            className="font-semibold underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+            {/* KPI Overview Banner */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4">
           <p className="text-xs text-slate-500 font-medium">Total Inventory Value</p>
@@ -983,15 +1015,11 @@ export function SupplyChainScmView({ tenantId }: SupplyChainScmViewProps) {
             items={items}
             locations={locations}
             transactions={transactions}
-            onSaveParLevel={async (balanceId, newMin, newReorderPoint) => {
-              await updateBalanceReorderParameters(tenantId, balanceId, newMin, newReorderPoint);
-              setBalances((prev) =>
-                prev.map((b) =>
-                  b.balanceId === balanceId
-                    ? { ...b, minimumStock: newMin, reorderPoint: newReorderPoint }
-                    : b
-                )
+            onSaveParLevel={async () => {
+              setGovernanceNotice(
+                'PAR/minimum-stock edits are read-only until a governed configuration command is available. No browser Firestore write was attempted.'
               );
+              throw new Error('SCM_PAR_GOVERNED_COMMAND_REQUIRED');
             }}
             onTriggerReorder={(it, qty) => {
               setReqSelectedItem(it.itemId);
@@ -2207,12 +2235,22 @@ export function SupplyChainScmView({ tenantId }: SupplyChainScmViewProps) {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-500 mb-1">Purchase Order #:</label>
-                  <input
-                    type="text"
+                  <select
                     value={grnPoNumber}
                     onChange={(e) => setGrnPoNumber(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700"
-                  />
+                  >
+                    <option value="">-- Select receivable PO --</option>
+                    {purchaseOrders
+                      .filter((po) =>
+                        ['APPROVED', 'SENT', 'SENT_TO_SUPPLIER', 'ACKNOWLEDGED', 'PARTIALLY_RECEIVED'].includes(po.status)
+                      )
+                      .map((po) => (
+                        <option key={po.poId} value={po.poNumber}>
+                          {po.poNumber} — {po.supplierName}
+                        </option>
+                      ))}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-slate-500 mb-1">Delivery Note / AWB #:</label>
@@ -2230,9 +2268,13 @@ export function SupplyChainScmView({ tenantId }: SupplyChainScmViewProps) {
                   <label className="block text-slate-500 mb-1">Supplier / Vendor:</label>
                   <input
                     type="text"
-                    value={grnSupplierName}
-                    onChange={(e) => setGrnSupplierName(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700"
+                    value={
+                      purchaseOrders.find((po) => po.poNumber === grnPoNumber)
+                        ?.supplierName || grnSupplierName
+                    }
+                    readOnly
+                    aria-readonly="true"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700"
                   />
                 </div>
                 <div>

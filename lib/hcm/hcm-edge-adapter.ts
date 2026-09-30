@@ -48,12 +48,19 @@ export type CreateEmployeeEdgePayload = Omit<
 async function run<T>(
   commandType:string,
   payload:Record<string,unknown>,
-  idempotencyKey?:string
+  idempotencyKey?:string,
+  offlineQueue?:{
+    enabled:boolean;
+    collection:string;
+    resourceId:string;
+    action:'CREATE'|'UPDATE'|'DELETE';
+    optimisticCache?:boolean;
+  }
 ):Promise<T>{
   const result=await executeActiveTenantCommand<T>(
     commandType,
     payload,
-    {idempotencyKey,schemaVersion:1}
+    {idempotencyKey,schemaVersion:1,offlineQueue}
   );
   if(!result.success){
     throw new Error(result.error?.message||`${commandType} failed.`);
@@ -252,6 +259,24 @@ export const calculatePayrollEmployeeEdge=(
 export const finalizePayrollPeriodEdge=(
   payload:{periodId:string},idempotencyKey?:string
 )=>run<PayrollPeriodRecord>('FinalizePayrollPeriodCommand',payload as unknown as Record<string,unknown>,idempotencyKey);
+
+export const approvePayrollPeriodEdge=(
+  payload:{periodId:string;notes?:string},idempotencyKey?:string
+)=>run<PayrollPeriodRecord>('ApprovePayrollPeriodCommand',payload as unknown as Record<string,unknown>,idempotencyKey);
+
+export const postPayrollPeriodEdge=(
+  payload:{periodId:string},idempotencyKey?:string
+)=>run<PayrollPeriodRecord>('PostPayrollPeriodCommand',payload as unknown as Record<string,unknown>,idempotencyKey);
+
+export const settlePayrollPeriodEdge=(
+  payload:{periodId:string;treasuryAccountId:string;settlementReference:string;settledAt:string},
+  idempotencyKey?:string
+)=>run<PayrollPeriodRecord>('SettlePayrollPeriodCommand',payload as unknown as Record<string,unknown>,idempotencyKey);
+
+export const remitPayrollLiabilityEdge=(
+  payload:{liabilityId:string;treasuryAccountId:string;remittanceReference:string;remittedAt:string},
+  idempotencyKey?:string
+)=>run('RemitPayrollLiabilityCommand',payload as unknown as Record<string,unknown>,idempotencyKey);
 
 export const submitLeaveRequestEdge=(
   payload:{

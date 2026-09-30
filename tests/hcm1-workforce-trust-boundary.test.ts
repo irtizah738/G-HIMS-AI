@@ -91,6 +91,8 @@ describe('HCM-1 workforce master and trust boundary',()=>{
     expect(service).not.toContain("requiredRoles:['HR_ADMIN','SYSTEM_ADMIN','MEDICAL_DIRECTOR','HOSPITAL_EXECUTIVE']");
     expect(service).toContain("['TERMINATED','RETIRED','INACTIVE'].includes");
     expect(service).toContain('EMPLOYEE_NOT_TRANSFERABLE');
+    expect(service).toContain('FUTURE_TRANSFER_REQUIRES_SCHEDULING');
+    expect(service).not.toContain("offboardingStage:'RESIGNED'");
   });
 
   test('workforce UI reads governed edge projection and no longer owns mock employees',async()=>{

@@ -18,6 +18,7 @@ import { FinanceCloseDomainService } from '../services/finance-close-domain-serv
 import { FinanceTaxDomainService } from '../services/finance-tax-domain-service';
 import { FinanceIntelligenceDomainService } from '../services/finance-intelligence-domain-service';
 import { HrWorkforceDomainService } from '../services/hr-workforce-domain-service';
+import { HcmPayrollDomainService } from '../services/hcm-payroll-domain-service';
 import { ResourceCapacityDomainService } from '../services/resource-capacity-domain-service';
 import { PatientIdentityDomainService } from '../services/patient-identity-domain-service';
 import { PatientMergeDomainService } from '../services/patient-merge-domain-service';
@@ -261,6 +262,42 @@ export class CommandBus {
             command.commandId,
             command.idempotencyKey,
             command.payload as any
+          );
+          break;
+
+        case 'SetCompensationCommand':
+          result = await HcmPayrollDomainService.setCompensation(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'ReviewCompensationCommand':
+          result = await HcmPayrollDomainService.reviewCompensation(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'CreatePayrollPeriodCommand':
+          result = await HcmPayrollDomainService.createPayrollPeriod(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'EnrollPayrollEmployeeCommand':
+          result = await HcmPayrollDomainService.enrollPayrollEmployee(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'CalculatePayrollEmployeeCommand':
+          result = await HcmPayrollDomainService.calculatePayrollEmployee(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'FinalizePayrollPeriodCommand':
+          result = await HcmPayrollDomainService.finalizePayrollPeriod(
+            context, command.commandId, command.idempotencyKey, command.payload as any
           );
           break;
 

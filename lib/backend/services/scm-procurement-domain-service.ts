@@ -706,20 +706,7 @@ export class ScmProcurementDomainService {
         ],
         prepare: (current) => {
           const po = current.po as unknown as PurchaseOrderRecord;
-          const destination =
-            current.destination as unknown as InventoryLocation;
           assertFacilityScope(context, po.facilityId);
-
-          if (
-            po.facilityId !== payload.facilityId ||
-            destination.facilityId !== po.facilityId ||
-            !destination.active
-          ) {
-            throw new AtomicMutationRejectedError(
-              'GRN_FACILITY_OR_LOCATION_MISMATCH',
-              'GRN facility and destination must match an active location on the authoritative purchase order.'
-            );
-          }
 
           if (!['PENDING_APPROVAL', 'SUBMITTED'].includes(po.status)) {
             throw new AtomicMutationRejectedError(

@@ -1026,6 +1026,186 @@ export class ScmOfflineDomainService {
     }
   }
 
+
+  public static async reviewPurchaseOrder(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: Record<string, unknown>
+  ): Promise<CommandResult> {
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: [
+        'SCM_MANAGER',
+        'FINANCE',
+        'FINANCE_MANAGER',
+        'SYSTEM_ADMIN',
+        'ADMINISTRATOR',
+      ],
+    });
+    if (!auth.authorized) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Purchase order approval authority required.',
+        },
+      };
+    }
+
+    const purchaseOrderId = String(payload.purchaseOrderId || '').trim();
+    const decision = String(payload.decision || '').trim().toUpperCase();
+    const comments = String(payload.comments || '').trim();
+
+    if (
+      !purchaseOrderId ||
+      !['APPROVED', 'REJECTED'].includes(decision) ||
+      (decision === 'REJECTED' && comments.length < 5)
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INVALID_PURCHASE_ORDER_REVIEW',
+          message:
+            'purchaseOrderId, valid decision, and rejection reason when applicable are required.',
+        },
+      };
+    }
+
+    try {
+      const tx = await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.roles[0] || 'AUTHENTICATED_USER',
+        aggregateType: 'PURCHASE_ORDER',
+        aggregateId: purchaseOrderId,
+        eventType:
+          decision === 'APPROVED' ? 'PO_APPROVED' : 'PO_REJECTED',
+        auditAction:
+          decision === 'APPROVED' ? 'PO_APPROVED' : 'PO_REJECTED',
+        outboxTopic: 'g-hims-scm-events',
+        idempotencyKey,
+        commandId,
+        correlationId: context.correlationId,
+        readTargets: [
+          {
+            key: 'purchaseOrder',
+            entityType: 'PURCHASE_ORDER',
+            entityId: purchaseOrderId,
+            required: true,
+          },
+        ],
+        prepare: (current) => {
+          const po = current.purchaseOrder as unknown as PurchaseOrderRecord;
+          if (po.status !== 'PENDING_APPROVAL') {
+            throw new AtomicMutationRejectedError(
+              'PURCHASE_ORDER_STATE_CONFLICT',
+              `Purchase order in state ${po.status} cannot be reviewed.`
+            );
+          }
+
+          const creatorId = String(po.createdBy?.userId || '').trim();
+          const elevatedAdmin = context.roles.some((role) =>
+            ['SYSTEM_ADMIN', 'ADMINISTRATOR'].includes(role.toUpperCase())
+          );
+          if (
+            creatorId &&
+            creatorId === context.actorId &&
+            !elevatedAdmin
+          ) {
+            throw new AtomicMutationRejectedError(
+              'PURCHASE_ORDER_SELF_APPROVAL_DENIED',
+              'Purchase order creator cannot approve their own financial commitment.'
+            );
+          }
+
+          const now = new Date().toISOString();
+          const approved = decision === 'APPROVED';
+          const next: PurchaseOrderRecord = {
+            ...po,
+            status: decision as 'APPROVED' | 'REJECTED',
+            approvedBy: approved
+              ? {
+                  userId: context.actorId,
+                  userName: context.actorId,
+                  approvalTier: 'SCM_FINANCIAL_APPROVAL',
+                  approvedAt: now,
+                }
+              : undefined,
+            approverId: context.actorId,
+            approvedAt: approved ? now : undefined,
+            approvalSignatures: [
+              ...(po.approvalSignatures || []),
+              {
+                role: context.roles[0] || 'AUTHENTICATED_USER',
+                signedBy: context.actorId,
+                signedAt: now,
+                signatureHash: crypto
+                  .createHash('sha256')
+                  .update(
+                    [
+                      context.tenantId,
+                      po.poId,
+                      decision,
+                      context.actorId,
+                      now,
+                    ].join('|')
+                  )
+                  .digest('hex'),
+                approved,
+                tier: 'SCM_FINANCIAL_APPROVAL',
+                comments: comments || undefined,
+              },
+            ],
+            updatedAt: now,
+          };
+
+          return {
+            domainState: next,
+            eventPayload: {
+              purchaseOrderId,
+              poNumber: po.poNumber,
+              decision,
+              approverId: context.actorId,
+              totalAmount: po.totalAmount,
+              currency: po.currency,
+            },
+            auditReason: `${decision} purchase order ${po.poNumber}`,
+            resultData: next,
+          };
+        },
+      });
+
+      return {
+        success: true,
+        commandId,
+        idempotencyKey,
+        entityId: purchaseOrderId,
+        eventId: tx.eventId,
+        auditId: tx.auditId,
+        outboxId: tx.outboxId,
+        data: tx.resultData,
+      };
+    } catch (error) {
+      if (error instanceof AtomicMutationRejectedError) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+          },
+        };
+      }
+      throw error;
+    }
+  }
+
   public static async receivePurchaseOrder(
     context: CommandContext,
     commandId: string,

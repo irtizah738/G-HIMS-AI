@@ -946,6 +946,9 @@ export class ScmProcurementDomainService {
           const nextPoLines = po.items.map((line) => ({ ...line }));
           const receiptTransactionIds: string[] = [];
           const seenReceiptItems = new Set<string>();
+          let grniAccrualMinorUnits = 0;
+          let grniPharmacyInventoryMinorUnits = 0;
+          let grniSuppliesInventoryMinorUnits = 0;
 
           for (let index = 0; index < normalizedLines.length; index += 1) {
             const line = normalizedLines[index];
@@ -1079,6 +1082,27 @@ export class ScmProcurementDomainService {
               );
             }
             const acceptedStock = toStockQuantity(item, accepted, line.uom);
+            const poDiscountMinorUnits = Math.round(
+              Number(poLine.discount || 0) * 100
+            );
+            const allocatedDiscountMinorUnits =
+              poLine.quantityOrdered > 0
+                ? Math.round(
+                    (accepted / poLine.quantityOrdered) *
+                      poDiscountMinorUnits
+                  )
+                : 0;
+            const acceptedAccrualMinorUnits = Math.max(
+              0,
+              Math.round(accepted * poUnitCost * 100) -
+                allocatedDiscountMinorUnits
+            );
+            grniAccrualMinorUnits += acceptedAccrualMinorUnits;
+            if (item.itemType === 'MEDICATION') {
+              grniPharmacyInventoryMinorUnits += acceptedAccrualMinorUnits;
+            } else {
+              grniSuppliesInventoryMinorUnits += acceptedAccrualMinorUnits;
+            }
             const stockUnitCost =
               acceptedStock.factor > 0
                 ? roundMoney(poUnitCost / acceptedStock.factor)
@@ -1352,6 +1376,71 @@ export class ScmProcurementDomainService {
             (line) => Number(line.quantityRemaining || 0) <= 0
           );
           const now = new Date().toISOString();
+          const receivedAtMs = Date.parse(payload.receivedAt);
+          if (!Number.isFinite(receivedAtMs)) {
+            throw new AtomicMutationRejectedError(
+              'INVALID_GRN_RECEIPT_DATE',
+              'Goods receipt requires a valid receivedAt timestamp.'
+            );
+          }
+          const postingDate = new Date(receivedAtMs);
+          const grniJournalId =
+            grniAccrualMinorUnits > 0
+              ? `je_grni_${payload.grnId}`
+              : undefined;
+
+          if (grniJournalId) {
+            writes.push({
+              entityType: 'JOURNAL_ENTRY',
+              entityId: grniJournalId,
+              domainState: {
+                journalId: grniJournalId,
+                tenantId: context.tenantId,
+                fiscalYear: postingDate.getUTCFullYear(),
+                postingPeriod: postingDate.getUTCMonth() + 1,
+                documentDate: receivedAtMs,
+                postingDate: receivedAtMs,
+                referenceDocumentId: payload.grnId,
+                documentHeader: `GRNI accrual: ${payload.grnNumber} / ${po.poNumber}`,
+                currency: po.currency,
+                totalAmountMinorUnits: grniAccrualMinorUnits,
+                lines: [
+                  ...(grniPharmacyInventoryMinorUnits > 0
+                    ? [
+                        {
+                          glAccountId: '1210',
+                          glAccountName: 'Pharmacy Formulary Inventory',
+                          debitMinorUnits: grniPharmacyInventoryMinorUnits,
+                          creditMinorUnits: 0,
+                          lineDescription: `Pharmacy inventory received under ${payload.grnNumber}`,
+                        },
+                      ]
+                    : []),
+                  ...(grniSuppliesInventoryMinorUnits > 0
+                    ? [
+                        {
+                          glAccountId: '1220',
+                          glAccountName: 'Surgical & Sterile Medical Supplies Inventory',
+                          debitMinorUnits: grniSuppliesInventoryMinorUnits,
+                          creditMinorUnits: 0,
+                          lineDescription: `Medical/general inventory received under ${payload.grnNumber}`,
+                        },
+                      ]
+                    : []),
+                  {
+                    glAccountId: '2030',
+                    glAccountName: 'Goods Received Not Invoiced (GRNI)',
+                    debitMinorUnits: 0,
+                    creditMinorUnits: grniAccrualMinorUnits,
+                    lineDescription: `GRNI liability for ${payload.grnNumber}`,
+                  },
+                ],
+                status: 'POSTED',
+                postedBy: context.actorId,
+                postedAt: Date.now(),
+              },
+            });
+          }
           const nextPo: PurchaseOrderRecord = {
             ...po,
             items: nextPoLines,
@@ -1394,6 +1483,7 @@ export class ScmProcurementDomainService {
                 ? 'INSPECTED'
                 : 'PUTAWAY_COMPLETED',
             notes: payload.notes,
+            journalEntryId: grniJournalId,
             createdAt: now,
             updatedAt: now,
           };
@@ -1413,12 +1503,18 @@ export class ScmProcurementDomainService {
               lineCount: grn.items.length,
               stockTransactionIds: receiptTransactionIds,
               poStatus: nextPo.status,
+              grniJournalId,
+              grniAccrualMinorUnits,
+              grniPharmacyInventoryMinorUnits,
+              grniSuppliesInventoryMinorUnits,
             },
             auditReason: `Received and inspected goods for PO ${po.poNumber} under GRN ${grn.grnNumber}`,
             resultData: {
               grn,
               purchaseOrder: nextPo,
               receiptTransactionIds,
+              grniJournalId,
+              grniAccrualMinorUnits,
             },
           };
         },

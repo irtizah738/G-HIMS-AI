@@ -24,6 +24,8 @@ export interface Account {
   description?: string;
   isActive: boolean;
   isSystemLocked?: boolean; // Prevents accidental deletion of core GL accounts
+  /** Explicit treasury capability; supplier settlement cannot use arbitrary asset accounts. */
+  allowSupplierPayments?: boolean;
   parentAccountCode?: string | null;
   tenantId: string;
   createdAt: string;

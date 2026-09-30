@@ -66,7 +66,17 @@ service cloud.firestore {
       return hasAnyRole(tenantId, [
         'administrator',
         'billing_clerk',
-        'billing_staff'
+        'billing_staff',
+        'accounts_payable',
+        'accountant',
+        'finance_manager',
+        'treasury_manager',
+        'ACCOUNTS_PAYABLE',
+        'ACCOUNTANT',
+        'FINANCE_MANAGER',
+        'TREASURY_MANAGER',
+        'SYSTEM_ADMIN',
+        'ADMINISTRATOR'
       ]);
     }
 
@@ -292,6 +302,23 @@ service cloud.firestore {
         allow write: if false;
       }
       match /claims/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+
+      match /scmSupplierInvoices/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /scmSupplierInvoiceMatches/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /scmPaymentAuthorizations/{id} {
+        allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /scmSupplierPayments/{id} {
         allow read: if canReadFinance(tenantId);
         allow write: if false;
       }

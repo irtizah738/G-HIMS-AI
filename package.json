@@ -67,7 +67,10 @@
     "test:scm2": "bun test tests/scm2-procure-to-receive.test.ts",
     "validate:scm2": "bun run typecheck && bun run lint && bun run test:scm1 && bun run test:scm2 && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",
     "test:scm3": "bun test tests/scm3-tenant-boundary.test.ts",
-    "validate:scm3": "bun run typecheck && bun run lint && bun run test:scm1 && bun run test:scm2 && bun run test:scm3 && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build"
+    "validate:scm3": "bun run typecheck && bun run lint && bun run test:scm1 && bun run test:scm2 && bun run test:scm3 && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",
+    "test:scm4": "bun test tests/scm4-receive-to-pay.test.ts",
+    "validate:scm4": "bun run typecheck && bun run lint && bun run test:scm1 && bun run test:scm2 && bun run test:scm3 && bun run test:scm4 && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",
+    "ops:scm4:provision-finance": "bun scripts/ops/scm4-provision-financial-control-accounts.ts"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

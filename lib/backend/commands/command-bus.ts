@@ -21,6 +21,7 @@ import { TelehealthDomainService } from '../services/telehealth-domain-service';
 import { RevenueIntegrityDomainService } from '../services/revenue-integrity-domain-service';
 import { ScmOfflineDomainService } from '../services/scm-offline-domain-service';
 import { ScmProcurementDomainService } from '../services/scm-procurement-domain-service';
+import { ScmPayablesDomainService } from '../services/scm-payables-domain-service';
 import { CashReceiptDomainService } from '../services/cash-receipt-domain-service';
 import { DiagnosticResultDomainService } from '../services/diagnostic-result-domain-service';
 import { PatientClinicalKnowledgeDomainService } from '../services/patient-clinical-knowledge-domain-service';
@@ -553,6 +554,60 @@ export class CommandBus {
 
         case 'RecordGoodsReceiptCommand':
           result = await ScmProcurementDomainService.recordGoodsReceipt(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecordSupplierInvoiceCommand':
+          result = await ScmPayablesDomainService.recordSupplierInvoice(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ResolveSupplierInvoiceMatchCommand':
+          result = await ScmPayablesDomainService.resolveSupplierInvoiceMatch(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecognizeSupplierInvoicePayableCommand':
+          result = await ScmPayablesDomainService.recognizeSupplierInvoicePayable(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RequestSupplierPaymentAuthorizationCommand':
+          result = await ScmPayablesDomainService.requestSupplierPaymentAuthorization(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ApproveSupplierPaymentAuthorizationCommand':
+          result = await ScmPayablesDomainService.approveSupplierPaymentAuthorization(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecordSupplierPaymentCommand':
+          result = await ScmPayablesDomainService.recordSupplierPayment(
             context,
             command.commandId,
             command.idempotencyKey,

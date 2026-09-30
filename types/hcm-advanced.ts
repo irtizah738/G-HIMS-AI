@@ -432,6 +432,22 @@ export interface StaffingGapAnalysis {
   credentialAlerts: string[];
 }
 
+export interface RosterTimelineEntry {
+  rosterId: string;
+  startTime: string;
+  endTime: string;
+  status: RosterShiftStatus;
+}
+
+export interface RosterTimelineBucket {
+  timelineId: string;
+  tenantId: string;
+  employeeId: string;
+  monthKey: string; // YYYY-MM
+  shifts: RosterTimelineEntry[];
+  updatedAt: string;
+}
+
 export interface RosterShiftEntry {
   rosterId: string;
   tenantId: string;

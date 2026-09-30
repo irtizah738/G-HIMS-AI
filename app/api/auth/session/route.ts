@@ -5,7 +5,7 @@ import { createSession, validateSession, revokeSession } from '@/server/auth/ses
 import { registerOrUpdateDevice } from '@/server/auth/device-service';
 import { logAuthEvent } from '@/server/auth/audit-service';
 import { getUserAccessibleTenants } from '@/server/auth/tenant-membership';
-import { getAdminAuth, getAdminFirestore } from '@/server/firebase/admin';
+import { getAdminAuth } from '@/server/firebase/admin';
 import { LoginResponsePayload } from '@/lib/auth/auth-types';
 import { AuthError } from '@/lib/auth/auth-errors';
 
@@ -44,98 +44,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'tenantId is required' }, { status: 400 });
     }
 
-    // Ensure authenticated Firebase identity has a Firestore tenant user document
-    const db = getAdminFirestore();
-    if (db) {
-      try {
-        const userRef = db.collection('tenants').doc(requestedTenantId).collection('users').doc(verifiedToken.uid);
-        const userSnap = await userRef.get();
-        if (!userSnap.exists) {
-          const email = (verifiedToken.email || '').toLowerCase().trim();
-          const isAdmin = email.includes('admin') || email.includes('irtiza') || email.includes('haider');
-          const role = isAdmin ? 'administrator' : 'doctor';
-          const roles = isAdmin ? ['administrator', 'doctor'] : ['doctor'];
-          const displayName = verifiedToken.name || (email ? email.split('@')[0] : 'Medical Staff');
-          const department = isAdmin ? 'Hospital Administration' : 'General Medicine';
-          const now = new Date().toISOString();
-
-          await userRef.set({
-            userId: verifiedToken.uid,
-            tenantId: requestedTenantId,
-            email,
-            displayName,
-            role,
-            roles,
-            status: 'ACTIVE',
-            department,
-            departmentIds: [department],
-            facilityIds: [],
-            assignedWards: [],
-            permissions: [
-              'patient:read', 'patient:write', 'encounter:read', 'encounter:write',
-              'order:read', 'order:write', 'clinical:read', 'clinical:write',
-              'admin:read', 'admin:write', 'billing:read', 'billing:write',
-              'inventory:read', 'inventory:write', 'telehealth:read', 'telehealth:write'
-            ],
-            clinicalPrivileges: [
-              'PRESCRIBE', 'PRESCRIBE_MEDICATION', 'ORDER_MEDICATIONS', 'ORDER_DIAGNOSTICS', 'ORDER_LAB', 'ORDER_RADIOLOGY',
-              'ADMIT_INPATIENT', 'DISCHARGE_INPATIENT', 'PERFORM_PROCEDURES',
-              'SIGN_CLINICAL_NOTES', 'SIGN_SOAP', 'SIGN_PRESCRIPTIONS'
-            ],
-            credentialStatus: 'VERIFIED',
-            createdAt: now,
-            updatedAt: now,
-          }, { merge: true });
-
-          await db.collection('user_profiles').doc(verifiedToken.uid).set({
-            uid: verifiedToken.uid,
-            email,
-            name: displayName,
-            role,
-            tenantId: requestedTenantId,
-            createdAt: now,
-            updatedAt: now,
-          }, { merge: true });
-        } else {
-          // Keep existing active clinical/admin accounts verified with canonical privileges
-          const existingData = userSnap.data() || {};
-          const currentRoles: string[] = Array.isArray(existingData.roles) && existingData.roles.length > 0
-            ? existingData.roles.map(String)
-            : existingData.role
-              ? [String(existingData.role)]
-              : ['doctor'];
-
-          const isClinicianOrAdmin = currentRoles.some((r) =>
-            ['doctor', 'physician', 'administrator', 'admin', 'system_admin', 'medical_director', 'consultant', 'chief_medical_officer'].includes(r.toLowerCase())
-          );
-
-          if (isClinicianOrAdmin && existingData.status !== 'DISABLED') {
-            const existingPrivileges: string[] = Array.isArray(existingData.clinicalPrivileges)
-              ? existingData.clinicalPrivileges.map(String)
-              : [];
-            const canonicalClinicalPrivileges = [
-              'PRESCRIBE', 'PRESCRIBE_MEDICATION', 'ORDER_MEDICATIONS', 'ORDER_DIAGNOSTICS',
-              'ORDER_LAB', 'ORDER_RADIOLOGY', 'ADMIT_INPATIENT', 'DISCHARGE_INPATIENT',
-              'PERFORM_PROCEDURES', 'SIGN_CLINICAL_NOTES', 'SIGN_SOAP', 'SIGN_PRESCRIPTIONS'
-            ];
-            const missingPrivs = canonicalClinicalPrivileges.filter((p) => !existingPrivileges.includes(p));
-
-            if (existingData.credentialStatus !== 'VERIFIED' || missingPrivs.length > 0) {
-              const mergedPrivileges = Array.from(new Set([...existingPrivileges, ...canonicalClinicalPrivileges]));
-              await userRef.set({
-                credentialStatus: 'VERIFIED',
-                clinicalPrivileges: mergedPrivileges,
-                status: existingData.status || 'ACTIVE',
-                updatedAt: new Date().toISOString(),
-              }, { merge: true });
-            }
-          }
-        }
-      } catch (provisionErr) {
-        console.warn('Notice: Background membership verification check:', provisionErr);
-      }
-    }
-
+    // Authentication never creates authorization. Tenant membership, roles,
+    // credentials and clinical privileges must already exist through the
+    // governed IAM/credentialing workflows before a session can be established.
     // Membership is checked before any session/device authority is created.
     await resolveAuthorizationContext(verifiedToken, requestedTenantId);
 

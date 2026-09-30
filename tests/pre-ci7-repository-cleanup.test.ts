@@ -9,7 +9,7 @@ describe('pre-CI7 repository cleanup regressions', () => {
   test('Patient 360 route enforces explicit full-chart authorization', () => {
     const source = read('app/api/clinical/patient360/[patientId]/route.ts');
     expect(source).toContain("from '@/lib/clinical/patient360/patient360-access'");
-    expect(source).toContain('assertPatient360ReadAccess(context);');
+    expect(source).toContain('assertPatient360PatientAccess(context, patient, activeEncounter);');
   });
 
   test('Patient 360 projection stores remain server-only in Firestore rules', () => {

@@ -79,52 +79,10 @@ export class AuthorizationPipeline {
 
     // 4. Clinical Privilege Verification (Credential-Gated)
     if (requirement.requiredPrivilege) {
-      const required = requirement.requiredPrivilege.toUpperCase();
-      const rawPrivileges = (context.clinicalPrivileges || []).map((p) => String(p).toUpperCase());
-
-      // Expand canonical synonyms and aliases
-      const privileges = new Set<string>(rawPrivileges);
-      for (const priv of rawPrivileges) {
-        if (priv === 'SIGN_PRESCRIPTIONS' || priv === 'ORDER_MEDICATIONS' || priv === 'PRESCRIBE_MEDICATION') {
-          privileges.add('PRESCRIBE');
-          privileges.add('SIGN_PRESCRIPTIONS');
-          privileges.add('ORDER_MEDICATIONS');
-          privileges.add('PRESCRIBE_MEDICATION');
-        }
-        if (priv === 'PRESCRIBE') {
-          privileges.add('SIGN_PRESCRIPTIONS');
-          privileges.add('ORDER_MEDICATIONS');
-          privileges.add('PRESCRIBE_MEDICATION');
-        }
-        if (priv === 'SIGN_CLINICAL_NOTES' || priv === 'SIGN_SOAP' || priv === 'SIGN_SOAP_CLINICAL_NOTE') {
-          privileges.add('SIGN_CLINICAL_NOTES');
-          privileges.add('SIGN_SOAP');
-          privileges.add('SIGN_SOAP_CLINICAL_NOTE');
-        }
-        if (priv === 'ORDER_LAB' || priv === 'ORDER_HIGH_COMPLEXITY_LAB') {
-          privileges.add('ORDER_LAB');
-          privileges.add('ORDER_HIGH_COMPLEXITY_LAB');
-        }
-        if (priv === 'ORDER_RADIOLOGY' || priv === 'INTERPRET_RADIOLOGY_CT_MRI') {
-          privileges.add('ORDER_RADIOLOGY');
-          privileges.add('INTERPRET_RADIOLOGY_CT_MRI');
-        }
-        if (priv === 'PERFORM_PROCEDURES' || priv === 'PERFORM_PROCEDURE' || priv === 'PERFORM_INVASIVE_PROCEDURES') {
-          privileges.add('PERFORM_PROCEDURES');
-          privileges.add('PERFORM_PROCEDURE');
-          privileges.add('PERFORM_INVASIVE_PROCEDURES');
-        }
-      }
-
+      const privileges = context.clinicalPrivileges || [];
       const hasPrivilege =
-        privileges.has(required) ||
-        privileges.has('UNRESTRICTED_CLINICAL_CHIEF') ||
-        context.roles.includes('MEDICAL_DIRECTOR') ||
-        context.roles.includes('SYSTEM_ADMIN') ||
-        context.roles.includes('ADMINISTRATOR') ||
-        context.roles.includes('ADMIN') ||
-        context.roles.includes('HOSPITAL_ADMIN') ||
-        context.roles.includes('CHIEF_MEDICAL_OFFICER');
+        privileges.includes(requirement.requiredPrivilege) ||
+        privileges.includes('UNRESTRICTED_CLINICAL_CHIEF');
 
       if (!hasPrivilege) {
         return {

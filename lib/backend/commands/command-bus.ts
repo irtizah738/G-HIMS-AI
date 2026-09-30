@@ -25,6 +25,7 @@ import { DiagnosticResultDomainService } from '../services/diagnostic-result-dom
 import { PatientClinicalKnowledgeDomainService } from '../services/patient-clinical-knowledge-domain-service';
 import { DischargeReadinessReviewDomainService } from '../services/discharge-readiness-review-domain-service';
 import { IdempotencyService } from '../idempotency/idempotency-service';
+import { validateCommandPayload } from './command-schema-registry';
 import { emitOperationalEvent, operationalTimer } from '@/lib/observability/server-telemetry';
 
 export class CommandBus {
@@ -58,8 +59,8 @@ export class CommandBus {
       });
     };
 
-    // Zero-Trust Perimeter Validation: Tenant Isolation & Actor Authenticity (§2 Architectural Non-Negotiables)
-    if (!context.tenantId || context.tenantId.trim() === '' || !command.tenantId || command.tenantId.trim() === '') {
+    // Zero-trust perimeter validation must precede schema/idempotency work.
+    if (!context.tenantId?.trim() || !command.tenantId?.trim()) {
       emit('REJECTED', 'TENANT_ISOLATION_ERROR');
       return {
         success: false,
@@ -72,7 +73,10 @@ export class CommandBus {
       };
     }
 
-    if (context.tenantId.trim() !== command.tenantId.trim()) {
+    if (
+      context.tenantId.trim().toLowerCase() !==
+      command.tenantId.trim().toLowerCase()
+    ) {
       emit('REJECTED', 'TENANT_MISMATCH');
       return {
         success: false,
@@ -85,7 +89,7 @@ export class CommandBus {
       };
     }
 
-    if (!context.actorId || context.actorId.trim() === '') {
+    if (!context.actorId?.trim()) {
       emit('REJECTED', 'UNAUTHENTICATED_ACTOR');
       return {
         success: false,
@@ -99,6 +103,23 @@ export class CommandBus {
     }
 
     try {
+      const schemaValidation = validateCommandPayload(command);
+      if (!schemaValidation.success) {
+        emit('REJECTED', schemaValidation.error?.code);
+        return {
+          success: false,
+          commandId: command.commandId,
+          idempotencyKey: command.idempotencyKey,
+          error: {
+            code: schemaValidation.error?.code || 'COMMAND_PAYLOAD_INVALID',
+            message: schemaValidation.error?.message || 'Command payload validation failed.',
+            details: schemaValidation.error?.details,
+          },
+        };
+      }
+
+      command.payload = schemaValidation.payload || command.payload;
+
       // 1. Durable zero-duplicate idempotency reservation.
       const idempotencyCheck = await IdempotencyService.acquireExecution(
         context.tenantId,

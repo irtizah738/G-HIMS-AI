@@ -107,7 +107,8 @@ function authorizedCollections(roles: string[]): string[] {
   const add = (...collections: readonly string[]) =>
     collections.forEach((collection) => selected.add(collection));
 
-  // Clinicians need the complete clinical working set while disconnected.
+  // Clinicians receive a bounded working set. The response is further reduced
+  // by facility/department/care relationship before leaving the server.
   if (['DOCTOR', 'CONSULTANT', 'NURSE'].some((role) => normalized.has(role))) {
     add(...CLINICAL_COLLECTIONS);
   }
@@ -117,14 +118,13 @@ function authorizedCollections(roles: string[]): string[] {
     add('patients', 'encounters', 'opd_queue', 'beds');
   }
 
-  // Diagnostics need identity/encounter/order context, not the whole chart.
+  // Ancillary roles never hydrate the complete patient identity/chart set.
   if (['LAB_TECHNICIAN', 'LAB_TECH'].some((role) => normalized.has(role))) {
-    add('patients', 'encounters', 'orders');
+    add('encounters', 'orders');
   }
 
-  // Pharmacy needs prescription + patient context and its stock working set.
   if (normalized.has('PHARMACIST')) {
-    add('patients', 'encounters', 'prescriptions');
+    add('encounters', 'prescriptions');
     add(...SCM_COLLECTIONS);
   }
 
@@ -144,6 +144,139 @@ function authorizedCollections(roles: string[]): string[] {
   }
 
   return [...selected];
+}
+
+function isAdministrativeRole(roles: string[]): boolean {
+  const normalized = new Set(roles.map((role) => String(role || '').trim().toUpperCase()));
+  return ['SYSTEM_ADMIN', 'ADMINISTRATOR', 'ADMIN'].some((role) => normalized.has(role));
+}
+
+function valueMatchesScope(
+  value: unknown,
+  allowed: Set<string>
+): boolean {
+  const normalized = String(value || '').trim();
+  return !normalized || allowed.size === 0 || allowed.has(normalized);
+}
+
+function scopeOfflineCollections(
+  context: {
+    actorId: string;
+    roles: string[];
+    departmentId?: string;
+    departmentIds?: string[];
+    facilityIds?: string[];
+  },
+  collections: Record<string, Array<Record<string, unknown>>>
+): Record<string, Array<Record<string, unknown>>> {
+  if (isAdministrativeRole(context.roles)) return collections;
+
+  const departments = new Set(
+    (context.departmentIds || (context.departmentId ? [context.departmentId] : []))
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+  );
+  const facilities = new Set(
+    (context.facilityIds || [])
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+  );
+
+  const encounters = (collections.encounters || []).filter((encounter) => {
+    if (!valueMatchesScope(encounter.facilityId, facilities)) return false;
+    if (!valueMatchesScope(encounter.departmentId, departments)) return false;
+
+    const explicitActorIds = [
+      encounter.assignedDoctorId,
+      encounter.attendingDoctorId,
+      encounter.assignedNurseId,
+      encounter.clinicianId,
+      encounter.providerId,
+    ]
+      .map((value) => String(value || '').trim())
+      .filter(Boolean);
+
+    const hasExplicitScope =
+      Boolean(String(encounter.facilityId || '').trim()) ||
+      Boolean(String(encounter.departmentId || '').trim()) ||
+      explicitActorIds.length > 0;
+
+    // Legacy encounters without any server-verifiable care scope are deliberately
+    // omitted from non-admin offline hydration instead of leaking tenant-wide PHI.
+    if (!hasExplicitScope) return false;
+    if (explicitActorIds.length > 0 && !explicitActorIds.includes(context.actorId)) {
+      // Department/facility-scoped clinicians may still receive encounters in
+      // their assigned organizational scope.
+      return (
+        Boolean(String(encounter.departmentId || '').trim()) &&
+        valueMatchesScope(encounter.departmentId, departments)
+      );
+    }
+    return true;
+  });
+
+  const encounterIds = new Set(
+    encounters
+      .map((item) => String(item.id || item.encounterId || '').trim())
+      .filter(Boolean)
+  );
+  const patientIds = new Set(
+    encounters
+      .map((item) => String(item.patientId || '').trim())
+      .filter(Boolean)
+  );
+
+  const scoped: Record<string, Array<Record<string, unknown>>> = {
+    ...collections,
+    encounters,
+  };
+
+  const byEncounterOrPatient = new Set([
+    'encounterEvidence',
+    'orders',
+    'prescriptions',
+    'opd_queue',
+    'dischargeReadinessProjections',
+    'deteriorationProjections',
+  ]);
+
+  for (const [collection, rows] of Object.entries(collections)) {
+    if (collection === 'encounters') continue;
+
+    if (collection === 'patients' || collection === 'patient360Projections') {
+      scoped[collection] = rows.filter((row) =>
+        patientIds.has(String(row.id || row.patientId || '').trim())
+      );
+      continue;
+    }
+
+    if (collection === 'beds') {
+      scoped[collection] = rows.filter((row) => {
+        const encounterId = String(row.currentEncounterId || row.encounterId || '').trim();
+        if (encounterId && encounterIds.has(encounterId)) return true;
+        return (
+          valueMatchesScope(row.facilityId, facilities) &&
+          valueMatchesScope(row.departmentId, departments) &&
+          (Boolean(String(row.facilityId || '').trim()) ||
+            Boolean(String(row.departmentId || '').trim()))
+        );
+      });
+      continue;
+    }
+
+    if (byEncounterOrPatient.has(collection)) {
+      scoped[collection] = rows.filter((row) => {
+        const encounterId = String(row.encounterId || row.id || '').trim();
+        const patientId = String(row.patientId || '').trim();
+        return (
+          (encounterId && encounterIds.has(encounterId)) ||
+          (patientId && patientIds.has(patientId))
+        );
+      });
+    }
+  }
+
+  return scoped;
 }
 
 export async function GET(req: NextRequest) {
@@ -173,6 +306,10 @@ export async function GET(req: NextRequest) {
         await readCollectionSnapshot(tenantRef, collection),
       ] as const)
     );
+    const scopedCollections = scopeOfflineCollections(
+      context,
+      Object.fromEntries(entries)
+    );
 
     const snapshotVersion = `${context.tenantId}:${generatedAt}`;
 
@@ -182,7 +319,7 @@ export async function GET(req: NextRequest) {
         tenantId: context.tenantId,
         generatedAt,
         snapshotVersion,
-        collections: Object.fromEntries(entries),
+        collections: scopedCollections,
       },
       {
         status: 200,

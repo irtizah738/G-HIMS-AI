@@ -9,6 +9,8 @@ export interface CommandContext {
   roles: string[];
   permissions: string[];
   departmentId?: string;
+  departmentIds?: string[];
+  facilityIds?: string[];
   verifiedCredentials?: string[];
   clinicalPrivileges?: string[];
   deviceId?: string;

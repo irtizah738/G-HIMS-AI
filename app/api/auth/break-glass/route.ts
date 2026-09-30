@@ -4,6 +4,7 @@ import { getAdminFirestore } from '@/server/firebase/admin';
 import { logAuthEvent } from '@/server/auth/audit-service';
 
 const ELIGIBLE_ROLES = new Set(['DOCTOR', 'CONSULTANT', 'MEDICAL_DIRECTOR', 'ATTENDING_PHYSICIAN']);
+const REVIEW_ROLES = new Set(['SYSTEM_ADMIN', 'ADMINISTRATOR', 'MEDICAL_DIRECTOR', 'COMPLIANCE_OFFICER']);
 
 export async function POST(req: NextRequest) {
   const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || '127.0.0.1';
@@ -81,6 +82,98 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to trigger emergency Break-Glass';
     const unauthorized = /AUTH|TENANT|UNAUTH/i.test(message);
+    return NextResponse.json({ error: message }, { status: unauthorized ? 403 : 500 });
+  }
+}
+
+
+export async function PATCH(req: NextRequest) {
+  const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || '127.0.0.1';
+  const userAgent = req.headers.get('user-agent') || 'Unknown';
+
+  try {
+    const body = await req.json().catch(() => ({}));
+    const tenantId = String(body.tenantId || '').trim().toLowerCase();
+    const grantId = String(body.grantId || '').trim();
+    const outcome = String(body.outcome || '').trim().toUpperCase();
+    const reviewReason = String(body.reviewReason || '').trim();
+
+    if (
+      !tenantId ||
+      !grantId ||
+      !['APPROVED', 'INAPPROPRIATE', 'ESCALATED'].includes(outcome) ||
+      reviewReason.length < 10
+    ) {
+      return NextResponse.json(
+        { error: 'tenantId, grantId, valid outcome, and reviewReason of at least 10 characters are required.' },
+        { status: 400 }
+      );
+    }
+
+    const { context } = await deriveAuthoritativeContext(req, tenantId);
+    if (!context.roles.some((role) => REVIEW_ROLES.has(role))) {
+      return NextResponse.json(
+        { error: 'Break-Glass review authority is required.' },
+        { status: 403 }
+      );
+    }
+
+    const db = getAdminFirestore();
+    if (!db) {
+      return NextResponse.json({ error: 'Security store unavailable.' }, { status: 503 });
+    }
+
+    const grantRef = db
+      .collection('tenants')
+      .doc(context.tenantId)
+      .collection('break_glass_grants')
+      .doc(grantId);
+
+    const reviewedAt = new Date().toISOString();
+
+    await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(grantRef);
+      if (!snapshot.exists) {
+        throw new Error('BREAK_GLASS_GRANT_NOT_FOUND');
+      }
+      const current = snapshot.data() as Record<string, unknown>;
+      if (String(current.reviewStatus || '') !== 'PENDING_REVIEW') {
+        throw new Error('BREAK_GLASS_ALREADY_REVIEWED');
+      }
+
+      transaction.update(grantRef, {
+        reviewStatus: outcome,
+        reviewReason,
+        reviewedAt,
+        reviewedBy: context.actorId,
+      });
+    });
+
+    await logAuthEvent({
+      eventType: 'BREAK_GLASS_REVIEWED',
+      tenantId: context.tenantId,
+      userId: context.actorId,
+      ip: clientIp,
+      userAgent,
+      reason: reviewReason,
+      metadata: { grantId, outcome, reviewedAt },
+    });
+
+    return NextResponse.json({
+      success: true,
+      grantId,
+      reviewStatus: outcome,
+      reviewedAt,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Break-Glass review failed';
+    if (message === 'BREAK_GLASS_GRANT_NOT_FOUND') {
+      return NextResponse.json({ error: message }, { status: 404 });
+    }
+    if (message === 'BREAK_GLASS_ALREADY_REVIEWED') {
+      return NextResponse.json({ error: message }, { status: 409 });
+    }
+    const unauthorized = /AUTH|TENANT|UNAUTH|SESSION/i.test(message);
     return NextResponse.json({ error: message }, { status: unauthorized ? 403 : 500 });
   }
 }

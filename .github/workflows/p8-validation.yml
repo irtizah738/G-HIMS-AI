@@ -1,0 +1,93 @@
+name: P8 Main Baseline Hardening
+
+on:
+  push:
+    branches:
+      - hardening/p8-main-baseline
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p8-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  p8:
+    name: P8 main baseline hardening gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-p8-ci
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p8-ci
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p8-ci
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p8-ci
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      GHIMS_INTEGRATION_HL7_STATE: DISABLED
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_INTEGRATION_DICOMWEB_STATE: DISABLED
+      GHIMS_INTEGRATION_DEVICE_TELEMETRY_STATE: DISABLED
+      GHIMS_INTEGRATION_EDI_X12_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: TypeScript
+        run: bun run typecheck
+
+      - name: Lint
+        run: bun run lint
+
+      - name: P8 hardening contract
+        run: bun run test:p8
+
+      - name: Clinical architecture
+        run: bun run test:clinical-architecture
+
+      - name: Clinical Intelligence
+        run: bun run test:ci7 && bun run test:ci8
+
+      - name: Offline and pilot boundaries
+        run: bun run test:p6 && bun run test:p7
+
+      - name: Security regression
+        run: bun run test:security
+
+      - name: Production build
+        run: bun run build
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "## G-HIMS P8 Main Baseline Hardening"
+            echo ""
+            echo "- Authoritative invoice settlement: PASS"
+            echo "- Strict journal invariants: PASS"
+            echo "- Versioned high-risk command schemas: PASS"
+            echo "- Patient 360 minimum-necessary access: PASS"
+            echo "- Scoped offline hydration: PASS"
+            echo "- Encrypted offline auth/security cache: PASS"
+            echo "- Legacy caller-supplied outbox dispatch retired: PASS"
+            echo "- Break-glass post-event review: PASS"
+            echo "- Repository secret/PHI ignore rules: PASS"
+            echo "- Clinical/offline/security/build regressions: PASS"
+          } >> "$GITHUB_STEP_SUMMARY"

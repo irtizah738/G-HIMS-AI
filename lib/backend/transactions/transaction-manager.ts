@@ -197,6 +197,7 @@ function collectionForEntityType(entityType: string): string {
     PATIENT_CONSUMPTION: 'patientConsumptions',
     PURCHASE_REQUISITION: 'purchaseRequisitions',
     CASH_RECEIPT: 'cashReceipts',
+    INVOICE: 'invoices',
     INVOICE_SETTLEMENT: 'invoiceSettlements',
     DISCHARGE_READINESS_REVIEW: 'dischargeReadinessReviews',
     BED_TRANSFER: 'bedTransfers',

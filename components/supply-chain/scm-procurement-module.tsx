@@ -9,10 +9,10 @@ import {
   InventoryLocation,
 } from '@/types/scm-domain';
 import {
-  createPurchaseRequisition,
-  updateRequisitionStatus,
-  convertRequisitionToPO,
-} from '@/lib/firebase/services/scm-firestore-service';
+  approvePurchaseRequisitionEdge,
+  createPurchaseOrderEdge,
+  submitPurchaseRequisitionEdge,
+} from '@/lib/supply-chain/scm-edge-adapter';
 import {
   ShoppingCart,
   Plus,
@@ -69,8 +69,6 @@ export function ScmProcurementModule({
   // Approval Modal
   const [selectedReqForApproval, setSelectedReqForApproval] = useState<PurchaseRequisition | null>(null);
   const [approvalDecision, setApprovalDecision] = useState<'APPROVED' | 'REJECTED'>('APPROVED');
-  const [approverName, setApproverName] = useState('Dr. Robert Henderson, MD');
-  const [approverRole, setApproverRole] = useState('Clinical Director & CMO');
   const [approvalNotes, setApprovalNotes] = useState('Clinically validated under hospital emergency formulary protocol.');
 
   // Conversion to PO Modal
@@ -165,7 +163,7 @@ export function ScmProcurementModule({
     };
 
     try {
-      await createPurchaseRequisition(tenantId, newReq);
+      await submitPurchaseRequisitionEdge(newReq);
       setFeedback({
         type: 'success',
         text: `Requisition ${newPrNumber} submitted successfully. Immutably logged in audit stream.`,
@@ -187,10 +185,17 @@ export function ScmProcurementModule({
     if (!selectedReqForApproval) return;
     setActionLoading(true);
     try {
-      await updateRequisitionStatus(tenantId, selectedReqForApproval.requisitionId, approvalDecision, {
-        name: approverName,
-        role: approverRole,
+      await approvePurchaseRequisitionEdge({
+        requisitionId: selectedReqForApproval.requisitionId,
+        decision: approvalDecision,
         comments: approvalNotes,
+        approvedLines:
+          approvalDecision === 'APPROVED'
+            ? selectedReqForApproval.items.map((line) => ({
+                itemId: line.itemId,
+                approvedQuantity: line.requestedQuantity,
+              }))
+            : undefined,
       });
 
       setFeedback({
@@ -223,22 +228,52 @@ export function ScmProcurementModule({
     }
 
     try {
-      const generatedPo = await convertRequisitionToPO(
-        tenantId,
-        selectedReqForPo.requisitionId,
-        chosenSupplier.supplierId,
-        chosenSupplier.displayName || chosenSupplier.legalName,
-        {
-          userId: 'usr_scm_director',
-          userName: 'Elena Rostova, CPIM',
-          role: 'Hospital SCM Director',
-        },
-        poNotes || `Converted to PO under payment terms ${poPaymentTerms}.`
-      );
+      const destination =
+        locations.find(
+          (location) =>
+            location.locationId === selectedReqForPo.requestingLocationId &&
+            location.active
+        ) ||
+        locations.find(
+          (location) =>
+            location.facilityId === selectedReqForPo.facilityId &&
+            location.active
+        );
+
+      if (!destination) {
+        throw new Error(
+          'No active authoritative inventory destination is available for this requisition facility.'
+        );
+      }
+
+      const poId = `po_${crypto.randomUUID()}`;
+      const generatedPo = await createPurchaseOrderEdge({
+        poId,
+        poNumber: `PO-${new Date().getFullYear()}-${Date.now().toString().slice(-8)}`,
+        requisitionId: selectedReqForPo.requisitionId,
+        supplierId: chosenSupplier.supplierId,
+        currency: selectedReqForPo.currency,
+        paymentTerms: poPaymentTerms,
+        expectedDeliveryDate: new Date(
+          Date.now() + poExpectedDays * 86_400_000
+        ).toISOString(),
+        destinationLocationId: destination.locationId,
+        destinationLocationName: destination.name,
+        items: selectedReqForPo.items.map((line, index) => ({
+          lineId: `${poId}:line:${index + 1}`,
+          itemId: line.itemId,
+          quantityOrdered:
+            Number(line.approvedQuantity ?? line.requestedQuantity),
+          uom: line.uom,
+          unitPrice: Number(line.estimatedUnitCost),
+          discount: 0,
+          taxPercent: 0,
+        })),
+      });
 
       setFeedback({
         type: 'success',
-        text: `Successfully converted PR ${selectedReqForPo.requisitionNumber} into Purchase Order ${generatedPo.poNumber}! Both state transition events PR_CONVERTED_TO_PO and PO_GENERATED recorded.`,
+        text: `Generated Purchase Order ${generatedPo.poNumber} from PR ${selectedReqForPo.requisitionNumber}. The authenticated server owns creator identity, totals, supplier validation, and state transitions.`,
       });
       setSelectedReqForPo(null);
       await onRefresh();
@@ -764,29 +799,8 @@ export function ScmProcurementModule({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
-                    Approver Name:
-                  </label>
-                  <input
-                    type="text"
-                    value={approverName}
-                    onChange={(e) => setApproverName(e.target.value)}
-                    className="w-full px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700"
-                  />
-                </div>
-                <div>
-                  <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
-                    Role / Authority:
-                  </label>
-                  <input
-                    type="text"
-                    value={approverRole}
-                    onChange={(e) => setApproverRole(e.target.value)}
-                    className="w-full px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700"
-                  />
-                </div>
+              <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
+                Approver identity, role, facility scope, and segregation-of-duties checks are resolved from the authenticated server session. They cannot be entered or overridden in this form.
               </div>
 
               <div>

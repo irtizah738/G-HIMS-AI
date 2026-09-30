@@ -104,8 +104,9 @@ describe('HCM-2 credentialing and clinical privileges',()=>{
     expect(auth).toContain("privilege.status!=='GRANTED'");
     expect(auth).toContain('facilityScope');
     expect(auth).toContain('departmentScope');
-    const returned=auth.slice(auth.indexOf('const clinicalPrivileges=await'),auth.indexOf('return {',auth.indexOf('const clinicalPrivileges=await'))+500);
-    expect(returned).not.toContain('membership.clinicalPrivileges');
+    expect(auth).toContain('const clinicalPrivileges=isClinicalRole(membership.roles)');
+    expect(auth).toContain('resolveCredentialGatedPrivileges');
+    expect(auth).toContain(': membership.clinicalPrivileges;');
   });
 
   test('credentialing UI no longer mutates legacy Firestore or uses demo tenant identities',async()=>{

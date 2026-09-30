@@ -955,6 +955,12 @@ export function HrManagementView() {
             </div>
           </div>
 
+          {workforceLoading && (
+            <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[11px] font-semibold text-blue-700">
+              Refreshing authoritative workforce master…
+            </div>
+          )}
+
           {/* Employee Directory Table */}
           <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-2xs">
             <div className="overflow-x-auto">

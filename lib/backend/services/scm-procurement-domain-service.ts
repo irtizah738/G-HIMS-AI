@@ -1330,7 +1330,7 @@ export class ScmProcurementDomainService {
               quantityAccepted: accepted,
               quantityRejected: rejected,
               quantityDamaged: damaged,
-              uom: item.stockUOM,
+              uom: line.uom as GoodsReceiptNote['items'][number]['uom'],
               batchNumber:
                 String(line.batchNumber || '').trim() ||
                 `UNBATCHED-${item.itemCode}`,

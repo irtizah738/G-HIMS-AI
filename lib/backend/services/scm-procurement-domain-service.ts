@@ -947,6 +947,8 @@ export class ScmProcurementDomainService {
           const receiptTransactionIds: string[] = [];
           const seenReceiptItems = new Set<string>();
           let grniAccrualMinorUnits = 0;
+          let grniPharmacyInventoryMinorUnits = 0;
+          let grniSuppliesInventoryMinorUnits = 0;
 
           for (let index = 0; index < normalizedLines.length; index += 1) {
             const line = normalizedLines[index];
@@ -1090,11 +1092,17 @@ export class ScmProcurementDomainService {
                       poDiscountMinorUnits
                   )
                 : 0;
-            grniAccrualMinorUnits += Math.max(
+            const acceptedAccrualMinorUnits = Math.max(
               0,
               Math.round(accepted * poUnitCost * 100) -
                 allocatedDiscountMinorUnits
             );
+            grniAccrualMinorUnits += acceptedAccrualMinorUnits;
+            if (item.itemType === 'MEDICATION') {
+              grniPharmacyInventoryMinorUnits += acceptedAccrualMinorUnits;
+            } else {
+              grniSuppliesInventoryMinorUnits += acceptedAccrualMinorUnits;
+            }
             const stockUnitCost =
               acceptedStock.factor > 0
                 ? roundMoney(poUnitCost / acceptedStock.factor)
@@ -1397,15 +1405,30 @@ export class ScmProcurementDomainService {
                 currency: po.currency,
                 totalAmountMinorUnits: grniAccrualMinorUnits,
                 lines: [
+                  ...(grniPharmacyInventoryMinorUnits > 0
+                    ? [
+                        {
+                          glAccountId: '1210',
+                          glAccountName: 'Pharmacy Formulary Inventory',
+                          debitMinorUnits: grniPharmacyInventoryMinorUnits,
+                          creditMinorUnits: 0,
+                          lineDescription: `Pharmacy inventory received under ${payload.grnNumber}`,
+                        },
+                      ]
+                    : []),
+                  ...(grniSuppliesInventoryMinorUnits > 0
+                    ? [
+                        {
+                          glAccountId: '1220',
+                          glAccountName: 'Surgical & Sterile Medical Supplies Inventory',
+                          debitMinorUnits: grniSuppliesInventoryMinorUnits,
+                          creditMinorUnits: 0,
+                          lineDescription: `Medical/general inventory received under ${payload.grnNumber}`,
+                        },
+                      ]
+                    : []),
                   {
-                    glAccountId: '1210',
-                    glAccountName: 'Medical & General Supplies Inventory',
-                    debitMinorUnits: grniAccrualMinorUnits,
-                    creditMinorUnits: 0,
-                    lineDescription: `Inventory received under ${payload.grnNumber}`,
-                  },
-                  {
-                    glAccountId: '2110',
+                    glAccountId: '2030',
                     glAccountName: 'Goods Received Not Invoiced (GRNI)',
                     debitMinorUnits: 0,
                     creditMinorUnits: grniAccrualMinorUnits,
@@ -1482,6 +1505,8 @@ export class ScmProcurementDomainService {
               poStatus: nextPo.status,
               grniJournalId,
               grniAccrualMinorUnits,
+              grniPharmacyInventoryMinorUnits,
+              grniSuppliesInventoryMinorUnits,
             },
             auditReason: `Received and inspected goods for PO ${po.poNumber} under GRN ${grn.grnNumber}`,
             resultData: {

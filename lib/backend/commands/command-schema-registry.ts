@@ -1154,6 +1154,59 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       effectiveDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     }).strict(),
   },
+  SubmitCredentialCommand: {
+    1: z.object({
+      employeeId: nonEmpty.max(100),
+      credentialType: z.enum([
+        'MEDICAL_LICENSE','NURSING_BOARD','PHARMACY_LICENSE',
+        'PROFESSIONAL_REGISTRATION','SPECIALTY_BOARD','BLS_ACLS',
+        'DEA_REGISTRATION','HOSPITAL_CREDENTIAL','FELLOWSHIP_CERTIFICATE'
+      ]),
+      title: nonEmpty.max(250),
+      issuingAuthority: nonEmpty.max(250),
+      credentialNumber: nonEmpty.max(150),
+      issueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      expiryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      documentReference: z.string().trim().min(1).max(1000).optional(),
+      documentHash: z.string().trim().min(16).max(256).optional(),
+      notes: z.string().trim().max(2000).optional(),
+      isMandatoryForPractice: z.boolean(),
+    }).strict(),
+  },
+  VerifyCredentialCommand: {
+    1: z.object({
+      credentialId: nonEmpty.max(150),
+      status: z.enum(['VERIFIED','REJECTED']),
+      notes: z.string().trim().max(2000).optional(),
+    }).strict(),
+  },
+  GrantClinicalPrivilegeCommand: {
+    1: z.object({
+      employeeId: nonEmpty.max(100),
+      privilegeType: z.enum([
+        'CONSULT_OPD','PRESCRIBE_MEDICATION','PERFORM_GENERAL_SURGERY',
+        'PERFORM_CARDIOTHORACIC_SURGERY','ADMINISTER_ANESTHESIA',
+        'ORDER_HIGH_COMPLEXITY_LAB','APPROVE_LAB_RESULTS',
+        'INTERPRET_RADIOLOGY_CT_MRI','SIGN_DEATH_CERTIFICATE',
+        'PERFORM_INVASIVE_PROCEDURES','SIGN_SOAP_CLINICAL_NOTE'
+      ]),
+      specialty: nonEmpty.max(200),
+      facilityId: nonEmpty.max(100),
+      facilityName: nonEmpty.max(200),
+      departmentId: nonEmpty.max(100),
+      departmentName: nonEmpty.max(200),
+      effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      effectiveUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      restrictionNotes: z.string().trim().max(2000).optional(),
+    }).strict(),
+  },
+  ChangeClinicalPrivilegeStatusCommand: {
+    1: z.object({
+      privilegeId: nonEmpty.max(150),
+      status: z.enum(['GRANTED','SUSPENDED','REVOKED']),
+      reason: nonEmpty.max(2000),
+    }).strict(),
+  },
   RecordVitalsCommand: {
     1: z.object({
       patientId: nonEmpty,

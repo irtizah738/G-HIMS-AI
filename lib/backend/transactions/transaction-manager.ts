@@ -192,6 +192,7 @@ function collectionForEntityType(entityType: string): string {
     REVENUE_INTEGRITY_FINDING: 'billingMismatches',
     ENCOUNTER_CHARGE: 'encounterCharges',
     AI_DRAFT: 'aiDrafts',
+    ITEM_MASTER: 'items',
     STOCK_TRANSACTION: 'stockTransactions',
     INVENTORY_BALANCE: 'inventoryBalances',
     PATIENT_CONSUMPTION: 'patientConsumptions',

@@ -19,6 +19,7 @@ import { FinanceTaxDomainService } from '../services/finance-tax-domain-service'
 import { FinanceIntelligenceDomainService } from '../services/finance-intelligence-domain-service';
 import { HrWorkforceDomainService } from '../services/hr-workforce-domain-service';
 import { HcmPayrollDomainService } from '../services/hcm-payroll-domain-service';
+import { HcmIntelligenceDomainService } from '../services/hcm-intelligence-domain-service';
 import { ResourceCapacityDomainService } from '../services/resource-capacity-domain-service';
 import { PatientIdentityDomainService } from '../services/patient-identity-domain-service';
 import { PatientMergeDomainService } from '../services/patient-merge-domain-service';
@@ -321,6 +322,12 @@ export class CommandBus {
 
         case 'RemitPayrollLiabilityCommand':
           result = await HcmPayrollDomainService.remitPayrollLiability(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'GenerateHcmIntelligenceCommand':
+          result = await HcmIntelligenceDomainService.generateSnapshot(
             context, command.commandId, command.idempotencyKey, command.payload as any
           );
           break;

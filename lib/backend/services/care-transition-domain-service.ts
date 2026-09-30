@@ -10,6 +10,8 @@ import { TransactionManager } from '../transactions/transaction-manager';
 import type { CommandContext, CommandResult } from '../types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import { PatientClinicalKnowledgeDomainService } from './patient-clinical-knowledge-domain-service';
+import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
+import { DischargeReadinessService } from '@/lib/clinical/intelligence/discharge-readiness-service';
 import {
   criticalObservationIds,
   isCriticalDiagnosticResult,
@@ -70,7 +72,7 @@ export interface DischargeInpatientEncounterPayload {
   encounterId: string;
   bedId: string;
   disposition: string;
-  dischargeSummaryEvidenceId: string;
+  dischargeSummaryEvidenceId?: string;
   followUpInstructions: string;
   notes?: string;
 }
@@ -537,7 +539,6 @@ export class CareTransitionDomainService {
     if (
       !payload.encounterId ||
       !payload.bedId ||
-      !payload.dischargeSummaryEvidenceId ||
       !String(payload.disposition || '').trim() ||
       !String(payload.followUpInstructions || '').trim()
     ) {
@@ -548,7 +549,7 @@ export class CareTransitionDomainService {
         error: {
           code: 'INVALID_INPATIENT_DISCHARGE_INPUT',
           message:
-            'Encounter, bed, signed discharge summary, disposition, and follow-up instructions are required.',
+            'Encounter, bed, disposition, and follow-up instructions are required. Signed discharge evidence is resolved authoritatively.',
         },
       };
     }
@@ -583,8 +584,108 @@ export class CareTransitionDomainService {
       return { success: false, commandId, idempotencyKey, error: { code: 'PATIENT_CENSUS_STATE_CONFLICT', message: 'Patient active encounter/bed does not match the discharge target.' } };
     }
 
+    // Architecture contract:
+    // immutable clinical events -> longitudinal Patient 360 projection -> CI-7
+    // -> credentialed clinician review -> governed discharge command.
+    // The raw clinical checks below remain defense-in-depth.
+    const [patient360, readiness, readinessReviews] = await Promise.all([
+      Patient360ProjectionService.getProjection(
+        context.tenantId,
+        encounter.patientId
+      ),
+      DischargeReadinessService.getProjection(
+        context.tenantId,
+        encounter.encounterId
+      ),
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        context.tenantId,
+        'dischargeReadinessReviews',
+        'encounterId',
+        encounter.encounterId
+      ),
+    ]);
+
+    if (
+      !patient360 ||
+      patient360.activeEncounter?.encounterId !== encounter.encounterId
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'PATIENT360_DECISION_CONTEXT_REQUIRED',
+          message:
+            'The current inpatient encounter must be present in authoritative Patient 360 before discharge can execute.',
+        },
+      };
+    }
+
+    if (
+      !readiness ||
+      readiness.patientId !== encounter.patientId ||
+      readiness.encounterId !== encounter.encounterId ||
+      readiness.patient360Revision !== patient360.revision ||
+      readiness.patient360SourceCheckpoint !== patient360.sourceCheckpoint
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'DISCHARGE_READINESS_EVALUATION_STALE',
+          message:
+            'CI-7 has not evaluated the current Patient 360 revision. Wait for projection processing and review the latest assessment.',
+        },
+      };
+    }
+
+    if (readiness.blockers.length > 0) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'DISCHARGE_READINESS_BLOCKERS_PRESENT',
+          message:
+            'The current CI-7 assessment contains unresolved discharge blockers.',
+          details: readiness.blockers.map((item) => ({
+            findingId: item.findingId,
+            code: item.code,
+            title: item.title,
+          })),
+        },
+      };
+    }
+
+    const currentReviewAccepted = readinessReviews.some((review) => {
+      const outcome = String(review.outcome || '').toUpperCase();
+      return (
+        String(review.evaluationId || '') === readiness.evaluationId &&
+        String(review.patientId || '') === encounter.patientId &&
+        ['ACKNOWLEDGED', 'PROCEED_WITH_WARNINGS'].includes(outcome)
+      );
+    });
+
+    if (!currentReviewAccepted) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'DISCHARGE_READINESS_REVIEW_REQUIRED',
+          message:
+            'A credentialed clinician must acknowledge the current CI-7 Patient 360 assessment before the discharge command can execute.',
+          details: {
+            evaluationId: readiness.evaluationId,
+            readinessState: readiness.state,
+          },
+        },
+      };
+    }
+
     const [
-      dischargeEvidence,
+      allEncounterEvidence,
       diagnosticOrders,
       diagnosticResults,
       clinicalObservations,
@@ -596,10 +697,11 @@ export class CareTransitionDomainService {
       allergyKnowledge,
       medicationKnowledge,
     ] = await Promise.all([
-      DomainStateRepository.getById<Record<string, unknown>>(
+      DomainStateRepository.queryAllEqual<Record<string, unknown>>(
         context.tenantId,
         'encounterEvidence',
-        payload.dischargeSummaryEvidenceId
+        'encounterId',
+        encounter.encounterId
       ),
       DomainStateRepository.queryAllEqual<Record<string, unknown>>(
         context.tenantId,
@@ -660,6 +762,30 @@ export class CareTransitionDomainService {
         'MEDICATIONS'
       ),
     ]);
+
+    const dischargeEvidence =
+      (payload.dischargeSummaryEvidenceId
+        ? allEncounterEvidence.find(
+            (item) =>
+              String(item.evidenceId || item.id || '') ===
+              payload.dischargeSummaryEvidenceId
+          )
+        : [...allEncounterEvidence]
+            .filter(
+              (item) =>
+                item.encounterId === encounter.encounterId &&
+                item.patientId === encounter.patientId &&
+                item.evidenceType === 'SIGNED_CLINICAL_NOTE' &&
+                item.category === 'DISCHARGE' &&
+                item.status === 'FINAL' &&
+                Boolean(String(item.signedBy || '').trim()) &&
+                Number.isFinite(Number(item.signedAt))
+            )
+            .sort(
+              (left, right) =>
+                Number(right.signedAt || right.createdAt || 0) -
+                Number(left.signedAt || left.createdAt || 0)
+            )[0]) || null;
 
     if (
       !dischargeEvidence ||

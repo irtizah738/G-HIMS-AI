@@ -137,6 +137,51 @@ export class ClinicalDeteriorationService {
     return encounterId ? this.getProjection(tenantId, encounterId) : null;
   }
 
+  /**
+   * Tenant-scoped active CI-8 census view.
+   *
+   * The Bed Board and other operational surfaces must consume this derived
+   * intelligence rather than re-classifying raw NEWS2/bed metadata locally.
+   */
+  public static async listActiveForTenant(
+    tenantId: string
+  ): Promise<DeteriorationProjection[]> {
+    const inpatientEncounters =
+      await DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        tenantId,
+        'encounters',
+        'encounterType',
+        'IPD'
+      );
+
+    const activeEncounterIds = inpatientEncounters
+      .filter((encounter) =>
+        ['ACTIVE', 'IN_PROGRESS', 'ADMITTED'].includes(
+          String(encounter.status || '').toUpperCase()
+        )
+      )
+      .map((encounter) =>
+        String(encounter.encounterId || encounter.id || '').trim()
+      )
+      .filter(Boolean);
+
+    const projections = await Promise.all(
+      activeEncounterIds.map((encounterId) =>
+        this.getProjection(tenantId, encounterId)
+      )
+    );
+
+    return projections
+      .filter(
+        (projection): projection is DeteriorationProjection =>
+          projection !== null && projection.state !== 'NOT_APPLICABLE'
+      )
+      .sort((left, right) =>
+        right.evaluatedAt - left.evaluatedAt ||
+        left.encounterId.localeCompare(right.encounterId)
+      );
+  }
+
   public static async buildSnapshot(
     tenantId: string,
     patientId: string

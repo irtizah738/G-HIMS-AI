@@ -10,10 +10,14 @@ import type {
   EmployeeAssignmentHistory,
   EmployeeCredential,
   EmployeeMaster,
+  RosterShiftEntry,
+  RosterSwapRecord,
 } from '@/types/hcm-advanced';
 import type {
   ClinicalCredential,
   CredentialExpiryAlert,
+  RosterShift,
+  ShiftType,
   StaffMember,
   StaffRole,
 } from '@/types/hcm';
@@ -184,6 +188,50 @@ export const changeClinicalPrivilegeStatusEdge=(
   idempotencyKey
 );
 
+export type AssignShiftEdgePayload = Omit<
+  RosterShiftEntry,
+  | 'rosterId'
+  | 'tenantId'
+  | 'employeeName'
+  | 'positionTitle'
+  | 'durationHours'
+  | 'status'
+  | 'isOvertime'
+  | 'overtimeHours'
+  | 'publishedAt'
+  | 'publishedBy'
+  | 'conflictFlags'
+  | 'createdAt'
+  | 'updatedAt'
+>;
+
+export const assignShiftEdge=(
+  payload:AssignShiftEdgePayload,
+  idempotencyKey?:string
+)=>run<RosterShiftEntry>(
+  'AssignShiftCommand',
+  payload as unknown as Record<string,unknown>,
+  idempotencyKey
+);
+
+export const cancelShiftEdge=(
+  payload:{rosterId:string;reason:string},
+  idempotencyKey?:string
+)=>run<RosterShiftEntry>(
+  'CancelShiftCommand',
+  payload as unknown as Record<string,unknown>,
+  idempotencyKey
+);
+
+export const executeRosterSwapEdge=(
+  payload:{shiftAId:string;shiftBId:string;reason:string},
+  idempotencyKey?:string
+)=>run<RosterSwapRecord>(
+  'ExecuteRosterSwapCommand',
+  payload as unknown as Record<string,unknown>,
+  idempotencyKey
+);
+
 function inferLegacyStaffRole(employee:EmployeeMaster):StaffRole{
   const value=`${employee.positionTitle} ${employee.specialty||''}`.toLowerCase();
   if(value.includes('nurse')) return 'nurse';
@@ -334,4 +382,79 @@ export async function loadLocalCredentialing(tenantId:string){
 
 export async function hydrateCredentialing(tenantId:string){
   return mapCredentialingSnapshot(await hydrateEdgeSnapshot(tenantId));
+}
+
+function inferLegacyShiftType(shift:RosterShiftEntry):ShiftType{
+  const value=`${shift.shiftName} ${shift.shiftId}`.toLowerCase();
+  if(value.includes('night')) return 'night';
+  if(value.includes('evening')) return 'evening';
+  if(value.includes('on call')||value.includes('on_call')||value.includes('on-call')) return 'on_call';
+  return 'morning';
+}
+
+function toLegacyRosterShift(
+  shift:RosterShiftEntry,
+  employee?:EmployeeMaster
+):RosterShift{
+  const status:RosterShift['status']=
+    shift.status==='CANCELLED'?'cancelled':
+    shift.status==='COMPLETED'?'completed':
+    shift.status==='IN_PROGRESS'?'in_progress':
+    'scheduled';
+  return {
+    id:shift.rosterId,
+    tenantId:shift.tenantId,
+    shiftNumber:shift.rosterId,
+    staffId:shift.employeeId,
+    staffName:shift.employeeName,
+    staffRole:employee?inferLegacyStaffRole(employee):'admin',
+    departmentId:shift.departmentId,
+    departmentName:shift.departmentName,
+    wardId:shift.facilityId,
+    wardName:shift.facilityName,
+    shiftType:inferLegacyShiftType(shift),
+    date:shift.date,
+    scheduledStartTime:shift.startTime,
+    scheduledEndTime:shift.endTime,
+    breakDuration:0,
+    totalHours:shift.durationHours,
+    status,
+    isOvertime:shift.isOvertime,
+    overtimeHours:shift.overtimeHours,
+    notes:shift.notes,
+    conflictFlags:shift.conflictFlags,
+    createdAt:shift.createdAt,
+    updatedAt:shift.updatedAt,
+  };
+}
+
+function mapRosterSnapshot(
+  snapshot:Awaited<ReturnType<typeof loadLocalEdgeSnapshot>>
+){
+  const employees=(snapshot.collections.employees||[])
+    .map(row=>row as unknown as EmployeeMaster);
+  const employeeById=new Map(employees.map(employee=>[employee.employeeId,employee]));
+  const staff=employees.map(toLegacyStaff).sort((a,b)=>a.staffNumber.localeCompare(b.staffNumber));
+  const credentials=(snapshot.collections.clinicalCredentials||[])
+    .map(row=>row as unknown as EmployeeCredential)
+    .map(credential=>toLegacyCredential(credential,employeeById.get(credential.employeeId)));
+  const shifts=(snapshot.collections.rosterAssignments||[])
+    .map(row=>row as unknown as RosterShiftEntry)
+    .map(shift=>toLegacyRosterShift(shift,employeeById.get(shift.employeeId)))
+    .sort((a,b)=>a.scheduledStartTime.localeCompare(b.scheduledStartTime));
+  return {
+    staff,
+    credentials,
+    shifts,
+    source:snapshot.source,
+    generatedAt:snapshot.generatedAt,
+  };
+}
+
+export async function loadLocalRoster(tenantId:string){
+  return mapRosterSnapshot(await loadLocalEdgeSnapshot(tenantId));
+}
+
+export async function hydrateRoster(tenantId:string){
+  return mapRosterSnapshot(await hydrateEdgeSnapshot(tenantId));
 }

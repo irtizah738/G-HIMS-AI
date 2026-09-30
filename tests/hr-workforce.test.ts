@@ -367,28 +367,23 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
         actorId: 'usr_hr_lead_01',
         timestamp: new Date().toISOString(),
         payload: {
-          tenantId: 'central-metro-hospital',
           facilityId: 'fac_central',
           facilityName: 'Central Metro Hospital',
           departmentId: 'dept_cardiology',
           departmentName: 'Cardiology',
           employeeId: 'emp_001',
-          employeeName: 'Dr. Sarah Jenkins',
-          positionTitle: 'Attending Cardiologist',
           date: today,
           shiftId: 'sft_night_call',
           shiftName: 'Cardiology Night Call',
           startTime: `${today}T18:00:00Z`,
           endTime: `${today}T23:59:00Z`,
-          durationHours: 6,
-          isOvertime: false,
         },
       };
 
       const result = await CommandBus.dispatch(hrAdminContext, violatingShiftCmd);
       expect(result.success).toBe(false);
       expect(result.error?.code).toBe('FATIGUE_COMPLIANCE_VIOLATION');
-      expect(result.error?.message).toContain('Mandatory rest violation');
+      expect(result.error?.message).toContain('mandatory 10-hour rest');
     });
 
     test('Rejects overlapping shift due to double-booking conflict', async () => {
@@ -403,21 +398,16 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
         actorId: 'usr_hr_lead_01',
         timestamp: new Date().toISOString(),
         payload: {
-          tenantId: 'central-metro-hospital',
           facilityId: 'fac_central',
           facilityName: 'Central Metro Hospital',
           departmentId: 'dept_cardiology',
           departmentName: 'Cardiology',
           employeeId: 'emp_001',
-          employeeName: 'Dr. Sarah Jenkins',
-          positionTitle: 'Attending Cardiologist',
           date: today,
           shiftId: 'sft_conflict',
           shiftName: 'Conflicting Specialty Clinic',
           startTime: `${today}T10:00:00Z`,
           endTime: `${today}T14:00:00Z`,
-          durationHours: 4,
-          isOvertime: false,
         },
       };
 
@@ -438,9 +428,6 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
         timestamp: new Date().toISOString(),
         payload: {
           employeeId: 'emp_003',
-          employeeName: 'Elena Rostova',
-          facilityId: 'fac_central',
-          departmentId: 'dept_icu',
           source: 'BIOMETRIC_SCANNER',
         },
       };
@@ -519,9 +506,7 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
         actorId: 'usr_hr_lead_01',
         timestamp: new Date().toISOString(),
         payload: {
-          tenantId: 'central-metro-hospital',
           employeeId: 'emp_001',
-          employeeName: 'Dr. Sarah Jenkins',
           departmentId: 'dept_cardiology',
           leaveType: 'ANNUAL',
           startDate: '2026-07-01',

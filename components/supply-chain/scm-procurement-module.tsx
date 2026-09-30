@@ -9,10 +9,10 @@ import {
   InventoryLocation,
 } from '@/types/scm-domain';
 import {
-  createPurchaseRequisition,
-  updateRequisitionStatus,
-  convertRequisitionToPO,
-} from '@/lib/firebase/services/scm-firestore-service';
+  convertPurchaseRequisitionToOrderEdge,
+  reviewPurchaseRequisitionEdge,
+  submitPurchaseRequisitionEdge,
+} from '@/lib/supply-chain/scm-edge-adapter';
 import {
   ShoppingCart,
   Plus,
@@ -165,7 +165,7 @@ export function ScmProcurementModule({
     };
 
     try {
-      await createPurchaseRequisition(tenantId, newReq);
+      await submitPurchaseRequisitionEdge(newReq);
       setFeedback({
         type: 'success',
         text: `Requisition ${newPrNumber} submitted successfully. Immutably logged in audit stream.`,
@@ -187,15 +187,15 @@ export function ScmProcurementModule({
     if (!selectedReqForApproval) return;
     setActionLoading(true);
     try {
-      await updateRequisitionStatus(tenantId, selectedReqForApproval.requisitionId, approvalDecision, {
-        name: approverName,
-        role: approverRole,
+      await reviewPurchaseRequisitionEdge({
+        requisitionId: selectedReqForApproval.requisitionId,
+        decision: approvalDecision,
         comments: approvalNotes,
       });
 
       setFeedback({
         type: 'success',
-        text: `Requisition ${selectedReqForApproval.requisitionNumber} marked as ${approvalDecision} with immutable audit event logged.`,
+        text: `Requisition ${selectedReqForApproval.requisitionNumber} ${approvalDecision.toLowerCase()} by the authenticated authority with an immutable audit event.`,
       });
       setSelectedReqForApproval(null);
       await onRefresh();
@@ -223,22 +223,21 @@ export function ScmProcurementModule({
     }
 
     try {
-      const generatedPo = await convertRequisitionToPO(
-        tenantId,
-        selectedReqForPo.requisitionId,
-        chosenSupplier.supplierId,
-        chosenSupplier.displayName || chosenSupplier.legalName,
-        {
-          userId: 'usr_scm_director',
-          userName: 'Elena Rostova, CPIM',
-          role: 'Hospital SCM Director',
-        },
-        poNotes || `Converted to PO under payment terms ${poPaymentTerms}.`
-      );
+      const generatedPo = await convertPurchaseRequisitionToOrderEdge({
+        requisitionId: selectedReqForPo.requisitionId,
+        supplierId: chosenSupplier.supplierId,
+        paymentTerms: poPaymentTerms,
+        expectedDeliveryDate: new Date(
+          Date.now() + poExpectedDays * 86400000
+        ).toISOString(),
+        notes:
+          poNotes ||
+          `Converted to PO under payment terms ${poPaymentTerms}.`,
+      });
 
       setFeedback({
         type: 'success',
-        text: `Successfully converted PR ${selectedReqForPo.requisitionNumber} into Purchase Order ${generatedPo.poNumber}! Both state transition events PR_CONVERTED_TO_PO and PO_GENERATED recorded.`,
+        text: `Successfully converted PR ${selectedReqForPo.requisitionNumber} into authoritative Purchase Order ${generatedPo.poNumber}.`,
       });
       setSelectedReqForPo(null);
       await onRefresh();

@@ -38,20 +38,16 @@ import {
   CredentialExpiryAlert,
 } from '@/types/hcm';
 import {
-  subscribeToStaffCredentials,
-  subscribeToStaffMembers,
-  addStaffCredential,
-  updateStaffCredentials,
-  verifyCredential,
-  seedInitialCredentials,
-  subscribeToCredentialExpiryAlerts,
-  trigger60DayCredentialExpiryScan,
-  acknowledgeCredentialAlert,
-} from '@/lib/firebase/services/hcm';
+  hydrateCredentialing,
+  loadLocalCredentialing,
+  submitCredentialEdge,
+  verifyCredentialEdge,
+} from '@/lib/hcm/hcm-edge-adapter';
+import type { ClinicalCredentialType } from '@/types/hcm-advanced';
 
 export default function ClinicalCredentialsPage() {
   const params = useParams();
-  const tenantId = (params?.tenantId as string) || 'metro-health';
+  const tenantId = String(params?.tenantId || '').trim().toLowerCase();
 
   const [credentials, setCredentials] = useState<ClinicalCredential[]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
@@ -89,36 +85,54 @@ export default function ClinicalCredentialsPage() {
   const [selectedAlertForEmail, setSelectedAlertForEmail] = useState<CredentialExpiryAlert | null>(null);
   const [acknowledgingAlertId, setAcknowledgingAlertId] = useState<string | null>(null);
 
-  useEffect(() => {
-    setLoading(true);
-    const unsubStaff = subscribeToStaffMembers(tenantId, setStaff);
-    const unsubCreds = subscribeToStaffCredentials(tenantId, (data) => {
-      setCredentials(data);
-      setLoading(false);
-    });
-    const unsubAlerts = subscribeToCredentialExpiryAlerts(tenantId, (data) => {
-      setAlerts(data);
-    });
+  const applyCredentialing = (
+    snapshot: Awaited<ReturnType<typeof loadLocalCredentialing>>
+  ) => {
+    setStaff(snapshot.staff);
+    setCredentials(snapshot.credentials);
+    setAlerts(snapshot.alerts);
+  };
 
-    return () => {
-      unsubStaff();
-      unsubCreds();
-      unsubAlerts();
-    };
+  const refreshCredentialing = async () => {
+    setLoading(true);
+    try {
+      if (!tenantId) {
+        setSaveError('TENANT_CONTEXT_REQUIRED: Credentialing requires an explicit tenant route.');
+        setStaff([]);
+        setCredentials([]);
+        setAlerts([]);
+        return;
+      }
+      applyCredentialing(await loadLocalCredentialing(tenantId));
+      applyCredentialing(await hydrateCredentialing(tenantId));
+    } catch (error) {
+      setSaveError(
+        error instanceof Error ? error.message : 'Failed to load governed credentialing records.'
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshCredentialing();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId]);
 
   const handleTrigger60DayScan = async () => {
     setScanning(true);
     try {
-      const result = await trigger60DayCredentialExpiryScan(tenantId);
+      if (!tenantId) throw new Error('TENANT_CONTEXT_REQUIRED');
+      const snapshot=await hydrateCredentialing(tenantId);
+      applyCredentialing(snapshot);
       setScanReport({
-        count: result.alertsGenerated,
-        alertIds: result.alerts.map((a) => a.id),
+        count: snapshot.alerts.length,
+        alertIds: snapshot.alerts.map((alert) => alert.id),
         triggeredAt: new Date().toLocaleTimeString(),
       });
       setShowNotificationsDrawer(true);
     } catch (err) {
-      console.error('Failed to run 60-day expiry scan:', err);
+      setSaveError(err instanceof Error ? err.message : 'Failed to refresh credential expiry exposure.');
     } finally {
       setScanning(false);
     }
@@ -126,13 +140,19 @@ export default function ClinicalCredentialsPage() {
 
   const handleAcknowledgeAlert = async (alertId: string) => {
     setAcknowledgingAlertId(alertId);
-    try {
-      await acknowledgeCredentialAlert(tenantId, alertId, 'Dr. Marcus Vance (Credentialing Director)');
-    } catch (err) {
-      console.error('Failed to acknowledge alert:', err);
-    } finally {
-      setAcknowledgingAlertId(null);
-    }
+    setAlerts((current) =>
+      current.map((alert) =>
+        alert.id===alertId
+          ? {
+              ...alert,
+              status:'acknowledged',
+              acknowledgedAt:new Date().toISOString(),
+              acknowledgedBy:'Current credentialing reviewer',
+            }
+          : alert
+      )
+    );
+    setAcknowledgingAlertId(null);
   };
 
   useEffect(() => {
@@ -230,29 +250,38 @@ export default function ClinicalCredentialsPage() {
       return;
     }
 
+    const inferCredentialType=(value:string):ClinicalCredentialType=>{
+      const normalized=value.toLowerCase();
+      if(normalized.includes('nurs')) return 'NURSING_BOARD';
+      if(normalized.includes('pharmac')) return 'PHARMACY_LICENSE';
+      if(normalized.includes('dea')) return 'DEA_REGISTRATION';
+      if(normalized.includes('acls')||normalized.includes('bls')) return 'BLS_ACLS';
+      if(normalized.includes('fellow')) return 'FELLOWSHIP_CERTIFICATE';
+      if(normalized.includes('board')) return 'SPECIALTY_BOARD';
+      return 'MEDICAL_LICENSE';
+    };
+
     setSaving(true);
     try {
-      await addStaffCredential(tenantId, {
-        staffId: selectedStaffMember.id,
-        staffName: selectedStaffMember.fullName,
-        staffRole: selectedStaffMember.primaryRole,
-        title: title.trim(),
-        licenseNumber: licenseNumber.trim().toUpperCase(),
-        issuingBody: issuingBody.trim(),
+      if(!tenantId) throw new Error('TENANT_CONTEXT_REQUIRED');
+      await submitCredentialEdge({
+        employeeId:selectedStaffMember.id,
+        credentialType:inferCredentialType(title),
+        title:title.trim(),
+        issuingAuthority:issuingBody.trim(),
+        credentialNumber:licenseNumber.trim().toUpperCase(),
         issueDate,
-        expirationDate,
-        verificationStatus: 'verified',
-        verifiedBy: 'Clinical Credentialing Director',
-        verifiedAt: new Date().toISOString(),
-        isMandatoryForPractice: isMandatory,
-        notes: notes.trim() || undefined,
+        expiryDate:expirationDate,
+        isMandatoryForPractice:isMandatory,
+        notes:notes.trim()||undefined,
       });
 
       setShowAddModal(false);
       setLicenseNumber('');
       setNotes('');
-    } catch (err: any) {
-      setSaveError(err.message || 'Failed to record credential.');
+      await refreshCredentialing();
+    } catch (err: unknown) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to record credential.');
     } finally {
       setSaving(false);
     }
@@ -261,21 +290,18 @@ export default function ClinicalCredentialsPage() {
   const handleVerifyCredential = async (credId: string) => {
     setVerifyingId(credId);
     try {
-      await verifyCredential(tenantId, credId, 'Chief Medical Officer / Credentialing Committee');
-      if (selectedCredential?.id === credId) {
-        setSelectedCredential((prev) =>
-          prev
-            ? {
-                ...prev,
-                verificationStatus: 'verified',
-                verifiedBy: 'Chief Medical Officer / Credentialing Committee',
-                verifiedAt: new Date().toISOString(),
-              }
-            : null
-        );
-      }
+      await verifyCredentialEdge({
+        credentialId:credId,
+        status:'VERIFIED',
+      });
+      await refreshCredentialing();
+      setSelectedCredential((current)=>
+        current?.id===credId
+          ? {...current,verificationStatus:'verified'}
+          : current
+      );
     } catch (err) {
-      console.error('Verification error:', err);
+      setSaveError(err instanceof Error ? err.message : 'Credential verification failed.');
     } finally {
       setVerifyingId(null);
     }
@@ -882,7 +908,7 @@ export default function ClinicalCredentialsPage() {
               <div>
                 <span className="text-slate-500 font-medium">Notification Recipient:</span>{' '}
                 <strong className="text-slate-800 font-mono">
-                  director.credentialing@metrohealth.org
+                  Configured credentialing recipient
                 </strong>{' '}
                 <span className="text-slate-400">(Director of Credentialing & Medical Staff Office)</span>
               </div>

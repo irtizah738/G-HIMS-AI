@@ -131,14 +131,6 @@ if (
   );
 }
 
-await accounts.doc(operatingTreasuryAccount.docId).set(
-  {
-    allowSupplierPayments: true,
-    updatedAt: new Date().toISOString(),
-  },
-  { merge: true }
-);
-
 const controls = [
   {
     code: '1230',
@@ -176,6 +168,10 @@ const controls = [
 
 const created: string[] = [];
 const verified: string[] = [];
+const pendingCreates: Array<{
+  docId: string;
+  control: (typeof controls)[number];
+}> = [];
 const now = new Date().toISOString();
 
 for (const control of controls) {
@@ -205,25 +201,43 @@ for (const control of controls) {
       `SCM4_COA_DOCUMENT_COLLISION: ${docId} already belongs to another account.`
     );
   }
+  pendingCreates.push({ docId, control });
+}
 
-  await ref.create({
-    id: docId,
-    accountCode: control.code,
-    accountName: control.accountName,
-    category: control.category,
-    subCategory: control.subCategory,
-    normalBalance: control.normalBalance,
+// All preconditions are now validated. Apply the capability update and every
+// missing control account in one atomic batch so provisioning cannot half-apply.
+const writeBatch = db.batch();
+writeBatch.set(
+  accounts.doc(operatingTreasuryAccount.docId),
+  {
+    allowSupplierPayments: true,
+    updatedAt: now,
+  },
+  { merge: true }
+);
+
+for (const pending of pendingCreates) {
+  const ref = accounts.doc(pending.docId);
+  writeBatch.create(ref, {
+    id: pending.docId,
+    accountCode: pending.control.code,
+    accountName: pending.control.accountName,
+    category: pending.control.category,
+    subCategory: pending.control.subCategory,
+    normalBalance: pending.control.normalBalance,
     balance: 0,
     currency,
-    description: control.description,
+    description: pending.control.description,
     isActive: true,
     isSystemLocked: true,
     tenantId,
     createdAt: now,
     updatedAt: now,
   });
-  created.push(control.code);
+  created.push(pending.control.code);
 }
+
+await writeBatch.commit();
 
 process.stdout.write(
   JSON.stringify(

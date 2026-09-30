@@ -322,6 +322,11 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      match /scmOperationalSnapshots/{id} {
+        allow read: if canReadScm(tenantId) || canReadFinance(tenantId);
+        allow write: if false;
+      }
+
       match /scmConsignmentAgreements/{id} {
         allow read: if canReadScm(tenantId) || canReadFinance(tenantId);
         allow write: if false;

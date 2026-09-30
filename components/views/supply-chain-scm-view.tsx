@@ -18,8 +18,6 @@ import {
   AISCMRecommendation,
 } from '@/types/scm-domain';
 import {
-  updateRequisitionStatus,
-  createGoodsReceiptNote,
   completeStockTransfer,
   executeBatchRecall,
   updateBalanceReorderParameters,
@@ -28,6 +26,8 @@ import {
   hydrateScmEdgeData,
   loadLocalScmEdgeData,
   recordStockTransactionEdge,
+  receivePurchaseOrderEdge,
+  reviewPurchaseRequisitionEdge,
   submitPurchaseRequisitionEdge,
 } from '@/lib/supply-chain/scm-edge-adapter';
 import { ScmExpiryDashboard } from '@/components/supply-chain/scm-expiry-dashboard';
@@ -333,10 +333,10 @@ export function SupplyChainScmView({ tenantId = 'metro-health' }: SupplyChainScm
 
   // Handle Requisition Approval
   const handleApproveRequisition = async (reqId: string) => {
-    await updateRequisitionStatus(tenantId, reqId, 'APPROVED', {
-      name: 'Dr. Sarah Jenkins, MD',
-      role: 'Clinical Chief of Staff',
-      comments: 'Clinically indicated and authorized for procurement execution.',
+    await reviewPurchaseRequisitionEdge({
+      requisitionId: reqId,
+      decision: 'APPROVED',
+      comments: 'Approved through the authenticated SCM governance workflow.',
     });
     await loadData();
   };
@@ -453,7 +453,21 @@ export function SupplyChainScmView({ tenantId = 'metro-health' }: SupplyChainScm
     };
 
     try {
-      await createGoodsReceiptNote(tenantId, newGrn);
+      const matchingPo = purchaseOrders.find(
+        (po) => po.poNumber === grnPoNumber
+      );
+      if (!matchingPo) {
+        throw new Error(
+          'Authoritative purchase order not found. Goods cannot be received against a free-text PO number.'
+        );
+      }
+
+      await receivePurchaseOrderEdge({
+        purchaseOrderId: matchingPo.poId,
+        deliveryNoteNumber: newGrn.deliveryNoteNumber,
+        supplierInvoiceReference: newGrn.supplierInvoiceReference,
+        items: newGrn.items,
+      });
       setIsNewGrnOpen(false);
       await loadData();
     } catch (err) {

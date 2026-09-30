@@ -53,6 +53,7 @@ export function buildInventoryMovementValuation(params: {
   items: ItemMaster[];
   periodStart: string;
   periodEnd: string;
+  currency: string;
 }): InventoryValuationResult {
   const startMs = Date.parse(params.periodStart);
   const endMs = Date.parse(params.periodEnd);
@@ -76,6 +77,13 @@ export function buildInventoryMovementValuation(params: {
     const sign = movementSign(transaction.transactionType);
     if (sign === 0) continue;
 
+    const transactionCurrency = String(transaction.currency || '').trim().toUpperCase();
+    if (transactionCurrency !== params.currency.trim().toUpperCase()) {
+      throw new Error(
+        `INVENTORY_VALUATION_CURRENCY_MISMATCH:${transaction.transactionId}:${transactionCurrency}`
+      );
+    }
+
     const item = items.get(transaction.itemId);
     if (!item) {
       throw new Error(`INVENTORY_VALUATION_ITEM_MISSING:${transaction.itemId}`);
@@ -97,6 +105,7 @@ export function buildJournalInventoryMovement(params: {
   journals: Array<Record<string, unknown>>;
   fiscalYear: number;
   postingPeriod: number;
+  currency: string;
 }): {
   movementMinorUnitsByAccount: Record<'1210' | '1220', number>;
   journalEntryCount: number;
@@ -116,6 +125,7 @@ export function buildJournalInventoryMovement(params: {
       continue;
     }
 
+    const journalCurrency = String(journal.currency || '').trim().toUpperCase();
     const lines = Array.isArray(journal.lines)
       ? (journal.lines as Array<Record<string, unknown>>)
       : [];
@@ -124,6 +134,11 @@ export function buildJournalInventoryMovement(params: {
     for (const line of lines) {
       const account = String(line.glAccountId || '');
       if (account !== '1210' && account !== '1220') continue;
+      if (journalCurrency !== params.currency.trim().toUpperCase()) {
+        throw new Error(
+          `INVENTORY_JOURNAL_CURRENCY_MISMATCH:${String(journal.journalId || '')}:${journalCurrency}`
+        );
+      }
       const debit = Number(line.debitMinorUnits || 0);
       const credit = Number(line.creditMinorUnits || 0);
       if (!Number.isSafeInteger(debit) || !Number.isSafeInteger(credit)) {

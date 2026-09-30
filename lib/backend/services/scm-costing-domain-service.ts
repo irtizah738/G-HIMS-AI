@@ -208,6 +208,12 @@ export class ScmCostingDomainService {
 
     try {
       assertFacilityScope(context, payload.facilityId);
+      const itemCatalog = await DomainStateRepository.list<ItemMaster>(
+        context.tenantId,
+        'items',
+        50000
+      );
+      const itemById = new Map(itemCatalog.map((item) => [item.itemId, item]));
       const periodKey = periodKeyFromIso(payload.countedAt);
       const closeId = inventoryPeriodCloseId(payload.facilityId, periodKey);
       const uniqueBalanceIds = new Set(payload.lines.map((line) => line.balanceId));
@@ -265,6 +271,14 @@ export class ScmCostingDomainService {
                 'Cycle count balance does not belong to the selected facility/location.'
               );
             }
+            const item = itemById.get(balance.itemId);
+            if (!item || item.isActive === false || item.itemType !== balance.itemType) {
+              throw new AtomicMutationRejectedError(
+                'CYCLE_COUNT_ITEM_MASTER_MISMATCH',
+                'Cycle count balance does not map to an active authoritative item master.'
+              );
+            }
+
             if (
               !Number.isFinite(line.countedQuantity) ||
               line.countedQuantity < 0
@@ -297,12 +311,25 @@ export class ScmCostingDomainService {
               unitCostMinorUnits,
               varianceValueMinorUnits,
               inventoryAccountCode: inventoryAccountForItemType(balance.itemType),
+              currency: String(item.currency || '').trim().toUpperCase(),
               status:
                 varianceQuantity === 0
                   ? ('MATCH' as const)
                   : ('VARIANCE_FLAGGED' as const),
             };
           });
+
+          const currencies = [...new Set(lines.map((line) => line.currency))];
+          if (
+            currencies.length !== 1 ||
+            !currencies[0] ||
+            currencies[0].length !== 3
+          ) {
+            throw new AtomicMutationRejectedError(
+              'CYCLE_COUNT_CURRENCY_MISMATCH',
+              'A governed cycle count must contain inventory in one authoritative 3-letter currency.'
+            );
+          }
 
           const now = new Date().toISOString();
           const record: GovernedCycleCountRecord = {
@@ -314,6 +341,7 @@ export class ScmCostingDomainService {
               payload.locationName ||
               (current['balance:0'] as unknown as InventoryBalance).locationName,
             valuationMethod: INVENTORY_VALUATION_METHOD,
+            currency: currencies[0],
             isBlindCount: payload.isBlindCount,
             countedAt: payload.countedAt,
             submittedAt: now,
@@ -639,7 +667,7 @@ export class ScmCostingDomainService {
               normalizedQuantity: quantity,
               unitCost: balance.unitCost,
               totalCost: Math.round(quantity * balance.unitCost * 100) / 100,
-              currency: 'USD',
+              currency: count.currency,
               transactionType,
               referenceType: 'CYCLE_COUNT',
               referenceId: count.countId,
@@ -690,6 +718,7 @@ export class ScmCostingDomainService {
               varianceValueMinorUnits: countLine.varianceValueMinorUnits,
               inventoryAccountCode: countLine.inventoryAccountCode,
               varianceAccountCode: '6040',
+              currency: count.currency,
               reasonCode: 'COUNT_VARIANCE',
               approvedBy: context.actorId,
               approvedAt: now,
@@ -757,7 +786,7 @@ export class ScmCostingDomainService {
               postingDate: countedMs,
               referenceDocumentId: count.countId,
               documentHeader: `Inventory cycle count adjustment ${count.countId}`,
-              currency: 'USD',
+              currency: count.currency,
               lines,
               postedBy: context.actorId,
             });
@@ -1006,11 +1035,13 @@ export class ScmCostingDomainService {
         items,
         periodStart: payload.periodStart,
         periodEnd: payload.periodEnd,
+        currency: payload.currency,
       });
       const ledger = buildJournalInventoryMovement({
         journals,
         fiscalYear: payload.fiscalYear,
         postingPeriod: payload.postingPeriod,
+        currency: payload.currency,
       });
 
       const deltas: Record<string, number> = {

@@ -587,6 +587,32 @@ service cloud.firestore {
         allow read: if canReadAudit(tenantId);
         allow write: if false;
       }
+      match /compensationProfiles/{id} {
+        allow read: if canReadHcm(tenantId) || canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /compensationSlots/{id} {
+        allow read: if canReadHcm(tenantId) || canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /payrollPeriods/{id} {
+        allow read: if canReadHcm(tenantId) || canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /payrollEmployeeSlots/{id} {
+        allow read: if canReadHcm(tenantId) || canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /payrollPayslips/{id} {
+        allow read: if canReadHcm(tenantId) || canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /payrollCalendars/{id} {
+        allow read, write: if false;
+      }
+      match /payrollAttendanceLocks/{id} {
+        allow read, write: if false;
+      }
       match /leaveBalances/{id} {
         allow read: if canReadHcm(tenantId);
         allow write: if false;

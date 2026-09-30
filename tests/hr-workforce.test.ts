@@ -55,6 +55,7 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
         commandId: 'cmd_hr_sec_01',
         idempotencyKey: 'idemp_hr_sec_01',
         commandType: 'CreateEmployeeCommand',
+        schemaVersion: 1,
         tenantId: '',
         actorId: 'usr_hr_lead_01',
         timestamp: new Date().toISOString(),
@@ -77,7 +78,6 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
           positionId: 'pos_resident',
           positionTitle: 'Resident Physician',
           employmentType: 'FULL_TIME',
-          employmentStatus: 'ACTIVE',
           hireDate: '2026-04-01',
         },
       };
@@ -92,6 +92,7 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
         commandId: 'cmd_hr_sec_02',
         idempotencyKey: 'idemp_hr_sec_02',
         commandType: 'CreateEmployeeCommand',
+        schemaVersion: 1,
         tenantId: 'central-metro-hospital',
         actorId: 'usr_nurse_01',
         timestamp: new Date().toISOString(),
@@ -114,7 +115,6 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
           positionId: 'pos_intern',
           positionTitle: 'Intern',
           employmentType: 'FULL_TIME',
-          employmentStatus: 'ACTIVE',
           hireDate: '2026-04-01',
         },
       };
@@ -131,6 +131,7 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
         commandId: 'cmd_idemp_01',
         idempotencyKey: 'idemp_key_unique_test_100',
         commandType: 'CreateEmployeeCommand',
+        schemaVersion: 1,
         tenantId: 'central-metro-hospital',
         actorId: 'usr_hr_lead_01',
         timestamp: new Date().toISOString(),
@@ -153,7 +154,6 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
           positionId: 'pos_attending_genmed',
           positionTitle: 'Attending Physician',
           employmentType: 'FULL_TIME',
-          employmentStatus: 'ACTIVE',
           hireDate: '2026-03-01',
         },
       };
@@ -174,13 +174,14 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
         commandId: 'cmd_cfl_1',
         idempotencyKey: key,
         commandType: 'CreateEmployeeCommand',
+        schemaVersion: 1,
         tenantId: 'central-metro-hospital',
         actorId: 'usr_hr_lead_01',
         timestamp: new Date().toISOString(),
         payload: {
           personalInfo: { legalFirstName: 'Dave', legalLastName: 'Clark', dateOfBirth: '1980-01-01', gender: 'MALE', contactEmail: 'd@h.com', contactPhone: '123', emergencyContact: { name: 'E', relationship: 'S', phone: '123' }, residentialAddress: { street: 'S', city: 'C', state: 'NY', postalCode: '1', country: 'USA' } },
           primaryFacilityId: 'fac_central', facilityIds: ['fac_central'], primaryDepartmentId: 'dept_icu', primaryDepartmentName: 'ICU', departmentIds: ['dept_icu'],
-          positionId: 'pos_nurse', positionTitle: 'Nurse', employmentType: 'FULL_TIME', employmentStatus: 'ACTIVE', hireDate: '2026-01-01',
+          positionId: 'pos_nurse', positionTitle: 'Nurse', employmentType: 'FULL_TIME', hireDate: '2026-01-01',
         },
       };
 
@@ -189,7 +190,7 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
         commandId: 'cmd_cfl_2',
         payload: {
           ...cmd1.payload,
-          primaryDepartmentId: 'dept_surgery', // modified payload!
+          positionTitle: 'Senior Nurse', // valid but conflicting payload
         },
       };
 
@@ -207,6 +208,7 @@ describe('G-HIMS HR & Workforce Management Domain Engine', () => {
         commandId: 'cmd_tx_emp_01',
         idempotencyKey: 'idemp_tx_emp_01',
         commandType: 'TransferEmployeeCommand',
+        schemaVersion: 1,
         tenantId: 'central-metro-hospital',
         actorId: 'usr_hr_lead_01',
         timestamp: new Date().toISOString(),

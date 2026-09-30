@@ -203,6 +203,8 @@ function collectionForEntityType(entityType: string): string {
     TAX_SUMMARY_SNAPSHOT: 'financeTaxSummarySnapshots',
     FINANCE_INTELLIGENCE_SNAPSHOT: 'financeIntelligenceSnapshots',
     EMPLOYEE_MASTER: 'employees',
+    EMPLOYEE_ASSIGNMENT: 'employeeAssignments',
+    WORKFORCE_IDENTITY: 'workforceIdentities',
     EMPLOYEE_CREDENTIAL: 'clinicalCredentials',
     CLINICAL_PRIVILEGE: 'clinicalPrivileges',
     ROSTER_SHIFT: 'rosterAssignments',

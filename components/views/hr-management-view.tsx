@@ -60,6 +60,11 @@ import {
   PositionDefinition,
 } from '@/types/hcm-advanced';
 import { executeCommand } from '@/lib/api/command-client';
+import {
+  createEmployeeEdge,
+  hydrateWorkforceMaster,
+  loadLocalWorkforceMaster,
+} from '@/lib/hcm/hcm-edge-adapter';
 import { useHospital } from '@/lib/context/hospital-context';
 import { useRBAC } from '@/lib/auth/rbac-context';
 
@@ -191,168 +196,143 @@ export function HrManagementView() {
     },
   ]);
 
-  const [employees, setEmployees] = useState<EmployeeMaster[]>([
-    {
-      employeeId: 'emp_001',
-      employeeNumber: 'EMP-2026-1041',
-      tenantId: 'metro-health',
-      facilityIds: ['fac_central'],
-      primaryFacilityId: 'fac_central',
-      departmentIds: ['dept_cardiology'],
-      primaryDepartmentId: 'dept_cardiology',
-      primaryDepartmentName: 'Cardiology & Catheterization',
-      positionId: 'pos_attending_cardio',
-      positionTitle: 'Attending Cardiologist',
-      employmentType: 'FULL_TIME',
-      employmentStatus: 'ACTIVE',
-      hireDate: '2021-03-15',
-      managerId: 'emp_chief_medical',
-      managerName: 'Dr. Robert Vance, MD',
-      personalInfo: {
-        legalFirstName: 'Sarah',
-        legalLastName: 'Jenkins',
-        preferredName: 'Dr. Sarah',
-        dateOfBirth: '1982-06-14',
-        gender: 'FEMALE',
-        contactEmail: 'sarah.jenkins@metrohealth.org',
-        contactPhone: '+1 (555) 234-5678',
-        emergencyContact: {
-          name: 'David Jenkins',
-          relationship: 'Spouse',
-          phone: '+1 (555) 234-5679',
+  const [employees, setEmployees] = useState<EmployeeMaster[]>([]);
+  const [workforceLoading, setWorkforceLoading] = useState(true);
+  const [newEmployee, setNewEmployee] = useState({
+    legalFirstName: '',
+    legalLastName: '',
+    dateOfBirth: '',
+    gender: 'UNDISCLOSED' as EmployeeMaster['personalInfo']['gender'],
+    contactEmail: '',
+    contactPhone: '',
+    emergencyName: '',
+    emergencyRelationship: '',
+    emergencyPhone: '',
+    street: '',
+    city: '',
+    state: '',
+    postalCode: '',
+    country: '',
+    primaryDepartmentId: 'dept_cardiology',
+    positionId: '',
+    positionTitle: '',
+    employmentType: 'FULL_TIME' as EmployeeMaster['employmentType'],
+    hireDate: '',
+  });
+
+  const applyWorkforceMaster = (
+    snapshot: Awaited<ReturnType<typeof loadLocalWorkforceMaster>>
+  ) => {
+    setEmployees(snapshot.employees);
+  };
+
+  const refreshWorkforceMaster = async () => {
+    if (!tenantId) {
+      setEmployees([]);
+      setWorkforceLoading(false);
+      return;
+    }
+    setWorkforceLoading(true);
+    try {
+      applyWorkforceMaster(await loadLocalWorkforceMaster(tenantId));
+      applyWorkforceMaster(await hydrateWorkforceMaster(tenantId));
+    } catch (error) {
+      setActionMessage({
+        text: error instanceof Error ? error.message : 'Failed to load authoritative workforce master.',
+        type: 'error',
+      });
+    } finally {
+      setWorkforceLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshWorkforceMaster();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantId]);
+
+  const handleCreateEmployee = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!tenantId) {
+      setActionMessage({ text: 'Tenant context is required.', type: 'error' });
+      return;
+    }
+    const department = departments.find(
+      (item) => item.departmentId === newEmployee.primaryDepartmentId
+    );
+    if (!department) {
+      setActionMessage({ text: 'A valid primary department is required.', type: 'error' });
+      return;
+    }
+    if (!newEmployee.positionId.trim() || !newEmployee.positionTitle.trim()) {
+      setActionMessage({ text: 'Position ID and title are required.', type: 'error' });
+      return;
+    }
+
+    try {
+      await createEmployeeEdge({
+        facilityIds: [department.facilityId],
+        primaryFacilityId: department.facilityId,
+        departmentIds: [department.departmentId],
+        primaryDepartmentId: department.departmentId,
+        primaryDepartmentName: department.name,
+        positionId: newEmployee.positionId.trim(),
+        positionTitle: newEmployee.positionTitle.trim(),
+        employmentType: newEmployee.employmentType,
+        hireDate: newEmployee.hireDate,
+        personalInfo: {
+          legalFirstName: newEmployee.legalFirstName.trim(),
+          legalLastName: newEmployee.legalLastName.trim(),
+          dateOfBirth: newEmployee.dateOfBirth,
+          gender: newEmployee.gender,
+          contactEmail: newEmployee.contactEmail.trim(),
+          contactPhone: newEmployee.contactPhone.trim(),
+          emergencyContact: {
+            name: newEmployee.emergencyName.trim(),
+            relationship: newEmployee.emergencyRelationship.trim(),
+            phone: newEmployee.emergencyPhone.trim(),
+          },
+          residentialAddress: {
+            street: newEmployee.street.trim(),
+            city: newEmployee.city.trim(),
+            state: newEmployee.state.trim(),
+            postalCode: newEmployee.postalCode.trim(),
+            country: newEmployee.country.trim(),
+          },
         },
-        residentialAddress: {
-          street: '742 Evergreen Terrace',
-          city: 'Metro City',
-          state: 'NY',
-          postalCode: '10001',
-          country: 'USA',
-        },
-      },
-      specialty: 'Interventional Cardiology',
-      createdAt: '2021-03-15T08:00:00Z',
-      updatedAt: '2026-02-15T10:00:00Z',
-      schemaVersion: 1,
-    },
-    {
-      employeeId: 'emp_002',
-      employeeNumber: 'EMP-2026-1088',
-      tenantId: 'metro-health',
-      facilityIds: ['fac_central'],
-      primaryFacilityId: 'fac_central',
-      departmentIds: ['dept_emergency'],
-      primaryDepartmentId: 'dept_emergency',
-      primaryDepartmentName: 'Emergency & Trauma Center',
-      positionId: 'pos_er_physician',
-      positionTitle: 'Attending Emergency Physician',
-      employmentType: 'FULL_TIME',
-      employmentStatus: 'ACTIVE',
-      hireDate: '2022-08-01',
-      personalInfo: {
-        legalFirstName: 'Michael',
-        legalLastName: 'Chang',
-        dateOfBirth: '1985-11-20',
-        gender: 'MALE',
-        contactEmail: 'michael.chang@metrohealth.org',
-        contactPhone: '+1 (555) 456-7890',
-        emergencyContact: {
-          name: 'Linda Chang',
-          relationship: 'Sister',
-          phone: '+1 (555) 456-7899',
-        },
-        residentialAddress: {
-          street: '124 Concord Way',
-          city: 'Metro City',
-          state: 'NY',
-          postalCode: '10002',
-          country: 'USA',
-        },
-      },
-      specialty: 'Emergency Medicine & Toxicology',
-      createdAt: '2022-08-01T08:00:00Z',
-      updatedAt: '2026-01-10T12:00:00Z',
-      schemaVersion: 1,
-    },
-    {
-      employeeId: 'emp_003',
-      employeeNumber: 'EMP-2026-2104',
-      tenantId: 'metro-health',
-      facilityIds: ['fac_central'],
-      primaryFacilityId: 'fac_central',
-      departmentIds: ['dept_surgery'],
-      primaryDepartmentId: 'dept_surgery',
-      primaryDepartmentName: 'Surgical Theaters & Perioperative',
-      positionId: 'pos_surgeon',
-      positionTitle: 'Chief of Cardiothoracic Surgery',
-      employmentType: 'FULL_TIME',
-      employmentStatus: 'ACTIVE',
-      hireDate: '2019-01-10',
-      personalInfo: {
-        legalFirstName: 'Elena',
-        legalLastName: 'Rostova',
-        dateOfBirth: '1978-04-03',
-        gender: 'FEMALE',
-        contactEmail: 'elena.rostova@metrohealth.org',
-        contactPhone: '+1 (555) 789-0123',
-        emergencyContact: {
-          name: 'Pavel Rostov',
-          relationship: 'Brother',
-          phone: '+1 (555) 789-0124',
-        },
-        residentialAddress: {
-          street: '88 Lexington Blvd',
-          city: 'Metro City',
-          state: 'NY',
-          postalCode: '10003',
-          country: 'USA',
-        },
-      },
-      specialty: 'Cardiothoracic Surgery',
-      createdAt: '2019-01-10T08:00:00Z',
-      updatedAt: '2026-03-01T09:00:00Z',
-      schemaVersion: 1,
-    },
-    {
-      employeeId: 'emp_004',
-      employeeNumber: 'EMP-2026-3042',
-      tenantId: 'metro-health',
-      facilityIds: ['fac_central'],
-      primaryFacilityId: 'fac_central',
-      departmentIds: ['dept_cardiology'],
-      primaryDepartmentId: 'dept_cardiology',
-      primaryDepartmentName: 'Cardiology & Catheterization',
-      positionId: 'pos_trauma_nurse',
-      positionTitle: 'Cardiac Care Staff Nurse',
-      employmentType: 'FULL_TIME',
-      employmentStatus: 'ONBOARDING',
-      hireDate: '2026-02-01',
-      personalInfo: {
-        legalFirstName: 'Marcus',
-        legalLastName: 'Vance',
-        dateOfBirth: '1992-09-15',
-        gender: 'MALE',
-        contactEmail: 'marcus.vance@metrohealth.org',
-        contactPhone: '+1 (555) 345-6789',
-        emergencyContact: {
-          name: 'Emily Vance',
-          relationship: 'Spouse',
-          phone: '+1 (555) 345-6780',
-        },
-        residentialAddress: {
-          street: '55 Pine Ridge Rd',
-          city: 'Metro City',
-          state: 'NY',
-          postalCode: '10004',
-          country: 'USA',
-        },
-      },
-      specialty: 'Critical Care Nursing',
-      onboardingStage: 'CREDENTIAL_VERIFICATION',
-      createdAt: '2026-02-01T08:00:00Z',
-      updatedAt: '2026-02-28T14:00:00Z',
-      schemaVersion: 1,
-    },
-  ]);
+      });
+      await refreshWorkforceMaster();
+      setActionMessage({
+        text: 'Employee created in ONBOARDING with an immutable initial assignment.',
+        type: 'success',
+      });
+      setShowAddEmployeeModal(false);
+      setNewEmployee((current) => ({
+        ...current,
+        legalFirstName: '',
+        legalLastName: '',
+        dateOfBirth: '',
+        contactEmail: '',
+        contactPhone: '',
+        emergencyName: '',
+        emergencyRelationship: '',
+        emergencyPhone: '',
+        street: '',
+        city: '',
+        state: '',
+        postalCode: '',
+        country: '',
+        positionId: '',
+        positionTitle: '',
+        hireDate: '',
+      }));
+    } catch (error) {
+      setActionMessage({
+        text: error instanceof Error ? error.message : 'Employee creation failed.',
+        type: 'error',
+      });
+    }
+  };
 
   const [credentials, setCredentials] = useState<EmployeeCredential[]>([
     {
@@ -974,6 +954,12 @@ export function HrManagementView() {
               </select>
             </div>
           </div>
+
+          {workforceLoading && (
+            <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[11px] font-semibold text-blue-700">
+              Refreshing authoritative workforce master…
+            </div>
+          )}
 
           {/* Employee Directory Table */}
           <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-2xs">
@@ -1718,74 +1704,152 @@ export function HrManagementView() {
       {/* Modal: New Employee Onboarding */}
       {showAddEmployeeModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-xl border border-slate-200 dark:border-slate-800">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-              <UserPlus className="w-5 h-5 text-blue-600" /> Onboard Hospital Employee
-            </h3>
-
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div>
-                <label className="font-semibold text-slate-600 block mb-1">Legal First Name</label>
-                <input
-                  id="input-new-first-name"
-                  type="text"
-                  placeholder="e.g. David"
-                  className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
-                />
-              </div>
-              <div>
-                <label className="font-semibold text-slate-600 block mb-1">Legal Last Name</label>
-                <input
-                  id="input-new-last-name"
-                  type="text"
-                  placeholder="e.g. Miller"
-                  className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
-                />
-              </div>
+          <form
+            onSubmit={handleCreateEmployee}
+            className="bg-white dark:bg-slate-900 rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-5 shadow-xl border border-slate-200 dark:border-slate-800"
+          >
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <UserPlus className="w-5 h-5 text-blue-600" /> Onboard Hospital Employee
+              </h3>
+              <p className="text-[11px] text-slate-500 mt-1">
+                Creates a tenant-authoritative employee in ONBOARDING. Compensation and identity links are controlled separately.
+              </p>
             </div>
 
-            <div className="text-xs">
-              <label className="font-semibold text-slate-600 block mb-1">Primary Department</label>
-              <select className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800">
-                {departments.map((d) => (
-                  <option key={d.departmentId} value={d.departmentId}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <label className="space-y-1">
+                <span className="font-semibold text-slate-600">Legal First Name</span>
+                <input required value={newEmployee.legalFirstName} onChange={(e)=>setNewEmployee(v=>({...v,legalFirstName:e.target.value}))}
+                  className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800" />
+              </label>
+              <label className="space-y-1">
+                <span className="font-semibold text-slate-600">Legal Last Name</span>
+                <input required value={newEmployee.legalLastName} onChange={(e)=>setNewEmployee(v=>({...v,legalLastName:e.target.value}))}
+                  className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800" />
+              </label>
+              <label className="space-y-1">
+                <span className="font-semibold text-slate-600">Date of Birth</span>
+                <input required type="date" value={newEmployee.dateOfBirth} onChange={(e)=>setNewEmployee(v=>({...v,dateOfBirth:e.target.value}))}
+                  className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800" />
+              </label>
+              <label className="space-y-1">
+                <span className="font-semibold text-slate-600">Gender</span>
+                <select value={newEmployee.gender} onChange={(e)=>setNewEmployee(v=>({...v,gender:e.target.value as EmployeeMaster['personalInfo']['gender']}))}
+                  className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800">
+                  <option value="UNDISCLOSED">Undisclosed</option>
+                  <option value="FEMALE">Female</option>
+                  <option value="MALE">Male</option>
+                  <option value="NON_BINARY">Non-binary</option>
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className="font-semibold text-slate-600">Contact Email</span>
+                <input required type="email" value={newEmployee.contactEmail} onChange={(e)=>setNewEmployee(v=>({...v,contactEmail:e.target.value}))}
+                  className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800" />
+              </label>
+              <label className="space-y-1">
+                <span className="font-semibold text-slate-600">Contact Phone</span>
+                <input required value={newEmployee.contactPhone} onChange={(e)=>setNewEmployee(v=>({...v,contactPhone:e.target.value}))}
+                  className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800" />
+              </label>
             </div>
 
-            <div className="text-xs">
-              <label className="font-semibold text-slate-600 block mb-1">Position Title</label>
-              <input
-                id="input-new-position"
-                type="text"
-                placeholder="e.g. Staff Nurse / Attending Physician"
-                className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
-              />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+              <label className="space-y-1">
+                <span className="font-semibold text-slate-600">Emergency Contact</span>
+                <input required value={newEmployee.emergencyName} onChange={(e)=>setNewEmployee(v=>({...v,emergencyName:e.target.value}))}
+                  className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800" />
+              </label>
+              <label className="space-y-1">
+                <span className="font-semibold text-slate-600">Relationship</span>
+                <input required value={newEmployee.emergencyRelationship} onChange={(e)=>setNewEmployee(v=>({...v,emergencyRelationship:e.target.value}))}
+                  className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800" />
+              </label>
+              <label className="space-y-1">
+                <span className="font-semibold text-slate-600">Emergency Phone</span>
+                <input required value={newEmployee.emergencyPhone} onChange={(e)=>setNewEmployee(v=>({...v,emergencyPhone:e.target.value}))}
+                  className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800" />
+              </label>
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
-              <button
-                onClick={() => setShowAddEmployeeModal(false)}
-                className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-600 hover:bg-slate-100"
-              >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <label className="space-y-1 md:col-span-2">
+                <span className="font-semibold text-slate-600">Street Address</span>
+                <input required value={newEmployee.street} onChange={(e)=>setNewEmployee(v=>({...v,street:e.target.value}))}
+                  className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800" />
+              </label>
+              <label className="space-y-1">
+                <span className="font-semibold text-slate-600">City</span>
+                <input required value={newEmployee.city} onChange={(e)=>setNewEmployee(v=>({...v,city:e.target.value}))}
+                  className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800" />
+              </label>
+              <label className="space-y-1">
+                <span className="font-semibold text-slate-600">State / Province</span>
+                <input required value={newEmployee.state} onChange={(e)=>setNewEmployee(v=>({...v,state:e.target.value}))}
+                  className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800" />
+              </label>
+              <label className="space-y-1">
+                <span className="font-semibold text-slate-600">Postal Code</span>
+                <input required value={newEmployee.postalCode} onChange={(e)=>setNewEmployee(v=>({...v,postalCode:e.target.value}))}
+                  className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800" />
+              </label>
+              <label className="space-y-1">
+                <span className="font-semibold text-slate-600">Country</span>
+                <input required value={newEmployee.country} onChange={(e)=>setNewEmployee(v=>({...v,country:e.target.value}))}
+                  className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800" />
+              </label>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <label className="space-y-1">
+                <span className="font-semibold text-slate-600">Primary Department</span>
+                <select required value={newEmployee.primaryDepartmentId} onChange={(e)=>setNewEmployee(v=>({...v,primaryDepartmentId:e.target.value}))}
+                  className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800">
+                  {departments.map((department)=>(
+                    <option key={department.departmentId} value={department.departmentId}>{department.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className="font-semibold text-slate-600">Employment Type</span>
+                <select value={newEmployee.employmentType} onChange={(e)=>setNewEmployee(v=>({...v,employmentType:e.target.value as EmployeeMaster['employmentType']}))}
+                  className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800">
+                  {['FULL_TIME','PART_TIME','CONTRACT','TEMPORARY','CONSULTANT','LOCUM','INTERN','VOLUNTEER','VISITING_CLINICIAN','AGENCY_WORKER'].map((type)=>(
+                    <option key={type} value={type}>{type.replaceAll('_',' ')}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className="font-semibold text-slate-600">Position ID</span>
+                <input required value={newEmployee.positionId} onChange={(e)=>setNewEmployee(v=>({...v,positionId:e.target.value}))}
+                  placeholder="e.g. pos_staff_nurse"
+                  className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800" />
+              </label>
+              <label className="space-y-1">
+                <span className="font-semibold text-slate-600">Position Title</span>
+                <input required value={newEmployee.positionTitle} onChange={(e)=>setNewEmployee(v=>({...v,positionTitle:e.target.value}))}
+                  placeholder="e.g. Staff Nurse"
+                  className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800" />
+              </label>
+              <label className="space-y-1">
+                <span className="font-semibold text-slate-600">Hire Date</span>
+                <input required type="date" value={newEmployee.hireDate} onChange={(e)=>setNewEmployee(v=>({...v,hireDate:e.target.value}))}
+                  className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800" />
+              </label>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+              <button type="button" onClick={()=>setShowAddEmployeeModal(false)}
+                className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-600 hover:bg-slate-100">
                 Cancel
               </button>
-              <button
-                onClick={() => {
-                  setActionMessage({
-                    text: 'New employee created and placed in ONBOARDING workflow with credential checklist.',
-                    type: 'success',
-                  });
-                  setShowAddEmployeeModal(false);
-                }}
-                className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold"
-              >
+              <button type="submit"
+                className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold">
                 Save & Initialize Onboarding
               </button>
             </div>
-          </div>
+          </form>
         </div>
       )}
 

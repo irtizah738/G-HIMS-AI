@@ -6,9 +6,14 @@
 
 import { CommandContext, CommandResult } from '../types';
 import { AuthorizationPipeline } from '../auth/authorization-pipeline';
-import { TransactionManager } from '../transactions/transaction-manager';
+import {
+  AtomicMutationRejectedError,
+  TransactionManager,
+} from '../transactions/transaction-manager';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   EmployeeMaster,
+  EmployeeAssignmentHistory,
   EmployeeCredential,
   ClinicalPrivilege,
   RosterShiftEntry,
@@ -22,6 +27,106 @@ import {
   EmployeeTrainingRecord,
 } from '@/types/hcm-advanced';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
+
+type CreateEmployeePayload = Omit<
+  EmployeeMaster,
+  | 'employeeId'
+  | 'employeeNumber'
+  | 'userId'
+  | 'tenantId'
+  | 'employmentStatus'
+  | 'terminationDate'
+  | 'onboardingStage'
+  | 'offboardingStage'
+  | 'compensation'
+  | 'currentAssignmentId'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'schemaVersion'
+>;
+
+function workforceIdentityId(kind:'EMAIL'|'NATIONAL_ID', value:string):string{
+  const normalized=value.trim().toLowerCase();
+  const digest=createHash('sha256').update(`${kind}\u0000${normalized}`).digest('hex').slice(0,40);
+  return `wid_${kind.toLowerCase()}_${digest}`;
+}
+
+function workforceReject<T>(
+  commandId:string,
+  idempotencyKey:string,
+  code:string,
+  message:string,
+  details?:unknown
+):CommandResult<T>{
+  return {success:false,commandId,idempotencyKey,error:{code,message,details}};
+}
+
+function assertWorkforceFacilityScope(
+  context:CommandContext,
+  facilityIds:string[]
+):void{
+  const privileged=context.roles.some(role=>
+    ['SYSTEM_ADMIN','HOSPITAL_EXECUTIVE'].includes(role)
+  );
+  const actorFacilities=new Set(context.facilityIds||[]);
+  if(
+    !privileged &&
+    actorFacilities.size>0 &&
+    facilityIds.some(facilityId=>!actorFacilities.has(facilityId))
+  ){
+    throw new AtomicMutationRejectedError(
+      'HCM_FACILITY_SCOPE_MISMATCH',
+      'Workforce mutation references a facility outside the actor scope.',
+      {facilityIds}
+    );
+  }
+}
+
+function assertEmployeeStructure(payload:CreateEmployeePayload):void{
+  const facilities=[...new Set(payload.facilityIds)];
+  const departments=[...new Set(payload.departmentIds)];
+  if(!facilities.length||!facilities.includes(payload.primaryFacilityId)){
+    throw new AtomicMutationRejectedError(
+      'INVALID_EMPLOYEE_FACILITY_ASSIGNMENT',
+      'Primary facility must be included in the employee facility assignments.'
+    );
+  }
+  if(!departments.length||!departments.includes(payload.primaryDepartmentId)){
+    throw new AtomicMutationRejectedError(
+      'INVALID_EMPLOYEE_DEPARTMENT_ASSIGNMENT',
+      'Primary department must be included in the employee department assignments.'
+    );
+  }
+  const hireMs=Date.parse(`${payload.hireDate}T00:00:00.000Z`);
+  const birthMs=Date.parse(`${payload.personalInfo.dateOfBirth}T00:00:00.000Z`);
+  if(!Number.isFinite(hireMs)){
+    throw new AtomicMutationRejectedError('INVALID_EMPLOYEE_HIRE_DATE','Hire date is invalid.');
+  }
+  if(!Number.isFinite(birthMs)||birthMs>=hireMs||birthMs>Date.now()){
+    throw new AtomicMutationRejectedError(
+      'INVALID_EMPLOYEE_DATE_OF_BIRTH',
+      'Date of birth must be valid, in the past, and precede the hire date.'
+    );
+  }
+}
+
+function allowedEmploymentTransition(
+  from:EmployeeMaster['employmentStatus'],
+  to:EmployeeMaster['employmentStatus']
+):boolean{
+  const allowed:Record<EmployeeMaster['employmentStatus'],EmployeeMaster['employmentStatus'][]>={
+    APPLICANT:['ONBOARDING','INACTIVE'],
+    ONBOARDING:['ACTIVE','SUSPENDED','TERMINATED','INACTIVE'],
+    ACTIVE:['ON_LEAVE','SUSPENDED','NOTICE_PERIOD','TERMINATED','RETIRED','INACTIVE'],
+    ON_LEAVE:['ACTIVE','SUSPENDED','NOTICE_PERIOD','TERMINATED','INACTIVE'],
+    SUSPENDED:['ACTIVE','NOTICE_PERIOD','TERMINATED','INACTIVE'],
+    NOTICE_PERIOD:['ACTIVE','SUSPENDED','TERMINATED','RETIRED'],
+    TERMINATED:[],
+    RETIRED:[],
+    INACTIVE:[],
+  };
+  return allowed[from].includes(to);
+}
 
 export class HrWorkforceDomainService {
   // In-memory CQRS cache stores for instant simulation and persistence sync
@@ -165,67 +270,151 @@ export class HrWorkforceDomainService {
     context: CommandContext,
     commandId: string,
     idempotencyKey: string,
-    payload: Omit<EmployeeMaster, 'employeeId' | 'employeeNumber' | 'createdAt' | 'updatedAt' | 'schemaVersion'>
+    payload: CreateEmployeePayload
   ): Promise<CommandResult<EmployeeMaster>> {
-    const auth = AuthorizationPipeline.evaluate(context, {
-      requiredRoles: ['HR_ADMIN', 'SYSTEM_ADMIN', 'MEDICAL_DIRECTOR', 'HOSPITAL_EXECUTIVE'],
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['HR_ADMIN','SYSTEM_ADMIN','HOSPITAL_EXECUTIVE'],
     });
-
-    if (!auth.authorized) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: auth.code || 'UNAUTHORIZED', message: auth.reason || 'HR Admin authority required.' },
-      };
+    if(!auth.authorized){
+      return workforceReject(commandId,idempotencyKey,auth.code||'UNAUTHORIZED',auth.reason||'HR Admin authority required.');
     }
 
-    const employeeId = `emp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const employeeNumber = `EMP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
-    const now = new Date().toISOString();
+    try{
+      assertEmployeeStructure(payload);
+      assertWorkforceFacilityScope(context,payload.facilityIds);
 
-    const employee: EmployeeMaster = {
-      ...payload,
-      employeeId,
-      employeeNumber,
-      createdAt: now,
-      updatedAt: now,
-      schemaVersion: 1,
-    };
-
-    this.employees.set(employeeId, employee);
-
-    // Seed default leave balance
-    this.seedDefaultLeaveBalances(employeeId);
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'EMPLOYEE_MASTER',
-      entityId: employeeId,
-      eventType: 'EMPLOYEE_CREATED',
-      domainState: employee,
-      eventPayload: {
+      const normalizedEmail=payload.personalInfo.contactEmail.trim().toLowerCase();
+      const normalizedNationalId=payload.personalInfo.nationalIdNumber?.trim();
+      const emailIdentityId=workforceIdentityId('EMAIL',normalizedEmail);
+      const nationalIdentityId=normalizedNationalId
+        ? workforceIdentityId('NATIONAL_ID',normalizedNationalId)
+        : undefined;
+      const employeeUuid=randomUUID();
+      const employeeId=`emp_${employeeUuid}`;
+      const employeeNumber=`EMP-${new Date().getUTCFullYear()}-${employeeUuid.replaceAll('-','').slice(0,10).toUpperCase()}`;
+      const assignmentId=`asg_${randomUUID()}`;
+      const now=new Date().toISOString();
+      const employee:EmployeeMaster={
+        ...payload,
         employeeId,
         employeeNumber,
-        fullName: `${employee.personalInfo.legalFirstName} ${employee.personalInfo.legalLastName}`,
-        departmentId: employee.primaryDepartmentId,
-        positionTitle: employee.positionTitle,
-        employmentType: employee.employmentType,
-        employmentStatus: employee.employmentStatus,
-      },
-      auditReason: `Hired/Created employee ${employeeNumber} (${employee.personalInfo.legalFirstName} ${employee.personalInfo.legalLastName})`,
-      outboxTopic: 'g-hims-workforce-events',
-    });
+        tenantId:context.tenantId,
+        personalInfo:{
+          ...payload.personalInfo,
+          contactEmail:normalizedEmail,
+          ...(normalizedNationalId?{nationalIdNumber:normalizedNationalId}:{}),
+        },
+        facilityIds:[...new Set(payload.facilityIds)],
+        departmentIds:[...new Set(payload.departmentIds)],
+        employmentStatus:'ONBOARDING',
+        onboardingStage:'OFFER_ACCEPTED',
+        currentAssignmentId:assignmentId,
+        createdAt:now,
+        updatedAt:now,
+        schemaVersion:1,
+      };
+      const assignment:EmployeeAssignmentHistory={
+        assignmentId,
+        employeeId,
+        employeeName:`${employee.personalInfo.legalFirstName} ${employee.personalInfo.legalLastName}`,
+        facilityId:employee.primaryFacilityId,
+        facilityName:employee.primaryFacilityId,
+        departmentId:employee.primaryDepartmentId,
+        departmentName:employee.primaryDepartmentName,
+        positionId:employee.positionId,
+        positionTitle:employee.positionTitle,
+        managerId:employee.managerId,
+        startDate:employee.hireDate,
+        status:'ACTIVE',
+        createdAt:now,
+      };
 
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: employeeId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: employee,
-    };
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,
+        actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'EMPLOYEE_MASTER',
+        aggregateId:employeeId,
+        eventType:'EMPLOYEE_CREATED',
+        auditAction:'EMPLOYEE_CREATED',
+        auditResourceType:'EMPLOYEE_MASTER',
+        auditResourceId:employeeId,
+        outboxTopic:'g-hims-workforce-events',
+        idempotencyKey,commandId,correlationId:context.correlationId,
+        readTargets:[
+          {key:'emailIdentity',entityType:'WORKFORCE_IDENTITY',entityId:emailIdentityId,required:false},
+          ...(nationalIdentityId
+            ? [{key:'nationalIdentity',entityType:'WORKFORCE_IDENTITY',entityId:nationalIdentityId,required:false}]
+            : []),
+        ],
+        prepare:(current)=>{
+          if(current.emailIdentity){
+            throw new AtomicMutationRejectedError(
+              'EMPLOYEE_EMAIL_ALREADY_REGISTERED',
+              'An employee already exists with this normalized contact email.'
+            );
+          }
+          if(nationalIdentityId&&current.nationalIdentity){
+            throw new AtomicMutationRejectedError(
+              'EMPLOYEE_NATIONAL_ID_ALREADY_REGISTERED',
+              'An employee already exists with this national identifier.'
+            );
+          }
+          const identityWrites:Array<{entityType:string;entityId:string;domainState:unknown}>=[
+            {
+              entityType:'WORKFORCE_IDENTITY',
+              entityId:emailIdentityId,
+              domainState:{
+                identityId:emailIdentityId,tenantId:context.tenantId,type:'EMAIL',
+                employeeId,createdAt:now,
+              },
+            },
+          ];
+          if(nationalIdentityId&&normalizedNationalId){
+            identityWrites.push({
+              entityType:'WORKFORCE_IDENTITY',
+              entityId:nationalIdentityId,
+              domainState:{
+                identityId:nationalIdentityId,tenantId:context.tenantId,type:'NATIONAL_ID',
+                employeeId,createdAt:now,
+              },
+            });
+          }
+          return {
+          domainState:employee,
+          additionalStateWrites:[
+            ...identityWrites,
+            {
+              entityType:'EMPLOYEE_ASSIGNMENT',
+              entityId:assignmentId,
+              domainState:assignment,
+            },
+          ],
+          eventPayload:{
+            employeeId,employeeNumber,
+            fullName:assignment.employeeName,
+            facilityId:employee.primaryFacilityId,
+            departmentId:employee.primaryDepartmentId,
+            positionTitle:employee.positionTitle,
+            employmentType:employee.employmentType,
+            employmentStatus:employee.employmentStatus,
+          },
+          auditReason:`Created employee ${employeeNumber} in ONBOARDING under tenant-authoritative workforce master.`,
+          resultData:employee,
+          };
+        },
+      });
+      this.employees.set(employeeId,employee);
+      return {
+        success:true,commandId,idempotencyKey,entityId:employeeId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:employee,
+      };
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
+    }
   }
 
   public static async updateEmployeeStatus(
@@ -238,59 +427,105 @@ export class HrWorkforceDomainService {
       reason: string;
     }
   ): Promise<CommandResult<EmployeeMaster>> {
-    const auth = AuthorizationPipeline.evaluate(context, {
-      requiredRoles: ['HR_ADMIN', 'SYSTEM_ADMIN', 'MEDICAL_DIRECTOR'],
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['HR_ADMIN','SYSTEM_ADMIN','HOSPITAL_EXECUTIVE'],
     });
-
-    if (!auth.authorized) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: auth.code || 'UNAUTHORIZED', message: auth.reason || 'Unauthorized.' },
-      };
+    if(!auth.authorized){
+      return workforceReject(commandId,idempotencyKey,auth.code||'UNAUTHORIZED',auth.reason||'Unauthorized.');
     }
 
-    const employee = await this.loadEmployee(context.tenantId, payload.employeeId);
-    if (!employee) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: 'EMPLOYEE_NOT_FOUND', message: `Employee ${payload.employeeId} does not exist.` },
-      };
+    const preflight=await this.loadEmployee(context.tenantId,payload.employeeId);
+    if(!preflight){
+      return workforceReject(commandId,idempotencyKey,'EMPLOYEE_NOT_FOUND',`Employee ${payload.employeeId} does not exist.`);
     }
 
-    const previousStatus = employee.employmentStatus;
-    employee.employmentStatus = payload.newStatus;
-    employee.updatedAt = new Date().toISOString();
-    this.employees.set(payload.employeeId, employee);
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'EMPLOYEE_MASTER',
-      entityId: payload.employeeId,
-      eventType: 'EMPLOYEE_STATUS_TRANSITIONED',
-      domainState: employee,
-      eventPayload: {
-        employeeId: payload.employeeId,
-        previousStatus,
-        newStatus: payload.newStatus,
-        reason: payload.reason,
-      },
-      auditReason: `Status of ${employee.employeeNumber} changed from ${previousStatus} to ${payload.newStatus}: ${payload.reason}`,
-      outboxTopic: 'g-hims-workforce-events',
-    });
-
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: payload.employeeId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: employee,
-    };
+    try{
+      assertWorkforceFacilityScope(context,preflight.facilityIds);
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'EMPLOYEE_MASTER',aggregateId:payload.employeeId,
+        eventType:'EMPLOYEE_STATUS_TRANSITIONED',
+        auditAction:'EMPLOYEE_STATUS_TRANSITIONED',
+        auditResourceType:'EMPLOYEE_MASTER',auditResourceId:payload.employeeId,
+        outboxTopic:'g-hims-workforce-events',
+        idempotencyKey,commandId,correlationId:context.correlationId,
+        readTargets:[
+          {
+            key:'employee',entityType:'EMPLOYEE_MASTER',
+            entityId:payload.employeeId,required:true,
+          },
+          ...(preflight.currentAssignmentId
+            ? [{
+                key:'currentAssignment',
+                entityType:'EMPLOYEE_ASSIGNMENT',
+                entityId:preflight.currentAssignmentId,
+                required:false,
+              }]
+            : []),
+        ],
+        prepare:(current)=>{
+          const employee=(current.employee as unknown as EmployeeMaster | null)||preflight;
+          if(!allowedEmploymentTransition(employee.employmentStatus,payload.newStatus)){
+            throw new AtomicMutationRejectedError(
+              'INVALID_EMPLOYMENT_STATUS_TRANSITION',
+              `Employment status cannot transition from ${employee.employmentStatus} to ${payload.newStatus}.`
+            );
+          }
+          const now=new Date().toISOString();
+          const next:EmployeeMaster={
+            ...employee,
+            employmentStatus:payload.newStatus,
+            updatedAt:now,
+            ...(payload.newStatus==='ACTIVE'?{onboardingStage:'ACTIVE' as const}:{}),
+            ...(['TERMINATED','RETIRED'].includes(payload.newStatus)
+              ? {terminationDate:now.slice(0,10)}
+              : {}),
+          };
+          const terminal=['TERMINATED','RETIRED','INACTIVE'].includes(payload.newStatus);
+          const currentAssignment=current.currentAssignment as unknown as EmployeeAssignmentHistory|null;
+          const additionalStateWrites:Array<{entityType:string;entityId:string;domainState:unknown}>=[];
+          if(terminal&&currentAssignment){
+            additionalStateWrites.push({
+              entityType:'EMPLOYEE_ASSIGNMENT',
+              entityId:currentAssignment.assignmentId,
+              domainState:{
+                ...currentAssignment,
+                endDate:now.slice(0,10),
+                status:'CONCLUDED',
+              },
+            });
+          }
+          const finalState:EmployeeMaster=terminal
+            ? {...next,currentAssignmentId:undefined}
+            : next;
+          return {
+            domainState:finalState,
+            additionalStateWrites,
+            eventPayload:{
+              employeeId:finalState.employeeId,
+              previousStatus:employee.employmentStatus,
+              newStatus:payload.newStatus,
+              reason:payload.reason,
+              assignmentConcluded:terminal&&Boolean(currentAssignment),
+            },
+            auditReason:`Status of ${finalState.employeeNumber} changed from ${employee.employmentStatus} to ${payload.newStatus}: ${payload.reason}`,
+            resultData:finalState,
+          };
+        },
+      });
+      const next=tx.resultData as EmployeeMaster;
+      this.employees.set(payload.employeeId,next);
+      return {
+        success:true,commandId,idempotencyKey,entityId:payload.employeeId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:next,
+      };
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
+    }
   }
 
   public static async transferEmployee(
@@ -299,6 +534,7 @@ export class HrWorkforceDomainService {
     idempotencyKey: string,
     payload: {
       employeeId: string;
+      toFacilityId?: string;
       toDepartmentId: string;
       toDepartmentName: string;
       toPositionId: string;
@@ -307,71 +543,138 @@ export class HrWorkforceDomainService {
       effectiveDate: string;
     }
   ): Promise<CommandResult<EmployeeMaster>> {
-    const auth = AuthorizationPipeline.evaluate(context, {
-      requiredRoles: ['HR_ADMIN', 'SYSTEM_ADMIN', 'MEDICAL_DIRECTOR', 'HOSPITAL_EXECUTIVE'],
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['HR_ADMIN','SYSTEM_ADMIN','HOSPITAL_EXECUTIVE'],
     });
+    if(!auth.authorized){
+      return workforceReject(commandId,idempotencyKey,auth.code||'UNAUTHORIZED',auth.reason||'HR Admin authority required.');
+    }
 
-    if (!auth.authorized) {
+    const preflight=await this.loadEmployee(context.tenantId,payload.employeeId);
+    if(!preflight){
+      return workforceReject(commandId,idempotencyKey,'EMPLOYEE_NOT_FOUND',`Employee ${payload.employeeId} does not exist.`);
+    }
+    if(['TERMINATED','RETIRED','INACTIVE'].includes(preflight.employmentStatus)){
+      return workforceReject(commandId,idempotencyKey,'EMPLOYEE_NOT_TRANSFERABLE','Inactive/terminal employees cannot be transferred.');
+    }
+
+    const targetFacilityId=payload.toFacilityId||preflight.primaryFacilityId;
+    try{
+      assertWorkforceFacilityScope(context,[targetFacilityId]);
+      const effectiveMs=Date.parse(`${payload.effectiveDate}T00:00:00.000Z`);
+      const hireMs=Date.parse(`${preflight.hireDate}T00:00:00.000Z`);
+      const todayUtc=Date.parse(`${new Date().toISOString().slice(0,10)}T00:00:00.000Z`);
+      if(!Number.isFinite(effectiveMs)||effectiveMs<hireMs){
+        throw new AtomicMutationRejectedError(
+          'INVALID_TRANSFER_EFFECTIVE_DATE',
+          'Transfer effective date must be valid and not precede hire date.'
+        );
+      }
+      if(effectiveMs>todayUtc){
+        throw new AtomicMutationRejectedError(
+          'FUTURE_TRANSFER_REQUIRES_SCHEDULING',
+          'Future-dated transfers cannot mutate the current assignment. Use a scheduled workforce action when that capability is enabled.'
+        );
+      }
+      const nextAssignmentId=`asg_${randomUUID()}`;
+      const readTargets:Array<{key:string;entityType:string;entityId:string;required:boolean}>=[
+        {key:'employee',entityType:'EMPLOYEE_MASTER',entityId:payload.employeeId,required:true},
+      ];
+      if(preflight.currentAssignmentId){
+        readTargets.push({
+          key:'currentAssignment',entityType:'EMPLOYEE_ASSIGNMENT',
+          entityId:preflight.currentAssignmentId,required:false,
+        });
+      }
+
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'EMPLOYEE_MASTER',aggregateId:payload.employeeId,
+        eventType:'EMPLOYEE_TRANSFERRED',auditAction:'EMPLOYEE_TRANSFERRED',
+        auditResourceType:'EMPLOYEE_MASTER',auditResourceId:payload.employeeId,
+        outboxTopic:'g-hims-workforce-events',
+        idempotencyKey,commandId,correlationId:context.correlationId,
+        readTargets,
+        prepare:(current)=>{
+          const employee=(current.employee as unknown as EmployeeMaster | null)||preflight;
+          if(['TERMINATED','RETIRED','INACTIVE'].includes(employee.employmentStatus)){
+            throw new AtomicMutationRejectedError('EMPLOYEE_NOT_TRANSFERABLE','Inactive/terminal employees cannot be transferred.');
+          }
+          const previousDept={id:employee.primaryDepartmentId,name:employee.primaryDepartmentName};
+          const previousPosition={id:employee.positionId,title:employee.positionTitle};
+          const previousFacilityId=employee.primaryFacilityId;
+          const now=new Date().toISOString();
+          const next:EmployeeMaster={
+            ...employee,
+            primaryFacilityId:targetFacilityId,
+            facilityIds:[...new Set([...employee.facilityIds,targetFacilityId])],
+            primaryDepartmentId:payload.toDepartmentId,
+            primaryDepartmentName:payload.toDepartmentName,
+            departmentIds:[...new Set([...employee.departmentIds,payload.toDepartmentId])],
+            positionId:payload.toPositionId,
+            positionTitle:payload.toPositionTitle,
+            currentAssignmentId:nextAssignmentId,
+            updatedAt:now,
+          };
+          const nextAssignment:EmployeeAssignmentHistory={
+            assignmentId:nextAssignmentId,
+            employeeId:next.employeeId,
+            employeeName:`${next.personalInfo.legalFirstName} ${next.personalInfo.legalLastName}`,
+            facilityId:targetFacilityId,
+            facilityName:targetFacilityId,
+            departmentId:payload.toDepartmentId,
+            departmentName:payload.toDepartmentName,
+            positionId:payload.toPositionId,
+            positionTitle:payload.toPositionTitle,
+            managerId:next.managerId,
+            startDate:payload.effectiveDate,
+            transferReason:payload.reason,
+            status:'ACTIVE',
+            createdAt:now,
+          };
+          const additionalStateWrites:Array<{entityType:string;entityId:string;domainState:unknown}>=[
+            {entityType:'EMPLOYEE_ASSIGNMENT',entityId:nextAssignmentId,domainState:nextAssignment},
+          ];
+          const currentAssignment=current.currentAssignment as unknown as EmployeeAssignmentHistory|null;
+          if(currentAssignment){
+            additionalStateWrites.push({
+              entityType:'EMPLOYEE_ASSIGNMENT',
+              entityId:currentAssignment.assignmentId,
+              domainState:{
+                ...currentAssignment,
+                endDate:payload.effectiveDate,
+                status:'CONCLUDED',
+              },
+            });
+          }
+          return {
+            domainState:next,additionalStateWrites,
+            eventPayload:{
+              employeeId:next.employeeId,
+              previousFacilityId,newFacilityId:targetFacilityId,
+              previousDept,newDept:{id:payload.toDepartmentId,name:payload.toDepartmentName},
+              previousPosition,newPosition:{id:payload.toPositionId,title:payload.toPositionTitle},
+              reason:payload.reason,effectiveDate:payload.effectiveDate,
+              assignmentId:nextAssignmentId,
+            },
+            auditReason:`Employee ${next.employeeNumber} transferred from ${previousDept.name} to ${payload.toDepartmentName}: ${payload.reason}`,
+            resultData:next,
+          };
+        },
+      });
+      const next=tx.resultData as EmployeeMaster;
+      this.employees.set(payload.employeeId,next);
       return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: auth.code || 'UNAUTHORIZED', message: auth.reason || 'HR Admin authority required.' },
+        success:true,commandId,idempotencyKey,entityId:payload.employeeId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:next,
       };
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
     }
-
-    const employee = await this.loadEmployee(context.tenantId, payload.employeeId);
-    if (!employee) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: 'EMPLOYEE_NOT_FOUND', message: `Employee ${payload.employeeId} does not exist.` },
-      };
-    }
-
-    const previousDept = { id: employee.primaryDepartmentId, name: employee.primaryDepartmentName };
-    const previousPosition = { id: employee.positionId, title: employee.positionTitle };
-
-    employee.primaryDepartmentId = payload.toDepartmentId;
-    employee.primaryDepartmentName = payload.toDepartmentName;
-    if (!employee.departmentIds.includes(payload.toDepartmentId)) {
-      employee.departmentIds.push(payload.toDepartmentId);
-    }
-    employee.positionId = payload.toPositionId;
-    employee.positionTitle = payload.toPositionTitle;
-    employee.updatedAt = new Date().toISOString();
-
-    this.employees.set(payload.employeeId, employee);
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'EMPLOYEE_MASTER',
-      entityId: payload.employeeId,
-      eventType: 'EMPLOYEE_TRANSFERRED',
-      domainState: employee,
-      eventPayload: {
-        employeeId: payload.employeeId,
-        previousDept,
-        newDept: { id: payload.toDepartmentId, name: payload.toDepartmentName },
-        previousPosition,
-        newPosition: { id: payload.toPositionId, title: payload.toPositionTitle },
-        reason: payload.reason,
-        effectiveDate: payload.effectiveDate,
-      },
-      auditReason: `Employee ${employee.employeeNumber} transferred from ${previousDept.name} to ${payload.toDepartmentName}: ${payload.reason}`,
-      outboxTopic: 'g-hims-workforce-events',
-    });
-
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: payload.employeeId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: employee,
-    };
   }
 
   // ============================================================================
@@ -1267,6 +1570,17 @@ export class HrWorkforceDomainService {
 
   public static ensureInitialized(): void {
     if (this.employees.size > 0) return;
+
+    const runtimeMode=String(
+      process.env.GHIMS_RUNTIME_MODE ||
+      process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE ||
+      ''
+    ).trim().toUpperCase();
+    const testRuntime=
+      runtimeMode==='TEST' ||
+      runtimeMode==='DEMO' ||
+      process.env.NODE_ENV==='test';
+    if(!testRuntime) return;
 
     const now = new Date().toISOString();
     const today = now.split('T')[0];

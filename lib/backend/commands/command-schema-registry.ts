@@ -1086,6 +1086,74 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       }).strict()).min(2).max(500),
     }).strict(),
   },
+  CreateEmployeeCommand: {
+    1: z.object({
+      facilityIds: z.array(nonEmpty.max(100)).min(1).max(50)
+        .refine((values)=>new Set(values).size===values.length,'Duplicate facility assignments are not allowed.'),
+      primaryFacilityId: nonEmpty.max(100),
+      departmentIds: z.array(nonEmpty.max(100)).min(1).max(50)
+        .refine((values)=>new Set(values).size===values.length,'Duplicate department assignments are not allowed.'),
+      primaryDepartmentId: nonEmpty.max(100),
+      primaryDepartmentName: nonEmpty.max(200),
+      positionId: nonEmpty.max(100),
+      positionTitle: nonEmpty.max(200),
+      employmentType: z.enum([
+        'FULL_TIME','PART_TIME','CONTRACT','TEMPORARY','CONSULTANT','LOCUM',
+        'INTERN','VOLUNTEER','VISITING_CLINICIAN','AGENCY_WORKER'
+      ]),
+      hireDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      managerId: z.string().trim().min(1).max(100).optional(),
+      managerName: z.string().trim().min(1).max(200).optional(),
+      supervisorId: z.string().trim().min(1).max(100).optional(),
+      specialty: z.string().trim().min(1).max(200).optional(),
+      subSpecialties: z.array(nonEmpty.max(200)).max(30).optional(),
+      personalInfo: z.object({
+        legalFirstName: nonEmpty.max(100),
+        legalLastName: nonEmpty.max(100),
+        preferredName: z.string().trim().min(1).max(100).optional(),
+        dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        nationalIdNumber: z.string().trim().min(1).max(100).optional(),
+        gender: z.enum(['FEMALE','MALE','NON_BINARY','UNDISCLOSED']),
+        contactEmail: z.string().trim().email().max(254),
+        contactPhone: nonEmpty.max(50),
+        emergencyContact: z.object({
+          name: nonEmpty.max(200),
+          relationship: nonEmpty.max(100),
+          phone: nonEmpty.max(50),
+        }).strict(),
+        residentialAddress: z.object({
+          street: nonEmpty.max(300),
+          city: nonEmpty.max(150),
+          state: nonEmpty.max(150),
+          postalCode: nonEmpty.max(40),
+          country: nonEmpty.max(150),
+        }).strict(),
+        photoUrl: z.string().url().max(2000).optional(),
+      }).strict(),
+    }).strict(),
+  },
+  UpdateEmployeeStatusCommand: {
+    1: z.object({
+      employeeId: nonEmpty.max(100),
+      newStatus: z.enum([
+        'APPLICANT','ONBOARDING','ACTIVE','ON_LEAVE','SUSPENDED',
+        'NOTICE_PERIOD','TERMINATED','RETIRED','INACTIVE'
+      ]),
+      reason: nonEmpty.max(1000),
+    }).strict(),
+  },
+  TransferEmployeeCommand: {
+    1: z.object({
+      employeeId: nonEmpty.max(100),
+      toFacilityId: z.string().trim().min(1).max(100).optional(),
+      toDepartmentId: nonEmpty.max(100),
+      toDepartmentName: nonEmpty.max(200),
+      toPositionId: nonEmpty.max(100),
+      toPositionTitle: nonEmpty.max(200),
+      reason: nonEmpty.max(1000),
+      effectiveDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    }).strict(),
+  },
   RecordVitalsCommand: {
     1: z.object({
       patientId: nonEmpty,

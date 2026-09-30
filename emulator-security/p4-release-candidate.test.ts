@@ -49,7 +49,7 @@ function financeContext(tenantId: string): CommandContext {
   return {
     actorId: 'p4-accountant',
     tenantId,
-    roles: ['ACCOUNTANT'],
+    roles: ['ACCOUNTANT', 'FINANCE_MANAGER'],
     permissions: ['FINANCE_WRITE'],
     correlationId: unique('corr'),
     requestId: unique('req'),
@@ -172,9 +172,52 @@ describe('G-HIMS P4 release-candidate Firestore recovery journey', () => {
     expect(prescriptionReplay.replayedFromCache).toBe(true);
     expect(prescriptionReplay.entityId).toBe(prescription.entityId);
 
-    const now = Date.now();
+    const finance = financeContext(tenantId);
+    for (const account of [
+      {
+        accountCode: '1100-AR-CASH',
+        accountName: 'Cash / Receivable',
+        category: 'asset',
+        subCategory: 'cash_receivable',
+        normalBalance: 'debit',
+      },
+      {
+        accountCode: '4100-CLINICAL-REV',
+        accountName: 'Clinical Service Revenue',
+        category: 'revenue',
+        subCategory: 'clinical_revenue',
+        normalBalance: 'credit',
+      },
+    ] as const) {
+      const created = await CommandBus.dispatch(
+        finance,
+        command(tenantId, 'CreateFinanceAccountCommand', {
+          ...account,
+          currency: 'PKR',
+          allowManualPosting: true,
+          allowCashReceipts: false,
+          allowSupplierPayments: false,
+          isSystemLocked: false,
+        })
+      );
+      expect(created.success).toBe(true);
+    }
+
+    const period = await CommandBus.dispatch(
+      finance,
+      command(tenantId, 'CreateFinancePeriodCommand', {
+        fiscalYear: 2026,
+        postingPeriod: 9,
+        periodName: 'September 2026',
+        startAt: Date.UTC(2026, 8, 1, 0, 0, 0, 0),
+        endAt: Date.UTC(2026, 9, 1, 0, 0, 0, 0) - 1,
+      })
+    );
+    expect(period.success).toBe(true);
+
+    const now = Date.UTC(2026, 8, 30, 12, 0, 0, 0);
     const journal = await CommandBus.dispatch(
-      financeContext(tenantId),
+      finance,
       command(tenantId, 'PostJournalCommand', {
         fiscalYear: 2026,
         postingPeriod: 9,

@@ -21,6 +21,7 @@ import {
 } from '@/lib/supply-chain/inventory-costing';
 import type { SupplierContract } from '@/types/scm-sourcing';
 import { validatePurchaseOrderAgainstContract } from '@/lib/supply-chain/supplier-sourcing';
+import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 
 type RequisitionDecision = 'APPROVED' | 'REJECTED';
 type PurchaseOrderDecision = 'APPROVED' | 'REJECTED';
@@ -623,6 +624,35 @@ export class ScmProcurementDomainService {
           const totalAmount = roundMoney(
             subtotal - discountTotal + taxTotal
           );
+          const contractSpendMinorUnits = contract
+            ? poLines.reduce(
+                (sum, line) =>
+                  sum +
+                  Math.round(
+                    line.quantityOrdered * line.unitPrice * 100
+                  ),
+                0
+              )
+            : 0;
+          const reservedContract = contract
+            ? {
+                ...contract,
+                reservedSpendMinorUnits:
+                  Number(contract.reservedSpendMinorUnits || 0) +
+                  contractSpendMinorUnits,
+                reservedQuantityByItem: poLines.reduce(
+                  (acc, line) => ({
+                    ...acc,
+                    [line.itemId]:
+                      Number(
+                        contract.reservedQuantityByItem?.[line.itemId] || 0
+                      ) + line.quantityOrdered,
+                  }),
+                  { ...(contract.reservedQuantityByItem || {}) }
+                ),
+                updatedAt: new Date().toISOString(),
+              }
+            : null;
           const now = new Date().toISOString();
 
           const po: PurchaseOrderRecord = {
@@ -636,6 +666,8 @@ export class ScmProcurementDomainService {
             supplierName: supplier.displayName || supplier.legalName,
             contractId: contract?.contractId,
             contractNumber: contract?.contractNumber,
+            contractReservedSpendMinorUnits:
+              contract ? contractSpendMinorUnits : undefined,
             emergencyContractWaiver: contract
               ? undefined
               : { reason: emergencyWaiverReason },
@@ -680,6 +712,13 @@ export class ScmProcurementDomainService {
                 entityId: requisition.requisitionId,
                 domainState: convertedRequisition,
               },
+              ...(reservedContract
+                ? [{
+                    entityType: 'SUPPLIER_CONTRACT',
+                    entityId: reservedContract.contractId,
+                    domainState: reservedContract,
+                  }]
+                : []),
             ],
             eventPayload: {
               poId: po.poId,
@@ -749,6 +788,12 @@ export class ScmProcurementDomainService {
     }
 
     try {
+      const poPreflight = await DomainStateRepository.getById<PurchaseOrderRecord>(
+        context.tenantId,
+        'scmPurchaseOrders',
+        payload.poId
+      );
+
       const tx = await TransactionManager.executeAtomicReadModifyMutation({
         tenantId: context.tenantId,
         actorId: context.actorId,
@@ -772,16 +817,20 @@ export class ScmProcurementDomainService {
             entityId: payload.poId,
             required: true,
           },
+          ...(poPreflight?.contractId
+            ? [{
+                key: 'contract',
+                entityType: 'SUPPLIER_CONTRACT',
+                entityId: poPreflight.contractId,
+                required: true,
+              }]
+            : []),
         ],
         prepare: (current) => {
-          if (isInventoryPeriodBlocked(current.periodClose)) {
-            throw new AtomicMutationRejectedError(
-              'INVENTORY_PERIOD_BLOCKED',
-              'Goods receipt cannot post into an inventory period that is closing or closed.'
-            );
-          }
-
           const po = current.po as unknown as PurchaseOrderRecord;
+          const contract = po.contractId
+            ? (current.contract as unknown as SupplierContract)
+            : null;
           assertFacilityScope(context, po.facilityId);
 
           if (!['PENDING_APPROVAL', 'SUBMITTED'].includes(po.status)) {
@@ -795,6 +844,66 @@ export class ScmProcurementDomainService {
               'SCM_SEGREGATION_OF_DUTIES',
               'Purchase order creator cannot approve or reject their own order.'
             );
+          }
+
+          let nextContract: SupplierContract | null = null;
+          if (po.contractId) {
+            if (!contract || contract.contractId !== po.contractId) {
+              throw new AtomicMutationRejectedError(
+                'PO_CONTRACT_STATE_MISSING',
+                'Purchase order contract reservation is missing.'
+              );
+            }
+            const reservedSpend = Number(
+              po.contractReservedSpendMinorUnits || 0
+            );
+            if (
+              reservedSpend <= 0 ||
+              Number(contract.reservedSpendMinorUnits || 0) < reservedSpend
+            ) {
+              throw new AtomicMutationRejectedError(
+                'PO_CONTRACT_RESERVATION_CONFLICT',
+                'Contract spend reservation is inconsistent with the purchase order.'
+              );
+            }
+
+            const nextReservedQuantities = {
+              ...(contract.reservedQuantityByItem || {}),
+            };
+            const nextCommittedQuantities = {
+              ...(contract.committedQuantityByItem || {}),
+            };
+            for (const line of po.items) {
+              const reserved = Number(
+                nextReservedQuantities[line.itemId] || 0
+              );
+              if (reserved < line.quantityOrdered) {
+                throw new AtomicMutationRejectedError(
+                  'PO_CONTRACT_QUANTITY_RESERVATION_CONFLICT',
+                  `Contract quantity reservation is inconsistent for ${line.itemId}.`
+                );
+              }
+              nextReservedQuantities[line.itemId] =
+                reserved - line.quantityOrdered;
+              if (payload.decision === 'APPROVED') {
+                nextCommittedQuantities[line.itemId] =
+                  Number(nextCommittedQuantities[line.itemId] || 0) +
+                  line.quantityOrdered;
+              }
+            }
+
+            nextContract = {
+              ...contract,
+              reservedSpendMinorUnits:
+                Number(contract.reservedSpendMinorUnits || 0) -
+                reservedSpend,
+              committedSpendMinorUnits:
+                Number(contract.committedSpendMinorUnits || 0) +
+                (payload.decision === 'APPROVED' ? reservedSpend : 0),
+              reservedQuantityByItem: nextReservedQuantities,
+              committedQuantityByItem: nextCommittedQuantities,
+              updatedAt: new Date().toISOString(),
+            };
           }
 
           const now = new Date().toISOString();
@@ -837,6 +946,13 @@ export class ScmProcurementDomainService {
 
           return {
             domainState: next,
+            additionalStateWrites: nextContract
+              ? [{
+                  entityType: 'SUPPLIER_CONTRACT',
+                  entityId: nextContract.contractId,
+                  domainState: nextContract,
+                }]
+              : [],
             eventPayload: {
               poId: next.poId,
               poNumber: next.poNumber,

@@ -63,6 +63,8 @@ const HCM_COLLECTIONS = [
   'clinicalPrivileges',
   'rosterAssignments',
   'attendanceRecords',
+  'leaveRequests',
+  'leaveBalances',
 ] as const;
 
 const SCM_COLLECTIONS = [
@@ -343,6 +345,17 @@ function scopeOfflineCollections(
       scopedEmployeeIds.has(String(record.employeeId||'').trim()) &&
       valueMatchesScope(record.facilityId,facilities) &&
       valueMatchesScope(record.departmentId,departments)
+    );
+  }
+
+  if(collections.leaveRequests){
+    scoped.leaveRequests=collections.leaveRequests.filter(request=>
+      scopedEmployeeIds.has(String(request.employeeId||'').trim())
+    );
+  }
+  if(collections.leaveBalances){
+    scoped.leaveBalances=collections.leaveBalances.filter(balance=>
+      scopedEmployeeIds.has(String(balance.employeeId||'').trim())
     );
   }
 

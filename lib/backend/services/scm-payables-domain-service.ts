@@ -38,12 +38,14 @@ export interface RecordSupplierInvoicePayload {
 
 export interface ResolveSupplierInvoiceMatchPayload {
   invoiceId: string;
+  poId: string;
   decision: 'APPROVE' | 'REJECT';
   notes: string;
 }
 
 export interface RecognizeSupplierInvoicePayablePayload {
   invoiceId: string;
+  poId: string;
   fiscalYear: number;
   postingPeriod: number;
   documentDate: number;
@@ -65,6 +67,7 @@ export interface ApproveSupplierPaymentAuthorizationPayload {
 
 export interface RecordSupplierPaymentPayload {
   authorizationId: string;
+  invoiceId: string;
   paymentReference: string;
   paymentMethod: SupplierPaymentRecord['paymentMethod'];
   sourceAccountId: string;
@@ -599,13 +602,21 @@ export class ScmPayablesDomainService {
           {
             key: 'po',
             entityType: 'PURCHASE_ORDER',
-            entityId: '',
-            required: false,
+            entityId: payload.poId,
+            required: true,
           },
         ],
         prepare: (current) => {
           const invoice = current.invoice as unknown as SupplierInvoiceRecord;
           const match = current.match as unknown as SupplierInvoiceMatchRecord;
+          const po = current.po as unknown as PurchaseOrderRecord;
+
+          if (invoice.poId !== payload.poId || po.poId !== invoice.poId) {
+            throw new AtomicMutationRejectedError(
+              'SUPPLIER_INVOICE_PO_MISMATCH',
+              'Exception resolution purchase order does not match the authoritative invoice.'
+            );
+          }
 
           if (invoice.status !== 'MATCH_EXCEPTION') {
             throw new AtomicMutationRejectedError(
@@ -640,11 +651,42 @@ export class ScmPayablesDomainService {
             updatedAt: now,
           };
 
+          const nextPo: PurchaseOrderRecord = approved
+            ? {
+                ...po,
+                invoiceMatchStatus: 'RESOLVED_APPROVED',
+                updatedAt: now,
+              }
+            : {
+                ...po,
+                items: po.items.map((poLine) => {
+                  const invoiceLine = invoice.lines.find(
+                    (line) => line.itemId === poLine.itemId
+                  );
+                  if (!invoiceLine) return poLine;
+                  return {
+                    ...poLine,
+                    quantityPendingInvoice: Math.max(
+                      0,
+                      Number(poLine.quantityPendingInvoice || 0) -
+                        invoiceLine.billedQuantity
+                    ),
+                  };
+                }),
+                invoiceMatchStatus: 'REJECTED',
+                updatedAt: now,
+              };
+
           const additionalStateWrites = [
             {
               entityType: 'SUPPLIER_INVOICE_MATCH',
               entityId: match.matchId,
               domainState: nextMatch,
+            },
+            {
+              entityType: 'PURCHASE_ORDER',
+              entityId: po.poId,
+              domainState: nextPo,
             },
           ];
 
@@ -734,11 +776,25 @@ export class ScmPayablesDomainService {
             entityId: matchId,
             required: true,
           },
+          {
+            key: 'po',
+            entityType: 'PURCHASE_ORDER',
+            entityId: payload.poId,
+            required: true,
+          },
         ],
         prepare: (current) => {
           const invoice = current.invoice as unknown as SupplierInvoiceRecord;
           const match = current.match as unknown as SupplierInvoiceMatchRecord;
+          const po = current.po as unknown as PurchaseOrderRecord;
           assertFacilityScope(context, invoice.facilityId);
+
+          if (invoice.poId !== payload.poId || po.poId !== invoice.poId) {
+            throw new AtomicMutationRejectedError(
+              'SUPPLIER_INVOICE_PO_MISMATCH',
+              'Payable recognition purchase order does not match the authoritative invoice.'
+            );
+          }
 
           if (invoice.status !== 'MATCHED') {
             throw new AtomicMutationRejectedError(
@@ -853,6 +909,28 @@ export class ScmPayablesDomainService {
             journalEntryId: journalId,
             updatedAt: now,
           };
+          const nextPo: PurchaseOrderRecord = {
+            ...po,
+            items: po.items.map((poLine) => {
+              const invoiceLine = invoice.lines.find(
+                (line) => line.itemId === poLine.itemId
+              );
+              if (!invoiceLine) return poLine;
+              return {
+                ...poLine,
+                quantityPendingInvoice: Math.max(
+                  0,
+                  Number(poLine.quantityPendingInvoice || 0) -
+                    invoiceLine.billedQuantity
+                ),
+                quantityInvoiced:
+                  Number(poLine.quantityInvoiced || 0) +
+                  invoiceLine.billedQuantity,
+              };
+            }),
+            invoiceMatchStatus: 'PAYABLE_RECOGNIZED',
+            updatedAt: now,
+          };
 
           return {
             domainState: nextInvoice,
@@ -861,6 +939,11 @@ export class ScmPayablesDomainService {
                 entityType: 'JOURNAL_ENTRY',
                 entityId: journalId,
                 domainState: journal,
+              },
+              {
+                entityType: 'PURCHASE_ORDER',
+                entityId: po.poId,
+                domainState: nextPo,
               },
             ],
             eventPayload: {
@@ -1208,6 +1291,12 @@ export class ScmPayablesDomainService {
             entityId: payload.authorizationId,
             required: true,
           },
+          {
+            key: 'invoice',
+            entityType: 'SUPPLIER_INVOICE',
+            entityId: payload.invoiceId,
+            required: true,
+          },
         ],
         prepare: (current) => {
           if (current.existingPayment) {
@@ -1219,6 +1308,18 @@ export class ScmPayablesDomainService {
 
           const authorization =
             current.authorization as unknown as SupplierPaymentAuthorization;
+          const invoice = current.invoice as unknown as SupplierInvoiceRecord;
+          assertFacilityScope(context, invoice.facilityId);
+
+          if (
+            authorization.invoiceId !== invoice.invoiceId ||
+            payload.invoiceId !== invoice.invoiceId
+          ) {
+            throw new AtomicMutationRejectedError(
+              'PAYMENT_AUTHORIZATION_INVOICE_MISMATCH',
+              'Payment authorization does not belong to the supplied invoice.'
+            );
+          }
           if (authorization.status !== 'APPROVED') {
             throw new AtomicMutationRejectedError(
               'PAYMENT_NOT_AUTHORIZED',
@@ -1231,11 +1332,141 @@ export class ScmPayablesDomainService {
               'Payment requester cannot execute the same supplier payment.'
             );
           }
+          if (
+            !['PAYABLE_RECOGNIZED', 'PARTIALLY_PAID'].includes(invoice.status)
+          ) {
+            throw new AtomicMutationRejectedError(
+              'INVOICE_NOT_PAYABLE',
+              `Supplier payment cannot be executed from invoice status ${invoice.status}.`
+            );
+          }
+          if (
+            authorization.amountMinorUnits <= 0 ||
+            authorization.amountMinorUnits > invoice.balanceMinorUnits
+          ) {
+            throw new AtomicMutationRejectedError(
+              'PAYMENT_AMOUNT_EXCEEDS_BALANCE',
+              'Authorized payment exceeds the authoritative invoice balance.'
+            );
+          }
+          if (
+            !payload.sourceAccountId.trim() ||
+            payload.sourceAccountId === AP_ACCOUNT.id ||
+            payload.sourceAccountId === GRNI_ACCOUNT.id
+          ) {
+            throw new AtomicMutationRejectedError(
+              'INVALID_PAYMENT_SOURCE_ACCOUNT',
+              'Supplier payment requires a distinct cash or bank GL account.'
+            );
+          }
 
-          throw new AtomicMutationRejectedError(
-            'SUPPLIER_PAYMENT_INVOICE_READ_REQUIRED',
-            'Payment execution requires authoritative invoice state in the same transaction.'
+          const journalId = `je_pay_${paymentId}`;
+          const journal = buildJournalState({
+            journalId,
+            tenantId: context.tenantId,
+            fiscalYear: payload.fiscalYear,
+            postingPeriod: payload.postingPeriod,
+            documentDate: Date.parse(payload.settledAt),
+            postingDate: Date.parse(payload.settledAt),
+            referenceDocumentId: paymentId,
+            documentHeader: `Supplier payment: ${invoice.invoiceNumber} / ${payload.paymentReference}`,
+            currency: invoice.currency,
+            lines: [
+              {
+                glAccountId: AP_ACCOUNT.id,
+                glAccountName: AP_ACCOUNT.name,
+                debitMinorUnits: authorization.amountMinorUnits,
+                creditMinorUnits: 0,
+                lineDescription: `Settle AP for ${invoice.invoiceNumber}`,
+              },
+              {
+                glAccountId: payload.sourceAccountId.trim(),
+                glAccountName: payload.sourceAccountName.trim(),
+                debitMinorUnits: 0,
+                creditMinorUnits: authorization.amountMinorUnits,
+                lineDescription: `Supplier payment ${payload.paymentReference}`,
+              },
+            ],
+            postedBy: context.actorId,
+          });
+
+          const nextPaid =
+            invoice.amountPaidMinorUnits + authorization.amountMinorUnits;
+          const nextBalance = Math.max(
+            0,
+            invoice.totalAmountMinorUnits - nextPaid
           );
+          const now = new Date().toISOString();
+
+          const nextInvoice: SupplierInvoiceRecord = {
+            ...invoice,
+            amountPaidMinorUnits: nextPaid,
+            balanceMinorUnits: nextBalance,
+            status: nextBalance === 0 ? 'PAID' : 'PARTIALLY_PAID',
+            updatedAt: now,
+          };
+          const nextAuthorization: SupplierPaymentAuthorization = {
+            ...authorization,
+            status: 'CONSUMED',
+            consumedByPaymentId: paymentId,
+            updatedAt: now,
+          };
+          const payment: SupplierPaymentRecord = {
+            paymentId,
+            tenantId: context.tenantId,
+            invoiceId: invoice.invoiceId,
+            invoiceNumber: invoice.invoiceNumber,
+            authorizationId: authorization.authorizationId,
+            supplierId: invoice.supplierId,
+            supplierName: invoice.supplierName,
+            currency: invoice.currency,
+            amountMinorUnits: authorization.amountMinorUnits,
+            paymentMethod: payload.paymentMethod,
+            sourceAccountId: payload.sourceAccountId.trim(),
+            sourceAccountName: payload.sourceAccountName.trim(),
+            paymentReference: payload.paymentReference.trim(),
+            settledAt: payload.settledAt,
+            recordedBy: context.actorId,
+            journalEntryId: journalId,
+            createdAt: now,
+          };
+
+          return {
+            domainState: payment,
+            additionalStateWrites: [
+              {
+                entityType: 'SUPPLIER_INVOICE',
+                entityId: invoice.invoiceId,
+                domainState: nextInvoice,
+              },
+              {
+                entityType: 'AP_PAYMENT_AUTHORIZATION',
+                entityId: authorization.authorizationId,
+                domainState: nextAuthorization,
+              },
+              {
+                entityType: 'JOURNAL_ENTRY',
+                entityId: journalId,
+                domainState: journal,
+              },
+            ],
+            eventPayload: {
+              paymentId,
+              invoiceId: invoice.invoiceId,
+              authorizationId: authorization.authorizationId,
+              supplierId: invoice.supplierId,
+              amountMinorUnits: authorization.amountMinorUnits,
+              balanceMinorUnits: nextBalance,
+              journalId,
+            },
+            auditReason: `Recorded authorized supplier payment ${payload.paymentReference} for invoice ${invoice.invoiceNumber}.`,
+            resultData: {
+              payment,
+              invoice: nextInvoice,
+              authorization: nextAuthorization,
+              journal,
+            },
+          };
         },
       });
 
@@ -1250,10 +1481,7 @@ export class ScmPayablesDomainService {
         data: tx.resultData,
       };
     } catch (error) {
-      if (
-        error instanceof AtomicMutationRejectedError &&
-        error.code !== 'SUPPLIER_PAYMENT_INVOICE_READ_REQUIRED'
-      ) {
+      if (error instanceof AtomicMutationRejectedError) {
         return rejection(
           commandId,
           idempotencyKey,
@@ -1262,27 +1490,7 @@ export class ScmPayablesDomainService {
           error.details
         );
       }
-      if (
-        error instanceof AtomicMutationRejectedError &&
-        error.code === 'SUPPLIER_PAYMENT_INVOICE_READ_REQUIRED'
-      ) {
-        // The first atomic preflight intentionally avoids trusting an invoice ID
-        // from the client. Payment execution is implemented below after reading
-        // the authorization-owned invoice identifier.
-      } else {
-        throw error;
-      }
+      throw error;
     }
-
-    // Authorization is the authoritative pointer to the invoice. The transaction
-    // manager requires read targets up-front, so fetch the authorization once
-    // through the domain repository boundary is deliberately avoided; instead,
-    // require invoiceId in a second command revision before enabling execution.
-    return rejection(
-      commandId,
-      idempotencyKey,
-      'SUPPLIER_PAYMENT_EXECUTION_SCHEMA_REQUIRES_INVOICE',
-      'Supplier payment execution requires invoiceId to be supplied and cross-checked against the authorization.'
-    );
   }
 }

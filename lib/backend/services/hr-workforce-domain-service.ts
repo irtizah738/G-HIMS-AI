@@ -18,6 +18,7 @@ import {
   ClinicalPrivilege,
   RosterShiftEntry,
   RosterTimelineBucket,
+  RosterSwapRecord,
   StaffingGapAnalysis,
   AttendanceRecord,
   LeaveRequest,
@@ -1636,6 +1637,358 @@ export class HrWorkforceDomainService {
         success:true,commandId,idempotencyKey,entityId:rosterId,
         eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:shiftEntry,
       };
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
+    }
+  }
+
+  public static async cancelShift(
+    context:CommandContext,
+    commandId:string,
+    idempotencyKey:string,
+    payload:{rosterId:string;reason:string}
+  ):Promise<CommandResult<RosterShiftEntry>>{
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['HR_ADMIN','NURSE_MANAGER','DEPARTMENT_HEAD','SYSTEM_ADMIN'],
+    });
+    if(!auth.authorized){
+      return workforceReject(commandId,idempotencyKey,auth.code||'UNAUTHORIZED',
+        auth.reason||'Roster cancellation authority required.');
+    }
+    const preflight=await this.loadShift(context.tenantId,payload.rosterId);
+    if(!preflight){
+      return workforceReject(commandId,idempotencyKey,'ROSTER_SHIFT_NOT_FOUND','Roster shift does not exist.');
+    }
+    try{
+      assertWorkforceFacilityScope(context,[preflight.facilityId]);
+      const monthKey=rosterMonthKey(Date.parse(preflight.startTime));
+      const timelineId=rosterTimelineId(preflight.employeeId,monthKey);
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'ROSTER_SHIFT',aggregateId:payload.rosterId,
+        eventType:'SHIFT_CANCELLED',auditAction:'SHIFT_CANCELLED',
+        auditResourceType:'ROSTER_SHIFT',auditResourceId:payload.rosterId,
+        outboxTopic:'g-hims-roster-events',idempotencyKey,commandId,
+        correlationId:context.correlationId,
+        readTargets:[
+          {key:'shift',entityType:'ROSTER_SHIFT',entityId:payload.rosterId,required:true},
+          {key:'timeline',entityType:'ROSTER_TIMELINE',entityId:timelineId,required:false},
+        ],
+        prepare:(current)=>{
+          const shift=current.shift as unknown as RosterShiftEntry;
+          if(shift.status==='CANCELLED'){
+            throw new AtomicMutationRejectedError('ROSTER_SHIFT_ALREADY_CANCELLED','Roster shift is already cancelled.');
+          }
+          const now=new Date().toISOString();
+          const next:RosterShiftEntry={
+            ...shift,status:'CANCELLED',
+            conflictFlags:[...(shift.conflictFlags||[]),`Cancelled: ${payload.reason}`],
+            updatedAt:now,
+          };
+          const bucket=current.timeline as unknown as RosterTimelineBucket|null;
+          const timeline:RosterTimelineBucket={
+            timelineId,
+            tenantId:context.tenantId,
+            employeeId:shift.employeeId,
+            monthKey,
+            shifts:(bucket?.shifts||[])
+              .map(item=>item.rosterId===shift.rosterId?{...item,status:'CANCELLED' as const}:item),
+            updatedAt:now,
+          };
+          return {
+            domainState:next,
+            additionalStateWrites:[{entityType:'ROSTER_TIMELINE',entityId:timelineId,domainState:timeline}],
+            eventPayload:{rosterId:shift.rosterId,employeeId:shift.employeeId,reason:payload.reason},
+            auditReason:`Cancelled roster shift ${shift.rosterId}: ${payload.reason}.`,
+            resultData:next,
+          };
+        },
+      });
+      const next=tx.resultData as RosterShiftEntry;
+      this.shifts.set(next.rosterId,next);
+      return {success:true,commandId,idempotencyKey,entityId:next.rosterId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:next};
+    }catch(error){
+      if(error instanceof AtomicMutationRejectedError){
+        return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);
+      }
+      throw error;
+    }
+  }
+
+  public static async executeRosterSwap(
+    context:CommandContext,
+    commandId:string,
+    idempotencyKey:string,
+    payload:{shiftAId:string;shiftBId:string;reason:string}
+  ):Promise<CommandResult<RosterSwapRecord>>{
+    const auth=AuthorizationPipeline.evaluate(context,{
+      requiredRoles:['HR_ADMIN','NURSE_MANAGER','DEPARTMENT_HEAD','SYSTEM_ADMIN'],
+    });
+    if(!auth.authorized){
+      return workforceReject(commandId,idempotencyKey,auth.code||'UNAUTHORIZED',
+        auth.reason||'Roster swap authority required.');
+    }
+    if(payload.shiftAId===payload.shiftBId){
+      return workforceReject(commandId,idempotencyKey,'INVALID_ROSTER_SWAP','Roster swap requires two distinct shifts.');
+    }
+
+    const [shiftA,shiftB]=await Promise.all([
+      this.loadShift(context.tenantId,payload.shiftAId),
+      this.loadShift(context.tenantId,payload.shiftBId),
+    ]);
+    if(!shiftA||!shiftB){
+      return workforceReject(commandId,idempotencyKey,'ROSTER_SHIFT_NOT_FOUND','One or both roster shifts do not exist.');
+    }
+    if(shiftA.employeeId===shiftB.employeeId){
+      return workforceReject(commandId,idempotencyKey,'INVALID_ROSTER_SWAP','Cannot swap two shifts assigned to the same employee.');
+    }
+
+    const [employeeA,employeeB]=await Promise.all([
+      this.loadEmployee(context.tenantId,shiftA.employeeId),
+      this.loadEmployee(context.tenantId,shiftB.employeeId),
+    ]);
+    if(!employeeA||!employeeB){
+      return workforceReject(commandId,idempotencyKey,'EMPLOYEE_NOT_FOUND','Roster swap employee no longer exists.');
+    }
+
+    try{
+      assertWorkforceFacilityScope(context,[shiftA.facilityId,shiftB.facilityId]);
+      const minRestMs=10*60*60*1000;
+      const [credentialsA,credentialsB,baselineA,baselineB]=await Promise.all([
+        DomainStateRepository.isAvailable()
+          ? DomainStateRepository.queryEqual<EmployeeCredential>(context.tenantId,'clinicalCredentials','employeeId',employeeA.employeeId)
+          : Promise.resolve(Array.from(this.credentials.values()).filter(c=>c.employeeId===employeeA.employeeId)),
+        DomainStateRepository.isAvailable()
+          ? DomainStateRepository.queryEqual<EmployeeCredential>(context.tenantId,'clinicalCredentials','employeeId',employeeB.employeeId)
+          : Promise.resolve(Array.from(this.credentials.values()).filter(c=>c.employeeId===employeeB.employeeId)),
+        this.loadShiftsForEmployee(context.tenantId,employeeA.employeeId),
+        this.loadShiftsForEmployee(context.tenantId,employeeB.employeeId),
+      ]);
+      const revisionA=Number(employeeA.credentialRevision||0);
+      const revisionB=Number(employeeB.credentialRevision||0);
+
+      const targetAStart=Date.parse(shiftB.startTime);
+      const targetAEnd=Date.parse(shiftB.endTime);
+      const targetBStart=Date.parse(shiftA.startTime);
+      const targetBEnd=Date.parse(shiftA.endTime);
+      const monthsA=[...new Set([
+        ...rosterRelevantMonthKeys(targetAStart,targetAEnd,minRestMs),
+        rosterMonthKey(Date.parse(shiftA.startTime)),
+      ])];
+      const monthsB=[...new Set([
+        ...rosterRelevantMonthKeys(targetBStart,targetBEnd,minRestMs),
+        rosterMonthKey(Date.parse(shiftB.startTime)),
+      ])];
+
+      const timelineTargetsA=monthsA.map((monthKey,index)=>({
+        key:`timelineA:${index}`,entityType:'ROSTER_TIMELINE',
+        entityId:rosterTimelineId(employeeA.employeeId,monthKey),required:false,
+      }));
+      const timelineTargetsB=monthsB.map((monthKey,index)=>({
+        key:`timelineB:${index}`,entityType:'ROSTER_TIMELINE',
+        entityId:rosterTimelineId(employeeB.employeeId,monthKey),required:false,
+      }));
+      const credentialTargetsA=credentialsA.map((credential,index)=>({
+        key:`credentialA:${index}`,entityType:'EMPLOYEE_CREDENTIAL',entityId:credential.credentialId,required:true,
+      }));
+      const credentialTargetsB=credentialsB.map((credential,index)=>({
+        key:`credentialB:${index}`,entityType:'EMPLOYEE_CREDENTIAL',entityId:credential.credentialId,required:true,
+      }));
+      const swapId=`rsw_${randomUUID()}`;
+
+      const tx=await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId:context.tenantId,actorId:context.actorId,
+        actorRole:context.roles[0]||'AUTHENTICATED_USER',
+        aggregateType:'ROSTER_SWAP',aggregateId:swapId,
+        eventType:'ROSTER_SWAP_COMPLETED',auditAction:'ROSTER_SWAP_COMPLETED',
+        auditResourceType:'ROSTER_SWAP',auditResourceId:swapId,
+        outboxTopic:'g-hims-roster-events',idempotencyKey,commandId,
+        correlationId:context.correlationId,
+        readTargets:[
+          {key:'shiftA',entityType:'ROSTER_SHIFT',entityId:shiftA.rosterId,required:true},
+          {key:'shiftB',entityType:'ROSTER_SHIFT',entityId:shiftB.rosterId,required:true},
+          {key:'employeeA',entityType:'EMPLOYEE_MASTER',entityId:employeeA.employeeId,required:true},
+          {key:'employeeB',entityType:'EMPLOYEE_MASTER',entityId:employeeB.employeeId,required:true},
+          ...credentialTargetsA,...credentialTargetsB,...timelineTargetsA,...timelineTargetsB,
+        ],
+        prepare:(current)=>{
+          const currentShiftA=current.shiftA as unknown as RosterShiftEntry;
+          const currentShiftB=current.shiftB as unknown as RosterShiftEntry;
+          const currentEmployeeA=current.employeeA as unknown as EmployeeMaster;
+          const currentEmployeeB=current.employeeB as unknown as EmployeeMaster;
+          if(currentShiftA.status==='CANCELLED'||currentShiftB.status==='CANCELLED'){
+            throw new AtomicMutationRejectedError('ROSTER_SWAP_SHIFT_NOT_ACTIVE','Cancelled shifts cannot be swapped.');
+          }
+          if(
+            currentShiftA.employeeId!==employeeA.employeeId ||
+            currentShiftB.employeeId!==employeeB.employeeId
+          ){
+            throw new AtomicMutationRejectedError('ROSTER_SWAP_STALE','Roster assignment changed before swap commit.');
+          }
+          if(
+            Number(currentEmployeeA.credentialRevision||0)!==revisionA ||
+            Number(currentEmployeeB.credentialRevision||0)!==revisionB
+          ){
+            throw new AtomicMutationRejectedError('CREDENTIAL_SET_CHANGED_RETRY','Credential set changed during roster swap evaluation.');
+          }
+          if(
+            !currentEmployeeA.facilityIds.includes(currentShiftB.facilityId) ||
+            !currentEmployeeA.departmentIds.includes(currentShiftB.departmentId) ||
+            !currentEmployeeB.facilityIds.includes(currentShiftA.facilityId) ||
+            !currentEmployeeB.departmentIds.includes(currentShiftA.departmentId)
+          ){
+            throw new AtomicMutationRejectedError(
+              'ROSTER_SWAP_SCOPE_MISMATCH',
+              'Each employee must be assigned to the facility/department of the shift they will receive.'
+            );
+          }
+
+          const today=new Date().toISOString().slice(0,10);
+          const assertCredentialSet=(employee:EmployeeMaster,targets:typeof credentialTargetsA)=>{
+            const rows=targets.map(target=>current[target.key] as unknown as EmployeeCredential);
+            const mandatory=rows.filter(row=>row.isMandatoryForPractice);
+            const clinicalRole=/doctor|physician|surgeon|nurse|pharmac|lab|technician/i.test(
+              `${employee.positionTitle} ${employee.specialty||''}`
+            );
+            if(
+              clinicalRole &&
+              (
+                mandatory.length===0 ||
+                mandatory.some(row=>
+                  row.verificationStatus!=='VERIFIED'||!row.expiryDate||row.expiryDate<today
+                )
+              )
+            ){
+              throw new AtomicMutationRejectedError(
+                'CLINICAL_CREDENTIAL_EXPIRED',
+                'Roster swap would assign a clinical shift to an employee without valid mandatory credentials.'
+              );
+            }
+          };
+          assertCredentialSet(currentEmployeeA,credentialTargetsA);
+          assertCredentialSet(currentEmployeeB,credentialTargetsB);
+
+          const timelineEntries=(targets:Array<{key:string}>)=>targets.flatMap(target=>{
+            const bucket=current[target.key] as unknown as RosterTimelineBucket|null;
+            return bucket?.shifts||[];
+          });
+          const assertTargetSafe=(
+            employee:EmployeeMaster,
+            baseline:RosterShiftEntry[],
+            timeline:Array<{rosterId:string;startTime:string;endTime:string;status:string}>,
+            excludeId:string,
+            targetStart:number,
+            targetEnd:number
+          )=>{
+            const all=new Map<string,{rosterId:string;startTime:string;endTime:string;status:string}>();
+            baseline.forEach(item=>all.set(item.rosterId,{
+              rosterId:item.rosterId,startTime:item.startTime,endTime:item.endTime,status:item.status,
+            }));
+            timeline.forEach(item=>all.set(item.rosterId,item));
+            for(const existing of all.values()){
+              if(existing.rosterId===excludeId||existing.status==='CANCELLED') continue;
+              const s=Date.parse(existing.startTime),e=Date.parse(existing.endTime);
+              if(targetStart<e&&targetEnd>s){
+                throw new AtomicMutationRejectedError('SHIFT_DOUBLE_BOOKING_CONFLICT',
+                  `Roster swap would double-book employee ${employee.employeeId}.`);
+              }
+              const before=targetStart-e,after=s-targetEnd;
+              if((before>0&&before<minRestMs)||(after>0&&after<minRestMs)){
+                throw new AtomicMutationRejectedError('FATIGUE_COMPLIANCE_VIOLATION',
+                  `Roster swap would violate mandatory rest for employee ${employee.employeeId}.`);
+              }
+            }
+          };
+          assertTargetSafe(currentEmployeeA,baselineA,timelineEntries(timelineTargetsA),currentShiftA.rosterId,targetAStart,targetAEnd);
+          assertTargetSafe(currentEmployeeB,baselineB,timelineEntries(timelineTargetsB),currentShiftB.rosterId,targetBStart,targetBEnd);
+
+          const now=new Date().toISOString();
+          const nextA:RosterShiftEntry={
+            ...currentShiftA,
+            employeeId:currentEmployeeB.employeeId,
+            employeeName:`${currentEmployeeB.personalInfo.legalFirstName} ${currentEmployeeB.personalInfo.legalLastName}`,
+            positionTitle:currentEmployeeB.positionTitle,
+            updatedAt:now,
+          };
+          const nextB:RosterShiftEntry={
+            ...currentShiftB,
+            employeeId:currentEmployeeA.employeeId,
+            employeeName:`${currentEmployeeA.personalInfo.legalFirstName} ${currentEmployeeA.personalInfo.legalLastName}`,
+            positionTitle:currentEmployeeA.positionTitle,
+            updatedAt:now,
+          };
+
+          const buildTimelineWrites=(
+            employee:EmployeeMaster,
+            months:string[],
+            targets:Array<{key:string;entityId:string}>,
+            removeId:string,
+            addShift:RosterShiftEntry
+          )=>{
+            const byMonth=new Map<string,RosterTimelineBucket>();
+            months.forEach((monthKey,index)=>{
+              const existing=current[targets[index].key] as unknown as RosterTimelineBucket|null;
+              const baseline=(employee.employeeId===employeeA.employeeId?baselineA:baselineB)
+                .filter(shift=>rosterMonthKey(Date.parse(shift.startTime))===monthKey)
+                .map(shift=>({
+                  rosterId:shift.rosterId,startTime:shift.startTime,endTime:shift.endTime,status:shift.status,
+                }));
+              const merged=new Map(
+                [...(existing?.shifts||[]),...baseline]
+                  .filter(item=>item.rosterId!==removeId)
+                  .map(item=>[item.rosterId,item] as const)
+              );
+              if(rosterMonthKey(Date.parse(addShift.startTime))===monthKey){
+                merged.set(addShift.rosterId,{
+                  rosterId:addShift.rosterId,startTime:addShift.startTime,endTime:addShift.endTime,status:addShift.status,
+                });
+              }
+              byMonth.set(monthKey,{
+                timelineId:targets[index].entityId,tenantId:context.tenantId,
+                employeeId:employee.employeeId,monthKey,
+                shifts:[...merged.values()].sort((a,b)=>a.startTime.localeCompare(b.startTime)),
+                updatedAt:now,
+              });
+            });
+            return [...byMonth.values()].map(bucket=>({
+              entityType:'ROSTER_TIMELINE',entityId:bucket.timelineId,domainState:bucket,
+            }));
+          };
+
+          const record:RosterSwapRecord={
+            swapId,tenantId:context.tenantId,
+            shiftAId:currentShiftA.rosterId,shiftBId:currentShiftB.rosterId,
+            employeeAId:currentEmployeeA.employeeId,employeeBId:currentEmployeeB.employeeId,
+            reason:payload.reason,executedBy:context.actorId,executedAt:now,status:'COMPLETED',
+          };
+          return {
+            domainState:record,
+            additionalStateWrites:[
+              {entityType:'ROSTER_SHIFT',entityId:nextA.rosterId,domainState:nextA},
+              {entityType:'ROSTER_SHIFT',entityId:nextB.rosterId,domainState:nextB},
+              ...buildTimelineWrites(currentEmployeeA,monthsA,timelineTargetsA,currentShiftA.rosterId,nextB),
+              ...buildTimelineWrites(currentEmployeeB,monthsB,timelineTargetsB,currentShiftB.rosterId,nextA),
+            ],
+            eventPayload:{swapId,shiftAId:nextA.rosterId,shiftBId:nextB.rosterId,
+              employeeAId:record.employeeAId,employeeBId:record.employeeBId},
+            auditReason:`Completed governed roster swap ${swapId}: ${payload.reason}.`,
+            resultData:record,
+          };
+        },
+      });
+
+      const record=tx.resultData as RosterSwapRecord;
+      const updatedA=await this.loadShift(context.tenantId,shiftA.rosterId);
+      const updatedB=await this.loadShift(context.tenantId,shiftB.rosterId);
+      if(updatedA) this.shifts.set(updatedA.rosterId,updatedA);
+      if(updatedB) this.shifts.set(updatedB.rosterId,updatedB);
+      return {success:true,commandId,idempotencyKey,entityId:swapId,
+        eventId:tx.eventId,auditId:tx.auditId,outboxId:tx.outboxId,data:record};
     }catch(error){
       if(error instanceof AtomicMutationRejectedError){
         return workforceReject(commandId,idempotencyKey,error.code,error.message,error.details);

@@ -66,10 +66,63 @@ export class FinancialLedgerDomainService {
       };
     }
 
-    const totalDebits = payload.lines.reduce((sum, line) => sum + (line.debitMinorUnits || 0), 0);
-    const totalCredits = payload.lines.reduce((sum, line) => sum + (line.creditMinorUnits || 0), 0);
+    const supportedCurrencies = new Set(['PKR', 'USD', 'AED', 'EUR', 'GBP']);
+    const currency = String(payload.currency || '').trim().toUpperCase();
+    if (!supportedCurrencies.has(currency)) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: 'UNSUPPORTED_JOURNAL_CURRENCY', message: 'Journal currency is not supported.' },
+      };
+    }
 
-    if (totalDebits !== totalCredits) {
+    if (
+      !Number.isInteger(payload.fiscalYear) ||
+      payload.fiscalYear < 2000 ||
+      !Number.isInteger(payload.postingPeriod) ||
+      payload.postingPeriod < 1 ||
+      payload.postingPeriod > 12 ||
+      !Number.isFinite(payload.documentDate) ||
+      !Number.isFinite(payload.postingDate)
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: 'INVALID_JOURNAL_PERIOD', message: 'Fiscal year, posting period and dates are invalid.' },
+      };
+    }
+
+    for (const line of payload.lines) {
+      const debit = line.debitMinorUnits;
+      const credit = line.creditMinorUnits;
+      if (
+        !String(line.glAccountId || '').trim() ||
+        !String(line.glAccountName || '').trim() ||
+        !Number.isSafeInteger(debit) ||
+        !Number.isSafeInteger(credit) ||
+        debit < 0 ||
+        credit < 0 ||
+        (debit === 0 && credit === 0) ||
+        (debit > 0 && credit > 0)
+      ) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'INVALID_JOURNAL_LINE',
+            message: 'Each journal line requires an account and exactly one positive debit or credit in integer minor units.',
+          },
+        };
+      }
+    }
+
+    const totalDebits = payload.lines.reduce((sum, line) => sum + line.debitMinorUnits, 0);
+    const totalCredits = payload.lines.reduce((sum, line) => sum + line.creditMinorUnits, 0);
+
+    if (!Number.isSafeInteger(totalDebits) || totalDebits <= 0 || totalDebits !== totalCredits) {
       return {
         success: false,
         commandId,
@@ -91,7 +144,7 @@ export class FinancialLedgerDomainService {
       postingDate: payload.postingDate,
       referenceDocumentId: payload.referenceDocumentId,
       documentHeader: payload.documentHeader,
-      currency: payload.currency || 'USD',
+      currency,
       totalAmountMinorUnits: totalDebits,
       lines: payload.lines,
       status: 'POSTED',
@@ -111,7 +164,7 @@ export class FinancialLedgerDomainService {
         totalAmountMinorUnits: totalDebits,
         lineCount: payload.lines.length,
       },
-      auditReason: `Posted journal voucher ${journalId} for amount ${totalDebits / 100} ${payload.currency}`,
+      auditReason: `Posted journal voucher ${journalId} for amount ${totalDebits / 100} ${currency}`,
       outboxTopic: 'g-hims-finance-events',
     });
 

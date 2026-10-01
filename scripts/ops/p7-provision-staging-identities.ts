@@ -218,14 +218,80 @@ for (const persona of personas) {
     {
       tenantName: 'G-HIMS P7 Hospital-0 Staging',
       facilityCode: 'P7H0',
-      credentialStatus:
-        persona.role === 'doctor' || persona.role === 'nurse' ? 'VERIFIED' : 'VERIFIED',
+      facilityIds: ['P7H0'],
+      departmentIds: [persona.department],
+      credentialStatus: 'VERIFIED',
       clinicalPrivileges: Array.from(privileges),
       syntheticQualificationAccount: true,
       updatedAt: new Date().toISOString(),
     },
     { merge: true }
   );
+
+  if (persona.role === 'doctor' || persona.role === 'nurse') {
+    const employeeId = `p7_emp_${persona.key}`;
+    const credentialId = `p7_cred_${persona.key}`;
+    await db.collection('tenants').doc(tenantId).collection('employees').doc(employeeId).set({
+      employeeId,
+      tenantId,
+      userId: uid,
+      personalInfo: {
+        legalFirstName: 'P7',
+        legalLastName: persona.role === 'doctor' ? 'Doctor' : 'Nurse',
+        contactEmail: email,
+      },
+      employmentStatus: 'ACTIVE',
+      facilityIds: ['P7H0'],
+      departmentIds: [persona.department],
+      primaryFacilityId: 'P7H0',
+      primaryDepartmentId: persona.department,
+      credentialRevision: 1,
+      syntheticQualificationRecord: true,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+
+    await db.collection('tenants').doc(tenantId)
+      .collection('clinicalCredentials').doc(credentialId).set({
+        credentialId,
+        tenantId,
+        employeeId,
+        credentialType:
+          persona.role === 'doctor' ? 'MEDICAL_LICENSE' : 'NURSING_BOARD',
+        credentialNumber: `P7-SYNTHETIC-${persona.key.toUpperCase()}`,
+        issueDate: '2026-01-01',
+        expiryDate: '2035-12-31',
+        isMandatoryForPractice: true,
+        verificationStatus: 'VERIFIED',
+        syntheticQualificationRecord: true,
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+
+    if (persona.role === 'doctor') {
+      const privilegeTypes = [
+        'PRESCRIBE_MEDICATION',
+        'ORDER_HIGH_COMPLEXITY_LAB',
+        'INTERPRET_RADIOLOGY_CT_MRI',
+        'SIGN_SOAP_CLINICAL_NOTE',
+      ];
+      for (const privilegeType of privilegeTypes) {
+        const privilegeId = `p7_prv_doctor_${privilegeType.toLowerCase()}`;
+        await db.collection('tenants').doc(tenantId)
+          .collection('clinicalPrivileges').doc(privilegeId).set({
+            privilegeId,
+            tenantId,
+            employeeId,
+            privilegeType,
+            facilityId: 'P7H0',
+            departmentId: persona.department,
+            status: 'GRANTED',
+            effectiveFrom: '2026-01-01',
+            effectiveUntil: '2035-12-31',
+            syntheticQualificationRecord: true,
+            updatedAt: new Date().toISOString(),
+          }, { merge: true });
+      }
+    }
+  }
 
   await auth.updateUser(uid, {
     password,

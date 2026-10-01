@@ -234,6 +234,8 @@ function collectionForEntityType(entityType: string): string {
     ROOM_IDENTITY: 'roomIdentities',
     HOSPITAL_BED: 'beds',
     BED_IDENTITY: 'bedIdentities',
+    SURGICAL_CASE: 'surgicalCases',
+    OR_ROOM_SCHEDULE: 'orRoomSchedules',
     TELEHEALTH_SESSION: 'telehealthSessions',
     RESOURCE_RESERVATION: 'resourceReservations',
     MAINTENANCE_WORK_ORDER: 'maintenanceWorkOrders',

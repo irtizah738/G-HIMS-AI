@@ -242,6 +242,7 @@ function collectionForEntityType(entityType: string): string {
     CALIBRATION_RECORD: 'calibrationRecords',
     PATIENT_MPI: 'patients',
     PATIENT_SAFETY: 'patients',
+    PATIENT_IDENTITY_CONFIRMATION: 'patientIdentityConfirmations',
     REVENUE_INTEGRITY_FINDING: 'billingMismatches',
     ENCOUNTER_CHARGE: 'encounterCharges',
     AI_DRAFT: 'aiDrafts',

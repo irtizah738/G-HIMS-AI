@@ -446,6 +446,21 @@ describe('FAC-2 authoritative bed & space capacity', () => {
     expect(statusBlock).toContain('optimisticCache: false');
     expect(statusBlock).toContain('result.queuedOffline');
     expect(statusBlock).not.toContain('const optimisticBed');
+
+    const admitStart = context.indexOf('const admitPatientToBed');
+    const admitEnd = context.indexOf('const dischargePatientFromBed', admitStart);
+    const admitBlock = context.slice(admitStart, admitEnd);
+    expect(admitBlock).toContain('if (!isDemoRuntime)');
+    expect(admitBlock).toContain('AdmitPatientToInpatientCareCommand');
+
+    const dischargeStart = context.indexOf('const dischargePatientFromBed');
+    const dischargeEnd = context.indexOf('const reconcileCensus', dischargeStart);
+    const dischargeBlock = context.slice(dischargeStart, dischargeEnd);
+    expect(dischargeBlock).toContain('if (!isDemoRuntime)');
+    expect(dischargeBlock).toContain('DischargeInpatientEncounterCommand');
+
+    expect(view).not.toContain('Avg Occupancy: 83.8%');
+    expect(view).not.toContain('Med Rec Signed: <strong>100%</strong>');
   });
 
   test('capacity allocation is transactionally coupled to room and bed identity', async () => {

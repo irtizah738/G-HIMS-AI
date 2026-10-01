@@ -835,7 +835,7 @@ export function BedOccupancyView() {
               key={bed.id}
               id={`bed-card-${bed.id}`}
               onClick={() => {
-                if (isOccupied) {
+                if (isOccupied && isDemoRuntime) {
                   handleOpenIpdPathway(bed);
                 } else {
                   setSelectedBed(bed);
@@ -929,6 +929,7 @@ export function BedOccupancyView() {
               {/* Quick Actions */}
               <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-1.5">
                 {isOccupied ? (
+                  isDemoRuntime ? (
                   <>
                     <button
                       id={`btn-ipd-pathway-${bed.id}`}
@@ -958,7 +959,13 @@ export function BedOccupancyView() {
                       <span>Discharge</span>
                     </button>
                   </>
+                  ) : (
+                    <div className="w-full py-1.5 px-2 text-xs text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 rounded-xl">
+                      Admission, transfer, and discharge are controlled by the governed Clinical Care workflow.
+                    </div>
+                  )
                 ) : bed.status === 'available' ? (
+                  isDemoRuntime ? (
                   <button
                     id={`btn-admit-${bed.id}`}
                     type="button"
@@ -971,6 +978,11 @@ export function BedOccupancyView() {
                   >
                     <UserPlus className="w-3.5 h-3.5" /> Admit Patient
                   </button>
+                  ) : (
+                    <div className="w-full py-1.5 px-2 text-xs text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 rounded-xl">
+                      Admission is initiated from the governed Clinical Care workflow.
+                    </div>
+                  )
                 ) : (
                   <button
                     id={`btn-ready-${bed.id}`}
@@ -1169,7 +1181,7 @@ export function BedOccupancyView() {
       )}
 
       {/* Admit Patient Modal */}
-      {showAdmitModal && selectedBed && (
+      {isDemoRuntime && showAdmitModal && selectedBed && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-200 dark:border-slate-800 space-y-4">
             <div className="flex items-start justify-between">
@@ -1264,7 +1276,7 @@ export function BedOccupancyView() {
         </div>
       )}
       {/* Inpatient Clinical Discharge & Med Reconciliation Modal */}
-      {showDischargeModal && dischargeBedTarget && (
+      {isDemoRuntime && showDischargeModal && dischargeBedTarget && (
         <InpatientDischargeModal
           isOpen={showDischargeModal}
           onClose={() => {
@@ -1290,7 +1302,7 @@ export function BedOccupancyView() {
       )}
 
       {/* 15-Stage IPD Clinical Care Pathway Modal */}
-      {ipdPathwayBed && (
+      {isDemoRuntime && ipdPathwayBed && (
         <IpdPathwayModal
           isOpen={!!ipdPathwayBed}
           onClose={() => setIpdPathwayBed(null)}

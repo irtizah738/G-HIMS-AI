@@ -206,7 +206,7 @@ export async function generateAuditPdfReport({
       7: { cellWidth: 22, halign: 'center' },
       8: { cellWidth: 60, font: 'courier' },
     },
-    didDrawPage: (data) => {
+    didDrawPage: (data: { pageNumber: number }) => {
       const pageCount = (doc as any).internal.getNumberOfPages();
       const pageCurrent = data.pageNumber;
 

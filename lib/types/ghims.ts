@@ -167,7 +167,7 @@ export interface Patient {
   dateOfBirth: string;
   age: number;
   gender: 'Male' | 'Female' | 'Other';
-  bloodGroup: 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-';
+  bloodGroup: 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-' | 'Unknown';
   contactNumber: string;
   email: string;
   address: string;

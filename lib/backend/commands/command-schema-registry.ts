@@ -1420,6 +1420,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       departmentName: nonEmpty.max(200),
       roomType: z.enum([
         'consultation','procedure','operating_room','isolation','icu',
+        'inpatient_room','emergency_bay','recovery','maternity','pediatric',
         'meeting','storage','laboratory','imaging'
       ]),
       capacity: z.number().int().positive().max(10000),

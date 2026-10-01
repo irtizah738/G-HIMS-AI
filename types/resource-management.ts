@@ -101,6 +101,8 @@ export interface ResourceMaster {
   operatingSpecifications?: Record<string, string | number>;
   acquisitionDate: string;
   lifecycleState: 'IN_SERVICE' | 'STORAGE' | 'UNDER_REPAIR' | 'DECOMMISSIONED' | 'DISPOSED';
+  /** Monotonic server-owned token used to serialize reservation decisions. */
+  reservationRevision?: number;
   createdAt: string;
   updatedAt: string;
 }

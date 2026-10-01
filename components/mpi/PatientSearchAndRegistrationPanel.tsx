@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { PatientMPI, PatientIdentifier, Gender } from '@/types/mpi';
-import { RegisterPatientEncounterParams } from '@/lib/runtime/registration-orchestrator';
+import type { RegistrationRequest } from '@/lib/api/command-client';
 import {
   Search,
   UserPlus,
@@ -25,7 +25,7 @@ import {
 interface PatientSearchAndRegistrationPanelProps {
   existingPatients: PatientMPI[];
   onSelectPatient: (patient: PatientMPI) => void;
-  onRegisterPatient: (params: RegisterPatientEncounterParams) => Promise<void>;
+  onRegisterPatient: (params: RegistrationRequest) => Promise<void>;
   isLoading?: boolean;
 }
 
@@ -41,20 +41,18 @@ export function PatientSearchAndRegistrationPanel({
   // Form State
   const [fullName, setFullName] = useState('');
   const [gender, setGender] = useState<Gender>('female');
-  const [dateOfBirth, setDateOfBirth] = useState('1994-05-18');
-  const [contactPhone, setContactPhone] = useState('+1 (555) 234-5678');
-  const [address, setAddress] = useState('452 Elm Street, Suite 4B');
+  const [dateOfBirth, setDateOfBirth] = useState('');
+  const [contactPhone, setContactPhone] = useState('');
+  const [address, setAddress] = useState('');
   const [bloodGroup, setBloodGroup] = useState('O+');
-  const [chiefComplaint, setChiefComplaint] = useState('Persistent seasonal cough and fever');
+  const [chiefComplaint, setChiefComplaint] = useState('');
   const [department, setDepartment] = useState('General Medicine');
   const [priority, setPriority] = useState<'ROUTINE' | 'URGENT' | 'EMERGENCY'>('ROUTINE');
   const [idType, setIdType] = useState<'CNIC' | 'MRN' | 'PASSPORT' | 'PHONE'>('CNIC');
-  const [idValue, setIdValue] = useState('42101-9876543-1');
-  const [identifiers, setIdentifiers] = useState<PatientIdentifier[]>([
-    { type: 'CNIC', value: '42101-9876543-1', issuer: 'National Registry' },
-  ]);
-  const [allergiesText, setAllergiesText] = useState('Penicillin');
-  const [chronicConditionsText, setChronicConditionsText] = useState('Mild Asthma');
+  const [idValue, setIdValue] = useState('');
+  const [identifiers, setIdentifiers] = useState<PatientIdentifier[]>([]);
+  const [allergiesText, setAllergiesText] = useState('');
+  const [chronicConditionsText, setChronicConditionsText] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
   // Filter existing patients
@@ -104,8 +102,7 @@ export function PatientSearchAndRegistrationPanel({
       return;
     }
 
-    const payload: RegisterPatientEncounterParams = {
-      tenantId: 'metro_general',
+    const payload: RegistrationRequest = {
       fullName: fullName.trim(),
       gender,
       dateOfBirth,
@@ -115,18 +112,15 @@ export function PatientSearchAndRegistrationPanel({
       identifiers,
       allergies: allergiesText
         .split(',')
-        .map((s) => s.trim())
+        .map((value) => value.trim())
         .filter(Boolean),
       chronicConditions: chronicConditionsText
         .split(',')
-        .map((s) => s.trim())
+        .map((value) => value.trim())
         .filter(Boolean),
       department,
       priority,
       chiefComplaint,
-      actorId: 'usr_frontdesk_1',
-      actorRole: 'receptionist',
-      actorName: 'Alice Green (Front Desk Intake)',
     };
 
     try {

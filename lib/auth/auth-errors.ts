@@ -10,6 +10,7 @@ export type AuthErrorCode =
   | 'ACCOUNT_PENDING'
   | 'TENANT_ACCESS_DENIED'
   | 'TENANT_NOT_FOUND'
+  | 'TENANT_SELECTION_REQUIRED'
   | 'SESSION_EXPIRED'
   | 'SESSION_REVOKED'
   | 'SESSION_NOT_FOUND'
@@ -65,6 +66,8 @@ export function getDefaultUserMessage(code: AuthErrorCode): string {
       return 'You do not have authorized privileges for this hospital facility.';
     case 'TENANT_NOT_FOUND':
       return 'The requested hospital facility was not recognized.';
+    case 'TENANT_SELECTION_REQUIRED':
+      return 'Select an authorized hospital facility before continuing.';
     case 'SESSION_EXPIRED':
       return 'Your clinical session has expired due to inactivity. Please sign in again.';
     case 'SESSION_REVOKED':

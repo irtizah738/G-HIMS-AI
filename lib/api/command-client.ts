@@ -259,7 +259,7 @@ async function queueOfflineRegistration<TData>(
     identifiers: request.identifiers || [],
     contactPhone: request.contactPhone,
     address: request.address,
-    bloodGroup: request.bloodGroup || 'O+',
+    bloodGroup: request.bloodGroup || 'Unknown',
     allergies: request.allergies || [],
     chronicConditions: request.chronicConditions || [],
     createdAt: now,

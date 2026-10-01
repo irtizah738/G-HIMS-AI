@@ -1179,7 +1179,12 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
 
   const updateBedStatus = async (bedId: string, status: BedStatus, _patientId?: string, notes?: string) => {
     if (status === 'occupied') {
-      throw new Error('BED_STATUS_REJECTED: use admitPatientToBed for occupied beds.');
+      throw new Error('BED_STATUS_REJECTED: use the governed care-transition workflow for occupied beds.');
+    }
+    if (status === 'reserved') {
+      throw new Error(
+        'BED_RESERVATION_WORKFLOW_REQUIRED: bed holds must be created by a governed admission/capacity reservation workflow.'
+      );
     }
 
     const existingBed = beds.find((bed) => bed.id === bedId);

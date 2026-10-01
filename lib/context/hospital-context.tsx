@@ -1234,6 +1234,12 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
   };
 
   const admitPatientToBed = async (patientId: string, bedId: string, doctor?: string, nurse?: string) => {
+    if (!isDemoRuntime) {
+      throw new Error(
+        'CARE_TRANSITION_COMMAND_REQUIRED: production inpatient admission must use AdmitPatientToInpatientCareCommand.'
+      );
+    }
+
     const existingBed = beds.find((bed) => bed.id === bedId);
     const existingPatient = patients.find((patient) => patient.id === patientId);
 
@@ -1300,6 +1306,12 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     disposition?: string,
     censusRecord?: DischargedCensusRecord
   ) => {
+    if (!isDemoRuntime) {
+      throw new Error(
+        'CARE_TRANSITION_COMMAND_REQUIRED: production inpatient discharge must use DischargeInpatientEncounterCommand.'
+      );
+    }
+
     const existingBed = beds.find((bed) => bed.id === bedId);
     if (!existingBed || existingBed.status !== 'occupied' || !existingBed.patientId) {
       throw new Error('BED_NOT_OCCUPIED: only an occupied bed can be discharged.');

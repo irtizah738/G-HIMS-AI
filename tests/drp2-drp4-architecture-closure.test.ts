@@ -122,6 +122,31 @@ describe('DRP-2/3/4 architecture and production-data closure', () => {
     expect(edge).toContain('optimisticCache: false');
   });
 
+  test('synthetic analytics and compliance-like export claims cannot leak into staging', async () => {
+    const analytics = await source('lib/analytics/hospital-kpi-data.ts');
+    expect(analytics).toContain('AUTHORITATIVE_ANALYTICS_PROJECTION_REQUIRED');
+    expect(analytics).toContain("runtime !== 'DEMO' && runtime !== 'TEST'");
+    expect(analytics).not.toContain(
+      'Certified Regulatory Compliance: Joint Commission & CMS'
+    );
+  });
+
+  test('audit exports never treat missing verification evidence as cryptographically verified', async () => {
+    const pdf = await source('lib/audit/generateAuditPdf.ts');
+    expect(pdf).toContain("'NOT_VERIFIED'");
+    expect(pdf).toContain('AUDIT CHAIN VERIFICATION: NOT PERFORMED');
+    expect(pdf).not.toContain('verificationResult?.isValid ?? true');
+    expect(pdf).not.toContain('SHA-256 FORWARD CHAIN INTEGRITY ATTESTATION');
+  });
+
+  test('medical director presentation does not normalize to cross-domain administrator', async () => {
+    const rbac = await source('lib/auth/rbac.ts');
+    expect(rbac).toContain("if (clean === 'medical_director') return 'doctor'");
+    expect(rbac).not.toContain(
+      "clean === 'system_admin' || clean === 'medical_director'"
+    );
+  });
+
   test('tenant dashboard branding is tenant-derived rather than a fixed hospital identity', async () => {
     const dashboard = await source('components/tenant-dashboard.tsx');
     expect(dashboard).not.toContain('Metropolitan Health');

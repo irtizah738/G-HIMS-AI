@@ -1,0 +1,85 @@
+name: DRP Security Qualification
+
+on:
+  push:
+    branches:
+      - drp/staging-readiness-program
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: drp-security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security:
+    name: DRP-11 security qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-drp-security-ci
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-drp-security-ci
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-drp-security-ci
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-drp-security-ci
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      GHIMS_INTEGRATION_HL7_STATE: DISABLED
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_INTEGRATION_DICOMWEB_STATE: DISABLED
+      GHIMS_INTEGRATION_DEVICE_TELEMETRY_STATE: DISABLED
+      GHIMS_INTEGRATION_EDI_X12_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - run: bun install --frozen-lockfile
+
+      - name: Dependency vulnerability audit
+        run: bun audit --audit-level high
+
+      - name: DRP security contracts
+        run: bun test tests/drp11-security-qualification.test.ts
+
+      - name: Existing penetration regressions
+        run: bun run test:security
+
+      - name: Setup Java for Firebase Emulator
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install Firebase emulator tooling
+        run: npm install --no-save --package-lock=false @firebase/rules-unit-testing@4.0.1 firebase-tools
+
+      - name: Firestore authorization penetration suite
+        run: bun run test:p0:rules
+
+      - name: Auth/IAM emulator suite
+        run: bun run test:p5a:emulator
+
+  secret-scan:
+    name: Repository secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

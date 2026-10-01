@@ -18,7 +18,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { ItemMaster, InventoryBalance, PurchaseRequisition, StandardUOM } from '@/types/scm-domain';
-import { createPurchaseRequisition } from '@/lib/firebase/services/scm-firestore-service';
+import { submitPurchaseRequisitionEdge } from '@/lib/supply-chain/scm-edge-adapter';
 
 export interface ParDeficitAlert {
   id: string;
@@ -219,7 +219,7 @@ export function ScmParNotificationSystem({
         updatedAt: nowIso,
       };
 
-      await createPurchaseRequisition(tenantId, newPR);
+      await submitPurchaseRequisitionEdge(newPR);
 
       // Mark as requisitioned
       setRequisitionedAlertIds((prev) => new Set([...prev, alert.id]));

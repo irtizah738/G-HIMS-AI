@@ -31,7 +31,7 @@ const ViewSkeleton = () => (
 // Dynamic module code-splitting to prevent massive initial bundle timeout
 const BillingErpView = dynamic(() => import('@/components/views/billing-erp-view').then(m => m.BillingErpView), { loading: ViewSkeleton, ssr: false });
 const OpdEncountersView = dynamic(() => import('@/components/views/opd-encounters-view').then(m => m.OpdEncountersView), { loading: ViewSkeleton, ssr: false });
-const BedOccupancyView = dynamic(() => import('@/components/views/bed-occupancy-view').then(m => m.BedOccupancyView), { loading: ViewSkeleton, ssr: false });
+const GovernedBedBoard = dynamic(() => import('@/components/inpatient/governed-bed-board').then(m => m.GovernedBedBoard), { loading: ViewSkeleton, ssr: false });
 const AncillaryServicesView = dynamic(() => import('@/components/views/ancillary-services-view').then(m => m.AncillaryServicesView), { loading: ViewSkeleton, ssr: false });
 const OrdersInteropView = dynamic(() => import('@/components/views/orders-interop-view').then(m => m.OrdersInteropView), { loading: ViewSkeleton, ssr: false });
 const AuditLedgerView = dynamic(() => import('@/components/views/audit-ledger-view').then(m => m.AuditLedgerView), { loading: ViewSkeleton, ssr: false });
@@ -273,7 +273,7 @@ export function TenantDashboard() {
             )}
             {activeTab === 'beds' && (
               <RbacModuleGate moduleId="beds" moduleName="Inpatient Bed Occupancy">
-                <BedOccupancyView />
+                <GovernedBedBoard />
               </RbacModuleGate>
             )}
             {activeTab === 'surgery' && (

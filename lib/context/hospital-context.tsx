@@ -1208,20 +1208,16 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
           collection: 'beds',
           resourceId: bedId,
           action: 'UPDATE',
-          optimisticCache: true,
+          // Bed availability is admission-safety state. Never make an offline
+          // intent look authoritative before server-side conflict checks pass.
+          optimisticCache: false,
         },
       }
     );
 
     if (result.queuedOffline) {
-      const optimisticBed: Bed = {
-        ...existingBed,
-        status,
-        patientId: undefined,
-        patientName: undefined,
-        ...(notes !== undefined ? { notes } : {}),
-      };
-      setBeds((previous) => previous.map((bed) => bed.id === bedId ? optimisticBed : bed));
+      // The command is durable in the offline outbox, but the local bed read
+      // model remains unchanged until authoritative replay succeeds.
       return;
     }
 

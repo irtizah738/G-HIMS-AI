@@ -57,7 +57,8 @@ describe('DRP-6 offline qualification contracts', () => {
     expect(secureStore).toContain('encryptEdgeJson');
     expect(secureStore).toContain('decryptEdgeJson');
     expect(crypto).toContain('AES-GCM');
-    expect(crypto).toContain('extractable: false');
+    expect(crypto).toContain("{ name: 'AES-GCM', length: 256 }");
+    expect(crypto).toMatch(/generateKey\([\s\S]*?false,[\s\S]*?\['encrypt', 'decrypt'\]/);
   });
 
   test('logout privacy cleanup removes session/membership state and tenant read models', async () => {
@@ -69,14 +70,16 @@ describe('DRP-6 offline qualification contracts', () => {
   });
 
   test('safety-critical bed and inventory availability are never optimistic offline truth', async () => {
-    const [context, scm] = await Promise.all([
-      source('lib/context/hospital-context.ts'),
+    const [facilities, scm] = await Promise.all([
+      source('lib/facilities/facilities-edge-adapter.ts'),
       source('lib/supply-chain/scm-edge-adapter.ts'),
     ]);
 
-    const bedStart = context.indexOf('const updateBedStatus');
-    const bedEnd = context.indexOf('const admitPatientToBed', bedStart);
-    expect(context.slice(bedStart, bedEnd)).toContain('optimisticCache: false');
+    const bedStart = facilities.indexOf('export const updateBedOperationalStatusEdge');
+    const bedEnd = facilities.indexOf('export const recordCalibrationEdge', bedStart);
+    const bedBlock = facilities.slice(bedStart, bedEnd);
+    expect(bedBlock).toContain("'UpdateBedStatusCommand'");
+    expect(facilities).not.toContain('offlineQueue');
 
     expect(scm).toContain("'RecordStockTransactionCommand'");
     expect(scm).toContain('optimisticCache: false');

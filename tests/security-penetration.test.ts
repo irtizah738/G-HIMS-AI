@@ -30,6 +30,38 @@ describe('G-HIMS Security Penetration & Zero-Trust Engine', () => {
     requestId: 'req_hacker',
   };
 
+  const facilitiesContext: CommandContext = {
+    actorId: 'fac_pen_101',
+    tenantId: legitTenant,
+    roles: ['FACILITIES_ADMIN'],
+    permissions: ['ALL_FACILITIES'],
+    facilityIds: ['fac-penetration'],
+    correlationId: 'corr_fac_pen',
+    requestId: 'req_fac_pen',
+  };
+
+  const resourceRegistrationPayload = (suffix: string) => ({
+    resourceNumber: `RES-PEN-${suffix}`,
+    resourceType: 'MEDICAL_DEVICE',
+    name: `Penetration Test Pump ${suffix}`,
+    facilityId: 'fac-penetration',
+    facilityName: 'Penetration Test Facility',
+    departmentId: 'icu',
+    departmentName: 'ICU',
+    ownerDepartmentId: 'icu',
+    ownerDepartmentName: 'ICU',
+    location: { building: 'Main', floor: '2', roomNumber: 'ICU-2' },
+    status: 'AVAILABLE',
+    manufacturer: 'Test',
+    model: 'Pump',
+    serialNumber: `SERIAL-PEN-${suffix}`,
+    assetTagNumber: `TAG-PEN-${suffix}`,
+    calibrationRequired: true,
+    calibrationStatus: 'VALID',
+    acquisitionDate: '2026-01-01',
+    lifecycleState: 'IN_SERVICE',
+  });
+
   describe('1. Tenant Attack Validation', () => {
     test('Rejects command with empty or missing tenant identifier', async () => {
       const forgedContext: CommandContext = {
@@ -233,22 +265,17 @@ describe('G-HIMS Security Penetration & Zero-Trust Engine', () => {
         commandId: 'cmd_pen_replay_01',
         idempotencyKey: 'idemp_pen_replay_unique_100',
         tenantId: legitTenant,
-        commandType: 'CreateEncounterCommand',
+        commandType: 'RegisterResourceCommand',
         schemaVersion: 1,
-        payload: {
-          patientId: 'pat_replay_test',
-          encounterType: 'OPD',
-          chiefComplaint: 'Original request',
-          departmentId: 'dept_general',
-        },
+        payload: resourceRegistrationPayload('REPLAY-ONE'),
       };
 
-      const firstRun = await CommandBus.dispatch(legitimateDoctorContext, cmd);
+      const firstRun = await CommandBus.dispatch(facilitiesContext, cmd);
       expect(firstRun.success).toBe(true);
       expect(firstRun.replayedFromCache).toBeFalsy();
 
       // Replay attempt
-      const replayRun = await CommandBus.dispatch(legitimateDoctorContext, cmd);
+      const replayRun = await CommandBus.dispatch(facilitiesContext, cmd);
       expect(replayRun.success).toBe(true);
       expect(replayRun.replayedFromCache).toBe(true);
       expect(replayRun.entityId).toBe(firstRun.entityId);
@@ -260,24 +287,24 @@ describe('G-HIMS Security Penetration & Zero-Trust Engine', () => {
         commandId: 'cmd_pen_rep_a',
         idempotencyKey: sharedKey,
         tenantId: legitTenant,
-        commandType: 'CreateEncounterCommand',
+        commandType: 'RegisterResourceCommand',
         schemaVersion: 1,
-        payload: { patientId: 'pat_A', encounterType: 'OPD', chiefComplaint: 'Earache', departmentId: 'dept_ent' },
+        payload: resourceRegistrationPayload('CONFLICT-A'),
       };
 
       const cmd2: BaseCommand = {
         commandId: 'cmd_pen_rep_b',
         idempotencyKey: sharedKey,
         tenantId: legitTenant,
-        commandType: 'CreateEncounterCommand',
+        commandType: 'RegisterResourceCommand',
         schemaVersion: 1,
-        payload: { patientId: 'pat_DIFFERENT_TARGET', encounterType: 'EMERGENCY', chiefComplaint: 'Poisoning', departmentId: 'dept_er' },
+        payload: resourceRegistrationPayload('CONFLICT-B'),
       };
 
-      const res1 = await CommandBus.dispatch(legitimateDoctorContext, cmd1);
+      const res1 = await CommandBus.dispatch(facilitiesContext, cmd1);
       expect(res1.success).toBe(true);
 
-      const res2 = await CommandBus.dispatch(legitimateDoctorContext, cmd2);
+      const res2 = await CommandBus.dispatch(facilitiesContext, cmd2);
       expect(res2.success).toBe(false);
       expect(['IDEMPOTENCY_CONFLICT', 'IDEMPOTENCY_KEY_CONFLICT']).toContain(res2.error?.code as string);
     });

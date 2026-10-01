@@ -1442,9 +1442,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
     1: z.object({
       bedNumber: nonEmpty.max(100),
       facilityId: nonEmpty.max(100),
-      facilityName: nonEmpty.max(200),
       departmentId: nonEmpty.max(100),
-      departmentName: nonEmpty.max(200),
       roomId: nonEmpty.max(150),
       ward: z.enum([
         'ICU','General','Emergency','Maternity','Pediatrics','Surgery','Cardiology','Oncology'

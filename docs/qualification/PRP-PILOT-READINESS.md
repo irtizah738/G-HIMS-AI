@@ -21,7 +21,7 @@ Every qualification defect must follow:
 ## PRP gates
 
 ### PRP-1 — Isolated STAGING Deployment
-Status: IN PROGRESS
+Status: BLOCKED — DEPLOYMENT CREDENTIALS
 
 Exit criteria:
 - Exact current `main` SHA is recorded before deployment.
@@ -37,7 +37,12 @@ Exit criteria:
 Kickoff finding:
 - Current Vercel project has no deployment corresponding to the frozen DRP-S/main candidate.
 - Recent Vercel deployment records predate the frozen candidate and are in ERROR state.
-- Therefore PRP-1 is not qualified until the guarded `STAGING Deployment` workflow successfully deploys and verifies the frozen main lineage.
+- Guarded STAGING workflow dispatch was successfully initiated for exact main SHA `a3f96e8b124b280a5ed53acbb833df09d9465766`.
+- Workflow runs `36829005293` and `36829172912` both failed closed at "Validate Vercel credentials".
+- Confirmed blocker: GitHub Actions secret `VERCEL_TOKEN` is unset.
+- The workflow log also shows `VERCEL_AUTOMATION_BYPASS_SECRET` is unset; it will be required by the protected STAGING smoke gate.
+- `GHIMS_P7_BOOTSTRAP_PASSWORD` is required by the later authenticated qualification steps and must be configured before retry.
+- No build or deployment occurred after the credential gate, so no unqualified artifact reached STAGING.
 
 ### PRP-2 — Physical-Device Offline Qualification
 Status: BLOCKED BY PRP-1
@@ -125,9 +130,16 @@ PRP reuses those assets as evidence-producing gates. It does not duplicate the D
 
 ## Current next action
 
-Execute the guarded `STAGING Deployment` workflow against current `main` and require the workflow to produce:
-- staging preflight PASS;
-- smoke PASS;
+Configure the required GitHub Actions secrets without exposing their values in source control:
+- `VERCEL_TOKEN`;
+- `VERCEL_AUTOMATION_BYPASS_SECRET`;
+- `GHIMS_P7_BOOTSTRAP_PASSWORD`.
+
+Then re-run the guarded `STAGING Deployment` workflow against current `main` and require the workflow to produce:
+- exact-main verification PASS;
+- STAGING environment preflight PASS;
+- build/deploy PASS;
+- protected smoke PASS;
 - authenticated P7 rehearsal PASS;
 - DRP-10 cross-domain rehearsal PASS;
 - deployment evidence artifact whose `main_sha` matches the frozen candidate lineage.

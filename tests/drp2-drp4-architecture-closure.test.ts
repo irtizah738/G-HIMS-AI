@@ -151,4 +151,79 @@ describe('DRP-2/3/4 architecture and production-data closure', () => {
     const dashboard = await source('components/tenant-dashboard.tsx');
     expect(dashboard).not.toContain('Metropolitan Health');
   });
+
+  test('pilot-facing Emergency is authoritative and the synthetic ED engine is retired', async () => {
+    const [dashboard, emergency, encounter] = await Promise.all([
+      source('components/tenant-dashboard.tsx'),
+      source('components/emergency/governed-emergency-console.tsx'),
+      source('lib/backend/services/encounter-domain-service.ts'),
+    ]);
+
+    expect(dashboard).toContain('GovernedEmergencyConsole');
+    expect(dashboard).not.toContain('EmergencyTriageView');
+    expect(emergency).toContain('hydrateEdgeSnapshot');
+    expect(emergency).toContain("'CreateEncounterCommand'");
+    expect(emergency).toContain("'RecordVitalsCommand'");
+    expect(emergency).toContain('Open');
+    expect(emergency).not.toContain('INITIAL_ED_OPTIMIZED_CASES');
+    expect(emergency).not.toContain('Math.random');
+    expect(emergency).not.toContain('STEMI');
+    expect(encounter).toContain('crypto.randomUUID()');
+    expect(encounter).toContain("'PATIENT_NOT_FOUND'");
+    expect(encounter).toContain("'PATIENT_NOT_ACTIVE'");
+    await expect(
+      source('components/views/emergency-triage-view.tsx')
+    ).rejects.toThrow();
+    await expect(source('lib/clinical/emergency-service.ts')).rejects.toThrow();
+  });
+
+  test('OPD staging surface never auto-accepts synthetic diagnoses medications procedures or charges', async () => {
+    const [view, context] = await Promise.all([
+      source('components/views/opd-encounters-view.tsx'),
+      source('lib/context/hospital-context.tsx'),
+    ]);
+
+    expect(view).toContain('diagnoses: []');
+    expect(view).toContain('medicationsPrescribed: []');
+    expect(view).toContain('recommendedProcedures: []');
+    expect(view).toContain('billingCodes: []');
+    expect(view).toContain('Save');
+    expect(view).toContain('Open Diagnostic Orders');
+    expect(view).not.toContain('Ticagrelor 90mg BID');
+    expect(view).not.toContain('CPT 99214');
+    expect(view).not.toContain('sampleId: Math.random');
+    expect(context).toContain('Promise<void>');
+    expect(context).toContain("'SignClinicalNoteCommand'");
+    expect(context).toContain("'RecordVitalsCommand'");
+    expect(context).toContain("'UpdateOpdQueueStatusCommand'");
+  });
+
+  test('MPI fails closed on patient scope and missing demographics instead of inventing patient facts', async () => {
+    const [view, registration, commandClient] = await Promise.all([
+      source('components/views/patient-mpi-view.tsx'),
+      source('server/runtime/registration-orchestrator.ts'),
+      source('lib/api/command-client.ts'),
+    ]);
+
+    expect(view).toContain("setNewBlood('Unknown')");
+    expect(view).toContain('G-HIMS will not invent missing demographics');
+    expect(view).not.toContain("activePatientId || 'p-1001'");
+    expect(view).not.toContain("patients[0]");
+    expect(view).not.toContain("'123 Main St, Metro City'");
+    expect(view).not.toContain('@example.com');
+    expect(view).not.toContain("useState('+1 (555) 000-0000')");
+    expect(registration).toContain("bloodGroup: params.bloodGroup || 'Unknown'");
+    expect(commandClient).toContain("bloodGroup: request.bloodGroup || 'Unknown'");
+  });
+
+  test('MPI AI extraction is draft-only and cannot directly become accepted clinical structure', async () => {
+    const view = await source('components/views/patient-mpi-view.tsx');
+
+    expect(view).toContain('AI draft — not accepted into the clinical record');
+    expect(view).toContain('Generate AI Draft');
+    expect(view).toContain('Save Clinician Narrative');
+    expect(view).toContain('setAiDraft(data.structured');
+    expect(view).not.toContain('aiStructuredData: data.structured');
+  });
+
 });

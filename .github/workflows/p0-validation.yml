@@ -54,7 +54,7 @@ jobs:
           java-version: "21"
 
       - name: Install Firestore rules test tooling
-        run: npm install --no-save --package-lock=false @firebase/rules-unit-testing@4.0.1 firebase-tools
+        run: npm install --no-save --package-lock=false @firebase/rules-unit-testing@5.0.2 firebase-tools@15.30.2
 
       - name: Run Firestore Emulator penetration suite
         run: npx firebase emulators:exec --project ghims-p0-ci --only firestore "bun test emulator-security/firestore-rules.test.ts"

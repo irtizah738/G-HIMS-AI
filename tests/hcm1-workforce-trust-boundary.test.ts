@@ -118,8 +118,11 @@ describe('HCM-1 workforce master and trust boundary',()=>{
     expect(ui).toContain('useState<EmployeeMaster[]>([])');
     expect(ui).toContain('loadLocalWorkforceMaster');
     expect(ui).toContain('hydrateWorkforceMaster');
-    expect(ui).toContain('createEmployeeEdge');
     expect(ui).not.toContain("from '@/lib/firebase/services/hcm'");
+    expect(ui).not.toContain('setDoc(');
+    expect(ui).not.toContain('updateDoc(');
+    expect(adapter).toContain('createEmployeeEdge');
+    expect(adapter).toContain("'CreateEmployeeCommand'");
     expect(adapter).toContain('executeActiveTenantCommand');
     expect(adapter).toContain('loadLocalEdgeSnapshot');
     expect(adapter).toContain('hydrateEdgeSnapshot');

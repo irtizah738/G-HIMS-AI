@@ -3,7 +3,7 @@
  * Validates clinical stage workflows, financial double-entry invariance, and standards adapters.
  */
 
-import { describe, test, expect } from 'bun:test';
+import { beforeEach, describe, test, expect } from 'bun:test';
 import { CommandBus } from '../lib/backend/commands/command-bus';
 import { CommandContext, BaseCommand } from '../lib/backend/types';
 import { parseHL7, extractORU_R01, generateACK } from '../lib/interop/hl7-parser';
@@ -11,6 +11,7 @@ import { DeviceTelemetryAdapter, RawTelemetryPacket } from '../lib/interop/devic
 import { RadioIntercomAdapter } from '../lib/interop/radio-intercom-adapter';
 import { ReconciliationDomainService } from '../lib/backend/services/reconciliation-domain-service';
 import { validateGovernedJournal } from '../lib/finance/finance-engine';
+import { TransactionManager } from '../lib/backend/transactions/transaction-manager';
 
 describe('G-HIMS Clinical Safety, Financial & Interoperability Engine', () => {
   const tenantId = `tenant_${crypto.randomUUID().slice(0, 8)}`;
@@ -33,6 +34,25 @@ describe('G-HIMS Clinical Safety, Financial & Interoperability Engine', () => {
     correlationId: 'corr_act_john',
     requestId: 'req_act_john',
   };
+
+  beforeEach(() => {
+    for (const patientId of ['pat_cardiac_arrest_99', 'pat_trauma_victim']) {
+      TransactionManager.seedEphemeralStateForTesting(
+        tenantId,
+        'PATIENT_MPI',
+        patientId,
+        {
+          id: patientId,
+          tenantId,
+          mrn: `MRN-${patientId}`,
+          fullName: 'Synthetic Security Qualification Patient',
+          status: 'ACTIVE',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        }
+      );
+    }
+  });
 
   describe('1. Clinical Safety & Governed Stage Workflow', () => {
     test('Creates emergency triage encounter and advances through governed clinical stage', async () => {

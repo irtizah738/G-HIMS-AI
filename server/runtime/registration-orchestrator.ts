@@ -146,7 +146,7 @@ export async function registerPatientAndEncounter(
     identifiers: params.identifiers || [],
     contactPhone: params.contactPhone,
     address: params.address,
-    bloodGroup: params.bloodGroup || 'O+',
+    bloodGroup: params.bloodGroup || 'Unknown',
     allergies: params.allergies || [],
     chronicConditions: params.chronicConditions || [],
     createdAt: now,

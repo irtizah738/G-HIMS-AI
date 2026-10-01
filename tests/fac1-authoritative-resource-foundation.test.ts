@@ -62,6 +62,7 @@ function registerCommand(params:{
 describe('FAC-1 authoritative facility & biomedical resource foundation',()=>{
   beforeEach(()=>{
     ResourceCapacityDomainService.resetForTesting();
+    ResourceCapacityDomainService.seedTestFixtures(adminContext.tenantId);
   });
 
   test('resource commands have strict server-side schemas',()=>{
@@ -139,8 +140,6 @@ describe('FAC-1 authoritative facility & biomedical resource foundation',()=>{
   });
 
   test('maintenance completion cannot bypass calibration lockout',async()=>{
-    ResourceCapacityDomainService.seedTestFixtures();
-
     const create:BaseCommand={
       commandId:'fac1-wo-create',
       idempotencyKey:'fac1-wo-create-idem',
@@ -187,6 +186,52 @@ describe('FAC-1 authoritative facility & biomedical resource foundation',()=>{
       .find(row=>row.resourceId==='res_003');
     expect(resource?.calibrationStatus).toBe('CALIBRATION_REQUIRED');
     expect(resource?.status).toBe('OUT_OF_SERVICE');
+  });
+
+  test('concurrent reservations cannot both commit for the same resource window',async()=>{
+    const today=new Date().toISOString().split('T')[0];
+    const make=(suffix:string):BaseCommand=>({
+      commandId:`fac1-concurrent-${suffix}`,
+      idempotencyKey:`fac1-concurrent-idem-${suffix}`,
+      commandType:'ReserveResourceCommand',
+      schemaVersion:1,
+      tenantId:adminContext.tenantId,
+      actorId:adminContext.actorId,
+      timestamp:new Date().toISOString(),
+      payload:{
+        resourceId:'res_002',
+        resourceName:'client supplied name is not authoritative',
+        resourceType:'SURGICAL_EQUIPMENT',
+        facilityId:'fac_central',
+        departmentId:'dept_surgery',
+        startTime:`${today}T09:00:00Z`,
+        endTime:`${today}T10:00:00Z`,
+        purpose:'SURGICAL_PROCEDURE',
+        requesterName:'Facilities Admin',
+        priority:'ROUTINE',
+      },
+    });
+
+    const scoped={...adminContext,facilityIds:['fac_central']};
+    const [a,b]=await Promise.all([
+      CommandBus.dispatch(scoped,make('a')),
+      CommandBus.dispatch(scoped,make('b')),
+    ]);
+
+    expect([a.success,b.success].filter(Boolean)).toHaveLength(1);
+    const loser=a.success?b:a;
+    expect([
+      'DOUBLE_BOOKING_CONFLICT',
+      'RESERVATION_CONCURRENCY_RETRY_REQUIRED',
+    ]).toContain(loser.error?.code);
+
+    const committed=ResourceCapacityDomainService.getReservations()
+      .filter((row)=>row.resourceId==='res_002'&&row.startTime===`${today}T09:00:00Z`);
+    expect(committed).toHaveLength(1);
+    expect(committed[0]?.resourceName).toBe(
+      'Stryker 1688 AIM 4K Endoscopy Tower System'
+    );
+    expect(committed[0]?.requesterActorId).toBe(adminContext.actorId);
   });
 
   test('production initialization cannot inject demo facility state',async()=>{

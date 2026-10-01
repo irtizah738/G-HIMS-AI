@@ -214,6 +214,9 @@ for (const persona of personas) {
       'MEDICAL_DIRECTOR',
       'SCM_MANAGER',
       'PROCUREMENT_MANAGER',
+      'FINANCE_MANAGER',
+      'ACCOUNTANT',
+      'PAYROLL_MANAGER',
     ].forEach((role) => qualificationRoles.add(role));
     qualificationPermissions.add('SCM_PURCHASE_ORDER:APPROVE');
   }

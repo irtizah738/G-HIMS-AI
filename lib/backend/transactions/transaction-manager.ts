@@ -354,6 +354,17 @@ export class TransactionManager {
     this.setEphemeralState(tenantId,entityType,entityId,value);
   }
 
+  public static getEphemeralStateForTesting(
+    tenantId:string,
+    entityType:string,
+    entityId:string
+  ):Record<string,unknown>|null{
+    if(!canUseEphemeralPersistence()){
+      throw new Error('EPHEMERAL_STATE_READ_FORBIDDEN_OUTSIDE_TEST_OR_DEMO');
+    }
+    return this.getEphemeralState(tenantId,entityType,entityId);
+  }
+
   private static buildRecords(params: {
     tenantId: string;
     actorId: string;

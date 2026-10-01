@@ -1,0 +1,23 @@
+name: One-time DRP-S merged branch cleanup
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/cleanup-drp-staging-readiness.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    name: Remove merged DRP-S branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete redundant merged branch ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/drp%2Fstaging-readiness-program" || true

@@ -460,7 +460,7 @@ export class CommandBus {
           break;
 
         case 'UpdateBedStatusCommand':
-          result = await InpatientBedDomainService.updateStatus(
+          result = await ResourceCapacityDomainService.updateBedOperationalStatus(
             context,
             command.commandId,
             command.idempotencyKey,
@@ -1266,6 +1266,15 @@ export class CommandBus {
 
         case 'RegisterRoomCommand':
           result = await ResourceCapacityDomainService.registerRoom(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RegisterBedCommand':
+          result = await ResourceCapacityDomainService.registerBed(
             context,
             command.commandId,
             command.idempotencyKey,

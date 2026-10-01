@@ -563,7 +563,7 @@ export class ResourceCapacityDomainService {
           idempotencyKey,
           error: {
             code: 'DOUBLE_BOOKING_CONFLICT',
-            message: `Conflict detected: ${payload.resourceName} is already reserved for ${ex.purpose} (${ex.startTime} to ${ex.endTime}) by ${ex.requesterName}.`,
+            message: `Conflict detected: ${resource.name} is already reserved for ${ex.purpose} (${ex.startTime} to ${ex.endTime}) by ${ex.requesterName}.`,
           },
         };
       }
@@ -589,6 +589,10 @@ export class ResourceCapacityDomainService {
 
     const reservation: ResourceReservation = {
       ...payload,
+      resourceName: resource.name,
+      resourceType: resource.resourceType,
+      facilityId: resource.facilityId,
+      requesterActorId: context.actorId,
       reservationId,
       status: 'APPROVED',
       createdAt: now,
@@ -605,13 +609,13 @@ export class ResourceCapacityDomainService {
       eventPayload: {
         reservationId,
         resourceId: payload.resourceId,
-        resourceName: payload.resourceName,
+        resourceName: resource.name,
         startTime: payload.startTime,
         endTime: payload.endTime,
         purpose: payload.purpose,
         requester: payload.requesterName,
       },
-      auditReason: `Reserved ${payload.resourceName} for ${payload.purpose} (${payload.startTime} - ${payload.endTime})`,
+      auditReason: `Reserved ${resource.name} for ${payload.purpose} (${payload.startTime} - ${payload.endTime})`,
       outboxTopic: 'g-hims-reservation-events',
     });
 
@@ -1277,7 +1281,7 @@ export class ResourceCapacityDomainService {
       reservationId: 'resv_sample_01',
       resourceId: 'res_001',
       resourceName: 'GE Healthcare Aisys CS2 Anesthesia Delivery Workstation',
-      resourceType: 'SURGICAL_EQUIPMENT',
+      resourceType: 'MEDICAL_DEVICE',
       facilityId: 'fac_central',
       departmentId: 'dept_surgery',
       startTime: `${today}T14:00:00Z`,

@@ -487,7 +487,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       source: z.enum(['ONLINE', 'OFFLINE_SYNC', 'SYSTEM']).optional(),
       performedBy: z.record(z.string(), z.unknown()).optional(),
       metadata: z.record(z.string(), z.unknown()).optional(),
-    }).passthrough().superRefine((value, ctx) => {
+    }).strict().superRefine((value, ctx) => {
       if (
         (value.transactionType === 'TRANSFER_OUT' ||
           value.transactionType === 'TRANSFER_IN') &&
@@ -537,7 +537,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       grnId: z.string().optional(),
       isImplant: z.boolean(),
       implantDetails: z.record(z.string(), z.unknown()).optional(),
-    }).passthrough(),
+    }).strict(),
   },
   SubmitPurchaseRequisitionCommand: {
     1: z.object({
@@ -560,7 +560,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
         estimatedTotal: z.number().finite().nonnegative(),
         approvedQuantity: z.number().finite().nonnegative().optional(),
         justification: z.string().optional(),
-      }).passthrough()).min(1).max(500),
+      }).strict()).min(1).max(500),
       justification: nonEmpty,
       requiredByDate: nonEmpty,
       estimatedTotalCost: z.number().finite().nonnegative(),
@@ -571,7 +571,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       approvalHistory: z.array(z.unknown()).optional(),
       createdAt: z.string().optional(),
       updatedAt: z.string().optional(),
-    }).passthrough(),
+    }).strict(),
   },
   ApprovePurchaseRequisitionCommand: {
     1: z.object({

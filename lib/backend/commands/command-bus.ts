@@ -23,7 +23,6 @@ import { HcmIntelligenceDomainService } from '../services/hcm-intelligence-domai
 import { ResourceCapacityDomainService } from '../services/resource-capacity-domain-service';
 import { PatientIdentityDomainService } from '../services/patient-identity-domain-service';
 import { PatientMergeDomainService } from '../services/patient-merge-domain-service';
-import { InpatientBedDomainService } from '../services/inpatient-bed-domain-service';
 import { InpatientClinicalDomainService } from '../services/inpatient-clinical-domain-service';
 import { CareTransitionDomainService } from '../services/care-transition-domain-service';
 import { TelehealthDomainService } from '../services/telehealth-domain-service';
@@ -460,7 +459,7 @@ export class CommandBus {
           break;
 
         case 'UpdateBedStatusCommand':
-          result = await InpatientBedDomainService.updateStatus(
+          result = await ResourceCapacityDomainService.updateBedOperationalStatus(
             context,
             command.commandId,
             command.idempotencyKey,
@@ -1266,6 +1265,15 @@ export class CommandBus {
 
         case 'RegisterRoomCommand':
           result = await ResourceCapacityDomainService.registerRoom(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RegisterBedCommand':
+          result = await ResourceCapacityDomainService.registerBed(
             context,
             command.commandId,
             command.idempotencyKey,

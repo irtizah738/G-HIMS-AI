@@ -112,9 +112,11 @@ service cloud.firestore {
         'facilities_admin',
         'biomedical_engineer',
         'hospital_executive',
+        'housekeeping',
         'FACILITIES_ADMIN',
         'BIOMEDICAL_ENGINEER',
         'HOSPITAL_EXECUTIVE',
+        'HOUSEKEEPING',
         'SYSTEM_ADMIN',
         'ADMINISTRATOR'
       ]);
@@ -201,7 +203,7 @@ service cloud.firestore {
       }
 
       match /beds/{bedId} {
-        allow read: if canReadClinical(tenantId);
+        allow read: if canReadClinical(tenantId) || canReadFacilities(tenantId) || canReadAudit(tenantId);
         allow write: if false;
       }
 
@@ -599,6 +601,9 @@ service cloud.firestore {
         allow read, write: if false;
       }
       match /roomIdentities/{id} {
+        allow read, write: if false;
+      }
+      match /bedIdentities/{id} {
         allow read, write: if false;
       }
 

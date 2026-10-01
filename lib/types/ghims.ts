@@ -2,12 +2,39 @@ export type WardType = 'ICU' | 'General' | 'Emergency' | 'Maternity' | 'Pediatri
 
 export type BedStatus = 'available' | 'occupied' | 'maintenance' | 'reserved' | 'cleaning';
 
+export type BedType =
+  | 'STANDARD'
+  | 'ICU'
+  | 'HDU'
+  | 'ISOLATION'
+  | 'PEDIATRIC'
+  | 'MATERNITY'
+  | 'EMERGENCY'
+  | 'RECOVERY';
+
+export type BedLifecycleState =
+  | 'IN_SERVICE'
+  | 'MAINTENANCE'
+  | 'OUT_OF_SERVICE'
+  | 'DECOMMISSIONED';
+
 export interface Bed {
   id: string;
   bedNumber: string;
   ward: WardType;
   room: string;
   status: BedStatus;
+  /** FAC-2 physical topology. Optional only for legacy/demo compatibility. */
+  facilityId?: string;
+  facilityName?: string;
+  departmentId?: string;
+  departmentName?: string;
+  roomId?: string;
+  bedType?: BedType;
+  lifecycleState?: BedLifecycleState;
+  capabilities?: string[];
+  createdAt?: string;
+  updatedAt?: string;
   patientId?: string;
   currentPatientId?: string;
   patientName?: string;

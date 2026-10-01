@@ -58,6 +58,11 @@ interface ActivityLogItem {
 }
 
 export function BedOccupancyView() {
+  const isDemoRuntime =
+    String(process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE || '')
+      .trim()
+      .toUpperCase() === 'DEMO';
+
   const {
     beds,
     patients,
@@ -76,8 +81,12 @@ export function BedOccupancyView() {
   const [selectedBed, setSelectedBed] = useState<Bed | null>(null);
   const [showAdmitModal, setShowAdmitModal] = useState(false);
   const [admitPatientId, setAdmitPatientId] = useState('');
-  const [admitDoctor, setAdmitDoctor] = useState('Dr. Fatima Zahra');
-  const [admitNurse, setAdmitNurse] = useState('Nurse Clara Oswald');
+  const [admitDoctor, setAdmitDoctor] = useState(
+    isDemoRuntime ? 'Dr. Fatima Zahra' : ''
+  );
+  const [admitNurse, setAdmitNurse] = useState(
+    isDemoRuntime ? 'Nurse Clara Oswald' : ''
+  );
   const [showActivityDrawer, setShowActivityDrawer] = useState(false);
   const [soundMuted, setSoundMuted] = useState(false);
   const [showDischargeModal, setShowDischargeModal] = useState(false);
@@ -92,7 +101,8 @@ export function BedOccupancyView() {
   const doctorsList = useMemo(() => staff.filter((s) => s.role === 'Physician' || s.role === 'Surgeon'), [staff]);
   const nursesList = useMemo(() => staff.filter((s) => s.role === 'Nurse'), [staff]);
 
-  const [activityLogs, setActivityLogs] = useState<ActivityLogItem[]>([
+  const [activityLogs, setActivityLogs] = useState<ActivityLogItem[]>(() =>
+    isDemoRuntime ? [
     {
       id: 'log-1',
       time: '10:42 AM',
@@ -125,7 +135,8 @@ export function BedOccupancyView() {
       description: 'Bed G-204 terminal disinfection completed by housekeeping.',
       severity: 'NORMAL',
     },
-  ]);
+    ] : []
+  );
 
   const d3SvgRef = useRef<SVGSVGElement | null>(null);
 
@@ -140,17 +151,42 @@ export function BedOccupancyView() {
   ];
 
   // Daily census 7-day trend data for Recharts
-  const censusTrendData = useMemo(() => {
-    return [
-      { day: 'Mon', admissions: 12, discharges: 10, occupancyRate: 78 },
-      { day: 'Tue', admissions: 15, discharges: 11, occupancyRate: 82 },
-      { day: 'Wed', admissions: 18, discharges: 14, occupancyRate: 85 },
-      { day: 'Thu', admissions: 14, discharges: 16, occupancyRate: 81 },
-      { day: 'Fri', admissions: 22, discharges: 15, occupancyRate: 89 },
-      { day: 'Sat', admissions: 19, discharges: 18, occupancyRate: 87 },
-      { day: 'Today', admissions: 16, discharges: 12, occupancyRate: 86 },
-    ];
-  }, []);
+  const censusTrendData = useMemo(
+    () =>
+      isDemoRuntime
+        ? [
+            { day: 'Mon', admissions: 12, discharges: 10, occupancyRate: 78 },
+            { day: 'Tue', admissions: 15, discharges: 11, occupancyRate: 82 },
+            { day: 'Wed', admissions: 18, discharges: 14, occupancyRate: 85 },
+            { day: 'Thu', admissions: 14, discharges: 16, occupancyRate: 81 },
+            { day: 'Fri', admissions: 22, discharges: 15, occupancyRate: 89 },
+            { day: 'Sat', admissions: 19, discharges: 18, occupancyRate: 87 },
+            { day: 'Today', admissions: 16, discharges: 12, occupancyRate: 86 },
+          ]
+        : [],
+    [isDemoRuntime]
+  );
+
+  const averageOccupancyRate = useMemo(() => {
+    if (censusTrendData.length === 0) return null;
+    return Math.round(
+      (censusTrendData.reduce((sum, row) => sum + row.occupancyRate, 0) /
+        censusTrendData.length) *
+        10
+    ) / 10;
+  }, [censusTrendData]);
+
+  const medicationReconciliationSummary = useMemo(() => {
+    const total = dischargedCensus?.length || 0;
+    const signed = (dischargedCensus || []).filter(
+      (record) => record.medicationReconciliationCompleted
+    ).length;
+    return {
+      total,
+      signed,
+      rate: total > 0 ? Math.round((signed / total) * 100) : null,
+    };
+  }, [dischargedCensus]);
 
   const filteredBeds = useMemo(() => {
     return beds.filter((b) => {
@@ -584,54 +620,62 @@ export function BedOccupancyView() {
               </p>
             </div>
             <span className="text-[11px] font-bold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 px-2 py-0.5 rounded-md border border-blue-200 dark:border-blue-800">
-              Avg Occupancy: 83.8%
+              {averageOccupancyRate === null
+                ? 'No 7-day census series'
+                : `Avg Occupancy: ${averageOccupancyRate}%`}
             </span>
           </div>
 
           <div className="w-full h-48 mt-2">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={censusTrendData} margin={{ top: 10, right: 15, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" strokeOpacity={0.5} />
-                <XAxis dataKey="day" stroke="#94a3b8" fontSize={11} />
-                <YAxis stroke="#94a3b8" fontSize={11} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#0f172a',
-                    borderColor: '#334155',
-                    borderRadius: '0.75rem',
-                    color: '#f8fafc',
-                    fontSize: '11px',
-                  }}
-                />
-                <Legend iconType="circle" wrapperStyle={{ fontSize: '11px', paddingTop: '4px' }} />
-                <Line
-                  type="monotone"
-                  dataKey="admissions"
-                  name="Admissions"
-                  stroke="#3b82f6"
-                  strokeWidth={2.5}
-                  dot={{ r: 3 }}
-                  activeDot={{ r: 5 }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="discharges"
-                  name="Discharges"
-                  stroke="#10b981"
-                  strokeWidth={2}
-                  strokeDasharray="4 4"
-                  dot={{ r: 3 }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="occupancyRate"
-                  name="Occupancy %"
-                  stroke="#8b5cf6"
-                  strokeWidth={2}
-                  dot={{ r: 2 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            {censusTrendData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={censusTrendData} margin={{ top: 10, right: 15, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" strokeOpacity={0.5} />
+                  <XAxis dataKey="day" stroke="#94a3b8" fontSize={11} />
+                  <YAxis stroke="#94a3b8" fontSize={11} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#0f172a',
+                      borderColor: '#334155',
+                      borderRadius: '0.75rem',
+                      color: '#f8fafc',
+                      fontSize: '11px',
+                    }}
+                  />
+                  <Legend iconType="circle" wrapperStyle={{ fontSize: '11px', paddingTop: '4px' }} />
+                  <Line
+                    type="monotone"
+                    dataKey="admissions"
+                    name="Admissions"
+                    stroke="#3b82f6"
+                    strokeWidth={2.5}
+                    dot={{ r: 3 }}
+                    activeDot={{ r: 5 }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="discharges"
+                    name="Discharges"
+                    stroke="#10b981"
+                    strokeWidth={2}
+                    strokeDasharray="4 4"
+                    dot={{ r: 3 }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="occupancyRate"
+                    name="Occupancy %"
+                    stroke="#8b5cf6"
+                    strokeWidth={2}
+                    dot={{ r: 2 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-center text-xs text-slate-500 dark:text-slate-400 px-6">
+                Historical census trend data is not available in the authoritative projection yet.
+              </div>
+            )}
           </div>
         </div>
 
@@ -670,13 +714,25 @@ export function BedOccupancyView() {
                 <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100">
                   IPD 15-Stage Care Lifecycle & Inpatient Census Integrity
                 </h3>
-                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300 flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                  Census Invariant Reconciled
+                <span
+                  className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border flex items-center gap-1 ${
+                    censusAudit.isReconciled
+                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border-emerald-300'
+                      : 'bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300 border-rose-300'
+                  }`}
+                >
+                  {censusAudit.isReconciled ? (
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                  ) : (
+                    <AlertCircle className="w-3 h-3 text-rose-600" />
+                  )}
+                  {censusAudit.isReconciled
+                    ? 'Census Reconciled'
+                    : 'Census Drift Detected'}
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Bed allocation reconciles with patient census, admission state, discharge state, reservation & resource availability. Zero silent patient loss.
+                Live reconciliation compares bed occupancy with the active inpatient census and flags any divergence for review.
               </p>
             </div>
           </div>
@@ -717,8 +773,18 @@ export function BedOccupancyView() {
                 / {censusAudit.activePatientCensusCount} Admitted
               </span>
             </div>
-            <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold block mt-0.5">
-              &Delta; 0 Patients (100% Invariant)
+            <span
+              className={`text-[10px] font-semibold block mt-0.5 ${
+                censusAudit.isReconciled
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : 'text-rose-600 dark:text-rose-400'
+              }`}
+            >
+              {censusAudit.isReconciled
+                ? 'Δ 0 Patients (Reconciled)'
+                : `Δ ${Math.abs(
+                    censusAudit.occupiedCount - censusAudit.activePatientCensusCount
+                  )} Patients (Requires reconciliation)`}
             </span>
           </div>
 
@@ -757,13 +823,30 @@ export function BedOccupancyView() {
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
               15-Stage IPD Protocol
             </span>
-            <div className="flex items-baseline gap-1 mt-0.5">
-              <span className="text-xs font-bold text-blue-600 dark:text-blue-400">15 / 15 Stages</span>
-              <span className="text-[10px] text-slate-400">Verified</span>
-            </div>
-            <span className="text-[10px] text-slate-500 font-medium block truncate mt-0.5" title="Admission → Bed Alloc → Nursing → Orders → Meds → Labs → Imaging → Progress → Procedures → Consults → Discharge Plan → Med Rec → Finance → Discharge → Follow-up">
-              Admission &rarr; Follow-up
-            </span>
+            {isDemoRuntime ? (
+              <>
+                <div className="flex items-baseline gap-1 mt-0.5">
+                  <span className="text-xs font-bold text-blue-600 dark:text-blue-400">
+                    15 / 15 Stages
+                  </span>
+                  <span className="text-[10px] text-slate-400">Demo pathway</span>
+                </div>
+                <span className="text-[10px] text-slate-500 font-medium block truncate mt-0.5">
+                  Admission &rarr; Follow-up simulation
+                </span>
+              </>
+            ) : (
+              <>
+                <div className="flex items-baseline gap-1 mt-0.5">
+                  <span className="text-xs font-bold text-blue-600 dark:text-blue-400">
+                    Clinical Care authority
+                  </span>
+                </div>
+                <span className="text-[10px] text-slate-500 font-medium block truncate mt-0.5">
+                  Admission, transfer &amp; discharge are governed separately
+                </span>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -820,7 +903,7 @@ export function BedOccupancyView() {
               key={bed.id}
               id={`bed-card-${bed.id}`}
               onClick={() => {
-                if (isOccupied) {
+                if (isOccupied && isDemoRuntime) {
                   handleOpenIpdPathway(bed);
                 } else {
                   setSelectedBed(bed);
@@ -914,6 +997,7 @@ export function BedOccupancyView() {
               {/* Quick Actions */}
               <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-1.5">
                 {isOccupied ? (
+                  isDemoRuntime ? (
                   <>
                     <button
                       id={`btn-ipd-pathway-${bed.id}`}
@@ -943,7 +1027,13 @@ export function BedOccupancyView() {
                       <span>Discharge</span>
                     </button>
                   </>
+                  ) : (
+                    <div className="w-full py-1.5 px-2 text-xs text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 rounded-xl">
+                      Admission, transfer, and discharge are controlled by the governed Clinical Care workflow.
+                    </div>
+                  )
                 ) : bed.status === 'available' ? (
+                  isDemoRuntime ? (
                   <button
                     id={`btn-admit-${bed.id}`}
                     type="button"
@@ -956,13 +1046,27 @@ export function BedOccupancyView() {
                   >
                     <UserPlus className="w-3.5 h-3.5" /> Admit Patient
                   </button>
+                  ) : (
+                    <div className="w-full py-1.5 px-2 text-xs text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 rounded-xl">
+                      Admission is initiated from the governed Clinical Care workflow.
+                    </div>
+                  )
+                ) : bed.status === 'reserved' ? (
+                  <div className="w-full py-1.5 px-2 text-xs text-indigo-600 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-xl">
+                    Governed clinical hold — release through Clinical Care.
+                  </div>
                 ) : (
                   <button
                     id={`btn-ready-${bed.id}`}
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      updateBedStatus(bed.id, 'available', 'Cleared and ready');
+                      void updateBedStatus(
+                        bed.id,
+                        'available',
+                        undefined,
+                        'Cleared and ready'
+                      );
                     }}
                     className="w-full py-1.5 px-2 text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 rounded-xl flex items-center justify-center gap-1.5 transition-colors"
                   >
@@ -1137,24 +1241,16 @@ export function BedOccupancyView() {
                   id="btn-status-maintenance"
                   type="button"
                   onClick={() => {
-                    updateBedStatus(selectedBed.id, 'maintenance', 'Routine calibration');
+                    updateBedStatus(selectedBed.id, 'maintenance', undefined, 'Routine maintenance');
                     setSelectedBed(null);
                   }}
                   className="p-2 rounded-xl text-xs font-semibold border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200"
                 >
                   Maintenance
                 </button>
-                <button
-                  id="btn-status-reserved"
-                  type="button"
-                  onClick={() => {
-                    updateBedStatus(selectedBed.id, 'reserved');
-                    setSelectedBed(null);
-                  }}
-                  className="p-2 rounded-xl text-xs font-semibold border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100"
-                >
-                  Reserve Bed
-                </button>
+                <div className="p-2 rounded-xl text-xs border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400">
+                  Bed holds are created through the governed admission workflow.
+                </div>
               </div>
             </div>
           </div>
@@ -1162,7 +1258,7 @@ export function BedOccupancyView() {
       )}
 
       {/* Admit Patient Modal */}
-      {showAdmitModal && selectedBed && (
+      {isDemoRuntime && showAdmitModal && selectedBed && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-200 dark:border-slate-800 space-y-4">
             <div className="flex items-start justify-between">
@@ -1257,7 +1353,7 @@ export function BedOccupancyView() {
         </div>
       )}
       {/* Inpatient Clinical Discharge & Med Reconciliation Modal */}
-      {showDischargeModal && dischargeBedTarget && (
+      {isDemoRuntime && showDischargeModal && dischargeBedTarget && (
         <InpatientDischargeModal
           isOpen={showDischargeModal}
           onClose={() => {
@@ -1283,7 +1379,7 @@ export function BedOccupancyView() {
       )}
 
       {/* 15-Stage IPD Clinical Care Pathway Modal */}
-      {ipdPathwayBed && (
+      {isDemoRuntime && ipdPathwayBed && (
         <IpdPathwayModal
           isOpen={!!ipdPathwayBed}
           onClose={() => setIpdPathwayBed(null)}
@@ -1326,14 +1422,14 @@ export function BedOccupancyView() {
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
-                      Permanent Inpatient Discharged Census Registry
+                      Inpatient Discharged Census View
                     </h3>
                     <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300">
-                      Zero Patient Loss Guarantee
+                      Census Reconciliation
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    Immutable historical archive of completed inpatient stays, medication reconciliations & discharge clearances.
+                    Derived view of completed inpatient stays, medication reconciliations & discharge clearances.
                   </p>
                 </div>
               </div>
@@ -1364,7 +1460,12 @@ export function BedOccupancyView() {
                   Total Discharged: <strong className="text-indigo-600">{dischargedCensus?.length || 0}</strong>
                 </span>
                 <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 rounded-lg">
-                  Med Rec Signed: <strong>100%</strong>
+                  Med Rec Signed:{' '}
+                  <strong>
+                    {medicationReconciliationSummary.total === 0
+                      ? 'No records'
+                      : `${medicationReconciliationSummary.signed}/${medicationReconciliationSummary.total} (${medicationReconciliationSummary.rate}%)`}
+                  </strong>
                 </span>
               </div>
             </div>
@@ -1380,7 +1481,7 @@ export function BedOccupancyView() {
                     No Discharged Inpatients Yet in This Session
                   </h4>
                   <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                    When an inpatient completes the 15-stage care pathway and is discharged, their complete clinical dossier, gate pass, and med rec are permanently logged here.
+                    Completed inpatient discharge records appear here when they are available in the current census projection.
                   </p>
                 </div>
               ) : (
@@ -1511,8 +1612,16 @@ export function BedOccupancyView() {
                     <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
                       IPD Clinical Census & Invariant Audit
                     </h3>
-                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300">
-                      100% Invariant Verified
+                    <span
+                      className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border ${
+                        censusAudit.isReconciled
+                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border-emerald-300'
+                          : 'bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300 border-rose-300'
+                      }`}
+                    >
+                      {censusAudit.isReconciled
+                        ? 'Invariant Reconciled'
+                        : 'Invariant Violation Detected'}
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
@@ -1537,8 +1646,25 @@ export function BedOccupancyView() {
                   <span className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
                     Core Operational Invariant Equation
                   </span>
-                  <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                    <CheckCircle2 className="w-4 h-4" /> &Delta; = 0 (No Census Drift)
+                  <span
+                    className={`text-xs font-bold flex items-center gap-1 ${
+                      censusAudit.isReconciled
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-rose-600 dark:text-rose-400'
+                    }`}
+                  >
+                    {censusAudit.isReconciled ? (
+                      <CheckCircle2 className="w-4 h-4" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4" />
+                    )}
+                    &Delta; = {Math.abs(
+                      censusAudit.occupiedCount -
+                        censusAudit.activePatientCensusCount
+                    )}{' '}
+                    ({censusAudit.isReconciled
+                      ? 'No census drift'
+                      : 'Reconciliation required'})
                   </span>
                 </div>
                 <div className="grid grid-cols-3 gap-3 text-center py-2 bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800">

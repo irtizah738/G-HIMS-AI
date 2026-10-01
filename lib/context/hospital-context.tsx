@@ -1179,7 +1179,12 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
 
   const updateBedStatus = async (bedId: string, status: BedStatus, _patientId?: string, notes?: string) => {
     if (status === 'occupied') {
-      throw new Error('BED_STATUS_REJECTED: use admitPatientToBed for occupied beds.');
+      throw new Error('BED_STATUS_REJECTED: use the governed care-transition workflow for occupied beds.');
+    }
+    if (status === 'reserved') {
+      throw new Error(
+        'BED_RESERVATION_WORKFLOW_REQUIRED: bed holds must be created by a governed admission/capacity reservation workflow.'
+      );
     }
 
     const existingBed = beds.find((bed) => bed.id === bedId);
@@ -1203,20 +1208,16 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
           collection: 'beds',
           resourceId: bedId,
           action: 'UPDATE',
-          optimisticCache: true,
+          // Bed availability is admission-safety state. Never make an offline
+          // intent look authoritative before server-side conflict checks pass.
+          optimisticCache: false,
         },
       }
     );
 
     if (result.queuedOffline) {
-      const optimisticBed: Bed = {
-        ...existingBed,
-        status,
-        patientId: undefined,
-        patientName: undefined,
-        ...(notes !== undefined ? { notes } : {}),
-      };
-      setBeds((previous) => previous.map((bed) => bed.id === bedId ? optimisticBed : bed));
+      // The command is durable in the offline outbox, but the local bed read
+      // model remains unchanged until authoritative replay succeeds.
       return;
     }
 
@@ -1233,6 +1234,12 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
   };
 
   const admitPatientToBed = async (patientId: string, bedId: string, doctor?: string, nurse?: string) => {
+    if (!isDemoRuntime) {
+      throw new Error(
+        'CARE_TRANSITION_COMMAND_REQUIRED: production inpatient admission must use AdmitPatientToInpatientCareCommand.'
+      );
+    }
+
     const existingBed = beds.find((bed) => bed.id === bedId);
     const existingPatient = patients.find((patient) => patient.id === patientId);
 
@@ -1299,6 +1306,12 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     disposition?: string,
     censusRecord?: DischargedCensusRecord
   ) => {
+    if (!isDemoRuntime) {
+      throw new Error(
+        'CARE_TRANSITION_COMMAND_REQUIRED: production inpatient discharge must use DischargeInpatientEncounterCommand.'
+      );
+    }
+
     const existingBed = beds.find((bed) => bed.id === bedId);
     if (!existingBed || existingBed.status !== 'occupied' || !existingBed.patientId) {
       throw new Error('BED_NOT_OCCUPIED: only an occupied bed can be discharged.');

@@ -1,9 +1,9 @@
 name: PRP-1 one-time STAGING launcher
 
 on:
-  push:
+  pull_request:
     branches:
-      - prp/pilot-readiness-program
+      - main
     paths:
       - .github/workflows/prp1-dispatch-staging.yml
 

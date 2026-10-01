@@ -17,6 +17,7 @@ export interface AuthoritativeUserDirectoryRecord {
   tenantId: string;
   roles: string[];
   permissions: string[];
+  financialAuthorityMinorUnits?: number;
   departmentIds: string[];
   facilityIds: string[];
   clinicalPrivileges: string[];
@@ -93,6 +94,7 @@ export async function deriveAuthoritativeContext(
     tenantId: authContext.tenantId,
     roles: authContext.roles.map((role) => role.toUpperCase()),
     permissions: authContext.permissions.map((permission) => permission.toUpperCase()),
+    financialAuthorityMinorUnits: authContext.financialAuthorityMinorUnits,
     departmentId: authContext.departmentIds[0],
     departmentIds: [...authContext.departmentIds],
     facilityIds: [...authContext.facilityIds],
@@ -110,6 +112,7 @@ export async function deriveAuthoritativeContext(
     tenantId: authContext.tenantId,
     roles: authContext.roles.map((role) => role.toUpperCase()),
     permissions: authContext.permissions.map((permission) => permission.toUpperCase()),
+    financialAuthorityMinorUnits: authContext.financialAuthorityMinorUnits,
     departmentIds: [...authContext.departmentIds],
     facilityIds: [...authContext.facilityIds],
     clinicalPrivileges: authContext.clinicalPrivileges.map((privilege) => privilege.toUpperCase()),

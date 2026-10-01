@@ -50,7 +50,8 @@ function financeContext(tenantId: string): CommandContext {
     actorId: 'p4-accountant',
     tenantId,
     roles: ['ACCOUNTANT', 'FINANCE_MANAGER'],
-    permissions: ['FINANCE_WRITE'],
+    permissions: ['FINANCE_WRITE', 'ERP_GL:CREATE'],
+    financialAuthorityMinorUnits: 1_000_000,
     correlationId: unique('corr'),
     requestId: unique('req'),
   };

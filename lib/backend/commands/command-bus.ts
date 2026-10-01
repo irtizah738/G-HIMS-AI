@@ -25,6 +25,7 @@ import { PatientIdentityDomainService } from '../services/patient-identity-domai
 import { PatientMergeDomainService } from '../services/patient-merge-domain-service';
 import { InpatientClinicalDomainService } from '../services/inpatient-clinical-domain-service';
 import { CareTransitionDomainService } from '../services/care-transition-domain-service';
+import { SurgicalCaseDomainService } from '../services/surgical-case-domain-service';
 import { TelehealthDomainService } from '../services/telehealth-domain-service';
 import { RevenueIntegrityDomainService } from '../services/revenue-integrity-domain-service';
 import { ScmOfflineDomainService } from '../services/scm-offline-domain-service';
@@ -496,6 +497,42 @@ export class CommandBus {
                 'Inpatient discharge must use DischargeInpatientEncounterCommand so clinical safety gates, encounter closure, patient census, and bed release are atomic.',
             },
           };
+          break;
+
+        case 'ScheduleSurgicalCaseCommand':
+          result = await SurgicalCaseDomainService.scheduleCase(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecordSurgicalSafetyChecklistCommand':
+          result = await SurgicalCaseDomainService.recordSafetyChecklist(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'AdvanceSurgicalCaseCommand':
+          result = await SurgicalCaseDomainService.advanceCase(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'CancelSurgicalCaseCommand':
+          result = await SurgicalCaseDomainService.cancelCase(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
           break;
 
         case 'CreateTelehealthSessionCommand':

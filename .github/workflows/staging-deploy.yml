@@ -85,6 +85,22 @@ jobs:
           set -euo pipefail
           vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
 
+      - name: Pull STAGING environment for fail-closed preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          vercel env pull .env.staging --yes --environment=preview --token="$VERCEL_TOKEN"
+
+      - name: Validate isolated STAGING runtime contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -a
+          source .env.staging
+          set +a
+          bun run ops:staging-preflight | tee staging-preflight.json
+          rm -f .env.staging
+
       - name: Build exact main with pulled STAGING configuration
         shell: bash
         run: |
@@ -132,6 +148,7 @@ jobs:
           name: ghims-staging-verification-${{ env.MAIN_SHA }}
           path: |
             staging-smoke.json
+            staging-preflight.json
             staging-deployment-evidence.txt
           if-no-files-found: error
           retention-days: 30

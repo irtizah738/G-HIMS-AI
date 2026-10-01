@@ -37,7 +37,7 @@ const OrdersInteropView = dynamic(() => import('@/components/views/orders-intero
 const AuditLedgerView = dynamic(() => import('@/components/views/audit-ledger-view').then(m => m.AuditLedgerView), { loading: ViewSkeleton, ssr: false });
 const PatientMpiView = dynamic(() => import('@/components/views/patient-mpi-view').then(m => m.PatientMpiView), { loading: ViewSkeleton, ssr: false });
 const StaffView = dynamic(() => import('@/components/views/staff-view').then(m => m.StaffView), { loading: ViewSkeleton, ssr: false });
-const EmergencyTriageView = dynamic(() => import('@/components/views/emergency-triage-view').then(m => m.EmergencyTriageView), { loading: ViewSkeleton, ssr: false });
+const GovernedEmergencyConsole = dynamic(() => import('@/components/emergency/governed-emergency-console').then(m => m.GovernedEmergencyConsole), { loading: ViewSkeleton, ssr: false });
 const SurgeryTheaterView = dynamic(() => import('@/components/views/surgery-theater-view').then(m => m.SurgeryTheaterView), { loading: ViewSkeleton, ssr: false });
 const BloodBankView = dynamic(() => import('@/components/views/blood-bank-view').then(m => m.BloodBankView), { loading: ViewSkeleton, ssr: false });
 const TelehealthView = dynamic(() => import('@/components/views/telehealth-view').then(m => m.TelehealthView), { loading: ViewSkeleton, ssr: false });
@@ -268,7 +268,7 @@ export function TenantDashboard() {
             )}
             {activeTab === 'emergency' && (
               <RbacModuleGate moduleId="emergency" moduleName="Emergency & Trauma (ER)">
-                <EmergencyTriageView />
+                <GovernedEmergencyConsole />
               </RbacModuleGate>
             )}
             {activeTab === 'beds' && (

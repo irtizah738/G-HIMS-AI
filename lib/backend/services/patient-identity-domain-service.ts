@@ -148,7 +148,7 @@ export class PatientIdentityDomainService {
       tenantId: context.tenantId,
       actorId: context.actorId,
       actorRole: context.roles[0] || 'CLINICIAN',
-      aggregateType: 'PATIENT_SAFETY',
+      aggregateType: 'PATIENT_IDENTITY_CONFIRMATION',
       aggregateId: confirmationId,
       eventType: 'PATIENT_IDENTITY_EXPLICITLY_CONFIRMED',
       eventPayload: {

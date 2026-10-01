@@ -267,11 +267,11 @@ describe('G-HIMS P0 Core Trust Boundary regression guards', () => {
     const fs = await import('node:fs/promises');
 
     await expect(
-      fs.access(path.join(process.cwd(), 'functions/src/index.ts'))
+      fs.access(join(process.cwd(), 'functions/src/index.ts'))
     ).rejects.toThrow();
     await expect(
       fs.access(
-        path.join(process.cwd(), 'functions/src/registerPatientAndEncounter.ts')
+        join(process.cwd(), 'functions/src/registerPatientAndEncounter.ts')
       )
     ).rejects.toThrow();
   });

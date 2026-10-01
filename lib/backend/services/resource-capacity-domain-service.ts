@@ -761,124 +761,101 @@ export class ResourceCapacityDomainService {
     }
 
     repositoryRequiredOutsideTests();
-
-    const bed = await this.loadBed(context.tenantId, payload.bedId);
-    if (!bed) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: { code: 'BED_NOT_FOUND', message: 'Target bed does not exist.' },
-      };
-    }
-
-    try {
-      if (bed.facilityId) assertFacilityScope(context, bed.facilityId);
-    } catch {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: {
-          code: 'FACILITY_SCOPE_MISMATCH',
-          message: 'Bed status update is outside the actor facility scope.',
-        },
-      };
-    }
-
-    if (
-      bed.status === 'occupied' ||
-      bed.patientId ||
-      bed.currentPatientId ||
-      bed.currentEncounterId
-    ) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: {
-          code: 'BED_OCCUPIED',
-          message:
-            'Physical bed readiness cannot change while clinical occupancy is active.',
-        },
-      };
-    }
-
-    if (bed.status === 'reserved') {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: {
-          code: 'BED_CLINICAL_HOLD_ACTIVE',
-          message:
-            'A clinically reserved bed must be released through the care-transition allocation workflow.',
-        },
-      };
-    }
-
-    if (
-      bed.lifecycleState === 'DECOMMISSIONED' ||
-      bed.lifecycleState === 'OUT_OF_SERVICE'
-    ) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: {
-          code: 'BED_LIFECYCLE_LOCKOUT',
-          message:
-            'A decommissioned/out-of-service bed cannot be returned to operational readiness.',
-        },
-      };
-    }
-
-    const nextLifecycle =
-      payload.status === 'maintenance' ? 'MAINTENANCE' : 'IN_SERVICE';
     const now = new Date().toISOString();
-    const bedState: Bed = {
-      ...bed,
-      status: payload.status,
-      lifecycleState: nextLifecycle,
-      patientId: undefined,
-      currentPatientId: undefined,
-      patientName: undefined,
-      currentEncounterId: undefined,
-      ...(payload.notes !== undefined ? { notes: payload.notes } : {}),
-      updatedAt: now,
-    };
 
     try {
-      const tx = await TransactionManager.executeAtomicMutation({
+      const tx = await TransactionManager.executeAtomicReadModifyMutation({
         tenantId: context.tenantId,
         actorId: context.actorId,
         actorRole: context.roles[0] || 'FACILITIES_ADMIN',
         aggregateType: 'HOSPITAL_BED',
         aggregateId: payload.bedId,
         eventType: 'BED_OPERATIONAL_STATUS_CHANGED',
-        eventPayload: {
-          bedId: payload.bedId,
-          facilityId: bed.facilityId,
-          roomId: bed.roomId,
-          previousStatus: bed.status,
-          status: payload.status,
-          lifecycleState: nextLifecycle,
-        },
         auditAction: 'UPDATE_BED_OPERATIONAL_STATUS',
         auditResourceType: 'HOSPITAL_BED',
         auditResourceId: payload.bedId,
-        auditReason:
-          `Bed ${bed.bedNumber || bed.id} operational status changed from ${bed.status} to ${payload.status}.`,
         outboxTopic: 'g-hims-facility-events',
         idempotencyKey,
         commandId,
         correlationId: context.correlationId,
-        domainState: bedState,
-        expectedPrimaryServerVersion: Number(
-          (bed as Bed & { _serverVersion?: number })._serverVersion || 0
-        ),
+        readTargets: [{
+          key: 'bed',
+          entityType: 'HOSPITAL_BED',
+          entityId: payload.bedId,
+          required: true,
+        }],
+        prepare: (current) => {
+          const bed = current.bed as (Bed & { _serverVersion?: number }) | null;
+          if (!bed) {
+            throw new AtomicMutationRejectedError(
+              'BED_NOT_FOUND',
+              'Target bed does not exist.'
+            );
+          }
+
+          if (bed.facilityId) assertFacilityScope(context, bed.facilityId);
+
+          if (
+            bed.status === 'occupied' ||
+            bed.patientId ||
+            bed.currentPatientId ||
+            bed.currentEncounterId
+          ) {
+            throw new AtomicMutationRejectedError(
+              'BED_OCCUPIED',
+              'Physical bed readiness cannot change while clinical occupancy is active.'
+            );
+          }
+
+          if (bed.status === 'reserved') {
+            throw new AtomicMutationRejectedError(
+              'BED_CLINICAL_HOLD_ACTIVE',
+              'A clinically reserved bed must be released through the care-transition allocation workflow.'
+            );
+          }
+
+          if (
+            bed.lifecycleState === 'DECOMMISSIONED' ||
+            bed.lifecycleState === 'OUT_OF_SERVICE'
+          ) {
+            throw new AtomicMutationRejectedError(
+              'BED_LIFECYCLE_LOCKOUT',
+              'A decommissioned/out-of-service bed cannot be returned to operational readiness.'
+            );
+          }
+
+          const nextLifecycle =
+            payload.status === 'maintenance' ? 'MAINTENANCE' : 'IN_SERVICE';
+          const bedState: Bed = {
+            ...bed,
+            status: payload.status,
+            lifecycleState: nextLifecycle,
+            patientId: undefined,
+            currentPatientId: undefined,
+            patientName: undefined,
+            currentEncounterId: undefined,
+            ...(payload.notes !== undefined ? { notes: payload.notes } : {}),
+            updatedAt: now,
+          };
+
+          return {
+            domainState: bedState,
+            eventPayload: {
+              bedId: payload.bedId,
+              facilityId: bed.facilityId,
+              roomId: bed.roomId,
+              previousStatus: bed.status,
+              status: payload.status,
+              lifecycleState: nextLifecycle,
+            },
+            auditReason:
+              `Bed ${bed.bedNumber || bed.id} operational status changed from ${bed.status} to ${payload.status}.`,
+            resultData: bedState,
+          };
+        },
       });
 
+      const bedState = tx.resultData as Bed;
       this.beds.set(payload.bedId, bedState);
       return {
         success: true,
@@ -891,18 +868,29 @@ export class ResourceCapacityDomainService {
         data: { bed: bedState },
       };
     } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message.startsWith('DOMAIN_STATE_VERSION_CONFLICT:')
-      ) {
+      if (error instanceof AtomicMutationRejectedError) {
+        const code =
+          error.code === 'REQUIRED_STATE_NOT_FOUND' ? 'BED_NOT_FOUND' : error.code;
         return {
           success: false,
           commandId,
           idempotencyKey,
           error: {
-            code: 'BED_STATE_CONFLICT',
+            code,
             message:
-              'Bed state changed concurrently. Refresh authoritative state and retry.',
+              code === 'BED_NOT_FOUND' ? 'Target bed does not exist.' : error.message,
+            details: error.details,
+          },
+        };
+      }
+      if (error instanceof Error && error.message === 'FACILITY_SCOPE_MISMATCH') {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'FACILITY_SCOPE_MISMATCH',
+            message: 'Bed status update is outside the actor facility scope.',
           },
         };
       }

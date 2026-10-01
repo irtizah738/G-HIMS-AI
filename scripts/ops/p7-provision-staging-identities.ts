@@ -196,6 +196,45 @@ for (const persona of personas) {
   const roles = Array.isArray(membership.roles)
     ? membership.roles.map(String)
     : [String(membership.role || '')].filter(Boolean);
+  const qualificationRoles = new Set(
+    roles.map((role) => String(role).trim().toUpperCase()).filter(Boolean)
+  );
+  const qualificationPermissions = new Set(
+    Array.isArray(membership.permissions)
+      ? membership.permissions.map(String)
+      : []
+  );
+
+  if (persona.key === 'admin') {
+    [
+      'ADMINISTRATOR',
+      'HOSPITAL_EXECUTIVE',
+      'FACILITIES_ADMIN',
+      'HR_ADMIN',
+      'MEDICAL_DIRECTOR',
+      'SCM_MANAGER',
+      'PROCUREMENT_MANAGER',
+    ].forEach((role) => qualificationRoles.add(role));
+    qualificationPermissions.add('SCM_PURCHASE_ORDER:APPROVE');
+  }
+  if (persona.key === 'billing') {
+    ['BILLING_CLERK', 'FINANCE_MANAGER', 'ACCOUNTANT', 'CASHIER', 'CFO']
+      .forEach((role) => qualificationRoles.add(role));
+    qualificationPermissions.add('ERP_GL:CREATE');
+  }
+  if (persona.key === 'lab') {
+    qualificationRoles.add('LAB_TECH');
+    qualificationRoles.add('PROCUREMENT_OFFICER');
+  }
+  if (persona.key === 'pharmacy') {
+    qualificationRoles.add('PHARMACIST');
+    qualificationRoles.add('STORE_KEEPER');
+  }
+  if (persona.key === 'reception') {
+    qualificationRoles.add('RECEPTIONIST');
+    qualificationRoles.add('DEPARTMENT_HEAD');
+  }
+
   const privileges = new Set(
     Array.isArray(membership.clinicalPrivileges)
       ? membership.clinicalPrivileges.map(String)
@@ -220,6 +259,13 @@ for (const persona of personas) {
       facilityCode: 'P7H0',
       facilityIds: ['P7H0'],
       departmentIds: [persona.department],
+      roles: Array.from(qualificationRoles),
+      role: Array.from(qualificationRoles)[0] || persona.role,
+      permissions: Array.from(qualificationPermissions),
+      financialAuthorityMinorUnits:
+        persona.key === 'billing' || persona.key === 'admin'
+          ? 10_000_000_000
+          : 0,
       credentialStatus: 'VERIFIED',
       clinicalPrivileges: Array.from(privileges),
       syntheticQualificationAccount: true,
@@ -302,8 +348,8 @@ for (const persona of personas) {
 
   await auth.setCustomUserClaims(uid, {
     tenantId,
-    role: roles[0] || persona.role,
-    roles,
+    role: Array.from(qualificationRoles)[0] || persona.role,
+    roles: Array.from(qualificationRoles),
     accessibleTenants: [tenantId],
     p7SyntheticQualification: true,
     claimedAt: Date.now(),
@@ -313,7 +359,7 @@ for (const persona of personas) {
     key: persona.key,
     email,
     uid,
-    role: roles[0] || persona.role,
+    role: Array.from(qualificationRoles)[0] || persona.role,
     identityCreated,
   });
 }

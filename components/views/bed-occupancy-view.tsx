@@ -732,8 +732,18 @@ export function BedOccupancyView() {
                 / {censusAudit.activePatientCensusCount} Admitted
               </span>
             </div>
-            <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold block mt-0.5">
-              &Delta; 0 Patients (100% Invariant)
+            <span
+              className={`text-[10px] font-semibold block mt-0.5 ${
+                censusAudit.isReconciled
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : 'text-rose-600 dark:text-rose-400'
+              }`}
+            >
+              {censusAudit.isReconciled
+                ? 'Δ 0 Patients (Reconciled)'
+                : `Δ ${Math.abs(
+                    censusAudit.occupiedCount - censusAudit.activePatientCensusCount
+                  )} Patients (Requires reconciliation)`}
             </span>
           </div>
 
@@ -772,13 +782,30 @@ export function BedOccupancyView() {
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
               15-Stage IPD Protocol
             </span>
-            <div className="flex items-baseline gap-1 mt-0.5">
-              <span className="text-xs font-bold text-blue-600 dark:text-blue-400">15 / 15 Stages</span>
-              <span className="text-[10px] text-slate-400">Verified</span>
-            </div>
-            <span className="text-[10px] text-slate-500 font-medium block truncate mt-0.5" title="Admission → Bed Alloc → Nursing → Orders → Meds → Labs → Imaging → Progress → Procedures → Consults → Discharge Plan → Med Rec → Finance → Discharge → Follow-up">
-              Admission &rarr; Follow-up
-            </span>
+            {isDemoRuntime ? (
+              <>
+                <div className="flex items-baseline gap-1 mt-0.5">
+                  <span className="text-xs font-bold text-blue-600 dark:text-blue-400">
+                    15 / 15 Stages
+                  </span>
+                  <span className="text-[10px] text-slate-400">Demo pathway</span>
+                </div>
+                <span className="text-[10px] text-slate-500 font-medium block truncate mt-0.5">
+                  Admission &rarr; Follow-up simulation
+                </span>
+              </>
+            ) : (
+              <>
+                <div className="flex items-baseline gap-1 mt-0.5">
+                  <span className="text-xs font-bold text-blue-600 dark:text-blue-400">
+                    Clinical Care authority
+                  </span>
+                </div>
+                <span className="text-[10px] text-slate-500 font-medium block truncate mt-0.5">
+                  Admission, transfer &amp; discharge are governed separately
+                </span>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -983,13 +1010,22 @@ export function BedOccupancyView() {
                       Admission is initiated from the governed Clinical Care workflow.
                     </div>
                   )
+                ) : bed.status === 'reserved' ? (
+                  <div className="w-full py-1.5 px-2 text-xs text-indigo-600 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-xl">
+                    Governed clinical hold — release through Clinical Care.
+                  </div>
                 ) : (
                   <button
                     id={`btn-ready-${bed.id}`}
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      updateBedStatus(bed.id, 'available', undefined, 'Cleared and ready');
+                      void updateBedStatus(
+                        bed.id,
+                        'available',
+                        undefined,
+                        'Cleared and ready'
+                      );
                     }}
                     className="w-full py-1.5 px-2 text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 rounded-xl flex items-center justify-center gap-1.5 transition-colors"
                   >
@@ -1348,11 +1384,11 @@ export function BedOccupancyView() {
                       Permanent Inpatient Discharged Census Registry
                     </h3>
                     <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300">
-                      Zero Patient Loss Guarantee
+                      Census Reconciliation
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    Immutable historical archive of completed inpatient stays, medication reconciliations & discharge clearances.
+                    Derived view of completed inpatient stays, medication reconciliations & discharge clearances.
                   </p>
                 </div>
               </div>

@@ -113,13 +113,13 @@ const TRANSITIONS: Record<string, SurgicalCaseStatus[]> = {
   cancelled: [],
 };
 
-function reject(
+function reject<T = never>(
   commandId: string,
   idempotencyKey: string,
   code: string,
   message: string,
   details?: unknown
-): CommandResult {
+): CommandResult<T> {
   return {
     success: false,
     commandId,

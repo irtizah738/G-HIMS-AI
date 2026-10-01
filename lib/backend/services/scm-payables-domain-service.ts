@@ -1173,6 +1173,23 @@ export class ScmPayablesDomainService {
             current.authorization as unknown as SupplierPaymentAuthorization;
           const invoice = current.invoice as unknown as SupplierInvoiceRecord;
           assertFacilityScope(context, invoice.facilityId);
+
+          const authority = AuthorizationPipeline.evaluate(context, {
+            requiredRoles: [
+              'FINANCE_MANAGER',
+              'TREASURY_MANAGER',
+              'SYSTEM_ADMIN',
+              'ADMINISTRATOR',
+            ],
+            requiredPermissions: ['SCM_AP:APPROVE_PAYMENT'],
+            financialLimitMinorUnits: authorization.amountMinorUnits,
+          });
+          if (!authority.authorized) {
+            throw new AtomicMutationRejectedError(
+              authority.code || 'UNAUTHORIZED',
+              authority.reason || 'Supplier payment approval authority required.'
+            );
+          }
           if (
             authorization.invoiceId !== invoice.invoiceId ||
             payload.invoiceId !== invoice.invoiceId

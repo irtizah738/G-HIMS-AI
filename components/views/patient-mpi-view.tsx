@@ -57,7 +57,7 @@ export function PatientMpiView() {
   const [isAiProcessing, setIsAiProcessing] = useState(false);
   const [aiParseError, setAiParseError] = useState<string | null>(null);
   const [noteCategory, setNoteCategory] = useState<'SOAP' | 'Progress' | 'Nursing' | 'Discharge'>('SOAP');
-  const [authorName, setAuthorName] = useState('Authenticated clinician');
+  const authorName = 'Authenticated clinician';
 
   // New vitals state
   const [newHeartRate, setNewHeartRate] = useState<number | ''>('');

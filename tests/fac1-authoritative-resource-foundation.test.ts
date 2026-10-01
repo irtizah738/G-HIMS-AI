@@ -158,7 +158,10 @@ describe('FAC-1 authoritative facility & biomedical resource foundation',()=>{
         reportedByName:'Facilities Admin',
       },
     };
-    const created=await CommandBus.dispatch(adminContext,create);
+    const created=await CommandBus.dispatch(
+      {...adminContext,facilityIds:['fac_central']},
+      create
+    );
     expect(created.success).toBe(true);
 
     const completed=await CommandBus.dispatch(

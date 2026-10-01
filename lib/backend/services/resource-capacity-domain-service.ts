@@ -24,6 +24,7 @@ import {
   OperationalMatchResult,
 } from '@/types/resource-management';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
+import type { Bed, BedStatus } from '@/lib/types/ghims';
 
 function deterministicId(
   prefix: string,
@@ -83,6 +84,7 @@ function repositoryRequiredOutsideTests(): void {
 export class ResourceCapacityDomainService {
   private static resources: Map<string, ResourceMaster> = new Map();
   private static rooms: Map<string, HospitalRoom> = new Map();
+  private static beds: Map<string, Bed> = new Map();
   private static transfers: Map<string, ResourceTransferRecord> = new Map();
   private static workOrders: Map<string, MaintenanceWorkOrder> = new Map();
   private static calibrations: Map<string, CalibrationRecord> = new Map();
@@ -103,6 +105,40 @@ export class ResourceCapacityDomainService {
       return persisted;
     }
     return this.resources.get(resourceId) || null;
+  }
+
+  private static async loadRoom(
+    tenantId: string,
+    roomId: string
+  ): Promise<HospitalRoom | null> {
+    if (DomainStateRepository.isAvailable()) {
+      const persisted = await DomainStateRepository.getById<HospitalRoom>(
+        tenantId,
+        'rooms',
+        roomId
+      );
+      if (persisted) this.rooms.set(roomId, persisted);
+      else this.rooms.delete(roomId);
+      return persisted;
+    }
+    return this.rooms.get(roomId) || null;
+  }
+
+  private static async loadBed(
+    tenantId: string,
+    bedId: string
+  ): Promise<Bed | null> {
+    if (DomainStateRepository.isAvailable()) {
+      const persisted = await DomainStateRepository.getById<Bed>(
+        tenantId,
+        'beds',
+        bedId
+      );
+      if (persisted) this.beds.set(bedId, persisted);
+      else this.beds.delete(bedId);
+      return persisted;
+    }
+    return this.beds.get(bedId) || null;
   }
 
   private static async loadWorkOrder(
@@ -457,6 +493,416 @@ export class ResourceCapacityDomainService {
           error: {
             code: 'FACILITY_SCOPE_MISMATCH',
             message: 'Room registration is outside the actor facility scope.',
+          },
+        };
+      }
+      throw error;
+    }
+  }
+
+  // ============================================================================
+  // FAC-2. AUTHORITATIVE BED & SPACE CAPACITY
+  // ============================================================================
+
+  public static async registerBed(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: {
+      bedNumber: string;
+      facilityId: string;
+      facilityName: string;
+      departmentId: string;
+      departmentName: string;
+      roomId: string;
+      ward: Bed['ward'];
+      bedType: NonNullable<Bed['bedType']>;
+      capabilities?: string[];
+      notes?: string;
+    }
+  ): Promise<CommandResult<Bed>> {
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: ['FACILITIES_ADMIN', 'SYSTEM_ADMIN', 'HOSPITAL_EXECUTIVE'],
+    });
+    if (!auth.authorized) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Facilities admin authority required.',
+        },
+      };
+    }
+
+    repositoryRequiredOutsideTests();
+
+    try {
+      assertFacilityScope(context, payload.facilityId);
+
+      const bedId = deterministicId('bed', context.tenantId, commandId);
+      const bedIdentityId = identityId(
+        'bed-number',
+        payload.facilityId,
+        payload.roomId,
+        payload.bedNumber
+      );
+      const now = new Date().toISOString();
+
+      const tx = await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.roles[0] || 'FACILITIES_ADMIN',
+        aggregateType: 'HOSPITAL_BED',
+        aggregateId: bedId,
+        eventType: 'BED_REGISTERED',
+        auditAction: 'BED_REGISTERED',
+        auditResourceType: 'HOSPITAL_BED',
+        auditResourceId: bedId,
+        outboxTopic: 'g-hims-facility-events',
+        idempotencyKey,
+        commandId,
+        correlationId: context.correlationId,
+        readTargets: [
+          {
+            key: 'room',
+            entityType: 'HOSPITAL_ROOM',
+            entityId: payload.roomId,
+            required: true,
+          },
+          {
+            key: 'bedIdentity',
+            entityType: 'BED_IDENTITY',
+            entityId: bedIdentityId,
+            required: false,
+          },
+        ],
+        prepare: (current) => {
+          if (current.bedIdentity) {
+            throw new AtomicMutationRejectedError(
+              'BED_IDENTITY_ALREADY_REGISTERED',
+              'This bed number is already registered in the room.'
+            );
+          }
+
+          const room = current.room as (HospitalRoom & { _serverVersion?: number }) | null;
+          if (!room) {
+            throw new AtomicMutationRejectedError(
+              'ROOM_NOT_FOUND',
+              'The authoritative room does not exist.'
+            );
+          }
+
+          if (
+            room.facilityId !== payload.facilityId ||
+            room.departmentId !== payload.departmentId
+          ) {
+            throw new AtomicMutationRejectedError(
+              'BED_ROOM_SCOPE_MISMATCH',
+              'Bed facility/department does not match the authoritative room.'
+            );
+          }
+
+          if (['OUT_OF_SERVICE', 'LOST', 'RETIRED'].includes(room.status)) {
+            throw new AtomicMutationRejectedError(
+              'ROOM_NOT_IN_SERVICE',
+              'Beds cannot be registered in a room that is out of service or retired.'
+            );
+          }
+
+          const existingBedIds = Array.from(new Set(room.bedIds || []));
+          if (existingBedIds.length >= room.capacity) {
+            throw new AtomicMutationRejectedError(
+              'ROOM_BED_CAPACITY_EXCEEDED',
+              `Room ${room.roomNumber} already has ${existingBedIds.length} registered beds for capacity ${room.capacity}.`
+            );
+          }
+
+          const bed: Bed = {
+            id: bedId,
+            bedNumber: payload.bedNumber.trim(),
+            ward: payload.ward,
+            room: room.roomNumber,
+            status: 'available',
+            facilityId: room.facilityId,
+            facilityName: room.facilityName,
+            departmentId: room.departmentId,
+            departmentName: room.departmentName,
+            roomId: room.roomId,
+            bedType: payload.bedType,
+            lifecycleState: 'IN_SERVICE',
+            capabilities: payload.capabilities || [],
+            notes: payload.notes,
+            createdAt: now,
+            updatedAt: now,
+          };
+
+          const nextRoom: HospitalRoom = {
+            ...room,
+            bedIds: [...existingBedIds, bedId],
+            updatedAt: now,
+          };
+
+          return {
+            domainState: bed,
+            additionalStateWrites: [
+              {
+                entityType: 'BED_IDENTITY',
+                entityId: bedIdentityId,
+                domainState: {
+                  identityId: bedIdentityId,
+                  tenantId: context.tenantId,
+                  facilityId: room.facilityId,
+                  departmentId: room.departmentId,
+                  roomId: room.roomId,
+                  bedNumber: bed.bedNumber,
+                  bedId,
+                  createdAt: now,
+                },
+              },
+              {
+                entityType: 'HOSPITAL_ROOM',
+                entityId: room.roomId,
+                domainState: nextRoom,
+              },
+            ],
+            eventPayload: {
+              bedId,
+              bedNumber: bed.bedNumber,
+              roomId: room.roomId,
+              facilityId: room.facilityId,
+              departmentId: room.departmentId,
+              ward: bed.ward,
+              bedType: bed.bedType,
+            },
+            auditReason:
+              `Registered authoritative bed ${bed.bedNumber} in room ${room.roomNumber}.`,
+            resultData: {
+              bed,
+              room: nextRoom,
+            },
+          };
+        },
+      });
+
+      const committed = tx.resultData as { bed: Bed; room: HospitalRoom };
+      this.beds.set(committed.bed.id, committed.bed);
+      this.rooms.set(committed.room.roomId, committed.room);
+
+      return {
+        success: true,
+        commandId,
+        idempotencyKey,
+        entityId: committed.bed.id,
+        eventId: tx.eventId,
+        auditId: tx.auditId,
+        outboxId: tx.outboxId,
+        data: committed.bed,
+      };
+    } catch (error) {
+      if (error instanceof AtomicMutationRejectedError) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+          },
+        };
+      }
+      if (error instanceof Error && error.message === 'FACILITY_SCOPE_MISMATCH') {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'FACILITY_SCOPE_MISMATCH',
+            message: 'Bed registration is outside the actor facility scope.',
+          },
+        };
+      }
+      throw error;
+    }
+  }
+
+  public static async updateBedOperationalStatus(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: {
+      bedId: string;
+      status: Extract<BedStatus, 'available' | 'maintenance' | 'cleaning'>;
+      notes?: string;
+    }
+  ): Promise<CommandResult<{ bed: Bed }>> {
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: [
+        'NURSE',
+        'HOUSEKEEPING',
+        'FACILITIES_ADMIN',
+        'BIOMEDICAL_ENGINEER',
+        'SYSTEM_ADMIN',
+        'ADMINISTRATOR',
+      ],
+    });
+    if (!auth.authorized) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Bed operational-status authority required.',
+        },
+      };
+    }
+
+    repositoryRequiredOutsideTests();
+
+    const bed = await this.loadBed(context.tenantId, payload.bedId);
+    if (!bed) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: 'BED_NOT_FOUND', message: 'Target bed does not exist.' },
+      };
+    }
+
+    try {
+      if (bed.facilityId) assertFacilityScope(context, bed.facilityId);
+    } catch {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'FACILITY_SCOPE_MISMATCH',
+          message: 'Bed status update is outside the actor facility scope.',
+        },
+      };
+    }
+
+    if (
+      bed.status === 'occupied' ||
+      bed.patientId ||
+      bed.currentPatientId ||
+      bed.currentEncounterId
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'BED_OCCUPIED',
+          message:
+            'Physical bed readiness cannot change while clinical occupancy is active.',
+        },
+      };
+    }
+
+    if (bed.status === 'reserved') {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'BED_CLINICAL_HOLD_ACTIVE',
+          message:
+            'A clinically reserved bed must be released through the care-transition allocation workflow.',
+        },
+      };
+    }
+
+    if (
+      bed.lifecycleState === 'DECOMMISSIONED' ||
+      bed.lifecycleState === 'OUT_OF_SERVICE'
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'BED_LIFECYCLE_LOCKOUT',
+          message:
+            'A decommissioned/out-of-service bed cannot be returned to operational readiness.',
+        },
+      };
+    }
+
+    const nextLifecycle =
+      payload.status === 'maintenance' ? 'MAINTENANCE' : 'IN_SERVICE';
+    const now = new Date().toISOString();
+    const bedState: Bed = {
+      ...bed,
+      status: payload.status,
+      lifecycleState: nextLifecycle,
+      patientId: undefined,
+      currentPatientId: undefined,
+      patientName: undefined,
+      currentEncounterId: undefined,
+      ...(payload.notes !== undefined ? { notes: payload.notes } : {}),
+      updatedAt: now,
+    };
+
+    try {
+      const tx = await TransactionManager.executeAtomicMutation({
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.roles[0] || 'FACILITIES_ADMIN',
+        aggregateType: 'HOSPITAL_BED',
+        aggregateId: payload.bedId,
+        eventType: 'BED_OPERATIONAL_STATUS_CHANGED',
+        eventPayload: {
+          bedId: payload.bedId,
+          facilityId: bed.facilityId,
+          roomId: bed.roomId,
+          previousStatus: bed.status,
+          status: payload.status,
+          lifecycleState: nextLifecycle,
+        },
+        auditAction: 'UPDATE_BED_OPERATIONAL_STATUS',
+        auditResourceType: 'HOSPITAL_BED',
+        auditResourceId: payload.bedId,
+        auditReason:
+          `Bed ${bed.bedNumber || bed.id} operational status changed from ${bed.status} to ${payload.status}.`,
+        outboxTopic: 'g-hims-facility-events',
+        idempotencyKey,
+        commandId,
+        correlationId: context.correlationId,
+        domainState: bedState,
+        expectedPrimaryServerVersion: Number(
+          (bed as Bed & { _serverVersion?: number })._serverVersion || 0
+        ),
+      });
+
+      this.beds.set(payload.bedId, bedState);
+      return {
+        success: true,
+        commandId,
+        idempotencyKey,
+        entityId: payload.bedId,
+        eventId: tx.eventId,
+        auditId: tx.auditId,
+        outboxId: tx.outboxId,
+        data: { bed: bedState },
+      };
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.startsWith('DOMAIN_STATE_VERSION_CONFLICT:')
+      ) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'BED_STATE_CONFLICT',
+            message:
+              'Bed state changed concurrently. Refresh authoritative state and retry.',
           },
         };
       }
@@ -1431,7 +1877,15 @@ export class ResourceCapacityDomainService {
       },
     ];
 
-    sampleRooms.forEach((rm) => this.rooms.set(rm.roomId, rm));
+    sampleRooms.forEach((rm) => {
+      this.rooms.set(rm.roomId, rm);
+      TransactionManager.seedEphemeralStateForTesting(
+        tenantId,
+        'HOSPITAL_ROOM',
+        rm.roomId,
+        rm
+      );
+    });
 
     const sampleReservation: ResourceReservation = {
       reservationId: 'resv_sample_01',
@@ -1459,6 +1913,7 @@ export class ResourceCapacityDomainService {
   public static resetForTesting(): void {
     this.resources.clear();
     this.rooms.clear();
+    this.beds.clear();
     this.reservations.clear();
     this.workOrders.clear();
     this.calibrations.clear();
@@ -1470,6 +1925,10 @@ export class ResourceCapacityDomainService {
 
   public static getRooms(): HospitalRoom[] {
     return Array.from(this.rooms.values());
+  }
+
+  public static getBeds(): Bed[] {
+    return Array.from(this.beds.values());
   }
 
   public static getWorkOrders(): MaintenanceWorkOrder[] {

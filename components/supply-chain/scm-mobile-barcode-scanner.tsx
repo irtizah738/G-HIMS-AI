@@ -33,7 +33,7 @@ import {
   InventoryBalance,
   StockTransaction,
 } from '@/types/scm-domain';
-import { recordStockTransaction } from '@/lib/firebase/services/scm-firestore-service';
+import { recordStockTransactionEdge } from '@/lib/supply-chain/scm-edge-adapter';
 
 interface ScmMobileBarcodeScannerProps {
   tenantId: string;
@@ -414,7 +414,7 @@ export function ScmMobileBarcodeScanner({
         },
       };
 
-      await recordStockTransaction(tenantId, newTxn);
+      await recordStockTransactionEdge(newTxn);
 
       const computedNewTotal =
         updateMode === 'COUNT'

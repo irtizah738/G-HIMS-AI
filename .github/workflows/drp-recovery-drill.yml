@@ -1,0 +1,121 @@
+name: DRP Recovery Drill
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type RECOVERY_DRILL to run against an isolated recovery project'
+        required: true
+        type: string
+      recovery_project_id:
+        description: 'Dedicated non-production Firebase/GCP recovery project ID'
+        required: true
+        type: string
+      tenant_id:
+        description: 'Tenant to rebuild after restore'
+        required: true
+        type: string
+      backup_source:
+        description: 'gs:// Firestore export source produced from STAGING'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ghims-drp-recovery-drill
+  cancel-in-progress: false
+
+jobs:
+  recovery-drill:
+    name: Restore and rebuild in isolated recovery project
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ${{ inputs.recovery_project_id }}
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${{ inputs.recovery_project_id }}
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ${{ inputs.recovery_project_id }}
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ${{ inputs.recovery_project_id }}
+      FIRESTORE_DATABASE_ID: "(default)"
+      GHIMS_RESTORE_SOURCE: ${{ inputs.backup_source }}
+      GHIMS_RESTORE_CONFIRM_PROJECT: ${{ inputs.recovery_project_id }}
+      GHIMS_PROJECTION_REBUILD_TENANT: ${{ inputs.tenant_id }}
+      GHIMS_PROJECTION_REBUILD_CONFIRM_TENANT: ${{ inputs.tenant_id }}
+      GHIMS_ALLOW_DESTRUCTIVE_PROJECTION_REBUILD: "true"
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      GHIMS_INTEGRATION_HL7_STATE: DISABLED
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_INTEGRATION_DICOMWEB_STATE: DISABLED
+      GHIMS_INTEGRATION_DEVICE_TELEMETRY_STATE: DISABLED
+      GHIMS_INTEGRATION_EDI_X12_STATE: DISABLED
+
+    steps:
+      - name: Require explicit recovery confirmation and isolated project
+        shell: bash
+        env:
+          PROD_PROJECT: ${{ secrets.GHIMS_PRODUCTION_PROJECT_ID }}
+          STAGING_PROJECT: ${{ secrets.GHIMS_STAGING_PROJECT_ID }}
+          DEMO_PROJECT: ${{ secrets.GHIMS_DEMO_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.confirm }}" != "RECOVERY_DRILL" ]; then
+            echo "Refusing recovery drill without exact confirmation." >&2
+            exit 1
+          fi
+          TARGET="${{ inputs.recovery_project_id }}"
+          if [ -z "$TARGET" ]; then
+            echo "Recovery project is required." >&2
+            exit 1
+          fi
+          for PROTECTED in "$PROD_PROJECT" "$STAGING_PROJECT" "$DEMO_PROJECT"; do
+            if [ -n "$PROTECTED" ] && [ "$TARGET" = "$PROTECTED" ]; then
+              echo "Recovery target collides with a protected environment." >&2
+              exit 1
+            fi
+          done
+
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - run: bun install --frozen-lockfile
+
+      - name: Authenticate isolated recovery workload
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.GCP_RECOVERY_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_RECOVERY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Restore Firestore export into recovery project
+        run: bun run ops:restore
+
+      - name: Rebuild disposable projections from immutable events
+        run: bun run ops:projection-rebuild | tee projection-rebuild-evidence.json
+
+      - name: Record recovery evidence
+        shell: bash
+        run: |
+          {
+            echo "source=${{ inputs.backup_source }}"
+            echo "recovery_project=${{ inputs.recovery_project_id }}"
+            echo "tenant=${{ inputs.tenant_id }}"
+            echo "main_sha=${GITHUB_SHA}"
+            echo "verified_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > recovery-drill-evidence.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ghims-recovery-drill-${{ github.run_id }}
+          path: |
+            projection-rebuild-evidence.json
+            recovery-drill-evidence.txt
+          retention-days: 90
+          if-no-files-found: error

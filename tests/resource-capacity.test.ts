@@ -138,7 +138,7 @@ describe('G-HIMS Resource & Capacity Management Domain Engine', () => {
         payload: {
           resourceId: 'res_001',
           resourceName: 'GE Healthcare Aisys CS2 Anesthesia Delivery Workstation',
-          resourceType: 'SURGICAL_EQUIPMENT',
+          resourceType: 'MEDICAL_DEVICE',
           facilityId: 'fac_central',
           departmentId: 'dept_surgery',
           startTime: `${today}T15:00:00Z`,

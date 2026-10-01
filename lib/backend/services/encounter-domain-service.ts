@@ -196,8 +196,41 @@ export class EncounterDomainService {
       };
     }
 
-    // 3. Domain Logic & State Initialization
-    const encounterId = `enc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    // 3. Authoritative patient precondition and state initialization.
+    const patient = await DomainStateRepository.getById<Record<string, unknown>>(
+      context.tenantId,
+      'patients',
+      payload.patientId
+    );
+    if (!patient) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'PATIENT_NOT_FOUND',
+          message: 'Encounter target patient does not exist in the authenticated tenant.',
+        },
+      };
+    }
+
+    if (
+      ['MERGED', 'DECEASED', 'INACTIVE'].includes(
+        String(patient.status || '').toUpperCase()
+      )
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'PATIENT_NOT_ACTIVE',
+          message: 'A new encounter cannot be opened against a non-active patient identity.',
+        },
+      };
+    }
+
+    const encounterId = `enc_${crypto.randomUUID()}`;
     const domainState: EncounterState = {
       encounterId,
       tenantId: context.tenantId,

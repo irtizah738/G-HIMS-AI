@@ -1518,6 +1518,7 @@ export function SupplyChainScmView({ tenantId }: SupplyChainScmViewProps) {
           batches={batches}
           balances={balances}
           locations={locations}
+          transactions={transactions}
           onRefresh={loadData}
         />
       )}

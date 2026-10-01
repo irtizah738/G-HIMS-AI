@@ -1,17 +1,36 @@
 /**
  * G-HIMS Multi-Layered Authorization Pipeline
- * Enforces Tenant Resolution, RBAC, ABAC, and Credential-Gated Clinical Privileges.
+ * Enforces tenant identity, explicit RBAC, permissions, department scope,
+ * credential-gated clinical privileges and explicit financial authority.
+ *
+ * Security posture: fail closed. No clinical or administrative title is an
+ * implicit cross-domain superuser. A role only satisfies a requirement when it
+ * is explicitly listed by the calling domain service.
  */
 
 import { CommandContext } from '../types';
 
 export interface AuthorizationRequirement {
   requiredRoles?: string[];
+  /**
+   * Every listed permission is required. Use '*' on the membership only for an
+   * explicitly provisioned tenant administrator; clients cannot supply it.
+   */
   requiredPermissions?: string[];
   requiredPrivilege?: string;
   requiredDepartment?: string;
+  /**
+   * Minimum minor-unit authority required for this action. Example:
+   * 250000 = actor must be authorized for at least 2,500.00 in a 2-decimal currency.
+   */
   financialLimitMinorUnits?: number;
+  /**
+   * Break-glass can bypass only the credential-gated clinical privilege check.
+   * It never bypasses roles, permissions, department scope, tenant scope or
+   * financial authority.
+   */
   allowBreakGlass?: boolean;
+  /** @deprecated Emergency override state is resolved from CommandContext. */
   isEmergencyOverride?: boolean;
 }
 
@@ -23,25 +42,63 @@ export interface AuthorizationDecision {
     tenantId: string;
     actorId: string;
     roles: string[];
+    permissions: string[];
     privileges: string[];
+    departmentIds: string[];
+    financialAuthorityMinorUnits?: number;
+    breakGlassActive: boolean;
   };
+}
+
+function normalize(values: string[] | undefined): string[] {
+  return Array.from(
+    new Set(
+      (values || [])
+        .map((value) => String(value || '').trim().toUpperCase())
+        .filter(Boolean)
+    )
+  );
 }
 
 export class AuthorizationPipeline {
   /**
-   * Executes zero-trust authorization pipeline on the command context.
+   * Executes the zero-trust authorization pipeline on a server-derived context.
    */
   public static evaluate(
     context: CommandContext,
     requirement: AuthorizationRequirement
   ): AuthorizationDecision {
-    // 1. Tenant Resolution & Identity Check
+    const roles = normalize(context.roles);
+    const permissions = normalize(context.permissions);
+    const privileges = normalize(context.clinicalPrivileges);
+    const departmentIds = normalize([
+      ...(context.departmentIds || []),
+      ...(context.departmentId ? [context.departmentId] : []),
+    ]);
+    const breakGlassActive = Boolean(
+      requirement.allowBreakGlass &&
+        context.isEmergencyOverride &&
+        context.breakGlassGrantId
+    );
+
+    const evaluatedContext = {
+      tenantId: String(context.tenantId || ''),
+      actorId: String(context.actorId || ''),
+      roles,
+      permissions,
+      privileges,
+      departmentIds,
+      financialAuthorityMinorUnits: context.financialAuthorityMinorUnits,
+      breakGlassActive,
+    };
+
+    // 1. Tenant + authoritative actor are mandatory.
     if (!context.tenantId || context.tenantId.trim() === '') {
       return {
         authorized: false,
         code: 'TENANT_ISOLATION_ERROR',
         reason: 'Command context is missing an authenticated tenant identifier.',
-        evaluatedContext: this.extractContext(context),
+        evaluatedContext,
       };
     }
 
@@ -50,74 +107,114 @@ export class AuthorizationPipeline {
         authorized: false,
         code: 'UNAUTHENTICATED_ACTOR',
         reason: 'Command context does not contain an authoritative actor ID.',
-        evaluatedContext: this.extractContext(context),
+        evaluatedContext,
       };
     }
 
-    // 2. Emergency Override / Break-Glass evaluation
-    if (requirement.allowBreakGlass && context.isEmergencyOverride && context.breakGlassGrantId) {
+    // 2. Explicit RBAC only. No implicit MEDICAL_DIRECTOR/SYSTEM_ADMIN bypass.
+    const requiredRoles = normalize(requirement.requiredRoles);
+    if (
+      requiredRoles.length > 0 &&
+      !requiredRoles.some((requiredRole) => roles.includes(requiredRole))
+    ) {
       return {
-        authorized: true,
-        evaluatedContext: this.extractContext(context),
+        authorized: false,
+        code: 'INSUFFICIENT_ROLE',
+        reason:
+          `Actor lacks an explicitly authorized role. Required: [${requiredRoles.join(', ')}]. Current: [${roles.join(', ')}].`,
+        evaluatedContext,
       };
     }
 
-    // 3. RBAC Evaluation
-    if (requirement.requiredRoles && requirement.requiredRoles.length > 0) {
-      const hasRole = requirement.requiredRoles.some((role) =>
-        context.roles.includes(role) || context.roles.includes('SYSTEM_ADMIN') || context.roles.includes('MEDICAL_DIRECTOR')
+    // 3. Permission layer. Every requested permission is mandatory.
+    const requiredPermissions = normalize(requirement.requiredPermissions);
+    if (requiredPermissions.length > 0 && !permissions.includes('*')) {
+      const missing = requiredPermissions.filter(
+        (permission) => !permissions.includes(permission)
       );
-      if (!hasRole) {
+      if (missing.length > 0) {
         return {
           authorized: false,
-          code: 'INSUFFICIENT_ROLE',
-          reason: `Actor lacks required roles: [${requirement.requiredRoles.join(', ')}]. Current roles: [${context.roles.join(', ')}]`,
-          evaluatedContext: this.extractContext(context),
+          code: 'INSUFFICIENT_PERMISSION',
+          reason: `Actor lacks required permissions: [${missing.join(', ')}].`,
+          evaluatedContext,
         };
       }
     }
 
-    // 4. Clinical Privilege Verification (Credential-Gated)
-    if (requirement.requiredPrivilege) {
-      const privileges = context.clinicalPrivileges || [];
+    // 4. Department scope is fail-closed when a department is required.
+    if (requirement.requiredDepartment) {
+      const requiredDepartment = String(requirement.requiredDepartment)
+        .trim()
+        .toUpperCase();
+
+      if (!requiredDepartment || !departmentIds.includes(requiredDepartment)) {
+        return {
+          authorized: false,
+          code: 'DEPARTMENT_SCOPE_MISMATCH',
+          reason:
+            departmentIds.length === 0
+              ? `Action requires department ${requiredDepartment}, but the actor has no authoritative department assignment.`
+              : `Actor departments [${departmentIds.join(', ')}] do not include required department ${requiredDepartment}.`,
+          evaluatedContext,
+        };
+      }
+    }
+
+    // 5. Explicit financial authority. Missing authority never means unlimited.
+    if (requirement.financialLimitMinorUnits !== undefined) {
+      const requiredAmount = requirement.financialLimitMinorUnits;
+      const actorLimit = context.financialAuthorityMinorUnits;
+
+      if (
+        !Number.isSafeInteger(requiredAmount) ||
+        requiredAmount < 0
+      ) {
+        return {
+          authorized: false,
+          code: 'AUTHORIZATION_REQUIREMENT_INVALID',
+          reason: 'Financial authority requirement must be a non-negative safe integer.',
+          evaluatedContext,
+        };
+      }
+
+      if (
+        !Number.isSafeInteger(actorLimit) ||
+        Number(actorLimit) < requiredAmount
+      ) {
+        return {
+          authorized: false,
+          code: 'FINANCIAL_AUTHORITY_EXCEEDED',
+          reason:
+            `Action requires financial authority of at least ${requiredAmount} minor units; actor authority is ${Number.isSafeInteger(actorLimit) ? actorLimit : 0}.`,
+          evaluatedContext,
+        };
+      }
+    }
+
+    // 6. Credential-gated clinical privilege. Break-glass may bypass only this layer.
+    if (requirement.requiredPrivilege && !breakGlassActive) {
+      const requiredPrivilege = String(requirement.requiredPrivilege)
+        .trim()
+        .toUpperCase();
       const hasPrivilege =
-        privileges.includes(requirement.requiredPrivilege) ||
+        privileges.includes(requiredPrivilege) ||
         privileges.includes('UNRESTRICTED_CLINICAL_CHIEF');
 
       if (!hasPrivilege) {
         return {
           authorized: false,
           code: 'CLINICAL_PRIVILEGE_DENIED',
-          reason: `Actor lacks active, verified clinical privilege: ${requirement.requiredPrivilege}. Requires Medical Director verification.`,
-          evaluatedContext: this.extractContext(context),
-        };
-      }
-    }
-
-    // 5. Department Scope Check
-    if (requirement.requiredDepartment && context.departmentId) {
-      if (context.departmentId !== requirement.requiredDepartment && !context.roles.includes('SYSTEM_ADMIN')) {
-        return {
-          authorized: false,
-          code: 'DEPARTMENT_SCOPE_MISMATCH',
-          reason: `Actor department (${context.departmentId}) does not match required scope (${requirement.requiredDepartment}).`,
-          evaluatedContext: this.extractContext(context),
+          reason:
+            `Actor lacks active, verified clinical privilege: ${requiredPrivilege}.`,
+          evaluatedContext,
         };
       }
     }
 
     return {
       authorized: true,
-      evaluatedContext: this.extractContext(context),
-    };
-  }
-
-  private static extractContext(context: CommandContext) {
-    return {
-      tenantId: context.tenantId,
-      actorId: context.actorId,
-      roles: context.roles || [],
-      privileges: context.clinicalPrivileges || [],
+      evaluatedContext,
     };
   }
 }

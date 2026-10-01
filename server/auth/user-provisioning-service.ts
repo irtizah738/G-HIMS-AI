@@ -2,6 +2,7 @@ import { getAdminAuth, getAdminFirestore } from '@/server/firebase/admin';
 import { ROLE_DEFINITIONS } from '@/lib/auth/rbac';
 import type { RoleId } from '@/types/rbac';
 import { sanitizeForFirestore } from '@/lib/firestore/sanitize';
+import { revokeUserSessions } from '@/server/auth/session-service';
 
 export type ProvisionableUiRole =
   | 'admin'
@@ -157,27 +158,22 @@ export class UserProvisioningService {
   public static async listTenantUsers(tenantIdInput: string) {
     const tenantId = cleanTenantId(tenantIdInput);
     const db = getAdminFirestore();
-
-    if (db) {
-      try {
-        const snapshot = await db.collection('tenants').doc(tenantId).collection('users').get();
-        return snapshot.docs
-          .map((document) => toUiUser(tenantId, document.id, document.data()))
-          .sort((a, b) => a.displayName.localeCompare(b.displayName));
-      } catch {
-        // Fall back to client firestore
-      }
-    }
+    if (!db) throw new Error('IAM_STORE_UNAVAILABLE');
 
     try {
-      const { db: clientDb } = await import('@/lib/firebase/client');
-      const { collection, getDocs } = await import('firebase/firestore');
-      const snapshot = await getDocs(collection(clientDb, 'tenants', tenantId, 'users'));
+      const snapshot = await db
+        .collection('tenants')
+        .doc(tenantId)
+        .collection('users')
+        .get();
+
       return snapshot.docs
         .map((document) => toUiUser(tenantId, document.id, document.data()))
         .sort((a, b) => a.displayName.localeCompare(b.displayName));
-    } catch {
-      throw new Error('IAM_STORE_UNAVAILABLE');
+    } catch (error) {
+      throw new Error(
+        `IAM_STORE_UNAVAILABLE: ${error instanceof Error ? error.message : 'membership query failed'}`
+      );
     }
   }
 
@@ -268,7 +264,8 @@ export class UserProvisioningService {
     if (!tenantId || !userId) throw new Error('IAM_UPDATE_INPUT_INVALID');
 
     const db = getAdminFirestore();
-    if (!db) throw new Error('IAM_STORE_UNAVAILABLE');
+    const auth = getAdminAuth();
+    if (!db || !auth) throw new Error('IAM_ADMIN_UNAVAILABLE');
 
     const membershipRef = db.collection('tenants').doc(tenantId).collection('users').doc(userId);
     const existing = await membershipRef.get();
@@ -308,6 +305,27 @@ export class UserProvisioningService {
     }
 
     await membershipRef.set(sanitizeForFirestore(patch), { merge: true });
+
+    const authorizationChanged = Boolean(
+      input.status ||
+      input.role ||
+      input.department !== undefined ||
+      input.licenseId !== undefined ||
+      input.assignedWards !== undefined
+    );
+
+    if (authorizationChanged) {
+      await Promise.all([
+        revokeUserSessions(
+          tenantId,
+          userId,
+          'IAM_ADMIN',
+          'Tenant authorization changed; re-authentication required.'
+        ),
+        auth.revokeRefreshTokens(userId),
+      ]);
+    }
+
     const updated = await membershipRef.get();
     return toUiUser(tenantId, userId, updated.data() || {});
   }

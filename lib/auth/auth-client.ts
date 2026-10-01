@@ -51,10 +51,45 @@ export class AuthClient {
       });
     }
 
-    const requestedTenantId = options?.tenantId || 'central-metro-hospital';
     const deviceMeta = generateDeviceMetadata();
     const rememberDevice = options?.rememberDevice ?? true;
     const idToken = await currentUser.getIdToken(true);
+
+    let requestedTenantId = String(options?.tenantId || '').trim().toLowerCase();
+    if (!requestedTenantId) {
+      const tenantResponse = await fetch('/api/auth/tenant-selection', {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      const tenantData = await tenantResponse.json().catch(() => ({}));
+      if (!tenantResponse.ok) {
+        throw new AuthError({
+          code: tenantData.code || 'TENANT_ACCESS_DENIED',
+          message: tenantData.error || 'Unable to resolve hospital access.',
+          statusCode: tenantResponse.status,
+        });
+      }
+
+      const activeTenants = (Array.isArray(tenantData.tenants) ? tenantData.tenants : [])
+        .filter((tenant: TenantSelectionItem) => !tenant.status || tenant.status === 'ACTIVE');
+
+      if (activeTenants.length === 1) {
+        requestedTenantId = String(activeTenants[0].tenantId || '').trim().toLowerCase();
+      } else if (activeTenants.length > 1) {
+        throw new AuthError({
+          code: 'TENANT_SELECTION_REQUIRED',
+          message: 'Multiple active hospital memberships are available.',
+          statusCode: 409,
+          userMessage: 'Select the hospital you want to access.',
+        });
+      } else {
+        throw new AuthError({
+          code: 'TENANT_ACCESS_DENIED',
+          message: 'No active hospital membership is available for this identity.',
+          statusCode: 403,
+        });
+      }
+    }
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 12000);
@@ -102,6 +137,8 @@ export class AuthClient {
       tenantId: loginPayload.tenant.tenantId,
       roles: loginPayload.authorization.roles,
       permissions: loginPayload.authorization.permissions,
+      financialAuthorityMinorUnits:
+        loginPayload.authorization.financialAuthorityMinorUnits,
       departmentIds: loginPayload.authorization.departmentIds,
       facilityIds: loginPayload.authorization.facilityIds,
       accountStatus: loginPayload.authorization.accountStatus,
@@ -204,8 +241,15 @@ export class AuthClient {
    */
   public static async signInSSO(
     email: string,
-    tenantId: string = 'central-metro-hospital'
+    tenantId: string
   ): Promise<LoginResponsePayload> {
+    if (!String(tenantId || '').trim()) {
+      throw new AuthError({
+        code: 'TENANT_SELECTION_REQUIRED',
+        message: 'Explicit tenant selection is required for SSO.',
+        statusCode: 400,
+      });
+    }
     try {
       const cleanEmail = email.trim();
       const response = await fetch('/api/auth/sso/login', {

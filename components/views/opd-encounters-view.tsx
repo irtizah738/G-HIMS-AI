@@ -42,14 +42,13 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
     completeOpdToken,
     patients,
     addClinicalNote,
-    addLabOrder,
     addVitals,
     selectedPatientId,
     setSelectedPatientId,
     setActiveTab,
   } = useHospital();
 
-  const [selectedTokenId, setSelectedTokenId] = useState<string>('tok-01');
+  const [selectedTokenId, setSelectedTokenId] = useState<string>('');
 
   // Auto-focus on matching OPD token if global selected patient matches
   useEffect(() => {
@@ -70,71 +69,126 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
   const [isRoutingModalOpen, setIsRoutingModalOpen] = useState<boolean>(false);
   const [routingPatientData, setRoutingPatientData] = useState<any>(null);
   const [chiefComplaint, setChiefComplaint] = useState<string>('');
-  const [soapSubjective, setSoapSubjective] = useState<string>('Patient reports 3-day history of worsening chest pressure following physical exertion. Denies diaphoresis.');
-  const [soapObjective, setSoapObjective] = useState<string>('BP: 138/88 mmHg, HR: 98 bpm regular, SpO2: 96% on room air. Lungs clear to auscultation bilaterally.');
-  const [soapAssessment, setSoapAssessment] = useState<string>('Post-PCI Angina Pectoris (ICD-10 I20.9), Essential Hypertension.');
-  const [soapPlan, setSoapPlan] = useState<string>('1. Continue Ticagrelor 90mg BID. 2. Order High-Sensitivity Troponin I and 12-Lead ECG. 3. Bedside Echocardiogram.');
+  const [soapSubjective, setSoapSubjective] = useState<string>('');
+  const [soapObjective, setSoapObjective] = useState<string>('');
+  const [soapAssessment, setSoapAssessment] = useState<string>('');
+  const [soapPlan, setSoapPlan] = useState<string>('');
   const [isAiStructuring, setIsAiStructuring] = useState<boolean>(false);
   const [successToast, setSuccessToast] = useState<string | null>(null);
 
   // Vitals entry
-  const [hr, setHr] = useState<number>(98);
-  const [bp, setBp] = useState<string>('138/88');
-  const [temp, setTemp] = useState<number>(37.2);
-  const [spo2, setSpo2] = useState<number>(96);
+  const [hr, setHr] = useState<number | ''>('');
+  const [bp, setBp] = useState<string>('');
+  const [temp, setTemp] = useState<number | ''>('');
+  const [spo2, setSpo2] = useState<number | ''>('');
+  const [respiratoryRate, setRespiratoryRate] = useState<number | ''>('');
+  const [isSaving, setIsSaving] = useState(false);
 
   const selectedToken = opdQueue.find(t => t.id === selectedTokenId) || opdQueue[0];
   const patient = patients.find(p => p.id === selectedToken?.patientId) || patients[0];
 
-  const handleSaveConsultation = () => {
-    if (!patient) return;
+  const handleSaveConsultation = async () => {
+    if (!patient || !selectedToken || isSaving) return;
 
-    // Build full SOAP note
-    const fullContent = `SUBJECTIVE:\n${soapSubjective}\n\nOBJECTIVE:\n${soapObjective}\n\nASSESSMENT:\n${soapAssessment}\n\nPLAN:\n${soapPlan}`;
+    const hasNarrative =
+      soapSubjective.trim() ||
+      soapObjective.trim() ||
+      soapAssessment.trim() ||
+      soapPlan.trim();
 
-    addClinicalNote(patient.id, {
-      author: 'Dr. Sarah Jenkins',
-      role: 'Consultant Cardiologist',
-      category: 'SOAP',
-      content: fullContent,
-      aiStructuredData: {
-        chiefComplaint: selectedToken.chiefComplaint,
-        diagnoses: ['Post-PCI Angina Pectoris (I20.9)', 'Essential Hypertension (I10)'],
-        medicationsPrescribed: ['Ticagrelor 90mg PO BID', 'Atorvastatin 80mg QHS'],
-        recommendedProcedures: ['12-Lead ECG (CPT 93000)', 'Echocardiogram (CPT 93306)'],
-        followUpDays: 7,
-        billingCodes: [
-          { code: '99214', description: 'Outpatient Clinic Visit - Moderate/High Complexity', fee: 185 },
-          { code: '93000', description: '12-Lead Electrocardiogram w/ Interpretation', fee: 120 },
-        ],
-      },
-    });
+    if (!hasNarrative) {
+      setSuccessToast(
+        'Clinical documentation was not signed because the SOAP note is empty.'
+      );
+      setTimeout(() => setSuccessToast(null), 4000);
+      return;
+    }
 
-    // Record vitals
-    addVitals(patient.id, {
-      heartRate: hr,
-      bloodPressure: bp,
-      temperature: temp,
-      respiratoryRate: 18,
-      oxygenSaturation: spo2,
-    });
+    const fullContent =
+      `SUBJECTIVE:\n${soapSubjective.trim()}\n\nOBJECTIVE:\n${soapObjective.trim()}\n\nASSESSMENT:\n${soapAssessment.trim()}\n\nPLAN:\n${soapPlan.trim()}`;
 
-    completeOpdToken(selectedToken.id);
-    setSuccessToast(`Consultation saved for ${patient.fullName || 'Patient'}! Clinical note committed to Encounter Stage: Complete. AI extracted CPT 99214 & 93000 to billing validation queue.`);
-    setTimeout(() => setSuccessToast(null), 6000);
+    const vitalsComplete =
+      typeof hr === 'number' &&
+      hr > 0 &&
+      bp.trim().length > 0 &&
+      typeof temp === 'number' &&
+      temp > 0 &&
+      typeof spo2 === 'number' &&
+      spo2 > 0 &&
+      typeof respiratoryRate === 'number' &&
+      respiratoryRate > 0;
+
+    const vitalsStarted =
+      hr !== '' ||
+      bp.trim().length > 0 ||
+      temp !== '' ||
+      spo2 !== '' ||
+      respiratoryRate !== '';
+
+    if (vitalsStarted && !vitalsComplete) {
+      setSuccessToast(
+        'Vitals were not recorded: complete HR, BP, temperature, respiratory rate and SpO₂, or clear the vitals fields.'
+      );
+      setTimeout(() => setSuccessToast(null), 5000);
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+
+      // Server identity/audit context owns signer identity. This UI never injects
+      // diagnoses, medications, procedures or billing codes that the clinician
+      // did not explicitly enter/accept.
+      await addClinicalNote(patient.id, {
+        author: selectedToken.assignedDoctor || 'Authenticated clinician',
+        role: 'Clinician',
+        category: 'SOAP',
+        content: fullContent,
+        aiStructuredData: {
+          chiefComplaint: selectedToken.chiefComplaint,
+          diagnoses: [],
+          medicationsPrescribed: [],
+          recommendedProcedures: [],
+          billingCodes: [],
+        },
+      });
+
+      if (vitalsComplete) {
+        await addVitals(patient.id, {
+          heartRate: hr,
+          bloodPressure: bp.trim(),
+          temperature: temp,
+          respiratoryRate,
+          oxygenSaturation: spo2,
+        });
+      }
+
+      // Queue completion happens only after preceding governed clinical commands
+      // have been accepted/queued successfully.
+      await completeOpdToken(selectedToken.id);
+
+      setSuccessToast(
+        `Consultation signed for ${patient.fullName || 'Patient'}. No diagnosis, medication, procedure or charge code was auto-accepted.`
+      );
+      setTimeout(() => setSuccessToast(null), 6000);
+    } catch (error) {
+      setSuccessToast(
+        error instanceof Error
+          ? error.message
+          : 'Consultation could not be finalized.'
+      );
+      setTimeout(() => setSuccessToast(null), 6000);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleQuickLabOrder = () => {
-    if (!patient) return;
-    addLabOrder(patient.id, {
-      testName: 'High-Sensitivity Troponin I & Complete Blood Count',
-      category: 'Biochemistry',
-      status: 'ordered',
-      sampleId: `SMP-${Math.floor(1000 + Math.random() * 9000)}`,
-      cost: 120,
-    });
-    setSuccessToast('Stat Diagnostic Lab Order dispatched via HL7 ORM^O01 to LIS!');
-    setTimeout(() => setSuccessToast(null), 3000);
+    setActiveTab('ancillary');
+    setSuccessToast(
+      'Diagnostics ordering opened. Select an authoritative catalog item and clinical indication before placing the order.'
+    );
+    setTimeout(() => setSuccessToast(null), 4000);
   };
 
   return (
@@ -212,7 +266,7 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
                 <h1 className="text-lg font-bold text-slate-900 dark:text-slate-100">Outpatient (OPD) & Triage Consultation Suite</h1>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Real-time token queue, digital SOAP charting, and automated point-of-care CPT charge capture
+                Authoritative token queue, clinician-entered SOAP documentation, governed diagnostics and explicit charge validation
               </p>
             </div>
 
@@ -299,7 +353,7 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
                             mrn: token.mrn,
                             chiefComplaint: token.chiefComplaint,
                             triageCategory: 'Outpatient Triage / OPD',
-                            currentAttending: 'Dr. Sarah Jenkins',
+                            currentAttending: token.assignedDoctor || 'Unassigned',
                           });
                           setIsRoutingModalOpen(true);
                         }}
@@ -314,7 +368,14 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            callNextOpdToken(token.id);
+                            void callNextOpdToken(token.id).catch((error) => {
+                              setSuccessToast(
+                                error instanceof Error
+                                  ? error.message
+                                  : 'Unable to call OPD patient.'
+                              );
+                              setTimeout(() => setSuccessToast(null), 4000);
+                            });
                           }}
                           className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold shadow-xs transition-all cursor-pointer"
                         >
@@ -338,8 +399,8 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
               encounterType="OPD"
               encounterStage="CLINICAL_CONSULTATION"
               encounterId={`OPD-${selectedToken?.tokenNumber}`}
-              attendingDoctor="Dr. Sarah Jenkins, MD (Cardiology)"
-              bedNumber="Consultation Bay 104"
+              attendingDoctor={selectedToken?.assignedDoctor || "Unassigned"}
+              bedNumber="OPD Consultation"
             />
           )}
 
@@ -348,7 +409,7 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800/80 pb-4">
               <div>
                 <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 block">
-                  Active Consultation Room 104
+                  Active OPD Consultation
                 </span>
                 <h3 className="text-sm font-extrabold text-slate-800 dark:text-slate-200 mt-0.5">
                   Chief Complaint: <span className="text-blue-600 dark:text-blue-400">{selectedToken?.chiefComplaint}</span>
@@ -366,7 +427,7 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
                         mrn: selectedToken.mrn,
                         chiefComplaint: selectedToken.chiefComplaint,
                         triageCategory: 'Outpatient Triage / OPD',
-                        currentAttending: 'Dr. Sarah Jenkins',
+                        currentAttending: selectedToken?.assignedDoctor || 'Unassigned',
                       });
                       setIsRoutingModalOpen(true);
                     }
@@ -380,7 +441,7 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
                   onClick={handleQuickLabOrder}
                   className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs flex items-center gap-1 transition-all cursor-pointer"
                 >
-                  <FlaskConical className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" /> Order Stat Labs
+                  <FlaskConical className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" /> Open Diagnostic Orders
                 </button>
                 <button
                   type="button"
@@ -404,7 +465,7 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
                   <input
                     type="number"
                     value={hr}
-                    onChange={(e) => setHr(Number(e.target.value))}
+                    onChange={(e) => setHr(e.target.value === '' ? '' : Number(e.target.value))}
                     className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg p-1.5 font-bold text-slate-800 dark:text-slate-100 outline-none focus:ring-1 focus:ring-blue-500"
                   />
                 </div>
@@ -423,7 +484,20 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
                     type="number"
                     step="0.1"
                     value={temp}
-                    onChange={(e) => setTemp(Number(e.target.value))}
+                    onChange={(e) => setTemp(e.target.value === '' ? '' : Number(e.target.value))}
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg p-1.5 font-bold text-slate-800 dark:text-slate-100 outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold block">Respiratory Rate</label>
+                  <input
+                    type="number"
+                    value={respiratoryRate}
+                    onChange={(e) =>
+                      setRespiratoryRate(
+                        e.target.value === '' ? '' : Number(e.target.value)
+                      )
+                    }
                     className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg p-1.5 font-bold text-slate-800 dark:text-slate-100 outline-none focus:ring-1 focus:ring-blue-500"
                   />
                 </div>
@@ -432,7 +506,7 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
                   <input
                     type="number"
                     value={spo2}
-                    onChange={(e) => setSpo2(Number(e.target.value))}
+                    onChange={(e) => setSpo2(e.target.value === '' ? '' : Number(e.target.value))}
                     className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg p-1.5 font-bold text-slate-800 dark:text-slate-100 outline-none focus:ring-1 focus:ring-blue-500"
                   />
                 </div>
@@ -479,7 +553,7 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
 
               <div>
                 <label className="font-bold text-slate-800 dark:text-slate-200 block mb-1">
-                  Plan & Prescriptions (Auto-coded for Charge Sheet):
+                  Plan / Orders / Follow-up:
                 </label>
                 <textarea
                   rows={2}
@@ -490,17 +564,8 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
               </div>
             </div>
 
-            {/* Bottom Point-of-Care CPT Auto-Suggestion Preview */}
-            <div className="p-3 bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-xl flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                <span className="text-slate-700 dark:text-slate-300">
-                  AI Real-Time Charge Suggester: <strong className="text-blue-900 dark:text-blue-200">CPT 99214 ($185) + CPT 93000 ($120)</strong>
-                </span>
-              </div>
-              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-600 text-white shadow-2xs">
-                +$305 Estimated
-              </span>
+            <div className="p-3 bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-xl text-xs text-slate-700 dark:text-slate-300">
+              Structured diagnoses, medications, procedures and charge codes are not inferred or accepted from this form. Use their governed catalog/order workflows and explicit clinician acceptance.
             </div>
           </div>
         </div>
@@ -533,11 +598,11 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
           onClose={() => setIsConfirmModalOpen(false)}
           onConfirm={() => {
             setIsConfirmModalOpen(false);
-            handleSaveConsultation();
+            void handleSaveConsultation();
           }}
           patient={patient}
-          actionTitle="Finalize Clinical Consultation, Prescribe Rx & Capture CPT Charges"
-          actionDescription={`Signing outpatient evaluation for ${patient.fullName || (patient as any).name} (${patient.mrn}). Medications: Ticagrelor 90mg BID, Atorvastatin 80mg QHS. CPT: 99214, 93000.`}
+          actionTitle="Finalize and Sign Clinical Consultation"
+          actionDescription={`Signing the clinician-entered outpatient SOAP note for ${patient.fullName || (patient as any).name} (${patient.mrn}). No medication, diagnosis, procedure or charge code will be auto-accepted.`}
           actionRiskLevel="HIGH"
         />
       )}

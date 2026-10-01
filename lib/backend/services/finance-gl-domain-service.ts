@@ -539,11 +539,17 @@ export class FinanceGlDomainService {
         'The generic journal command is reserved for MANUAL postings. System subledgers must post through their governed domain services.'
       );
     }
+    const requestedAuthorityMinorUnits = payload.lines.reduce(
+      (sum, line) => sum + Number(line.debitMinorUnits || 0),
+      0
+    );
     const auth = AuthorizationPipeline.evaluate(context, {
       requiredRoles:
         sourceModule === 'MANUAL'
           ? ['FINANCE_MANAGER', 'ACCOUNTANT', 'SYSTEM_ADMIN', 'ADMINISTRATOR']
           : ['SYSTEM_ADMIN', 'ADMINISTRATOR', 'FINANCE_MANAGER', 'ACCOUNTANT'],
+      requiredPermissions: ['ERP_GL:CREATE'],
+      financialLimitMinorUnits: requestedAuthorityMinorUnits,
     });
     if (!auth.authorized) {
       return reject(

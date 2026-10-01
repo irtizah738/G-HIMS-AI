@@ -282,3 +282,83 @@ export async function revokeSession(
     });
   }
 }
+
+
+/**
+ * Revoke every active G-HIMS session for a tenant user.
+ * Used after role/status/department changes so stale sessions cannot continue
+ * with pre-change authorization or Firestore claims.
+ */
+export async function revokeUserSessions(
+  tenantId: string,
+  userId: string,
+  revokedBy: string,
+  reason: string
+): Promise<number> {
+  if (!tenantId || !userId) return 0;
+
+  const db = getAdminFirestore();
+  const now = new Date().toISOString();
+
+  if (!db) {
+    if (!mayUseInMemorySessions()) {
+      throw new AuthError({
+        code: 'INTERNAL_AUTH_ERROR',
+        message: 'Authoritative session store is unavailable',
+        statusCode: 503,
+      });
+    }
+
+    let count = 0;
+    for (const [key, session] of inMemorySessionStore.entries()) {
+      if (
+        session.tenantId === tenantId &&
+        session.userId === userId &&
+        session.status === 'ACTIVE'
+      ) {
+        inMemorySessionStore.set(key, {
+          ...session,
+          status: 'REVOKED',
+          revokedAt: now,
+          revokedBy,
+          revokeReason: reason,
+        });
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  try {
+    const snapshot = await db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection('sessions')
+      .where('userId', '==', userId)
+      .get();
+
+    const active = snapshot.docs.filter(
+      (document) => String(document.data().status || '') === 'ACTIVE'
+    );
+    if (active.length === 0) return 0;
+
+    const batch = db.batch();
+    for (const document of active) {
+      batch.update(document.ref, {
+        status: 'REVOKED',
+        revokedAt: now,
+        revokedBy,
+        revokeReason: reason,
+      });
+    }
+    await batch.commit();
+    return active.length;
+  } catch (error) {
+    throw new AuthError({
+      code: 'INTERNAL_AUTH_ERROR',
+      message: 'Failed to revoke user sessions',
+      statusCode: 503,
+      originalError: error,
+    });
+  }
+}

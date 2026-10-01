@@ -10,6 +10,7 @@ import { AuthError } from '@/lib/auth/auth-errors';
 import { extractBearerToken, verifyFirebaseToken } from '@/server/auth/verify-token';
 import { resolveAuthorizationContext } from '@/server/auth/authorization-context';
 import { validateSession } from '@/server/auth/session-service';
+import { assertDeviceActive } from '@/server/auth/device-service';
 
 export interface AuthoritativeUserDirectoryRecord {
   userId: string;
@@ -17,6 +18,7 @@ export interface AuthoritativeUserDirectoryRecord {
   tenantId: string;
   roles: string[];
   permissions: string[];
+  financialAuthorityMinorUnits?: number;
   departmentIds: string[];
   facilityIds: string[];
   clinicalPrivileges: string[];
@@ -73,6 +75,10 @@ export async function deriveAuthoritativeContext(
   );
   const requestedDeviceId = String(req.headers.get('x-ghims-device-id') || '').trim();
 
+  if (session.deviceId) {
+    await assertDeviceActive(targetTenant, session.deviceId, verifiedToken.uid);
+  }
+
   if (requestedDeviceId && session.deviceId && requestedDeviceId !== session.deviceId) {
     throw new AuthError({
       code: 'DEVICE_REVOKED',
@@ -93,6 +99,7 @@ export async function deriveAuthoritativeContext(
     tenantId: authContext.tenantId,
     roles: authContext.roles.map((role) => role.toUpperCase()),
     permissions: authContext.permissions.map((permission) => permission.toUpperCase()),
+    financialAuthorityMinorUnits: authContext.financialAuthorityMinorUnits,
     departmentId: authContext.departmentIds[0],
     departmentIds: [...authContext.departmentIds],
     facilityIds: [...authContext.facilityIds],
@@ -110,6 +117,7 @@ export async function deriveAuthoritativeContext(
     tenantId: authContext.tenantId,
     roles: authContext.roles.map((role) => role.toUpperCase()),
     permissions: authContext.permissions.map((permission) => permission.toUpperCase()),
+    financialAuthorityMinorUnits: authContext.financialAuthorityMinorUnits,
     departmentIds: [...authContext.departmentIds],
     facilityIds: [...authContext.facilityIds],
     clinicalPrivileges: authContext.clinicalPrivileges.map((privilege) => privilege.toUpperCase()),

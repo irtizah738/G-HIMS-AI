@@ -8,10 +8,7 @@ import {
   InventoryLocation,
   InventoryBalance,
 } from '@/types/scm-domain';
-import {
-  recordStockTransaction,
-  createBatchRecord,
-} from '@/lib/firebase/services/scm-firestore-service';
+import { recordStockTransactionEdge } from '@/lib/supply-chain/scm-edge-adapter';
 import {
   Layers,
   Boxes,
@@ -66,7 +63,7 @@ export function ScmBatchTrackingLedger({
     new Date(Date.now() + 365 * 86400000).toISOString().split('T')[0]
   );
   const [batchQty, setBatchQty] = useState(100);
-  const [batchManufacturer, setBatchManufacturer] = useState('Pfizer BioPharma Ltd');
+  const [batchManufacturer, setBatchManufacturer] = useState('');
   const [isSubmittingBatch, setIsSubmittingBatch] = useState(false);
 
   // Quick Transaction Modal with Batch Details
@@ -127,59 +124,16 @@ export function ScmBatchTrackingLedger({
     });
   }, [items, searchQuery]);
 
-  // Handle Register New Batch
+  // Batch identities are created only by governed receiving/GRN workflows.
+  // A standalone browser mutation would bypass PO, supplier, inspection, and
+  // inventory-finance controls, so this surface is intentionally fail-closed.
   const handleRegisterNewBatch = async () => {
-    if (!selectedBatchItem || !batchNumberInput.trim()) return;
-    setIsSubmittingBatch(true);
-    setFeedback(null);
-
-    const newBatchId = `btc-${Date.now()}`;
-    const newBatch: BatchLotRecord = {
-      batchId: newBatchId,
-      tenantId,
-      itemId: selectedBatchItem.itemId,
-      itemCode: selectedBatchItem.itemCode,
-      itemName: selectedBatchItem.name,
-      batchNumber: batchNumberInput.trim().toUpperCase(),
-      manufacturer: batchManufacturer,
-      manufactureDate: new Date(batchMfgDate).toISOString(),
-      expiryDate: new Date(batchExpDate).toISOString(),
-      receivedDate: new Date().toISOString(),
-      supplierId: 'vnd-direct',
-      supplierName: 'Direct Manufacturer / Primary Distributor',
-      unitCost: selectedBatchItem.unitCost,
-      currency: 'USD',
-      quantityReceived: batchQty,
-      quantityRemaining: batchQty,
-      quantityReserved: 0,
-      storageCondition: selectedBatchItem.storageRequirements || 'Standard Climate Controlled',
-      status: 'AVAILABLE',
-      temperatureExcursionDetected: false,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    try {
-      await createBatchRecord(tenantId, newBatch, {
-        userId: 'usr_dock_inspector',
-        userName: 'David Miller (Receiving QA)',
-        role: 'Dock Inspector',
-      });
-      setFeedback({
-        type: 'success',
-        text: `Batch ${newBatch.batchNumber} registered for ${selectedBatchItem.name}. Expiry tracked: ${batchExpDate}.`,
-      });
-      setIsNewBatchOpen(false);
-      setBatchNumberInput('');
-      await onRefresh();
-    } catch (err: unknown) {
-      setFeedback({
-        type: 'error',
-        text: err instanceof Error ? err.message : 'Failed to register batch.',
-      });
-    } finally {
-      setIsSubmittingBatch(false);
-    }
+    setFeedback({
+      type: 'error',
+      text:
+        'Standalone batch creation is disabled. Register received lots through the governed Goods Receipt workflow.',
+    });
+    setIsNewBatchOpen(false);
   };
 
   // Handle Record Stock Transaction
@@ -230,7 +184,7 @@ export function ScmBatchTrackingLedger({
     };
 
     try {
-      await recordStockTransaction(tenantId, newTxn);
+      await recordStockTransactionEdge(newTxn);
       setFeedback({
         type: 'success',
         text: `Stock transaction recorded! Moved ${txnQty} ${selectedTxnItem.unitOfMeasure} of ${selectedTxnItem.name} (Batch: ${newTxn.batchNumber}, Exp: ${newTxn.expirationDate ? newTxn.expirationDate.split('T')[0] : 'N/A'}).`,

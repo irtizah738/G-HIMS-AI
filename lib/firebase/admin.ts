@@ -1,8 +1,15 @@
-import * as admin from 'firebase-admin';
-import { getFirestore } from 'firebase-admin/firestore';
+import {
+  cert,
+  getApp,
+  getApps,
+  initializeApp,
+  type App,
+} from 'firebase-admin/app';
+import { getAuth, type Auth } from 'firebase-admin/auth';
+import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 import firebaseConfig from '@/firebase-applet-config.json';
 
-let adminApp: admin.app.App | null = null;
+let adminApp: App | null = null;
 
 /**
  * Format and sanitize PEM private keys for OpenSSL 3 / Node.js crypto decoder compatibility.
@@ -12,25 +19,31 @@ function formatPrivateKey(rawKey: string | undefined): string | null {
   if (!rawKey) return null;
   let key = rawKey.trim();
 
-  // Strip wrapping single or double quotes
-  if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+  if (
+    (key.startsWith('"') && key.endsWith('"')) ||
+    (key.startsWith("'") && key.endsWith("'"))
+  ) {
     key = key.slice(1, -1).trim();
   }
 
-  // Ignore empty or placeholder strings
-  if (!key || key.length < 30 || key.toLowerCase().includes('your-private-key') || key.toLowerCase().includes('placeholder')) {
+  if (
+    !key ||
+    key.length < 30 ||
+    key.toLowerCase().includes('your-private-key') ||
+    key.toLowerCase().includes('placeholder')
+  ) {
     return null;
   }
 
-  // Unescape escaped newlines or carriage returns
   key = key.replace(/\\n/g, '\n').replace(/\\r/g, '\r');
 
-  // Check for PEM boundary markers
   if (key.includes('BEGIN') && key.includes('KEY')) {
-    const match = key.match(/(-----BEGIN[A-Z0-9_ -]+-----)([\s\S]+?)(-----END[A-Z0-9_ -]+-----)/);
+    const match = key.match(
+      /(-----BEGIN[A-Z0-9_ -]+-----)([\s\S]+?)(-----END[A-Z0-9_ -]+-----)/
+    );
     if (match) {
       const header = match[1].trim();
-      const body = match[2].replace(/\s+/g, ''); // Remove all interior whitespace/linebreaks
+      const body = match[2].replace(/\s+/g, '');
       const footer = match[3].trim();
       const chunks = body.match(/.{1,64}/g) || [body];
       return `${header}\n${chunks.join('\n')}\n${footer}\n`;
@@ -40,25 +53,26 @@ function formatPrivateKey(rawKey: string | undefined): string | null {
   return key;
 }
 
-export function getAdminApp(): admin.app.App | null {
-  if (adminApp) {
+export function getAdminApp(): App | null {
+  if (adminApp) return adminApp;
+
+  const existingApps = getApps();
+  if (existingApps.length > 0) {
+    adminApp = getApp();
     return adminApp;
   }
 
-  if (admin.apps.length > 0) {
-    adminApp = admin.app();
-    return adminApp;
-  }
-
-  const projectId = process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || firebaseConfig.projectId;
+  const projectId =
+    process.env.FIREBASE_PROJECT_ID ||
+    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
+    firebaseConfig.projectId;
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim();
   const privateKey = formatPrivateKey(process.env.FIREBASE_PRIVATE_KEY);
 
-  // 1. Try initializing with explicit service account credentials if valid
   if (projectId && clientEmail && privateKey) {
     try {
-      adminApp = admin.initializeApp({
-        credential: admin.credential.cert({
+      adminApp = initializeApp({
+        credential: cert({
           projectId,
           clientEmail,
           privateKey,
@@ -67,58 +81,62 @@ export function getAdminApp(): admin.app.App | null {
       });
       return adminApp;
     } catch (certError) {
-      // If service account cert decoding fails in sandbox, continue to fallback gracefully
-      console.warn('Notice: Firebase Admin certificate parsing fallback:', certError instanceof Error ? certError.message : 'Invalid PEM format');
+      console.warn(
+        'Notice: Firebase Admin certificate parsing fallback:',
+        certError instanceof Error ? certError.message : 'Invalid PEM format'
+      );
     }
   }
 
-  // 2. Fallback: Google Application Default Credentials or GCloud Project environment
   try {
-    if (process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.GCLOUD_PROJECT) {
-      adminApp = admin.initializeApp({
+    if (
+      process.env.GOOGLE_APPLICATION_CREDENTIALS ||
+      process.env.GCLOUD_PROJECT
+    ) {
+      adminApp = initializeApp({
         projectId: projectId || process.env.GCLOUD_PROJECT,
       });
       return adminApp;
     }
   } catch {
-    // Continue to standard fallback
+    // Continue to project-scoped initialization.
   }
 
-  // 3. Fallback: Project-scoped initialization
   try {
-    adminApp = admin.initializeApp({
+    adminApp = initializeApp({
       projectId: projectId || firebaseConfig.projectId || 'g-hims-ai',
     });
     return adminApp;
   } catch {
-    if (admin.apps.length > 0) {
-      adminApp = admin.app();
+    const apps = getApps();
+    if (apps.length > 0) {
+      adminApp = getApp();
       return adminApp;
     }
     return null;
   }
 }
 
-export function getAdminAuth(): admin.auth.Auth | null {
+export function getAdminAuth(): Auth | null {
   const app = getAdminApp();
-  return app ? admin.auth(app) : null;
+  return app ? getAuth(app) : null;
 }
 
-export function getAdminFirestore(): admin.firestore.Firestore | null {
+export function getAdminFirestore(): Firestore | null {
   const app = getAdminApp();
   if (!app) return null;
-  try {
-    const dbId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
-    if (dbId && dbId !== '(default)') {
-      return getFirestore(app, dbId);
-    }
-    return admin.firestore(app);
-  } catch {
-    return admin.firestore(app);
+
+  const configuredDbId =
+    process.env.FIRESTORE_DATABASE_ID ||
+    process.env.NEXT_PUBLIC_FIRESTORE_DATABASE_ID ||
+    (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
+
+  if (configuredDbId && configuredDbId !== '(default)') {
+    return getFirestore(app, configuredDbId);
   }
+  return getFirestore(app);
 }
 
-// Direct exported singleton instances with lazy getter proxies
 export const adminAuth = {
   get instance() {
     return getAdminAuth();
@@ -128,7 +146,10 @@ export const adminAuth = {
     if (!auth) throw new Error('Firebase Admin Auth is not initialized');
     return auth.verifyIdToken(token, checkRevoked);
   },
-  setCustomUserClaims: async (uid: string, customUserClaims: object | null) => {
+  setCustomUserClaims: async (
+    uid: string,
+    customUserClaims: object | null
+  ) => {
     const auth = getAdminAuth();
     if (!auth) throw new Error('Firebase Admin Auth is not initialized');
     return auth.setCustomUserClaims(uid, customUserClaims);
@@ -137,7 +158,7 @@ export const adminAuth = {
     const auth = getAdminAuth();
     if (!auth) throw new Error('Firebase Admin Auth is not initialized');
     return auth.getUser(uid);
-  }
+  },
 };
 
 export const adminFirestore = {
@@ -153,8 +174,7 @@ export const adminFirestore = {
     const db = getAdminFirestore();
     if (!db) throw new Error('Firebase Admin Firestore is not initialized');
     return db.doc(docPath);
-  }
+  },
 };
 
 export default getAdminApp;
-

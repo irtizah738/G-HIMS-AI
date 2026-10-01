@@ -62,34 +62,21 @@ describe('G-HIMS clinical workflow architecture contract', () => {
     expect(route).toContain('deterioration,');
   });
 
-  test('Bed Board escalation consumes CI-8 and never derives escalation from NEWS2 locally', async () => {
+  test('STAGING/PILOT Bed Board consumes CI-8 and never derives escalation locally', async () => {
     const board = await source(
-      'app/[tenantId]/inpatient/bed-board/page.tsx'
+      'components/inpatient/governed-bed-board.tsx'
     );
 
     expect(board).toContain('loadActiveDeteriorationCensus');
     expect(board).toContain('deteriorationByEncounter');
-    expect(board).toContain("state === 'ESCALATION_REQUIRED'");
-    expect(board).toContain("state === 'CRITICAL_REVIEW_REQUIRED'");
+    expect(board).toContain("projection?.state === 'ESCALATION_REQUIRED'");
+    expect(board).toContain("projection?.state === 'CRITICAL_REVIEW_REQUIRED'");
     expect(board).toContain(
       'The Bed Board will not infer escalation from raw bed or NEWS2 metadata.'
     );
-
-    const escalationStart = board.indexOf(
-      'const hasCi8Escalation = (bed: Bed)'
-    );
-    const escalationEnd = board.indexOf(
-      'const escalationBeds',
-      escalationStart
-    );
-    const escalationResolver = board.slice(
-      escalationStart,
-      escalationEnd
-    );
-
-    expect(escalationResolver).not.toContain('acuityScore');
-    expect(escalationResolver).not.toContain('score >=');
-    expect(escalationResolver).not.toContain('calculateNEWS2');
+    expect(board).not.toContain('calculateNEWS2');
+    expect(board).not.toContain('acuityScore');
+    expect(board).not.toContain('bed.vitalAlert');
   });
 
   test('active CI-8 census is server-authorized and has encrypted-edge continuity', async () => {
@@ -134,25 +121,29 @@ describe('G-HIMS clinical workflow architecture contract', () => {
     );
   });
 
-  test('Bed Board discharge is two-phase: immutable summary then Patient 360 review then command', async () => {
-    const board = await source(
-      'app/[tenantId]/inpatient/bed-board/page.tsx'
-    );
-    const modal = await source(
-      'components/inpatient/DischargeConfirmationModal.tsx'
-    );
+  test('Bed Board routes clinical occupancy decisions to Patient 360/care-transition authority', async () => {
+    const [board, page, patient360, client, bus, discharge] = await Promise.all([
+      source('components/inpatient/governed-bed-board.tsx'),
+      source('app/[tenantId]/inpatient/bed-board/page.tsx'),
+      source('components/patient360/Patient360View.tsx'),
+      source('lib/clinical/patient360/patient360-client.ts'),
+      source('lib/backend/commands/command-bus.ts'),
+      source('lib/backend/services/care-transition-domain-service.ts'),
+    ]);
 
-    expect(board).toContain('loadPatient360ClinicalView');
-    expect(board).toContain("'SignClinicalNoteCommand'");
-    expect(board).toContain("'DISCHARGE_SUMMARY_REQUIRED'");
+    expect(page).toContain('isDemoRuntime ? <BedOccupancyView /> : <GovernedBedBoard />');
+    expect(board).toContain('Open Patient 360 / CI review');
     expect(board).toContain('/360');
-    expect(board).toContain("'DischargeInpatientEncounterCommand'");
-    expect(board.indexOf("'SignClinicalNoteCommand'")).toBeLessThan(
-      board.indexOf("'DischargeInpatientEncounterCommand'")
-    );
-    expect(modal).toContain(
-      'Patient 360 / CI-7 assessment to be reviewed and acknowledged'
-    );
+    expect(board).not.toContain("'DischargeInpatientEncounterCommand'");
+    expect(board).not.toContain('dischargePatientFromBed');
+    expect(board).not.toContain('admitPatientToBed');
+
+    expect(patient360).toContain('recordDischargeReadinessReview');
+    expect(client).toContain("'RecordDischargeReadinessReviewCommand'");
+    expect(bus).toContain("'DischargeInpatientEncounterCommand'");
+    expect(discharge).toContain('Patient360ProjectionService.getProjection');
+    expect(discharge).toContain('DischargeReadinessService.getProjection');
+    expect(discharge).toContain("'DISCHARGE_READINESS_REVIEW_REQUIRED'");
   });
 
   test('AI remains draft-only and cannot directly mutate authoritative clinical state', async () => {

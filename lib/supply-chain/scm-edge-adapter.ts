@@ -72,9 +72,20 @@ export async function hydrateScmEdgeData(tenantId: string): Promise<ScmEdgeData>
 export async function recordStockTransactionEdge(
   transaction: StockTransaction
 ): Promise<void> {
+  const {
+    tenantId: _tenantId,
+    performedBy: _performedBy,
+    authorizedBy: _authorizedBy,
+    recordedAt: _recordedAt,
+    source: _source,
+    ...clientPayload
+  } = transaction as StockTransaction & {
+    authorizedBy?: unknown;
+  };
+
   const result = await executeActiveTenantCommand(
     'RecordStockTransactionCommand',
-    transaction as unknown as Record<string, unknown>,
+    clientPayload as unknown as Record<string, unknown>,
     {
       idempotencyKey: transaction.idempotencyKey,
       offlineQueue: {
@@ -82,11 +93,117 @@ export async function recordStockTransactionEdge(
         collection: 'stockTransactions',
         resourceId: transaction.transactionId,
         action: 'CREATE',
-        optimisticCache: true,
+        optimisticCache: false,
       },
     }
   );
-  if (!result.success) throw new Error(result.error?.message || 'Stock transaction failed.');
+  if (!result.success) {
+    throw new Error(result.error?.message || 'Stock transaction failed.');
+  }
+}
+
+export async function recordStockAdjustmentEdge(input: {
+  transactionId: string;
+  facilityId: string;
+  locationId: string;
+  locationName?: string;
+  itemId: string;
+  batchId?: string;
+  varianceQuantity: number;
+  uom: string;
+  referenceId: string;
+  reasonCode: string;
+  justification: string;
+  occurredAt?: string;
+}): Promise<void> {
+  if (!Number.isFinite(input.varianceQuantity) || input.varianceQuantity === 0) {
+    throw new Error('Stock adjustment variance must be non-zero.');
+  }
+
+  const inbound = input.varianceQuantity > 0;
+  const payload: Record<string, unknown> = {
+    transactionId: input.transactionId,
+    facilityId: input.facilityId,
+    itemId: input.itemId,
+    ...(input.batchId ? { batchId: input.batchId } : {}),
+    transactionType: inbound ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT',
+    quantity: Math.abs(input.varianceQuantity),
+    normalizedQuantity: Math.abs(input.varianceQuantity),
+    uom: input.uom,
+    ...(inbound
+      ? { toLocationId: input.locationId, toLocationName: input.locationName }
+      : { fromLocationId: input.locationId, fromLocationName: input.locationName }),
+    referenceType: 'CYCLE_COUNT',
+    referenceId: input.referenceId,
+    occurredAt: input.occurredAt || new Date().toISOString(),
+    metadata: {
+      reasonCode: input.reasonCode,
+      justification: input.justification,
+    },
+  };
+
+  const result = await executeActiveTenantCommand(
+    'RecordStockTransactionCommand',
+    payload,
+    {
+      idempotencyKey: `scm-adjustment:${input.transactionId}`,
+      offlineQueue: {
+        enabled: true,
+        collection: 'stockTransactions',
+        resourceId: input.transactionId,
+        action: 'CREATE',
+        optimisticCache: false,
+      },
+    }
+  );
+  if (!result.success) {
+    throw new Error(result.error?.message || 'Stock adjustment failed.');
+  }
+}
+
+export async function quarantineBatchEdge(input: {
+  transactionId: string;
+  facilityId: string;
+  locationId: string;
+  locationName?: string;
+  itemId: string;
+  batchId: string;
+  quantity: number;
+  uom: string;
+  reason: string;
+}): Promise<void> {
+  const result = await executeActiveTenantCommand(
+    'RecordStockTransactionCommand',
+    {
+      transactionId: input.transactionId,
+      facilityId: input.facilityId,
+      itemId: input.itemId,
+      batchId: input.batchId,
+      transactionType: 'QUARANTINE',
+      quantity: input.quantity,
+      normalizedQuantity: input.quantity,
+      uom: input.uom,
+      fromLocationId: input.locationId,
+      fromLocationName: input.locationName,
+      referenceType: 'EXPIRY_CONTROL',
+      referenceId: `expiry-quarantine:${input.batchId}`,
+      occurredAt: new Date().toISOString(),
+      metadata: { reason: input.reason },
+    },
+    {
+      idempotencyKey: `scm-quarantine:${input.transactionId}`,
+      offlineQueue: {
+        enabled: false,
+        collection: 'stockTransactions',
+        resourceId: input.transactionId,
+        action: 'CREATE',
+        optimisticCache: false,
+      },
+    }
+  );
+  if (!result.success) {
+    throw new Error(result.error?.message || 'Batch quarantine failed.');
+  }
 }
 
 export async function recordPatientConsumptionEdge(

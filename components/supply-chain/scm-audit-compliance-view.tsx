@@ -7,13 +7,10 @@ import {
   InventoryBalance,
   InventoryLocation,
   ScmDomainEvent,
-  StockAdjustmentRecord,
+  StockTransaction,
   AdjustmentReasonCode,
 } from '@/types/scm-domain';
-import {
-  getScmDomainEvents,
-  recordStockAdjustment,
-} from '@/lib/firebase/services/scm-firestore-service';
+import { recordStockAdjustmentEdge } from '@/lib/supply-chain/scm-edge-adapter';
 import {
   ShieldAlert,
   CheckCircle2,
@@ -41,6 +38,7 @@ interface ScmAuditComplianceViewProps {
   batches: BatchLotRecord[];
   balances: InventoryBalance[];
   locations: InventoryLocation[];
+  transactions: StockTransaction[];
   onRefresh: () => Promise<void>;
 }
 
@@ -50,45 +48,65 @@ export function ScmAuditComplianceView({
   batches,
   balances,
   locations,
+  transactions,
   onRefresh,
 }: ScmAuditComplianceViewProps) {
-  const [events, setEvents] = useState<ScmDomainEvent[]>([]);
-  const [loading, setLoading] = useState(true);
   const [selectedEventType, setSelectedEventType] = useState<string>('ALL');
   const [selectedReasonFilter, setSelectedReasonFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedEventForDetail, setSelectedEventForDetail] = useState<ScmDomainEvent | null>(null);
 
-  // New Adjustment Modal
+  // Physical-count adjustment state. Actor identity and authorization are
+  // resolved by the authoritative command endpoint; the browser never supplies them.
   const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
   const [adjItemId, setAdjItemId] = useState<string>(items[0]?.itemId || '');
   const [adjLocationId, setAdjLocationId] = useState<string>(locations[0]?.locationId || '');
   const [adjBatchId, setAdjBatchId] = useState<string>('');
-  const [adjPhysicalCount, setAdjPhysicalCount] = useState<number>(100);
+  const [adjPhysicalCount, setAdjPhysicalCount] = useState<number>(0);
   const [adjReasonCode, setAdjReasonCode] = useState<AdjustmentReasonCode>('COUNT_VARIANCE');
-  const [adjJustification, setAdjJustification] = useState<string>('Routine physical audit variance verified against physical shelf tags.');
-  const [adjAuthorizerId, setAdjAuthorizerId] = useState<string>('usr_scm_director');
-  const [adjAuthorizerName, setAdjAuthorizerName] = useState<string>('Elena Rostova, CPIM (SCM Director)');
-  const [adjSecondAuthorizerId, setAdjSecondAuthorizerId] = useState<string>('usr_chief_auditor');
-  const [adjSecondAuthorizerName, setAdjSecondAuthorizerName] = useState<string>('Marcus Vance, CPA (Internal Audit)');
+  const [adjJustification, setAdjJustification] = useState<string>('');
   const [isSubmittingAdj, setIsSubmittingAdj] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const loadAuditEvents = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await getScmDomainEvents(tenantId);
-      setEvents(data);
-    } catch (err: unknown) {
-      console.error('Error fetching audit events:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [tenantId]);
+  const events = useMemo<ScmDomainEvent[]>(() => {
+    return transactions.map((transaction) => {
+      const eventType: ScmDomainEvent['eventType'] =
+        transaction.transactionType === 'RECEIPT'
+          ? 'STOCK_RECEIVED'
+          : transaction.transactionType === 'ADJUSTMENT_IN' ||
+              transaction.transactionType === 'ADJUSTMENT_OUT'
+            ? 'STOCK_ADJUSTED'
+            : transaction.transactionType === 'QUARANTINE'
+              ? 'BATCH_QUARANTINED'
+              : 'STOCK_ISSUED';
 
-  useEffect(() => {
-    loadAuditEvents();
-  }, [loadAuditEvents]);
+      return {
+        eventId: transaction.transactionId,
+        tenantId,
+        eventType,
+        aggregateId: transaction.transactionId,
+        aggregateType: 'STOCK_TRANSACTION',
+        actor: {
+          userId: transaction.performedBy?.userId || 'server',
+          userName: transaction.performedBy?.userName || 'Authenticated actor',
+          role: transaction.performedBy?.role || 'AUTHENTICATED_USER',
+        },
+        description:
+          `${transaction.transactionType} ${transaction.quantity} ${transaction.uom} of ${transaction.itemName || transaction.itemId}`,
+        payload: {
+          transactionType: transaction.transactionType,
+          quantity: transaction.quantity,
+          reasonCode: transaction.reasonCode,
+          referenceType: transaction.referenceType,
+          referenceId: transaction.referenceId,
+          batchId: transaction.batchId,
+        },
+        occurredAt: transaction.occurredAt,
+        recordedAt: transaction.recordedAt,
+        idempotencyKey: transaction.idempotencyKey,
+      };
+    });
+  }, [transactions, tenantId]);
 
   // Derived filtered events
   const filteredEvents = useMemo(() => {
@@ -148,55 +166,59 @@ export function ScmAuditComplianceView({
 
   const calculatedVariance = adjPhysicalCount - currentSystemBalance;
 
-  // Handle Submit Stock Adjustment
+  // Handle Submit Stock Adjustment through the authoritative inventory command.
   const handleSubmitAdjustment = async () => {
-    if (!targetAdjItem) return;
+    if (!targetAdjItem || !adjLocationId || calculatedVariance === 0) return;
+    if (!adjJustification.trim()) {
+      setFeedbackMsg({
+        type: 'error',
+        text: 'A substantive physical-count justification is required.',
+      });
+      return;
+    }
+
     setIsSubmittingAdj(true);
     setFeedbackMsg(null);
 
-    const adjId = `adj-${Date.now()}`;
-    const adjNumber = `ADJ-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const selectedBatch = batches.find((batch) => batch.batchId === adjBatchId) || targetItemBatches[0];
+    const location = locations.find((candidate) => candidate.locationId === adjLocationId);
+    const matchedBalance = balances.find(
+      (balance) =>
+        balance.itemId === targetAdjItem.itemId &&
+        balance.locationId === adjLocationId &&
+        (!selectedBatch?.batchId || balance.batchId === selectedBatch.batchId)
+    );
+    const facilityId = matchedBalance?.facilityId || location?.facilityId || '';
 
-    const selectedBatch = batches.find((b) => b.batchId === adjBatchId) || targetItemBatches[0];
-    const loc = locations.find((l) => l.locationId === adjLocationId) || locations[0];
+    if (!facilityId) {
+      setFeedbackMsg({
+        type: 'error',
+        text: 'The selected stock location is missing authoritative facility scope.',
+      });
+      setIsSubmittingAdj(false);
+      return;
+    }
 
-    const adjustmentRecord: StockAdjustmentRecord = {
-      adjustmentId: adjId,
-      tenantId,
-      facilityId: 'FAC-MAIN',
-      adjustmentNumber: adjNumber,
-      locationId: loc?.locationId || 'loc-pharmacy-main',
-      locationName: loc?.name || 'Central Pharmacy Depot',
-      itemId: targetAdjItem.itemId,
-      itemCode: targetAdjItem.itemCode,
-      itemName: targetAdjItem.name,
-      batchId: selectedBatch?.batchId || 'btc-general',
-      batchNumber: selectedBatch?.batchNumber || 'LOT-GENERAL',
-      uom: targetAdjItem.unitOfMeasure,
-      systemQuantityBefore: currentSystemBalance,
-      countedQuantity: adjPhysicalCount,
-      varianceQuantity: calculatedVariance,
-      adjustmentType: calculatedVariance >= 0 ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT',
-      unitCost: targetAdjItem.unitCost,
-      totalVarianceValuation: Math.round(calculatedVariance * targetAdjItem.unitCost * 100) / 100,
-      reasonCode: adjReasonCode,
-      justification: adjJustification,
-      reportedBy: 'Staff Inventory Specialist',
-      authorizedBy: adjAuthorizerName,
-      requiresDualAuthorization: Math.abs(calculatedVariance * targetAdjItem.unitCost) > 1000,
-      secondAuthorizedBy: adjSecondAuthorizerName,
-      timestamp: new Date().toISOString(),
-      status: 'APPROVED_POSTED',
-    };
-
+    const transactionId = `adj_${crypto.randomUUID()}`;
     try {
-      await recordStockAdjustment(tenantId, adjustmentRecord);
+      await recordStockAdjustmentEdge({
+        transactionId,
+        facilityId,
+        locationId: adjLocationId,
+        locationName: location?.name,
+        itemId: targetAdjItem.itemId,
+        batchId: selectedBatch?.batchId,
+        varianceQuantity: calculatedVariance,
+        uom: targetAdjItem.stockUOM || targetAdjItem.unitOfMeasure,
+        referenceId: transactionId,
+        reasonCode: adjReasonCode,
+        justification: adjJustification.trim(),
+      });
       setFeedbackMsg({
         type: 'success',
-        text: `Physical Stock Adjustment ${adjNumber} posted successfully. Variance of ${calculatedVariance > 0 ? '+' : ''}${calculatedVariance} ${targetAdjItem.unitOfMeasure} tracked with a server-owned audit event.`,
+        text: `Physical count adjustment queued/posted through the governed inventory command. Variance: ${calculatedVariance > 0 ? '+' : ''}${calculatedVariance}.`,
       });
       setIsAdjustmentModalOpen(false);
-      await loadAuditEvents();
       await onRefresh();
     } catch (err: unknown) {
       setFeedbackMsg({
@@ -256,12 +278,11 @@ export function ScmAuditComplianceView({
 
         <div className="flex items-center gap-2">
           <button
-            onClick={loadAuditEvents}
-            disabled={loading}
+            onClick={() => void onRefresh()}
             className="p-2 rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 cursor-pointer"
-            title="Refresh Audit Logs"
+            title="Refresh authoritative SCM evidence"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-blue-500' : ''}`} />
+            <RefreshCw className="w-4 h-4" />
           </button>
           <button
             id="btn-record-stock-adjustment"
@@ -719,33 +740,8 @@ export function ScmAuditComplianceView({
                 />
               </div>
 
-              {/* Dual Authorizing User Sign-offs */}
-              <div className="grid grid-cols-2 gap-3 pt-1">
-                <div>
-                  <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
-                    Primary Authorizing User ID:
-                  </label>
-                  <input
-                    type="text"
-                    value={adjAuthorizerId}
-                    onChange={(e) => setAdjAuthorizerId(e.target.value)}
-                    className="w-full px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700 font-mono text-[11px]"
-                  />
-                  <span className="text-[10px] text-slate-400">{adjAuthorizerName}</span>
-                </div>
-
-                <div>
-                  <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
-                    Second Supervisory Authorizer:
-                  </label>
-                  <input
-                    type="text"
-                    value={adjSecondAuthorizerId}
-                    onChange={(e) => setAdjSecondAuthorizerId(e.target.value)}
-                    className="w-full px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700 font-mono text-[11px]"
-                  />
-                  <span className="text-[10px] text-slate-400">{adjSecondAuthorizerName}</span>
-                </div>
+              <div className="rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50/70 dark:bg-blue-950/30 p-3 text-[11px] text-blue-800 dark:text-blue-300">
+                Actor identity, permissions, financial authority, and any required supervisory approval are resolved by the server from the authenticated session. This browser never accepts authorizer IDs.
               </div>
             </div>
 

@@ -140,24 +140,26 @@ describe('SCM-1 inventory integrity foundation', () => {
     expect(method).toContain("'INVALID_REQUISITION_LINE'");
   });
 
-  test('production SCM reads never seed synthetic hospital records', async () => {
-    const scm = await source(
-      'lib/firebase/services/scm-firestore-service.ts'
-    );
-    const legacy = await source('lib/firebase/services/supply-chain.ts');
+  test('production SCM reads use governed projections and contain no synthetic hospital defaults', async () => {
+    const [view, adapter] = await Promise.all([
+      source('components/views/supply-chain-scm-view.tsx'),
+      source('lib/supply-chain/scm-edge-adapter.ts'),
+    ]);
 
-    expect(scm).toContain(
-      "const IS_DEMO_RUNTIME = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO'"
-    );
-    expect(legacy).toContain(
-      "const IS_DEMO_RUNTIME = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO'"
-    );
-    expect(scm).not.toContain(
-      'if (snap.empty) {\n      await seedRealisticHospitalSCMData'
-    );
-    expect(legacy).not.toContain(
-      'if (snapshot.empty) {\n      await seedInitial'
-    );
+    expect(view).toContain('loadLocalScmEdgeData');
+    expect(view).toContain('hydrateScmEdgeData');
+    expect(view).not.toContain("from '@/lib/firebase/services/");
+    expect(view).not.toContain('seedRealisticHospitalSCMData');
+    expect(view).not.toContain('seedInitial');
+    expect(view).not.toContain("useState('Pfizer BioPharma Ltd')");
+    expect(view).not.toContain("useState('PO-2026-0041')");
+    expect(view).not.toContain("useState('ICU Nurse Station B')");
+
+    expect(adapter).toContain('executeActiveTenantCommand');
+    expect(adapter).toContain('loadLocalEdgeSnapshot');
+    expect(adapter).toContain('hydrateEdgeSnapshot');
+    expect(adapter).not.toContain('seedRealisticHospitalSCMData');
+    expect(adapter).not.toContain("firebase/firestore");
   });
 
   test('ward replenishment FEFO uses source-location balances and a true transfer', async () => {

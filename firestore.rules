@@ -207,6 +207,16 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      match /surgicalCases/{caseId} {
+        allow read: if canReadClinical(tenantId);
+        allow write: if false;
+      }
+
+      match /orRoomSchedules/{roomId} {
+        allow read: if canReadClinical(tenantId) || canReadFacilities(tenantId);
+        allow write: if false;
+      }
+
       match /telehealthSessions/{sessionId} {
         allow read: if canReadClinical(tenantId);
         allow write: if false;

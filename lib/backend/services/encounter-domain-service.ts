@@ -109,33 +109,9 @@ export class EncounterDomainService {
       );
 
       if (!persisted) {
-        const cached = this.encounterCache.get(key);
-        if (cached) return cached;
-
-        // Fallback for seed/demo encounters when running with live/staging database
-        if (encounterId === 'enc-101' || encounterId === 'enc-102' || encounterId.startsWith('enc-')) {
-          const fallbackEncounter: EncounterState = {
-            encounterId,
-            tenantId,
-            patientId: 'pat_eleanor_vance',
-            encounterType: 'OPD',
-            chiefComplaint: 'Chest tightness and shortness of breath on exertion',
-            departmentId: 'Cardiology',
-            status: 'ACTIVE',
-            currentStage: 'REGISTERED',
-            clinicalState: 'REGISTERED',
-            operationalState: 'QUEUED',
-            financialClearanceState: 'CONSULTATION_CLEARED',
-            resourceAssignmentState: 'NONE',
-            priority: 'URGENT',
-            assignedProviderId: 'doc-01',
-            createdAt: Date.now() - 3600000,
-            updatedAt: Date.now(),
-          };
-          this.encounterCache.set(key, fallbackEncounter);
-          return fallbackEncounter;
-        }
-
+        // Authoritative runtime never fabricates clinical state when Firestore
+        // cannot resolve the encounter. Test/demo fixtures must be provisioned
+        // explicitly into their isolated environments.
         this.encounterCache.delete(key);
         return null;
       }
@@ -220,8 +196,47 @@ export class EncounterDomainService {
       };
     }
 
-    // 3. Domain Logic & State Initialization
-    const encounterId = `enc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    // 3. Authoritative patient precondition and state initialization.
+    const patient = DomainStateRepository.isAvailable()
+      ? await DomainStateRepository.getById<Record<string, unknown>>(
+          context.tenantId,
+          'patients',
+          payload.patientId
+        )
+      : TransactionManager.getEphemeralStateForTesting(
+          context.tenantId,
+          'PATIENT_MPI',
+          payload.patientId
+        );
+    if (!patient) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'PATIENT_NOT_FOUND',
+          message: 'Encounter target patient does not exist in the authenticated tenant.',
+        },
+      };
+    }
+
+    if (
+      ['MERGED', 'DECEASED', 'INACTIVE'].includes(
+        String(patient.status || '').toUpperCase()
+      )
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'PATIENT_NOT_ACTIVE',
+          message: 'A new encounter cannot be opened against a non-active patient identity.',
+        },
+      };
+    }
+
+    const encounterId = `enc_${crypto.randomUUID()}`;
     const domainState: EncounterState = {
       encounterId,
       tenantId: context.tenantId,

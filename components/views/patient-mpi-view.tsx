@@ -56,32 +56,37 @@ export function PatientMpiView() {
   const [rawNoteText, setRawNoteText] = useState('');
   const [isAiProcessing, setIsAiProcessing] = useState(false);
   const [aiParseError, setAiParseError] = useState<string | null>(null);
+  const [aiDraft, setAiDraft] = useState<Record<string, unknown> | null>(null);
   const [noteCategory, setNoteCategory] = useState<'SOAP' | 'Progress' | 'Nursing' | 'Discharge'>('SOAP');
-  const [authorName, setAuthorName] = useState('Dr. Sarah Jenkins');
+  const authorName = 'Authenticated clinician';
 
   // New vitals state
-  const [newHeartRate, setNewHeartRate] = useState(78);
-  const [newBp, setNewBp] = useState('120/80');
-  const [newTemp, setNewTemp] = useState(36.8);
-  const [newResp, setNewResp] = useState(18);
-  const [newO2, setNewO2] = useState(98);
+  const [newHeartRate, setNewHeartRate] = useState<number | ''>('');
+  const [newBp, setNewBp] = useState('');
+  const [newTemp, setNewTemp] = useState<number | ''>('');
+  const [newResp, setNewResp] = useState<number | ''>('');
+  const [newO2, setNewO2] = useState<number | ''>('');
 
   // New patient registration state
   const [newFullName, setNewFullName] = useState('');
-  const [newDob, setNewDob] = useState('1990-01-01');
-  const [newAge, setNewAge] = useState(36);
-  const [newGender, setNewGender] = useState<'Male' | 'Female' | 'Other'>('Female');
-  const [newBlood, setNewBlood] = useState<'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-'>('O+');
-  const [newPhone, setNewPhone] = useState('+1 (555) 000-0000');
+  const [newDob, setNewDob] = useState('');
+  const [newAge, setNewAge] = useState<number | ''>('');
+  const [newGender, setNewGender] = useState<'' | 'Male' | 'Female' | 'Other'>('');
+  const [newBlood, setNewBlood] = useState<Patient['bloodGroup']>('Unknown');
+  const [newPhone, setNewPhone] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newAddress, setNewAddress] = useState('');
   const [newAllergies, setNewAllergies] = useState('');
   const [newConditions, setNewConditions] = useState('');
+  const [registrationError, setRegistrationError] = useState<string | null>(null);
 
   // ABAC patient dataset gating: If user is 'patient', ONLY show their own record
-  const scopedPatients = currentRole === 'patient'
-    ? patients.filter((p) => p.id === (activePatientId || 'p-1001'))
-    : patients;
+  const scopedPatients =
+    currentRole === 'patient'
+      ? activePatientId
+        ? patients.filter((p) => p.id === activePatientId)
+        : []
+      : patients;
 
   // RULE 10: Patient Identity Safety — Automated MPI Duplicate Pair Detection
   const detectedDuplicatePairs = useMemo(() => {
@@ -136,7 +141,7 @@ export function PatientMpiView() {
     );
   });
 
-  const currentPatient = scopedPatients.find((p) => p.id === selectedPatientId) || scopedPatients[0] || patients[0];
+  const currentPatient = scopedPatients.find((p) => p.id === selectedPatientId) || scopedPatients[0];
   const activeEncounter = currentPatient?.encounters?.[0];
   const assignedBed = beds.find((b) => b.id === currentPatient?.activeBedId);
 
@@ -150,17 +155,52 @@ export function PatientMpiView() {
 
   const handleCreatePatient = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newFullName) return;
+    setRegistrationError(null);
 
-    // RULE 10: Patient Identity Safety — Check for duplicates (same name & DOB or phone)
+    if (
+      !newFullName.trim() ||
+      !newDob ||
+      !newGender ||
+      !newPhone.trim() ||
+      !newAddress.trim()
+    ) {
+      setRegistrationError(
+        'Full legal name, date of birth, gender, phone number and address are required. G-HIMS will not invent missing demographics.'
+      );
+      return;
+    }
+
+    const birthDate = new Date(`${newDob}T00:00:00Z`);
+    const today = new Date();
+    if (!Number.isFinite(birthDate.getTime()) || birthDate > today) {
+      setRegistrationError('Date of birth is invalid.');
+      return;
+    }
+
+    let derivedAge = today.getUTCFullYear() - birthDate.getUTCFullYear();
+    const monthDelta = today.getUTCMonth() - birthDate.getUTCMonth();
+    if (
+      monthDelta < 0 ||
+      (monthDelta === 0 && today.getUTCDate() < birthDate.getUTCDate())
+    ) {
+      derivedAge -= 1;
+    }
+    if (derivedAge < 0 || derivedAge > 130) {
+      setRegistrationError('Derived patient age is outside the accepted range.');
+      return;
+    }
+
+    // Local fuzzy detection is advisory only. The server transaction owns exact
+    // identifier uniqueness and will reject an authoritative identity conflict.
     if (!overrideDuplicateRegistration) {
       const normalizedName = newFullName.trim().toLowerCase();
       const normalizedPhone = newPhone.replace(/\D/g, '');
       const duplicate = patients.find((p) => {
-        const pName = (p.fullName || (p as any).name || '').toLowerCase();
+        const pName = (p.fullName || '').trim().toLowerCase();
         const pPhone = (p.contactNumber || '').replace(/\D/g, '');
         const nameMatch = pName === normalizedName && p.dateOfBirth === newDob;
-        const phoneMatch = normalizedPhone.length >= 7 && pPhone === normalizedPhone;
+        const phoneMatch =
+          normalizedPhone.length >= 7 && pPhone === normalizedPhone;
         return nameMatch || phoneMatch;
       });
 
@@ -172,26 +212,47 @@ export function PatientMpiView() {
 
     try {
       const created = await registerNewPatient({
-        fullName: newFullName,
+        fullName: newFullName.trim(),
         dateOfBirth: newDob,
-        age: Number(newAge) || 30,
+        age: derivedAge,
         gender: newGender,
         bloodGroup: newBlood,
-        contactNumber: newPhone,
-        email: newEmail || `${newFullName.toLowerCase().replace(/\s+/g, '.')}@example.com`,
-        address: newAddress || '123 Main St, Metro City',
-        emergencyContact: { name: 'Emergency Contact', relationship: 'Family', phone: newPhone },
-        allergies: newAllergies ? newAllergies.split(',').map((s) => s.trim()) : [],
-        chronicConditions: newConditions ? newConditions.split(',').map((s) => s.trim()) : [],
+        contactNumber: newPhone.trim(),
+        email: newEmail.trim(),
+        address: newAddress.trim(),
+        emergencyContact: {
+          name: '',
+          relationship: '',
+          phone: '',
+        },
+        allergies: newAllergies
+          ? newAllergies.split(',').map((value) => value.trim()).filter(Boolean)
+          : [],
+        chronicConditions: newConditions
+          ? newConditions.split(',').map((value) => value.trim()).filter(Boolean)
+          : [],
       });
 
       setSelectedPatientId(created.id);
       setShowNewPatientModal(false);
       setNewFullName('');
+      setNewDob('');
+      setNewAge('');
+      setNewGender('');
+      setNewBlood('Unknown');
+      setNewPhone('');
+      setNewEmail('');
+      setNewAddress('');
+      setNewAllergies('');
+      setNewConditions('');
       setDuplicateWarningPatient(null);
       setOverrideDuplicateRegistration(false);
     } catch (error) {
-      console.error('PATIENT_REGISTRATION_FAILED', error);
+      setRegistrationError(
+        error instanceof Error
+          ? error.message
+          : 'Patient registration failed.'
+      );
     }
   };
 
@@ -202,22 +263,48 @@ export function PatientMpiView() {
     setMergeCandidateSecondaryId(undefined);
   };
 
-  const handleAddVitals = (e: React.FormEvent) => {
+  const handleAddVitals = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentPatient) return;
-    addVitals(currentPatient.id, {
-      heartRate: Number(newHeartRate),
-      bloodPressure: newBp,
-      temperature: Number(newTemp),
-      respiratoryRate: Number(newResp),
-      oxygenSaturation: Number(newO2),
-    });
+
+    if (
+      typeof newHeartRate !== 'number' ||
+      !newBp.trim() ||
+      typeof newTemp !== 'number' ||
+      typeof newResp !== 'number' ||
+      typeof newO2 !== 'number'
+    ) {
+      setAiParseError(
+        'Complete all vital-sign fields before recording a new observation.'
+      );
+      return;
+    }
+
+    try {
+      await addVitals(currentPatient.id, {
+        heartRate: newHeartRate,
+        bloodPressure: newBp.trim(),
+        temperature: newTemp,
+        respiratoryRate: newResp,
+        oxygenSaturation: newO2,
+      });
+      setNewHeartRate('');
+      setNewBp('');
+      setNewTemp('');
+      setNewResp('');
+      setNewO2('');
+    } catch (error) {
+      setAiParseError(
+        error instanceof Error ? error.message : 'Vitals could not be recorded.'
+      );
+    }
   };
 
   const handleAiNoteParse = async () => {
     if (!rawNoteText.trim() || !currentPatient) return;
     setIsAiProcessing(true);
     setAiParseError(null);
+    setAiDraft(null);
 
     try {
       const tenantId = await AuthClient.getActiveTenantId();
@@ -234,34 +321,44 @@ export function PatientMpiView() {
 
       const data = await res.json();
       if (!res.ok || !data.structured) {
-        throw new Error(data.message || data.error || 'Clinical note AI extraction unavailable');
+        throw new Error(
+          data.message || data.error || 'Clinical note AI extraction unavailable'
+        );
       }
 
-      addClinicalNote(currentPatient.id, {
-        author: authorName,
-        role: 'Attending Physician',
-        category: noteCategory,
-        content: rawNoteText,
-        aiStructuredData: data.structured,
-      });
-
-      setRawNoteText('');
+      // DRP-S safety boundary: generative output is a draft only. It is not
+      // committed as accepted diagnoses, medications, procedures or billing.
+      setAiDraft(data.structured as Record<string, unknown>);
     } catch (error) {
-      // Preserve the clinician-authored note without inventing AI-derived facts.
-      addClinicalNote(currentPatient.id, {
-        author: authorName,
-        role: 'Attending Physician',
-        category: noteCategory,
-        content: rawNoteText,
-      });
       setAiParseError(
         error instanceof Error
-          ? `Note saved without AI structure: ${error.message}`
-          : 'Note saved without AI structure because AI extraction was unavailable.'
+          ? `AI draft unavailable: ${error.message}`
+          : 'AI draft unavailable.'
       );
-      setRawNoteText('');
     } finally {
       setIsAiProcessing(false);
+    }
+  };
+
+  const handleSaveNarrativeNote = async () => {
+    if (!rawNoteText.trim() || !currentPatient) return;
+    setAiParseError(null);
+
+    try {
+      await addClinicalNote(currentPatient.id, {
+        author: authorName,
+        role: 'Clinician',
+        category: noteCategory,
+        content: rawNoteText.trim(),
+      });
+      setRawNoteText('');
+      setAiDraft(null);
+    } catch (error) {
+      setAiParseError(
+        error instanceof Error
+          ? error.message
+          : 'Clinical note could not be saved.'
+      );
     }
   };
 
@@ -575,7 +672,7 @@ export function PatientMpiView() {
                       </div>
                       <div>
                         <h3 className="text-sm font-bold">GenAI Clinical Note Copilot</h3>
-                        <p className="text-[11px] text-slate-300">Dictate or enter freeform clinical notes. Generative AI extracts ICD billing codes, prescriptions & care plans automatically.</p>
+                        <p className="text-[11px] text-slate-300">Enter clinician-authored narrative. AI may generate a non-authoritative draft for review; it never auto-accepts diagnoses, medications, procedures or billing.</p>
                       </div>
                     </div>
                   </div>
@@ -586,13 +683,27 @@ export function PatientMpiView() {
                       rows={3}
                       value={rawNoteText}
                       onChange={(e) => setRawNoteText(e.target.value)}
-                      placeholder="e.g., Patient presented with stable hemodynamics. Sternal discomfort resolved. Administered Aspirin 81mg and Atorvastatin 80mg. Schedule follow-up ECG in 3 days. Recommend CPT 99233 high complexity review..."
+                      placeholder="Enter clinician-authored narrative. Do not paste information for another patient."
                       className="w-full bg-slate-950/60 border border-slate-700 rounded-lg p-3 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-400"
                     />
 
                     {aiParseError && (
                       <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
                         {aiParseError}
+                      </div>
+                    )}
+
+                    {aiDraft && (
+                      <div className="rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-3 text-[11px] text-blue-100 space-y-2">
+                        <div className="font-bold">
+                          AI draft — not accepted into the clinical record
+                        </div>
+                        <pre className="whitespace-pre-wrap break-words">
+                          {JSON.stringify(aiDraft, null, 2)}
+                        </pre>
+                        <div className="text-blue-200">
+                          Structured findings require an explicit reviewed acceptance workflow before they can become authoritative clinical data.
+                        </div>
                       </div>
                     )}
 
@@ -610,14 +721,9 @@ export function PatientMpiView() {
                           <option value="Discharge">Discharge Summary</option>
                         </select>
 
-                        <input
-                          id="input-author-name"
-                          type="text"
-                          value={authorName}
-                          onChange={(e) => setAuthorName(e.target.value)}
-                          placeholder="Author name"
-                          className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-200 w-36"
-                        />
+                        <span className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs text-slate-300">
+                          Signer: authenticated session
+                        </span>
                       </div>
 
                       <button
@@ -632,9 +738,17 @@ export function PatientMpiView() {
                           </>
                         ) : (
                           <>
-                            <Sparkles className="w-3.5 h-3.5" /> Parse & Save with AI
+                            <Sparkles className="w-3.5 h-3.5" /> Generate AI Draft
                           </>
                         )}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!rawNoteText.trim()}
+                        onClick={() => void handleSaveNarrativeNote()}
+                        className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white shadow-sm transition-all"
+                      >
+                        Save Clinician Narrative
                       </button>
                     </div>
                   </div>
@@ -711,7 +825,7 @@ export function PatientMpiView() {
                         id="input-vitals-hr"
                         type="number"
                         value={newHeartRate}
-                        onChange={(e) => setNewHeartRate(Number(e.target.value))}
+                        onChange={(e) => setNewHeartRate(e.target.value === '' ? '' : Number(e.target.value))}
                         className="w-full text-xs border border-slate-200 rounded-lg p-2 text-slate-800"
                       />
                     </div>
@@ -732,7 +846,7 @@ export function PatientMpiView() {
                         type="number"
                         step="0.1"
                         value={newTemp}
-                        onChange={(e) => setNewTemp(Number(e.target.value))}
+                        onChange={(e) => setNewTemp(e.target.value === '' ? '' : Number(e.target.value))}
                         className="w-full text-xs border border-slate-200 rounded-lg p-2 text-slate-800"
                       />
                     </div>
@@ -742,7 +856,7 @@ export function PatientMpiView() {
                         id="input-vitals-resp"
                         type="number"
                         value={newResp}
-                        onChange={(e) => setNewResp(Number(e.target.value))}
+                        onChange={(e) => setNewResp(e.target.value === '' ? '' : Number(e.target.value))}
                         className="w-full text-xs border border-slate-200 rounded-lg p-2 text-slate-800"
                       />
                     </div>
@@ -752,7 +866,7 @@ export function PatientMpiView() {
                         id="input-vitals-o2"
                         type="number"
                         value={newO2}
-                        onChange={(e) => setNewO2(Number(e.target.value))}
+                        onChange={(e) => setNewO2(e.target.value === '' ? '' : Number(e.target.value))}
                         className="w-full text-xs border border-slate-200 rounded-lg p-2 text-slate-800"
                       />
                     </div>
@@ -1058,7 +1172,7 @@ export function PatientMpiView() {
                   required
                   value={newFullName}
                   onChange={(e) => setNewFullName(e.target.value)}
-                  placeholder="e.g. Eleanor Vance"
+                  placeholder="Enter legal name exactly as provided"
                   className="w-full border border-slate-200 rounded-lg p-2 text-slate-800 focus:ring-1 focus:ring-blue-500"
                 />
               </div>
@@ -1069,7 +1183,30 @@ export function PatientMpiView() {
                   id="input-reg-dob"
                   type="date"
                   value={newDob}
-                  onChange={(e) => setNewDob(e.target.value)}
+                  required
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setNewDob(value);
+                    if (!value) {
+                      setNewAge('');
+                      return;
+                    }
+                    const birth = new Date(`${value}T00:00:00Z`);
+                    const now = new Date();
+                    if (!Number.isFinite(birth.getTime()) || birth > now) {
+                      setNewAge('');
+                      return;
+                    }
+                    let age = now.getUTCFullYear() - birth.getUTCFullYear();
+                    const monthDelta = now.getUTCMonth() - birth.getUTCMonth();
+                    if (
+                      monthDelta < 0 ||
+                      (monthDelta === 0 && now.getUTCDate() < birth.getUTCDate())
+                    ) {
+                      age -= 1;
+                    }
+                    setNewAge(age);
+                  }}
                   className="w-full border border-slate-200 rounded-lg p-2 text-slate-800"
                 />
               </div>
@@ -1080,8 +1217,9 @@ export function PatientMpiView() {
                   id="input-reg-age"
                   type="number"
                   value={newAge}
-                  onChange={(e) => setNewAge(Number(e.target.value))}
-                  className="w-full border border-slate-200 rounded-lg p-2 text-slate-800"
+                  readOnly
+                  aria-label="Age derived from date of birth"
+                  className="w-full border border-slate-200 rounded-lg p-2 text-slate-500 bg-slate-50"
                 />
               </div>
 
@@ -1092,7 +1230,9 @@ export function PatientMpiView() {
                   value={newGender}
                   onChange={(e) => setNewGender(e.target.value as any)}
                   className="w-full border border-slate-200 rounded-lg p-2 text-slate-800"
+                  required
                 >
+                  <option value="">Select gender</option>
                   <option value="Female">Female</option>
                   <option value="Male">Male</option>
                   <option value="Other">Other</option>
@@ -1107,6 +1247,7 @@ export function PatientMpiView() {
                   onChange={(e) => setNewBlood(e.target.value as any)}
                   className="w-full border border-slate-200 rounded-lg p-2 text-slate-800"
                 >
+                  <option value="Unknown">Unknown / not tested</option>
                   <option value="O+">O+</option>
                   <option value="O-">O-</option>
                   <option value="A+">A+</option>
@@ -1124,6 +1265,7 @@ export function PatientMpiView() {
                   id="input-reg-phone"
                   type="text"
                   value={newPhone}
+                  required
                   onChange={(e) => setNewPhone(e.target.value)}
                   className="w-full border border-slate-200 rounded-lg p-2 text-slate-800"
                 />
@@ -1141,6 +1283,18 @@ export function PatientMpiView() {
               </div>
 
               <div className="sm:col-span-2">
+                <label className="block font-medium text-slate-700 mb-1">Address *</label>
+                <textarea
+                  id="input-reg-address"
+                  required
+                  value={newAddress}
+                  onChange={(e) => setNewAddress(e.target.value)}
+                  placeholder="Enter the address supplied by the patient/representative"
+                  className="w-full border border-slate-200 rounded-lg p-2 text-slate-800"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
                 <label className="block font-medium text-slate-700 mb-1">Known Allergies (comma-separated)</label>
                 <input
                   id="input-reg-allergies"
@@ -1152,6 +1306,12 @@ export function PatientMpiView() {
                 />
               </div>
             </div>
+
+            {registrationError && (
+              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+                {registrationError}
+              </div>
+            )}
 
             <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
               <button
@@ -1183,7 +1343,7 @@ export function PatientMpiView() {
           mrn={currentPatient.mrn}
           chiefComplaint={currentPatient.chronicConditions.join(', ') || 'Inpatient / Outpatient Consultation Request'}
           triageCategory="MPI / Longitudinal Chart"
-          currentAttending="Dr. Sarah Jenkins"
+          currentAttending="Unassigned"
           onRoutedSuccess={(consultant, details) => {
             setShowRoutingModal(false);
           }}

@@ -234,12 +234,15 @@ function collectionForEntityType(entityType: string): string {
     ROOM_IDENTITY: 'roomIdentities',
     HOSPITAL_BED: 'beds',
     BED_IDENTITY: 'bedIdentities',
+    SURGICAL_CASE: 'surgicalCases',
+    OR_ROOM_SCHEDULE: 'orRoomSchedules',
     TELEHEALTH_SESSION: 'telehealthSessions',
     RESOURCE_RESERVATION: 'resourceReservations',
     MAINTENANCE_WORK_ORDER: 'maintenanceWorkOrders',
     CALIBRATION_RECORD: 'calibrationRecords',
     PATIENT_MPI: 'patients',
     PATIENT_SAFETY: 'patients',
+    PATIENT_IDENTITY_CONFIRMATION: 'patientIdentityConfirmations',
     REVENUE_INTEGRITY_FINDING: 'billingMismatches',
     ENCOUNTER_CHARGE: 'encounterCharges',
     AI_DRAFT: 'aiDrafts',
@@ -349,6 +352,17 @@ export class TransactionManager {
       throw new Error('EPHEMERAL_STATE_SEED_FORBIDDEN_OUTSIDE_TEST_OR_DEMO');
     }
     this.setEphemeralState(tenantId,entityType,entityId,value);
+  }
+
+  public static getEphemeralStateForTesting(
+    tenantId:string,
+    entityType:string,
+    entityId:string
+  ):Record<string,unknown>|null{
+    if(!canUseEphemeralPersistence()){
+      throw new Error('EPHEMERAL_STATE_READ_FORBIDDEN_OUTSIDE_TEST_OR_DEMO');
+    }
+    return this.getEphemeralState(tenantId,entityType,entityId);
   }
 
   private static buildRecords(params: {

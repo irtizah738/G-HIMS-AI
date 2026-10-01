@@ -17,6 +17,8 @@ const CLINICAL_COLLECTIONS = [
   'prescriptions',
   'opd_queue',
   'beds',
+  'surgicalCases',
+  'orRoomSchedules',
   'patient360Projections',
   'dischargeReadinessProjections',
   'deteriorationProjections',
@@ -389,6 +391,26 @@ function scopeOfflineCollections(
             Boolean(String(row.departmentId || '').trim()))
         );
       });
+      continue;
+    }
+
+    if (collection === 'surgicalCases') {
+      scoped[collection] = rows.filter((row) => {
+        const encounterId = String(row.encounterId || '').trim();
+        const patientId = String(row.patientId || '').trim();
+        return (
+          (encounterId && encounterIds.has(encounterId)) ||
+          (patientId && patientIds.has(patientId)) ||
+          valueMatchesScope(row.facilityId, facilities)
+        );
+      });
+      continue;
+    }
+
+    if (collection === 'orRoomSchedules') {
+      scoped[collection] = rows.filter((row) =>
+        valueMatchesScope(row.facilityId, facilities)
+      );
       continue;
     }
 

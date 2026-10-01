@@ -12,7 +12,6 @@ const IAM_ADMIN_ROLES = new Set([
   'SYSTEM_ADMIN',
   'SUPER_ADMIN',
   'HOSPITAL_ADMIN',
-  'MEDICAL_DIRECTOR',
 ]);
 
 async function requireIamAdmin(req: NextRequest, tenantId: string) {

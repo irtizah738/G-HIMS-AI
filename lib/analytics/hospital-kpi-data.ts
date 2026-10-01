@@ -122,6 +122,17 @@ export interface HospitalKpiReport {
  * Generates dynamic, realistic hospital reporting data based on active filters
  */
 export function generateHospitalKpiReport(filter: AnalyticsFilterState): HospitalKpiReport {
+  const runtime = String(
+    process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE ||
+      process.env.GHIMS_RUNTIME_MODE ||
+      ''
+  ).trim().toUpperCase();
+  if (runtime !== 'DEMO' && runtime !== 'TEST') {
+    throw new Error(
+      'AUTHORITATIVE_ANALYTICS_PROJECTION_REQUIRED: synthetic KPI generation is disabled outside DEMO/TEST.'
+    );
+  }
+
   const isAllDepts = filter.department === 'all' || !filter.department;
   
   // Scaling factors based on time horizon
@@ -627,7 +638,11 @@ export async function exportReportToPdf(report: HospitalKpiReport, filename = 'h
     doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
     doc.text(`Scope: Department [${report.filter.department.toUpperCase()}] | Encounter Type [${report.filter.encounterType.toUpperCase()}]`, 14, 39);
-    doc.text(`System Audit Signature: SHA256: 4f8b91c... | Certified Regulatory Compliance: Joint Commission & CMS`, 14, 44);
+    doc.text(
+      'Data provenance: supplied report projection. This export does not assert regulatory certification.',
+      14,
+      44
+    );
 
     // 3. Executive KPI Summary Table
     doc.setFontSize(11);

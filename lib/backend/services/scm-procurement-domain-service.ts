@@ -777,6 +777,7 @@ export class ScmProcurementDomainService {
         'SYSTEM_ADMIN',
         'ADMINISTRATOR',
       ],
+      requiredPermissions: ['SCM_PURCHASE_ORDER:APPROVE'],
     });
     if (!auth.authorized) {
       return rejection(

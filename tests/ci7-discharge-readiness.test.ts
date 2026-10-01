@@ -444,14 +444,12 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
     );
   });
 
-  test('legacy Bed Board census bypasses are retired outside DEMO', async () => {
-    const bus = await source('lib/backend/commands/command-bus.ts');
-    const board = await source(
-      'app/[tenantId]/inpatient/bed-board/page.tsx'
-    );
-    const legacyClient = await source(
-      'lib/firebase/services/inpatient-or.ts'
-    );
+  test('STAGING/PILOT Bed Board uses governed capacity and CI projections only', async () => {
+    const [bus, page, board] = await Promise.all([
+      source('lib/backend/commands/command-bus.ts'),
+      source('app/[tenantId]/inpatient/bed-board/page.tsx'),
+      source('components/inpatient/governed-bed-board.tsx'),
+    ]);
 
     expect(bus).toContain("'TransferInpatientBedCommand'");
     expect(bus).toContain("'CARE_TRANSITION_COMMAND_REQUIRED'");
@@ -462,56 +460,36 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
       'Inpatient discharge must use DischargeInpatientEncounterCommand'
     );
 
-    expect(board).toContain("'AdmitPatientToInpatientCareCommand'");
-    expect(board).toContain("'TransferInpatientBedCommand'");
-    expect(board).toContain("'DischargeInpatientEncounterCommand'");
-    expect(board).toContain("'UpdateBedStatusCommand'");
-    expect(board).not.toContain('saveClinicalDataOptimistic');
-    expect(board).not.toContain('assignBedToPatient(');
-    expect(board).not.toContain('transferPatientBed(');
-    expect(board).not.toContain('dischargePatientBed(');
-    expect(board).not.toContain('markBedCleaned(');
-    expect(board).not.toContain('updateBedStatus(');
+    expect(page).toContain('NEXT_PUBLIC_GHIMS_RUNTIME_MODE');
+    expect(page).toContain('isDemoRuntime ? <BedOccupancyView /> : <GovernedBedBoard />');
 
-    expect(legacyClient).toContain(
-      "assertDemoOnlyMutation('assignBedToPatient')"
-    );
-    expect(legacyClient).toContain(
-      "assertDemoOnlyMutation('transferPatientBed')"
-    );
-    expect(legacyClient).toContain(
-      "assertDemoOnlyMutation('dischargePatientBed')"
-    );
-    expect(legacyClient).toContain(
-      "assertDemoOnlyMutation('updateBedStatus')"
-    );
-    expect(legacyClient).toContain(
-      "assertDemoOnlyMutation('seedInitialInpatientORData')"
-    );
+    expect(board).toContain('loadActiveDeteriorationCensus');
+    expect(board).toContain('hydrateFacilitiesProjection');
+    expect(board).toContain('updateBedOperationalStatusEdge');
+    expect(board).toContain('Open Patient 360 / CI review');
+    expect(board).not.toContain('admitPatientToBed');
+    expect(board).not.toContain('dischargePatientFromBed');
+    expect(board).not.toContain('assignBedToPatient');
+    expect(board).not.toContain('transferPatientBed');
+    expect(board).not.toContain('markBedCleaned');
   });
 
-  test('Bed Board never fabricates NEWS2 from bed class or isolation metadata', async () => {
+  test('STAGING/PILOT Bed Board never fabricates NEWS2 from resource metadata', async () => {
     const board = await source(
-      'app/[tenantId]/inpatient/bed-board/page.tsx'
+      'components/inpatient/governed-bed-board.tsx'
     );
 
-    expect(board).toContain('NEWS2: Not recorded');
+    expect(board).toContain('NEWS2: Not recorded on the Bed Board');
     expect(board).toContain(
-      'Never infer NEWS2 from bed class, isolation status'
+      'Never infer NEWS2 from bed class'
     );
-    const resolverStart = board.indexOf(
-      'const getBedNEWS2 = (bed: Bed) =>'
+    expect(board).toContain(
+      'The Bed Board will not infer escalation from raw bed or NEWS2 metadata.'
     );
-    const resolverEnd = board.indexOf(
-      'const getBedDeterioration',
-      resolverStart
-    );
-    const resolver = board.slice(resolverStart, resolverEnd);
-
-    expect(resolver).not.toContain("bed.class === 'icu'");
-    expect(resolver).not.toContain('bed.isolationType');
-    expect(resolver).not.toContain('vitalAlert');
-    expect(resolver).toContain("return { score: null, riskLevel: null }");
+    expect(board).not.toContain('calculateNEWS2');
+    expect(board).not.toContain('highRiskBedsCount');
+    expect(board).not.toContain('bed.vitalAlert');
+    expect(board).not.toContain("bed.notes?.includes('NEWS2");
   });
 
   test('governed inpatient discharge requires explicit disposition and follow-up', async () => {

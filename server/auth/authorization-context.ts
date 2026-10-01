@@ -25,7 +25,7 @@ function isClinicalRole(roles:string[]):boolean{
 function mapHcmPrivilegeToAuthorization(privilege:ClinicalPrivilege['privilegeType']):string[]{
   const map:Record<ClinicalPrivilege['privilegeType'],string[]>={
     CONSULT_OPD:['CONSULT_OPD'],
-    PRESCRIBE_MEDICATION:['PRESCRIBE_MEDICATION','ORDER_MEDICATIONS','SIGN_PRESCRIPTIONS'],
+    PRESCRIBE_MEDICATION:['PRESCRIBE_MEDICATION','PRESCRIBE','ORDER_MEDICATIONS','SIGN_PRESCRIPTIONS'],
     PERFORM_GENERAL_SURGERY:['PERFORM_GENERAL_SURGERY','PERFORM_PROCEDURES'],
     PERFORM_CARDIOTHORACIC_SURGERY:['PERFORM_CARDIOTHORACIC_SURGERY','PERFORM_PROCEDURES'],
     ADMINISTER_ANESTHESIA:['ADMINISTER_ANESTHESIA','PERFORM_PROCEDURES'],
@@ -46,6 +46,7 @@ async function resolveCredentialGatedPrivileges(params:{
   roles:string[];
   facilityIds:string[];
   departmentIds:string[];
+  declaredClinicalPrivileges:string[];
 }):Promise<string[]>{
   if(!isClinicalRole(params.roles)) return [];
   const db=getAdminFirestore();
@@ -97,7 +98,24 @@ async function resolveCredentialGatedPrivileges(params:{
 
   const facilityScope=new Set(params.facilityIds);
   const departmentScope=new Set(params.departmentIds);
-  const effective=new Set<string>();
+
+  // These are role-baseline clinical capabilities, not specialty privileges.
+  // They remain unavailable until the HCM employee has a valid mandatory
+  // credential. Specialty/high-risk capabilities are added only from explicit
+  // active HCM ClinicalPrivilege grants below.
+  const credentialGatedRoleBaseline = new Set([
+    'ADMIT_INPATIENT',
+    'DISCHARGE_INPATIENT',
+    'RECORD_VITALS',
+    'TRIAGE_PATIENTS',
+    'UPDATE_BED_OCCUPANCY',
+    'EXECUTE_NURSING_CARE_PLAN',
+  ]);
+  const effective=new Set<string>(
+    params.declaredClinicalPrivileges.filter((value)=>
+      credentialGatedRoleBaseline.has(String(value).toUpperCase())
+    )
+  );
   for(const privilege of privileges){
     if(
       privilege.status!=='GRANTED' ||
@@ -170,6 +188,7 @@ export async function resolveAuthorizationContext(
         roles:membership.roles,
         facilityIds:membership.facilityIds,
         departmentIds:membership.departmentIds,
+        declaredClinicalPrivileges:membership.clinicalPrivileges,
       })
     : membership.clinicalPrivileges;
 
@@ -179,6 +198,7 @@ export async function resolveAuthorizationContext(
     tenantId: membership.tenantId,
     roles: membership.roles,
     permissions: membership.permissions,
+    financialAuthorityMinorUnits: membership.financialAuthorityMinorUnits,
     departmentIds: membership.departmentIds,
     facilityIds: membership.facilityIds,
     clinicalPrivileges,

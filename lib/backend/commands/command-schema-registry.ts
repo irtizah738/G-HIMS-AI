@@ -4,6 +4,441 @@ import type { BaseCommand } from '@/lib/backend/types';
 const nonEmpty = z.string().trim().min(1);
 
 const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>> = {
+  // --------------------------------------------------------------------------
+  // DRP-1: Clinical / identity / telehealth command perimeter.
+  // Every CommandBus handler must have an explicit versioned schema.
+  // --------------------------------------------------------------------------
+  CreateEncounterCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      encounterType: z.enum(['OPD','IPD','EMERGENCY','TELEHEALTH']),
+      chiefComplaint: nonEmpty.max(4000),
+      departmentId: nonEmpty.max(150),
+      priority: z.enum(['STAT','URGENT','ROUTINE']).optional(),
+    }).strict(),
+  },
+  CreateOpdEncounterCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      chiefComplaint: nonEmpty.max(4000),
+      departmentId: nonEmpty.max(150),
+      priority: z.enum(['STAT','URGENT','ROUTINE']).optional(),
+      assignedDoctor: z.string().trim().min(1).max(200).optional(),
+    }).strict(),
+  },
+  CommitEncounterDispositionCommand: {
+    1: z.object({
+      encounterId: nonEmpty.max(150),
+      dispositionType: nonEmpty.max(100),
+      patientInstructions: z.string().trim().max(8000).optional(),
+      warningSignsRedFlags: z.string().trim().max(8000).optional(),
+      followUpScheduledDate: z.string().trim().max(50).optional(),
+      followUpDepartment: z.string().trim().max(250).optional(),
+      inpatientAdmissionRequest: z.object({
+        targetWard: nonEmpty.max(200),
+        targetBedId: z.string().trim().min(1).max(150).optional(),
+        clinicalIndication: nonEmpty.max(4000),
+        admittingService: z.string().trim().max(250).optional(),
+      }).strict().optional(),
+    }).strict(),
+  },
+  PlaceDiagnosticOrderCommand: {
+    1: z.object({
+      encounterId: nonEmpty.max(150),
+      patientId: nonEmpty.max(150),
+      orderType: z.enum(['LAB','RADIOLOGY','PROCEDURE']),
+      catalogCode: nonEmpty.max(100),
+      orderName: nonEmpty.max(500),
+      priority: z.enum(['STAT','URGENT','ROUTINE']),
+      clinicalIndication: nonEmpty.max(4000),
+      estimatedCostMinorUnits: z.number().int().safe().nonnegative(),
+    }).strict(),
+  },
+  DispensePrescriptionCommand: {
+    1: z.object({
+      prescriptionId: nonEmpty.max(150),
+      quantityDispensed: z.number().finite().positive().max(1000000),
+      batchNumber: z.string().trim().min(1).max(200).optional(),
+      expiryDate: z.string().trim().min(1).max(50).optional(),
+      dispensedByName: z.string().trim().min(1).max(250).optional(),
+    }).strict(),
+  },
+  RecordDiagnosticResultCommand: {
+    1: z.object({
+      orderId: nonEmpty.max(150),
+      patientId: nonEmpty.max(150),
+      encounterId: z.string().trim().min(1).max(150).optional(),
+      reportCode: nonEmpty.max(150),
+      reportDisplay: nonEmpty.max(500),
+      category: z.enum(['LAB','RADIOLOGY','PATHOLOGY','OTHER']),
+      results: z.array(z.object({
+        code: nonEmpty.max(150),
+        display: nonEmpty.max(500),
+        codingSystem: z.string().trim().min(1).max(200).optional(),
+        value: z.union([z.string().max(4000), z.number().finite()]),
+        unit: z.string().trim().max(100).optional(),
+        unitCode: z.string().trim().max(100).optional(),
+        referenceRange: z.string().trim().max(500).optional(),
+        abnormalFlag: z.string().trim().max(100).optional(),
+        status: z.enum(['PRELIMINARY','FINAL','AMENDED','CORRECTED']).optional(),
+        observedAt: z.number().finite().positive().optional(),
+      }).strict()).min(1).max(500),
+      reportStatus: z.enum(['PARTIAL','PRELIMINARY','FINAL','AMENDED','CORRECTED']).optional(),
+      conclusion: z.string().trim().max(12000).optional(),
+      issuedAt: z.number().finite().positive().optional(),
+      verifiedBy: z.string().trim().min(1).max(150).optional(),
+      verifiedAt: z.number().finite().positive().optional(),
+      sourceType: z.enum(['LAB_SYSTEM','RADIOLOGY_SYSTEM','CLINICIAN','EXTERNAL_HL7']).optional(),
+      sourceSystem: z.string().trim().min(1).max(250).optional(),
+      sourceMessageControlId: z.string().trim().min(1).max(250).optional(),
+    }).strict(),
+  },
+  AcknowledgeCriticalDiagnosticResultCommand: {
+    1: z.object({
+      reportId: nonEmpty.max(150),
+      patientId: nonEmpty.max(150),
+      encounterId: nonEmpty.max(150),
+      note: z.string().trim().max(4000).optional(),
+    }).strict(),
+  },
+  SignClinicalNoteCommand: {
+    1: z.object({
+      encounterId: nonEmpty.max(150),
+      patientId: nonEmpty.max(150),
+      category: z.enum(['SOAP','PROGRESS','CONSULTATION','DISCHARGE','NURSING']),
+      content: nonEmpty.max(50000),
+      sourceDraftId: z.string().trim().min(1).max(200).optional(),
+      acceptedStructuredData: z.record(z.string(), z.unknown()).optional(),
+    }).strict(),
+  },
+  CompleteMedicationReconciliationCommand: {
+    1: z.object({
+      encounterId: nonEmpty.max(150),
+      patientId: nonEmpty.max(150),
+      reconciledMedicationIds: z.array(nonEmpty.max(150)).max(1000),
+      discrepancyCount: z.number().int().nonnegative().max(10000),
+      unresolvedDiscrepancies: z.array(nonEmpty.max(2000)).max(1000).optional(),
+      notes: z.string().trim().max(8000).optional(),
+    }).strict(),
+  },
+  RecordClinicalConditionCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      encounterId: z.string().trim().min(1).max(150).optional(),
+      code: nonEmpty.max(150),
+      display: nonEmpty.max(500),
+      codingSystem: z.string().trim().min(1).max(200).optional(),
+      category: z.enum(['PROBLEM_LIST','ENCOUNTER_DIAGNOSIS','CHRONIC','ACUTE','OTHER']),
+      clinicalStatus: z.enum(['ACTIVE','INACTIVE','RESOLVED','COMPLETED','CANCELLED','ENTERED_IN_ERROR']).optional(),
+      verificationStatus: z.enum(['UNCONFIRMED','PROVISIONAL','DIFFERENTIAL','CONFIRMED','REFUTED','ENTERED_IN_ERROR']).optional(),
+      onsetAt: z.number().finite().positive().optional(),
+    }).strict(),
+  },
+  RecordClinicalAllergyCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      encounterId: z.string().trim().min(1).max(150).optional(),
+      substanceCode: nonEmpty.max(150),
+      substanceDisplay: nonEmpty.max(500),
+      codingSystem: z.string().trim().min(1).max(200).optional(),
+      type: z.enum(['ALLERGY','INTOLERANCE']).optional(),
+      category: z.enum(['FOOD','MEDICATION','ENVIRONMENT','BIOLOGIC','OTHER']),
+      criticality: z.enum(['LOW','HIGH','UNABLE_TO_ASSESS']).optional(),
+      verificationStatus: z.enum(['UNCONFIRMED','PROVISIONAL','DIFFERENTIAL','CONFIRMED','REFUTED','ENTERED_IN_ERROR']).optional(),
+      reactionText: z.string().trim().max(4000).optional(),
+      reactionSeverity: z.enum(['MILD','MODERATE','SEVERE']).optional(),
+    }).strict(),
+  },
+  ReviewPatientClinicalKnowledgeCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      encounterId: z.string().trim().min(1).max(150).optional(),
+      domain: z.enum(['ALLERGIES','MEDICATIONS','PROBLEM_LIST']),
+      status: z.enum(['KNOWN','KNOWN_NONE','UNKNOWN','NOT_ASSESSED','PATIENT_UNABLE_TO_REPORT']),
+      reason: z.string().trim().max(4000).optional(),
+    }).strict(),
+  },
+  RecordDischargeReadinessReviewCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      encounterId: nonEmpty.max(150),
+      evaluationId: nonEmpty.max(200),
+      outcome: z.enum(['ACKNOWLEDGED','ESCALATE','PROCEED_WITH_WARNINGS']),
+      reviewedFindingIds: z.array(nonEmpty.max(200)).max(500).optional(),
+      reason: z.string().trim().max(8000).optional(),
+    }).strict(),
+  },
+  UpdateOpdQueueStatusCommand: {
+    1: z.object({
+      tokenId: nonEmpty.max(150),
+      targetStatus: z.enum(['called','in_consultation','completed','no_show','transferred']),
+      targetDepartment: z.string().trim().min(1).max(250).optional(),
+      assignedDoctorName: z.string().trim().min(1).max(250).optional(),
+      assignedRoomOrBay: z.string().trim().min(1).max(200).optional(),
+    }).strict(),
+  },
+  AdmitPatientToInpatientCareCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      bedId: nonEmpty.max(150),
+      sourceEncounterId: z.string().trim().min(1).max(150).optional(),
+      admittingDiagnosis: nonEmpty.max(4000),
+      targetWard: nonEmpty.max(250),
+      assignedDoctor: z.string().trim().min(1).max(250).optional(),
+      assignedNurse: z.string().trim().min(1).max(250).optional(),
+      priority: z.enum(['STAT','URGENT','ROUTINE']).optional(),
+    }).strict(),
+  },
+  PlaceInpatientOrderCommand: {
+    1: z.object({
+      encounterId: nonEmpty.max(150),
+      patientId: nonEmpty.max(150),
+      orderType: z.enum(['DIET','ACTIVITY','MEDICATION','LAB','IMAGING','NURSING']),
+      description: nonEmpty.max(8000),
+      priority: z.enum(['ROUTINE','URGENT','STAT']).optional(),
+    }).strict(),
+  },
+  ResolveInpatientOrderCommand: {
+    1: z.object({
+      encounterId: nonEmpty.max(150),
+      patientId: nonEmpty.max(150),
+      orderId: nonEmpty.max(150),
+      status: z.enum(['COMPLETED','DISCONTINUED']),
+      reason: z.string().trim().max(4000).optional(),
+    }).strict(),
+  },
+  RecordMedicationAdministrationCommand: {
+    1: z.object({
+      encounterId: nonEmpty.max(150),
+      patientId: nonEmpty.max(150),
+      medicationId: nonEmpty.max(150),
+      medicationName: nonEmpty.max(500),
+      dose: nonEmpty.max(200),
+      route: nonEmpty.max(200),
+      status: z.enum(['GIVEN','HELD']).optional(),
+      administeredAt: z.number().finite().positive().optional(),
+      notes: z.string().trim().max(4000).optional(),
+    }).strict(),
+  },
+  TransferInpatientBedCommand: {
+    1: z.object({
+      encounterId: nonEmpty.max(150),
+      sourceBedId: nonEmpty.max(150),
+      targetBedId: nonEmpty.max(150),
+      reason: nonEmpty.max(4000),
+      clinicalIndication: z.string().trim().max(4000).optional(),
+    }).strict(),
+  },
+  ScheduleSurgicalCaseCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      encounterId: nonEmpty.max(150),
+      roomId: nonEmpty.max(150),
+      scheduledStartTime: nonEmpty.max(100),
+      scheduledEndTime: nonEmpty.max(100),
+      procedureName: nonEmpty.max(1000),
+      urgency: z.enum(['elective','urgent','emergency']),
+      anesthesiaType: z.enum(['general','regional','local','mac','sedation']).optional(),
+      surgeonEmployeeId: z.string().trim().min(1).max(150).optional(),
+      notes: z.string().trim().max(8000).optional(),
+    }).strict(),
+  },
+  RecordSurgicalSafetyChecklistCommand: {
+    1: z.object({
+      caseId: nonEmpty.max(150),
+      phase: z.enum(['SIGN_IN','TIME_OUT','SIGN_OUT']),
+      completed: z.boolean(),
+      evidenceSummary: nonEmpty.max(8000),
+    }).strict(),
+  },
+  AdvanceSurgicalCaseCommand: {
+    1: z.object({
+      caseId: nonEmpty.max(150),
+      targetStatus: z.enum(['pre_op','intra_op','post_op_pacu','completed']),
+    }).strict(),
+  },
+  CancelSurgicalCaseCommand: {
+    1: z.object({
+      caseId: nonEmpty.max(150),
+      reason: nonEmpty.max(8000),
+    }).strict(),
+  },
+
+  CreateTelehealthSessionCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      type: z.enum([
+        'Telehealth Consultation',
+        'Remote Post-Op Follow-up',
+        'RPM Chronic Care Review',
+        'Urgent Tele-Triage',
+      ]),
+      scheduledTime: z.string().trim().min(1).max(100).optional(),
+      chiefComplaint: nonEmpty.max(4000),
+      attendingPhysician: z.string().trim().max(250).optional(),
+    }).strict(),
+  },
+  UpdateTelehealthSessionCommand: {
+    1: z.object({
+      sessionId: nonEmpty.max(150),
+      updates: z.object({
+        status: z.enum(['WAITING_ROOM','IN_CONSULTATION','DOCUMENTING','COMPLETED','CANCELLED']).optional(),
+        connectionQuality: z.enum(['EXCELLENT','GOOD','DEGRADED']).optional(),
+        callDurationSeconds: z.number().int().nonnegative().max(86400).optional(),
+        vitals: z.object({
+          bp: z.string().max(50),
+          hr: z.number().finite().min(0).max(300),
+          spo2: z.number().finite().min(0).max(100),
+          temp: z.number().finite().min(20).max(50),
+          glucose: z.number().finite().min(0).max(2000).optional(),
+          respiratoryRate: z.number().finite().min(0).max(100).optional(),
+          rhythm: z.string().max(200).optional(),
+          connectedDevice: z.string().max(250).optional(),
+          lastSync: z.string().max(100).optional(),
+        }).strict().optional(),
+        transcription: z.array(z.object({
+          id: nonEmpty.max(150),
+          timestamp: nonEmpty.max(100),
+          speaker: z.enum(['DOCTOR','PATIENT','SYSTEM']),
+          text: nonEmpty.max(12000),
+        }).strict()).max(5000).optional(),
+        soapNote: z.object({
+          subjective: z.string().max(20000),
+          objective: z.string().max(20000),
+          assessment: z.string().max(20000),
+          plan: z.string().max(20000),
+          icd10Codes: z.array(z.object({
+            code: nonEmpty.max(50),
+            description: nonEmpty.max(500),
+            confidence: z.number().finite().min(0).max(1).optional(),
+          }).strict()).max(200).optional(),
+          cptCodes: z.array(z.object({
+            code: nonEmpty.max(50),
+            description: nonEmpty.max(500),
+            fee: z.number().finite().nonnegative().optional(),
+          }).strict()).max(200).optional(),
+          signedAt: z.string().max(100).optional(),
+          signedBy: z.string().max(250).optional(),
+          clinicianNpi: z.string().max(100).optional(),
+        }).strict().optional(),
+        isAudioMuted: z.boolean().optional(),
+        isVideoMuted: z.boolean().optional(),
+        isRecording: z.boolean().optional(),
+      }).strict().refine((value)=>Object.keys(value).length>0,'At least one telehealth field must be updated.'),
+    }).strict(),
+  },
+  CompleteTelehealthSessionCommand: {
+    1: z.object({
+      sessionId: nonEmpty.max(150),
+      soapNote: z.object({
+        subjective: z.string().max(20000).optional(),
+        objective: z.string().max(20000).optional(),
+        assessment: z.string().max(20000).optional(),
+        plan: z.string().max(20000).optional(),
+        icd10Codes: z.array(z.object({
+          code: nonEmpty.max(50),
+          description: nonEmpty.max(500),
+          confidence: z.number().finite().min(0).max(1).optional(),
+        }).strict()).max(200).optional(),
+        cptCodes: z.array(z.object({
+          code: nonEmpty.max(50),
+          description: nonEmpty.max(500),
+          fee: z.number().finite().nonnegative().optional(),
+        }).strict()).max(200).optional(),
+        signedAt: z.string().max(100).optional(),
+        signedBy: z.string().max(250).optional(),
+        clinicianNpi: z.string().max(100).optional(),
+      }).strict().optional(),
+      prescriptions: z.array(z.object({
+        id: nonEmpty.max(150),
+        medication: nonEmpty.max(500),
+        dosage: nonEmpty.max(200),
+        frequency: nonEmpty.max(200),
+        duration: nonEmpty.max(200),
+        instructions: z.string().max(4000),
+        prescribedAt: nonEmpty.max(100),
+        pharmacyName: z.string().max(250),
+        pharmacyNpi: z.string().max(100),
+        status: z.enum(['DRAFT','PENDING_TRANSMISSION','TRANSMITTED','DISPENSED']),
+        transactionRef: z.string().max(250).optional(),
+      }).strict()).max(200).optional(),
+    }).strict(),
+  },
+  MergePatientCommand: {
+    1: z.object({
+      primaryPatientId: nonEmpty.max(150),
+      secondaryPatientId: nonEmpty.max(150),
+      mergeReason: nonEmpty.max(4000),
+      overrideDemographicConflict: z.boolean().optional(),
+    }).strict(),
+  },
+  ConfirmPatientIdentityCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      expectedMrn: nonEmpty.max(150),
+      expectedFullName: nonEmpty.max(500),
+      expectedDob: z.string().trim().max(50),
+      encounterId: z.string().trim().min(1).max(150).optional(),
+      actionType: z.enum([
+        'PRESCRIBE_HIGH_ALERT_MEDICATION',
+        'ORDER_BLOOD_TRANSFUSION',
+        'SCHEDULE_SURGERY',
+        'STAT_LAB_OVERRIDE',
+      ]),
+      actionSummary: nonEmpty.max(4000),
+      clinicianVerificationSignature: nonEmpty.max(2000),
+    }).strict(),
+  },
+  ReconcileRevenueIntegrityFindingCommand: {
+    1: z.object({
+      findingId: nonEmpty.max(150),
+    }).strict(),
+  },
+  DismissRevenueIntegrityFindingCommand: {
+    1: z.object({
+      findingId: nonEmpty.max(150),
+      reason: nonEmpty.max(4000),
+    }).strict(),
+  },
+
+  // Retired Generation-1 commands remain schema-bound so malformed payloads
+  // are rejected before the handler returns the migration-required error.
+  RegisterPatientCommand: {
+    1: z.object({
+      fullName: nonEmpty.max(500),
+      gender: z.enum(['male','female','other','unknown']),
+      dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      contactPhone: nonEmpty.max(100),
+      address: z.string().max(2000).optional(),
+      bloodGroup: z.string().max(20).optional(),
+      identifiers: z.array(z.object({
+        type: z.enum(['CNIC','MRN','PASSPORT','NATIONAL_ID','DRIVER_LICENSE','INSURANCE_ID']),
+        value: nonEmpty.max(250),
+        issuer: z.string().max(250).optional(),
+      }).strict()).max(100),
+      allergies: z.array(z.string().max(500)).max(500).optional(),
+      chronicConditions: z.array(z.string().max(500)).max(500).optional(),
+      department: z.string().max(250).optional(),
+      priority: z.enum(['ROUTINE','URGENT','EMERGENCY']).optional(),
+      chiefComplaint: z.string().max(4000).optional(),
+    }).strict(),
+  },
+  AdmitPatientToBedCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      bedId: nonEmpty.max(150),
+      assignedDoctor: z.string().max(250).optional(),
+      assignedNurse: z.string().max(250).optional(),
+    }).strict(),
+  },
+  DischargePatientFromBedCommand: {
+    1: z.object({
+      bedId: nonEmpty.max(150),
+      notes: z.string().max(8000).optional(),
+      disposition: z.string().max(500).optional(),
+    }).strict(),
+  },
+
   RecordStockTransactionCommand: {
     1: z.object({
       transactionId: nonEmpty,
@@ -52,7 +487,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       source: z.enum(['ONLINE', 'OFFLINE_SYNC', 'SYSTEM']).optional(),
       performedBy: z.record(z.string(), z.unknown()).optional(),
       metadata: z.record(z.string(), z.unknown()).optional(),
-    }).passthrough().superRefine((value, ctx) => {
+    }).strict().superRefine((value, ctx) => {
       if (
         (value.transactionType === 'TRANSFER_OUT' ||
           value.transactionType === 'TRANSFER_IN') &&
@@ -102,7 +537,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       grnId: z.string().optional(),
       isImplant: z.boolean(),
       implantDetails: z.record(z.string(), z.unknown()).optional(),
-    }).passthrough(),
+    }).strict(),
   },
   SubmitPurchaseRequisitionCommand: {
     1: z.object({
@@ -125,7 +560,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
         estimatedTotal: z.number().finite().nonnegative(),
         approvedQuantity: z.number().finite().nonnegative().optional(),
         justification: z.string().optional(),
-      }).passthrough()).min(1).max(500),
+      }).strict()).min(1).max(500),
       justification: nonEmpty,
       requiredByDate: nonEmpty,
       estimatedTotalCost: z.number().finite().nonnegative(),
@@ -136,7 +571,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       approvalHistory: z.array(z.unknown()).optional(),
       createdAt: z.string().optional(),
       updatedAt: z.string().optional(),
-    }).passthrough(),
+    }).strict(),
   },
   ApprovePurchaseRequisitionCommand: {
     1: z.object({
@@ -1561,20 +1996,53 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
   },
   RecordVitalsCommand: {
     1: z.object({
-      patientId: nonEmpty,
-      encounterId: nonEmpty,
-    }).passthrough(),
+      patientId: nonEmpty.max(150),
+      encounterId: nonEmpty.max(150),
+      heartRate: z.number().finite().min(20).max(250),
+      bloodPressure: z.string().trim().regex(/^\d{2,3}\/\d{2,3}$/).max(7),
+      temperature: z.number().finite().min(30).max(45),
+      respiratoryRate: z.number().finite().min(4).max(80),
+      oxygenSaturation: z.number().finite().min(50).max(100),
+      spO2Scale: z.union([z.literal(1), z.literal(2)]).optional(),
+      onSupplementalOxygen: z.boolean().optional(),
+      consciousness: z.enum([
+        'Alert','Voice','Pain','Unresponsive','NewConfusion','A','V','P','U','C'
+      ]).optional(),
+      gcsScore: z.number().int().min(3).max(15).optional(),
+      measuredAt: z.number().finite().positive().optional(),
+    }).strict(),
   },
   PrescribeMedicationCommand: {
     1: z.object({
-      patientId: nonEmpty,
-      encounterId: nonEmpty,
-    }).passthrough(),
+      patientId: nonEmpty.max(150),
+      encounterId: nonEmpty.max(150),
+      drugCode: nonEmpty.max(100),
+      drugName: nonEmpty.max(300),
+      dosage: nonEmpty.max(200),
+      route: nonEmpty.max(100),
+      frequency: nonEmpty.max(100),
+      durationDays: z.number().int().positive().max(3650),
+      quantityPrescribed: z.number().finite().positive().max(1_000_000).optional(),
+      unitOfMeasure: z.string().trim().min(1).max(100).optional(),
+      unitPriceMinorUnits: z.number().int().safe().nonnegative().optional(),
+      inventoryItemId: z.string().trim().min(1).max(150).optional(),
+      instructions: z.string().trim().max(4000).optional(),
+    }).strict(),
   },
   AdvanceStageCommand: {
     1: z.object({
-      encounterId: nonEmpty,
-    }).passthrough(),
+      encounterId: nonEmpty.max(150),
+      currentStage: nonEmpty.max(100),
+      targetStage: nonEmpty.max(100),
+      evidenceId: z.string().trim().min(1).max(150).optional(),
+      stageNotes: z.string().trim().max(4000).optional(),
+      handoffSbar: z.object({
+        situation: z.string().trim().min(1).max(2000),
+        background: z.string().trim().min(1).max(4000),
+        assessment: z.string().trim().min(1).max(4000),
+        recommendation: z.string().trim().min(1).max(4000),
+      }).strict().optional(),
+    }).strict(),
   },
   DischargeInpatientEncounterCommand: {
     1: z.object({
@@ -1592,7 +2060,10 @@ export interface CommandSchemaValidationResult {
   success: boolean;
   payload?: Record<string, unknown>;
   error?: {
-    code: 'COMMAND_SCHEMA_VERSION_UNSUPPORTED' | 'COMMAND_PAYLOAD_INVALID';
+    code:
+      | 'COMMAND_SCHEMA_NOT_REGISTERED'
+      | 'COMMAND_SCHEMA_VERSION_UNSUPPORTED'
+      | 'COMMAND_PAYLOAD_INVALID';
     message: string;
     details?: unknown;
   };
@@ -1603,7 +2074,13 @@ export function validateCommandPayload(
 ): CommandSchemaValidationResult {
   const versions = schemas[command.commandType];
   if (!versions) {
-    return { success: true, payload: command.payload };
+    return {
+      success: false,
+      error: {
+        code: 'COMMAND_SCHEMA_NOT_REGISTERED',
+        message: `No authoritative payload schema is registered for ${command.commandType}.`,
+      },
+    };
   }
 
   const schema = versions[command.schemaVersion];

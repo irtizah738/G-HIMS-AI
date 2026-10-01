@@ -31,13 +31,13 @@ const ViewSkeleton = () => (
 // Dynamic module code-splitting to prevent massive initial bundle timeout
 const BillingErpView = dynamic(() => import('@/components/views/billing-erp-view').then(m => m.BillingErpView), { loading: ViewSkeleton, ssr: false });
 const OpdEncountersView = dynamic(() => import('@/components/views/opd-encounters-view').then(m => m.OpdEncountersView), { loading: ViewSkeleton, ssr: false });
-const BedOccupancyView = dynamic(() => import('@/components/views/bed-occupancy-view').then(m => m.BedOccupancyView), { loading: ViewSkeleton, ssr: false });
+const GovernedBedBoard = dynamic(() => import('@/components/inpatient/governed-bed-board').then(m => m.GovernedBedBoard), { loading: ViewSkeleton, ssr: false });
 const AncillaryServicesView = dynamic(() => import('@/components/views/ancillary-services-view').then(m => m.AncillaryServicesView), { loading: ViewSkeleton, ssr: false });
 const OrdersInteropView = dynamic(() => import('@/components/views/orders-interop-view').then(m => m.OrdersInteropView), { loading: ViewSkeleton, ssr: false });
 const AuditLedgerView = dynamic(() => import('@/components/views/audit-ledger-view').then(m => m.AuditLedgerView), { loading: ViewSkeleton, ssr: false });
 const PatientMpiView = dynamic(() => import('@/components/views/patient-mpi-view').then(m => m.PatientMpiView), { loading: ViewSkeleton, ssr: false });
 const StaffView = dynamic(() => import('@/components/views/staff-view').then(m => m.StaffView), { loading: ViewSkeleton, ssr: false });
-const EmergencyTriageView = dynamic(() => import('@/components/views/emergency-triage-view').then(m => m.EmergencyTriageView), { loading: ViewSkeleton, ssr: false });
+const GovernedEmergencyConsole = dynamic(() => import('@/components/emergency/governed-emergency-console').then(m => m.GovernedEmergencyConsole), { loading: ViewSkeleton, ssr: false });
 const SurgeryTheaterView = dynamic(() => import('@/components/views/surgery-theater-view').then(m => m.SurgeryTheaterView), { loading: ViewSkeleton, ssr: false });
 const BloodBankView = dynamic(() => import('@/components/views/blood-bank-view').then(m => m.BloodBankView), { loading: ViewSkeleton, ssr: false });
 const TelehealthView = dynamic(() => import('@/components/views/telehealth-view').then(m => m.TelehealthView), { loading: ViewSkeleton, ssr: false });
@@ -164,7 +164,7 @@ export function TenantDashboard() {
               <div className="flex items-center gap-2">
                 <span className="font-extrabold text-slate-900 dark:text-slate-100 text-sm tracking-tight">G-HIMS</span>
                 <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium hidden sm:inline border-l border-slate-200 dark:border-slate-700 pl-2">
-                  Metropolitan Health
+                  {currentTenant?.name || currentTenantId}
                 </span>
               </div>
             </div>
@@ -268,12 +268,12 @@ export function TenantDashboard() {
             )}
             {activeTab === 'emergency' && (
               <RbacModuleGate moduleId="emergency" moduleName="Emergency & Trauma (ER)">
-                <EmergencyTriageView />
+                <GovernedEmergencyConsole />
               </RbacModuleGate>
             )}
             {activeTab === 'beds' && (
               <RbacModuleGate moduleId="beds" moduleName="Inpatient Bed Occupancy">
-                <BedOccupancyView />
+                <GovernedBedBoard />
               </RbacModuleGate>
             )}
             {activeTab === 'surgery' && (

@@ -8,6 +8,8 @@ export interface CommandContext {
   tenantId: string;
   roles: string[];
   permissions: string[];
+  /** Maximum minor-unit amount this actor may authorize for governed financial actions. */
+  financialAuthorityMinorUnits?: number;
   departmentId?: string;
   departmentIds?: string[];
   facilityIds?: string[];

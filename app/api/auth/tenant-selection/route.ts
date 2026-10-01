@@ -125,6 +125,7 @@ export async function POST(req: NextRequest) {
       authorization: {
         roles: authContext.roles,
         permissions: authContext.permissions,
+        financialAuthorityMinorUnits: authContext.financialAuthorityMinorUnits,
         departmentIds: authContext.departmentIds,
         facilityIds: authContext.facilityIds,
         clinicalPrivileges: authContext.clinicalPrivileges,

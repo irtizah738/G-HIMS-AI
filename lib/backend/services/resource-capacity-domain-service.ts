@@ -485,9 +485,7 @@ export class ResourceCapacityDomainService {
     payload: {
       bedNumber: string;
       facilityId: string;
-      facilityName: string;
       departmentId: string;
-      departmentName: string;
       roomId: string;
       ward: Bed['ward'];
       bedType: NonNullable<Bed['bedType']>;

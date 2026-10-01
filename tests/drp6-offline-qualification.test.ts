@@ -1,0 +1,95 @@
+import { describe, expect, test } from 'bun:test';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+
+const source = (file: string) =>
+  readFile(path.join(process.cwd(), file), 'utf8');
+
+describe('DRP-6 offline qualification contracts', () => {
+  test('offline capture requires a still-valid authenticated actor and tenant', async () => {
+    const sync = await source('lib/offline/sync-engine.ts');
+    expect(sync).toContain('AUTHENTICATION_REQUIRED: offline commands require an authenticated originating user.');
+    expect(sync).toContain('TENANT_MISMATCH: offline command tenant must match the active session.');
+    expect(sync).toContain('SESSION_EXPIRED: offline command capture requires a still-valid cached session.');
+    expect(sync).toContain('actorId: cached.user.uid');
+  });
+
+  test('replay re-authenticates and replaces client actor/device claims with authoritative context', async () => {
+    const route = await source('app/api/sync/batch/route.ts');
+    expect(route).toContain('deriveAuthoritativeContext');
+    expect(route).toContain('tenantId: context.tenantId');
+    expect(route).toContain('actorId: context.actorId');
+    expect(route).toContain('deviceId: context.deviceId || batch.deviceId');
+  });
+
+  test('raw legacy mutations cannot replay and every mutation returns an explicit reconciliation result', async () => {
+    const sync = await source('lib/offline/sync-engine.ts');
+    expect(sync).toContain('LEGACY_RAW_MUTATION_REJECTED');
+    expect(sync).toContain('SYNC_RESPONSE_INCOMPLETE');
+    expect(sync).toContain('commandType: mutation.commandType');
+    expect(sync).toContain('idempotencyKey: mutation.idempotencyKey');
+  });
+
+  test('server compares authoritative version/vector clocks before non-append replay', async () => {
+    const reconciliation = await source(
+      'lib/backend/services/offline-reconciliation-domain-service.ts'
+    );
+    expect(reconciliation).toContain('compareAuthoritativeEntityVersion');
+    expect(reconciliation).toContain("category !== 'SAFE_APPEND'");
+    expect(reconciliation).toContain("status: 'requires_review'");
+    expect(reconciliation).toContain('STALE_BASE_VERSION');
+    expect(reconciliation).toContain('CAUSAL_CONFLICT');
+    expect(reconciliation).toContain('CommandBus.dispatch');
+  });
+
+  test('offline cache is encrypted and actor/tenant scoped', async () => {
+    const [authStorage, secureStore, crypto] = await Promise.all([
+      source('lib/offline/auth-storage.ts'),
+      source('lib/offline/secure-store.ts'),
+      source('lib/offline/crypto.ts'),
+    ]);
+
+    expect(authStorage).toContain('encryptEdgeJson');
+    expect(authStorage).toContain('decryptEdgeJson');
+    expect(authStorage).toContain('tenantId: user.tenantId');
+    expect(authStorage).toContain('actorId: user.uid');
+
+    expect(secureStore).toContain('encryptEdgeJson');
+    expect(secureStore).toContain('decryptEdgeJson');
+    expect(crypto).toContain('AES-GCM');
+    expect(crypto).toContain('extractable: false');
+  });
+
+  test('logout privacy cleanup removes session/membership state and tenant read models', async () => {
+    const authStorage = await source('lib/offline/auth-storage.ts');
+    expect(authStorage).toContain('clearOfflineReadModelsForTenant');
+    expect(authStorage).toContain("localStorage.removeItem('ghims_active_tenant')");
+    expect(authStorage).toContain('STORE_SESSION');
+    expect(authStorage).toContain('STORE_MEMBERSHIPS');
+  });
+
+  test('safety-critical bed and inventory availability are never optimistic offline truth', async () => {
+    const [context, scm] = await Promise.all([
+      source('lib/context/hospital-context.ts'),
+      source('lib/supply-chain/scm-edge-adapter.ts'),
+    ]);
+
+    const bedStart = context.indexOf('const updateBedStatus');
+    const bedEnd = context.indexOf('const admitPatientToBed', bedStart);
+    expect(context.slice(bedStart, bedEnd)).toContain('optimisticCache: false');
+
+    expect(scm).toContain("'RecordStockTransactionCommand'");
+    expect(scm).toContain('optimisticCache: false');
+  });
+
+  test('background sync transport failure preserves queued commands instead of silently deleting them', async () => {
+    const sync = await source('lib/offline/sync-engine.ts');
+    expect(sync).toContain('SYNC_TRANSPORT_FAILURE');
+    expect(sync).toContain("updateMutationStatus(");
+    expect(sync).toContain("'failed'");
+    expect(sync).toContain('deleteMutation(mutation.id)');
+    const deleteIndex = sync.indexOf('deleteMutation(mutation.id)');
+    const acceptedIndex = sync.lastIndexOf("if (result.status === 'accepted')", deleteIndex);
+    expect(acceptedIndex).toBeGreaterThan(-1);
+  });
+});

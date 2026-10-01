@@ -51,7 +51,7 @@ jobs:
         run: bun run build
 
       - name: Install Firebase emulator CLI
-        run: npm install --no-save --package-lock=false firebase-tools
+        run: npm install --no-save --package-lock=false firebase-tools@15.30.2
 
       - name: Run P1 durability emulator suite
         run: npx firebase emulators:exec --project ghims-p1-ci --only firestore "bun test emulator-security/p1-durability.test.ts"

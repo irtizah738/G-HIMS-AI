@@ -1,4 +1,4 @@
-name: PRP-1 one-time STAGING launcher
+name: PRP-1 STAGING observer
 
 on:
   pull_request:
@@ -9,18 +9,19 @@ on:
 
 permissions:
   contents: read
-  actions: write
+  actions: read
 
 jobs:
-  dispatch:
-    name: Dispatch guarded main STAGING workflow
+  observe:
+    name: Observe guarded main STAGING workflow
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch STAGING Deployment from main
+      - name: Report latest STAGING Deployment dispatch
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          gh workflow run staging-deploy.yml --repo "$GH_REPO" --ref main -f confirm=STAGING
-          echo "Dispatched staging-deploy.yml from main with confirm=STAGING."
+          echo "LATEST_STAGING_RUNS"
+          gh run list --repo "$GH_REPO" --workflow staging-deploy.yml --event workflow_dispatch --limit 5 \
+            --json databaseId,status,conclusion,url,headSha,createdAt,displayTitle

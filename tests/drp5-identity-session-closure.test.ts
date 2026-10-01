@@ -131,4 +131,14 @@ describe('DRP-5 identity and session closure', () => {
     expect(signOut).toContain('clearCachedAuthSession');
     expect(signOut).toContain('firebaseSignOut');
   });
+  test('clinical role capability is released only after authoritative HCM credential resolution', async () => {
+    const auth = await source('server/auth/authorization-context.ts');
+    expect(auth).toContain('credentialGatedRoleBaseline');
+    expect(auth).toContain('declaredClinicalPrivileges');
+    expect(auth).toContain("PRESCRIBE_MEDICATION:['PRESCRIBE_MEDICATION','PRESCRIBE'");
+    expect(auth).toContain("collection('employees')");
+    expect(auth).toContain("collection('clinicalCredentials')");
+    expect(auth).toContain("collection('clinicalPrivileges')");
+  });
+
 });

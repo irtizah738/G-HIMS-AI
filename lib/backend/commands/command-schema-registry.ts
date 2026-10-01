@@ -229,6 +229,41 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       clinicalIndication: z.string().trim().max(4000).optional(),
     }).strict(),
   },
+  ScheduleSurgicalCaseCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      encounterId: nonEmpty.max(150),
+      roomId: nonEmpty.max(150),
+      scheduledStartTime: nonEmpty.max(100),
+      scheduledEndTime: nonEmpty.max(100),
+      procedureName: nonEmpty.max(1000),
+      urgency: z.enum(['elective','urgent','emergency']),
+      anesthesiaType: z.enum(['general','regional','local','mac','sedation']).optional(),
+      surgeonEmployeeId: z.string().trim().min(1).max(150).optional(),
+      notes: z.string().trim().max(8000).optional(),
+    }).strict(),
+  },
+  RecordSurgicalSafetyChecklistCommand: {
+    1: z.object({
+      caseId: nonEmpty.max(150),
+      phase: z.enum(['SIGN_IN','TIME_OUT','SIGN_OUT']),
+      completed: z.boolean(),
+      evidenceSummary: nonEmpty.max(8000),
+    }).strict(),
+  },
+  AdvanceSurgicalCaseCommand: {
+    1: z.object({
+      caseId: nonEmpty.max(150),
+      targetStatus: z.enum(['pre_op','intra_op','post_op_pacu','completed']),
+    }).strict(),
+  },
+  CancelSurgicalCaseCommand: {
+    1: z.object({
+      caseId: nonEmpty.max(150),
+      reason: nonEmpty.max(8000),
+    }).strict(),
+  },
+
   CreateTelehealthSessionCommand: {
     1: z.object({
       patientId: nonEmpty.max(150),

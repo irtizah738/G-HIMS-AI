@@ -1996,20 +1996,53 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
   },
   RecordVitalsCommand: {
     1: z.object({
-      patientId: nonEmpty,
-      encounterId: nonEmpty,
-    }).passthrough(),
+      patientId: nonEmpty.max(150),
+      encounterId: nonEmpty.max(150),
+      heartRate: z.number().finite().min(20).max(250),
+      bloodPressure: z.string().trim().regex(/^\\d{2,3}\\/\\d{2,3}$/).max(7),
+      temperature: z.number().finite().min(30).max(45),
+      respiratoryRate: z.number().finite().min(4).max(80),
+      oxygenSaturation: z.number().finite().min(50).max(100),
+      spO2Scale: z.union([z.literal(1), z.literal(2)]).optional(),
+      onSupplementalOxygen: z.boolean().optional(),
+      consciousness: z.enum([
+        'Alert','Voice','Pain','Unresponsive','NewConfusion','A','V','P','U','C'
+      ]).optional(),
+      gcsScore: z.number().int().min(3).max(15).optional(),
+      measuredAt: z.number().finite().positive().optional(),
+    }).strict(),
   },
   PrescribeMedicationCommand: {
     1: z.object({
-      patientId: nonEmpty,
-      encounterId: nonEmpty,
-    }).passthrough(),
+      patientId: nonEmpty.max(150),
+      encounterId: nonEmpty.max(150),
+      drugCode: nonEmpty.max(100),
+      drugName: nonEmpty.max(300),
+      dosage: nonEmpty.max(200),
+      route: nonEmpty.max(100),
+      frequency: nonEmpty.max(100),
+      durationDays: z.number().int().positive().max(3650),
+      quantityPrescribed: z.number().finite().positive().max(1_000_000).optional(),
+      unitOfMeasure: z.string().trim().min(1).max(100).optional(),
+      unitPriceMinorUnits: z.number().int().safe().nonnegative().optional(),
+      inventoryItemId: z.string().trim().min(1).max(150).optional(),
+      instructions: z.string().trim().max(4000).optional(),
+    }).strict(),
   },
   AdvanceStageCommand: {
     1: z.object({
-      encounterId: nonEmpty,
-    }).passthrough(),
+      encounterId: nonEmpty.max(150),
+      currentStage: nonEmpty.max(100),
+      targetStage: nonEmpty.max(100),
+      evidenceId: z.string().trim().min(1).max(150).optional(),
+      stageNotes: z.string().trim().max(4000).optional(),
+      handoffSbar: z.object({
+        situation: z.string().trim().min(1).max(2000),
+        background: z.string().trim().min(1).max(4000),
+        assessment: z.string().trim().min(1).max(4000),
+        recommendation: z.string().trim().min(1).max(4000),
+      }).strict().optional(),
+    }).strict(),
   },
   DischargeInpatientEncounterCommand: {
     1: z.object({

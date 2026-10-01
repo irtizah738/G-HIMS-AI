@@ -58,6 +58,11 @@ interface ActivityLogItem {
 }
 
 export function BedOccupancyView() {
+  const isDemoRuntime =
+    String(process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE || '')
+      .trim()
+      .toUpperCase() === 'DEMO';
+
   const {
     beds,
     patients,
@@ -76,8 +81,12 @@ export function BedOccupancyView() {
   const [selectedBed, setSelectedBed] = useState<Bed | null>(null);
   const [showAdmitModal, setShowAdmitModal] = useState(false);
   const [admitPatientId, setAdmitPatientId] = useState('');
-  const [admitDoctor, setAdmitDoctor] = useState('Dr. Fatima Zahra');
-  const [admitNurse, setAdmitNurse] = useState('Nurse Clara Oswald');
+  const [admitDoctor, setAdmitDoctor] = useState(
+    isDemoRuntime ? 'Dr. Fatima Zahra' : ''
+  );
+  const [admitNurse, setAdmitNurse] = useState(
+    isDemoRuntime ? 'Nurse Clara Oswald' : ''
+  );
   const [showActivityDrawer, setShowActivityDrawer] = useState(false);
   const [soundMuted, setSoundMuted] = useState(false);
   const [showDischargeModal, setShowDischargeModal] = useState(false);
@@ -92,7 +101,8 @@ export function BedOccupancyView() {
   const doctorsList = useMemo(() => staff.filter((s) => s.role === 'Physician' || s.role === 'Surgeon'), [staff]);
   const nursesList = useMemo(() => staff.filter((s) => s.role === 'Nurse'), [staff]);
 
-  const [activityLogs, setActivityLogs] = useState<ActivityLogItem[]>([
+  const [activityLogs, setActivityLogs] = useState<ActivityLogItem[]>(() =>
+    isDemoRuntime ? [
     {
       id: 'log-1',
       time: '10:42 AM',
@@ -125,7 +135,8 @@ export function BedOccupancyView() {
       description: 'Bed G-204 terminal disinfection completed by housekeeping.',
       severity: 'NORMAL',
     },
-  ]);
+    ] : []
+  );
 
   const d3SvgRef = useRef<SVGSVGElement | null>(null);
 
@@ -140,17 +151,21 @@ export function BedOccupancyView() {
   ];
 
   // Daily census 7-day trend data for Recharts
-  const censusTrendData = useMemo(() => {
-    return [
-      { day: 'Mon', admissions: 12, discharges: 10, occupancyRate: 78 },
-      { day: 'Tue', admissions: 15, discharges: 11, occupancyRate: 82 },
-      { day: 'Wed', admissions: 18, discharges: 14, occupancyRate: 85 },
-      { day: 'Thu', admissions: 14, discharges: 16, occupancyRate: 81 },
-      { day: 'Fri', admissions: 22, discharges: 15, occupancyRate: 89 },
-      { day: 'Sat', admissions: 19, discharges: 18, occupancyRate: 87 },
-      { day: 'Today', admissions: 16, discharges: 12, occupancyRate: 86 },
-    ];
-  }, []);
+  const censusTrendData = useMemo(
+    () =>
+      isDemoRuntime
+        ? [
+            { day: 'Mon', admissions: 12, discharges: 10, occupancyRate: 78 },
+            { day: 'Tue', admissions: 15, discharges: 11, occupancyRate: 82 },
+            { day: 'Wed', admissions: 18, discharges: 14, occupancyRate: 85 },
+            { day: 'Thu', admissions: 14, discharges: 16, occupancyRate: 81 },
+            { day: 'Fri', admissions: 22, discharges: 15, occupancyRate: 89 },
+            { day: 'Sat', admissions: 19, discharges: 18, occupancyRate: 87 },
+            { day: 'Today', admissions: 16, discharges: 12, occupancyRate: 86 },
+          ]
+        : [],
+    [isDemoRuntime]
+  );
 
   const filteredBeds = useMemo(() => {
     return beds.filter((b) => {

@@ -278,12 +278,11 @@ export function ScmAuditComplianceView({
 
         <div className="flex items-center gap-2">
           <button
-            onClick={loadAuditEvents}
-            disabled={loading}
+            onClick={() => void onRefresh()}
             className="p-2 rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 cursor-pointer"
-            title="Refresh Audit Logs"
+            title="Refresh authoritative SCM evidence"
           >
-            <RefreshCw className={`w-4 h-4 ${false ? 'animate-spin text-blue-500' : ''}`} />
+            <RefreshCw className="w-4 h-4" />
           </button>
           <button
             id="btn-record-stock-adjustment"
@@ -741,33 +740,8 @@ export function ScmAuditComplianceView({
                 />
               </div>
 
-              {/* Dual Authorizing User Sign-offs */}
-              <div className="grid grid-cols-2 gap-3 pt-1">
-                <div>
-                  <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
-                    Primary Authorizing User ID:
-                  </label>
-                  <input
-                    type="text"
-                    value={'server-authoritative'}
-                    onChange={(e) => setAdjAuthorizerId(e.target.value)}
-                    className="w-full px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700 font-mono text-[11px]"
-                  />
-                  <span className="text-[10px] text-slate-400">{'Resolved server-side'}</span>
-                </div>
-
-                <div>
-                  <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
-                    Second Supervisory Authorizer:
-                  </label>
-                  <input
-                    type="text"
-                    value={'server-authoritative'}
-                    onChange={(e) => setAdjSecondAuthorizerId(e.target.value)}
-                    className="w-full px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700 font-mono text-[11px]"
-                  />
-                  <span className="text-[10px] text-slate-400">{'Resolved server-side'}</span>
-                </div>
+              <div className="rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50/70 dark:bg-blue-950/30 p-3 text-[11px] text-blue-800 dark:text-blue-300">
+                Actor identity, permissions, financial authority, and any required supervisory approval are resolved by the server from the authenticated session. This browser never accepts authorizer IDs.
               </div>
             </div>
 

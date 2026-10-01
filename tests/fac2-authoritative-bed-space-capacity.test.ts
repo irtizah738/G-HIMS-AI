@@ -75,9 +75,7 @@ function registerBedPayload(
   return {
     bedNumber,
     facilityId: 'fac_central',
-    facilityName: 'client supplied facility name',
     departmentId: 'dept_icu',
-    departmentName: 'client supplied department name',
     roomId,
     ward: 'ICU',
     bedType: 'ICU',
@@ -110,6 +108,28 @@ describe('FAC-2 authoritative bed & space capacity', () => {
       })
     );
     expect(invalidStatus.success).toBe(false);
+  });
+
+  test('new room occupancy and bed membership are server-owned', async () => {
+    const result = await CommandBus.dispatch(
+      facilitiesContext,
+      command('RegisterRoomCommand', 'fac2-room-forged-capacity-state', {
+        roomNumber: 'ICU-FORGED',
+        facilityId: 'fac_central',
+        facilityName: 'Central Metro Hospital',
+        building: 'Critical Care Pavilion',
+        floor: 'Floor 2',
+        departmentId: 'dept_icu',
+        departmentName: 'Intensive Care Unit (ICU)',
+        roomType: 'icu',
+        capacity: 2,
+        currentOccupancy: 1,
+        bedIds: ['forged-bed-id'],
+        status: 'AVAILABLE',
+      })
+    );
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('ROOM_CAPACITY_STATE_SERVER_OWNED');
   });
 
   test('registration derives physical topology from the authoritative room', async () => {

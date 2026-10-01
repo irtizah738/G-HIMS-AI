@@ -401,7 +401,8 @@ export const DEMO_PERSONAS: Record<RoleId, { name: string; title: string; email:
 export function normalizeRole(roleStr?: string): RoleId {
   if (!roleStr) return 'doctor';
   const clean = roleStr.toLowerCase().trim().replace(/\s+/g, '_');
-  if (clean === 'admin' || clean === 'administrator' || clean === 'system_admin' || clean === 'medical_director') return 'administrator';
+  if (clean === 'admin' || clean === 'administrator' || clean === 'system_admin') return 'administrator';
+  if (clean === 'medical_director') return 'doctor';
   if (clean === 'doctor' || clean === 'physician' || clean === 'surgeon') return 'doctor';
   if (clean === 'nurse' || clean === 'head_nurse') return 'nurse';
   if (clean === 'reception' || clean === 'receptionist' || clean === 'intake') return 'receptionist';

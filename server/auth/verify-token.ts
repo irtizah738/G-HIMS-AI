@@ -69,6 +69,7 @@ export async function verifyFirebaseToken(
       originalError: err,
     });
   }
+}
 
 export function extractBearerToken(authHeader: string | null | undefined): string {
   if (!authHeader || !authHeader.startsWith('Bearer ')) {

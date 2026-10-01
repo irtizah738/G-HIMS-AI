@@ -197,11 +197,17 @@ export class EncounterDomainService {
     }
 
     // 3. Authoritative patient precondition and state initialization.
-    const patient = await DomainStateRepository.getById<Record<string, unknown>>(
-      context.tenantId,
-      'patients',
-      payload.patientId
-    );
+    const patient = DomainStateRepository.isAvailable()
+      ? await DomainStateRepository.getById<Record<string, unknown>>(
+          context.tenantId,
+          'patients',
+          payload.patientId
+        )
+      : TransactionManager.getEphemeralStateForTesting(
+          context.tenantId,
+          'PATIENT_MPI',
+          payload.patientId
+        );
     if (!patient) {
       return {
         success: false,

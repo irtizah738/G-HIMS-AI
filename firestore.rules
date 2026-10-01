@@ -112,9 +112,11 @@ service cloud.firestore {
         'facilities_admin',
         'biomedical_engineer',
         'hospital_executive',
+        'housekeeping',
         'FACILITIES_ADMIN',
         'BIOMEDICAL_ENGINEER',
         'HOSPITAL_EXECUTIVE',
+        'HOUSEKEEPING',
         'SYSTEM_ADMIN',
         'ADMINISTRATOR'
       ]);

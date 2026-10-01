@@ -24,6 +24,7 @@ export interface AuthenticatedUser {
   tenantId: string;
   roles: string[];
   permissions: string[];
+  financialAuthorityMinorUnits?: number;
   departmentIds: string[];
   facilityIds: string[];
   accountStatus: AccountStatus;

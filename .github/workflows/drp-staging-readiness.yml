@@ -16,10 +16,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  trust-boundary:
-    name: DRP-1 trust boundary
+  staging-readiness:
+    name: DRP-S full staging-readiness gate
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     env:
       GHIMS_RUNTIME_MODE: TEST
       NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
@@ -42,4 +42,4 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
-      - run: bun run validate:drp1
+      - run: bun run validate:drp-staging

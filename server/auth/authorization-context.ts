@@ -179,6 +179,7 @@ export async function resolveAuthorizationContext(
     tenantId: membership.tenantId,
     roles: membership.roles,
     permissions: membership.permissions,
+    financialAuthorityMinorUnits: membership.financialAuthorityMinorUnits,
     departmentIds: membership.departmentIds,
     facilityIds: membership.facilityIds,
     clinicalPrivileges,

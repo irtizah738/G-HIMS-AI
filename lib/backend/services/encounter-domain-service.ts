@@ -109,33 +109,9 @@ export class EncounterDomainService {
       );
 
       if (!persisted) {
-        const cached = this.encounterCache.get(key);
-        if (cached) return cached;
-
-        // Fallback for seed/demo encounters when running with live/staging database
-        if (encounterId === 'enc-101' || encounterId === 'enc-102' || encounterId.startsWith('enc-')) {
-          const fallbackEncounter: EncounterState = {
-            encounterId,
-            tenantId,
-            patientId: 'pat_eleanor_vance',
-            encounterType: 'OPD',
-            chiefComplaint: 'Chest tightness and shortness of breath on exertion',
-            departmentId: 'Cardiology',
-            status: 'ACTIVE',
-            currentStage: 'REGISTERED',
-            clinicalState: 'REGISTERED',
-            operationalState: 'QUEUED',
-            financialClearanceState: 'CONSULTATION_CLEARED',
-            resourceAssignmentState: 'NONE',
-            priority: 'URGENT',
-            assignedProviderId: 'doc-01',
-            createdAt: Date.now() - 3600000,
-            updatedAt: Date.now(),
-          };
-          this.encounterCache.set(key, fallbackEncounter);
-          return fallbackEncounter;
-        }
-
+        // Authoritative runtime never fabricates clinical state when Firestore
+        // cannot resolve the encounter. Test/demo fixtures must be provisioned
+        // explicitly into their isolated environments.
         this.encounterCache.delete(key);
         return null;
       }

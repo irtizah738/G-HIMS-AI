@@ -989,14 +989,14 @@ interface HospitalContextType {
   ) => Promise<void>;
   registerNewPatient: (patientData: Omit<Patient, 'id' | 'mrn' | 'registeredAt' | 'encounters'>) => Promise<Patient>;
   mergePatients: (primaryId: string, secondaryId: string, mergeReason: string) => Promise<Patient>;
-  addClinicalNote: (patientId: string, note: Omit<ClinicalNote, 'id' | 'timestamp'>) => void;
-  addLabOrder: (patientId: string, order: Omit<LabOrder, 'id' | 'orderedAt'>) => void;
-  addVitals: (patientId: string, vitals: Omit<Vitals, 'timestamp'>) => void;
+  addClinicalNote: (patientId: string, note: Omit<ClinicalNote, 'id' | 'timestamp'>) => Promise<void>;
+  addLabOrder: (patientId: string, order: Omit<LabOrder, 'id' | 'orderedAt'>) => Promise<void>;
+  addVitals: (patientId: string, vitals: Omit<Vitals, 'timestamp'>) => Promise<void>;
   reconcileMismatch: (mismatchId: string) => void;
   dismissMismatch: (mismatchId: string) => void;
   dispatchHl7Message: (message: Omit<Hl7Message, 'id' | 'timestamp' | 'status'>) => void;
-  callNextOpdToken: (tokenId: string) => void;
-  completeOpdToken: (tokenId: string) => void;
+  callNextOpdToken: (tokenId: string) => Promise<void>;
+  completeOpdToken: (tokenId: string) => Promise<void>;
   triggerOfflineSync: () => void;
   addAuditLog: (
     action: string,
@@ -1559,16 +1559,21 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     return consolidatedPrimary;
   };
 
-  const addClinicalNote = (patientId: string, note: Omit<ClinicalNote, 'id' | 'timestamp'>) => {
+  const addClinicalNote = async (
+    patientId: string,
+    note: Omit<ClinicalNote, 'id' | 'timestamp'>
+  ): Promise<void> => {
     const patient = patients.find((item) => item.id === patientId);
     const encounterId = patient?.activeEncounterId || patient?.encounters?.[0]?.id;
 
     if (!patient || !encounterId) {
-      console.error('CLINICAL_NOTE_REJECTED: active patient encounter is required.');
-      return;
+      throw new Error('CLINICAL_NOTE_REJECTED: active patient encounter is required.');
     }
 
-    const categoryMap: Record<ClinicalNote['category'], 'SOAP' | 'PROGRESS' | 'CONSULTATION' | 'DISCHARGE' | 'NURSING'> = {
+    const categoryMap: Record<
+      ClinicalNote['category'],
+      'SOAP' | 'PROGRESS' | 'CONSULTATION' | 'DISCHARGE' | 'NURSING'
+    > = {
       SOAP: 'SOAP',
       Progress: 'PROGRESS',
       Consultation: 'CONSULTATION',
@@ -1577,8 +1582,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     };
 
     const offlineNoteId = `offline-note-${crypto.randomUUID()}`;
-
-    void executeActiveTenantCommand<{
+    const result = await executeActiveTenantCommand<{
       evidenceId: string;
       revenueIntegrityFindings?: Array<{
         id: string;
@@ -1593,46 +1597,56 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
         evidenceSnippet: string;
         confidenceScore?: number;
       }>;
-    }>('SignClinicalNoteCommand', {
-      encounterId,
-      patientId,
-      category: categoryMap[note.category],
-      content: note.content,
-      acceptedStructuredData: note.aiStructuredData || {},
-    }, {
-      offlineQueue: {
-        enabled: true,
-        collection: 'clinical_notes',
-        resourceId: offlineNoteId,
-        action: 'CREATE',
-        optimisticCache: true,
+    }>(
+      'SignClinicalNoteCommand',
+      {
+        encounterId,
+        patientId,
+        category: categoryMap[note.category],
+        content: note.content,
+        acceptedStructuredData: note.aiStructuredData || {},
       },
-    }).then((result) => {
-      if (!result.success) {
-        throw new Error(result.error?.message || 'Clinical note command failed.');
+      {
+        offlineQueue: {
+          enabled: true,
+          collection: 'clinical_notes',
+          resourceId: offlineNoteId,
+          action: 'CREATE',
+          optimisticCache: true,
+        },
       }
+    );
 
-      const noteId = result.entityId || offlineNoteId;
-      const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
-      const newNote: ClinicalNote = { ...note, id: noteId, timestamp };
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Clinical note command failed.');
+    }
 
-      setPatients((previous) => previous.map((item) => {
-        if (item.id !== patientId) return item;
-        const encounters = [...item.encounters];
-        if (encounters.length > 0) {
-          encounters[0] = {
-            ...encounters[0],
-            clinicalNotes: [newNote, ...encounters[0].clinicalNotes],
-          };
-        }
-        return { ...item, encounters };
-      }));
+    const noteId = result.entityId || offlineNoteId;
+    const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
+    const newNote: ClinicalNote = { ...note, id: noteId, timestamp };
 
-      // Revenue Integrity candidates are created server-side from the signed,
-      // clinician-accepted structured note. The browser only renders that result.
-      const authoritativeFindings = result.data?.revenueIntegrityFindings || [];
-      if (authoritativeFindings.length > 0) {
-        const projectedMismatches: BillingAuditMismatch[] = authoritativeFindings.map((finding) => ({
+    setPatients((previous) => previous.map((item) => {
+      if (item.id !== patientId) return item;
+      const encounters = [...item.encounters];
+      const encounterIndex = encounters.findIndex(
+        (encounter) => encounter.id === encounterId
+      );
+      if (encounterIndex >= 0) {
+        encounters[encounterIndex] = {
+          ...encounters[encounterIndex],
+          clinicalNotes: [
+            newNote,
+            ...encounters[encounterIndex].clinicalNotes,
+          ],
+        };
+      }
+      return { ...item, encounters };
+    }));
+
+    const authoritativeFindings = result.data?.revenueIntegrityFindings || [];
+    if (authoritativeFindings.length > 0) {
+      const projectedMismatches: BillingAuditMismatch[] =
+        authoritativeFindings.map((finding) => ({
           id: finding.id,
           patientId: finding.patientId,
           patientName: patient.fullName,
@@ -1642,7 +1656,8 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
           documentedItem: finding.documentedItem,
           category: finding.category,
           suggestedCptCode: finding.suggestedCode,
-          estimatedRecoverableRevenue: finding.estimatedRecoverableAmountMinorUnits / 100,
+          estimatedRecoverableRevenue:
+            finding.estimatedRecoverableAmountMinorUnits / 100,
           status:
             finding.status === 'RECONCILED'
               ? 'reconciled'
@@ -1652,131 +1667,150 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
           evidenceSnippet: finding.evidenceSnippet,
           confidenceScore: finding.confidenceScore ?? 1,
         }));
-        setMismatches((previous) => [
-          ...projectedMismatches,
-          ...previous.filter((existing) => !projectedMismatches.some((item) => item.id === existing.id)),
-        ]);
-      }
 
-      recordMutation('INSERT_NOTE', `Note:${noteId}`, newNote);
-    }).catch((error) => {
-      console.error('CLINICAL_NOTE_COMMAND_FAILED', error);
-    });
+      setMismatches((previous) => [
+        ...projectedMismatches,
+        ...previous.filter(
+          (existing) =>
+            !projectedMismatches.some((item) => item.id === existing.id)
+        ),
+      ]);
+    }
+
+    recordMutation('INSERT_NOTE', `Note:${noteId}`, newNote);
   };
 
-  const addLabOrder = (patientId: string, order: Omit<LabOrder, 'id' | 'orderedAt'>) => {
+  const addLabOrder = async (
+    patientId: string,
+    order: Omit<LabOrder, 'id' | 'orderedAt'>
+  ): Promise<void> => {
     const patient = patients.find((item) => item.id === patientId);
     const encounterId = patient?.activeEncounterId || patient?.encounters?.[0]?.id;
 
     if (!patient || !encounterId) {
-      console.error('DIAGNOSTIC_ORDER_REJECTED: active patient encounter is required.');
-      return;
+      throw new Error('DIAGNOSTIC_ORDER_REJECTED: active patient encounter is required.');
     }
 
     const orderType = order.category === 'Radiology' ? 'RADIOLOGY' : 'LAB';
     const offlineOrderId = `offline-order-${crypto.randomUUID()}`;
 
-    void executeActiveTenantCommand('PlaceDiagnosticOrderCommand', {
-      encounterId,
-      patientId,
-      orderType,
-      catalogCode: order.sampleId || order.testName,
-      orderName: order.testName,
-      priority: 'ROUTINE',
-      clinicalIndication: order.notes || 'Clinician ordered diagnostic investigation',
-      estimatedCostMinorUnits: Math.round((order.cost || 0) * 100),
-    }, {
-      offlineQueue: {
-        enabled: true,
-        collection: 'clinical_orders',
-        resourceId: offlineOrderId,
-        action: 'CREATE',
-        optimisticCache: true,
+    const result = await executeActiveTenantCommand(
+      'PlaceDiagnosticOrderCommand',
+      {
+        encounterId,
+        patientId,
+        orderType,
+        catalogCode: order.sampleId || order.testName,
+        orderName: order.testName,
+        priority: 'ROUTINE',
+        clinicalIndication:
+          order.notes || 'Clinician ordered diagnostic investigation',
+        estimatedCostMinorUnits: Math.round((order.cost || 0) * 100),
       },
-    }).then((result) => {
-      if (!result.success) {
-        throw new Error(result.error?.message || 'Diagnostic order command failed.');
+      {
+        offlineQueue: {
+          enabled: true,
+          collection: 'clinical_orders',
+          resourceId: offlineOrderId,
+          action: 'CREATE',
+          optimisticCache: true,
+        },
       }
+    );
 
-      const orderedAt = new Date().toISOString().replace('T', ' ').slice(0, 16);
-      const newOrder: LabOrder = {
-        ...order,
-        id: result.entityId || offlineOrderId,
-        orderedAt,
-      };
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Diagnostic order command failed.');
+    }
 
-      setPatients((previous) => previous.map((item) => {
-        if (item.id !== patientId) return item;
-        const encounters = [...item.encounters];
-        if (encounters.length > 0) {
-          encounters[0] = {
-            ...encounters[0],
-            labOrders: [newOrder, ...encounters[0].labOrders],
-          };
-        }
-        return { ...item, encounters };
-      }));
+    const orderedAt = new Date().toISOString().replace('T', ' ').slice(0, 16);
+    const newOrder: LabOrder = {
+      ...order,
+      id: result.entityId || offlineOrderId,
+      orderedAt,
+    };
 
-      // Integration delivery is now represented by the durable transaction outbox.
-      // Do not fabricate a browser-side HL7 dispatch record here.
-      recordMutation('ORDER_LAB', `Order:${newOrder.id}`, newOrder);
-    }).catch((error) => {
-      console.error('DIAGNOSTIC_ORDER_COMMAND_FAILED', error);
-    });
+    setPatients((previous) => previous.map((item) => {
+      if (item.id !== patientId) return item;
+      const encounters = [...item.encounters];
+      const encounterIndex = encounters.findIndex(
+        (encounter) => encounter.id === encounterId
+      );
+      if (encounterIndex >= 0) {
+        encounters[encounterIndex] = {
+          ...encounters[encounterIndex],
+          labOrders: [
+            newOrder,
+            ...encounters[encounterIndex].labOrders,
+          ],
+        };
+      }
+      return { ...item, encounters };
+    }));
+
+    recordMutation('ORDER_LAB', `Order:${newOrder.id}`, newOrder);
   };
 
-  const addVitals = (patientId: string, vitals: Omit<Vitals, 'timestamp'>) => {
+  const addVitals = async (
+    patientId: string,
+    vitals: Omit<Vitals, 'timestamp'>
+  ): Promise<void> => {
     const patient = patients.find((item) => item.id === patientId);
     const encounterId = patient?.activeEncounterId || patient?.encounters?.[0]?.id;
 
     if (!patient || !encounterId) {
-      console.error('VITALS_REJECTED: active patient encounter is required.');
-      return;
+      throw new Error('VITALS_REJECTED: active patient encounter is required.');
     }
 
     const offlineVitalsId = `offline-vitals-${crypto.randomUUID()}`;
-
-    void executeActiveTenantCommand('RecordVitalsCommand', {
-      encounterId,
-      patientId,
-      heartRate: vitals.heartRate,
-      bloodPressure: vitals.bloodPressure,
-      temperature: vitals.temperature,
-      respiratoryRate: vitals.respiratoryRate,
-      oxygenSaturation: vitals.oxygenSaturation,
-      measuredAt: Date.now(),
-    }, {
-      offlineQueue: {
-        enabled: true,
-        collection: 'vitals',
-        resourceId: offlineVitalsId,
-        action: 'CREATE',
-        optimisticCache: true,
+    const result = await executeActiveTenantCommand(
+      'RecordVitalsCommand',
+      {
+        encounterId,
+        patientId,
+        heartRate: vitals.heartRate,
+        bloodPressure: vitals.bloodPressure,
+        temperature: vitals.temperature,
+        respiratoryRate: vitals.respiratoryRate,
+        oxygenSaturation: vitals.oxygenSaturation,
+        measuredAt: Date.now(),
       },
-    }).then((result) => {
-      if (!result.success) {
-        throw new Error(result.error?.message || 'Vitals command failed.');
+      {
+        offlineQueue: {
+          enabled: true,
+          collection: 'vitals',
+          resourceId: offlineVitalsId,
+          action: 'CREATE',
+          optimisticCache: true,
+        },
       }
+    );
 
-      const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
-      const newVitals: Vitals = { ...vitals, timestamp };
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Vitals command failed.');
+    }
 
-      setPatients((previous) => previous.map((item) => {
-        if (item.id !== patientId) return item;
-        const encounters = [...item.encounters];
-        if (encounters.length > 0) {
-          encounters[0] = {
-            ...encounters[0],
-            vitalsHistory: [newVitals, ...encounters[0].vitalsHistory],
-          };
-        }
-        return { ...item, encounters };
-      }));
+    const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
+    const newVitals: Vitals = { ...vitals, timestamp };
 
-      recordMutation('UPDATE_VITALS', `Patient:${patientId}`, newVitals);
-    }).catch((error) => {
-      console.error('VITALS_COMMAND_FAILED', error);
-    });
+    setPatients((previous) => previous.map((item) => {
+      if (item.id !== patientId) return item;
+      const encounters = [...item.encounters];
+      const encounterIndex = encounters.findIndex(
+        (encounter) => encounter.id === encounterId
+      );
+      if (encounterIndex >= 0) {
+        encounters[encounterIndex] = {
+          ...encounters[encounterIndex],
+          vitalsHistory: [
+            newVitals,
+            ...encounters[encounterIndex].vitalsHistory,
+          ],
+        };
+      }
+      return { ...item, encounters };
+    }));
+
+    recordMutation('UPDATE_VITALS', `Patient:${patientId}`, newVitals);
   };
 
   const reconcileMismatch = async (mismatchId: string) => {
@@ -1914,11 +1948,13 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     addAuditLog('DISPATCH_HL7', msg.type, `Dispatched to ${msg.receivingApp} for MRN: ${msg.patientMrn}`);
   };
 
-  const callNextOpdToken = (tokenId: string) => {
+  const callNextOpdToken = async (tokenId: string): Promise<void> => {
     const token = opdQueue.find((item) => item.id === tokenId);
-    if (!token) return;
+    if (!token) {
+      throw new Error('OPD_TOKEN_NOT_FOUND');
+    }
 
-    void executeActiveTenantCommand(
+    const result = await executeActiveTenantCommand(
       'UpdateOpdQueueStatusCommand',
       {
         tokenId,
@@ -1933,25 +1969,25 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
           optimisticCache: true,
         },
       }
-    ).then((result) => {
-      if (!result.success) {
-        throw new Error(result.error?.message || 'Unable to call OPD patient.');
-      }
+    );
 
-      setOpdQueue((previous) => previous.map((item) =>
-        item.id === tokenId ? { ...item, status: 'in_consultation' } : item
-      ));
-      setSelectedPatientId(token.patientId);
-    }).catch((error) => {
-      console.error('OPD_CALL_COMMAND_FAILED', error);
-    });
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Unable to call OPD patient.');
+    }
+
+    setOpdQueue((previous) => previous.map((item) =>
+      item.id === tokenId ? { ...item, status: 'in_consultation' } : item
+    ));
+    setSelectedPatientId(token.patientId);
   };
 
-  const completeOpdToken = (tokenId: string) => {
+  const completeOpdToken = async (tokenId: string): Promise<void> => {
     const token = opdQueue.find((item) => item.id === tokenId);
-    if (!token) return;
+    if (!token) {
+      throw new Error('OPD_TOKEN_NOT_FOUND');
+    }
 
-    void executeActiveTenantCommand(
+    const result = await executeActiveTenantCommand(
       'UpdateOpdQueueStatusCommand',
       {
         tokenId,
@@ -1966,17 +2002,17 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
           optimisticCache: true,
         },
       }
-    ).then((result) => {
-      if (!result.success) {
-        throw new Error(result.error?.message || 'Unable to complete OPD consultation.');
-      }
+    );
 
-      setOpdQueue((previous) => previous.map((item) =>
-        item.id === tokenId ? { ...item, status: 'completed' } : item
-      ));
-    }).catch((error) => {
-      console.error('OPD_COMPLETE_COMMAND_FAILED', error);
-    });
+    if (!result.success) {
+      throw new Error(
+        result.error?.message || 'Unable to complete OPD consultation.'
+      );
+    }
+
+    setOpdQueue((previous) => previous.map((item) =>
+      item.id === tokenId ? { ...item, status: 'completed' } : item
+    ));
   };
 
   const triggerOfflineSync = () => {

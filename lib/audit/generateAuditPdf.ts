@@ -35,7 +35,13 @@ export async function generateAuditPdfReport({
 
   const pageWidth = 297;
   const pageHeight = 210;
-  const isChainValid = verificationResult?.isValid ?? true;
+  const verificationState: 'VERIFIED' | 'FAILED' | 'NOT_VERIFIED' =
+    verificationResult === null
+      ? 'NOT_VERIFIED'
+      : verificationResult.isValid
+        ? 'VERIFIED'
+        : 'FAILED';
+  const isChainValid = verificationState === 'VERIFIED';
 
   // 1. Top Executive Banner
   doc.setFillColor(15, 23, 42); // slate-900
@@ -72,7 +78,7 @@ export async function generateAuditPdfReport({
   const boxY = 26;
   const boxHeight = 20;
 
-  if (isChainValid) {
+  if (verificationState === 'VERIFIED') {
     doc.setFillColor(240, 253, 244); // emerald-50
     doc.setDrawColor(134, 239, 172); // emerald-300
     doc.roundedRect(14, boxY, pageWidth - 28, boxHeight, 2, 2, 'FD');
@@ -97,7 +103,7 @@ export async function generateAuditPdfReport({
       18,
       boxY + 17
     );
-  } else {
+  } else if (verificationState === 'FAILED') {
     doc.setFillColor(254, 242, 242); // rose-50
     doc.setDrawColor(252, 165, 165); // rose-300
     doc.roundedRect(14, boxY, pageWidth - 28, boxHeight, 2, 2, 'FD');
@@ -112,6 +118,22 @@ export async function generateAuditPdfReport({
     doc.setTextColor(80, 20, 20);
     doc.text(
       'One or more sequential hashes failed canonical payload recalculation. Review flagged events in the ledger table below.',
+      18,
+      boxY + 13
+    );
+  } else {
+    doc.setFillColor(255, 251, 235);
+    doc.setDrawColor(252, 211, 77);
+    doc.roundedRect(14, boxY, pageWidth - 28, boxHeight, 2, 2, 'FD');
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(146, 64, 14);
+    doc.text('AUDIT CHAIN VERIFICATION: NOT PERFORMED', 18, boxY + 6);
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(71, 85, 105);
+    doc.text(
+      'This export contains recorded audit entries, but no cryptographic chain-verification result was supplied. No integrity attestation is implied.',
       18,
       boxY + 13
     );
@@ -134,7 +156,13 @@ export async function generateAuditPdfReport({
 
   // 4. Tabular Ledger Records
   const tableData = logs.map((log, index) => {
-    const status = logVerificationMap[log.id] || (isChainValid ? 'VERIFIED' : 'MISMATCH');
+    const status =
+      logVerificationMap[log.id] ||
+      (verificationState === 'VERIFIED'
+        ? 'VERIFIED'
+        : verificationState === 'FAILED'
+          ? 'MISMATCH'
+          : 'NOT_VERIFIED');
     const timeFormatted = new Date(log.timestamp).toLocaleString([], {
       month: 'short',
       day: 'numeric',
@@ -219,7 +247,7 @@ export async function generateAuditPdfReport({
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(148, 163, 184);
       doc.text(
-        'STRICTLY CONFIDENTIAL • HIPAA §164.312(b) & ISO 27001 AUDIT LEDGER • SHA-256 FORWARD CHAIN INTEGRITY ATTESTATION',
+        'STRICTLY CONFIDENTIAL • G-HIMS AUDIT LEDGER EXPORT • VERIFY INTEGRITY STATUS BEFORE RELIANCE',
         14,
         pageHeight - 6
       );

@@ -1438,6 +1438,31 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       }).strict().optional(),
     }).strict(),
   },
+  RegisterBedCommand: {
+    1: z.object({
+      bedNumber: nonEmpty.max(100),
+      facilityId: nonEmpty.max(100),
+      facilityName: nonEmpty.max(200),
+      departmentId: nonEmpty.max(100),
+      departmentName: nonEmpty.max(200),
+      roomId: nonEmpty.max(150),
+      ward: z.enum([
+        'ICU','General','Emergency','Maternity','Pediatrics','Surgery','Cardiology','Oncology'
+      ]),
+      bedType: z.enum([
+        'STANDARD','ICU','HDU','ISOLATION','PEDIATRIC','MATERNITY','EMERGENCY','RECOVERY'
+      ]),
+      capabilities: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
+      notes: z.string().trim().max(2000).optional(),
+    }).strict(),
+  },
+  UpdateBedStatusCommand: {
+    1: z.object({
+      bedId: nonEmpty.max(150),
+      status: z.enum(['available','maintenance','cleaning']),
+      notes: z.string().trim().max(2000).optional(),
+    }).strict(),
+  },
   ReserveResourceCommand: {
     1: z.object({
       resourceId: nonEmpty.max(150),

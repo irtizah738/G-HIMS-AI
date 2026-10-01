@@ -46,6 +46,7 @@ export interface TenantMembership {
   departmentIds: string[];
   facilityIds: string[];
   permissions: string[];
+  financialAuthorityMinorUnits?: number;
   clinicalPrivileges: string[];
   licenseId?: string;
   credentialStatus?: string;
@@ -128,6 +129,7 @@ export interface AuthorizationContext {
   tenantId: string;
   roles: string[];
   permissions: string[];
+  financialAuthorityMinorUnits?: number;
   departmentIds: string[];
   facilityIds: string[];
   clinicalPrivileges: string[];
@@ -153,6 +155,7 @@ export interface LoginResponsePayload {
   authorization: {
     roles: string[];
     permissions: string[];
+    financialAuthorityMinorUnits?: number;
     departmentIds: string[];
     facilityIds: string[];
     clinicalPrivileges: string[];

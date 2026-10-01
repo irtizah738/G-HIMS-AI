@@ -160,47 +160,36 @@ export async function getTenantMembership(
     });
   }
 
+  if (!db) {
+    throw new AuthError({
+      code: 'INTERNAL_AUTH_ERROR',
+      message: 'Authoritative tenant membership store is unavailable',
+      statusCode: 503,
+    });
+  }
+
   let rawData: Record<string, any> | null = null;
+  try {
+    const userDoc = await db
+      .collection('tenants')
+      .doc(normalizedTenantId)
+      .collection('users')
+      .doc(userId)
+      .get();
 
-  if (db) {
-    try {
-      const userDoc = await db
-        .collection('tenants')
-        .doc(normalizedTenantId)
-        .collection('users')
-        .doc(userId)
-        .get();
-
-      if (userDoc.exists) {
-        rawData = (userDoc.data() || {}) as Record<string, any>;
-      }
-    } catch {
-      // Continue to client firestore fallback
+    if (userDoc.exists) {
+      rawData = (userDoc.data() || {}) as Record<string, any>;
     }
+  } catch (error) {
+    throw new AuthError({
+      code: 'INTERNAL_AUTH_ERROR',
+      message: 'Unable to read authoritative tenant membership',
+      statusCode: 503,
+      originalError: error,
+    });
   }
 
   if (!rawData) {
-    try {
-      const { db: clientDb } = await import('@/lib/firebase/client');
-      const { doc, getDoc } = await import('firebase/firestore');
-      const snap = await getDoc(doc(clientDb, 'tenants', normalizedTenantId, 'users', userId));
-      if (snap.exists()) {
-        rawData = snap.data() as Record<string, any>;
-      }
-    } catch {
-      // Fallback read skipped
-    }
-  }
-
-  if (!rawData) {
-    if (!db) {
-      throw new AuthError({
-        code: 'INTERNAL_AUTH_ERROR',
-        message: 'Authoritative tenant membership store is unavailable',
-        statusCode: 503,
-      });
-    }
-
     throw new AuthError({
       code: 'TENANT_ACCESS_DENIED',
       message: `User ${userId} has no membership in tenant ${normalizedTenantId}`,
@@ -218,27 +207,6 @@ export async function getUserAccessibleTenants(
   const db = getAdminFirestore();
 
   if (!db) {
-    try {
-      const { db: clientDb } = await import('@/lib/firebase/client');
-      const { doc, getDoc } = await import('firebase/firestore');
-      const defaultTenantId = 'central-metro-hospital';
-      const snap = await getDoc(doc(clientDb, 'tenants', defaultTenantId, 'users', userId));
-      if (snap.exists()) {
-        const membership = membershipFromDocument(defaultTenantId, userId, snap.data() || {});
-        return [{
-          tenantId: defaultTenantId,
-          name: 'Central Metro General Hospital',
-          facilityCode: 'CMGH',
-          roles: membership.roles,
-          status: membership.status,
-          departmentIds: membership.departmentIds,
-          primaryRole: membership.roles[0],
-        }];
-      }
-    } catch {
-      // Proceed to error
-    }
-
     throw new AuthError({
       code: 'INTERNAL_AUTH_ERROR',
       message: 'Authoritative tenant membership store is unavailable',

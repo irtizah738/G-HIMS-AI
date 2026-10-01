@@ -266,7 +266,7 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
                 <h1 className="text-lg font-bold text-slate-900 dark:text-slate-100">Outpatient (OPD) & Triage Consultation Suite</h1>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Real-time token queue, digital SOAP charting, and automated point-of-care CPT charge capture
+                Authoritative token queue, clinician-entered SOAP documentation, governed diagnostics and explicit charge validation
               </p>
             </div>
 
@@ -353,7 +353,7 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
                             mrn: token.mrn,
                             chiefComplaint: token.chiefComplaint,
                             triageCategory: 'Outpatient Triage / OPD',
-                            currentAttending: selectedToken?.assignedDoctor || 'Unassigned',
+                            currentAttending: token.assignedDoctor || 'Unassigned',
                           });
                           setIsRoutingModalOpen(true);
                         }}
@@ -368,7 +368,14 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            callNextOpdToken(token.id);
+                            void callNextOpdToken(token.id).catch((error) => {
+                              setSuccessToast(
+                                error instanceof Error
+                                  ? error.message
+                                  : 'Unable to call OPD patient.'
+                              );
+                              setTimeout(() => setSuccessToast(null), 4000);
+                            });
                           }}
                           className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold shadow-xs transition-all cursor-pointer"
                         >
@@ -434,7 +441,7 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
                   onClick={handleQuickLabOrder}
                   className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs flex items-center gap-1 transition-all cursor-pointer"
                 >
-                  <FlaskConical className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" /> Order Stat Labs
+                  <FlaskConical className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" /> Open Diagnostic Orders
                 </button>
                 <button
                   type="button"

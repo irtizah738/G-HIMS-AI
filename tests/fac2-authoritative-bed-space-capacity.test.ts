@@ -101,6 +101,15 @@ describe('FAC-2 authoritative bed & space capacity', () => {
     );
     expect(invalidRegistration.success).toBe(false);
 
+    const clientOwnedNames = validateCommandPayload(
+      command('RegisterBedCommand', 'fac2-schema-client-names', {
+        ...registerBedPayload('rm_003', 'ICU-NAME-FORGE'),
+        facilityName: 'forged facility',
+        departmentName: 'forged department',
+      })
+    );
+    expect(clientOwnedNames.success).toBe(false);
+
     const invalidStatus = validateCommandPayload(
       command('UpdateBedStatusCommand', 'fac2-schema-status', {
         bedId: 'bed-any',
@@ -271,6 +280,50 @@ describe('FAC-2 authoritative bed & space capacity', () => {
     expect(result.error?.code).toBe('FACILITY_SCOPE_MISMATCH');
   });
 
+  test('housekeeping can transition unoccupied cleaning readiness within facility scope', async () => {
+    const registration = await CommandBus.dispatch(
+      facilitiesContext,
+      command(
+        'RegisterBedCommand',
+        'fac2-housekeeping-bed',
+        registerBedPayload('rm_003', 'ICU-HK-A')
+      )
+    );
+    expect(registration.success).toBe(true);
+    const bed = registration.data as Bed;
+
+    const housekeepingContext: CommandContext = {
+      ...facilitiesContext,
+      actorId: 'fac2-housekeeping',
+      roles: ['HOUSEKEEPING'],
+      correlationId: 'fac2-hk-corr',
+      requestId: 'fac2-hk-req',
+    };
+
+    const cleaning = await CommandBus.dispatch(
+      housekeepingContext,
+      command(
+        'UpdateBedStatusCommand',
+        'fac2-housekeeping-cleaning',
+        { bedId: bed.id, status: 'cleaning', notes: 'Terminal cleaning started' },
+        housekeepingContext
+      )
+    );
+    expect(cleaning.success).toBe(true);
+
+    const ready = await CommandBus.dispatch(
+      housekeepingContext,
+      command(
+        'UpdateBedStatusCommand',
+        'fac2-housekeeping-ready',
+        { bedId: bed.id, status: 'available', notes: 'Terminal cleaning complete' },
+        housekeepingContext
+      )
+    );
+    expect(ready.success).toBe(true);
+    expect((ready.data as { bed: Bed }).bed.status).toBe('available');
+  });
+
   test('operational readiness is facilities-owned but cannot override clinical occupancy', async () => {
     const registration = await CommandBus.dispatch(
       facilitiesContext,
@@ -379,6 +432,20 @@ describe('FAC-2 authoritative bed & space capacity', () => {
     expect(view).toContain(
       'Bed holds are created through the governed admission workflow.'
     );
+    expect(view).toContain('Clinical Care authority');
+    expect(view).toContain('isDemoRuntime && showAdmitModal');
+    expect(view).toContain('isDemoRuntime && showDischargeModal');
+    expect(view).toContain('isDemoRuntime && ipdPathwayBed');
+    expect(view).not.toContain('100% Invariant');
+    expect(view).not.toContain('Zero Patient Loss Guarantee');
+
+    const context = await source('lib/context/hospital-context.tsx');
+    const statusStart = context.indexOf('const updateBedStatus');
+    const statusEnd = context.indexOf('const assignPatientToBed', statusStart);
+    const statusBlock = context.slice(statusStart, statusEnd);
+    expect(statusBlock).toContain('optimisticCache: false');
+    expect(statusBlock).toContain('result.queuedOffline');
+    expect(statusBlock).not.toContain('const optimisticBed');
   });
 
   test('capacity allocation is transactionally coupled to room and bed identity', async () => {

@@ -93,4 +93,14 @@ describe('G-HIMS P7 controlled live pilot qualification', () => {
     expect(p6).toContain('requires_review');
     expect(p7).toContain('docs/operations/OFFLINE_FIRST_QUALIFICATION.md');
   });
+  test('staging clinician provisioning creates HCM credential and privilege evidence', async () => {
+    const provision = await source('scripts/ops/p7-provision-staging-identities.ts');
+    expect(provision).toContain("collection('employees')");
+    expect(provision).toContain("collection('clinicalCredentials')");
+    expect(provision).toContain("collection('clinicalPrivileges')");
+    expect(provision).toContain('syntheticQualificationRecord');
+    expect(provision).toContain("'PRESCRIBE_MEDICATION'");
+    expect(provision).toContain("'SIGN_SOAP_CLINICAL_NOTE'");
+  });
+
 });

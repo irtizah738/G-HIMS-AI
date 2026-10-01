@@ -111,6 +111,12 @@ function membershipFromDocument(tenantId: string, userId: string, data: Record<s
       ? declaredClinicalPrivileges
       : [];
 
+  const rawFinancialAuthority = Number(data.financialAuthorityMinorUnits);
+  const financialAuthorityMinorUnits =
+    Number.isSafeInteger(rawFinancialAuthority) && rawFinancialAuthority >= 0
+      ? rawFinancialAuthority
+      : undefined;
+
   return {
     userId,
     tenantId,
@@ -128,6 +134,7 @@ function membershipFromDocument(tenantId: string, userId: string, data: Record<s
         : [],
     facilityIds: Array.isArray(data.facilityIds) ? data.facilityIds.map(String) : [],
     permissions,
+    financialAuthorityMinorUnits,
     clinicalPrivileges,
     licenseId: typeof data.licenseId === 'string' ? data.licenseId : undefined,
     credentialStatus,

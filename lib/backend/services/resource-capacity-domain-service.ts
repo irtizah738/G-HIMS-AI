@@ -583,6 +583,22 @@ export class ResourceCapacityDomainService {
             );
           }
 
+          const inpatientCapableRoomTypes: HospitalRoom['roomType'][] = [
+            'icu',
+            'isolation',
+            'inpatient_room',
+            'emergency_bay',
+            'recovery',
+            'maternity',
+            'pediatric',
+          ];
+          if (!inpatientCapableRoomTypes.includes(room.roomType)) {
+            throw new AtomicMutationRejectedError(
+              'ROOM_NOT_BED_CAPABLE',
+              `Room ${room.roomNumber} is classified as ${room.roomType} and cannot host inpatient beds.`
+            );
+          }
+
           const existingBedIds = Array.from(new Set(room.bedIds || []));
           if (existingBedIds.length >= room.capacity) {
             throw new AtomicMutationRejectedError(

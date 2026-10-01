@@ -474,6 +474,31 @@ export class ResourceCapacityDomainService {
     idempotencyKey: string,
     payload: Omit<ResourceReservation, 'reservationId' | 'status' | 'createdAt' | 'updatedAt'>
   ): Promise<CommandResult<ResourceReservation>> {
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: [
+        'DOCTOR',
+        'CLINICIAN',
+        'NURSE',
+        'LAB_TECHNICIAN',
+        'RADIOLOGY_TECHNICIAN',
+        'FACILITIES_ADMIN',
+        'BIOMEDICAL_ENGINEER',
+        'SYSTEM_ADMIN',
+        'ADMINISTRATOR',
+      ],
+    });
+    if (!auth.authorized) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Resource reservation authority required.',
+        },
+      };
+    }
+
     const proposedStart = new Date(payload.startTime).getTime();
     const proposedEnd = new Date(payload.endTime).getTime();
 

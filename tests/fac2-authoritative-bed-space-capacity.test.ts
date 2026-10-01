@@ -161,6 +161,48 @@ describe('FAC-2 authoritative bed & space capacity', () => {
     expect(room?.bedIds).toContain(bed.id);
   });
 
+  test('bed registration rejects missing and non-inpatient rooms', async () => {
+    const missing = await CommandBus.dispatch(
+      facilitiesContext,
+      command(
+        'RegisterBedCommand',
+        'fac2-bed-missing-room',
+        registerBedPayload('room-does-not-exist', 'BED-MISSING-ROOM')
+      )
+    );
+    expect(missing.success).toBe(false);
+    expect(missing.error?.code).toBe('ROOM_NOT_FOUND');
+
+    const nonBedRoom = await CommandBus.dispatch(
+      facilitiesContext,
+      command('RegisterRoomCommand', 'fac2-meeting-room', {
+        roomNumber: 'MEET-01',
+        facilityId: 'fac_central',
+        facilityName: 'Central Metro Hospital',
+        building: 'Admin Pavilion',
+        floor: 'Floor 1',
+        departmentId: 'dept_icu',
+        departmentName: 'Intensive Care Unit (ICU)',
+        roomType: 'meeting',
+        capacity: 10,
+        currentOccupancy: 0,
+        status: 'AVAILABLE',
+      })
+    );
+    expect(nonBedRoom.success).toBe(true);
+
+    const invalid = await CommandBus.dispatch(
+      facilitiesContext,
+      command(
+        'RegisterBedCommand',
+        'fac2-bed-in-meeting-room',
+        registerBedPayload(String(nonBedRoom.entityId), 'MEET-BED-01')
+      )
+    );
+    expect(invalid.success).toBe(false);
+    expect(invalid.error?.code).toBe('ROOM_NOT_BED_CAPABLE');
+  });
+
   test('duplicate bed physical identities are rejected atomically', async () => {
     const roomId = await createRoom('03', 2);
     const first = await CommandBus.dispatch(
@@ -313,6 +355,7 @@ describe('FAC-2 authoritative bed & space capacity', () => {
     expect(bedRule).toContain('canReadClinical(tenantId)');
     expect(bedRule).toContain('canReadFacilities(tenantId)');
     expect(bedRule).toContain('allow write: if false;');
+    expect(rules).toContain("'HOUSEKEEPING'");
 
     const identityRule = rules.slice(
       rules.indexOf('match /bedIdentities/{id}'),
@@ -324,6 +367,18 @@ describe('FAC-2 authoritative bed & space capacity', () => {
     expect(edge).toContain('beds: (snapshot.collections.beds || [])');
     expect(edge).toContain("'RegisterBedCommand'");
     expect(edge).toContain("'UpdateBedStatusCommand'");
+  });
+
+  test('production bed dashboard does not fabricate demo census evidence', async () => {
+    const view = await source('components/views/bed-occupancy-view.tsx');
+    expect(view).toContain('NEXT_PUBLIC_GHIMS_RUNTIME_MODE');
+    expect(view).toContain("isDemoRuntime ? 'Dr. Fatima Zahra' : ''");
+    expect(view).toContain('isDemoRuntime ? [');
+    expect(view).toContain(': []');
+    expect(view).not.toContain("updateBedStatus(selectedBed.id, 'reserved')");
+    expect(view).toContain(
+      'Bed holds are created through the governed admission workflow.'
+    );
   });
 
   test('capacity allocation is transactionally coupled to room and bed identity', async () => {

@@ -263,11 +263,16 @@ describe('G-HIMS P0 Core Trust Boundary regression guards', () => {
     expect(sso).not.toContain('getDoc(');
   });
 
-  test('Cloud Function authorization has no default admin identity', async () => {
-    const functions = await source('functions/src/index.ts');
+  test('deprecated Cloud Functions authority path remains removed', async () => {
+    const fs = await import('node:fs/promises');
 
-    expect(functions).toContain('Authentication Required');
-    expect(functions).not.toContain("context?.auth?.uid || 'usr_clinical_auth'");
-    expect(functions).not.toContain("context?.auth?.token?.role || 'admin'");
+    await expect(
+      fs.access(path.join(process.cwd(), 'functions/src/index.ts'))
+    ).rejects.toThrow();
+    await expect(
+      fs.access(
+        path.join(process.cwd(), 'functions/src/registerPatientAndEncounter.ts')
+      )
+    ).rejects.toThrow();
   });
 });

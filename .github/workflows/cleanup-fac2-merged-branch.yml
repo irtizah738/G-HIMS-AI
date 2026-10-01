@@ -1,0 +1,23 @@
+name: One-time FAC-2 merged branch cleanup
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/cleanup-fac2-merged-branch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    name: Remove merged FAC-2 branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete redundant merged branch ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/fac%2Ffac2-authoritative-bed-space-capacity" || true

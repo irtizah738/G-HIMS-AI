@@ -12,10 +12,12 @@ import type {
   ResourceMaster,
   ResourceReservation,
 } from '@/types/resource-management';
+import type { Bed } from '@/lib/types/ghims';
 
 export interface FacilitiesEdgeProjection {
   resources: ResourceMaster[];
   rooms: HospitalRoom[];
+  beds: Bed[];
   reservations: ResourceReservation[];
   workOrders: MaintenanceWorkOrder[];
   calibrations: CalibrationRecord[];
@@ -27,6 +29,7 @@ function mapProjection(
   return {
     resources: (snapshot.collections.resources || []) as unknown as ResourceMaster[],
     rooms: (snapshot.collections.rooms || []) as unknown as HospitalRoom[],
+    beds: (snapshot.collections.beds || []) as unknown as Bed[],
     reservations: (snapshot.collections.resourceReservations || []) as unknown as ResourceReservation[],
     workOrders: (snapshot.collections.maintenanceWorkOrders || []) as unknown as MaintenanceWorkOrder[],
     calibrations: (snapshot.collections.calibrationRecords || []) as unknown as CalibrationRecord[],
@@ -60,6 +63,16 @@ async function run<T>(
   }
   return result.data as T;
 }
+
+export const registerBedEdge = (
+  payload: Record<string, unknown>,
+  idempotencyKey?: string
+) => run<Bed>('RegisterBedCommand', payload, idempotencyKey);
+
+export const updateBedOperationalStatusEdge = (
+  payload: Record<string, unknown>,
+  idempotencyKey?: string
+) => run<{ bed: Bed }>('UpdateBedStatusCommand', payload, idempotencyKey);
 
 export const recordCalibrationEdge = (
   payload: Record<string, unknown>,

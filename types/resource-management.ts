@@ -48,7 +48,12 @@ export type MaintenanceStatus =
   | 'VERIFIED'
   | 'CANCELLED';
 
-export type CalibrationStatus = 'VALID' | 'EXPIRING_SOON' | 'CALIBRATION_REQUIRED' | 'FAILED';
+export type CalibrationStatus =
+  | 'NOT_REQUIRED'
+  | 'VALID'
+  | 'EXPIRING_SOON'
+  | 'CALIBRATION_REQUIRED'
+  | 'FAILED';
 
 export type ReservationStatus =
   | 'REQUESTED'
@@ -96,6 +101,8 @@ export interface ResourceMaster {
   operatingSpecifications?: Record<string, string | number>;
   acquisitionDate: string;
   lifecycleState: 'IN_SERVICE' | 'STORAGE' | 'UNDER_REPAIR' | 'DECOMMISSIONED' | 'DISPOSED';
+  /** Monotonic server-owned token used to serialize reservation decisions. */
+  reservationRevision?: number;
   createdAt: string;
   updatedAt: string;
 }

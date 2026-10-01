@@ -41,7 +41,7 @@ describe('G-HIMS Resource & Capacity Management Domain Engine', () => {
 
   beforeEach(() => {
     ResourceCapacityDomainService.resetForTesting();
-    ResourceCapacityDomainService.ensureInitialized();
+    ResourceCapacityDomainService.seedTestFixtures();
   });
 
   describe('1. Resource Registration & Role Authorization (Gate E)', () => {
@@ -50,6 +50,7 @@ describe('G-HIMS Resource & Capacity Management Domain Engine', () => {
         commandId: 'cmd_reg_01',
         idempotencyKey: 'idemp_reg_01',
         commandType: 'RegisterResourceCommand',
+        schemaVersion: 1,
         tenantId: 'central-metro-hospital',
         actorId: 'usr_doc_01',
         timestamp: new Date().toISOString(),
@@ -85,6 +86,7 @@ describe('G-HIMS Resource & Capacity Management Domain Engine', () => {
         commandId: 'cmd_reg_02',
         idempotencyKey: 'idemp_reg_02',
         commandType: 'RegisterResourceCommand',
+        schemaVersion: 1,
         tenantId: 'central-metro-hospital',
         actorId: 'usr_fac_lead_01',
         timestamp: new Date().toISOString(),
@@ -129,13 +131,14 @@ describe('G-HIMS Resource & Capacity Management Domain Engine', () => {
         commandId: 'cmd_resv_ovl_01',
         idempotencyKey: 'idemp_resv_ovl_01',
         commandType: 'ReserveResourceCommand',
+        schemaVersion: 1,
         tenantId: 'central-metro-hospital',
         actorId: 'usr_doc_01',
         timestamp: new Date().toISOString(),
         payload: {
           resourceId: 'res_001',
           resourceName: 'GE Healthcare Aisys CS2 Anesthesia Delivery Workstation',
-          resourceType: 'SURGICAL_EQUIPMENT',
+          resourceType: 'MEDICAL_DEVICE',
           facilityId: 'fac_central',
           departmentId: 'dept_surgery',
           startTime: `${today}T15:00:00Z`,
@@ -166,6 +169,7 @@ describe('G-HIMS Resource & Capacity Management Domain Engine', () => {
         commandId: 'cmd_resv_lockout_01',
         idempotencyKey: 'idemp_resv_lockout_01',
         commandType: 'ReserveResourceCommand',
+        schemaVersion: 1,
         tenantId: 'central-metro-hospital',
         actorId: 'usr_doc_01',
         timestamp: new Date().toISOString(),
@@ -199,6 +203,7 @@ describe('G-HIMS Resource & Capacity Management Domain Engine', () => {
         commandId: 'cmd_cal_01',
         idempotencyKey: 'idemp_cal_01',
         commandType: 'RecordCalibrationCommand',
+        schemaVersion: 1,
         tenantId: 'central-metro-hospital',
         actorId: 'usr_biomed_01',
         timestamp: new Date().toISOString(),
@@ -207,8 +212,9 @@ describe('G-HIMS Resource & Capacity Management Domain Engine', () => {
           resourceName: 'Hamilton-G5 Intensive Care Mechanical Ventilator',
           calibrationDate: today,
           nextDueDate: nextYear,
-          performedByActorId: 'usr_biomed_01',
-          performedByName: 'Biomedical Engineering Team',
+          model: 'G5',
+          serialNumber: 'HAM-VEN-59201',
+          technicianName: 'Biomedical Engineering Team',
           certificateNumber: 'CAL-CERT-2026-8819',
           result: 'PASS',
           notes: 'Annual transducer and oxygen sensor recalibration complete. Meets factory specs.',
@@ -231,13 +237,14 @@ describe('G-HIMS Resource & Capacity Management Domain Engine', () => {
         commandId: 'cmd_wo_01',
         idempotencyKey: 'idemp_wo_01',
         commandType: 'CreateMaintenanceWorkOrderCommand',
+        schemaVersion: 1,
         tenantId: 'central-metro-hospital',
         actorId: 'usr_fac_lead_01',
         timestamp: new Date().toISOString(),
         payload: {
           resourceId: 'res_002',
           resourceName: 'Stryker 1688 AIM 4K Endoscopy Tower System',
-          workOrderType: 'CORRECTIVE',
+          maintenanceType: 'CORRECTIVE',
           priority: 'HIGH',
           issueDescription: 'Fiber optic light cable flickering during laparoscopic cholecystectomy',
           reportedByActorId: 'usr_fac_lead_01',
@@ -258,6 +265,7 @@ describe('G-HIMS Resource & Capacity Management Domain Engine', () => {
         commandId: 'cmd_comp_wo_01',
         idempotencyKey: 'idemp_comp_wo_01',
         commandType: 'CompleteMaintenanceWorkOrderCommand',
+        schemaVersion: 1,
         tenantId: 'central-metro-hospital',
         actorId: 'usr_biomed_01',
         timestamp: new Date().toISOString(),

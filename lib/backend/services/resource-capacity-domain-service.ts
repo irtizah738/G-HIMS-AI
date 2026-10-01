@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 /**
  * G-HIMS Master Resource Management & Capacity Domain Service
  * Production-grade hospital resource & asset operating engine.
@@ -7,7 +8,10 @@
 
 import { CommandContext, CommandResult } from '../types';
 import { AuthorizationPipeline } from '../auth/authorization-pipeline';
-import { TransactionManager } from '../transactions/transaction-manager';
+import {
+  AtomicMutationRejectedError,
+  TransactionManager,
+} from '../transactions/transaction-manager';
 import {
   ResourceMaster,
   HospitalRoom,
@@ -20,6 +24,61 @@ import {
   OperationalMatchResult,
 } from '@/types/resource-management';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
+
+function deterministicId(
+  prefix: string,
+  tenantId: string,
+  commandId: string
+): string {
+  const digest = createHash('sha256')
+    .update(`${tenantId}\u0000${commandId}`)
+    .digest('hex')
+    .slice(0, 24);
+  return `${prefix}_${digest}`;
+}
+
+function identityId(prefix: string, ...parts: string[]): string {
+  const digest = createHash('sha256')
+    .update(parts.map((part) => part.trim().toLowerCase()).join('\u0000'))
+    .digest('hex')
+    .slice(0, 32);
+  return `${prefix}_${digest}`;
+}
+
+function assertFacilityScope(
+  context: CommandContext,
+  facilityId: string
+): void {
+  const admin = context.roles.some((role) =>
+    ['SYSTEM_ADMIN', 'ADMINISTRATOR'].includes(role)
+  );
+  if (
+    !admin &&
+    context.facilityIds?.length &&
+    !context.facilityIds.includes(facilityId)
+  ) {
+    throw new Error('FACILITY_SCOPE_MISMATCH');
+  }
+}
+
+function isCalibrationLocked(
+  resource: ResourceMaster,
+  requiredThroughMs?: number
+): boolean {
+  if (!resource.calibrationRequired) return false;
+  if (resource.calibrationStatus !== 'VALID') return true;
+  if (!resource.nextCalibrationDate) return true;
+  const dueMs = Date.parse(`${resource.nextCalibrationDate}T23:59:59.999Z`);
+  if (!Number.isFinite(dueMs)) return true;
+  return requiredThroughMs !== undefined ? requiredThroughMs > dueMs : Date.now() > dueMs;
+}
+
+function repositoryRequiredOutsideTests(): void {
+  if (!DomainStateRepository.isAvailable() && process.env.NODE_ENV !== 'test') {
+    throw new Error('RESOURCE_PERSISTENCE_UNAVAILABLE');
+  }
+}
+
 
 export class ResourceCapacityDomainService {
   private static resources: Map<string, ResourceMaster> = new Map();
@@ -68,11 +127,12 @@ export class ResourceCapacityDomainService {
     resourceId: string
   ): Promise<ResourceReservation[]> {
     if (DomainStateRepository.isAvailable()) {
-      const persisted = await DomainStateRepository.queryEqual<ResourceReservation>(
+      const persisted = await DomainStateRepository.queryAllEqual<ResourceReservation>(
         tenantId,
         'resourceReservations',
         'resourceId',
-        resourceId
+        resourceId,
+        { pageSize: 250, maxRows: 10000 }
       );
 
       for (const reservation of persisted) {
@@ -95,62 +155,167 @@ export class ResourceCapacityDomainService {
     context: CommandContext,
     commandId: string,
     idempotencyKey: string,
-    payload: Omit<ResourceMaster, 'resourceId' | 'resourceNumber' | 'createdAt' | 'updatedAt'>
+    payload: Omit<ResourceMaster, 'resourceId' | 'createdAt' | 'updatedAt'> & {
+      resourceNumber?: string;
+    }
   ): Promise<CommandResult<ResourceMaster>> {
     const auth = AuthorizationPipeline.evaluate(context, {
       requiredRoles: ['FACILITIES_ADMIN', 'BIOMEDICAL_ENGINEER', 'SYSTEM_ADMIN', 'HR_ADMIN'],
     });
-
     if (!auth.authorized) {
       return {
         success: false,
         commandId,
         idempotencyKey,
-        error: { code: auth.code || 'UNAUTHORIZED', message: auth.reason || 'Facilities / Biomedical authorization required.' },
+        error: {
+          code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Facilities / Biomedical authorization required.',
+        },
       };
     }
 
-    const resourceId = `res_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const resourceNumber = (payload as any).resourceNumber || `RES-${payload.resourceType.substring(0, 3)}-${Math.floor(1000 + Math.random() * 9000)}`;
-    const now = new Date().toISOString();
+    repositoryRequiredOutsideTests();
+    try {
+      assertFacilityScope(context, payload.facilityId);
+      const resourceId = deterministicId('res', context.tenantId, commandId);
+      const resourceNumber =
+        payload.resourceNumber?.trim() ||
+        `RES-${payload.resourceType.substring(0, 3)}-${resourceId.slice(-8).toUpperCase()}`;
+      const now = new Date().toISOString();
 
-    const resource: ResourceMaster = {
-      ...payload,
-      resourceId,
-      resourceNumber,
-      createdAt: now,
-      updatedAt: now,
-    };
+      const identities = [
+        {
+          key: 'resourceNumberIdentity',
+          entityId: identityId('resource-number', resourceNumber),
+          type: 'RESOURCE_NUMBER',
+          value: resourceNumber,
+        },
+        ...(payload.serialNumber?.trim()
+          ? [{
+              key: 'serialIdentity',
+              entityId: identityId('resource-serial', payload.serialNumber),
+              type: 'SERIAL_NUMBER',
+              value: payload.serialNumber.trim(),
+            }]
+          : []),
+        ...(payload.assetTagNumber?.trim()
+          ? [{
+              key: 'assetTagIdentity',
+              entityId: identityId('resource-asset-tag', payload.assetTagNumber),
+              type: 'ASSET_TAG',
+              value: payload.assetTagNumber.trim(),
+            }]
+          : []),
+      ];
 
-    this.resources.set(resourceId, resource);
+      const tx = await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.roles[0] || 'AUTHENTICATED_USER',
+        aggregateType: 'RESOURCE_MASTER',
+        aggregateId: resourceId,
+        eventType: 'RESOURCE_REGISTERED',
+        auditAction: 'RESOURCE_REGISTERED',
+        auditResourceType: 'RESOURCE_MASTER',
+        auditResourceId: resourceId,
+        outboxTopic: 'g-hims-resource-events',
+        idempotencyKey,
+        commandId,
+        correlationId: context.correlationId,
+        readTargets: identities.map((identity) => ({
+          key: identity.key,
+          entityType: 'RESOURCE_IDENTITY',
+          entityId: identity.entityId,
+          required: false,
+        })),
+        prepare: (current) => {
+          for (const identity of identities) {
+            if (current[identity.key]) {
+              throw new AtomicMutationRejectedError(
+                'RESOURCE_IDENTITY_ALREADY_REGISTERED',
+                `${identity.type} '${identity.value}' is already registered in this tenant.`,
+                { type: identity.type, value: identity.value }
+              );
+            }
+          }
 
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'RESOURCE_MASTER',
-      entityId: resourceId,
-      eventType: 'RESOURCE_REGISTERED',
-      domainState: resource,
-      eventPayload: {
-        resourceId,
-        resourceNumber,
-        name: resource.name,
-        resourceType: resource.resourceType,
-        departmentId: resource.departmentId,
-        status: resource.status,
-      },
-      auditReason: `Registered asset ${resourceNumber} (${resource.name}) for ${resource.departmentName || resource.departmentId}`,
-      outboxTopic: 'g-hims-resource-events',
-    });
+          const resource: ResourceMaster = {
+            ...payload,
+            resourceId,
+            resourceNumber,
+            createdAt: now,
+            updatedAt: now,
+          };
 
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: resourceId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: resource,
-    };
+          return {
+            domainState: resource,
+            additionalStateWrites: identities.map((identity) => ({
+              entityType: 'RESOURCE_IDENTITY',
+              entityId: identity.entityId,
+              domainState: {
+                identityId: identity.entityId,
+                tenantId: context.tenantId,
+                type: identity.type,
+                value: identity.value,
+                resourceId,
+                createdAt: now,
+              },
+            })),
+            eventPayload: {
+              resourceId,
+              resourceNumber,
+              name: resource.name,
+              resourceType: resource.resourceType,
+              facilityId: resource.facilityId,
+              departmentId: resource.departmentId,
+              status: resource.status,
+            },
+            auditReason:
+              `Registered authoritative resource ${resourceNumber} (${resource.name}) for ` +
+              `${resource.departmentName || resource.departmentId}.`,
+            resultData: resource,
+          };
+        },
+      });
+
+      const resource = tx.resultData as ResourceMaster;
+      this.resources.set(resourceId, resource);
+      return {
+        success: true,
+        commandId,
+        idempotencyKey,
+        entityId: resourceId,
+        eventId: tx.eventId,
+        auditId: tx.auditId,
+        outboxId: tx.outboxId,
+        data: resource,
+      };
+    } catch (error) {
+      if (error instanceof AtomicMutationRejectedError) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+          },
+        };
+      }
+      if (error instanceof Error && error.message === 'FACILITY_SCOPE_MISMATCH') {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'FACILITY_SCOPE_MISMATCH',
+            message: 'Resource registration is outside the actor facility scope.',
+          },
+        };
+      }
+      throw error;
+    }
   }
 
   // ============================================================================
@@ -166,54 +331,137 @@ export class ResourceCapacityDomainService {
     const auth = AuthorizationPipeline.evaluate(context, {
       requiredRoles: ['FACILITIES_ADMIN', 'SYSTEM_ADMIN', 'HOSPITAL_EXECUTIVE'],
     });
-
     if (!auth.authorized) {
       return {
         success: false,
         commandId,
         idempotencyKey,
-        error: { code: 'UNAUTHORIZED', message: 'Facilities admin authority required.' },
+        error: {
+          code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Facilities admin authority required.',
+        },
       };
     }
 
-    const roomId = `rm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const now = new Date().toISOString();
+    repositoryRequiredOutsideTests();
+    try {
+      assertFacilityScope(context, payload.facilityId);
+      if (payload.currentOccupancy > payload.capacity) {
+        throw new AtomicMutationRejectedError(
+          'ROOM_OCCUPANCY_EXCEEDS_CAPACITY',
+          'Room occupancy cannot exceed configured capacity.'
+        );
+      }
+      const roomId = deterministicId('room', context.tenantId, commandId);
+      const roomIdentityId = identityId(
+        'room-number',
+        payload.facilityId,
+        payload.building,
+        payload.floor,
+        payload.roomNumber
+      );
+      const now = new Date().toISOString();
 
-    const room: HospitalRoom = {
-      ...payload,
-      roomId,
-      createdAt: now,
-      updatedAt: now,
-    };
+      const tx = await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.roles[0] || 'AUTHENTICATED_USER',
+        aggregateType: 'HOSPITAL_ROOM',
+        aggregateId: roomId,
+        eventType: 'ROOM_REGISTERED',
+        auditAction: 'ROOM_REGISTERED',
+        auditResourceType: 'HOSPITAL_ROOM',
+        auditResourceId: roomId,
+        outboxTopic: 'g-hims-facility-events',
+        idempotencyKey,
+        commandId,
+        correlationId: context.correlationId,
+        readTargets: [{
+          key: 'roomIdentity',
+          entityType: 'ROOM_IDENTITY',
+          entityId: roomIdentityId,
+          required: false,
+        }],
+        prepare: (current) => {
+          if (current.roomIdentity) {
+            throw new AtomicMutationRejectedError(
+              'ROOM_IDENTITY_ALREADY_REGISTERED',
+              'This room number/location is already registered in the facility.'
+            );
+          }
+          const room: HospitalRoom = {
+            ...payload,
+            roomId,
+            createdAt: now,
+            updatedAt: now,
+          };
+          return {
+            domainState: room,
+            additionalStateWrites: [{
+              entityType: 'ROOM_IDENTITY',
+              entityId: roomIdentityId,
+              domainState: {
+                identityId: roomIdentityId,
+                tenantId: context.tenantId,
+                facilityId: payload.facilityId,
+                building: payload.building,
+                floor: payload.floor,
+                roomNumber: payload.roomNumber,
+                roomId,
+                createdAt: now,
+              },
+            }],
+            eventPayload: {
+              roomId,
+              roomNumber: room.roomNumber,
+              roomType: room.roomType,
+              facilityId: room.facilityId,
+              departmentId: room.departmentId,
+            },
+            auditReason: `Registered authoritative room ${room.roomNumber} (${room.roomType}).`,
+            resultData: room,
+          };
+        },
+      });
 
-    this.rooms.set(roomId, room);
-
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'HOSPITAL_ROOM',
-      entityId: roomId,
-      eventType: 'ROOM_REGISTERED',
-      domainState: room,
-      eventPayload: {
-        roomId,
-        roomNumber: room.roomNumber,
-        roomType: room.roomType,
-        facilityId: room.facilityId,
-        departmentId: room.departmentId,
-      },
-      auditReason: `Registered room ${room.roomNumber} (${room.roomType})`,
-      outboxTopic: 'g-hims-facility-events',
-    });
-
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: roomId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: room,
-    };
+      const room = tx.resultData as HospitalRoom;
+      this.rooms.set(roomId, room);
+      return {
+        success: true,
+        commandId,
+        idempotencyKey,
+        entityId: roomId,
+        eventId: tx.eventId,
+        auditId: tx.auditId,
+        outboxId: tx.outboxId,
+        data: room,
+      };
+    } catch (error) {
+      if (error instanceof AtomicMutationRejectedError) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+          },
+        };
+      }
+      if (error instanceof Error && error.message === 'FACILITY_SCOPE_MISMATCH') {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'FACILITY_SCOPE_MISMATCH',
+            message: 'Room registration is outside the actor facility scope.',
+          },
+        };
+      }
+      throw error;
+    }
   }
 
   // ============================================================================
@@ -226,10 +474,39 @@ export class ResourceCapacityDomainService {
     idempotencyKey: string,
     payload: Omit<ResourceReservation, 'reservationId' | 'status' | 'createdAt' | 'updatedAt'>
   ): Promise<CommandResult<ResourceReservation>> {
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: [
+        'DOCTOR',
+        'CLINICIAN',
+        'NURSE',
+        'LAB_TECHNICIAN',
+        'RADIOLOGY_TECHNICIAN',
+        'FACILITIES_ADMIN',
+        'BIOMEDICAL_ENGINEER',
+        'SYSTEM_ADMIN',
+        'ADMINISTRATOR',
+      ],
+    });
+    if (!auth.authorized) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Resource reservation authority required.',
+        },
+      };
+    }
+
     const proposedStart = new Date(payload.startTime).getTime();
     const proposedEnd = new Date(payload.endTime).getTime();
 
-    if (proposedEnd <= proposedStart) {
+    if (
+      !Number.isFinite(proposedStart) ||
+      !Number.isFinite(proposedEnd) ||
+      proposedEnd <= proposedStart
+    ) {
       return {
         success: false,
         commandId,
@@ -238,49 +515,94 @@ export class ResourceCapacityDomainService {
       };
     }
 
-    // Check resource status and calibration lockout
     const resource = await this.loadResource(context.tenantId, payload.resourceId);
-    if (resource) {
-      if (resource.status === 'OUT_OF_SERVICE' || resource.status === 'MAINTENANCE') {
-        return {
-          success: false,
-          commandId,
-          idempotencyKey,
-          error: {
-            code: 'RESOURCE_UNAVAILABLE',
-            message: `Resource ${resource.name} is currently in ${resource.status} status.`,
-          },
-        };
-      }
-
-      if (resource.calibrationRequired && resource.calibrationStatus === 'CALIBRATION_REQUIRED') {
-        return {
-          success: false,
-          commandId,
-          idempotencyKey,
-          error: {
-            code: 'CALIBRATION_LOCKOUT',
-            message: `SAFETY LOCKOUT: Biomedical asset ${resource.name} has expired calibration and is blocked from clinical procedures until recertified.`,
-          },
-        };
-      }
+    if (!resource) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'RESOURCE_NOT_FOUND',
+          message: `Resource ${payload.resourceId} does not exist.`,
+        },
+      };
     }
 
-    // Conflict Check: Double-booking prevention across overlapping reservations
+    if (
+      resource.facilityId !== payload.facilityId ||
+      resource.resourceType !== payload.resourceType
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'RESOURCE_RESERVATION_SCOPE_MISMATCH',
+          message: 'Reservation resource identity does not match the authoritative resource master.',
+        },
+      };
+    }
+
+    if (
+      resource.lifecycleState !== 'IN_SERVICE' ||
+      ['OUT_OF_SERVICE', 'MAINTENANCE', 'LOST', 'RETIRED'].includes(resource.status)
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'RESOURCE_UNAVAILABLE',
+          message: `Resource ${resource.name} is currently in ${resource.status} status.`,
+        },
+      };
+    }
+
+    if (isCalibrationLocked(resource, proposedEnd)) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'CALIBRATION_LOCKOUT',
+          message:
+            `SAFETY LOCKOUT: Biomedical asset ${resource.name} has expired calibration and ` +
+            'is blocked from clinical procedures until recertified.',
+        },
+      };
+    }
+
+    try {
+      assertFacilityScope(context, resource.facilityId);
+    } catch {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'FACILITY_SCOPE_MISMATCH',
+          message: 'Resource reservation is outside the actor facility scope.',
+        },
+      };
+    }
+
+    // Query all active reservations before entering the write transaction.
+    // The resource's reservationRevision below acts as the serialization token:
+    // if another reservation commits after this read, this transaction fails
+    // closed and the caller must retry against fresh availability.
     const existingReservations = (await this.loadReservationsForResource(
       context.tenantId,
-      payload.resourceId
+      resource.resourceId
     )).filter(
       (reservation) =>
         reservation.status !== 'CANCELLED' &&
-        reservation.status !== 'COMPLETED'
+        reservation.status !== 'COMPLETED' &&
+        reservation.status !== 'EXPIRED'
     );
 
     for (const ex of existingReservations) {
       const exStart = new Date(ex.startTime).getTime();
       const exEnd = new Date(ex.endTime).getTime();
-
-      // Check overlap: (StartA < EndB) and (EndA > StartB)
       if (proposedStart < exEnd && proposedEnd > exStart) {
         return {
           success: false,
@@ -288,53 +610,170 @@ export class ResourceCapacityDomainService {
           idempotencyKey,
           error: {
             code: 'DOUBLE_BOOKING_CONFLICT',
-            message: `Conflict detected: ${payload.resourceName} is already reserved for ${ex.purpose} (${ex.startTime} to ${ex.endTime}) by ${ex.requesterName}.`,
+            message:
+              `Conflict detected: ${resource.name} is already reserved for ${ex.purpose} ` +
+              `(${ex.startTime} to ${ex.endTime}) by ${ex.requesterName}.`,
           },
         };
       }
     }
 
-    const reservationId = `resv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    repositoryRequiredOutsideTests();
+
+    const expectedReservationRevision = Number(resource.reservationRevision || 0);
+    const reservationId = deterministicId('resv', context.tenantId, commandId);
     const now = new Date().toISOString();
 
     const reservation: ResourceReservation = {
       ...payload,
+      resourceName: resource.name,
+      resourceType: resource.resourceType,
+      facilityId: resource.facilityId,
+      requesterActorId: context.actorId,
       reservationId,
       status: 'APPROVED',
       createdAt: now,
       updatedAt: now,
     };
 
-    this.reservations.set(reservationId, reservation);
+    try {
+      const tx = await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.roles[0] || 'AUTHENTICATED_USER',
+        aggregateType: 'RESOURCE_RESERVATION',
+        aggregateId: reservationId,
+        eventType: 'RESOURCE_RESERVED',
+        auditAction: 'RESOURCE_RESERVED',
+        auditResourceType: 'RESOURCE_RESERVATION',
+        auditResourceId: reservationId,
+        outboxTopic: 'g-hims-reservation-events',
+        idempotencyKey,
+        commandId,
+        correlationId: context.correlationId,
+        readTargets: [{
+          key: 'resource',
+          entityType: 'RESOURCE_MASTER',
+          entityId: resource.resourceId,
+          required: true,
+        }],
+        prepare: (current) => {
+          const currentResource = current.resource as
+            | (ResourceMaster & { _serverVersion?: number })
+            | null;
 
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'RESOURCE_RESERVATION',
-      entityId: reservationId,
-      eventType: 'RESOURCE_RESERVED',
-      domainState: reservation,
-      eventPayload: {
-        reservationId,
-        resourceId: payload.resourceId,
-        resourceName: payload.resourceName,
-        startTime: payload.startTime,
-        endTime: payload.endTime,
-        purpose: payload.purpose,
-        requester: payload.requesterName,
-      },
-      auditReason: `Reserved ${payload.resourceName} for ${payload.purpose} (${payload.startTime} - ${payload.endTime})`,
-      outboxTopic: 'g-hims-reservation-events',
-    });
+          if (!currentResource) {
+            throw new AtomicMutationRejectedError(
+              'RESOURCE_NOT_FOUND',
+              `Resource ${resource.resourceId} does not exist.`
+            );
+          }
 
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: reservationId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: reservation,
-    };
+          if (Number(currentResource.reservationRevision || 0) !== expectedReservationRevision) {
+            throw new AtomicMutationRejectedError(
+              'RESERVATION_CONCURRENCY_RETRY_REQUIRED',
+              'Resource availability changed while the reservation was being committed. Retry against fresh availability.',
+              {
+                resourceId: resource.resourceId,
+                expectedReservationRevision,
+                currentReservationRevision: Number(currentResource.reservationRevision || 0),
+              }
+            );
+          }
+
+          if (
+            currentResource.facilityId !== resource.facilityId ||
+            currentResource.resourceType !== resource.resourceType
+          ) {
+            throw new AtomicMutationRejectedError(
+              'RESOURCE_RESERVATION_SCOPE_MISMATCH',
+              'Authoritative resource identity changed while the reservation was being committed.'
+            );
+          }
+
+          if (
+            currentResource.lifecycleState !== 'IN_SERVICE' ||
+            ['OUT_OF_SERVICE', 'MAINTENANCE', 'LOST', 'RETIRED'].includes(currentResource.status)
+          ) {
+            throw new AtomicMutationRejectedError(
+              'RESOURCE_UNAVAILABLE',
+              `Resource ${currentResource.name} is currently in ${currentResource.status} status.`
+            );
+          }
+
+          if (isCalibrationLocked(currentResource, proposedEnd)) {
+            throw new AtomicMutationRejectedError(
+              'CALIBRATION_LOCKOUT',
+              `SAFETY LOCKOUT: Biomedical asset ${currentResource.name} is not calibration-valid through the requested reservation window.`
+            );
+          }
+
+          const nextResource: ResourceMaster = {
+            ...currentResource,
+            reservationRevision: expectedReservationRevision + 1,
+            updatedAt: now,
+          };
+
+          return {
+            domainState: reservation,
+            additionalStateWrites: [{
+              entityType: 'RESOURCE_MASTER',
+              entityId: resource.resourceId,
+              domainState: nextResource,
+            }],
+            eventPayload: {
+              reservationId,
+              resourceId: resource.resourceId,
+              resourceName: currentResource.name,
+              startTime: reservation.startTime,
+              endTime: reservation.endTime,
+              purpose: reservation.purpose,
+              requesterActorId: context.actorId,
+            },
+            auditReason:
+              `Reserved ${currentResource.name} for ${reservation.purpose} ` +
+              `(${reservation.startTime} - ${reservation.endTime})`,
+            resultData: {
+              reservation,
+              resource: nextResource,
+            },
+          };
+        },
+      });
+
+      const committed = tx.resultData as {
+        reservation: ResourceReservation;
+        resource: ResourceMaster;
+      };
+
+      this.reservations.set(reservationId, committed.reservation);
+      this.resources.set(resource.resourceId, committed.resource);
+
+      return {
+        success: true,
+        commandId,
+        idempotencyKey,
+        entityId: reservationId,
+        eventId: tx.eventId,
+        auditId: tx.auditId,
+        outboxId: tx.outboxId,
+        data: committed.reservation,
+      };
+    } catch (error) {
+      if (error instanceof AtomicMutationRejectedError) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+          },
+        };
+      }
+      throw error;
+    }
   }
 
   public static async transferResource(
@@ -375,26 +814,44 @@ export class ResourceCapacityDomainService {
       };
     }
 
+    try {
+      assertFacilityScope(context, resource.facilityId);
+      assertFacilityScope(context, payload.toFacilityId);
+    } catch {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'FACILITY_SCOPE_MISMATCH',
+          message: 'Resource transfer source or destination is outside the actor facility scope.',
+        },
+      };
+    }
+
     const previousLocation = { ...resource.location };
     const previousDept = { id: resource.departmentId, name: resource.departmentName };
 
-    resource.departmentId = payload.toDepartmentId;
-    resource.departmentName = payload.toDepartmentName;
-    resource.facilityId = payload.toFacilityId;
-    resource.facilityName = payload.toFacilityName;
-    resource.location = payload.toLocation;
-    if (payload.custodianName) {
-      resource.currentCustodianName = payload.custodianName;
-    }
-    resource.updatedAt = new Date().toISOString();
+    const updatedResource: ResourceMaster = {
+      ...resource,
+      departmentId: payload.toDepartmentId,
+      departmentName: payload.toDepartmentName,
+      facilityId: payload.toFacilityId,
+      facilityName: payload.toFacilityName,
+      location: payload.toLocation,
+      ...(payload.custodianName
+        ? { currentCustodianName: payload.custodianName }
+        : {}),
+      updatedAt: new Date().toISOString(),
+    };
 
-    this.resources.set(payload.resourceId, resource);
+    this.resources.set(payload.resourceId, updatedResource);
 
     const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
       entityType: 'RESOURCE_MASTER',
       entityId: payload.resourceId,
       eventType: 'RESOURCE_TRANSFERRED',
-      domainState: resource,
+      domainState: updatedResource,
       eventPayload: {
         resourceId: payload.resourceId,
         previousDept,
@@ -403,7 +860,7 @@ export class ResourceCapacityDomainService {
         newLocation: payload.toLocation,
         reason: payload.reason,
       },
-      auditReason: `Resource ${resource.name} (${resource.resourceNumber}) transferred to ${payload.toDepartmentName}: ${payload.reason}`,
+      auditReason: `Resource ${updatedResource.name} (${updatedResource.resourceNumber}) transferred to ${payload.toDepartmentName}: ${payload.reason}`,
       outboxTopic: 'g-hims-facility-events',
     });
 
@@ -415,7 +872,7 @@ export class ResourceCapacityDomainService {
       eventId: tx.event.eventId,
       auditId: tx.audit.auditId,
       outboxId: tx.outbox.outboxId,
-      data: resource,
+      data: updatedResource,
     };
   }
 
@@ -451,12 +908,32 @@ export class ResourceCapacityDomainService {
       };
     }
 
-    const workOrderId = `wo_${crypto.randomUUID()}`;
-    const workOrderNumber = `WO-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    repositoryRequiredOutsideTests();
+    try {
+      assertFacilityScope(context, resource.facilityId);
+    } catch {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'FACILITY_SCOPE_MISMATCH',
+          message: 'Maintenance work order is outside the actor facility scope.',
+        },
+      };
+    }
+
+    const workOrderId = deterministicId('wo', context.tenantId, commandId);
+    const workOrderNumber =
+      `WO-${new Date().getUTCFullYear()}-${workOrderId.slice(-8).toUpperCase()}`;
     const now = new Date().toISOString();
 
     const workOrder: MaintenanceWorkOrder = {
       ...payload,
+      resourceId: resource.resourceId,
+      resourceName: resource.name,
+      resourceType: resource.resourceType,
+      reportedByActorId: context.actorId,
       workOrderId,
       workOrderNumber,
       status: 'REPORTED',
@@ -573,7 +1050,7 @@ export class ResourceCapacityDomainService {
 
     const updatedResource: ResourceMaster = {
       ...resource,
-      status: 'AVAILABLE',
+      status: isCalibrationLocked(resource) ? 'OUT_OF_SERVICE' : 'AVAILABLE',
       lastMaintenanceDate: now.split('T')[0],
       updatedAt: now,
     };
@@ -654,12 +1131,32 @@ export class ResourceCapacityDomainService {
       };
     }
 
-    const calibrationId = `cal_${crypto.randomUUID()}`;
+    repositoryRequiredOutsideTests();
+    try {
+      assertFacilityScope(context, resource.facilityId);
+    } catch {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'FACILITY_SCOPE_MISMATCH',
+          message: 'Calibration record is outside the actor facility scope.',
+        },
+      };
+    }
+
+    const calibrationId = deterministicId('cal', context.tenantId, commandId);
     const now = new Date().toISOString();
     const isPassed = payload.result === 'PASS' || payload.result === 'CONDITIONAL_PASS';
 
     const calibration: CalibrationRecord = {
       ...payload,
+      resourceId: resource.resourceId,
+      resourceName: resource.name,
+      model: resource.model || payload.model,
+      serialNumber: resource.serialNumber || payload.serialNumber,
+      technicianId: context.actorId,
       calibrationId,
       status: isPassed ? 'VALID' : 'FAILED',
       createdAt: now,
@@ -671,11 +1168,7 @@ export class ResourceCapacityDomainService {
       lastCalibrationDate: payload.calibrationDate,
       nextCalibrationDate: payload.nextDueDate,
       calibrationCertificateNumber: payload.certificateNumber,
-      status: !isPassed
-        ? 'OUT_OF_SERVICE'
-        : resource.status === 'OUT_OF_SERVICE'
-          ? 'AVAILABLE'
-          : resource.status,
+      status: !isPassed ? 'OUT_OF_SERVICE' : resource.status,
       updatedAt: now,
     };
 
@@ -773,6 +1266,15 @@ export class ResourceCapacityDomainService {
   }
 
   public static ensureInitialized(): void {
+    // Production initialization is intentionally empty.
+    // Authoritative state must come from tenant-scoped persisted read models.
+    repositoryRequiredOutsideTests();
+  }
+
+  public static seedTestFixtures(tenantId = 'central-metro-hospital'): void {
+    if (process.env.NODE_ENV !== 'test') {
+      throw new Error('TEST_FIXTURE_SEED_FORBIDDEN_OUTSIDE_TESTS');
+    }
     if (this.resources.size > 0) return;
 
     const now = new Date().toISOString();
@@ -803,6 +1305,7 @@ export class ResourceCapacityDomainService {
         currentCustodianName: 'Dr. Elena Rostova (Chief Surgeon)',
         acquisitionDate: '2023-05-15',
         lifecycleState: 'IN_SERVICE',
+        reservationRevision: 0,
         createdAt: now,
         updatedAt: now,
       },
@@ -830,6 +1333,7 @@ export class ResourceCapacityDomainService {
         currentCustodianName: 'Dr. Robert Hayes (Head of Surgery)',
         acquisitionDate: '2024-02-10',
         lifecycleState: 'IN_SERVICE',
+        reservationRevision: 0,
         createdAt: now,
         updatedAt: now,
       },
@@ -857,12 +1361,21 @@ export class ResourceCapacityDomainService {
         currentCustodianName: 'Nurse Elena Rostova (Charge Nurse)',
         acquisitionDate: '2022-08-20',
         lifecycleState: 'UNDER_REPAIR',
+        reservationRevision: 0,
         createdAt: now,
         updatedAt: now,
       },
     ];
 
-    sampleResources.forEach((r) => this.resources.set(r.resourceId, r));
+    sampleResources.forEach((r) => {
+      this.resources.set(r.resourceId, r);
+      TransactionManager.seedEphemeralStateForTesting(
+        tenantId,
+        'RESOURCE_MASTER',
+        r.resourceId,
+        r
+      );
+    });
 
     const sampleRooms: HospitalRoom[] = [
       {
@@ -924,7 +1437,7 @@ export class ResourceCapacityDomainService {
       reservationId: 'resv_sample_01',
       resourceId: 'res_001',
       resourceName: 'GE Healthcare Aisys CS2 Anesthesia Delivery Workstation',
-      resourceType: 'SURGICAL_EQUIPMENT',
+      resourceType: 'MEDICAL_DEVICE',
       facilityId: 'fac_central',
       departmentId: 'dept_surgery',
       startTime: `${today}T14:00:00Z`,
@@ -952,27 +1465,22 @@ export class ResourceCapacityDomainService {
   }
 
   public static getResources(): ResourceMaster[] {
-    this.ensureInitialized();
     return Array.from(this.resources.values());
   }
 
   public static getRooms(): HospitalRoom[] {
-    this.ensureInitialized();
     return Array.from(this.rooms.values());
   }
 
   public static getWorkOrders(): MaintenanceWorkOrder[] {
-    this.ensureInitialized();
     return Array.from(this.workOrders.values());
   }
 
   public static getCalibrations(): CalibrationRecord[] {
-    this.ensureInitialized();
     return Array.from(this.calibrations.values());
   }
 
   public static getReservations(): ResourceReservation[] {
-    this.ensureInitialized();
     return Array.from(this.reservations.values());
   }
 }

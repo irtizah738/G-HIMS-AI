@@ -106,6 +106,20 @@ service cloud.firestore {
       ]);
     }
 
+    function canReadFacilities(tenantId) {
+      return hasAnyRole(tenantId, [
+        'administrator',
+        'facilities_admin',
+        'biomedical_engineer',
+        'hospital_executive',
+        'FACILITIES_ADMIN',
+        'BIOMEDICAL_ENGINEER',
+        'HOSPITAL_EXECUTIVE',
+        'SYSTEM_ADMIN',
+        'ADMINISTRATOR'
+      ]);
+    }
+
     function canReadAudit(tenantId) {
       return hasAnyRole(tenantId, ['administrator']);
     }
@@ -558,6 +572,34 @@ service cloud.firestore {
       match /paymentTransactions/{id} {
         allow read: if canReadFinance(tenantId);
         allow write: if false;
+      }
+
+      // Facilities / biomedical authoritative read models.
+      match /resources/{id} {
+        allow read: if canReadFacilities(tenantId) || canReadAudit(tenantId);
+        allow write: if false;
+      }
+      match /rooms/{id} {
+        allow read: if canReadFacilities(tenantId) || canReadAudit(tenantId);
+        allow write: if false;
+      }
+      match /resourceReservations/{id} {
+        allow read: if canReadFacilities(tenantId) || canReadAudit(tenantId);
+        allow write: if false;
+      }
+      match /maintenanceWorkOrders/{id} {
+        allow read: if canReadFacilities(tenantId) || canReadAudit(tenantId);
+        allow write: if false;
+      }
+      match /calibrationRecords/{id} {
+        allow read: if canReadFacilities(tenantId) || canReadAudit(tenantId);
+        allow write: if false;
+      }
+      match /resourceIdentities/{id} {
+        allow read, write: if false;
+      }
+      match /roomIdentities/{id} {
+        allow read, write: if false;
       }
 
       // Workforce/resource read models.

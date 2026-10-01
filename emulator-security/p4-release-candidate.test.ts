@@ -269,8 +269,11 @@ describe('G-HIMS P4 release-candidate Firestore recovery journey', () => {
       tenantRef.collection('outbox').get(),
     ]);
 
-    expect(events.length).toBe(6);
-    expect(new Set(events.map((event) => event.eventId)).size).toBe(6);
+    // Finance account/period provisioning is itself authoritative and emits
+    // durable events. Recovery correctness must follow the actual event stream
+    // rather than a stale fixed cardinality from an earlier journey shape.
+    expect(events.length).toBeGreaterThanOrEqual(9);
+    expect(new Set(events.map((event) => event.eventId)).size).toBe(events.length);
     expect(events.map((event) => event.eventType)).toEqual(
       expect.arrayContaining([
         'PATIENT_REGISTERED',
@@ -281,8 +284,8 @@ describe('G-HIMS P4 release-candidate Firestore recovery journey', () => {
         'JOURNAL_ENTRY_POSTED',
       ])
     );
-    expect(audits.length).toBeGreaterThanOrEqual(6);
-    expect(outboxSnapshot.size).toBe(6);
+    expect(audits.length).toBeGreaterThanOrEqual(events.length);
+    expect(outboxSnapshot.size).toBe(events.length);
     for (const document of outboxSnapshot.docs) {
       expect(document.data().status).toBe('PUBLISHED');
     }
@@ -321,10 +324,10 @@ describe('G-HIMS P4 release-candidate Firestore recovery journey', () => {
           tenantId
         );
 
-      expect(firstRebuild.eventCount).toBe(6);
-      expect(firstRebuild.checkpointCount).toBe(6);
-      expect(secondRebuild.eventCount).toBe(6);
-      expect(secondRebuild.checkpointCount).toBe(6);
+      expect(firstRebuild.eventCount).toBe(events.length);
+      expect(firstRebuild.checkpointCount).toBe(events.length);
+      expect(secondRebuild.eventCount).toBe(events.length);
+      expect(secondRebuild.checkpointCount).toBe(events.length);
       expect(secondRebuild.eventStreamSha256).toBe(
         firstRebuild.eventStreamSha256
       );

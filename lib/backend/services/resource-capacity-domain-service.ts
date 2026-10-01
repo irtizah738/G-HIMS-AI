@@ -107,23 +107,6 @@ export class ResourceCapacityDomainService {
     return this.resources.get(resourceId) || null;
   }
 
-  private static async loadRoom(
-    tenantId: string,
-    roomId: string
-  ): Promise<HospitalRoom | null> {
-    if (DomainStateRepository.isAvailable()) {
-      const persisted = await DomainStateRepository.getById<HospitalRoom>(
-        tenantId,
-        'rooms',
-        roomId
-      );
-      if (persisted) this.rooms.set(roomId, persisted);
-      else this.rooms.delete(roomId);
-      return persisted;
-    }
-    return this.rooms.get(roomId) || null;
-  }
-
   private static async loadWorkOrder(
     tenantId: string,
     workOrderId: string
@@ -365,6 +348,12 @@ export class ResourceCapacityDomainService {
     repositoryRequiredOutsideTests();
     try {
       assertFacilityScope(context, payload.facilityId);
+      if (payload.currentOccupancy !== 0 || (payload.bedIds?.length || 0) > 0) {
+        throw new AtomicMutationRejectedError(
+          'ROOM_CAPACITY_STATE_SERVER_OWNED',
+          'New room occupancy and registered bed membership are server-owned and must start empty.'
+        );
+      }
       if (payload.currentOccupancy > payload.capacity) {
         throw new AtomicMutationRejectedError(
           'ROOM_OCCUPANCY_EXCEEDS_CAPACITY',
@@ -410,6 +399,8 @@ export class ResourceCapacityDomainService {
           }
           const room: HospitalRoom = {
             ...payload,
+            currentOccupancy: 0,
+            bedIds: [],
             roomId,
             createdAt: now,
             updatedAt: now,
@@ -685,13 +676,18 @@ export class ResourceCapacityDomainService {
       };
     } catch (error) {
       if (error instanceof AtomicMutationRejectedError) {
+        const code =
+          error.code === 'REQUIRED_STATE_NOT_FOUND' ? 'ROOM_NOT_FOUND' : error.code;
         return {
           success: false,
           commandId,
           idempotencyKey,
           error: {
-            code: error.code,
-            message: error.message,
+            code,
+            message:
+              code === 'ROOM_NOT_FOUND'
+                ? 'The authoritative room does not exist.'
+                : error.message,
             details: error.details,
           },
         };

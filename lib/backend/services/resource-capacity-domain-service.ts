@@ -127,11 +127,12 @@ export class ResourceCapacityDomainService {
     resourceId: string
   ): Promise<ResourceReservation[]> {
     if (DomainStateRepository.isAvailable()) {
-      const persisted = await DomainStateRepository.queryEqual<ResourceReservation>(
+      const persisted = await DomainStateRepository.queryAllEqual<ResourceReservation>(
         tenantId,
         'resourceReservations',
         'resourceId',
-        resourceId
+        resourceId,
+        { pageSize: 250, maxRows: 10000 }
       );
 
       for (const reservation of persisted) {
@@ -476,7 +477,11 @@ export class ResourceCapacityDomainService {
     const proposedStart = new Date(payload.startTime).getTime();
     const proposedEnd = new Date(payload.endTime).getTime();
 
-    if (proposedEnd <= proposedStart) {
+    if (
+      !Number.isFinite(proposedStart) ||
+      !Number.isFinite(proposedEnd) ||
+      proposedEnd <= proposedStart
+    ) {
       return {
         success: false,
         commandId,
@@ -485,7 +490,6 @@ export class ResourceCapacityDomainService {
       };
     }
 
-    // Check resource status and calibration lockout
     const resource = await this.loadResource(context.tenantId, payload.resourceId);
     if (!resource) {
       return {
@@ -498,6 +502,7 @@ export class ResourceCapacityDomainService {
         },
       };
     }
+
     if (
       resource.facilityId !== payload.facilityId ||
       resource.resourceType !== payload.resourceType
@@ -512,66 +517,38 @@ export class ResourceCapacityDomainService {
         },
       };
     }
-    {
-      if (
-        resource.lifecycleState !== 'IN_SERVICE' ||
-        ['OUT_OF_SERVICE', 'MAINTENANCE', 'LOST', 'RETIRED'].includes(resource.status)
-      ) {
-        return {
-          success: false,
-          commandId,
-          idempotencyKey,
-          error: {
-            code: 'RESOURCE_UNAVAILABLE',
-            message: `Resource ${resource.name} is currently in ${resource.status} status.`,
-          },
-        };
-      }
 
-      if (isCalibrationLocked(resource, proposedEnd)) {
-        return {
-          success: false,
-          commandId,
-          idempotencyKey,
-          error: {
-            code: 'CALIBRATION_LOCKOUT',
-            message: `SAFETY LOCKOUT: Biomedical asset ${resource.name} has expired calibration and is blocked from clinical procedures until recertified.`,
-          },
-        };
-      }
+    if (
+      resource.lifecycleState !== 'IN_SERVICE' ||
+      ['OUT_OF_SERVICE', 'MAINTENANCE', 'LOST', 'RETIRED'].includes(resource.status)
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'RESOURCE_UNAVAILABLE',
+          message: `Resource ${resource.name} is currently in ${resource.status} status.`,
+        },
+      };
     }
 
-    // Conflict Check: Double-booking prevention across overlapping reservations
-    const existingReservations = (await this.loadReservationsForResource(
-      context.tenantId,
-      payload.resourceId
-    )).filter(
-      (reservation) =>
-        reservation.status !== 'CANCELLED' &&
-        reservation.status !== 'COMPLETED'
-    );
-
-    for (const ex of existingReservations) {
-      const exStart = new Date(ex.startTime).getTime();
-      const exEnd = new Date(ex.endTime).getTime();
-
-      // Check overlap: (StartA < EndB) and (EndA > StartB)
-      if (proposedStart < exEnd && proposedEnd > exStart) {
-        return {
-          success: false,
-          commandId,
-          idempotencyKey,
-          error: {
-            code: 'DOUBLE_BOOKING_CONFLICT',
-            message: `Conflict detected: ${resource.name} is already reserved for ${ex.purpose} (${ex.startTime} to ${ex.endTime}) by ${ex.requesterName}.`,
-          },
-        };
-      }
+    if (isCalibrationLocked(resource, proposedEnd)) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'CALIBRATION_LOCKOUT',
+          message:
+            `SAFETY LOCKOUT: Biomedical asset ${resource.name} has expired calibration and ` +
+            'is blocked from clinical procedures until recertified.',
+        },
+      };
     }
 
-    repositoryRequiredOutsideTests();
     try {
-      assertFacilityScope(context, payload.facilityId);
+      assertFacilityScope(context, resource.facilityId);
     } catch {
       return {
         success: false,
@@ -584,6 +561,41 @@ export class ResourceCapacityDomainService {
       };
     }
 
+    // Query all active reservations before entering the write transaction.
+    // The resource's reservationRevision below acts as the serialization token:
+    // if another reservation commits after this read, this transaction fails
+    // closed and the caller must retry against fresh availability.
+    const existingReservations = (await this.loadReservationsForResource(
+      context.tenantId,
+      resource.resourceId
+    )).filter(
+      (reservation) =>
+        reservation.status !== 'CANCELLED' &&
+        reservation.status !== 'COMPLETED' &&
+        reservation.status !== 'EXPIRED'
+    );
+
+    for (const ex of existingReservations) {
+      const exStart = new Date(ex.startTime).getTime();
+      const exEnd = new Date(ex.endTime).getTime();
+      if (proposedStart < exEnd && proposedEnd > exStart) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'DOUBLE_BOOKING_CONFLICT',
+            message:
+              `Conflict detected: ${resource.name} is already reserved for ${ex.purpose} ` +
+              `(${ex.startTime} to ${ex.endTime}) by ${ex.requesterName}.`,
+          },
+        };
+      }
+    }
+
+    repositoryRequiredOutsideTests();
+
+    const expectedReservationRevision = Number(resource.reservationRevision || 0);
     const reservationId = deterministicId('resv', context.tenantId, commandId);
     const now = new Date().toISOString();
 
@@ -599,36 +611,144 @@ export class ResourceCapacityDomainService {
       updatedAt: now,
     };
 
-    this.reservations.set(reservationId, reservation);
+    try {
+      const tx = await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.roles[0] || 'AUTHENTICATED_USER',
+        aggregateType: 'RESOURCE_RESERVATION',
+        aggregateId: reservationId,
+        eventType: 'RESOURCE_RESERVED',
+        auditAction: 'RESOURCE_RESERVED',
+        auditResourceType: 'RESOURCE_RESERVATION',
+        auditResourceId: reservationId,
+        outboxTopic: 'g-hims-reservation-events',
+        idempotencyKey,
+        commandId,
+        correlationId: context.correlationId,
+        readTargets: [{
+          key: 'resource',
+          entityType: 'RESOURCE_MASTER',
+          entityId: resource.resourceId,
+          required: true,
+        }],
+        prepare: (current) => {
+          const currentResource = current.resource as
+            | (ResourceMaster & { _serverVersion?: number })
+            | null;
 
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'RESOURCE_RESERVATION',
-      entityId: reservationId,
-      eventType: 'RESOURCE_RESERVED',
-      domainState: reservation,
-      eventPayload: {
-        reservationId,
-        resourceId: payload.resourceId,
-        resourceName: resource.name,
-        startTime: payload.startTime,
-        endTime: payload.endTime,
-        purpose: payload.purpose,
-        requester: payload.requesterName,
-      },
-      auditReason: `Reserved ${resource.name} for ${payload.purpose} (${payload.startTime} - ${payload.endTime})`,
-      outboxTopic: 'g-hims-reservation-events',
-    });
+          if (!currentResource) {
+            throw new AtomicMutationRejectedError(
+              'RESOURCE_NOT_FOUND',
+              `Resource ${resource.resourceId} does not exist.`
+            );
+          }
 
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: reservationId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: reservation,
-    };
+          if (Number(currentResource.reservationRevision || 0) !== expectedReservationRevision) {
+            throw new AtomicMutationRejectedError(
+              'RESERVATION_CONCURRENCY_RETRY_REQUIRED',
+              'Resource availability changed while the reservation was being committed. Retry against fresh availability.',
+              {
+                resourceId: resource.resourceId,
+                expectedReservationRevision,
+                currentReservationRevision: Number(currentResource.reservationRevision || 0),
+              }
+            );
+          }
+
+          if (
+            currentResource.facilityId !== resource.facilityId ||
+            currentResource.resourceType !== resource.resourceType
+          ) {
+            throw new AtomicMutationRejectedError(
+              'RESOURCE_RESERVATION_SCOPE_MISMATCH',
+              'Authoritative resource identity changed while the reservation was being committed.'
+            );
+          }
+
+          if (
+            currentResource.lifecycleState !== 'IN_SERVICE' ||
+            ['OUT_OF_SERVICE', 'MAINTENANCE', 'LOST', 'RETIRED'].includes(currentResource.status)
+          ) {
+            throw new AtomicMutationRejectedError(
+              'RESOURCE_UNAVAILABLE',
+              `Resource ${currentResource.name} is currently in ${currentResource.status} status.`
+            );
+          }
+
+          if (isCalibrationLocked(currentResource, proposedEnd)) {
+            throw new AtomicMutationRejectedError(
+              'CALIBRATION_LOCKOUT',
+              `SAFETY LOCKOUT: Biomedical asset ${currentResource.name} is not calibration-valid through the requested reservation window.`
+            );
+          }
+
+          const nextResource: ResourceMaster = {
+            ...currentResource,
+            reservationRevision: expectedReservationRevision + 1,
+            updatedAt: now,
+          };
+
+          return {
+            domainState: reservation,
+            additionalStateWrites: [{
+              entityType: 'RESOURCE_MASTER',
+              entityId: resource.resourceId,
+              domainState: nextResource,
+            }],
+            eventPayload: {
+              reservationId,
+              resourceId: resource.resourceId,
+              resourceName: currentResource.name,
+              startTime: reservation.startTime,
+              endTime: reservation.endTime,
+              purpose: reservation.purpose,
+              requesterActorId: context.actorId,
+            },
+            auditReason:
+              `Reserved ${currentResource.name} for ${reservation.purpose} ` +
+              `(${reservation.startTime} - ${reservation.endTime})`,
+            resultData: {
+              reservation,
+              resource: nextResource,
+            },
+          };
+        },
+      });
+
+      const committed = tx.resultData as {
+        reservation: ResourceReservation;
+        resource: ResourceMaster;
+      };
+
+      this.reservations.set(reservationId, committed.reservation);
+      this.resources.set(resource.resourceId, committed.resource);
+
+      return {
+        success: true,
+        commandId,
+        idempotencyKey,
+        entityId: reservationId,
+        eventId: tx.eventId,
+        auditId: tx.auditId,
+        outboxId: tx.outboxId,
+        data: committed.reservation,
+      };
+    } catch (error) {
+      if (error instanceof AtomicMutationRejectedError) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+          },
+        };
+      }
+      throw error;
+    }
   }
 
   public static async transferResource(
@@ -1126,7 +1246,7 @@ export class ResourceCapacityDomainService {
     repositoryRequiredOutsideTests();
   }
 
-  public static seedTestFixtures(): void {
+  public static seedTestFixtures(tenantId = 'central-metro-hospital'): void {
     if (process.env.NODE_ENV !== 'test') {
       throw new Error('TEST_FIXTURE_SEED_FORBIDDEN_OUTSIDE_TESTS');
     }
@@ -1160,6 +1280,7 @@ export class ResourceCapacityDomainService {
         currentCustodianName: 'Dr. Elena Rostova (Chief Surgeon)',
         acquisitionDate: '2023-05-15',
         lifecycleState: 'IN_SERVICE',
+        reservationRevision: 0,
         createdAt: now,
         updatedAt: now,
       },
@@ -1187,6 +1308,7 @@ export class ResourceCapacityDomainService {
         currentCustodianName: 'Dr. Robert Hayes (Head of Surgery)',
         acquisitionDate: '2024-02-10',
         lifecycleState: 'IN_SERVICE',
+        reservationRevision: 0,
         createdAt: now,
         updatedAt: now,
       },
@@ -1214,12 +1336,21 @@ export class ResourceCapacityDomainService {
         currentCustodianName: 'Nurse Elena Rostova (Charge Nurse)',
         acquisitionDate: '2022-08-20',
         lifecycleState: 'UNDER_REPAIR',
+        reservationRevision: 0,
         createdAt: now,
         updatedAt: now,
       },
     ];
 
-    sampleResources.forEach((r) => this.resources.set(r.resourceId, r));
+    sampleResources.forEach((r) => {
+      this.resources.set(r.resourceId, r);
+      TransactionManager.seedEphemeralStateForTesting(
+        tenantId,
+        'RESOURCE_MASTER',
+        r.resourceId,
+        r
+      );
+    });
 
     const sampleRooms: HospitalRoom[] = [
       {

@@ -125,7 +125,8 @@
     "test:drp10": "bun test tests/drp10-authenticated-hospital-e2e.test.ts",
     "ops:drp10:provision": "bun scripts/ops/drp10-provision-staging-fixtures.ts",
     "ops:drp10:rehearsal": "bun scripts/ops/drp10-staging-cross-domain-rehearsal.ts",
-    "test:drp-all": "bun run test:drp1 && bun run test:drp2-4 && bun run test:drp5 && bun run test:drp6 && bun run test:drp7-9 && bun run test:drp10 && bun run test:drp11"
+    "test:drp-all": "bun run test:drp1 && bun run test:drp2-4 && bun run test:drp5 && bun run test:drp6 && bun run test:drp7-9 && bun run test:drp10 && bun run test:drp11",
+    "test:drp-critical": "bun run test:drp1 && bun run test:drp5 && bun run test:drp10 && bun run test:drp11"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

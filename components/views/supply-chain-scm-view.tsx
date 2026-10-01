@@ -143,7 +143,7 @@ export function SupplyChainScmView({ tenantId }: SupplyChainScmViewProps) {
   const [isStockIssueOpen, setIsStockIssueOpen] = useState(false);
   const [issueItem, setIssueItem] = useState<ItemMaster | null>(null);
   const [issueQty, setIssueQty] = useState(1);
-  const [issueRecipient, setIssueRecipient] = useState('ICU Nurse Station B');
+  const [issueRecipient, setIssueRecipient] = useState('');
 
   const [isRecallModalOpen, setIsRecallModalOpen] = useState(false);
   const [recallBatchNum, setRecallBatchNum] = useState('');
@@ -151,11 +151,11 @@ export function SupplyChainScmView({ tenantId }: SupplyChainScmViewProps) {
 
   // Goods Receipt Note Modal State
   const [isNewGrnOpen, setIsNewGrnOpen] = useState(false);
-  const [grnPoNumber, setGrnPoNumber] = useState('PO-2026-0041');
-  const [grnSupplierName, setGrnSupplierName] = useState('Pfizer BioPharma Ltd');
-  const [grnDeliveryNote, setGrnDeliveryNote] = useState('DN-98421');
+  const [grnPoNumber, setGrnPoNumber] = useState('');
+  const [grnSupplierName, setGrnSupplierName] = useState('');
+  const [grnDeliveryNote, setGrnDeliveryNote] = useState('');
   const [grnItemId, setGrnItemId] = useState('');
-  const [grnBatchNumber, setGrnBatchNumber] = useState('LOT-2026-N201');
+  const [grnBatchNumber, setGrnBatchNumber] = useState('');
   const [grnManufactureDate, setGrnManufactureDate] = useState(new Date().toISOString().split('T')[0]);
   const [grnExpirationDate, setGrnExpirationDate] = useState(
     new Date(Date.now() + 365 * 86400000).toISOString().split('T')[0]

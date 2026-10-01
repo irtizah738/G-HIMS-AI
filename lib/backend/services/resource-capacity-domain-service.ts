@@ -124,23 +124,6 @@ export class ResourceCapacityDomainService {
     return this.rooms.get(roomId) || null;
   }
 
-  private static async loadBed(
-    tenantId: string,
-    bedId: string
-  ): Promise<Bed | null> {
-    if (DomainStateRepository.isAvailable()) {
-      const persisted = await DomainStateRepository.getById<Bed>(
-        tenantId,
-        'beds',
-        bedId
-      );
-      if (persisted) this.beds.set(bedId, persisted);
-      else this.beds.delete(bedId);
-      return persisted;
-    }
-    return this.beds.get(bedId) || null;
-  }
-
   private static async loadWorkOrder(
     tenantId: string,
     workOrderId: string

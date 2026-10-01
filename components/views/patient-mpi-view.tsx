@@ -56,6 +56,7 @@ export function PatientMpiView() {
   const [rawNoteText, setRawNoteText] = useState('');
   const [isAiProcessing, setIsAiProcessing] = useState(false);
   const [aiParseError, setAiParseError] = useState<string | null>(null);
+  const [aiDraft, setAiDraft] = useState<Record<string, unknown> | null>(null);
   const [noteCategory, setNoteCategory] = useState<'SOAP' | 'Progress' | 'Nursing' | 'Discharge'>('SOAP');
   const authorName = 'Authenticated clinician';
 
@@ -303,6 +304,7 @@ export function PatientMpiView() {
     if (!rawNoteText.trim() || !currentPatient) return;
     setIsAiProcessing(true);
     setAiParseError(null);
+    setAiDraft(null);
 
     try {
       const tenantId = await AuthClient.getActiveTenantId();
@@ -319,34 +321,44 @@ export function PatientMpiView() {
 
       const data = await res.json();
       if (!res.ok || !data.structured) {
-        throw new Error(data.message || data.error || 'Clinical note AI extraction unavailable');
+        throw new Error(
+          data.message || data.error || 'Clinical note AI extraction unavailable'
+        );
       }
 
-      await addClinicalNote(currentPatient.id, {
-        author: authorName,
-        role: 'Attending Physician',
-        category: noteCategory,
-        content: rawNoteText,
-        aiStructuredData: data.structured,
-      });
-
-      setRawNoteText('');
+      // DRP-S safety boundary: generative output is a draft only. It is not
+      // committed as accepted diagnoses, medications, procedures or billing.
+      setAiDraft(data.structured as Record<string, unknown>);
     } catch (error) {
-      // Preserve the clinician-authored note without inventing AI-derived facts.
-      await addClinicalNote(currentPatient.id, {
-        author: authorName,
-        role: 'Attending Physician',
-        category: noteCategory,
-        content: rawNoteText,
-      });
       setAiParseError(
         error instanceof Error
-          ? `Note saved without AI structure: ${error.message}`
-          : 'Note saved without AI structure because AI extraction was unavailable.'
+          ? `AI draft unavailable: ${error.message}`
+          : 'AI draft unavailable.'
       );
-      setRawNoteText('');
     } finally {
       setIsAiProcessing(false);
+    }
+  };
+
+  const handleSaveNarrativeNote = async () => {
+    if (!rawNoteText.trim() || !currentPatient) return;
+    setAiParseError(null);
+
+    try {
+      await addClinicalNote(currentPatient.id, {
+        author: authorName,
+        role: 'Clinician',
+        category: noteCategory,
+        content: rawNoteText.trim(),
+      });
+      setRawNoteText('');
+      setAiDraft(null);
+    } catch (error) {
+      setAiParseError(
+        error instanceof Error
+          ? error.message
+          : 'Clinical note could not be saved.'
+      );
     }
   };
 
@@ -660,7 +672,7 @@ export function PatientMpiView() {
                       </div>
                       <div>
                         <h3 className="text-sm font-bold">GenAI Clinical Note Copilot</h3>
-                        <p className="text-[11px] text-slate-300">Dictate or enter freeform clinical notes. Generative AI extracts ICD billing codes, prescriptions & care plans automatically.</p>
+                        <p className="text-[11px] text-slate-300">Enter clinician-authored narrative. AI may generate a non-authoritative draft for review; it never auto-accepts diagnoses, medications, procedures or billing.</p>
                       </div>
                     </div>
                   </div>
@@ -671,13 +683,27 @@ export function PatientMpiView() {
                       rows={3}
                       value={rawNoteText}
                       onChange={(e) => setRawNoteText(e.target.value)}
-                      placeholder="e.g., Patient presented with stable hemodynamics. Sternal discomfort resolved. Administered Aspirin 81mg and Atorvastatin 80mg. Schedule follow-up ECG in 3 days. Recommend CPT 99233 high complexity review..."
+                      placeholder="Enter clinician-authored narrative. Do not paste information for another patient."
                       className="w-full bg-slate-950/60 border border-slate-700 rounded-lg p-3 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-400"
                     />
 
                     {aiParseError && (
                       <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
                         {aiParseError}
+                      </div>
+                    )}
+
+                    {aiDraft && (
+                      <div className="rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-3 text-[11px] text-blue-100 space-y-2">
+                        <div className="font-bold">
+                          AI draft — not accepted into the clinical record
+                        </div>
+                        <pre className="whitespace-pre-wrap break-words">
+                          {JSON.stringify(aiDraft, null, 2)}
+                        </pre>
+                        <div className="text-blue-200">
+                          Structured findings require an explicit reviewed acceptance workflow before they can become authoritative clinical data.
+                        </div>
                       </div>
                     )}
 
@@ -712,9 +738,17 @@ export function PatientMpiView() {
                           </>
                         ) : (
                           <>
-                            <Sparkles className="w-3.5 h-3.5" /> Parse & Save with AI
+                            <Sparkles className="w-3.5 h-3.5" /> Generate AI Draft
                           </>
                         )}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!rawNoteText.trim()}
+                        onClick={() => void handleSaveNarrativeNote()}
+                        className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white shadow-sm transition-all"
+                      >
+                        Save Clinician Narrative
                       </button>
                     </div>
                   </div>

@@ -146,7 +146,7 @@
     "recharts": "^2.15.4",
     "tailwind-merge": "^3.7.0",
     "zod": "^3.25.76",
-    "jspdf": "^2.5.2",
+    "jspdf": "^4.2.1",
     "jspdf-autotable": "^3.8.4"
   },
   "devDependencies": {

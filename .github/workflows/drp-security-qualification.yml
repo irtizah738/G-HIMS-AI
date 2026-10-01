@@ -71,6 +71,11 @@ jobs:
         run: bun run test:p0:rules
 
       - name: Auth/IAM emulator suite
+        env:
+          FIREBASE_PROJECT_ID: ghims-p5a-ci
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p5a-ci
+          GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p5a-ci
+          NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p5a-ci
         run: bun run test:p5a:emulator
 
   secret-scan:

@@ -164,7 +164,7 @@ export function TenantDashboard() {
               <div className="flex items-center gap-2">
                 <span className="font-extrabold text-slate-900 dark:text-slate-100 text-sm tracking-tight">G-HIMS</span>
                 <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium hidden sm:inline border-l border-slate-200 dark:border-slate-700 pl-2">
-                  Metropolitan Health
+                  {currentTenant?.name || currentTenantId}
                 </span>
               </div>
             </div>

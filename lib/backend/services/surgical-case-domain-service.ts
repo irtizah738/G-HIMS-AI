@@ -12,6 +12,7 @@ import {
   TransactionManager,
 } from '../transactions/transaction-manager';
 import type { CommandContext, CommandResult } from '../types';
+import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import type { HospitalRoom } from '@/types/resource-management';
 import type { PatientMPI } from '@/types/mpi';
 import type { SurgicalCase, SurgicalCaseStatus } from '@/types/inpatient-or';
@@ -617,6 +618,20 @@ export class SurgicalCaseDomainService {
       );
     }
 
+    const preflight = await DomainStateRepository.getById<GovernedSurgicalCase>(
+      context.tenantId,
+      'surgicalCases',
+      payload.caseId
+    );
+    if (!preflight) {
+      return reject(
+        commandId,
+        idempotencyKey,
+        'SURGICAL_CASE_NOT_FOUND',
+        'Surgical case does not exist.'
+      );
+    }
+    const scheduleId = `or_schedule_${preflight.orRoomId}`;
     const now = new Date().toISOString();
     try {
       const tx = await TransactionManager.executeAtomicReadModifyMutation({
@@ -640,10 +655,23 @@ export class SurgicalCaseDomainService {
             entityId: payload.caseId,
             required: true,
           },
+          {
+            key: 'schedule',
+            entityType: 'OR_ROOM_SCHEDULE',
+            entityId: scheduleId,
+            required: false,
+          },
         ],
         prepare: (current) => {
           const surgicalCase = current.case as unknown as GovernedSurgicalCase;
+          const roomSchedule = current.schedule as unknown as OrRoomSchedule | null;
           assertFacilityScope(context, surgicalCase.facilityId);
+          if (surgicalCase.orRoomId !== preflight.orRoomId) {
+            throw new AtomicMutationRejectedError(
+              'SURGICAL_CASE_ROOM_CONCURRENCY_CONFLICT',
+              'Operating-room assignment changed during case transition.'
+            );
+          }
 
           const currentStatus = (surgicalCase.status || 'scheduled') as SurgicalCaseStatus;
           if (!(TRANSITIONS[currentStatus] || []).includes(payload.targetStatus)) {
@@ -694,12 +722,16 @@ export class SurgicalCaseDomainService {
             payload.targetStatus === 'completed'
               ? [{
                   entityType: 'OR_ROOM_SCHEDULE',
-                  entityId: `or_schedule_${surgicalCase.orRoomId}`,
+                  entityId: scheduleId,
                   domainState: {
                     roomId: surgicalCase.orRoomId,
                     tenantId: context.tenantId,
                     facilityId: surgicalCase.facilityId,
-                    slots: [],
+                    slots: (roomSchedule?.slots || []).map((slot) =>
+                      slot.caseId === surgicalCase.id
+                        ? { ...slot, status: 'COMPLETED' as const }
+                        : slot
+                    ),
                     updatedAt: now,
                   },
                 }]
@@ -770,6 +802,20 @@ export class SurgicalCaseDomainService {
       );
     }
 
+    const preflight = await DomainStateRepository.getById<GovernedSurgicalCase>(
+      context.tenantId,
+      'surgicalCases',
+      payload.caseId
+    );
+    if (!preflight) {
+      return reject(
+        commandId,
+        idempotencyKey,
+        'SURGICAL_CASE_NOT_FOUND',
+        'Surgical case does not exist.'
+      );
+    }
+    const scheduleId = `or_schedule_${preflight.orRoomId}`;
     const now = new Date().toISOString();
     try {
       const tx = await TransactionManager.executeAtomicReadModifyMutation({
@@ -796,13 +842,20 @@ export class SurgicalCaseDomainService {
           {
             key: 'schedule',
             entityType: 'OR_ROOM_SCHEDULE',
-            entityId: `or_schedule_placeholder`,
+            entityId: scheduleId,
             required: false,
           },
         ],
         prepare: (current) => {
           const surgicalCase = current.case as unknown as GovernedSurgicalCase;
+          const roomSchedule = current.schedule as unknown as OrRoomSchedule | null;
           assertFacilityScope(context, surgicalCase.facilityId);
+          if (surgicalCase.orRoomId !== preflight.orRoomId) {
+            throw new AtomicMutationRejectedError(
+              'SURGICAL_CASE_ROOM_CONCURRENCY_CONFLICT',
+              'Operating-room assignment changed during cancellation.'
+            );
+          }
 
           const status = surgicalCase.status || 'scheduled';
           if (!['scheduled', 'pre_op'].includes(status)) {
@@ -826,8 +879,25 @@ export class SurgicalCaseDomainService {
             updatedAt: now,
           };
 
+          const nextSchedule: OrRoomSchedule = {
+            roomId: surgicalCase.orRoomId || preflight.orRoomId || '',
+            tenantId: context.tenantId,
+            facilityId: surgicalCase.facilityId,
+            slots: (roomSchedule?.slots || []).map((slot) =>
+              slot.caseId === surgicalCase.id
+                ? { ...slot, status: 'CANCELLED' as const }
+                : slot
+            ),
+            updatedAt: now,
+          };
+
           return {
             domainState: next,
+            additionalStateWrites: [{
+              entityType: 'OR_ROOM_SCHEDULE',
+              entityId: scheduleId,
+              domainState: nextSchedule,
+            }],
             eventPayload: {
               caseId: next.id,
               previousStatus: status,

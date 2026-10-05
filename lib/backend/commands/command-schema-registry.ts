@@ -2118,6 +2118,8 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       unitPriceMinorUnits: z.number().int().safe().nonnegative().optional(),
       inventoryItemId: z.string().trim().min(1).max(150).optional(),
       instructions: z.string().trim().max(4000).optional(),
+      safetyAcknowledgementFindingIds: z.array(nonEmpty.max(200)).max(50).optional(),
+      safetyOverrideReason: z.string().trim().min(10).max(4000).optional(),
     }).strict(),
   },
   AdvanceStageCommand: {

@@ -20,23 +20,30 @@ import {
   PharmacyPrescriptionItem,
 } from '@/types/opd-domain';
 import { AuthClient } from '@/lib/auth/auth-client';
+import type { MedicationSafetyCandidateEvaluation } from '@/types/medication-safety';
 
 interface OpdPharmacyPrescriptionsProps {
   encounter: ComprehensiveOpdEncounter;
   prescriptions: PharmacyPrescriptionItem[];
   canPrescribe?: boolean;
   canDispense?: boolean;
-  onAddPrescription: (item: PharmacyPrescriptionItem) => Promise<void> | void;
+  onAddPrescription: (
+    item: PharmacyPrescriptionItem,
+    safety?: {
+      safetyAcknowledgementFindingIds?: string[];
+      safetyOverrideReason?: string;
+    }
+  ) => Promise<void> | void;
   onDispensePrescription: (prescriptionId: string, dispensedBy: string) => void;
 }
 
 const DEMO_FORMULARY = [
-  { code: 'RX-FUROS-40', drugName: 'Furosemide', formulation: 'Tablet', strength: '40 mg', defaultRoute: 'Oral', defaultFreq: 'OD (Once Daily Morning)', defaultDays: 14, unitCost: 15, stock: 450, batch: 'BTH-2026-088', expiry: '2027-11-30', isPenicillin: false },
-  { code: 'RX-LISIN-10', drugName: 'Lisinopril', formulation: 'Tablet', strength: '10 mg', defaultRoute: 'Oral', defaultFreq: 'OD (Once Daily)', defaultDays: 30, unitCost: 22, stock: 320, batch: 'BTH-2026-142', expiry: '2028-04-15', isPenicillin: false },
-  { code: 'RX-METFOR-500', drugName: 'Metformin HCl', formulation: 'Tablet', strength: '500 mg', defaultRoute: 'Oral', defaultFreq: 'BD (Twice Daily with meals)', defaultDays: 30, unitCost: 12, stock: 800, batch: 'BTH-2026-009', expiry: '2027-09-20', isPenicillin: false },
-  { code: 'RX-AMOX-500', drugName: 'Amoxicillin', formulation: 'Capsule', strength: '500 mg', defaultRoute: 'Oral', defaultFreq: 'TDS (Three Times Daily)', defaultDays: 7, unitCost: 25, stock: 210, batch: 'BTH-2026-991', expiry: '2027-05-10', isPenicillin: true },
-  { code: 'RX-PARAC-500', drugName: 'Paracetamol', formulation: 'Tablet', strength: '500 mg', defaultRoute: 'Oral', defaultFreq: 'PRN (As needed for pain/fever)', defaultDays: 5, unitCost: 5, stock: 1200, batch: 'BTH-2026-301', expiry: '2028-10-01', isPenicillin: false },
-  { code: 'RX-ATORV-20', drugName: 'Atorvastatin', formulation: 'Tablet', strength: '20 mg', defaultRoute: 'Oral', defaultFreq: 'HS (At Bedtime)', defaultDays: 30, unitCost: 35, stock: 540, batch: 'BTH-2026-512', expiry: '2028-02-18', isPenicillin: false },
+  { code: 'RX-FUROS-40', drugName: 'Furosemide', formulation: 'Tablet', strength: '40 mg', defaultRoute: 'Oral', defaultFreq: 'OD (Once Daily Morning)', defaultDays: 14, unitCost: 15, stock: 450, batch: 'BTH-2026-088', expiry: '2027-11-30' },
+  { code: 'RX-LISIN-10', drugName: 'Lisinopril', formulation: 'Tablet', strength: '10 mg', defaultRoute: 'Oral', defaultFreq: 'OD (Once Daily)', defaultDays: 30, unitCost: 22, stock: 320, batch: 'BTH-2026-142', expiry: '2028-04-15' },
+  { code: 'RX-METFOR-500', drugName: 'Metformin HCl', formulation: 'Tablet', strength: '500 mg', defaultRoute: 'Oral', defaultFreq: 'BD (Twice Daily with meals)', defaultDays: 30, unitCost: 12, stock: 800, batch: 'BTH-2026-009', expiry: '2027-09-20' },
+  { code: 'RX-AMOX-500', drugName: 'Amoxicillin', formulation: 'Capsule', strength: '500 mg', defaultRoute: 'Oral', defaultFreq: 'TDS (Three Times Daily)', defaultDays: 7, unitCost: 25, stock: 210, batch: 'BTH-2026-991', expiry: '2027-05-10' },
+  { code: 'RX-PARAC-500', drugName: 'Paracetamol', formulation: 'Tablet', strength: '500 mg', defaultRoute: 'Oral', defaultFreq: 'PRN (As needed for pain/fever)', defaultDays: 5, unitCost: 5, stock: 1200, batch: 'BTH-2026-301', expiry: '2028-10-01' },
+  { code: 'RX-ATORV-20', drugName: 'Atorvastatin', formulation: 'Tablet', strength: '20 mg', defaultRoute: 'Oral', defaultFreq: 'HS (At Bedtime)', defaultDays: 30, unitCost: 35, stock: 540, batch: 'BTH-2026-512', expiry: '2028-02-18' },
 ];
 
 
@@ -59,7 +66,6 @@ interface FormularyDrug {
     locationId: string;
     locationName: string;
   } | null;
-  isPenicillin?: boolean;
 }
 
 const IS_DEMO_RUNTIME = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
@@ -89,6 +95,11 @@ export function OpdPharmacyPrescriptions({
 
   // State for prescription submission error
   const [prescriptionError, setPrescriptionError] = useState<string | null>(null);
+  const [pendingSafetyReview, setPendingSafetyReview] = useState<{
+    prescription: PharmacyPrescriptionItem;
+    evaluation: MedicationSafetyCandidateEvaluation;
+  } | null>(null);
+  const [safetyOverrideReason, setSafetyOverrideReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [dispenseModalItem, setDispenseModalItem] = useState<PharmacyPrescriptionItem | null>(null);
   const [pharmacistName, setPharmacistName] = useState<string>('Pharm. Tariq Bilal (R.Ph)');
@@ -149,15 +160,10 @@ export function OpdPharmacyPrescriptions({
     };
   }, []);
 
-  // Prescription-time warning is advisory only. The server remains authoritative
-  // for dispense allocation; authoritative clinical allergy evidence remains server-owned.
   const selectedDrug = useMemo(
     () => formulary.find((item) => item.code === selectedFormularyCode) || formulary[0],
     [formulary, selectedFormularyCode]
   );
-  const hasAllergyConflict =
-    !!selectedDrug?.isPenicillin &&
-    (encounter.knownAllergies?.some((a) => a.toLowerCase().includes('penicillin')) || false);
 
   const handleFormularyChange = (code: string) => {
     setSelectedFormularyCode(code);
@@ -175,12 +181,8 @@ export function OpdPharmacyPrescriptions({
     e.preventDefault();
     setPrescriptionError(null);
 
-    if (hasAllergyConflict) {
-      const proceed = confirm(
-        `CRITICAL ALLERGY ALERT: Patient has documented hypersensitivity to Penicillin! Proceeding will log a clinical safety override exception. Are you sure?`
-      );
-      if (!proceed) return;
-    }
+    setPendingSafetyReview(null);
+    setSafetyOverrideReason('');
 
     if (!selectedDrug) {
       alert('No authoritative formulary medication is available.');
@@ -213,10 +215,82 @@ export function OpdPharmacyPrescriptions({
 
     setIsSubmitting(true);
     try {
-      await onAddPrescription(newPrescription);
+      const tenantId = await AuthClient.getActiveTenantId();
+      const response = await AuthClient.authorizedFetch(
+        `/api/clinical/medication-safety/precheck?tenantId=${encodeURIComponent(tenantId)}`,
+        {
+          method: 'POST',
+          cache: 'no-store',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tenantId,
+            patientId: encounter.patientId,
+            encounterId: encounter.id,
+            drugCode: selectedDrug.code,
+            drugName: selectedDrug.drugName,
+          }),
+        },
+        tenantId
+      );
+      const payload = await response.json();
+      if (!response.ok || !payload?.success || !payload?.evaluation) {
+        throw new Error(
+          payload?.error?.message ||
+            payload?.error ||
+            'Authoritative medication-safety precheck failed.'
+        );
+      }
+
+      const evaluation =
+        payload.evaluation as MedicationSafetyCandidateEvaluation;
+      if (evaluation.findings.length > 0) {
+        setPendingSafetyReview({
+          prescription: newPrescription,
+          evaluation,
+        });
+        return;
+      }
+
+      await onAddPrescription(newPrescription, {
+        safetyAcknowledgementFindingIds: [],
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Prescription authorization failed.';
       setPrescriptionError(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const confirmSafetyReview = async () => {
+    if (!pendingSafetyReview) return;
+    const requiresOverride =
+      pendingSafetyReview.evaluation.blockingFindingIds.length > 0;
+    if (requiresOverride && safetyOverrideReason.trim().length < 10) {
+      setPrescriptionError(
+        'A clinical override reason of at least 10 characters is required for the critical medication-safety finding.'
+      );
+      return;
+    }
+
+    setIsSubmitting(true);
+    setPrescriptionError(null);
+    try {
+      await onAddPrescription(pendingSafetyReview.prescription, {
+        safetyAcknowledgementFindingIds:
+          pendingSafetyReview.evaluation.acknowledgementFindingIds,
+        safetyOverrideReason: requiresOverride
+          ? safetyOverrideReason.trim()
+          : undefined,
+      });
+      setPendingSafetyReview(null);
+      setSafetyOverrideReason('');
+    } catch (err) {
+      setPrescriptionError(
+        err instanceof Error
+          ? err.message
+          : 'Medication-safety acknowledgement failed.'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -236,15 +310,79 @@ export function OpdPharmacyPrescriptions({
           </p>
         </div>
 
-        {/* Allergy Warning if selected item collides */}
-        {hasAllergyConflict && (
-          <div className="p-4 rounded-xl bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-800 text-red-900 dark:text-red-200 flex items-center gap-3 text-xs">
-            <AlertTriangle className="w-5 h-5 text-red-600 shrink-0" />
-            <div>
-              <strong className="block font-bold">CRITICAL DRUG-ALLERGY COLLISION DETECTED</strong>
-              <span>
-                {selectedDrug?.drugName || 'Selected medication'} is a Penicillin-class derivative. Patient has documented allergy: {encounter.knownAllergies?.join(', ')}.
-              </span>
+        {pendingSafetyReview && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-xs text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+              <div className="min-w-0 flex-1">
+                <strong className="block font-bold">
+                  CI-9 medication safety review required
+                </strong>
+                <p className="mt-1">
+                  These findings were derived from authoritative Patient 360 evidence. Review each item before prescribing.
+                </p>
+                <div className="mt-3 space-y-2">
+                  {pendingSafetyReview.evaluation.findings.map((finding) => (
+                    <div
+                      key={finding.findingId}
+                      className={
+                        finding.requiresOverride
+                          ? 'rounded-lg border border-rose-300 bg-rose-50 p-3 text-rose-900'
+                          : 'rounded-lg border border-amber-200 bg-white/70 p-3 text-slate-800'
+                      }
+                    >
+                      <div className="font-bold">{finding.title}</div>
+                      <div className="mt-1">{finding.description}</div>
+                      <div className="mt-1 font-mono text-[10px] opacity-70">
+                        {finding.ruleId} · {finding.findingId}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {pendingSafetyReview.evaluation.blockingFindingIds.length > 0 && (
+                  <div className="mt-3">
+                    <label className="block text-[11px] font-bold">
+                      Clinical override reason *
+                    </label>
+                    <textarea
+                      value={safetyOverrideReason}
+                      onChange={(event) =>
+                        setSafetyOverrideReason(event.target.value)
+                      }
+                      rows={3}
+                      className="mt-1 w-full rounded-lg border border-rose-300 bg-white px-3 py-2 text-xs text-slate-900"
+                      placeholder="Document why prescribing remains clinically necessary despite the critical finding."
+                    />
+                  </div>
+                )}
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => void confirmSafetyReview()}
+                    className="rounded-lg bg-amber-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                  >
+                    {isSubmitting
+                      ? 'Recording…'
+                      : pendingSafetyReview.evaluation.blockingFindingIds.length > 0
+                        ? 'Acknowledge, override & prescribe'
+                        : 'Acknowledge findings & prescribe'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => {
+                      setPendingSafetyReview(null);
+                      setSafetyOverrideReason('');
+                    }}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700"
+                  >
+                    Cancel prescription
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}

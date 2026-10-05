@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import {
   acknowledgeCriticalDiagnosticResult,
+  completeMedicationReconciliation,
   loadPatient360ClinicalView,
   recordConsultantPatientReview,
   recordDischargeReadinessReview,
@@ -196,6 +197,14 @@ export function Patient360View({
   }>({});
   const [consultantReviewSubmitting, setConsultantReviewSubmitting] = useState(false);
   const [consultantReviewMessage, setConsultantReviewMessage] = useState<string | null>(null);
+  const [medicationReconciliationConfirmed, setMedicationReconciliationConfirmed] =
+    useState(false);
+  const [medicationReconciliationNotes, setMedicationReconciliationNotes] =
+    useState('');
+  const [medicationReconciliationSubmitting, setMedicationReconciliationSubmitting] =
+    useState(false);
+  const [medicationReconciliationMessage, setMedicationReconciliationMessage] =
+    useState<string | null>(null);
 
   const load = async () => {
     try {
@@ -298,6 +307,50 @@ export function Patient360View({
       );
     } finally {
       setCriticalAckReportId(null);
+    }
+  };
+
+  const completeCurrentMedicationReconciliation = async () => {
+    if (
+      !view?.selectedCareContext ||
+      view.source === 'LOCAL_EDGE' ||
+      !medicationReconciliationConfirmed
+    ) {
+      setMedicationReconciliationMessage(
+        view?.source === 'LOCAL_EDGE'
+          ? 'Medication reconciliation requires authoritative server connectivity.'
+          : 'Confirm that the current medication list has been reviewed and all discrepancies are resolved.'
+      );
+      return;
+    }
+
+    try {
+      setMedicationReconciliationSubmitting(true);
+      setMedicationReconciliationMessage(null);
+      await completeMedicationReconciliation(tenantId, {
+        patientId,
+        encounterId: view.selectedCareContext.encounterId,
+        reconciledMedicationIds: view.projection.currentMedications.map(
+          (item) => item.medicationOrderId
+        ),
+        discrepancyCount: 0,
+        unresolvedDiscrepancies: [],
+        notes: medicationReconciliationNotes.trim() || undefined,
+      });
+      setMedicationReconciliationMessage(
+        'Medication reconciliation recorded. CI-9 will re-evaluate after the authoritative event is projected.'
+      );
+      setMedicationReconciliationConfirmed(false);
+      setMedicationReconciliationNotes('');
+      await load();
+    } catch (caught) {
+      setMedicationReconciliationMessage(
+        caught instanceof Error
+          ? caught.message
+          : 'Medication reconciliation could not be completed.'
+      );
+    } finally {
+      setMedicationReconciliationSubmitting(false);
     }
   };
 
@@ -709,6 +762,186 @@ export function Patient360View({
             <EmptyState>
               Consultant attention intelligence is available to authenticated consultant/doctor roles for a selected encounter.
             </EmptyState>
+          )}
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <Pill className="h-5 w-5 text-indigo-600" />
+                <h2 className="text-sm font-bold">
+                  Medication Safety & Reconciliation Intelligence
+                </h2>
+              </div>
+              <p className="mt-1 max-w-3xl text-xs text-slate-500">
+                Deterministic CI-9 checks over Patient 360 medication, allergy and reconciliation evidence. Exact-match findings are evidence-linked; absence of a finding is not proof a medication is safe.
+              </p>
+            </div>
+            {view.medicationSafety ? (
+              <span
+                className={
+                  view.medicationSafety.state === 'CRITICAL_REVIEW_REQUIRED'
+                    ? 'inline-flex w-fit rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-bold text-rose-800'
+                    : view.medicationSafety.state === 'REVIEW_REQUIRED'
+                      ? 'inline-flex w-fit rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-800'
+                      : 'inline-flex w-fit rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-800'
+                }
+              >
+                {view.medicationSafety.state.replace(/_/g, ' ')}
+              </span>
+            ) : (
+              <span className="inline-flex w-fit rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
+                Not evaluated
+              </span>
+            )}
+          </div>
+
+          {offline && view.medicationSafety && (
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              This is the last synchronized medication-safety assessment. New offline prescriptions, allergies or reconciliations require server synchronization and re-evaluation.
+            </div>
+          )}
+
+          {view.medicationSafety ? (
+            <>
+              <div className="mt-4 grid gap-2 sm:grid-cols-4">
+                <div className="rounded-xl bg-slate-50 p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-slate-400">Findings</div>
+                  <div className="mt-1 text-xl font-bold">{view.medicationSafety.counts.total}</div>
+                </div>
+                <div className="rounded-xl bg-rose-50 p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-rose-500">Critical</div>
+                  <div className="mt-1 text-xl font-bold text-rose-800">{view.medicationSafety.counts.critical}</div>
+                </div>
+                <div className="rounded-xl bg-amber-50 p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-amber-500">Action required</div>
+                  <div className="mt-1 text-xl font-bold text-amber-800">{view.medicationSafety.counts.actionRequired}</div>
+                </div>
+                <div className="rounded-xl bg-slate-50 p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-slate-400">Evaluated</div>
+                  <div className="mt-1 text-xs font-semibold text-slate-700">{dateTime(view.medicationSafety.evaluatedAt)}</div>
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-2">
+                {view.medicationSafety.findings.length ? (
+                  view.medicationSafety.findings.map((finding) => (
+                    <details
+                      key={finding.findingId}
+                      className={
+                        finding.severity === 'CRITICAL_REVIEW_REQUIRED'
+                          ? 'group rounded-xl border border-rose-200 bg-rose-50 px-4 py-3'
+                          : 'group rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3'
+                      }
+                    >
+                      <summary className="cursor-pointer list-none">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-semibold text-slate-900">{finding.title}</div>
+                            <p className="mt-1 text-xs text-slate-600">{finding.description}</p>
+                          </div>
+                          <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                            {finding.severity.replace(/_/g, ' ')}
+                          </span>
+                        </div>
+                      </summary>
+                      <div className="mt-3 border-t border-slate-200 pt-3">
+                        <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                          Evidence
+                        </div>
+                        <div className="mt-2 space-y-1">
+                          {finding.evidence.map((evidence, index) => (
+                            <div
+                              key={`${finding.findingId}-${evidence.entityId}-${index}`}
+                              className="rounded-lg bg-white px-3 py-2 font-mono text-[10px] text-slate-600"
+                            >
+                              {evidence.source} · {evidence.entityId} · {evidence.label}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </details>
+                  ))
+                ) : (
+                  <EmptyState>
+                    No CI-9 finding is derived from the current evidence. This does not establish medication safety beyond the implemented deterministic rules.
+                  </EmptyState>
+                )}
+              </div>
+
+              {view.medicationSafety.findings.some(
+                (finding) => finding.type === 'MEDICATION_RECONCILIATION_REQUIRED'
+              ) && (
+                <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-xs text-indigo-950">
+                  <div className="flex items-center gap-2">
+                    <ClipboardCheck className="h-4 w-4 text-indigo-700" />
+                    <strong>Complete medication reconciliation</strong>
+                  </div>
+                  <p className="mt-2">
+                    Review the current Patient 360 medication list against the available history and resolve every discrepancy before marking reconciliation complete.
+                  </p>
+                  <label className="mt-3 flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={medicationReconciliationConfirmed}
+                      disabled={offline}
+                      onChange={(event) =>
+                        setMedicationReconciliationConfirmed(event.target.checked)
+                      }
+                      className="mt-0.5"
+                    />
+                    <span>
+                      I confirm that the medication list has been reviewed and there are no unresolved discrepancies.
+                    </span>
+                  </label>
+                  <textarea
+                    value={medicationReconciliationNotes}
+                    onChange={(event) =>
+                      setMedicationReconciliationNotes(event.target.value)
+                    }
+                    disabled={offline}
+                    rows={2}
+                    className="mt-3 w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs text-slate-900 disabled:opacity-50"
+                    placeholder="Optional reconciliation notes"
+                  />
+                  <button
+                    type="button"
+                    disabled={
+                      offline ||
+                      medicationReconciliationSubmitting ||
+                      !medicationReconciliationConfirmed
+                    }
+                    onClick={() =>
+                      void completeCurrentMedicationReconciliation()
+                    }
+                    className="mt-3 rounded-lg bg-indigo-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                  >
+                    {medicationReconciliationSubmitting
+                      ? 'Recording reconciliation…'
+                      : 'Complete reconciliation'}
+                  </button>
+                  {medicationReconciliationMessage && (
+                    <div className="mt-3 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs text-indigo-800">
+                      {medicationReconciliationMessage}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                  Known limitations
+                </div>
+                <ul className="mt-2 space-y-1 text-[11px] text-slate-600">
+                  {view.medicationSafety.limitations.map((limitation) => (
+                    <li key={limitation}>• {limitation}</li>
+                  ))}
+                </ul>
+              </div>
+            </>
+          ) : (
+            <EmptyState>Medication-safety projection has not been generated yet.</EmptyState>
           )}
         </section>
 

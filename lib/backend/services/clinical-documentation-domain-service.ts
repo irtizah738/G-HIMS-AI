@@ -519,9 +519,18 @@ export class ClinicalDocumentationDomainService {
     idempotencyKey: string,
     payload: CompleteMedicationReconciliationPayload
   ): Promise<CommandResult> {
-    const auth = AuthorizationPipeline.evaluate(context, {
-      requiredRoles: ['PHARMACIST', 'DOCTOR', 'CONSULTANT', 'SYSTEM_ADMIN'],
-    });
+    const normalizedRoles = new Set(
+      context.roles.map((role) => String(role || '').trim().toUpperCase())
+    );
+    const auth = normalizedRoles.has('PHARMACIST')
+      ? AuthorizationPipeline.evaluate(context, {
+          requiredRoles: ['PHARMACIST'],
+          requiredPrivilege: 'DISPENSE_MEDICATION',
+        })
+      : AuthorizationPipeline.evaluate(context, {
+          requiredRoles: ['DOCTOR', 'CONSULTANT'],
+          requiredPrivilege: 'PRESCRIBE',
+        });
     if (!auth.authorized) {
       return {
         success: false,

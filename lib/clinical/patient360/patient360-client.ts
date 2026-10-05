@@ -16,6 +16,7 @@ import type {
 import { selectCareContextEncounter } from '@/lib/clinical/patient360/care-context';
 import type { DischargeReadinessProjection } from '@/types/discharge-readiness';
 import type { DeteriorationProjection } from '@/types/clinical-deterioration';
+import type { MedicationSafetyProjection } from '@/types/medication-safety';
 
 export interface Patient360ClinicalView {
   tenantId: string;
@@ -25,6 +26,7 @@ export interface Patient360ClinicalView {
   selectedCareContext: Patient360EncounterSummary | null;
   dischargeReadiness: DischargeReadinessProjection | null;
   deterioration: DeteriorationProjection | null;
+  medicationSafety: MedicationSafetyProjection | null;
   consultantVisibility: ConsultantPatientStateProjection | null;
   source: 'SERVER' | 'LOCAL_EDGE';
   freshness: {
@@ -113,6 +115,15 @@ async function loadLocalPatient360(
           item.encounterId === selectedCareContext.encounterId)
     ) || null;
 
+  const medicationSafetyRows = await listSecureEdgeEntities<Record<string, unknown>>(
+    tenantId,
+    cached.user.uid,
+    'medicationSafetyProjections'
+  );
+  const medicationSafety =
+    (medicationSafetyRows as unknown as MedicationSafetyProjection[])
+      .find((item) => item.patientId === patientId) || null;
+
   const openItemRows = await listSecureEdgeEntities<Record<string, unknown>>(
     tenantId,
     cached.user.uid,
@@ -178,6 +189,7 @@ async function loadLocalPatient360(
     selectedCareContext,
     dischargeReadiness,
     deterioration,
+    medicationSafety,
     consultantVisibility,
     source: 'LOCAL_EDGE',
     freshness: freshness(projection),
@@ -220,6 +232,8 @@ export async function loadPatient360ClinicalView(
         (payload.dischargeReadiness as DischargeReadinessProjection | null) || null,
       deterioration:
         (payload.deterioration as DeteriorationProjection | null) || null,
+      medicationSafety:
+        (payload.medicationSafety as MedicationSafetyProjection | null) || null,
       consultantVisibility:
         (payload.consultantVisibility as ConsultantPatientStateProjection | null) || null,
       source: 'SERVER',
@@ -288,6 +302,52 @@ export async function recordConsultantPatientReview(
     );
   }
 
+  return payload as Record<string, unknown>;
+}
+
+export async function completeMedicationReconciliation(
+  tenantId: string,
+  input: {
+    patientId: string;
+    encounterId: string;
+    reconciledMedicationIds: string[];
+    discrepancyCount: number;
+    unresolvedDiscrepancies?: string[];
+    notes?: string;
+  }
+): Promise<Record<string, unknown>> {
+  const commandId = `cmd_medrec_${crypto.randomUUID()}`;
+  const idempotencyKey = `medrec:${input.encounterId}:${crypto.randomUUID()}`;
+
+  const response = await AuthClient.authorizedFetch(
+    '/api/commands/execute',
+    {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        command: {
+          commandId,
+          idempotencyKey,
+          tenantId,
+          commandType: 'CompleteMedicationReconciliationCommand',
+          payload: input,
+          clientTimestamp: Date.now(),
+          schemaVersion: 1,
+        },
+      }),
+    },
+    tenantId
+  );
+
+  const payload = await response.json();
+  if (!response.ok || !payload?.success) {
+    throw new Error(
+      payload?.error?.message ||
+        payload?.error ||
+        'Medication reconciliation could not be completed.'
+    );
+  }
   return payload as Record<string, unknown>;
 }
 

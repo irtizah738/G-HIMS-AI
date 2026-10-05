@@ -10,6 +10,7 @@ import { TransactionManager } from '../transactions/transaction-manager';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import { EncounterDomainService } from './encounter-domain-service';
 import { PatientClinicalKnowledgeDomainService } from './patient-clinical-knowledge-domain-service';
+import { MedicationSafetyService } from '@/lib/clinical/intelligence/medication-safety-service';
 import type { InventoryBalance } from '@/types/scm-domain';
 import {
   buildCanonicalDiagnosticOrder,
@@ -42,6 +43,8 @@ export interface PrescribeMedicationPayload {
   unitPriceMinorUnits?: number;
   inventoryItemId?: string;
   instructions?: string;
+  safetyAcknowledgementFindingIds?: string[];
+  safetyOverrideReason?: string;
 }
 
 interface VersionedInventoryBalance extends InventoryBalance {
@@ -626,6 +629,79 @@ export class ClinicalOrderDomainService {
       };
     }
 
+    let safetyEvaluation;
+    try {
+      safetyEvaluation =
+        await MedicationSafetyService.evaluateCandidateAuthoritatively(
+          context.tenantId,
+          payload.patientId,
+          payload.encounterId,
+          {
+            drugCode: payload.drugCode,
+            drugName: payload.drugName,
+          }
+        );
+    } catch (error) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'MEDICATION_SAFETY_PRECHECK_UNAVAILABLE',
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Authoritative medication-safety precheck is unavailable.',
+        },
+      };
+    }
+
+    const acknowledgedFindingIds = new Set(
+      (payload.safetyAcknowledgementFindingIds || [])
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    );
+    const missingAcknowledgements =
+      safetyEvaluation.acknowledgementFindingIds.filter(
+        (findingId) => !acknowledgedFindingIds.has(findingId)
+      );
+    if (missingAcknowledgements.length > 0) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'MEDICATION_SAFETY_ACKNOWLEDGEMENT_REQUIRED',
+          message:
+            'Medication-safety findings require explicit clinician acknowledgement before prescribing.',
+          details: {
+            findings: safetyEvaluation.findings,
+            missingFindingIds: missingAcknowledgements,
+          },
+        },
+      };
+    }
+
+    if (
+      safetyEvaluation.blockingFindingIds.length > 0 &&
+      !String(payload.safetyOverrideReason || '').trim()
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'MEDICATION_SAFETY_OVERRIDE_REQUIRED',
+          message:
+            'A documented clinical override reason is required for the identified critical medication-safety finding.',
+          details: {
+            findings: safetyEvaluation.findings,
+            blockingFindingIds: safetyEvaluation.blockingFindingIds,
+          },
+        },
+      };
+    }
+
     const prescriptionId = `rx_${crypto.randomUUID()}`;
     const domainState = {
       prescriptionId,
@@ -694,11 +770,26 @@ export class ClinicalOrderDomainService {
         quantityPrescribed: payload.quantityPrescribed,
         canonicalMedicationOrderId: canonicalMedicationOrder.medicationOrderId,
         medicationKnowledgeStatus: 'KNOWN',
+        medicationSafetyFindingIds: safetyEvaluation.findings.map(
+          (finding) => finding.findingId
+        ),
+        medicationSafetyOverrideApplied:
+          safetyEvaluation.blockingFindingIds.length > 0,
       },
       auditAction: 'PRESCRIBE_MEDICATION',
       auditResourceType: 'PRESCRIPTION',
       auditResourceId: prescriptionId,
       auditReason: `Prescribed ${payload.drugName} ${payload.dosage} (${payload.route})`,
+      auditMetadata: {
+        medicationSafetyFindingIds: safetyEvaluation.findings.map(
+          (finding) => finding.findingId
+        ),
+        medicationSafetyOverrideReason:
+          String(payload.safetyOverrideReason || '').trim() || undefined,
+        medicationSafetyRuleIds: safetyEvaluation.findings.map(
+          (finding) => finding.ruleId
+        ),
+      },
       outboxTopic: 'g-hims-clinical-events',
       idempotencyKey,
       commandId,
@@ -732,6 +823,7 @@ export class ClinicalOrderDomainService {
       data: {
         ...domainState,
         canonicalMedicationOrderId: canonicalMedicationOrder.medicationOrderId,
+        medicationSafety: safetyEvaluation,
       },
     };
   }

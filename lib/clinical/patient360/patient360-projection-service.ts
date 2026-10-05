@@ -56,14 +56,23 @@ function unique(values: Array<string | undefined | null>): string[] {
   );
 }
 
+function directPatientAggregateId(event: {
+  aggregateType?: string;
+  aggregateId?: string;
+}): string | undefined {
+  const aggregateType = String(event.aggregateType || '').toUpperCase();
+  return ['PATIENT', 'PATIENT_MPI'].includes(aggregateType)
+    ? event.aggregateId
+    : undefined;
+}
+
 function patientIdsFromEvent(event: DomainEventEnvelope): string[] {
   const payload = event.payload || {};
-  const aggregateType = String(event.aggregateType || '').toUpperCase();
   return unique([
     payload.patientId as string,
     payload.primaryPatientId as string,
     payload.secondaryPatientId as string,
-    aggregateType.includes('PATIENT') ? event.aggregateId : undefined,
+    directPatientAggregateId(event),
   ]);
 }
 
@@ -644,12 +653,11 @@ export class Patient360ProjectionService {
     const patientIds = unique(
       events.flatMap((event) => {
         const payload = event.payload || {};
-        const aggregateType = String(event.aggregateType || '').toUpperCase();
         return [
           payload.patientId as string,
           payload.primaryPatientId as string,
           payload.secondaryPatientId as string,
-          aggregateType.includes('PATIENT') ? event.aggregateId : undefined,
+          directPatientAggregateId(event),
         ];
       })
     );
@@ -683,9 +691,7 @@ export class Patient360ProjectionService {
           event.payload?.patientId as string,
           event.payload?.primaryPatientId as string,
           event.payload?.secondaryPatientId as string,
-          String(event.aggregateType || '').toUpperCase().includes('PATIENT')
-            ? event.aggregateId
-            : undefined,
+          directPatientAggregateId(event),
         ]);
         const checkpoint = {
           eventId: event.eventId,

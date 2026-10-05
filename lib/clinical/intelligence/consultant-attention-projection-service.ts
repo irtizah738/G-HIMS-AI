@@ -6,6 +6,7 @@ import { sanitizeForFirestore } from '@/lib/firestore/sanitize';
 import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
 import { ClinicalDeteriorationService } from '@/lib/clinical/intelligence/clinical-deterioration-service';
 import { DischargeReadinessService } from '@/lib/clinical/intelligence/discharge-readiness-service';
+import type { MedicationSafetyProjection } from '@/types/medication-safety';
 import { normalizeCareSetting } from '@/lib/clinical/patient360/care-context';
 import type { CommandContext } from '@/lib/backend/types';
 import type { ClinicalOpenItemProjection } from '@/types/consultant-visibility';
@@ -155,6 +156,7 @@ export class ConsultantAttentionProjectionService {
       diagnosticAckSnapshot,
       consultationSnapshot,
       handoffSnapshot,
+      medicationSafetySnapshot,
       existingOpenItemsSnapshot,
       existingEscalationSnapshot,
     ] = await Promise.all([
@@ -184,6 +186,10 @@ export class ConsultantAttentionProjectionService {
         .where('encounterId', '==', encounterId)
         .get(),
       tenantRef
+        .collection('medicationSafetyProjections')
+        .doc(patientId)
+        .get(),
+      tenantRef
         .collection('clinicalOpenItems')
         .where('encounterId', '==', encounterId)
         .get(),
@@ -205,6 +211,9 @@ export class ConsultantAttentionProjectionService {
     const handoffs = handoffSnapshot.docs.map(
       (doc) => doc.data() as ClinicalHandoff
     );
+    const medicationSafety = medicationSafetySnapshot.exists
+      ? (medicationSafetySnapshot.data() as MedicationSafetyProjection)
+      : null;
 
     if (
       deterioration &&
@@ -505,6 +514,43 @@ export class ConsultantAttentionProjectionService {
             ...targetOwner,
             createdAt: handoff.createdAt,
             sourceRefs: [handoff.handoffId],
+            lastSourceEventId: trigger?.eventId,
+          },
+          now
+        )
+      );
+    }
+
+    for (const finding of medicationSafety?.findings || []) {
+      if (finding.encounterId && finding.encounterId !== encounterId) continue;
+      active.push(
+        item(
+          {
+            openItemId: stableId('open', [
+              patientId,
+              encounterId,
+              'medication-safety',
+              finding.findingId,
+            ]),
+            tenantId,
+            patientId,
+            encounterId,
+            careSetting,
+            category: 'MEDICATION',
+            description: finding.title,
+            clinicalPriority: finding.severity,
+            ...owner,
+            createdAt: finding.detectedAt,
+            dueAt:
+              finding.severity === 'CRITICAL_REVIEW_REQUIRED'
+                ? finding.detectedAt + 15 * 60_000
+                : finding.severity === 'ACTION_REQUIRED'
+                  ? finding.detectedAt + 4 * 60 * 60_000
+                  : undefined,
+            sourceRefs: [
+              finding.findingId,
+              ...finding.evidence.map((evidence) => evidence.entityId),
+            ],
             lastSourceEventId: trigger?.eventId,
           },
           now

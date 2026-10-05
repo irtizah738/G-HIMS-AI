@@ -582,7 +582,9 @@ export function OpdMasterWorkspace() {
           ? [{ type: 'PHONE', value: newPatient.phone, issuer: 'Telecom' }]
           : []),
       ],
-      allergies: newPatient.knownAllergies || [],
+      ...(newPatient.knownAllergies
+        ? { allergies: newPatient.knownAllergies }
+        : {}),
       ...(newPatient.chronicConditions
         ? { chronicConditions: newPatient.chronicConditions }
         : {}),
@@ -606,6 +608,23 @@ export function OpdMasterWorkspace() {
 
     const tokenNum = registration.queueToken.tokenNumber;
     const newEncId = registration.encounter.id;
+
+    const consultationBilling = await executeActiveTenantCommand<{
+      invoice: Record<string, any>;
+    }>(
+      'CreateOpdConsultationInvoiceCommand',
+      { encounterId: newEncId },
+      { idempotencyKey: `opd-consultation-invoice:${newEncId}` }
+    );
+    if (!consultationBilling.success || !consultationBilling.data?.invoice) {
+      throw new Error(
+        consultationBilling.error?.message ||
+          'Authoritative consultation invoice creation failed. The patient is registered, but OPD service remains blocked until billing configuration is corrected.'
+      );
+    }
+    const consultationInvoice = adaptAuthoritativeConsultationInvoice(
+      consultationBilling.data.invoice
+    );
     const newEncounter: ComprehensiveOpdEncounter = {
       id: newEncId,
       tenantId: registration.patient.tenantId,
@@ -620,11 +639,11 @@ export function OpdMasterWorkspace() {
       tokenNumber: tokenNum,
       encounterType: 'OPD_ROUTINE',
       department: registration.queueToken.department || 'General Medicine',
-      currentStage: 'QUEUE_ASSIGNMENT',
+      currentStage: 'REGISTRATION',
       stageProgress: {
         REGISTRATION: { status: 'COMPLETED', enteredAt: Date.now(), completedAt: Date.now(), completedBy: 'Server Registration Orchestrator' },
-        BILLING_AUTHORIZATION: { status: 'PENDING' },
-        QUEUE_ASSIGNMENT: { status: 'ACTIVE', enteredAt: Date.now() },
+        BILLING_AUTHORIZATION: { status: 'ACTIVE', enteredAt: Date.now() },
+        QUEUE_ASSIGNMENT: { status: 'PENDING' },
         NURSING_INTAKE: { status: 'PENDING' },
         MO_ASSESSMENT: { status: 'PENDING' },
         SPECIALTY_CONSULTATION: { status: 'PENDING' },
@@ -636,22 +655,9 @@ export function OpdMasterWorkspace() {
       },
       diagnosticOrders: [],
       prescriptions: [],
-      invoice: {
-        id: `inv-${newEncId}`,
-        invoiceNumber: `INV-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${newEncId.slice(-6).toUpperCase()}`,
-        payerTariffPlan: authoritativePatient.tariffPlan,
-        lineItems: [],
-        totalAmountMinorUnits: 0,
-        payerCoverageAmountMinorUnits: 0,
-        patientCopayAmountMinorUnits: 0,
-        amountPaidMinorUnits: 0,
-        balanceDueMinorUnits: 0,
-        settlementStatus: 'PENDING',
-        payments: [],
-        createdAt: Date.now(),
-      },
+      consultationInvoice,
       startedAt: Date.now(),
-      status: 'IN_QUEUE',
+      status: 'REGISTERED',
     };
 
     const newQueueEntry: QueueEntry = {
@@ -661,7 +667,7 @@ export function OpdMasterWorkspace() {
       patientName: authoritativePatient.fullName,
       mrn: authoritativePatient.mrn,
       department: registration.queueToken.department,
-      assignedRoomOrBay: 'Triage Room A',
+      assignedRoomOrBay: 'UNASSIGNED',
       triagePriority: String(registration.queueToken.priority || 'routine').toUpperCase(),
       status: 'WAITING',
       issuedAt: registration.queueToken.createdAt || Date.now(),
@@ -672,7 +678,7 @@ export function OpdMasterWorkspace() {
     setQueue((prev) => [newQueueEntry, ...prev.filter((q) => q.id !== newQueueEntry.id)]);
     setSelectedEncounterId(newEncId);
     recordEvent('PATIENT_REGISTERED', `Patient ${authoritativePatient.fullName} registered. Token ${tokenNum} issued.`);
-    setActiveTab('QUEUE');
+    setActiveTab('BILLING');
   };
 
   // HANDLER: Check-in appointment by creating an authoritative OPD encounter
@@ -712,6 +718,23 @@ export function OpdMasterWorkspace() {
 
     const tokenNum = result.data.queueToken.tokenNumber;
     const newEncId = result.data.encounter.encounterId;
+
+    const consultationBilling = await executeActiveTenantCommand<{
+      invoice: Record<string, any>;
+    }>(
+      'CreateOpdConsultationInvoiceCommand',
+      { encounterId: newEncId },
+      { idempotencyKey: `opd-consultation-invoice:${newEncId}` }
+    );
+    if (!consultationBilling.success || !consultationBilling.data?.invoice) {
+      throw new Error(
+        consultationBilling.error?.message ||
+          'Authoritative consultation invoice creation failed for appointment check-in.'
+      );
+    }
+    const consultationInvoice = adaptAuthoritativeConsultationInvoice(
+      consultationBilling.data.invoice
+    );
     const newEncounter: ComprehensiveOpdEncounter = {
       id: newEncId,
       tenantId: result.data.encounter.tenantId,
@@ -728,11 +751,11 @@ export function OpdMasterWorkspace() {
       department: appt.department,
       attendingDoctorId: appt.doctorId,
       attendingDoctorName: appt.doctorName,
-      currentStage: 'QUEUE_ASSIGNMENT',
+      currentStage: 'REGISTRATION',
       stageProgress: {
         REGISTRATION: { status: 'COMPLETED', enteredAt: Date.now(), completedAt: Date.now(), completedBy: 'Authoritative OPD Encounter Service' },
-        BILLING_AUTHORIZATION: { status: 'PENDING' },
-        QUEUE_ASSIGNMENT: { status: 'ACTIVE', enteredAt: Date.now() },
+        BILLING_AUTHORIZATION: { status: 'ACTIVE', enteredAt: Date.now() },
+        QUEUE_ASSIGNMENT: { status: 'PENDING' },
         NURSING_INTAKE: { status: 'PENDING' },
         MO_ASSESSMENT: { status: 'PENDING' },
         SPECIALTY_CONSULTATION: { status: 'PENDING' },
@@ -744,20 +767,7 @@ export function OpdMasterWorkspace() {
       },
       diagnosticOrders: [],
       prescriptions: [],
-      invoice: {
-        id: `inv-${newEncId}`,
-        invoiceNumber: `INV-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${newEncId.slice(-6).toUpperCase()}`,
-        payerTariffPlan: patient.tariffPlan,
-        lineItems: [],
-        totalAmountMinorUnits: 0,
-        payerCoverageAmountMinorUnits: 0,
-        patientCopayAmountMinorUnits: 0,
-        amountPaidMinorUnits: 0,
-        balanceDueMinorUnits: 0,
-        settlementStatus: 'PENDING',
-        payments: [],
-        createdAt: Date.now(),
-      },
+      consultationInvoice,
       startedAt: Date.now(),
       status: 'IN_QUEUE',
     };
@@ -770,7 +780,7 @@ export function OpdMasterWorkspace() {
       mrn: patient.mrn,
       department: result.data.queueToken.department,
       assignedDoctorName: appt.doctorName,
-      assignedRoomOrBay: 'Consultation Room 104',
+      assignedRoomOrBay: 'UNASSIGNED',
       triagePriority: String(result.data.queueToken.priority || 'routine').toUpperCase(),
       status: 'WAITING',
       issuedAt: result.data.queueToken.createdAt || Date.now(),
@@ -783,7 +793,7 @@ export function OpdMasterWorkspace() {
     setQueue((prev) => [newQueueEntry, ...prev.filter((q) => q.id !== newQueueEntry.id)]);
     setSelectedEncounterId(newEncId);
     recordEvent('APPOINTMENT_CHECKED_IN', `Appointment ${appt.scheduledTimeSlot} checked in for ${appt.patientName}.`);
-    setActiveTab('QUEUE');
+    setActiveTab('BILLING');
   };
 
   // HANDLER: Save Triage Vitals through authoritative encounter evidence.

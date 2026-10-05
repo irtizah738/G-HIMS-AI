@@ -7,8 +7,6 @@ import {
   Heart,
   Baby,
   ShieldCheck,
-  AlertTriangle,
-  Sparkles,
   Search,
   CheckCircle2,
   FileText,
@@ -17,21 +15,21 @@ import {
   Activity,
   Plus,
   Trash2,
-  Bot,
 } from 'lucide-react';
 import {
   ComprehensiveOpdEncounter,
   OpdSpecialtyTemplate,
   SoapDocumentation,
   Icd10Diagnosis,
-  ClinicalDecisionAlert,
 } from '@/types/opd-domain';
+import { EncounterPreparationPanel } from '@/components/opd/EncounterPreparationPanel';
 
 interface OpdConsultationSpecialtiesProps {
   encounter: ComprehensiveOpdEncounter;
   onSaveConsultation: (soap: SoapDocumentation) => void;
   onPlaceDiagnosticOrders?: () => void;
   onPlacePrescriptions?: () => void;
+  online?: boolean;
 }
 
 const COMMON_ICD10_DB: Icd10Diagnosis[] = [
@@ -54,6 +52,7 @@ export function OpdConsultationSpecialties({
   onSaveConsultation,
   onPlaceDiagnosticOrders,
   onPlacePrescriptions,
+  online = true,
 }: OpdConsultationSpecialtiesProps) {
   const [selectedSpecialty, setSelectedSpecialty] = useState<OpdSpecialtyTemplate>(
     encounter.soap?.specialtyTemplate || (encounter.department as any) || 'GENERAL_MEDICINE'
@@ -105,29 +104,6 @@ export function OpdConsultationSpecialties({
   const [psychMse, setPsychMse] = useState<string>('Affect euthymic, thought process linear, suicidal ideation negative.');
   const [surgAbdomen, setSurgAbdomen] = useState<string>('No tenderness, Murphy sign negative, no palpable mass or hernia.');
 
-  // AI Copilot Differential Generation
-  const [aiLoading, setAiLoading] = useState<boolean>(false);
-  const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
-  const [aiAccepted, setAiAccepted] = useState<boolean>(false);
-
-  // Active CDS Alerts
-  const cdsAlerts: ClinicalDecisionAlert[] = [
-    {
-      id: 'cds-01',
-      severity: 'WARNING',
-      title: 'Known Allergy Alert: Penicillin',
-      message: 'Patient has verified history of Penicillin hypersensitivity. Beta-lactam prescribing is gated.',
-      suggestedAction: 'Ensure fluoroquinolone or macrolide alternatives if ordering anti-infectives.',
-    },
-    {
-      id: 'cds-02',
-      severity: 'INFO',
-      title: 'Guideline Reminder: ACC/AHA Heart Failure 2026',
-      message: 'Serum Creatinine & Potassium monitoring recommended within 7 days of loop diuretic initiation.',
-      suggestedAction: 'Add Renal Function Panel (RFT) to diagnostic lab orders.',
-    },
-  ];
-
   const handleAddDiagnosis = (diag: Icd10Diagnosis) => {
     if (!diagnoses.find((d) => d.code === diag.code)) {
       setDiagnoses([...diagnoses, diag]);
@@ -145,18 +121,6 @@ export function OpdConsultationSpecialties({
         isPrincipal: d.code === code,
       }))
     );
-  };
-
-  const handleSimulateAiCopilot = () => {
-    setAiLoading(true);
-    setTimeout(() => {
-      setAiLoading(false);
-      setAiSuggestions([
-        '1. Hypertensive Heart Disease with early diastolic dysfunction (Echo indicated)',
-        '2. Consider baseline Echocardiography and Serum Troponin I to rule out subclinical ischemia',
-        '3. Low-dose ARNI / ACE-inhibitor uptitration post renal profile confirmation',
-      ]);
-    }, 600);
   };
 
   const handleCommitSoap = () => {
@@ -205,6 +169,14 @@ export function OpdConsultationSpecialties({
 
   return (
     <div className="space-y-6">
+      <EncounterPreparationPanel
+        tenantId={encounter.tenantId}
+        patientId={encounter.patientId}
+        encounterId={encounter.id}
+        careSetting="OPD"
+        online={online}
+      />
+
       {/* Specialty Selector Header */}
       <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -214,7 +186,7 @@ export function OpdConsultationSpecialties({
               Specialist Outpatient Clinical Documentation (SOAP)
             </h2>
             <p className="text-xs text-slate-500">
-              Select from 11 specialized clinical templates. Includes ICD-10 dual diagnosis, CDS allergy checks, and human-in-the-loop AI assistance.
+              Select from 11 specialized clinical templates. Governed CI-10C encounter preparation appears above this documentation workspace; clinical decisions remain clinician-authored.
             </p>
           </div>
 
@@ -240,27 +212,6 @@ export function OpdConsultationSpecialties({
           </div>
         </div>
 
-        {/* CDS Alert Strip */}
-        {cdsAlerts.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-            {cdsAlerts.map((alert) => (
-              <div
-                key={alert.id}
-                className={`p-3 rounded-xl border flex items-start gap-2.5 text-xs ${
-                  alert.severity === 'WARNING'
-                    ? 'bg-amber-50 dark:bg-amber-950/60 border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200'
-                    : 'bg-blue-50 dark:bg-blue-950/60 border-blue-200 dark:border-blue-800 text-blue-900 dark:text-blue-200'
-                }`}
-              >
-                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-bold">{alert.title}</p>
-                  <p className="text-[11px] opacity-90">{alert.message}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* Main SOAP Workspace (2 columns) */}
@@ -650,60 +601,6 @@ export function OpdConsultationSpecialties({
                 </div>
               ))}
             </div>
-          </div>
-
-          {/* Human-in-the-Loop AI Assistant */}
-          <div className="p-6 rounded-2xl bg-gradient-to-br from-indigo-50/80 to-purple-50/80 dark:from-slate-900 dark:to-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 shadow-xs space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
-                <Bot className="w-4 h-4 text-indigo-600" />
-                AI Clinical Co-pilot (Decision Support)
-              </h3>
-              <span className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-indigo-200/60 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200">
-                HITL AUDITED
-              </span>
-            </div>
-            <p className="text-xs text-slate-600 dark:text-slate-300">
-              Generate evidence-grounded differential suggestions based on physiological vitals and history.
-            </p>
-
-            <button
-              onClick={handleSimulateAiCopilot}
-              disabled={aiLoading}
-              className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-all"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              {aiLoading ? 'Synthesizing Guidelines...' : 'Synthesize Clinical Differential'}
-            </button>
-
-            {aiSuggestions.length > 0 && (
-              <div className="space-y-2 pt-2 text-xs">
-                <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 space-y-1.5">
-                  <span className="font-bold text-indigo-900 dark:text-indigo-200 block">AI Differential Proposals:</span>
-                  {aiSuggestions.map((s, idx) => (
-                    <p key={idx} className="text-slate-700 dark:text-slate-300 text-[11px] leading-relaxed">
-                      {s}
-                    </p>
-                  ))}
-                </div>
-
-                {!aiAccepted ? (
-                  <button
-                    onClick={() => {
-                      setAiAccepted(true);
-                      setAssessment(assessment + '\n\n[Clinician-Reviewed AI Suggestion]: ' + aiSuggestions[0]);
-                    }}
-                    className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold cursor-pointer"
-                  >
-                    Accept & Append to Clinical Assessment
-                  </button>
-                ) : (
-                  <p className="text-[11px] text-emerald-600 font-bold text-center">
-                    Proposal accepted into formal documentation audit stream.
-                  </p>
-                )}
-              </div>
-            )}
           </div>
 
           {/* Final Commit Button */}

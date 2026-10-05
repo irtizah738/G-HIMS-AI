@@ -211,6 +211,7 @@ export interface ComprehensiveVitals {
   respiratoryRate: number; // breaths/min
   temperatureCelsius: number; // °C
   spo2Percent: number; // %
+  spO2Scale?: 1 | 2; // NEWS2 oxygen saturation scale explicitly selected at triage
   onSupplementalOxygen: boolean;
   oxygenFlowRateLpm?: number;
   bloodGlucoseMgDl?: number;

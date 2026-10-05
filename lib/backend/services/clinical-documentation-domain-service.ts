@@ -709,8 +709,8 @@ export class ClinicalDocumentationDomainService {
               /(?:^|\n)\s*(?:Subjective|Objective|Assessment|Plan)\s*:\s*/gi,
               '\n'
             )
-            .replace(/[^A-Za-z0-9]+/g, '')
-        : content.replace(/[^A-Za-z0-9]+/g, '');
+            .replace(/[^\p{L}\p{N}]+/gu, '')
+        : content.replace(/[^\p{L}\p{N}]+/gu, '');
 
     if (!content || substantiveContent.length < 3) {
       return {

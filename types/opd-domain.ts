@@ -832,6 +832,7 @@ export interface OpdInvoice {
   patientId: string;
   invoiceNumber: string;
   payerTariffPlan: string;
+  currency?: string;
   billingPurpose?: 'OPD_CONSULTATION' | 'OPD_DIAGNOSTIC' | 'FINAL_ENCOUNTER';
   sourceOrderId?: string;
   totalAmountMinorUnits: number;

@@ -1603,37 +1603,55 @@ export function OpdMasterWorkspace() {
           onStartService={async (tokenId) => {
             const item = queue.find((q) => q.id === tokenId);
             if (!item) return;
-            try {
-              const queueResult = await executeActiveTenantCommand(
-                'UpdateOpdQueueStatusCommand',
-                { tokenId, targetStatus: 'in_consultation' },
-                { idempotencyKey: `opd-queue-start:${tokenId}` }
-              );
-              if (!queueResult.success) {
-                console.warn('Queue update warning:', queueResult.error);
-              }
 
-              const transition = await executeActiveTenantCommand(
-                'AdvanceStageCommand',
-                {
-                  encounterId: item.encounterId,
-                  currentStage: 'REGISTERED',
-                  targetStage: 'TRIAGE',
-                },
-                { idempotencyKey: `opd-stage-registration-triage:${item.encounterId}` }
+            const result = await executeActiveTenantCommand<{
+              queueToken: Record<string, unknown>;
+              encounter: Record<string, unknown>;
+            }>(
+              'StartOpdServiceCommand',
+              { tokenId, assignedRoomOrBay: item.assignedRoomOrBay },
+              { idempotencyKey: `opd-start-service:${tokenId}` }
+            );
+
+            if (!result.success) {
+              throw new Error(
+                result.error?.message ||
+                  'OPD service start was rejected by the authoritative payment/workflow gate.'
               );
-              if (!transition.success) {
-                console.warn('Queue stage advance notice:', transition.error);
-              }
-            } catch (err) {
-              console.warn('Non-blocking queue start service notice:', err);
-            } finally {
-              setQueue((prev) =>
-                prev.map((q) => (q.id === tokenId ? { ...q, status: 'IN_SERVICE' as const } : q))
-              );
-              setSelectedEncounterId(item.encounterId);
-              setActiveTab('TRIAGE');
             }
+
+            setQueue((prev) =>
+              prev.map((q) =>
+                q.id === tokenId
+                  ? { ...q, status: 'IN_SERVICE' as const, serviceStartedAt: Date.now() }
+                  : q
+              )
+            );
+            setEncounters((prev) =>
+              prev.map((encounter) =>
+                encounter.id === item.encounterId
+                  ? {
+                      ...encounter,
+                      currentStage: 'TRIAGE',
+                      status: 'IN_TRIAGE',
+                      stageProgress: {
+                        ...encounter.stageProgress,
+                        REGISTRATION: {
+                          ...(encounter.stageProgress?.REGISTRATION || {}),
+                          status: 'COMPLETED',
+                          completedAt: Date.now(),
+                        },
+                        NURSING_INTAKE: {
+                          status: 'ACTIVE',
+                          enteredAt: Date.now(),
+                        },
+                      },
+                    }
+                  : encounter
+              )
+            );
+            setSelectedEncounterId(item.encounterId);
+            setActiveTab('TRIAGE');
           }}
           onCompleteService={async (tokenId) => {
             const result = await executeActiveTenantCommand(

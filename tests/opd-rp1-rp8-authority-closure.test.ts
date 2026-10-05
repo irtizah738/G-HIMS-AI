@@ -14,11 +14,14 @@ describe('OPD RP1-RP8 authority closure', () => {
     expect(snapshot).toContain('GeneralOpdWorkflowDefinition');
     expect(snapshot).toContain('Object.values(GeneralOpdWorkflowDefinition.stages)');
     expect(snapshot).not.toContain("id: 'OPD-REGISTRATION'");
-    expect(canonical).toContain("type: 'REGISTRATION'");
-    expect(canonical).toContain("type: 'TRIAGE'");
-    expect(canonical).toContain("type: 'CONSULTATION'");
-    expect(canonical).toContain("type: 'BILLING_SETTLEMENT'");
-    expect(canonical).toContain("type: 'DISCHARGE_OR_REFERRAL'");
+    expect(canonical).toContain("REGISTRATION: {");
+    expect(canonical).toContain("id: 'REGISTRATION'");
+    expect(canonical).toContain("TRIAGE: {");
+    expect(canonical).toContain("id: 'TRIAGE'");
+    expect(canonical).toContain("CONSULTATION: {");
+    expect(canonical).toContain("id: 'CONSULTATION'");
+    expect(canonical).toContain("BILLING_SETTLEMENT: {");
+    expect(canonical).toContain("DISCHARGE_OR_REFERRAL: {");
   });
 
   test('RP2 registration does not manufacture patient or clinical facts', async () => {

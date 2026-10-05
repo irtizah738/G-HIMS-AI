@@ -7,8 +7,6 @@ import {
   Heart,
   Baby,
   ShieldCheck,
-  AlertTriangle,
-  Sparkles,
   Search,
   CheckCircle2,
   FileText,
@@ -17,14 +15,13 @@ import {
   Activity,
   Plus,
   Trash2,
-  Bot,
 } from 'lucide-react';
+import { EncounterPreparationPanel } from './EncounterPreparationPanel';
 import {
   ComprehensiveOpdEncounter,
   OpdSpecialtyTemplate,
   SoapDocumentation,
   Icd10Diagnosis,
-  ClinicalDecisionAlert,
 } from '@/types/opd-domain';
 
 interface OpdConsultationSpecialtiesProps {
@@ -32,6 +29,7 @@ interface OpdConsultationSpecialtiesProps {
   onSaveConsultation: (soap: SoapDocumentation) => void;
   onPlaceDiagnosticOrders?: () => void;
   onPlacePrescriptions?: () => void;
+  offline?: boolean;
 }
 
 const COMMON_ICD10_DB: Icd10Diagnosis[] = [
@@ -54,6 +52,7 @@ export function OpdConsultationSpecialties({
   onSaveConsultation,
   onPlaceDiagnosticOrders,
   onPlacePrescriptions,
+  offline = false,
 }: OpdConsultationSpecialtiesProps) {
   const [selectedSpecialty, setSelectedSpecialty] = useState<OpdSpecialtyTemplate>(
     encounter.soap?.specialtyTemplate || (encounter.department as any) || 'GENERAL_MEDICINE'
@@ -61,72 +60,46 @@ export function OpdConsultationSpecialties({
 
   // SOAP Core State
   const [subjective, setSubjective] = useState<string>(
-    encounter.soap?.subjective || 'Patient reports 3-week history of worsening exertional dyspnea, accompanied by mild pedal edema in the evenings. Denies acute diaphoresis or syncope.'
+    encounter.soap?.subjective || ''
   );
   const [historyOfPresentIllness, setHpi] = useState<string>(
-    encounter.soap?.historyOfPresentIllness || 'Onset gradual, progressive with moderate exertion. Relieved by rest.'
+    encounter.soap?.historyOfPresentIllness || ''
   );
   const [reviewOfSystems, setRos] = useState<string>(
-    encounter.soap?.reviewOfSystems || 'Cardiovascular: +Dyspnea on exertion. Respiratory: No cough or wheeze. GI: Unremarkable.'
+    encounter.soap?.reviewOfSystems || ''
   );
   const [objective, setObjective] = useState<string>(
-    encounter.soap?.objective || 'Chest: Bilateral basal fine inspiratory crepitations. Heart: S1 S2 heard, no murmurs. JVP elevated 3cm. Bilateral pitting pedal edema 1+.'
+    encounter.soap?.objective || ''
   );
   const [physicalExamination, setPhysicalExam] = useState<string>(
-    encounter.soap?.physicalExamination || 'Abdomen soft, non-tender, no hepatomegaly. Peripheral pulses intact.'
+    encounter.soap?.physicalExamination || ''
   );
   const [assessment, setAssessment] = useState<string>(
-    encounter.soap?.assessment || 'Decompensated Heart Failure (NYHA Class II) secondary to underlying hypertensive heart disease. Good functional reserve.'
+    encounter.soap?.assessment || ''
   );
   const [plan, setPlan] = useState<string>(
-    encounter.soap?.plan || '1. Initiate Oral Loop Diuretic. 2. Request Stat 12-Lead ECG and Serum NT-proBNP. 3. Low sodium diet & daily weight monitoring. 4. Clinic review in 7 days.'
+    encounter.soap?.plan || ''
   );
 
   // Diagnoses
   const [diagnoses, setDiagnoses] = useState<Icd10Diagnosis[]>(
-    encounter.soap?.diagnoses || [
-      { code: 'I10', description: 'Essential (primary) hypertension', isPrincipal: true, category: 'Circulatory' },
-      { code: 'I25.10', description: 'Atherosclerotic heart disease', isPrincipal: false, category: 'Circulatory' },
-    ]
+    (encounter.soap?.diagnoses as Icd10Diagnosis[] | undefined) || []
   );
   const [icdSearchTerm, setIcdSearchTerm] = useState<string>('');
 
   // Specialty-Specific Fields
-  const [nyhaClass, setNyhaClass] = useState<'I' | 'II' | 'III' | 'IV'>('II');
-  const [cardiacChestPainType, setCardiacChestPainType] = useState<string>('Exertional / Atypical Angina');
-  const [pedFeeding, setPedFeeding] = useState<string>('Breastfed + Age-appropriate soft solids');
-  const [obgynGpal, setObgynGpal] = useState<string>('G2 P1 A0 L1');
-  const [obgynLmp, setObgynLmp] = useState<string>('2026-02-10');
-  const [orthoJointRom, setOrthoJointRom] = useState<string>('Right Knee flexion 110 deg, extension 0 deg. Moderate crepitus.');
-  const [ophthVisualAcuity, setOphthVisualAcuity] = useState<string>('OD: 6/6, OS: 6/9 pinhole improves to 6/6');
-  const [entOtoscopy, setEntOtoscopy] = useState<string>('Bilateral tympanic membranes intact, pearly grey with crisp light reflex.');
-  const [dermLesion, setDermLesion] = useState<string>('Erythematous plaques with silvery scales over extensor elbows.');
-  const [neuroCranialNerves, setNeuroCranialNerves] = useState<string>('CN II-XII grossly intact. No focal motor deficit (5/5 all limbs).');
-  const [psychMse, setPsychMse] = useState<string>('Affect euthymic, thought process linear, suicidal ideation negative.');
-  const [surgAbdomen, setSurgAbdomen] = useState<string>('No tenderness, Murphy sign negative, no palpable mass or hernia.');
-
-  // AI Copilot Differential Generation
-  const [aiLoading, setAiLoading] = useState<boolean>(false);
-  const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
-  const [aiAccepted, setAiAccepted] = useState<boolean>(false);
-
-  // Active CDS Alerts
-  const cdsAlerts: ClinicalDecisionAlert[] = [
-    {
-      id: 'cds-01',
-      severity: 'WARNING',
-      title: 'Known Allergy Alert: Penicillin',
-      message: 'Patient has verified history of Penicillin hypersensitivity. Beta-lactam prescribing is gated.',
-      suggestedAction: 'Ensure fluoroquinolone or macrolide alternatives if ordering anti-infectives.',
-    },
-    {
-      id: 'cds-02',
-      severity: 'INFO',
-      title: 'Guideline Reminder: ACC/AHA Heart Failure 2026',
-      message: 'Serum Creatinine & Potassium monitoring recommended within 7 days of loop diuretic initiation.',
-      suggestedAction: 'Add Renal Function Panel (RFT) to diagnostic lab orders.',
-    },
-  ];
+  const [nyhaClass, setNyhaClass] = useState<'' | 'I' | 'II' | 'III' | 'IV'>('');
+  const [cardiacChestPainType, setCardiacChestPainType] = useState<string>('');
+  const [pedFeeding, setPedFeeding] = useState<string>('');
+  const [obgynGpal, setObgynGpal] = useState<string>('');
+  const [obgynLmp, setObgynLmp] = useState<string>('');
+  const [orthoJointRom, setOrthoJointRom] = useState<string>('');
+  const [ophthVisualAcuity, setOphthVisualAcuity] = useState<string>('');
+  const [entOtoscopy, setEntOtoscopy] = useState<string>('');
+  const [dermLesion, setDermLesion] = useState<string>('');
+  const [neuroCranialNerves, setNeuroCranialNerves] = useState<string>('');
+  const [psychMse, setPsychMse] = useState<string>('');
+  const [surgAbdomen, setSurgAbdomen] = useState<string>('');
 
   const handleAddDiagnosis = (diag: Icd10Diagnosis) => {
     if (!diagnoses.find((d) => d.code === diag.code)) {
@@ -147,42 +120,30 @@ export function OpdConsultationSpecialties({
     );
   };
 
-  const handleSimulateAiCopilot = () => {
-    setAiLoading(true);
-    setTimeout(() => {
-      setAiLoading(false);
-      setAiSuggestions([
-        '1. Hypertensive Heart Disease with early diastolic dysfunction (Echo indicated)',
-        '2. Consider baseline Echocardiography and Serum Troponin I to rule out subclinical ischemia',
-        '3. Low-dose ARNI / ACE-inhibitor uptitration post renal profile confirmation',
-      ]);
-    }, 600);
-  };
-
   const handleCommitSoap = () => {
     const specialtyData: Record<string, any> = {};
     if (selectedSpecialty === 'CARDIOLOGY') {
-      specialtyData.nyhaClass = nyhaClass;
-      specialtyData.chestPainType = cardiacChestPainType;
+      if (nyhaClass) specialtyData.nyhaClass = nyhaClass;
+      if (cardiacChestPainType.trim()) specialtyData.chestPainType = cardiacChestPainType.trim();
     } else if (selectedSpecialty === 'PEDIATRICS') {
-      specialtyData.feedingHistory = pedFeeding;
+      if (pedFeeding.trim()) specialtyData.feedingHistory = pedFeeding.trim();
     } else if (selectedSpecialty === 'OBSTETRICS_GYNECOLOGY') {
-      specialtyData.gpal = obgynGpal;
-      specialtyData.lmp = obgynLmp;
+      if (obgynGpal.trim()) specialtyData.gpal = obgynGpal.trim();
+      if (obgynLmp) specialtyData.lmp = obgynLmp;
     } else if (selectedSpecialty === 'ORTHOPEDICS') {
-      specialtyData.jointRom = orthoJointRom;
+      if (orthoJointRom.trim()) specialtyData.jointRom = orthoJointRom.trim();
     } else if (selectedSpecialty === 'OPHTHALMOLOGY') {
-      specialtyData.visualAcuity = ophthVisualAcuity;
+      if (ophthVisualAcuity.trim()) specialtyData.visualAcuity = ophthVisualAcuity.trim();
     } else if (selectedSpecialty === 'ENT') {
-      specialtyData.otoscopy = entOtoscopy;
+      if (entOtoscopy.trim()) specialtyData.otoscopy = entOtoscopy.trim();
     } else if (selectedSpecialty === 'DERMATOLOGY') {
-      specialtyData.lesionMorphology = dermLesion;
+      if (dermLesion.trim()) specialtyData.lesionMorphology = dermLesion.trim();
     } else if (selectedSpecialty === 'NEUROLOGY') {
-      specialtyData.cranialNerves = neuroCranialNerves;
+      if (neuroCranialNerves.trim()) specialtyData.cranialNerves = neuroCranialNerves.trim();
     } else if (selectedSpecialty === 'PSYCHIATRY') {
-      specialtyData.mentalStateExam = psychMse;
+      if (psychMse.trim()) specialtyData.mentalStateExam = psychMse.trim();
     } else if (selectedSpecialty === 'GENERAL_SURGERY') {
-      specialtyData.abdominalFindings = surgAbdomen;
+      if (surgAbdomen.trim()) specialtyData.abdominalFindings = surgAbdomen.trim();
     }
 
     const soapDoc: SoapDocumentation = {
@@ -197,7 +158,10 @@ export function OpdConsultationSpecialties({
       diagnoses,
       specialtySpecificData: specialtyData,
       completedAt: Date.now(),
-      completedBy: 'Dr. Sarah Jenkins (Cardiology Fellow)',
+      completedBy:
+        encounter.attendingDoctorName ||
+        encounter.attendingDoctorId ||
+        'Authenticated clinician',
     };
 
     onSaveConsultation(soapDoc);
@@ -205,6 +169,13 @@ export function OpdConsultationSpecialties({
 
   return (
     <div className="space-y-6">
+      <EncounterPreparationPanel
+        tenantId={encounter.tenantId}
+        patientId={encounter.patientId}
+        encounterId={encounter.id}
+        offline={offline}
+      />
+
       {/* Specialty Selector Header */}
       <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -214,7 +185,7 @@ export function OpdConsultationSpecialties({
               Specialist Outpatient Clinical Documentation (SOAP)
             </h2>
             <p className="text-xs text-slate-500">
-              Select from 11 specialized clinical templates. Includes ICD-10 dual diagnosis, CDS allergy checks, and human-in-the-loop AI assistance.
+              Select a specialty template and document clinician-authored findings. CI-10C evidence remains read-only and never prefills the signed note.
             </p>
           </div>
 
@@ -240,27 +211,6 @@ export function OpdConsultationSpecialties({
           </div>
         </div>
 
-        {/* CDS Alert Strip */}
-        {cdsAlerts.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-            {cdsAlerts.map((alert) => (
-              <div
-                key={alert.id}
-                className={`p-3 rounded-xl border flex items-start gap-2.5 text-xs ${
-                  alert.severity === 'WARNING'
-                    ? 'bg-amber-50 dark:bg-amber-950/60 border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200'
-                    : 'bg-blue-50 dark:bg-blue-950/60 border-blue-200 dark:border-blue-800 text-blue-900 dark:text-blue-200'
-                }`}
-              >
-                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-bold">{alert.title}</p>
-                  <p className="text-[11px] opacity-90">{alert.message}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* Main SOAP Workspace (2 columns) */}
@@ -335,9 +285,14 @@ export function OpdConsultationSpecialties({
                     </label>
                     <select
                       value={nyhaClass}
-                      onChange={(e) => setNyhaClass(e.target.value as any)}
+                      onChange={(e) =>
+                        setNyhaClass(
+                          e.target.value as '' | 'I' | 'II' | 'III' | 'IV'
+                        )
+                      }
                       className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold"
                     >
+                      <option value="">Select NYHA class…</option>
                       <option value="I">Class I — No limitation of physical activity</option>
                       <option value="II">Class II — Slight limitation; comfortable at rest</option>
                       <option value="III">Class III — Marked limitation; comfortable only at rest</option>
@@ -557,7 +512,7 @@ export function OpdConsultationSpecialties({
           </div>
         </div>
 
-        {/* Right Col: ICD-10 Search & Human-in-the-Loop AI Assistant */}
+        {/* Right Col: clinician coding and sign-off */}
         <div className="space-y-6">
           {/* ICD-10 Coding Station */}
           <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
@@ -650,60 +605,6 @@ export function OpdConsultationSpecialties({
                 </div>
               ))}
             </div>
-          </div>
-
-          {/* Human-in-the-Loop AI Assistant */}
-          <div className="p-6 rounded-2xl bg-gradient-to-br from-indigo-50/80 to-purple-50/80 dark:from-slate-900 dark:to-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 shadow-xs space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
-                <Bot className="w-4 h-4 text-indigo-600" />
-                AI Clinical Co-pilot (Decision Support)
-              </h3>
-              <span className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-indigo-200/60 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200">
-                HITL AUDITED
-              </span>
-            </div>
-            <p className="text-xs text-slate-600 dark:text-slate-300">
-              Generate evidence-grounded differential suggestions based on physiological vitals and history.
-            </p>
-
-            <button
-              onClick={handleSimulateAiCopilot}
-              disabled={aiLoading}
-              className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-all"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              {aiLoading ? 'Synthesizing Guidelines...' : 'Synthesize Clinical Differential'}
-            </button>
-
-            {aiSuggestions.length > 0 && (
-              <div className="space-y-2 pt-2 text-xs">
-                <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 space-y-1.5">
-                  <span className="font-bold text-indigo-900 dark:text-indigo-200 block">AI Differential Proposals:</span>
-                  {aiSuggestions.map((s, idx) => (
-                    <p key={idx} className="text-slate-700 dark:text-slate-300 text-[11px] leading-relaxed">
-                      {s}
-                    </p>
-                  ))}
-                </div>
-
-                {!aiAccepted ? (
-                  <button
-                    onClick={() => {
-                      setAiAccepted(true);
-                      setAssessment(assessment + '\n\n[Clinician-Reviewed AI Suggestion]: ' + aiSuggestions[0]);
-                    }}
-                    className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold cursor-pointer"
-                  >
-                    Accept & Append to Clinical Assessment
-                  </button>
-                ) : (
-                  <p className="text-[11px] text-emerald-600 font-bold text-center">
-                    Proposal accepted into formal documentation audit stream.
-                  </p>
-                )}
-              </div>
-            )}
           </div>
 
           {/* Final Commit Button */}

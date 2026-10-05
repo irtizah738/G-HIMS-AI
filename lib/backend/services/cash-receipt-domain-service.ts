@@ -33,6 +33,7 @@ export class CashReceiptDomainService {
         'BILLING_CLERK',
         'BILLING_ADMIN',
         'CASHIER',
+        'BILLING_CASHIER',
         'FINANCE_MANAGER',
         'ACCOUNTANT',
         'SYSTEM_ADMIN',

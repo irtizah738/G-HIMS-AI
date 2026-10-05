@@ -487,9 +487,9 @@ describe('CI-10D clinical trend intelligence', () => {
     expect(rules.slice(index,index+180)).toContain('allow read, write: if false');
   });
 
-  test('Patient 360 exposes suppressed reasons and adds no model-provider side door', async () => {
-    const panel = await source(
-      'components/patient360/ClinicalTrendIntelligencePanel.tsx'
+  test('Patient 360 exposes suppressed reasons through the canonical workspace and adds no model-provider side door', async () => {
+    const workspace = await source(
+      'components/patient360/ClinicalCopilotWorkspace.tsx'
     );
     const view = await source('components/patient360/Patient360View.tsx');
     const route = await source(
@@ -499,10 +499,13 @@ describe('CI-10D clinical trend intelligence', () => {
       'lib/clinical/intelligence/clinical-trend-intelligence-service.ts'
     );
 
-    expect(panel).toContain('Mixed units');
-    expect(panel).toContain('Excluded observation evidence');
-    expect(panel).toContain('will not generate a fresh trend artifact');
-    expect(view).toContain('ClinicalTrendIntelligencePanel');
+    expect(workspace).toContain('generateClinicalTrendIntelligence');
+    expect(workspace).toContain('Excluded observation evidence');
+    expect(workspace).toContain('Suppressed / excluded evidence');
+    expect(workspace).toContain(
+      'CI-10G will not generate new summaries, trends'
+    );
+    expect(view).toContain('ClinicalCopilotWorkspace');
     expect(route).toContain('deriveAuthoritativeContext');
     expect(route).toContain('assertPatient360PatientAccess');
 

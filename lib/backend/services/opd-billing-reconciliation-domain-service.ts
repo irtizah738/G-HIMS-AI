@@ -7,7 +7,6 @@ import {
 import type { CommandContext, CommandResult } from '@/lib/backend/types';
 import { OpdWorkflowRuntimeService } from '@/lib/backend/services/opd-workflow-runtime-service';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
-import type { Invoice } from '@/types/billing';
 import type { FinanceArOpenItem } from '@/types/finance-domain';
 import type { OpdBillingReconciliation } from '@/types/opd-billing-reconciliation';
 
@@ -34,7 +33,7 @@ function reject(
   };
 }
 
-function majorToMinor(value: unknown, field: string): number {
+function majorToMinor(value: unknown): number {
   const numeric = Number(value);
   const minor = Math.round(numeric * 100);
   if (!Number.isFinite(numeric) || !Number.isSafeInteger(minor) || minor < 0) {
@@ -147,17 +146,6 @@ export class OpdBillingReconciliationDomainService {
       );
     }
 
-    const stage = OpdWorkflowRuntimeService.resolveStage(
-      encounter.clinicalState || encounter.currentStage
-    );
-    if (stage !== 'BILLING_SETTLEMENT') {
-      return reject(
-        commandId,
-        idempotencyKey,
-        'OPD_BILLING_STAGE_REQUIRED',
-        'Final billing reconciliation requires the authoritative OPD workflow to be at BILLING_SETTLEMENT.'
-      );
-    }
     if (
       String(encounter.billingReconciliationState || '').toUpperCase() ===
         'CLEARED' ||
@@ -171,6 +159,17 @@ export class OpdBillingReconciliationDomainService {
       );
     }
 
+    const stage = OpdWorkflowRuntimeService.resolveStage(
+      encounter.clinicalState || encounter.currentStage
+    );
+    if (stage !== 'BILLING_SETTLEMENT') {
+      return reject(
+        commandId,
+        idempotencyKey,
+        'OPD_BILLING_STAGE_REQUIRED',
+        'Final billing reconciliation requires the authoritative OPD workflow to be at BILLING_SETTLEMENT.'
+      );
+    }
     const patientId = String(encounter.patientId || '').trim();
     if (!patientId) {
       return reject(
@@ -301,18 +300,9 @@ export class OpdBillingReconciliationDomainService {
       }
       currencies.add(currency);
 
-      const patientDue = majorToMinor(
-        invoice.totalPatientDue,
-        `${invoiceId}.totalPatientDue`
-      );
-      const totalPaid = majorToMinor(
-        invoice.totalPaid || 0,
-        `${invoiceId}.totalPaid`
-      );
-      const balanceDue = majorToMinor(
-        invoice.balanceDue || 0,
-        `${invoiceId}.balanceDue`
-      );
+      const patientDue = majorToMinor(invoice.totalPatientDue);
+      const totalPaid = majorToMinor(invoice.totalPaid || 0);
+      const balanceDue = majorToMinor(invoice.balanceDue || 0);
       if (
         patientDue < 0 ||
         totalPaid < 0 ||

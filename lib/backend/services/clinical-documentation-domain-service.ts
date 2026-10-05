@@ -119,6 +119,14 @@ function normalizeSignedDiagnoses(
         message: 'Each structured diagnosis requires a code and description.',
       };
     }
+    // This validates the ICD-10 shape only. The current in-process terminology
+    // registry is intentionally not a fake complete ICD-10 catalogue.
+    if (!/^[A-Z][0-9][0-9A-Z](?:\.[0-9A-Z]{1,4})?$/.test(code)) {
+      return {
+        ok: false,
+        message: `Structured diagnosis code '${code}' is not a valid ICD-10-shaped code.`,
+      };
+    }
     if (code.length > 40 || description.length > 500) {
       return {
         ok: false,

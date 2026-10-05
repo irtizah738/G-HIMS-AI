@@ -51,7 +51,8 @@ function freshness(projection: Patient360Projection) {
 
 async function loadLocalPatient360(
   tenantId: string,
-  patientId: string
+  patientId: string,
+  options: { careSetting?: ClinicalCareSetting; encounterId?: string } = {}
 ): Promise<Patient360ClinicalView | null> {
   const cached = await getCachedAuthSession();
   if (
@@ -73,6 +74,15 @@ async function loadLocalPatient360(
 
   if (!projection) return null;
 
+  const selectedCareContext =
+    (options.encounterId
+      ? projection.recentEncounters.find(
+          (item) => item.encounterId === options.encounterId
+        )
+      : projection.careContexts
+        ? selectCareContextEncounter(projection.careContexts, options.careSetting)
+        : projection.activeEncounter) || null;
+
   const readinessRows = await listSecureEdgeEntities<Record<string, unknown>>(
     tenantId,
     cached.user.uid,
@@ -83,8 +93,8 @@ async function loadLocalPatient360(
     readiness.find(
       (item) =>
         item.patientId === patientId &&
-        (!projection.activeEncounter?.encounterId ||
-          item.encounterId === projection.activeEncounter.encounterId)
+        (!selectedCareContext?.encounterId ||
+          item.encounterId === selectedCareContext.encounterId)
     ) || null;
 
   const deteriorationRows = await listSecureEdgeEntities<Record<string, unknown>>(
@@ -98,8 +108,8 @@ async function loadLocalPatient360(
     deteriorationItems.find(
       (item) =>
         item.patientId === patientId &&
-        (!projection.activeEncounter?.encounterId ||
-          item.encounterId === projection.activeEncounter.encounterId)
+        (!selectedCareContext?.encounterId ||
+          item.encounterId === selectedCareContext.encounterId)
     ) || null;
 
   return {
@@ -107,8 +117,10 @@ async function loadLocalPatient360(
     patientId,
     projection,
     timeline: [],
+    selectedCareContext,
     dischargeReadiness,
     deterioration,
+    consultantVisibility: null,
     source: 'LOCAL_EDGE',
     freshness: freshness(projection),
   };

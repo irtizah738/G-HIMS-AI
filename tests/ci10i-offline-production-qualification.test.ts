@@ -138,7 +138,7 @@ describe('CI-10I offline and production qualification', () => {
       expect(route).toContain('observeClinicalIntelligenceOperation');
       expect(route).toContain('correlationId: context.correlationId');
       expect(route).toContain('tenantId: context.tenantId');
-      expect(route).toContain("'Cache-Control': 'no-store'");
+      expect(route).toMatch(/['"]Cache-Control['"]\s*:\s*['"]no-store['"]/);
     }
 
     const observability = await source(

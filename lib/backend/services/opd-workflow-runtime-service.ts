@@ -215,6 +215,30 @@ export class OpdWorkflowRuntimeService {
           targetStage,
         };
       }
+
+      const encounter =
+        await DomainStateRepository.getById<Record<string, unknown>>(
+          input.tenantId,
+          'encounters',
+          input.encounterId
+        );
+      if (
+        !encounter ||
+        String(encounter.billingReconciliationId || '') !== evidenceId ||
+        String(encounter.billingReconciliationState || '').toUpperCase() !==
+          'CLEARED' ||
+        Number(encounter.billingMutationSequence || 0) !==
+          Number(reconciliation.billingMutationSequence || -1)
+      ) {
+        return {
+          allowed: false,
+          code: 'OPD_BILLING_RECONCILIATION_STALE',
+          message:
+            'Billing state changed after reconciliation or the encounter clearance pointer is stale.',
+          sourceStage,
+          targetStage,
+        };
+      }
       return structural;
     }
 

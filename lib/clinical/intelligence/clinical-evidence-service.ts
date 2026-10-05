@@ -16,6 +16,10 @@ import {
   TrendEvidenceLoader,
   type TrendEvidenceSources,
 } from '@/lib/clinical/intelligence/trend-evidence-loader';
+import {
+  MedicationReconciliationEvidenceLoader,
+  type MedicationReconciliationEvidenceSources,
+} from '@/lib/clinical/intelligence/medication-reconciliation-evidence-loader';
 import type {
   Patient360AllergySummary,
   Patient360ConditionSummary,
@@ -53,7 +57,8 @@ type EvidenceCandidate = {
 type EvidenceSupplement =
   | LongitudinalEvidenceSources
   | EncounterPreparationEvidenceSources
-  | TrendEvidenceSources;
+  | TrendEvidenceSources
+  | MedicationReconciliationEvidenceSources;
 
 function canonicalStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'undefined';
@@ -397,7 +402,9 @@ export class ClinicalEvidenceService {
           ? 'This encounter-preparation snapshot combines Patient 360, canonical longitudinal facts, consultant change/open-item state and current governed clinical-intelligence projections frozen at generation time.'
           : purpose === 'TREND_EXPLANATION'
             ? 'This trend snapshot freezes the canonical quantitative observation history represented at generation time.'
-            : supplemental
+            : purpose === 'MEDICATION_RECONCILIATION'
+              ? 'This medication-reconciliation snapshot freezes the selected encounter context, canonical medication orders, dispenses, administrations, medication reconciliation records, medication-allergy records and current CI-9 findings represented at generation time.'
+              : supplemental
             ? 'This longitudinal snapshot combines Patient 360 evidence with canonical encounter, medication, observation, diagnostic-order, diagnostic-report, procedure and care-plan facts frozen at generation time.'
             : 'This snapshot contains only evidence represented in the current Patient 360 projection contract.',
         'Missing or incomplete source data must not be interpreted as clinical absence.',
@@ -520,7 +527,14 @@ export class ClinicalEvidenceService {
             )
           : purpose === 'TREND_EXPLANATION'
             ? await TrendEvidenceLoader.load(context.tenantId, patientId)
-            : undefined;
+            : purpose === 'MEDICATION_RECONCILIATION'
+              ? await MedicationReconciliationEvidenceLoader.load(
+                  context,
+                  patientId,
+                  projection,
+                  options
+                )
+              : undefined;
 
     const snapshot = this.buildSnapshot(
       projection,

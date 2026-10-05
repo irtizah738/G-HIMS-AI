@@ -754,6 +754,7 @@ export interface ComprehensiveOpdEncounter {
   soapDocumentation?: SoapDocumentation;
   diagnosticOrders: DiagnosticOrderItem[];
   prescriptions: PharmacyPrescriptionItem[];
+  consultationInvoice?: OpdInvoice;
   invoice?: OpdInvoice | any;
   ledgerVouchers?: LedgerJournalVoucher[];
   dispositionData?: DispositionAndAdmission | EncounterDisposition;
@@ -813,6 +814,7 @@ export interface OpdInvoice {
   patientId: string;
   invoiceNumber: string;
   payerTariffPlan: string;
+  billingPurpose?: 'OPD_CONSULTATION' | 'FINAL_ENCOUNTER';
   totalAmountMinorUnits: number;
   payerCoverageAmountMinorUnits: number;
   patientCopayAmountMinorUnits: number;

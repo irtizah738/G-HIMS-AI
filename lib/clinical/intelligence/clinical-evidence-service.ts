@@ -5,8 +5,9 @@ import type { CommandContext, DomainEventEnvelope } from '@/lib/backend/types';
 import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
 import {
   LongitudinalEvidenceLoader,
-  type LongitudinalEvidenceSources,
+  type ClinicalEvidenceSupplementalSources,
 } from '@/lib/clinical/intelligence/longitudinal-evidence-loader';
+import { EncounterPreparationEvidenceLoader } from '@/lib/clinical/intelligence/encounter-preparation-evidence-loader';
 import type {
   Patient360AllergySummary,
   Patient360ConditionSummary,
@@ -37,6 +38,8 @@ type EvidenceCandidate = {
   label: string;
   status?: string;
   occurredAt?: number;
+  sourceEventIds?: string[];
+  sourceEntityRefs?: string[];
   content: unknown;
 };
 
@@ -86,10 +89,24 @@ function provenanceFor(
   events: SourceEvent[],
   entityId: string,
   patientId: string,
-  sourceType: ClinicalEvidenceSourceType
+  sourceType: ClinicalEvidenceSourceType,
+  explicitEventIds: string[] = [],
+  sourceEntityRefs: string[] = []
 ) {
+  const explicitEventIdSet = new Set(
+    explicitEventIds.map((item) => String(item || '').trim()).filter(Boolean)
+  );
+  const entityRefs = Array.from(
+    new Set(
+      [entityId, ...sourceEntityRefs]
+        .map((item) => String(item || '').trim())
+        .filter(Boolean)
+    )
+  );
+
   const matches = events.filter((event) => {
-    if (eventReferencesEntity(event, entityId)) return true;
+    if (explicitEventIdSet.has(event.eventId)) return true;
+    if (entityRefs.some((ref) => eventReferencesEntity(event, ref))) return true;
     if (sourceType === 'PATIENT_IDENTITY') {
       return (
         String(event.aggregateId || '') === patientId &&
@@ -205,7 +222,7 @@ function candidateFromDocument(item: Patient360DocumentSummary): EvidenceCandida
 
 function candidatesFromProjection(
   projection: Patient360Projection,
-  supplemental?: LongitudinalEvidenceSources
+  supplemental?: ClinicalEvidenceSupplementalSources
 ): EvidenceCandidate[] {
   const candidates: EvidenceCandidate[] = [
     {
@@ -255,7 +272,9 @@ function toEvidenceRef(
     events,
     candidate.sourceEntityId,
     projection.patientId,
-    candidate.sourceType
+    candidate.sourceType,
+    candidate.sourceEventIds,
+    candidate.sourceEntityRefs
   );
   const contentHash = hash(candidate.content);
 
@@ -296,7 +315,7 @@ export class ClinicalEvidenceService {
     purpose: ClinicalIntelligencePurpose,
     actorId: string,
     createdAt = Date.now(),
-    supplemental?: LongitudinalEvidenceSources
+    supplemental?: ClinicalEvidenceSupplementalSources
   ): ClinicalEvidenceSnapshot {
     if (!projection.tenantId || !projection.patientId) {
       throw new Error('CI10_EVIDENCE_SCOPE_INVALID');
@@ -330,6 +349,7 @@ export class ClinicalEvidenceService {
       revision: projection.revision,
       sourceCheckpoint: projection.sourceCheckpoint,
       patient360ContentHash: projection.contentHash,
+      scope: supplemental?.scope,
       evidence: evidenceRefs.map((item) => ({
         evidenceId: item.evidenceId,
         contentHash: item.contentHash,
@@ -367,6 +387,7 @@ export class ClinicalEvidenceService {
       sourceEventCount: new Set(
         evidenceRefs.flatMap((item) => item.sourceEventIds)
       ).size,
+      ...(supplemental?.scope ? { scope: supplemental.scope } : {}),
       ...(supplemental?.coverage ? { coverage: supplemental.coverage } : {}),
       dateRange: {
         from: occurredTimes.length ? Math.min(...occurredTimes) : undefined,
@@ -375,7 +396,9 @@ export class ClinicalEvidenceService {
       snapshotHash,
       limitations: [
         supplemental
-          ? 'This longitudinal snapshot combines Patient 360 evidence with canonical encounter, medication, observation, diagnostic-order, diagnostic-report, procedure and care-plan facts frozen at generation time.'
+          ? purpose === 'ENCOUNTER_PREP'
+            ? 'This encounter-preparation snapshot combines Patient 360, longitudinal canonical facts, consultant-change/open-item projections and medication-safety findings frozen for the selected encounter.'
+            : 'This longitudinal snapshot combines Patient 360 evidence with canonical encounter, medication, observation, diagnostic-order, diagnostic-report, procedure and care-plan facts frozen at generation time.'
           : 'This snapshot contains only evidence represented in the current Patient 360 projection contract.',
         'Missing or incomplete source data must not be interpreted as clinical absence.',
         'No represented record is not equivalent to a negative clinical finding.',
@@ -467,14 +490,25 @@ export class ClinicalEvidenceService {
   public static async createAuthoritativeSnapshot(
     context: CommandContext,
     patientId: string,
-    purpose: ClinicalIntelligencePurpose
+    purpose: ClinicalIntelligencePurpose,
+    options: { encounterId?: string } = {}
   ): Promise<ClinicalEvidenceSnapshot> {
+    if (purpose === 'ENCOUNTER_PREP' && !options.encounterId) {
+      throw new Error('CI10C_ENCOUNTER_ID_REQUIRED');
+    }
+
     const [projection, events, supplemental] = await Promise.all([
       Patient360ProjectionService.getProjection(context.tenantId, patientId),
       Patient360ProjectionService.loadPatientEvents(context.tenantId, patientId),
       purpose === 'LONGITUDINAL_SUMMARY'
         ? LongitudinalEvidenceLoader.load(context.tenantId, patientId)
-        : Promise.resolve(undefined),
+        : purpose === 'ENCOUNTER_PREP'
+          ? EncounterPreparationEvidenceLoader.load(
+              context,
+              patientId,
+              options.encounterId || ''
+            )
+          : Promise.resolve(undefined),
     ]);
 
     if (!projection) {

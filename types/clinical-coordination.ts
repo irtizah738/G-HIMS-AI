@@ -45,6 +45,7 @@ export interface ClinicalHandoff {
   tenantId: string;
   patientId: string;
   encounterId: string;
+  sourceEncounterId?: string;
   episodeId?: string;
   careSetting: ClinicalCareSetting;
   fromClinicianId: string;

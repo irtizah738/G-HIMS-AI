@@ -73,7 +73,14 @@ function resolveOpdRole(roles: string[]): OpdRole {
   if (normalized.has('NURSE')) return 'TRIAGE_NURSE';
   if (normalized.has('PHARMACIST')) return 'PHARMACIST';
   if (normalized.has('LAB_TECH') || normalized.has('LAB_TECHNICIAN')) return 'LAB_TECH';
-  if (normalized.has('BILLING_CLERK') || normalized.has('BILLING_ADMIN') || normalized.has('CASHIER') || normalized.has('FINANCE_MANAGER')) return 'BILLING_CASHIER';
+  if (
+    normalized.has('BILLING_CLERK') ||
+    normalized.has('BILLING_ADMIN') ||
+    normalized.has('CASHIER') ||
+    normalized.has('FINANCE_MANAGER') ||
+    normalized.has('ACCOUNTANT') ||
+    normalized.has('REVENUE_CYCLE')
+  ) return 'BILLING_CASHIER';
   if (normalized.has('RECEPTIONIST') || normalized.has('REGISTRAR')) return 'RECEPTIONIST';
   return 'UNAUTHORIZED';
 }
@@ -445,8 +452,16 @@ export function OpdMasterWorkspace() {
     normalizedRoles.has('PHARMACIST') &&
     normalizedPrivileges.has('DISPENSE_MEDICATION')
   );
-  const canSettlePayment = isAdministrator || ['BILLING_CLERK','BILLING_ADMIN','CASHIER','FINANCE_MANAGER','ACCOUNTANT']
-    .some((role) => normalizedRoles.has(role));
+  const canSettlePayment =
+    isAdministrator ||
+    [
+      'BILLING_CLERK',
+      'BILLING_ADMIN',
+      'CASHIER',
+      'FINANCE_MANAGER',
+      'ACCOUNTANT',
+      'REVENUE_CYCLE',
+    ].some((role) => normalizedRoles.has(role));
   const canAccessTab = (tabId: string) =>
     (OPD_TAB_ROLES[tabId] || []).includes(activeRole);
 
@@ -2018,7 +2033,6 @@ export function OpdMasterWorkspace() {
           ? error.message
           : 'Final billing reconciliation failed.';
       setBillingReconciliationError(message);
-      throw error;
     } finally {
       setBillingReconciliationBusy(false);
     }

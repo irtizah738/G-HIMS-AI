@@ -63,8 +63,20 @@ function numberValue(value: unknown): number | undefined {
     : undefined;
 }
 
-function iso(value: unknown): string | undefined {
+function timestampValue(value: unknown): number | undefined {
   const numeric = numberValue(value);
+  if (numeric !== undefined) return numeric;
+  if (typeof value === 'string' && value.trim()) {
+    const numericString = Number(value);
+    if (Number.isFinite(numericString)) return numericString;
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function iso(value: unknown): string | undefined {
+  const numeric = timestampValue(value);
   if (numeric === undefined) return undefined;
   const date = new Date(numeric);
   return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
@@ -244,7 +256,7 @@ function previousEncounter(
 ): ClinicalEvidenceRef | undefined {
   const currentContent = record(record(current.content).encounter);
   const currentStartedAt =
-    numberValue(currentContent.startedAt) ||
+    timestampValue(currentContent.startedAt) ||
     current.occurredAt ||
     Number.MAX_SAFE_INTEGER;
 
@@ -253,8 +265,8 @@ function previousEncounter(
     .filter((item) => {
       const content = record(item.content);
       const startedAt =
-        numberValue(content.startedAt) ||
-        numberValue(content.createdAt) ||
+        timestampValue(content.startedAt) ||
+        timestampValue(content.createdAt) ||
         item.occurredAt ||
         0;
       return startedAt < currentStartedAt;
@@ -263,15 +275,15 @@ function previousEncounter(
       const l = record(left.content);
       const r = record(right.content);
       const leftTime =
-        numberValue(l.completedAt) ||
-        numberValue(l.dischargeDate) ||
-        numberValue(l.startedAt) ||
+        timestampValue(l.completedAt) ||
+        timestampValue(l.dischargeDate) ||
+        timestampValue(l.startedAt) ||
         left.occurredAt ||
         0;
       const rightTime =
-        numberValue(r.completedAt) ||
-        numberValue(r.dischargeDate) ||
-        numberValue(r.startedAt) ||
+        timestampValue(r.completedAt) ||
+        timestampValue(r.dischargeDate) ||
+        timestampValue(r.startedAt) ||
         right.occurredAt ||
         0;
       return rightTime - leftTime;
@@ -282,9 +294,9 @@ function encounterBaseline(ref?: ClinicalEvidenceRef): number | undefined {
   if (!ref) return undefined;
   const content = record(ref.content);
   return (
-    numberValue(content.completedAt) ||
-    numberValue(content.dischargeDate) ||
-    numberValue(content.startedAt) ||
+    timestampValue(content.completedAt) ||
+    timestampValue(content.dischargeDate) ||
+    timestampValue(content.startedAt) ||
     ref.occurredAt
   );
 }
@@ -294,10 +306,13 @@ function evidenceAfter(
   baseline?: number
 ): ClinicalEvidenceRef[] {
   if (baseline === undefined) return [];
-  return refs.filter(
-    (item) =>
-      typeof item.occurredAt === 'number' && item.occurredAt > baseline
-  );
+  return refs.filter((item) => {
+    const latestRepresentedAt = Math.max(
+      Number(item.occurredAt || 0),
+      Number(item.recordedAt || 0)
+    );
+    return latestRepresentedAt > baseline;
+  });
 }
 
 function buildReasonForVisit(

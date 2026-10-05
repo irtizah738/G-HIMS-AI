@@ -103,6 +103,7 @@ export interface ClinicalTrendIntelligenceArtifact {
   policyVersion: 'ci10d-clinical-trend-v1';
   generationMode: 'DETERMINISTIC_TREND_ENGINE';
   metrics: ClinicalTrendMetric[];
+  excludedEvidence: ClinicalTrendExclusion[];
   computedMetricCount: number;
   nonComputableMetricCount: number;
   warnings: string[];

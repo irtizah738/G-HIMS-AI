@@ -76,6 +76,135 @@ export interface SignClinicalNotePayload {
   acceptedStructuredData?: Record<string, unknown>;
 }
 
+interface SignedStructuredDiagnosis {
+  code: string;
+  description: string;
+  isPrincipal: boolean;
+  type: 'PRINCIPAL' | 'SECONDARY' | 'PROVISIONAL' | 'DIFFERENTIAL';
+  verificationStatus: 'CONFIRMED' | 'PROVISIONAL' | 'DIFFERENTIAL' | 'REFUTED';
+}
+
+function normalizeSignedDiagnoses(
+  structuredData?: Record<string, unknown>
+): { ok: true; diagnoses: SignedStructuredDiagnosis[] } | { ok: false; message: string } {
+  const raw = structuredData?.diagnoses;
+  if (raw === undefined) return { ok: true, diagnoses: [] };
+  if (!Array.isArray(raw)) {
+    return {
+      ok: false,
+      message: 'acceptedStructuredData.diagnoses must be an array when supplied.',
+    };
+  }
+  if (raw.length > 50) {
+    return {
+      ok: false,
+      message: 'A signed clinical note may contain at most 50 structured diagnoses.',
+    };
+  }
+
+  const seen = new Set<string>();
+  const diagnoses: SignedStructuredDiagnosis[] = [];
+  let principalCount = 0;
+
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return { ok: false, message: 'Each structured diagnosis must be an object.' };
+    }
+    const record = item as Record<string, unknown>;
+    const code = String(record.code || '').trim().toUpperCase();
+    const description = String(record.description || record.display || '').trim();
+    if (!code || !description) {
+      return {
+        ok: false,
+        message: 'Each structured diagnosis requires a code and description.',
+      };
+    }
+    // This validates the ICD-10 shape only. The current in-process terminology
+    // registry is intentionally not a fake complete ICD-10 catalogue.
+    if (!/^[A-Z][0-9][0-9A-Z](?:\.[0-9A-Z]{1,4})?$/.test(code)) {
+      return {
+        ok: false,
+        message: `Structured diagnosis code '${code}' is not a valid ICD-10-shaped code.`,
+      };
+    }
+    if (code.length > 40 || description.length > 500) {
+      return {
+        ok: false,
+        message: 'Structured diagnosis code or description exceeds allowed length.',
+      };
+    }
+    if (seen.has(code)) {
+      return {
+        ok: false,
+        message: `Duplicate structured diagnosis code '${code}' is not allowed.`,
+      };
+    }
+    seen.add(code);
+
+    const rawType = String(record.type || '').trim().toUpperCase();
+    if (
+      rawType &&
+      !['PRINCIPAL', 'SECONDARY', 'PROVISIONAL', 'DIFFERENTIAL'].includes(rawType)
+    ) {
+      return {
+        ok: false,
+        message: `Unsupported structured diagnosis type '${rawType}'.`,
+      };
+    }
+
+    const rawVerification = String(record.verificationStatus || '')
+      .trim()
+      .toUpperCase();
+    if (
+      rawVerification &&
+      !['CONFIRMED', 'SUSPECTED', 'REFUTED'].includes(rawVerification)
+    ) {
+      return {
+        ok: false,
+        message: `Unsupported diagnosis verification status '${rawVerification}'.`,
+      };
+    }
+
+    const isPrincipal = record.isPrincipal === true || rawType === 'PRINCIPAL';
+    if (isPrincipal) principalCount += 1;
+
+    const type: SignedStructuredDiagnosis['type'] =
+      rawType === 'DIFFERENTIAL'
+        ? 'DIFFERENTIAL'
+        : rawType === 'PROVISIONAL'
+          ? 'PROVISIONAL'
+          : isPrincipal
+            ? 'PRINCIPAL'
+            : 'SECONDARY';
+
+    const verificationStatus: SignedStructuredDiagnosis['verificationStatus'] =
+      rawVerification === 'REFUTED'
+        ? 'REFUTED'
+        : type === 'DIFFERENTIAL'
+          ? 'DIFFERENTIAL'
+          : rawVerification === 'SUSPECTED' || type === 'PROVISIONAL'
+            ? 'PROVISIONAL'
+            : 'CONFIRMED';
+
+    diagnoses.push({
+      code,
+      description,
+      isPrincipal,
+      type,
+      verificationStatus,
+    });
+  }
+
+  if (principalCount > 1) {
+    return {
+      ok: false,
+      message: 'A signed consultation may contain at most one principal diagnosis.',
+    };
+  }
+
+  return { ok: true, diagnoses };
+}
+
 export class ClinicalDocumentationDomainService {
   private static async validatePatientEncounter(
     tenantId: string,
@@ -387,20 +516,17 @@ export class ClinicalDocumentationDomainService {
       };
     }
 
-    const encounter = await DomainStateRepository.getById<Record<string, unknown>>(
+    const lineage = await this.validatePatientEncounter(
       context.tenantId,
-      'encounters',
+      payload.patientId,
       payload.encounterId
     );
-    if (!encounter) {
+    if (!lineage.ok) {
       return {
         success: false,
         commandId,
         idempotencyKey,
-        error: {
-          code: 'ENCOUNTER_NOT_FOUND',
-          message: `Encounter ${payload.encounterId} was not found.`,
-        },
+        error: { code: lineage.code, message: lineage.message },
       };
     }
 
@@ -712,19 +838,42 @@ export class ClinicalDocumentationDomainService {
       };
     }
 
-    const encounter = await DomainStateRepository.getById<Record<string, unknown>>(
+    const lineage = await this.validatePatientEncounter(
       context.tenantId,
-      'encounters',
+      payload.patientId,
       payload.encounterId
     );
-    if (!encounter) {
+    if (!lineage.ok) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: lineage.code, message: lineage.message },
+      };
+    }
+
+    const normalizedDiagnoses = normalizeSignedDiagnoses(payload.acceptedStructuredData);
+    if (!normalizedDiagnoses.ok) {
       return {
         success: false,
         commandId,
         idempotencyKey,
         error: {
-          code: 'ENCOUNTER_NOT_FOUND',
-          message: `Encounter ${payload.encounterId} was not found.`,
+          code: 'INVALID_STRUCTURED_DIAGNOSES',
+          message: normalizedDiagnoses.message,
+        },
+      };
+    }
+
+    if (payload.category === 'NURSING' && normalizedDiagnoses.diagnoses.length > 0) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'DIAGNOSIS_AUTHORITY_REQUIRED',
+          message:
+            'Nursing-note authority cannot create canonical encounter diagnoses. Use an authorized clinician note or diagnosis command.',
         },
       };
     }
@@ -743,6 +892,24 @@ export class ClinicalDocumentationDomainService {
 
     const evidenceId = `ev_note_${crypto.randomUUID()}`;
     const signedAt = Date.now();
+    const canonicalConditions = normalizedDiagnoses.diagnoses.map((diagnosis, index) =>
+      buildCanonicalCondition({
+        tenantId: context.tenantId,
+        patientId: payload.patientId,
+        encounterId: payload.encounterId,
+        conditionId: `cond_${evidenceId}_dx_${index + 1}`,
+        sourceEvidenceId: evidenceId,
+        actorId: context.actorId,
+        code: diagnosis.code,
+        display: diagnosis.description,
+        codingSystem: 'ICD10',
+        category: 'ENCOUNTER_DIAGNOSIS',
+        clinicalStatus: 'ACTIVE',
+        verificationStatus: diagnosis.verificationStatus,
+        recordedAt: signedAt,
+      })
+    );
+
     const domainState = {
       evidenceId,
       evidenceType: 'SIGNED_CLINICAL_NOTE',
@@ -819,6 +986,14 @@ export class ClinicalDocumentationDomainService {
         category: payload.category,
         sourceDraftId: payload.sourceDraftId,
         revenueIntegrityFindingIds: revenueIntegrityFindings.map((finding) => finding.id),
+        canonicalConditionIds: canonicalConditions.map((condition) => condition.conditionId),
+        structuredDiagnoses: normalizedDiagnoses.diagnoses.map((diagnosis) => ({
+          code: diagnosis.code,
+          description: diagnosis.description,
+          isPrincipal: diagnosis.isPrincipal,
+          type: diagnosis.type,
+          verificationStatus: diagnosis.verificationStatus,
+        })),
       },
       auditAction: 'SIGN_CLINICAL_NOTE',
       auditResourceType: 'ENCOUNTER_EVIDENCE',
@@ -835,6 +1010,11 @@ export class ClinicalDocumentationDomainService {
           entityId: canonicalDocument.clinicalDocumentId,
           domainState: canonicalDocument,
         },
+        ...canonicalConditions.map((condition) => ({
+          entityType: 'CLINICAL_CONDITION',
+          entityId: condition.conditionId,
+          domainState: condition,
+        })),
         ...revenueIntegrityFindings.map((finding) => ({
           entityType: 'REVENUE_INTEGRITY_FINDING',
           entityId: finding.id,
@@ -854,6 +1034,8 @@ export class ClinicalDocumentationDomainService {
       data: {
         ...domainState,
         canonicalDocumentId: canonicalDocument.clinicalDocumentId,
+        canonicalConditionIds: canonicalConditions.map((condition) => condition.conditionId),
+        canonicalConditions,
         revenueIntegrityFindings,
       },
     };

@@ -267,6 +267,7 @@ export function OpdRegistrationConsent({
                 onChange={(e) => setGender(e.target.value as any)}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
               >
+                <option value="">Select gender</option>
                 <option value="Female">Female</option>
                 <option value="Male">Male</option>
                 <option value="Other">Other</option>
@@ -280,6 +281,7 @@ export function OpdRegistrationConsent({
                 onChange={(e) => setBloodGroup(e.target.value as any)}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold text-rose-600"
               >
+                <option value="Unknown">Unknown / not tested</option>
                 <option value="A+">A+ (Rh Positive)</option>
                 <option value="A-">A- (Rh Negative)</option>
                 <option value="B+">B+ (Rh Positive)</option>
@@ -375,7 +377,8 @@ export function OpdRegistrationConsent({
                 onChange={(e) => setTariffPlan(e.target.value as any)}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
               >
-                <option value="CORPORATE_PPO">Corporate PPO (80% Payer / 20% Co-Pay)</option>
+                <option value="">Select tariff class</option>
+                <option value="CORPORATE_PPO">Corporate PPO</option>
                 <option value="SEHAT_CARD_UNIVERSAL">Sehat Sahulat Universal Health Card (100% Free)</option>
                 <option value="OUT_OF_POCKET">Private Out-of-Pocket Cash</option>
                 <option value="STATE_INSURANCE">State Civil Employee Health Scheme</option>
@@ -402,72 +405,80 @@ export function OpdRegistrationConsent({
           </div>
         </div>
 
-        {/* Section 4: Versioned Consent Engine */}
+        {/* Section 4: Versioned Consent Authority */}
         <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-bold uppercase tracking-wider text-blue-600 flex items-center gap-1.5">
               <FileCheck className="w-4 h-4" />
-              4. Versioned Informed Consent Engine
+              4. Explicit Registration Consent Decisions
             </h3>
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-slate-500 font-medium">Capture Method:</span>
-              <select
-                value={consentMethod}
-                onChange={(e) => setConsentMethod(e.target.value as any)}
-                className="px-2 py-1 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-semibold"
-              >
-                <option value="DIGITAL_SIGNATURE">Digital Signature Pad</option>
-                <option value="PAPER_SCANNED">Paper Scanned Document</option>
-                <option value="VERBAL_WITNESSED">Verbal Witnessed (Nurse Witnessed)</option>
-              </select>
-            </div>
+            <span className="text-[11px] font-semibold text-slate-500">
+              Digital attestation • server-issued immutable consent record
+            </span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/40 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-900 dark:text-slate-100">General OPD Care (v2.4)</span>
-                <input
-                  type="checkbox"
-                  checked={generalConsentGranted}
-                  onChange={(e) => setGeneralConsentGranted(e.target.checked)}
-                  className="w-4 h-4 text-blue-600 rounded"
-                />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {[
+              {
+                key: 'general',
+                title: 'General OPD Care',
+                description:
+                  'Routine outpatient history, examination and ordinary non-invasive care. Emergency stabilization remains governed by emergency-care policy.',
+                value: generalConsentGranted,
+                setValue: setGeneralConsentGranted,
+              },
+              {
+                key: 'hie',
+                title: 'Health Information Exchange Sharing',
+                description:
+                  'Permission to share authorized clinical data with external health-information exchange participants when an integration is enabled.',
+                value: dataSharingGranted,
+                setValue: setDataSharingGranted,
+              },
+            ].map((item) => (
+              <div
+                key={item.key}
+                className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/40 space-y-3"
+              >
+                <div>
+                  <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                    {item.title}
+                  </span>
+                  <p className="text-[11px] text-slate-500 mt-1">{item.description}</p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => item.setValue(true)}
+                    className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold border ${
+                      item.value === true
+                        ? 'bg-emerald-600 text-white border-emerald-600'
+                        : 'border-slate-200 dark:border-slate-700'
+                    }`}
+                  >
+                    Grant
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => item.setValue(false)}
+                    className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold border ${
+                      item.value === false
+                        ? 'bg-amber-600 text-white border-amber-600'
+                        : 'border-slate-200 dark:border-slate-700'
+                    }`}
+                  >
+                    Withhold
+                  </button>
+                </div>
               </div>
-              <p className="text-[11px] text-slate-500">
-                Authorizes routine clinical history, non-invasive physical examination, and emergency stabilization.
-              </p>
-            </div>
+            ))}
+          </div>
 
-            <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/40 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-900 dark:text-slate-100">HIE Data Sharing (v1.2)</span>
-                <input
-                  type="checkbox"
-                  checked={dataSharingGranted}
-                  onChange={(e) => setDataSharingGranted(e.target.checked)}
-                  className="w-4 h-4 text-blue-600 rounded"
-                />
-              </div>
-              <p className="text-[11px] text-slate-500">
-                Authorizes secure HL7 FHIR laboratory telemetry transmission across regional healthcare networks.
-              </p>
-            </div>
-
-            <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/40 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-900 dark:text-slate-100">Minor Diagnostics (v3.1)</span>
-                <input
-                  type="checkbox"
-                  checked={procedureConsentGranted}
-                  onChange={(e) => setProcedureConsentGranted(e.target.checked)}
-                  className="w-4 h-4 text-blue-600 rounded"
-                />
-              </div>
-              <p className="text-[11px] text-slate-500">
-                Covers venous phlebotomy, diagnostic radiography, and minor dressing applications.
-              </p>
-            </div>
+          <div className="p-3.5 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/60 dark:bg-amber-950/30">
+            <p className="text-[11px] text-amber-900 dark:text-amber-200">
+              Invasive procedures, blood products and other intervention-specific consents are not
+              granted here. They require a separate consent event tied to the actual ordered procedure.
+            </p>
           </div>
         </div>
 

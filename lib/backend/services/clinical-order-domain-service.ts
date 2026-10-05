@@ -43,6 +43,11 @@ export interface PlaceOrderPayload {
   statOverrideReason?: string;
 }
 
+export interface AdvanceDiagnosticWorklistPayload {
+  orderId: string;
+  targetStatus: 'SPECIMEN_COLLECTED' | 'IN_PROCESSING';
+}
+
 export interface PrescribeMedicationPayload {
   encounterId: string;
   patientId: string;
@@ -742,6 +747,197 @@ export class ClinicalOrderDomainService {
         commandId,
         idempotencyKey,
         entityId: orderId,
+        eventId: tx.eventId,
+        auditId: tx.auditId,
+        outboxId: tx.outboxId,
+        data: tx.resultData,
+      };
+    } catch (error) {
+      if (error instanceof AtomicMutationRejectedError) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+          },
+        };
+      }
+      throw error;
+    }
+  }
+
+
+  public static async advanceDiagnosticWorklist(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: AdvanceDiagnosticWorklistPayload
+  ): Promise<CommandResult> {
+    const orderLink =
+      await DomainStateRepository.getById<OperationalDiagnosticOrder>(
+        context.tenantId,
+        'orders',
+        payload.orderId
+      );
+    if (!orderLink) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'DIAGNOSTIC_ORDER_NOT_FOUND',
+          message: 'Diagnostic order was not found.',
+        },
+      };
+    }
+
+    const allowedRoles =
+      orderLink.orderType === 'LAB'
+        ? ['LAB_TECH', 'LAB_TECHNICIAN', 'PATHOLOGIST', 'SYSTEM_ADMIN']
+        : orderLink.orderType === 'RADIOLOGY'
+          ? ['RADIOLOGY_TECH', 'RADIOLOGY_TECHNICIAN', 'RADIOLOGIST', 'SYSTEM_ADMIN']
+          : ['DOCTOR', 'CONSULTANT', 'NURSE', 'SYSTEM_ADMIN'];
+
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: allowedRoles,
+    });
+    if (!auth.authorized) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Diagnostic worklist authority required.',
+        },
+      };
+    }
+
+    try {
+      const tx = await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.roles[0] || 'DIAGNOSTICS',
+        aggregateType: 'DIAGNOSTIC_ORDER',
+        aggregateId: payload.orderId,
+        eventType:
+          payload.targetStatus === 'SPECIMEN_COLLECTED'
+            ? 'DIAGNOSTIC_SPECIMEN_COLLECTED'
+            : 'DIAGNOSTIC_PROCESSING_STARTED',
+        auditAction:
+          payload.targetStatus === 'SPECIMEN_COLLECTED'
+            ? 'COLLECT_DIAGNOSTIC_SPECIMEN'
+            : 'START_DIAGNOSTIC_PROCESSING',
+        auditResourceType: 'DIAGNOSTIC_ORDER',
+        auditResourceId: payload.orderId,
+        outboxTopic: 'g-hims-clinical-events',
+        idempotencyKey,
+        commandId,
+        correlationId: context.correlationId,
+        readTargets: [
+          {
+            key: 'order',
+            entityType: 'DIAGNOSTIC_ORDER',
+            entityId: payload.orderId,
+            required: true,
+          },
+        ],
+        prepare: (current) => {
+          const order = current.order as unknown as OperationalDiagnosticOrder;
+
+          if (
+            !['PAID_SETTLED', 'UNLOCKED_STAT_OVERRIDE'].includes(
+              order.revenueLockStatus
+            )
+          ) {
+            throw new AtomicMutationRejectedError(
+              'DIAGNOSTIC_PAYMENT_REQUIRED',
+              'Diagnostic execution is locked until payment is settled or an audited STAT override applies.'
+            );
+          }
+
+          if (order.status === 'COMPLETED' || order.worklistStatus === 'FINALIZED') {
+            throw new AtomicMutationRejectedError(
+              'DIAGNOSTIC_ORDER_ALREADY_FINALIZED',
+              'Finalized diagnostic work cannot re-enter the execution worklist.'
+            );
+          }
+
+          if (payload.targetStatus === 'SPECIMEN_COLLECTED') {
+            if (order.orderType !== 'LAB') {
+              throw new AtomicMutationRejectedError(
+                'SPECIMEN_COLLECTION_NOT_APPLICABLE',
+                'Specimen collection is only valid for laboratory orders.'
+              );
+            }
+            if (order.worklistStatus !== 'READY_FOR_EXECUTION') {
+              throw new AtomicMutationRejectedError(
+                'INVALID_DIAGNOSTIC_WORKLIST_TRANSITION',
+                `Specimen collection requires READY_FOR_EXECUTION; found ${order.worklistStatus}.`
+              );
+            }
+          }
+
+          if (payload.targetStatus === 'IN_PROCESSING') {
+            const expected =
+              order.orderType === 'LAB'
+                ? 'SPECIMEN_COLLECTED'
+                : 'READY_FOR_EXECUTION';
+            if (order.worklistStatus !== expected) {
+              throw new AtomicMutationRejectedError(
+                'INVALID_DIAGNOSTIC_WORKLIST_TRANSITION',
+                `Starting diagnostic processing requires ${expected}; found ${order.worklistStatus}.`
+              );
+            }
+          }
+
+          const now = Date.now();
+          const nextOrder: OperationalDiagnosticOrder = {
+            ...order,
+            worklistStatus: payload.targetStatus,
+            status:
+              payload.targetStatus === 'IN_PROCESSING'
+                ? 'PROCESSING'
+                : order.status,
+            ...(payload.targetStatus === 'SPECIMEN_COLLECTED'
+              ? {
+                  specimenCollectedAt: now,
+                  specimenCollectedBy: context.actorId,
+                }
+              : {
+                  processingStartedAt: now,
+                  processingStartedBy: context.actorId,
+                }),
+            updatedAt: now,
+          };
+
+          return {
+            domainState: nextOrder,
+            eventPayload: {
+              orderId: order.orderId,
+              patientId: order.patientId,
+              encounterId: order.encounterId,
+              previousWorklistStatus: order.worklistStatus,
+              newWorklistStatus: payload.targetStatus,
+              revenueLockStatus: order.revenueLockStatus,
+            },
+            auditReason:
+              payload.targetStatus === 'SPECIMEN_COLLECTED'
+                ? `Collected specimen for diagnostic order ${order.orderId}.`
+                : `Started processing diagnostic order ${order.orderId}.`,
+            resultData: nextOrder,
+          };
+        },
+      });
+
+      return {
+        success: true,
+        commandId,
+        idempotencyKey,
+        entityId: payload.orderId,
         eventId: tx.eventId,
         auditId: tx.auditId,
         outboxId: tx.outboxId,

@@ -37,6 +37,10 @@ describe('OPD-RP10 diagnostic payment gate', () => {
     expect(service).toContain("'BLOCKED_BY_REVENUE_GATE'");
     expect(service).toContain("'UNLOCKED_STAT_OVERRIDE'");
     expect(service).toContain('STAT_OVERRIDE_REASON_REQUIRED');
+    expect(service).toContain('STAT_PAYMENT_OVERRIDE_NOT_AUTHORIZED');
+    expect(service).toContain('context.breakGlassPatientId');
+    expect(service).toContain('context.breakGlassEncounterId');
+    expect(service).toContain("encounter.encounterType || ''");
     expect(service).not.toContain('estimatedCostMinorUnits');
   });
 

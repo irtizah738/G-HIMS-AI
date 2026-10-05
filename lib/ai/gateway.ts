@@ -1,5 +1,13 @@
 import { GoogleGenAI } from '@google/genai';
 import { getServerIntegrationState } from '@/lib/interop/integration-state';
+import {
+  assertClinicalIntelligenceProductionReady,
+  resolveClinicalAITimeoutMs,
+} from '@/lib/clinical/intelligence/clinical-intelligence-production-policy';
+import {
+  emitOperationalEvent,
+  operationalTimer,
+} from '@/lib/observability/server-telemetry';
 
 export type AIPurpose =
   | 'CLINICAL_SOAP_DRAFT'
@@ -24,6 +32,8 @@ export interface AIGenerateJsonRequest {
   sourceData: unknown;
   responseSchema: string;
   temperature?: number;
+  correlationId?: string;
+  tenantId?: string;
 }
 
 export interface AIGenerateJsonResult<T> {
@@ -38,6 +48,36 @@ interface AIProvider {
 
 function cleanJsonPayload(value: string): string {
   return value.trim().replace(/^```json\s*/i, '').replace(/\s*```$/, '');
+}
+
+async function withProviderTimeout<T>(
+  operation: Promise<T>,
+  purpose: AIPurpose,
+  timeoutMs: number
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () =>
+            reject(
+              new Error(`AI_PROVIDER_TIMEOUT:${purpose}:${timeoutMs}`)
+            ),
+          timeoutMs
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+function operationalErrorCode(error: unknown): string {
+  const message =
+    error instanceof Error ? error.message : String(error || 'AI_FAILURE');
+  return (message.split(':')[0] || 'AI_FAILURE').slice(0, 96);
 }
 
 function generateDeterministicFallback<T>(request: AIGenerateJsonRequest): T {
@@ -60,12 +100,14 @@ class GoogleGenAIProvider implements AIProvider {
   public readonly id = 'google-genai';
   private readonly client: GoogleGenAI;
   private readonly model: string;
+  private readonly timeoutMs: number;
 
   constructor() {
     const apiKey = String(process.env.GEMINI_API_KEY || '').trim();
     if (!apiKey) throw new Error('AI_PROVIDER_NOT_CONFIGURED: GEMINI_API_KEY is required.');
     this.client = new GoogleGenAI({ apiKey });
     this.model = String(process.env.GHIMS_AI_MODEL || 'gemini-3.6-flash').trim();
+    this.timeoutMs = resolveClinicalAITimeoutMs();
   }
 
   public async generateJson<T>(request: AIGenerateJsonRequest): Promise<AIGenerateJsonResult<T>> {
@@ -86,11 +128,18 @@ class GoogleGenAIProvider implements AIProvider {
     ].join('\n');
 
     try {
-      const response = await this.client.models.generateContent({
-        model: this.model,
-        contents: prompt,
-        config: { responseMimeType: 'application/json', temperature: request.temperature ?? 0 },
-      });
+      const response = await withProviderTimeout(
+        this.client.models.generateContent({
+          model: this.model,
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json',
+            temperature: request.temperature ?? 0,
+          },
+        }),
+        request.purpose,
+        this.timeoutMs
+      );
 
       const raw = cleanJsonPayload(response.text || '');
       if (!raw) throw new Error('AI_INVALID_RESPONSE: provider returned an empty response.');
@@ -130,6 +179,8 @@ function buildProvider(): AIProvider {
     throw new Error('AI_INTEGRATION_NOT_LIVE: AI generation is disabled for this environment.');
   }
 
+  assertClinicalIntelligenceProductionReady();
+
   const provider = String(process.env.GHIMS_AI_PROVIDER || '').trim().toLowerCase();
   switch (provider) {
     case 'google':
@@ -143,7 +194,45 @@ function buildProvider(): AIProvider {
 }
 
 export class AIGateway {
-  public static async generateJson<T>(request: AIGenerateJsonRequest): Promise<AIGenerateJsonResult<T>> {
-    return buildProvider().generateJson<T>(request);
+  public static async generateJson<T>(
+    request: AIGenerateJsonRequest
+  ): Promise<AIGenerateJsonResult<T>> {
+    const elapsed = operationalTimer();
+
+    try {
+      const result = await buildProvider().generateJson<T>(request);
+      emitOperationalEvent({
+        event: 'clinical_ai_generation',
+        outcome: 'SUCCESS',
+        correlationId: request.correlationId,
+        tenantId: request.tenantId,
+        durationMs: elapsed(),
+        attributes: {
+          purpose: request.purpose,
+          provider: result.provenance.provider,
+          model: result.provenance.model,
+          safetyBoundaryVersion:
+            result.provenance.safetyBoundaryVersion || 'none',
+        },
+      });
+      return result;
+    } catch (error) {
+      emitOperationalEvent({
+        event: 'clinical_ai_generation',
+        outcome: 'FAILURE',
+        correlationId: request.correlationId,
+        tenantId: request.tenantId,
+        durationMs: elapsed(),
+        errorCode: operationalErrorCode(error),
+        attributes: {
+          purpose: request.purpose,
+          configuredProvider:
+            String(process.env.GHIMS_AI_PROVIDER || '').trim() || 'unset',
+          configuredModel:
+            String(process.env.GHIMS_AI_MODEL || '').trim() || 'unset',
+        },
+      });
+      throw error;
+    }
   }
 }

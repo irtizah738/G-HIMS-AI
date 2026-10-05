@@ -40,7 +40,7 @@ describe('CI-10G clinician-facing copilot workspace', () => {
     expect(workspace).not.toContain('PlaceDiagnosticOrderCommand');
   });
 
-  test('workspace never auto-generates intelligence on mount and explicitly blocks offline generation', async () => {
+  test('workspace never auto-generates intelligence on mount and keeps offline intelligence read-only', async () => {
     const workspace = await source(
       'components/patient360/ClinicalCopilotWorkspace.tsx'
     );
@@ -49,13 +49,15 @@ describe('CI-10G clinician-facing copilot workspace', () => {
     expect(workspace).toContain(
       'Fresh clinical intelligence requires authoritative server connectivity.'
     );
+    expect(workspace).toContain('loadCachedClinicalIntelligence');
     expect(workspace).toContain(
-      'CI-10G will not generate new summaries, trends'
+      'Cached intelligence is read-only and is never treated as'
+    );
+    expect(workspace).toContain(
+      "return offline ? 'OFFLINE_CACHED' : 'CURRENT'"
     );
     expect(workspace).not.toContain('void refreshAll();');
-    expect(workspace).toContain(
-      "useEffect(() => {\n    setArtifacts(EMPTY_ARTIFACTS);"
-    );
+    expect(workspace).toContain('setArtifacts(EMPTY_ARTIFACTS)');
   });
 
   test('artifact freshness is bound to both Patient 360 revision and source checkpoint', async () => {

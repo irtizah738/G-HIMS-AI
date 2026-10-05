@@ -22,6 +22,7 @@ import {
   generateEncounterPreparationBrief,
   generateLongitudinalClinicalSummary,
   generateMedicationReconciliationCopilot,
+  loadCachedClinicalIntelligence,
 } from '@/lib/clinical/patient360/patient360-client';
 import { ClinicalCopilotEvidencePanel } from '@/components/patient360/ClinicalCopilotEvidencePanel';
 import { GovernedClinicalDraftPanel } from '@/components/patient360/GovernedClinicalDraftPanel';
@@ -46,6 +47,8 @@ function stateClass(state: ClinicalCopilotArtifactState): string {
   switch (state) {
     case 'CURRENT':
       return 'border-emerald-200 bg-emerald-50 text-emerald-800';
+    case 'OFFLINE_CACHED':
+      return 'border-sky-200 bg-sky-50 text-sky-800';
     case 'STALE':
       return 'border-amber-200 bg-amber-50 text-amber-800';
     case 'ERROR':
@@ -129,11 +132,37 @@ export function ClinicalCopilotWorkspace({
   const [refreshingAll, setRefreshingAll] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
+
     setArtifacts(EMPTY_ARTIFACTS);
     setErrors({});
     setLoading({});
     setActiveTab('OVERVIEW');
-  }, [tenantId, patientId, encounterId, careSetting]);
+
+    if (offline) {
+      void loadCachedClinicalIntelligence(
+        tenantId,
+        patientId,
+        encounterId
+      )
+        .then((cached) => {
+          if (!cancelled) setArtifacts(cached);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setErrors((current) => ({
+              ...current,
+              LONGITUDINAL:
+                'Encrypted Clinical Intelligence cache could not be opened for this session.',
+            }));
+          }
+        });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, patientId, encounterId, careSetting, offline]);
 
   const artifactRevision = (key: ClinicalCopilotArtifactKey): number | null => {
     switch (key) {
@@ -181,7 +210,7 @@ export function ClinicalCopilotWorkspace({
     ) {
       return 'STALE';
     }
-    return 'CURRENT';
+    return offline ? 'OFFLINE_CACHED' : 'CURRENT';
   };
 
   const generateArtifact = async (key: Exclude<ClinicalCopilotArtifactKey, 'DRAFT'>) => {
@@ -423,10 +452,12 @@ export function ClinicalCopilotWorkspace({
         <div className="flex items-start gap-2 border-b border-amber-200 bg-amber-50 px-5 py-3 text-xs text-amber-900">
           <WifiOff className="mt-0.5 h-4 w-4 shrink-0" />
           <span>
-            Patient 360 continuity is available from the encrypted edge
-            snapshot, but CI-10G will not generate new summaries, trends,
-            reconciliation artifacts, or drafts from stale offline data.
-            Offline copilot qualification belongs to CI-10I.
+            Patient 360 continuity and previously generated CI-10B–E
+            intelligence may be viewed from the actor-scoped encrypted edge
+            cache. Cached intelligence is read-only and is never treated as
+            current server authority while offline. New intelligence, governed
+            drafts, review, approval, signing, and rejection require live
+            authoritative connectivity.
           </span>
         </div>
       )}

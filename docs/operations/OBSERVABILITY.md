@@ -22,6 +22,8 @@ External log/metrics infrastructure should build dashboards for:
 - outbox pending/failed/lease-expired counts
 - HL7 accepted/rejected/error rates
 - AI gateway availability and rejection rates without prompt/response content
+- Clinical Intelligence operation success/failure and latency by safe purpose/operation metadata
+- Clinical Intelligence provider timeout and safety-gate rejection rates by stable error code
 - reconciliation findings by severity/domain
 - API p50/p95/p99 latency
 - readiness failures and deployment restarts
@@ -37,5 +39,7 @@ Alert on:
 - backup job failure
 - reconciliation financial imbalance
 - repeated production integration attempts while state is not LIVE
+- sustained Clinical Intelligence provider failures/timeouts
+- Clinical Intelligence readiness becoming not-ready in a deployed pilot/production environment
 
 Thresholds are deployment-specific and must be set from measured hospital traffic. This repository does not claim that an external dashboard, SIEM, pager, or SLO is already provisioned.

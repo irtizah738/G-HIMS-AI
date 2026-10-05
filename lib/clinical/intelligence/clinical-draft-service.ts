@@ -343,6 +343,8 @@ export class ClinicalDraftService {
       },
       responseSchema: schemaFor(draftType),
       temperature: 0,
+      correlationId: context.correlationId,
+      tenantId: context.tenantId,
     });
 
     const normalized = validateProviderOutput(snapshot, draftType, generation.data);

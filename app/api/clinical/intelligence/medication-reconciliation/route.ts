@@ -5,6 +5,7 @@ import { DomainStateRepository } from '@/server/repositories/domain-state-reposi
 import { assertPatient360PatientAccess } from '@/lib/clinical/patient360/patient360-access';
 import { ClinicalEvidenceService } from '@/lib/clinical/intelligence/clinical-evidence-service';
 import { MedicationReconciliationCopilotService } from '@/lib/clinical/intelligence/medication-reconciliation-copilot-service';
+import { observeClinicalIntelligenceOperation } from '@/lib/clinical/intelligence/clinical-intelligence-observability';
 import type { CommandContext } from '@/lib/backend/types';
 import type { ClinicalCareSetting } from '@/types/consultant-visibility';
 
@@ -97,13 +98,21 @@ export async function POST(req: NextRequest) {
     }
 
     await assertAccess(context, patientId, encounterId);
-    const result =
-      await MedicationReconciliationCopilotService.generateAuthoritatively(
-        context,
-        patientId,
-        encounterId,
-        careSetting || 'UNKNOWN'
-      );
+    const result = await observeClinicalIntelligenceOperation(
+      {
+        operation: 'GENERATE_MEDICATION_RECONCILIATION',
+        purpose: 'MEDICATION_RECONCILIATION',
+        tenantId: context.tenantId,
+        correlationId: context.correlationId,
+      },
+      () =>
+        MedicationReconciliationCopilotService.generateAuthoritatively(
+          context,
+          patientId,
+          encounterId,
+          careSetting || 'UNKNOWN'
+        )
+    );
 
     return NextResponse.json(
       { success: true, ...result },

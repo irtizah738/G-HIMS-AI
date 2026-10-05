@@ -298,7 +298,8 @@ describe('G-HIMS CI-8 Clinical Deterioration & Escalation Intelligence', () => {
     );
     const bootstrap = await source('app/api/offline/bootstrap/route.ts');
 
-    expect(api).toContain('ClinicalDeteriorationService.getForPatient');
+    expect(api).toContain('selectedCareContext');
+    expect(api).toContain('ClinicalDeteriorationService.getProjection');
     expect(api).toContain('deterioration,');
     expect(client).toContain("'deteriorationProjections'");
     expect(client).toContain('deterioration: DeteriorationProjection | null');

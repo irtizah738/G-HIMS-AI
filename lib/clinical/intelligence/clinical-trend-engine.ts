@@ -286,7 +286,7 @@ function extractEvidence(
             ? 'CANCELLED'
             : status === 'ENTERED_IN_ERROR'
               ? 'ENTERED_IN_ERROR'
-              : 'PRELIMINARY';
+              : 'UNSUPPORTED_STATUS';
       exclusions.push(
         exclusion(
           item,

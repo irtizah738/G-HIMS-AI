@@ -27,6 +27,9 @@ export type ClinicalTrendExclusionReason =
   | 'MISSING_EFFECTIVE_TIME'
   | 'FUTURE_EFFECTIVE_TIME'
   | 'DUPLICATE_IDENTICAL'
+  | 'MISSING_UNIT'
+  | 'CONFLICTING_SAME_TIME'
+  | 'UNSUPPORTED_STATUS'
   | 'UNIDENTIFIED_METRIC';
 
 export interface ClinicalTrendPoint {

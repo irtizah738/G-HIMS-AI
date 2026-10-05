@@ -413,7 +413,7 @@ function extractEvidence(
             metric,
             quantity,
             effectiveAt,
-            interpretation,
+            '',
             false,
             observationId,
             status

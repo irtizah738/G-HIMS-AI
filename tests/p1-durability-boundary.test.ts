@@ -109,9 +109,11 @@ describe('G-HIMS P1 durability boundary regression guards', () => {
 
     expect(mpi).toContain("status?: 'ACTIVE' | 'MERGED' | 'DECEASED' | 'INACTIVE'");
     expect(mpi).toContain('activeEncounterId?: string');
+    expect(mpi).toContain('activeCareContexts?: PatientCareContextPointers');
     expect(mpi).toContain('activeBedId?: string');
     expect(registration).toContain("status: 'ACTIVE'");
-    expect(registration).toContain('activeEncounterId: encounterId');
+    expect(registration).toContain('activeCareContexts');
+    expect(registration).toContain('compatibilityEncounterId(activeCareContexts)');
     expect(inpatient).toContain("import { PatientMPI } from '@/types/mpi'");
   });
 

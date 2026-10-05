@@ -53,7 +53,9 @@ describe('CI-10G clinician-facing copilot workspace', () => {
       'CI-10G will not generate new summaries, trends'
     );
     expect(workspace).not.toContain('void refreshAll();');
-    expect(workspace).not.toContain('void generateArtifact(');
+    expect(workspace).toContain(
+      "useEffect(() => {\n    setArtifacts(EMPTY_ARTIFACTS);"
+    );
   });
 
   test('artifact freshness is bound to both Patient 360 revision and source checkpoint', async () => {

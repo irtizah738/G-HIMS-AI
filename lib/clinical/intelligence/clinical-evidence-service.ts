@@ -274,6 +274,9 @@ function toEvidenceRef(
     sourceEventCount: provenance.sourceEventCount,
     sourceEventSetHash: provenance.sourceEventSetHash,
     latestSourceEventId: provenance.latestSourceEventId,
+    provenanceStatus:
+      provenance.sourceEventCount > 0 ? 'EVENT_VERIFIED' : 'PROJECTION_ONLY',
+    content: candidate.content,
     contentHash,
   };
 }

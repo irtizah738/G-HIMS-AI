@@ -472,7 +472,7 @@ export class EncounterDomainService {
       tokenNumber,
       department: payload.departmentId,
       priority: String(payload.priority || 'ROUTINE').toLowerCase(),
-      status: 'waiting',
+      status: 'payment_pending',
       arrivalTime: new Date(now).toISOString(),
       createdAt: now,
     };

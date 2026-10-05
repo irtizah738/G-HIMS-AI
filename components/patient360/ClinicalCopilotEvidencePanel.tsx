@@ -114,6 +114,16 @@ export function ClinicalCopilotEvidencePanel({
                 Content hash:{' '}
                 <span className="break-all font-mono">{item.contentHash}</span>
               </div>
+              {item.content !== undefined && (
+                <details className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <summary className="cursor-pointer font-semibold text-slate-700">
+                    Frozen evidence payload
+                  </summary>
+                  <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[9px] leading-relaxed text-slate-600">
+                    {JSON.stringify(item.content, null, 2)}
+                  </pre>
+                </details>
+              )}
             </div>
           </details>
         ))}

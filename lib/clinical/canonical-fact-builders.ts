@@ -13,6 +13,7 @@ import type {
 import { TerminologyService } from '@/lib/clinical/terminology/terminology-service';
 
 interface ProvenanceInput {
+  provenanceId?: string;
   tenantId: string;
   patientId: string;
   encounterId?: string;
@@ -25,7 +26,7 @@ interface ProvenanceInput {
 
 function provenance(input: ProvenanceInput): ClinicalProvenance {
   return {
-    provenanceId: `prov_${input.sourceEvidenceId}`,
+    provenanceId: input.provenanceId || `prov_${input.sourceEvidenceId}`,
     tenantId: input.tenantId,
     patientId: input.patientId,
     encounterId: input.encounterId,
@@ -372,6 +373,7 @@ export function buildCanonicalCondition(input: {
   patientId: string;
   encounterId?: string;
   conditionId: string;
+  sourceEvidenceId?: string;
   actorId: string;
   code: string;
   display: string;
@@ -387,12 +389,13 @@ export function buildCanonicalCondition(input: {
     tenantId: input.tenantId,
     patientId: input.patientId,
     encounterId: input.encounterId,
-    sourceEvidenceId: input.conditionId,
+    sourceEvidenceId: input.sourceEvidenceId || input.conditionId,
     provenance: provenance({
+      provenanceId: `prov_${input.conditionId}`,
       tenantId: input.tenantId,
       patientId: input.patientId,
       encounterId: input.encounterId,
-      sourceEvidenceId: input.conditionId,
+      sourceEvidenceId: input.sourceEvidenceId || input.conditionId,
       actorId: input.actorId,
       recordedAt: input.recordedAt,
       sourceType: 'CLINICIAN',

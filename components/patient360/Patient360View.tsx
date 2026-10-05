@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import {
   acknowledgeCriticalDiagnosticResult,
+  completeMedicationReconciliation,
   loadPatient360ClinicalView,
   recordConsultantPatientReview,
   recordDischargeReadinessReview,
@@ -196,6 +197,14 @@ export function Patient360View({
   }>({});
   const [consultantReviewSubmitting, setConsultantReviewSubmitting] = useState(false);
   const [consultantReviewMessage, setConsultantReviewMessage] = useState<string | null>(null);
+  const [medicationReconciliationConfirmed, setMedicationReconciliationConfirmed] =
+    useState(false);
+  const [medicationReconciliationNotes, setMedicationReconciliationNotes] =
+    useState('');
+  const [medicationReconciliationSubmitting, setMedicationReconciliationSubmitting] =
+    useState(false);
+  const [medicationReconciliationMessage, setMedicationReconciliationMessage] =
+    useState<string | null>(null);
 
   const load = async () => {
     try {
@@ -298,6 +307,50 @@ export function Patient360View({
       );
     } finally {
       setCriticalAckReportId(null);
+    }
+  };
+
+  const completeCurrentMedicationReconciliation = async () => {
+    if (
+      !view?.selectedCareContext ||
+      view.source === 'LOCAL_EDGE' ||
+      !medicationReconciliationConfirmed
+    ) {
+      setMedicationReconciliationMessage(
+        view?.source === 'LOCAL_EDGE'
+          ? 'Medication reconciliation requires authoritative server connectivity.'
+          : 'Confirm that the current medication list has been reviewed and all discrepancies are resolved.'
+      );
+      return;
+    }
+
+    try {
+      setMedicationReconciliationSubmitting(true);
+      setMedicationReconciliationMessage(null);
+      await completeMedicationReconciliation(tenantId, {
+        patientId,
+        encounterId: view.selectedCareContext.encounterId,
+        reconciledMedicationIds: view.projection.currentMedications.map(
+          (item) => item.medicationOrderId
+        ),
+        discrepancyCount: 0,
+        unresolvedDiscrepancies: [],
+        notes: medicationReconciliationNotes.trim() || undefined,
+      });
+      setMedicationReconciliationMessage(
+        'Medication reconciliation recorded. CI-9 will re-evaluate after the authoritative event is projected.'
+      );
+      setMedicationReconciliationConfirmed(false);
+      setMedicationReconciliationNotes('');
+      await load();
+    } catch (caught) {
+      setMedicationReconciliationMessage(
+        caught instanceof Error
+          ? caught.message
+          : 'Medication reconciliation could not be completed.'
+      );
+    } finally {
+      setMedicationReconciliationSubmitting(false);
     }
   };
 
@@ -816,6 +869,65 @@ export function Patient360View({
                   </EmptyState>
                 )}
               </div>
+
+              {view.medicationSafety.findings.some(
+                (finding) => finding.type === 'MEDICATION_RECONCILIATION_REQUIRED'
+              ) && (
+                <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-xs text-indigo-950">
+                  <div className="flex items-center gap-2">
+                    <ClipboardCheck className="h-4 w-4 text-indigo-700" />
+                    <strong>Complete medication reconciliation</strong>
+                  </div>
+                  <p className="mt-2">
+                    Review the current Patient 360 medication list against the available history and resolve every discrepancy before marking reconciliation complete.
+                  </p>
+                  <label className="mt-3 flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={medicationReconciliationConfirmed}
+                      disabled={offline}
+                      onChange={(event) =>
+                        setMedicationReconciliationConfirmed(event.target.checked)
+                      }
+                      className="mt-0.5"
+                    />
+                    <span>
+                      I confirm that the medication list has been reviewed and there are no unresolved discrepancies.
+                    </span>
+                  </label>
+                  <textarea
+                    value={medicationReconciliationNotes}
+                    onChange={(event) =>
+                      setMedicationReconciliationNotes(event.target.value)
+                    }
+                    disabled={offline}
+                    rows={2}
+                    className="mt-3 w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs text-slate-900 disabled:opacity-50"
+                    placeholder="Optional reconciliation notes"
+                  />
+                  <button
+                    type="button"
+                    disabled={
+                      offline ||
+                      medicationReconciliationSubmitting ||
+                      !medicationReconciliationConfirmed
+                    }
+                    onClick={() =>
+                      void completeCurrentMedicationReconciliation()
+                    }
+                    className="mt-3 rounded-lg bg-indigo-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                  >
+                    {medicationReconciliationSubmitting
+                      ? 'Recording reconciliation…'
+                      : 'Complete reconciliation'}
+                  </button>
+                  {medicationReconciliationMessage && (
+                    <div className="mt-3 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs text-indigo-800">
+                      {medicationReconciliationMessage}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
                 <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">

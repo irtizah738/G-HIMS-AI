@@ -517,7 +517,10 @@ describe('CI-10B longitudinal clinical summary', () => {
     expect(route).toContain('ClinicalEvidenceService.getSnapshot');
     expect(workspace).toContain('generateLongitudinalClinicalSummary');
     expect(workspace).toContain(
-      'CI-10G will not generate new summaries, trends'
+      'Fresh clinical intelligence requires authoritative server connectivity.'
+    );
+    expect(workspace).toContain(
+      'Cached intelligence is read-only and is never treated as'
     );
     expect(evidence).toContain('sourceEventIds');
     expect(evidence).toContain('contentHash');

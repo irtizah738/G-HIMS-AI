@@ -575,6 +575,7 @@ export class ClinicalEvidenceService {
           snapshotHash: snapshot.snapshotHash,
           evidenceCount: snapshot.evidenceCount,
           sourceEventCount: snapshot.sourceEventCount,
+          scope: snapshot.scope,
         },
         actorId: context.actorId,
         actorRole: context.roles[0] || 'CLINICIAN',
@@ -614,6 +615,7 @@ export class ClinicalEvidenceService {
             snapshotHash: snapshot.snapshotHash,
             patient360Revision: snapshot.patient360Revision,
             patient360SourceCheckpoint: snapshot.patient360SourceCheckpoint,
+            scope: snapshot.scope,
           },
         })
       );

@@ -66,10 +66,12 @@ function sameMedication(
   if (leftCode && rightCode) {
     const leftSystem = normalized(medication.system);
     const rightSystem = normalized(other.system);
-    return (
+    if (
       leftCode === rightCode &&
       (!leftSystem || !rightSystem || leftSystem === rightSystem)
-    );
+    ) {
+      return true;
+    }
   }
 
   const leftName = normalized(medication.name);

@@ -10,6 +10,7 @@ import type {
 } from '@/types/patient360-projection';
 import type {
   ClinicalCareSetting,
+  ClinicalOpenItemProjection,
   ConsultantPatientStateProjection,
 } from '@/types/consultant-visibility';
 import { selectCareContextEncounter } from '@/lib/clinical/patient360/care-context';
@@ -112,6 +113,63 @@ async function loadLocalPatient360(
           item.encounterId === selectedCareContext.encounterId)
     ) || null;
 
+  const openItemRows = await listSecureEdgeEntities<Record<string, unknown>>(
+    tenantId,
+    cached.user.uid,
+    'clinicalOpenItems'
+  );
+  const openItems = (openItemRows as unknown as ClinicalOpenItemProjection[])
+    .filter(
+      (item) =>
+        item.patientId === patientId &&
+        item.status !== 'RESOLVED' &&
+        (!selectedCareContext?.encounterId ||
+          item.encounterId === selectedCareContext.encounterId)
+    )
+    .sort(
+      (left, right) =>
+        Number(left.dueAt || Number.MAX_SAFE_INTEGER) -
+          Number(right.dueAt || Number.MAX_SAFE_INTEGER) ||
+        Number(left.createdAt || 0) - Number(right.createdAt || 0)
+    );
+
+  const consultantVisibility: ConsultantPatientStateProjection | null =
+    selectedCareContext
+      ? {
+          tenantId,
+          consultantId: cached.user.uid,
+          patientId,
+          encounter: selectedCareContext,
+          encounterId: selectedCareContext.encounterId,
+          careSetting: selectedCareContext.careSetting,
+          relationship: 'REVIEWER',
+          patient360Revision: projection.revision,
+          patient360SourceCheckpoint: projection.sourceCheckpoint,
+          unreadClinicalChanges: 0,
+          unresolvedItemsCount: openItems.length,
+          criticalItemsCount: openItems.filter(
+            (item) => item.clinicalPriority === 'CRITICAL_REVIEW_REQUIRED'
+          ).length,
+          pendingDiagnosticCount: openItems.filter(
+            (item) => item.category === 'DIAGNOSTIC'
+          ).length,
+          unacknowledgedResultCount: openItems.filter(
+            (item) =>
+              item.category === 'DIAGNOSTIC' &&
+              item.clinicalPriority === 'CRITICAL_REVIEW_REQUIRED' &&
+              item.status === 'OPEN'
+          ).length,
+          medicationChangesCount: 0,
+          dataQualityState:
+            projection.dataQuality.missingCanonicalFacts.length > 0
+              ? 'REVIEW_REQUIRED'
+              : 'COMPLETE',
+          changes: [],
+          openItems,
+          generatedAt: projection.projectedAt,
+        }
+      : null;
+
   return {
     tenantId,
     patientId,
@@ -120,7 +178,7 @@ async function loadLocalPatient360(
     selectedCareContext,
     dischargeReadiness,
     deterioration,
-    consultantVisibility: null,
+    consultantVisibility,
     source: 'LOCAL_EDGE',
     freshness: freshness(projection),
   };

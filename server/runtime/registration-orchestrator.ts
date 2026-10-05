@@ -94,7 +94,7 @@ export interface OrchestrationResult {
     tokenNumber: string;
     department: string;
     priority: string;
-    status: 'waiting';
+    status: 'payment_pending';
     arrivalTime: string;
     createdAt: number;
   };
@@ -361,7 +361,7 @@ export async function registerPatientAndEncounter(
     tokenNumber,
     department: encounterRecord.department || 'General Medicine',
     priority: (params.priority || 'ROUTINE').toLowerCase(),
-    status: 'waiting' as const,
+    status: 'payment_pending' as const,
     arrivalTime: new Date(now).toISOString(),
     createdAt: now,
   };

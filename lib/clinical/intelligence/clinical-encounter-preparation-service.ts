@@ -606,6 +606,10 @@ function buildRecentAdmissions(
         ['COMPLETED', 'DISCHARGED', 'TRANSFERRED'].includes(status)
       );
     })
+    .sort(
+      (left, right) =>
+        Number(right.occurredAt || 0) - Number(left.occurredAt || 0)
+    )
     .slice(0, 10)
     .map((item) => {
       const data = record(item.content);

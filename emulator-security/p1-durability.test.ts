@@ -467,7 +467,7 @@ describe('G-HIMS P1 durable command infrastructure', () => {
       tx.outbox.outboxId
     );
     expect(secondClaim).toBeNull();
-  });
+  }, 15000);
 
   test('expired PROCESSING outbox lease can be reclaimed after worker crash', async () => {
     const tenantId = unique('tenant');

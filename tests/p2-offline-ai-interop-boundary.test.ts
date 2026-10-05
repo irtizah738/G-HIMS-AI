@@ -189,18 +189,25 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(icd).toContain('AIGateway.generateJson');
   });
 
-  test('AI provenance is durable and acceptance is bound to signed evidence',async()=>{
+  test('AI provenance is durable and governed clinical acceptance is bound to reviewed signed evidence',async()=>{
     const drafts=await source('server/ai/ai-draft-repository.ts');
     const docs=await source('lib/backend/services/clinical-documentation-domain-service.ts');
+    const governed=await source('lib/backend/services/clinical-draft-domain-service.ts');
     const tx=await source('lib/backend/transactions/transaction-manager.ts');
     expect(drafts).toContain('inputHash');
     expect(drafts).toContain('outputHash');
     expect(drafts).toContain('sourceEvidenceIds');
-    expect(drafts).toContain('ACCEPTED_IN_SIGNED_NOTE');
-    expect(docs).toContain('AI_DRAFT_PATIENT_MISMATCH');
-    expect(docs).toContain('AI_DRAFT_ENCOUNTER_MISMATCH');
-    expect(docs).toContain('AIDraftRepository.buildAcceptedState');
+    expect(docs).toContain('CI10F_LEGACY_AI_DRAFT_SIGNING_DISABLED');
+    expect(docs).not.toContain('AIDraftRepository.buildAcceptedState');
+    expect(governed).toContain('CI10F_DRAFT_INTEGRITY_FAILURE');
+    expect(governed).toContain('approvedContentHash');
+    expect(governed).toContain('evidenceSnapshotHash');
+    expect(governed).toContain('CLINICAL_DRAFT_REVISION');
+    expect(governed).toContain('CLINICAL_DOCUMENT');
+    expect(governed).toContain('ENCOUNTER_EVIDENCE');
     expect(tx).toContain("AI_DRAFT: 'aiDrafts'");
+    expect(tx).toContain("CLINICAL_DRAFT: 'clinicalDrafts'");
+    expect(tx).toContain("CLINICAL_DRAFT_REVISION: 'clinicalDraftRevisions'");
   });
 
   test('DICOM, FHIR and telemetry never silently pretend external systems are live',async()=>{

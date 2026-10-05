@@ -407,6 +407,17 @@ export class OpdBillingReconciliationDomainService {
         );
       }
       const status = String(charge.status || '').toUpperCase();
+      if (
+        status === 'PENDING_INVOICE' &&
+        String(charge.sourceFindingId || '').trim()
+      ) {
+        return reject(
+          commandId,
+          idempotencyKey,
+          'OPD_REVENUE_INTEGRITY_INVOICE_REQUIRED',
+          `Accepted Revenue Integrity charge ${chargeId} requires an authoritative server-generated invoice before encounter closure.`
+        );
+      }
       if (!['BILLED', 'BILLED_DEFERRED'].includes(status)) {
         return reject(
           commandId,

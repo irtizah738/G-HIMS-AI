@@ -750,6 +750,14 @@ export class ClinicalCoordinationDomainService {
     if (current.patientId !== payload.patientId || current.encounterId !== payload.encounterId) {
       return failure(commandId, idempotencyKey, 'CLINICAL_OPEN_ITEM_SCOPE_MISMATCH', 'Clinical attention item does not match patient encounter.');
     }
+    if ((current.resolutionMode || 'SOURCE_STATE') !== 'MANUAL') {
+      return failure(
+        commandId,
+        idempotencyKey,
+        'CLINICAL_OPEN_ITEM_SOURCE_CONTROLLED',
+        'This attention item is controlled by authoritative source state and will resolve automatically when that source is resolved.'
+      );
+    }
 
     const resolutionReason = String(payload.resolutionReason || '').trim();
     if (!resolutionReason) {

@@ -11,6 +11,13 @@ import type { CommandContext, CommandResult } from '../types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import { PatientClinicalKnowledgeDomainService } from './patient-clinical-knowledge-domain-service';
 import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
+import {
+  activateCareContext,
+  closeCareContext,
+  compatibilityEncounterId,
+  normalizeCareSetting,
+  normalizePatientCarePointers,
+} from '@/lib/clinical/patient360/care-context';
 import { DischargeReadinessService } from '@/lib/clinical/intelligence/discharge-readiness-service';
 import {
   criticalObservationIds,
@@ -139,8 +146,32 @@ export class CareTransitionDomainService {
     if (patient.activeBedId) {
       return { success: false, commandId, idempotencyKey, error: { code: 'PATIENT_ALREADY_ADMITTED', message: `Patient is already assigned to bed ${patient.activeBedId}.` } };
     }
-    if (patient.activeEncounterId && patient.activeEncounterId !== payload.sourceEncounterId) {
-      return { success: false, commandId, idempotencyKey, error: { code: 'PATIENT_ACTIVE_ENCOUNTER_CONFLICT', message: `Patient already has active encounter ${patient.activeEncounterId}.` } };
+    const carePointers = normalizePatientCarePointers(patient.activeCareContexts);
+    let activeIpdEncounterId = carePointers.activeIpdEncounterId;
+    if (!activeIpdEncounterId && patient.activeEncounterId) {
+      const legacyActive = await DomainStateRepository.getById<Record<string, unknown>>(
+        context.tenantId,
+        'encounters',
+        patient.activeEncounterId
+      );
+      if (
+        legacyActive &&
+        normalizeCareSetting(legacyActive.encounterType || legacyActive.type) === 'IPD' &&
+        activeEncounterStatus(legacyActive.status)
+      ) {
+        activeIpdEncounterId = patient.activeEncounterId;
+      }
+    }
+    if (activeIpdEncounterId) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'PATIENT_ACTIVE_IPD_ENCOUNTER_CONFLICT',
+          message: `Patient already has active inpatient encounter ${activeIpdEncounterId}.`,
+        },
+      };
     }
 
     const now = Date.now();
@@ -180,10 +211,27 @@ export class CareTransitionDomainService {
       assignedNurse: payload.assignedNurse || bed.assignedNurse,
     };
 
+    let activeCareContexts = normalizePatientCarePointers(patient.activeCareContexts);
+    if (sourceEncounter) {
+      activeCareContexts = closeCareContext(
+        activeCareContexts,
+        normalizeCareSetting(sourceEncounter.encounterType),
+        sourceEncounter.encounterId,
+        now
+      );
+    }
+    activeCareContexts = activateCareContext(
+      activeCareContexts,
+      'IPD',
+      encounterId,
+      now
+    );
+
     const patientState: PatientMPI = {
       ...patient,
       activeBedId: bed.id,
-      activeEncounterId: encounterId,
+      activeCareContexts,
+      activeEncounterId: compatibilityEncounterId(activeCareContexts),
       updatedAt: now,
     };
 
@@ -382,9 +430,13 @@ export class CareTransitionDomainService {
       'patients',
       encounter.patientId
     );
+    const activeIpdForTransfer = patient
+      ? normalizePatientCarePointers(patient.activeCareContexts).activeIpdEncounterId ||
+        patient.activeEncounterId
+      : undefined;
     if (
       !patient ||
-      patient.activeEncounterId !== encounter.encounterId ||
+      activeIpdForTransfer !== encounter.encounterId ||
       patient.activeBedId !== sourceBed.id
     ) {
       return {
@@ -580,8 +632,11 @@ export class CareTransitionDomainService {
     if (!patient) {
       return { success: false, commandId, idempotencyKey, error: { code: 'PATIENT_NOT_FOUND', message: 'Assigned patient record does not exist.' } };
     }
-    if (patient.activeEncounterId !== encounter.encounterId || patient.activeBedId !== bed.id) {
-      return { success: false, commandId, idempotencyKey, error: { code: 'PATIENT_CENSUS_STATE_CONFLICT', message: 'Patient active encounter/bed does not match the discharge target.' } };
+    const activeIpdForDischarge =
+      normalizePatientCarePointers(patient.activeCareContexts).activeIpdEncounterId ||
+      patient.activeEncounterId;
+    if (activeIpdForDischarge !== encounter.encounterId || patient.activeBedId !== bed.id) {
+      return { success: false, commandId, idempotencyKey, error: { code: 'PATIENT_CENSUS_STATE_CONFLICT', message: 'Patient active inpatient encounter/bed does not match the discharge target.' } };
     }
 
     // Architecture contract:
@@ -607,7 +662,7 @@ export class CareTransitionDomainService {
 
     if (
       !patient360 ||
-      patient360.activeEncounter?.encounterId !== encounter.encounterId
+      patient360.careContexts.activeIpdEncounter?.encounterId !== encounter.encounterId
     ) {
       return {
         success: false,
@@ -995,10 +1050,17 @@ export class CareTransitionDomainService {
       notes: payload.notes || 'Sanitizing protocol in progress (Discharged)',
     };
 
+    const activeCareContexts = closeCareContext(
+      patient.activeCareContexts,
+      'IPD',
+      encounter.encounterId,
+      now
+    );
     const patientState: PatientMPI = {
       ...patient,
       activeBedId: undefined,
-      activeEncounterId: undefined,
+      activeCareContexts,
+      activeEncounterId: compatibilityEncounterId(activeCareContexts),
       updatedAt: now,
     };
 

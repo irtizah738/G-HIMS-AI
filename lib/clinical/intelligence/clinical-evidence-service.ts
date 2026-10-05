@@ -340,7 +340,7 @@ export class ClinicalEvidenceService {
       snapshotHash,
     ]);
 
-    return {
+    const snapshot: ClinicalEvidenceSnapshot = {
       snapshotId,
       tenantId: projection.tenantId,
       patientId: projection.patientId,
@@ -369,6 +369,19 @@ export class ClinicalEvidenceService {
         'The snapshot is evidence for clinician review and is not an autonomous diagnosis or treatment decision.',
       ],
     };
+
+    // Firestore documents have a hard size ceiling. Keep substantial headroom
+    // for serialization/index overhead and fail closed instead of truncating
+    // clinical evidence or silently producing a partial intelligence packet.
+    const snapshotBytes = Buffer.byteLength(
+      JSON.stringify(sanitizeForFirestore(snapshot)),
+      'utf8'
+    );
+    if (snapshotBytes > 850_000) {
+      throw new Error(`CI10_EVIDENCE_SNAPSHOT_TOO_LARGE:${snapshotBytes}`);
+    }
+
+    return snapshot;
   }
 
   public static validateClaims(

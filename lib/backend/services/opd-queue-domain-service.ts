@@ -110,13 +110,11 @@ export class OpdQueueDomainService {
         eventType:
           payload.targetStatus === 'called'
             ? 'OPD_PATIENT_CALLED'
-            : payload.targetStatus === 'in_consultation'
-              ? 'OPD_SERVICE_STARTED'
-              : payload.targetStatus === 'completed'
-                ? 'OPD_CONSULTATION_COMPLETED'
-                : payload.targetStatus === 'transferred'
-                  ? 'OPD_QUEUE_TRANSFERRED'
-                  : 'OPD_PATIENT_NO_SHOW',
+            : payload.targetStatus === 'completed'
+              ? 'OPD_CONSULTATION_COMPLETED'
+              : payload.targetStatus === 'transferred'
+                ? 'OPD_QUEUE_TRANSFERRED'
+                : 'OPD_PATIENT_NO_SHOW',
         auditAction: 'UPDATE_OPD_QUEUE_STATUS',
         auditResourceType: 'OPD_QUEUE_TOKEN',
         auditResourceId: payload.tokenId,

@@ -1315,13 +1315,9 @@ export function OpdMasterWorkspace() {
         throw new Error('INVALID_PAYMENT_AMOUNT: enter a positive whole minor-unit amount.');
       }
 
-      const currentPaid = consultationInvoice.payments.reduce(
-        (sum, item) => sum + item.amountMinorUnits,
-        0
-      );
       const outstanding = Math.max(
         0,
-        consultationInvoice.patientCopayAmountMinorUnits - currentPaid
+        consultationInvoice.balanceDueMinorUnits
       );
       if (payment.amountMinorUnits > outstanding) {
         throw new Error(
@@ -1371,11 +1367,12 @@ export function OpdMasterWorkspace() {
           result.data.receipt?.journalId ||
           '',
       };
-      const totalPaid = currentPaid + governedPayment.amountMinorUnits;
       const newBalance = Math.max(
         0,
-        consultationInvoice.patientCopayAmountMinorUnits - totalPaid
+        outstanding - governedPayment.amountMinorUnits
       );
+      const totalPaid =
+        consultationInvoice.patientCopayAmountMinorUnits - newBalance;
       const isSettled = newBalance === 0;
 
       setEncounters((prev) =>
@@ -1572,13 +1569,9 @@ export function OpdMasterWorkspace() {
       throw new Error('INVALID_PAYMENT_AMOUNT: enter a positive whole minor-unit amount.');
     }
 
-    const currentPaid = activeEncounter.invoice.payments.reduce(
-      (sum: number, item: PaymentTransaction) => sum + item.amountMinorUnits,
-      0
-    );
     const currentBalance = Math.max(
       0,
-      activeEncounter.invoice.patientCopayAmountMinorUnits - currentPaid
+      activeEncounter.invoice.balanceDueMinorUnits
     );
     if (payment.amountMinorUnits > currentBalance) {
       throw new Error(
@@ -1650,11 +1643,12 @@ export function OpdMasterWorkspace() {
         result.data?.receipt?.journalId ||
         '',
     };
-    const totalPaid = currentPaid + governedPayment.amountMinorUnits;
     const newBalance = Math.max(
       0,
-      activeEncounter.invoice.patientCopayAmountMinorUnits - totalPaid
+      currentBalance - governedPayment.amountMinorUnits
     );
+    const totalPaid =
+      activeEncounter.invoice.patientCopayAmountMinorUnits - newBalance;
     const isSettled = newBalance === 0;
 
     if (isSettled) {

@@ -32,6 +32,9 @@ export interface ClinicalEvidenceRef {
   sourceEventCount: number;
   sourceEventSetHash: string;
   latestSourceEventId?: string;
+  provenanceStatus: 'EVENT_VERIFIED' | 'PROJECTION_ONLY';
+  /** Frozen evidence payload. Never interpreted as model/system instruction. */
+  content: unknown;
   contentHash: string;
 }
 

@@ -1439,6 +1439,133 @@ export function OpdMasterWorkspace() {
       return;
     }
 
+    const diagnosticInvoice = (activeEncounter.diagnosticInvoices || []).find(
+      (invoice) => invoice.id === payment.invoiceId
+    );
+    if (diagnosticInvoice) {
+      if (payment.mode !== 'CASH') {
+        throw new Error(
+          'EXTERNAL_PAYMENT_GATEWAY_REQUIRED: only cash settlement is enabled for the controlled OPD pilot.'
+        );
+      }
+      if (!Number.isSafeInteger(payment.amountMinorUnits) || payment.amountMinorUnits <= 0) {
+        throw new Error(
+          'INVALID_PAYMENT_AMOUNT: enter a positive whole minor-unit amount.'
+        );
+      }
+      if (payment.amountMinorUnits > diagnosticInvoice.balanceDueMinorUnits) {
+        throw new Error(
+          'PAYMENT_EXCEEDS_BALANCE: cash collection cannot exceed the outstanding diagnostic balance.'
+        );
+      }
+
+      const result = await executeActiveTenantCommand<{
+        receipt: { receiptId: string; journalId: string };
+        journal: { journalId: string };
+        invoice: Record<string, any>;
+        diagnosticOrder?: Record<string, any>;
+      }>(
+        'RecordCashReceiptCommand',
+        {
+          receiptId: payment.id,
+          invoiceId: diagnosticInvoice.id,
+          encounterId: activeEncounter.id,
+          patientId: activeEncounter.patientId,
+          amountMinorUnits: payment.amountMinorUnits,
+          currency: 'PKR',
+          referenceNumber: payment.referenceNumber,
+          collectedAt: payment.processedAt,
+          cashierName: payment.processedBy,
+        },
+        {
+          idempotencyKey: `opd-diagnostic-cash-receipt:${payment.id}`,
+        }
+      );
+
+      if (!result.success || !result.data) {
+        throw new Error(
+          result.error?.message || 'Diagnostic cash receipt command failed.'
+        );
+      }
+
+      const governedPayment: PaymentTransaction = {
+        ...payment,
+        invoiceId: diagnosticInvoice.id,
+        glJournalEntryId:
+          result.data.journal?.journalId ||
+          result.data.receipt?.journalId ||
+          '',
+      };
+      const nextBalance = Math.max(
+        0,
+        diagnosticInvoice.balanceDueMinorUnits - payment.amountMinorUnits
+      );
+      const isSettled = nextBalance === 0;
+      const releasedOrder = result.data.diagnosticOrder;
+
+      setEncounters((prev) =>
+        prev.map((encounter) =>
+          encounter.id === activeEncounter.id
+            ? {
+                ...encounter,
+                diagnosticInvoices: (encounter.diagnosticInvoices || []).map(
+                  (invoice) =>
+                    invoice.id === diagnosticInvoice.id
+                      ? {
+                          ...invoice,
+                          balanceDueMinorUnits: nextBalance,
+                          settlementStatus: isSettled
+                            ? 'SETTLED'
+                            : 'PARTIALLY_PAID',
+                          payments: [...invoice.payments, governedPayment],
+                          ...(isSettled ? { settledAt: Date.now() } : {}),
+                        }
+                      : invoice
+                ),
+                diagnosticOrders: encounter.diagnosticOrders.map((order) =>
+                  releasedOrder &&
+                  order.id ===
+                    String(
+                      releasedOrder.orderId ||
+                        diagnosticInvoice.sourceOrderId ||
+                        ''
+                    )
+                    ? {
+                        ...order,
+                        revenueLockStatus: String(
+                          releasedOrder.revenueLockStatus ||
+                            order.revenueLockStatus ||
+                            ''
+                        ),
+                        paymentStatus:
+                          String(releasedOrder.revenueLockStatus || '') ===
+                          'PAID_SETTLED'
+                            ? 'PAID_SETTLED'
+                            : order.paymentStatus,
+                        worklistStatus: String(
+                          releasedOrder.worklistStatus ||
+                            order.worklistStatus ||
+                            ''
+                        ),
+                      }
+                    : order
+                ),
+              }
+            : encounter
+        )
+      );
+
+      recordEvent(
+        'DIAGNOSTIC_PAYMENT_CAPTURED',
+        isSettled
+          ? `Diagnostic invoice ${diagnosticInvoice.invoiceNumber} settled; execution gate released.`
+          : `Partial diagnostic payment captured for ${diagnosticInvoice.invoiceNumber}.`,
+        { invoiceId: diagnosticInvoice.id, amountMinorUnits: payment.amountMinorUnits }
+      );
+      setActiveTab('BILLING');
+      return;
+    }
+
     if (!activeEncounter.invoice) throw new Error('FINAL_INVOICE_REQUIRED');
     if (payment.mode !== 'CASH') {
       throw new Error(
@@ -2093,22 +2220,9 @@ export function OpdMasterWorkspace() {
           encounter={activeEncounter}
           orders={activeEncounter.diagnosticOrders}
           onAddOrder={(order) => handleAddDiagnosticOrder(order)}
-          onUpdateOrderStatus={(orderId, status, resultsSummary) => {
-            setEncounters((prev) =>
-              prev.map((e) => {
-                if (e.id === activeEncounter.id) {
-                  return {
-                    ...e,
-                    diagnosticOrders: e.diagnosticOrders.map((o) =>
-                      o.id === orderId ? { ...o, status, resultsSummary: resultsSummary || o.resultsSummary } : o
-                    ),
-                  };
-                }
-                return e;
-              })
-            );
-            recordEvent('DIAGNOSTIC_STATUS_UPDATED', `Order ${orderId} updated to ${status}. ${resultsSummary || ''}`);
-          }}
+          onAdvanceOrderWorklist={(orderId, targetStatus) =>
+            handleAdvanceDiagnosticWorklist(orderId, targetStatus)
+          }
         />
       )}
 
@@ -2130,10 +2244,10 @@ export function OpdMasterWorkspace() {
       {activeTab === 'BILLING' &&
         canAccessTab('BILLING') &&
         activeEncounter &&
-        (activeEncounter.consultationInvoice || activeEncounter.invoice) && (
+        activeBillingInvoice && (
         <OpdBillingLedger
           encounter={activeEncounter}
-          invoice={(activeEncounter.consultationInvoice || activeEncounter.invoice)!}
+          invoice={activeBillingInvoice}
           canSettlePayment={canSettlePayment}
           onSettlePayment={(payment) => handleSettlePayment(payment)}
         />

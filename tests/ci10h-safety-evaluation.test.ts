@@ -145,6 +145,21 @@ describe('CI-10H clinical intelligence safety and evaluation framework', () => {
     expect(adapters).toContain('ClinicalIntelligenceSafetyEvaluator.evaluate');
   });
 
+  test('clinician UI exposes safety provenance and API distinguishes blocked output', async () => {
+    const panel = await source(
+      'components/patient360/GovernedClinicalDraftPanel.tsx'
+    );
+    const route = await source(
+      'app/api/clinical/intelligence/drafts/route.ts'
+    );
+
+    expect(panel).toContain('Safety evaluation:');
+    expect(panel).toContain('Safety policy:');
+    expect(panel).toContain('Safety gate:');
+    expect(route).toContain('CI10H_SAFETY_GATE_REJECTED');
+    expect(route).toContain('return 422');
+  });
+
   test('safety evaluation persistence is server-only', async () => {
     const rules = await source('firestore.rules');
     const evaluator = await source(

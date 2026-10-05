@@ -8,7 +8,7 @@ import { AtomicMutationRejectedError, TransactionManager } from '../transactions
 import { CommandContext, CommandResult } from '../types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 
-export type OpdQueueStatus = 'waiting' | 'called' | 'in_consultation' | 'completed' | 'no_show' | 'transferred';
+export type OpdQueueStatus = 'payment_pending' | 'waiting' | 'called' | 'in_consultation' | 'completed' | 'no_show' | 'transferred';
 
 export interface UpdateOpdQueueStatusPayload {
   tokenId: string;
@@ -34,6 +34,7 @@ interface OpdQueueState {
 }
 
 const ALLOWED_TRANSITIONS: Record<OpdQueueStatus, OpdQueueStatus[]> = {
+  payment_pending: [],
   waiting: ['called', 'in_consultation', 'no_show', 'transferred'],
   called: ['in_consultation', 'no_show', 'transferred'],
   in_consultation: ['completed', 'transferred'],

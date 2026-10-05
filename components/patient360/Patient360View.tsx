@@ -620,9 +620,11 @@ export function Patient360View({
               </div>
 
               <div className="mt-3 text-[11px] text-slate-500">
-                {view.consultantVisibility.lastReviewedAt
-                  ? `Last reviewed ${dateTime(view.consultantVisibility.lastReviewedAt)} · revision ${view.consultantVisibility.lastReviewedRevision ?? '—'}`
-                  : 'No prior consultant review checkpoint exists for this care context.'}
+                {offline
+                  ? `Offline attention snapshot from ${dateTime(freshness.projectedAt)}. Review checkpoint and since-last-review deltas require authoritative server connectivity.`
+                  : view.consultantVisibility.lastReviewedAt
+                    ? `Last reviewed ${dateTime(view.consultantVisibility.lastReviewedAt)} · revision ${view.consultantVisibility.lastReviewedRevision ?? '—'}`
+                    : 'No prior consultant review checkpoint exists for this care context.'}
               </div>
 
               <div className="mt-5 grid gap-5 lg:grid-cols-2">
@@ -655,7 +657,11 @@ export function Patient360View({
                         </div>
                       ))
                     ) : (
-                      <EmptyState>No new authoritative clinical changes since the last review checkpoint.</EmptyState>
+                      <EmptyState>
+                        {offline
+                          ? 'Since-last-review deltas are unavailable offline. Cached unresolved attention remains visible, but must be treated as potentially stale.'
+                          : 'No new authoritative clinical changes since the last review checkpoint.'}
+                      </EmptyState>
                     )}
                   </div>
                 </div>

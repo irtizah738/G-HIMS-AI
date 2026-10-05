@@ -35,7 +35,7 @@ function seedEncounter(
       tenantId,
       patientId,
       encounterType: 'OPD',
-      clinicalState: 'BILLING_SETTLEMENT',
+      clinicalState: 'DISPOSITION',
       currentStage: 'BILLING_SETTLEMENT',
       operationalState: 'ACTIVE',
       status: 'ACTIVE',

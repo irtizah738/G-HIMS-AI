@@ -233,7 +233,7 @@ export function ClinicalLongitudinalSummaryPanel({
                               >
                                 <summary className="cursor-pointer text-[10px] font-mono text-slate-600">
                                   {evidence
-                                    ? \`\${evidence.sourceType} · \${evidence.label} · \${evidence.provenanceStatus}\`
+                                    ? `${evidence.sourceType} · ${evidence.label} · ${evidence.provenanceStatus}`
                                     : evidenceId}
                                 </summary>
 

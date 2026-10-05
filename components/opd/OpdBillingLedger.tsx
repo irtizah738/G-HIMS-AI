@@ -12,7 +12,6 @@ import {
   OpdInvoice,
   PaymentTransaction,
   PaymentMode,
-  PaymentStatus,
 } from '@/types/opd-domain';
 
 interface OpdBillingLedgerProps {

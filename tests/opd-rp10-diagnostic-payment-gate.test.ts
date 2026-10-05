@@ -107,6 +107,8 @@ describe('OPD-RP10 diagnostic payment gate', () => {
     expect(workspace).toContain("'AdvanceDiagnosticWorklistCommand'");
     expect(workspace).toContain('activeBillingInvoice');
     expect(workspace).toContain("'RecordCashReceiptCommand'");
+    expect(workspace).toContain('consultationInvoice.balanceDueMinorUnits');
+    expect(workspace).toContain('activeEncounter.invoice.balanceDueMinorUnits');
     expect(workspace).not.toContain("offlineQueue: {\n          enabled: true,\n          collection: 'orders'");
   });
 
@@ -137,5 +139,7 @@ describe('OPD-RP10 diagnostic payment gate', () => {
     expect(billing).not.toContain('1001 Cash on Hand');
     expect(billing).not.toContain('4001 OPD Consultation & Diagnostic Revenue');
     expect(billing).toContain("glJournalEntryId: ''");
+    expect(billing).toContain('Math.round(paymentAmount * 100)');
+    expect(billing).toContain('invoice.balanceDueMinorUnits');
   });
 });

@@ -154,6 +154,32 @@ export class ClinicalOrderDomainService {
       };
     }
 
+    if (payload.priority === 'STAT') {
+      const encounterEmergency =
+        String(encounter.encounterType || '').toUpperCase() === 'EMERGENCY' ||
+        ['STAT', 'EMERGENCY'].includes(
+          String(encounter.priority || '').toUpperCase()
+        );
+      const boundBreakGlass =
+        context.isEmergencyOverride === true &&
+        Boolean(context.breakGlassGrantId) &&
+        String(context.breakGlassPatientId || '') === payload.patientId &&
+        String(context.breakGlassEncounterId || '') === payload.encounterId;
+
+      if (!encounterEmergency && !boundBreakGlass) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'STAT_PAYMENT_OVERRIDE_NOT_AUTHORIZED',
+            message:
+              'STAT payment bypass requires an authoritative emergency/STAT encounter or a patient-and-encounter-bound break-glass grant.',
+          },
+        };
+      }
+    }
+
     const [patient, catalog, tariff] = await Promise.all([
       DomainStateRepository.getById<PatientMPI>(
         context.tenantId,

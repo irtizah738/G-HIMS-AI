@@ -503,7 +503,10 @@ describe('CI-10D clinical trend intelligence', () => {
     expect(workspace).toContain('Excluded observation evidence');
     expect(workspace).toContain('Suppressed / excluded evidence');
     expect(workspace).toContain(
-      'CI-10G will not generate new summaries, trends'
+      'Fresh clinical intelligence requires authoritative server connectivity.'
+    );
+    expect(workspace).toContain(
+      'Cached intelligence is read-only and is never treated as'
     );
     expect(view).toContain('ClinicalCopilotWorkspace');
     expect(route).toContain('deriveAuthoritativeContext');

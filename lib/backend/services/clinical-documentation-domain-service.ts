@@ -141,22 +141,42 @@ function normalizeSignedDiagnoses(
     }
     seen.add(code);
 
-    const isPrincipal = record.isPrincipal === true;
+    const rawType = String(record.type || '').trim().toUpperCase();
+    if (
+      rawType &&
+      !['PRINCIPAL', 'SECONDARY', 'PROVISIONAL', 'DIFFERENTIAL'].includes(rawType)
+    ) {
+      return {
+        ok: false,
+        message: `Unsupported structured diagnosis type '${rawType}'.`,
+      };
+    }
+
+    const rawVerification = String(record.verificationStatus || '')
+      .trim()
+      .toUpperCase();
+    if (
+      rawVerification &&
+      !['CONFIRMED', 'SUSPECTED', 'REFUTED'].includes(rawVerification)
+    ) {
+      return {
+        ok: false,
+        message: `Unsupported diagnosis verification status '${rawVerification}'.`,
+      };
+    }
+
+    const isPrincipal = record.isPrincipal === true || rawType === 'PRINCIPAL';
     if (isPrincipal) principalCount += 1;
 
-    const rawType = String(record.type || '').trim().toUpperCase();
     const type: SignedStructuredDiagnosis['type'] =
       rawType === 'DIFFERENTIAL'
         ? 'DIFFERENTIAL'
         : rawType === 'PROVISIONAL'
           ? 'PROVISIONAL'
-          : isPrincipal || rawType === 'PRINCIPAL'
+          : isPrincipal
             ? 'PRINCIPAL'
             : 'SECONDARY';
 
-    const rawVerification = String(record.verificationStatus || '')
-      .trim()
-      .toUpperCase();
     const verificationStatus: SignedStructuredDiagnosis['verificationStatus'] =
       rawVerification === 'REFUTED'
         ? 'REFUTED'

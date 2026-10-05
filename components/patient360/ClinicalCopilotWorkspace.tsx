@@ -286,6 +286,7 @@ export function ClinicalCopilotWorkspace({
         provenanceStatus: string;
         sourceEventIds: string[];
         contentHash: string;
+        content?: unknown;
       }>
     ) => {
       for (const item of items) result.push({ ...item, sourceArtifact });
@@ -811,6 +812,24 @@ export function ClinicalCopilotWorkspace({
                           ))}
                         </ul>
                       )}
+                      {metric.exclusions.length > 0 && (
+                        <details className="mt-3 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2">
+                          <summary className="cursor-pointer text-[10px] font-bold text-rose-800">
+                            Suppressed / excluded evidence ({metric.exclusions.length})
+                          </summary>
+                          <div className="mt-2 space-y-1 text-[10px] text-rose-800">
+                            {metric.exclusions.map((item, index) => (
+                              <div key={`${item.evidenceId}:${item.reason}:${index}`}>
+                                <span className="font-bold">
+                                  {item.reason.replace(/_/g, ' ')}
+                                </span>
+                                {' — '}
+                                {item.detail}
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      )}
                     </details>
                   ))}
                   {artifacts.trends.artifact.metrics.length === 0 && (
@@ -819,6 +838,25 @@ export function ClinicalCopilotWorkspace({
                     </div>
                   )}
                 </div>
+                {artifacts.trends.artifact.excludedEvidence.length > 0 && (
+                  <details className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                    <summary className="cursor-pointer text-xs font-bold text-amber-900">
+                      Excluded observation evidence (
+                      {artifacts.trends.artifact.excludedEvidence.length})
+                    </summary>
+                    <div className="mt-2 space-y-1 text-[10px] text-amber-900">
+                      {artifacts.trends.artifact.excludedEvidence.map((item, index) => (
+                        <div key={`${item.evidenceId}:${item.reason}:${index}`}>
+                          <span className="font-bold">
+                            {item.reason.replace(/_/g, ' ')}
+                          </span>
+                          {' — '}
+                          {item.detail}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
               </>
             ) : (
               <div className="rounded-xl border border-dashed border-slate-200 p-5 text-sm text-slate-500">

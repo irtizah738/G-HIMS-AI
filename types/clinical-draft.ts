@@ -63,6 +63,9 @@ export interface GovernedClinicalDraft {
   patient360SourceCheckpoint: string;
   generationPolicyVersion: string;
   generationProvenance: AIGenerationProvenance;
+  safetyEvaluationId?: string;
+  safetyPolicyVersion?: string;
+  safetyGateStatus?: 'PASSED';
   generatedBy: string;
   generatedAt: number;
   currentRevisionId: string;

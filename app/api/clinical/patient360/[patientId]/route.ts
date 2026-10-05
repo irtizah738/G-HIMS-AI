@@ -43,18 +43,62 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
       );
     }
 
-    const activeEncounterId = String(
-      patient.activeEncounterId || patient.currentEncounterId || ''
+    const requestedCareSettingRaw = String(
+      req.nextUrl.searchParams.get('careSetting') || ''
     ).trim();
-    const activeEncounter = activeEncounterId
+    const requestedCareSetting = requestedCareSettingRaw
+      ? normalizeCareSetting(requestedCareSettingRaw)
+      : undefined;
+    if (requestedCareSettingRaw && requestedCareSetting === 'UNKNOWN') {
+      return NextResponse.json(
+        { success: false, error: 'INVALID_CARE_SETTING' },
+        { status: 400, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
+    const requestedEncounterId = String(
+      req.nextUrl.searchParams.get('encounterId') || ''
+    ).trim();
+
+    const projectionPreview = await Patient360ProjectionService.getProjection(
+      context.tenantId,
+      normalizedPatientId
+    );
+    const previewContext = projectionPreview
+      ? (
+          requestedEncounterId
+            ? projectionPreview.recentEncounters.find(
+                (item) => item.encounterId === requestedEncounterId
+              )
+            : selectCareContextEncounter(
+                projectionPreview.careContexts,
+                requestedCareSetting
+              )
+        )
+      : undefined;
+    const accessEncounterId =
+      requestedEncounterId ||
+      previewContext?.encounterId ||
+      String(patient.activeEncounterId || patient.currentEncounterId || '').trim();
+    const accessEncounter = accessEncounterId
       ? await DomainStateRepository.getById<Record<string, unknown>>(
           context.tenantId,
           'encounters',
-          activeEncounterId
+          accessEncounterId
         )
       : null;
 
-    assertPatient360PatientAccess(context, patient, activeEncounter);
+    if (
+      requestedEncounterId &&
+      (!accessEncounter || String(accessEncounter.patientId || '') !== normalizedPatientId)
+    ) {
+      return NextResponse.json(
+        { success: false, error: 'ENCOUNTER_PATIENT_MISMATCH' },
+        { status: 404, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
+    assertPatient360PatientAccess(context, patient, accessEncounter);
 
     const timelineLimit = Math.max(
       1,

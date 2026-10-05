@@ -408,7 +408,7 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
               2. Glasgow Coma Scale (GCS) Subscale Breakdown
             </h3>
             <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-              Total Score: {totalGcs}/15 (AVPU: {avpuDerived})
+              Total Score: {gcsComplete ? totalGcs : '—'}/15 (AVPU: {avpuDerived || '—'})
             </span>
           </div>
 
@@ -497,7 +497,7 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
             <div>
               <label className="block text-xs font-semibold mb-1">Computed BMI</label>
               <div className="px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 font-black text-slate-900 dark:text-slate-100">
-                {bmiComputed} kg/m²
+                {Number.isFinite(bmiComputed) ? bmiComputed : '—'} kg/m²
               </div>
             </div>
             <div>

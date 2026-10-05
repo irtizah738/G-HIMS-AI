@@ -1,0 +1,98 @@
+name: Clinical Intelligence CI-10C Encounter Preparation
+
+on:
+  push:
+    branches:
+      - ci10/encounter-preparation-intelligence
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci10c-encounter-preparation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci10c:
+    name: CI-10C encounter preparation qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-ci10c
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-ci10c
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-ci10c
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-ci10c
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      GHIMS_INTEGRATION_HL7_STATE: DISABLED
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_INTEGRATION_DICOMWEB_STATE: DISABLED
+      GHIMS_INTEGRATION_DEVICE_TELEMETRY_STATE: DISABLED
+      GHIMS_INTEGRATION_EDI_X12_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: TypeScript
+        run: bun run typecheck
+
+      - name: Lint
+        run: bun run lint
+
+      - name: CI-10C encounter preparation guards
+        run: bun run test:ci10c
+
+      - name: Preserve CI-10B longitudinal summary
+        run: bun run test:ci10b
+
+      - name: Preserve CI-10A evidence provenance
+        run: bun run test:ci10
+
+      - name: Preserve CI-9 consultant and deterioration guarantees
+        run: bun run test:ci9 && bun run test:cbe && bun run test:ci8
+
+      - name: Preserve main baseline and offline/pilot guarantees
+        run: bun run test:p8 && bun run test:p6 && bun run test:p7
+
+      - name: Security regression
+        run: bun run test:security
+
+      - name: Production build
+        run: bun run build
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "## G-HIMS CI-10C — Encounter Preparation Intelligence"
+            echo ""
+            echo "- Encounter-scoped evidence snapshot: PASS"
+            echo "- Reason-for-visit grounding: PASS"
+            echo "- Prior-encounter delta calculation: PASS"
+            echo "- Abnormal-result surfacing without diagnostic inference: PASS"
+            echo "- Medication change and discrepancy review: PASS"
+            echo "- Outstanding-work and data-quality surfacing: PASS"
+            echo "- Deterministic contradiction checks: PASS"
+            echo "- Actor/encounter scope isolation: PASS"
+            echo "- Mock clinical facts and simulated AI removed from consultation: PASS"
+            echo "- Read-only no-prefill safety contract: PASS"
+            echo "- Immutable server-only brief persistence: PASS"
+            echo "- CI-10B / CI-10A / CI-9 / CBE / CI-8 / P8 / P6 / P7 / security regressions: PASS"
+            echo "- Production build: PASS"
+          } >> "$GITHUB_STEP_SUMMARY"

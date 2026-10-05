@@ -701,14 +701,26 @@ export class ClinicalDocumentationDomainService {
       };
     }
 
-    if (!payload.content || payload.content.trim().length < 3) {
+    const content = String(payload.content || '').trim();
+    const substantiveContent =
+      payload.category === 'SOAP'
+        ? content
+            .replace(
+              /(?:^|\n)\s*(?:Subjective|Objective|Assessment|Plan)\s*:\s*/gi,
+              '\n'
+            )
+            .replace(/[^A-Za-z0-9]+/g, '')
+        : content.replace(/[^A-Za-z0-9]+/g, '');
+
+    if (!content || substantiveContent.length < 3) {
       return {
         success: false,
         commandId,
         idempotencyKey,
         error: {
           code: 'INVALID_CLINICAL_NOTE',
-          message: 'Signed clinical note content is required.',
+          message:
+            'Signed clinical note requires substantive clinician-authored content; section labels alone cannot be signed.',
         },
       };
     }
@@ -726,6 +738,17 @@ export class ClinicalDocumentationDomainService {
         error: {
           code: 'ENCOUNTER_NOT_FOUND',
           message: `Encounter ${payload.encounterId} was not found.`,
+        },
+      };
+    }
+    if (String(encounter.patientId || '') !== payload.patientId) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'ENCOUNTER_PATIENT_MISMATCH',
+          message: 'Encounter belongs to a different patient.',
         },
       };
     }

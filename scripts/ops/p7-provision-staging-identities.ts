@@ -325,7 +325,18 @@ for (const persona of personas) {
 
     const privilegeTypes =
       persona.role === 'doctor'
-        ? ['PRESCRIBE_MEDICATION', 'ORDER_LAB', 'ORDER_RADIOLOGY', 'ORDER_PROCEDURE', 'SIGN_CLINICAL_NOTE']
+        ? [
+            'PRESCRIBE_MEDICATION',
+            'ORDER_LAB',
+            'ORDER_RADIOLOGY',
+            'ORDER_PROCEDURE',
+            'SIGN_CLINICAL_NOTE',
+            // Keep the narrower specialty grants explicit for qualification.
+            // They no longer imply ordering authority in authorization-context.
+            'ORDER_HIGH_COMPLEXITY_LAB',
+            'INTERPRET_RADIOLOGY_CT_MRI',
+            'SIGN_SOAP_CLINICAL_NOTE',
+          ]
         : persona.role === 'pharmacy'
           ? ['DISPENSE_MEDICATION']
           : persona.role === 'lab'

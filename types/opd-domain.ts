@@ -513,13 +513,29 @@ export interface DiagnosticOrderItem {
   reasonForOrder?: string;
   price?: number;
   costAmountMinorUnits?: number;
+  currency?: string;
+  billingInvoiceId?: string;
+  chargeId?: string;
+  revenueLockStatus?:
+    | 'PENDING_PAYMENT_CLEARANCE'
+    | 'PAID_SETTLED'
+    | 'UNLOCKED_STAT_OVERRIDE'
+    | string;
+  statOverrideReason?: string;
   orderedBy?: string;
   orderingDoctor?: string;
   orderedAt: number;
   urgency?: 'ROUTINE' | 'URGENT' | 'STAT_EMERGENCY' | string;
   status?: 'ORDERED' | 'COLLECTED' | 'PROCESSING' | 'COMPLETED' | 'CANCELLED' | string;
   paymentStatus?: 'UNBILLED' | 'LOCKED_PENDING_PAYMENT' | 'PAID_SETTLED' | 'INSURANCE_PREAUTH' | string;
-  worklistStatus?: 'BLOCKED_BY_REVENUE_GATE' | 'READY_FOR_COLLECTION' | 'IN_PROCESSING' | 'FINALIZED' | string;
+  worklistStatus?:
+    | 'BLOCKED_BY_REVENUE_GATE'
+    | 'READY_FOR_EXECUTION'
+    | 'READY_FOR_COLLECTION'
+    | 'SPECIMEN_COLLECTED'
+    | 'IN_PROCESSING'
+    | 'FINALIZED'
+    | string;
   specimenType?: string;
   specimenBarcode?: string;
   requiresConsent?: boolean;
@@ -756,6 +772,7 @@ export interface ComprehensiveOpdEncounter {
   diagnosticOrders: DiagnosticOrderItem[];
   prescriptions: PharmacyPrescriptionItem[];
   consultationInvoice?: OpdInvoice;
+  diagnosticInvoices?: OpdInvoice[];
   invoice?: OpdInvoice | any;
   ledgerVouchers?: LedgerJournalVoucher[];
   dispositionData?: DispositionAndAdmission | EncounterDisposition;
@@ -815,7 +832,8 @@ export interface OpdInvoice {
   patientId: string;
   invoiceNumber: string;
   payerTariffPlan: string;
-  billingPurpose?: 'OPD_CONSULTATION' | 'FINAL_ENCOUNTER';
+  billingPurpose?: 'OPD_CONSULTATION' | 'OPD_DIAGNOSTIC' | 'FINAL_ENCOUNTER';
+  sourceOrderId?: string;
   totalAmountMinorUnits: number;
   payerCoverageAmountMinorUnits: number;
   patientCopayAmountMinorUnits: number;

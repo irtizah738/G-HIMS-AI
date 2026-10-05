@@ -1,0 +1,103 @@
+name: Clinical Intelligence CI-10I Offline Production Qualification
+
+on:
+  push:
+    branches:
+      - ci10/offline-production-qualification
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci10i-offline-production-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci10i:
+    name: CI-10I offline and production qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-ci10i
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-ci10i
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-ci10i
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-ci10i
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      GHIMS_INTEGRATION_HL7_STATE: DISABLED
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_INTEGRATION_DICOMWEB_STATE: DISABLED
+      GHIMS_INTEGRATION_DEVICE_TELEMETRY_STATE: DISABLED
+      GHIMS_INTEGRATION_EDI_X12_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: TypeScript
+        run: bun run typecheck
+
+      - name: Lint
+        run: bun run lint
+
+      - name: CI-10I offline and production guards
+        run: bun run test:ci10i
+
+      - name: Preserve CI-10H safety release gate
+        run: bun run test:ci10h && bun run ops:ci10h:safety-eval
+
+      - name: Preserve CI-10G through CI-10A guarantees
+        run: bun run test:ci10g && bun run test:ci10f && bun run test:ci10e && bun run test:ci10d && bun run test:ci10c && bun run test:ci10b && bun run test:ci10
+
+      - name: Offline and recovery qualification
+        run: bun run test:drp6 && bun run test:p6
+
+      - name: Pilot qualification
+        run: bun run test:p5c && bun run test:p7
+
+      - name: Security regression
+        run: bun run test:security
+
+      - name: Production build
+        run: bun run build
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "## G-HIMS CI-10I — Offline + Production Qualification"
+            echo ""
+            echo "- Encrypted actor-scoped CI-10B–E offline cache: PASS"
+            echo "- Offline cache remains read-only / non-authoritative: PASS"
+            echo "- Governed draft lifecycle remains online-authoritative only: PASS"
+            echo "- Application-origin connectivity preflight: PASS"
+            echo "- Client and provider request bounds: PASS"
+            echo "- Interrupted governed-draft idempotency contract: PASS"
+            echo "- Production provider/model/timeout policy: PASS"
+            echo "- Clinical Intelligence readiness contract: PASS"
+            echo "- PHI-safe operational telemetry: PASS"
+            echo "- Synthetic live-provider smoke tooling present: PASS"
+            echo "- CI-10H adversarial safety release gate: PASS"
+            echo "- CI-10G through CI-10A regressions: PASS"
+            echo "- DRP-6 / P6 offline guarantees: PASS"
+            echo "- P5C / P7 pilot guarantees: PASS"
+            echo "- Security regression: PASS"
+            echo "- Production build: PASS"
+            echo ""
+            echo "Target-environment readiness and live-provider smoke remain deployment evidence and are not fabricated by CI."
+          } >> "$GITHUB_STEP_SUMMARY"

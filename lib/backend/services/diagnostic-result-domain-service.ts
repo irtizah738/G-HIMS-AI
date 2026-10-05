@@ -9,6 +9,7 @@ import type { DiagnosticOrder } from '@/types/clinical-canonical';
 import type { OperationalDiagnosticOrder } from '@/types/diagnostic-billing';
 import type {
   FinanceAccountRecord,
+  FinancePeriodRecord,
 } from '@/types/finance-domain';
 import { financePeriodId } from '@/lib/finance/finance-engine';
 import {
@@ -185,6 +186,25 @@ export class DiagnosticResultDomainService {
       };
     }
 
+    const expectedResultCategory =
+      order.orderType === 'LAB'
+        ? 'LAB'
+        : order.orderType === 'RADIOLOGY'
+          ? 'RADIOLOGY'
+          : 'OTHER';
+    if (payload.category !== expectedResultCategory) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'DIAGNOSTIC_RESULT_CATEGORY_MISMATCH',
+          message:
+            'Diagnostic result category does not match the authoritative source order type.',
+        },
+      };
+    }
+
     const patient = await DomainStateRepository.getById<Record<string, unknown>>(
       context.tenantId,
       'patients',
@@ -243,7 +263,12 @@ export class DiagnosticResultDomainService {
         };
       }
 
-      const [deferredRows, revenueRows] = await Promise.all([
+      const postingDate = new Date(issuedAt);
+      const fiscalYear = postingDate.getUTCFullYear();
+      const postingPeriod = postingDate.getUTCMonth() + 1;
+      const periodId = financePeriodId(fiscalYear, postingPeriod);
+
+      const [deferredRows, revenueRows, period] = await Promise.all([
         DomainStateRepository.queryAllEqual<FinanceAccountRecord>(
           context.tenantId,
           'accounts',
@@ -257,6 +282,11 @@ export class DiagnosticResultDomainService {
           'accountCode',
           revenueCode,
           { pageSize: 10, maxRows: 10 }
+        ),
+        DomainStateRepository.getById<FinancePeriodRecord>(
+          context.tenantId,
+          'accountingPeriods',
+          periodId
         ),
       ]);
       const deferred = deferredRows[0];
@@ -296,10 +326,18 @@ export class DiagnosticResultDomainService {
           },
         };
       }
-
-      const postingDate = new Date(issuedAt);
-      const fiscalYear = postingDate.getUTCFullYear();
-      const postingPeriod = postingDate.getUTCMonth() + 1;
+      if (!period || !['OPEN', 'SOFT_CLOSE'].includes(period.status)) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'FINANCE_PERIOD_NOT_POSTABLE',
+            message:
+              'Diagnostic revenue cannot be recognized outside an open finance period.',
+          },
+        };
+      }
       recognitionId = `revrec_diag_${order.orderId}`;
       const journalId = `je_diag_recognize_${order.orderId}`;
 
@@ -373,8 +411,18 @@ export class DiagnosticResultDomainService {
       results: payload.results,
       issuedAt,
       conclusion: payload.conclusion,
-      verifiedBy: payload.verifiedBy || (isFinalLike(status) ? context.actorId : undefined),
-      verifiedAt: payload.verifiedAt || (isFinalLike(status) ? issuedAt : undefined),
+      verifiedBy:
+        integrationService && payload.verifiedBy
+          ? payload.verifiedBy
+          : isFinalLike(status)
+            ? context.actorId
+            : undefined,
+      verifiedAt:
+        integrationService && payload.verifiedAt
+          ? payload.verifiedAt
+          : isFinalLike(status)
+            ? issuedAt
+            : undefined,
       sourceEvidenceId,
     });
 

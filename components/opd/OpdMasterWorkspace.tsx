@@ -87,6 +87,56 @@ const OPD_TAB_ROLES: Record<string, OpdRole[]> = {
   AUDIT: ['ADMINISTRATOR','CLINICAL_DIRECTOR','SPECIALIST_CONSULTANT','MEDICAL_OFFICER','TRIAGE_NURSE'],
 };
 
+function adaptAuthoritativeConsultationInvoice(raw: Record<string, any>): OpdInvoice {
+  const items = Array.isArray(raw.items) ? raw.items : [];
+  const payments = Array.isArray(raw.paymentHistory) ? raw.paymentHistory : [];
+  return {
+    id: String(raw.id || ''),
+    tenantId: String(raw.tenantId || ''),
+    encounterId: String(raw.encounterId || ''),
+    patientId: String(raw.patientId || ''),
+    invoiceNumber: String(raw.invoiceNumber || ''),
+    payerTariffPlan: String(raw.tariffName || raw.planName || 'cash'),
+    billingPurpose: 'OPD_CONSULTATION',
+    totalAmountMinorUnits: Math.round(Number(raw.totalGross || 0) * 100),
+    payerCoverageAmountMinorUnits: Math.round(Number(raw.totalCoverage || 0) * 100),
+    patientCopayAmountMinorUnits: Math.round(Number(raw.totalPatientDue || 0) * 100),
+    balanceDueMinorUnits: Math.round(Number(raw.balanceDue || 0) * 100),
+    settlementStatus:
+      String(raw.paymentStatus || '').toLowerCase() === 'paid'
+        ? 'SETTLED'
+        : String(raw.paymentStatus || '').toLowerCase() === 'partially_paid'
+          ? 'PARTIALLY_PAID'
+          : 'PENDING',
+    lineItems: items.map((item: Record<string, any>) => ({
+      id: String(item.id || ''),
+      serviceCode: String(item.code || ''),
+      description: String(item.description || ''),
+      category: 'CONSULTATION',
+      quantity: Number(item.quantity || 1),
+      unitPriceMinorUnits: Math.round(Number(item.unitPrice || 0) * 100),
+      totalMinorUnits: Math.round(Number(item.netAmount || 0) * 100),
+    })),
+    payments: payments.map((payment: Record<string, any>) => ({
+      id: String(payment.id || payment.receiptId || ''),
+      invoiceId: String(raw.id || ''),
+      amountMinorUnits: Math.round(Number(payment.amount || 0) * 100),
+      mode: 'CASH',
+      referenceNumber: String(payment.referenceNumber || ''),
+      status: 'CAPTURED',
+      processedAt: Number(payment.timestamp || Date.now()),
+      processedBy: String(payment.recordedBy || payment.cashierId || ''),
+      glJournalEntryId: String(payment.journalId || ''),
+    })),
+    issuedAt: Date.parse(String(raw.createdAt || '')) || Date.now(),
+    issuedBy: 'SERVER_BILLING_AUTHORITY',
+    ...(String(raw.paymentStatus || '').toLowerCase() === 'paid'
+      ? { settledAt: Date.parse(String(raw.updatedAt || '')) || Date.now() }
+      : {}),
+  };
+}
+
+
 // Initial Mock Seed Data (DEMO runtime only)
 const SEED_PATIENTS: PatientDemographics[] = [
   {

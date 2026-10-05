@@ -274,6 +274,11 @@ export class Patient360Projector {
       });
 
     const conditions = samePatient(sources.conditions);
+    // Encounter diagnoses are valid longitudinal facts, but they do not prove
+    // that the patient's longitudinal problem list was reviewed or reconciled.
+    const problemListConditions = conditions.filter(
+      (item) => item.category !== 'ENCOUNTER_DIAGNOSIS'
+    );
     const allergies = samePatient(sources.allergies);
     const medicationOrders = samePatient(sources.medicationOrders);
     const observations = samePatient(sources.observations);
@@ -441,7 +446,7 @@ export class Patient360Projector {
             ? 'KNOWN'
             : sources.knowledgeStatus?.allergyStatus || 'NOT_ASSESSED',
         problemListKnowledge:
-          conditions.length > 0
+          problemListConditions.length > 0
             ? 'KNOWN'
             : sources.knowledgeStatus?.problemListStatus || 'NOT_ASSESSED',
         medicationKnowledge:
@@ -453,7 +458,7 @@ export class Patient360Projector {
         lastMedicationReconciliationAt:
           sources.knowledgeStatus?.lastMedicationReconciliationAt,
         hasUnverifiedAllergies: allergies.some((item) => item.verificationStatus !== 'CONFIRMED'),
-        hasUnverifiedProblems: conditions.some((item) =>
+        hasUnverifiedProblems: problemListConditions.some((item) =>
           !['CONFIRMED', 'REFUTED'].includes(item.verificationStatus)
         ),
         hasPreliminaryResults: diagnosticReports.some((item) =>
@@ -472,15 +477,15 @@ export class Patient360Projector {
               (sources.knowledgeStatus?.allergyStatus || 'NOT_ASSESSED') === 'PATIENT_UNABLE_TO_REPORT')
             ? ['ALLERGY_STATUS_PATIENT_UNABLE_TO_REPORT']
             : []),
-          ...((conditions.length === 0 &&
+          ...((problemListConditions.length === 0 &&
               (sources.knowledgeStatus?.problemListStatus || 'NOT_ASSESSED') === 'UNKNOWN')
             ? ['PROBLEM_LIST_UNKNOWN']
             : []),
-          ...((conditions.length === 0 &&
+          ...((problemListConditions.length === 0 &&
               (sources.knowledgeStatus?.problemListStatus || 'NOT_ASSESSED') === 'NOT_ASSESSED')
             ? ['PROBLEM_LIST_NOT_ASSESSED']
             : []),
-          ...((conditions.length === 0 &&
+          ...((problemListConditions.length === 0 &&
               (sources.knowledgeStatus?.problemListStatus || 'NOT_ASSESSED') === 'PATIENT_UNABLE_TO_REPORT')
             ? ['PROBLEM_LIST_PATIENT_UNABLE_TO_REPORT']
             : []),

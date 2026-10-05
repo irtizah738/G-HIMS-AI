@@ -489,8 +489,9 @@ describe('CI-10E medication reconciliation copilot', () => {
     expect(pharmacy).toContain(
       "IS_DEMO_RUNTIME ? 'Take with a full glass of water in the morning.' : ''"
     );
+    expect(pharmacy).not.toContain('pharmacistName');
     expect(pharmacy).toContain(
-      "const [pharmacistName, setPharmacistName] = useState<string>('')"
+      'Billing is posted from authoritative Item Master pricing at dispense.'
     );
     expect(pharmacy).toContain('setDosage(mapped[0].strength)');
   });

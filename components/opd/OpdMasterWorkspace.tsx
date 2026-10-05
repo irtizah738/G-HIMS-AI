@@ -516,6 +516,14 @@ export function OpdMasterWorkspace() {
     );
     if (openDiagnosticInvoice) return openDiagnosticInvoice;
 
+    const openPharmacyInvoice = (activeEncounter.pharmacyInvoices || []).find(
+      (invoice) =>
+        invoice.billingPurpose === 'OPD_PHARMACY' &&
+        invoice.settlementStatus !== 'SETTLED' &&
+        invoice.settlementStatus !== 'VOIDED'
+    );
+    if (openPharmacyInvoice) return openPharmacyInvoice;
+
     return activeEncounter.invoice;
   }, [activeEncounter]);
 
@@ -1193,46 +1201,74 @@ export function OpdMasterWorkspace() {
     }
   ) => {
     try {
-      const result = await executeActiveTenantCommand<Record<string, unknown>>(
+      const result = await executeActiveTenantCommand<Record<string, any>>(
         'PrescribeMedicationCommand',
         {
           encounterId: activeEncounter.id,
           patientId: activeEncounter.patientId,
           drugCode: item.medicationCode || item.id,
-          drugName: item.drugName,
           dosage: item.dosage,
           route: item.route,
           frequency: item.frequency,
           durationDays: item.durationDays,
           quantityPrescribed: item.quantity || item.quantityPrescribed,
           unitOfMeasure: item.formulation || 'UNIT',
-          unitPriceMinorUnits: item.unitPriceMinorUnits,
-          inventoryItemId: item.medicationCode || item.id,
           instructions: item.instructions || item.specialInstructions,
           safetyAcknowledgementFindingIds:
             safety?.safetyAcknowledgementFindingIds,
           safetyOverrideReason: safety?.safetyOverrideReason,
         },
         {
+          // Financially relevant medication ordering fails closed offline until
+          // RP15 qualifies command replay/remapping.
           idempotencyKey: `opd-rx:${activeEncounter.id}:${item.id}`,
-          offlineQueue: {
-            enabled: true,
-            collection: 'prescriptions',
-            resourceId: item.id,
-            action: 'CREATE',
-            optimisticCache: true,
-          },
         }
       );
       if (!result.success) {
         throw new Error(result.error?.message || 'Prescription failed.');
       }
 
+      const authoritative = result.data || {};
       const governedPrescription: PharmacyPrescriptionItem = {
         ...item,
-        id: result.entityId || item.id,
-        encounterId: activeEncounter.id,
+        id: String(
+          authoritative.prescriptionId || result.entityId || item.id
+        ),
+        encounterId: String(
+          authoritative.encounterId || activeEncounter.id
+        ),
+        medicationCode: String(
+          authoritative.drugCode || item.medicationCode || ''
+        ),
+        drugName: String(authoritative.drugName || ''),
+        dosage: String(authoritative.dosage || item.dosage),
+        route: String(authoritative.route || item.route),
+        frequency: String(authoritative.frequency || item.frequency),
+        durationDays: Number(
+          authoritative.durationDays || item.durationDays
+        ),
+        quantity: Number(
+          authoritative.quantityPrescribed ||
+            item.quantity ||
+            item.quantityPrescribed ||
+            0
+        ),
+        quantityPrescribed: Number(
+          authoritative.quantityPrescribed ||
+            item.quantityPrescribed ||
+            item.quantity ||
+            0
+        ),
+        formulation: String(
+          authoritative.unitOfMeasure || item.formulation || ''
+        ),
         status: 'PRESCRIBED',
+        prescribedBy: String(
+          authoritative.prescribedBy || item.prescribedBy || ''
+        ),
+        prescribedAt: Number(
+          authoritative.createdAt || item.prescribedAt || Date.now()
+        ),
       };
       setEncounters((prev) =>
         prev.map((e) =>
@@ -1250,7 +1286,7 @@ export function OpdMasterWorkspace() {
 
   // HANDLER: Dispense Prescription through the pharmacy domain.
   // CI-0D will extend this command to atomic inventory/consumption charging.
-  const handleDispensePrescription = async (rxId: string, dispensedBy: string) => {
+  const handleDispensePrescription = async (rxId: string) => {
     const prescription = activeEncounter.prescriptions.find((rx) => rx.id === rxId);
     if (!prescription) throw new Error('PRESCRIPTION_NOT_FOUND');
 
@@ -1260,23 +1296,25 @@ export function OpdMasterWorkspace() {
         prescriptionId: rxId,
         quantityDispensed: prescription.quantity || prescription.quantityPrescribed || 1,
         batchNumber: prescription.batchAllocation?.batchNumber || prescription.allocatedBatch?.batchNumber,
-        expiryDate: prescription.batchAllocation?.expiryDate || prescription.allocatedBatch?.expiryDate,
-        dispensedByName: dispensedBy,
+        expiryDate:
+          prescription.batchAllocation?.expiryDate ||
+          prescription.allocatedBatch?.expiryDate,
       },
       {
+        // Inventory + patient billing is atomic and must not be queued invisibly
+        // before RP15 offline financial replay qualification.
         idempotencyKey: `opd-dispense:${rxId}`,
-        offlineQueue: {
-          enabled: true,
-          collection: 'prescriptions',
-          resourceId: rxId,
-          action: 'UPDATE',
-          optimisticCache: true,
-        },
       }
     );
     if (!result.success) {
       throw new Error(result.error?.message || 'Medication dispensing failed.');
     }
+
+    const data = result.data as any;
+    const authoritativePrescription = data?.prescription || {};
+    const pharmacyInvoice = data?.invoice
+      ? adaptAuthoritativeOpdInvoice(data.invoice)
+      : undefined;
 
     setEncounters((prev) =>
       prev.map((e) =>
@@ -1285,14 +1323,39 @@ export function OpdMasterWorkspace() {
               ...e,
               prescriptions: e.prescriptions.map((rx) =>
                 rx.id === rxId
-                  ? { ...rx, status: 'DISPENSED', dispensedAt: Date.now(), dispensedBy }
+                  ? {
+                      ...rx,
+                      status: 'DISPENSED',
+                      quantityDispensed: Number(
+                        authoritativePrescription.quantityDispensed ||
+                          rx.quantityDispensed ||
+                          0
+                      ),
+                      dispensedAt: Number(
+                        authoritativePrescription.dispensedAt || Date.now()
+                      ),
+                      dispensedBy: String(
+                        authoritativePrescription.dispensedBy || ''
+                      ),
+                    }
                   : rx
               ),
+              pharmacyInvoices: pharmacyInvoice
+                ? [
+                    ...(e.pharmacyInvoices || []).filter(
+                      (invoice) => invoice.id !== pharmacyInvoice.id
+                    ),
+                    pharmacyInvoice,
+                  ]
+                : e.pharmacyInvoices,
             }
           : e
       )
     );
-    recordEvent('MEDICATION_DISPENSED', `Medication ${rxId} dispensed by ${dispensedBy}.`);
+    recordEvent(
+      'MEDICATION_DISPENSED',
+      `Medication ${rxId} dispensed and pharmacy receivable posted.`
+    );
   };
 
   // HANDLER: Cash settlement — the pilot is intentionally cash-only.
@@ -2226,7 +2289,7 @@ export function OpdMasterWorkspace() {
           onAddPrescription={(item, safety) =>
             handleAddPrescription(item, safety)
           }
-          onDispensePrescription={(rxId, dispensedBy) => handleDispensePrescription(rxId, dispensedBy)}
+          onDispensePrescription={(rxId) => handleDispensePrescription(rxId)}
         />
       )}
 

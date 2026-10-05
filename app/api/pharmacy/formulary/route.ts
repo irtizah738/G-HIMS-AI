@@ -67,7 +67,6 @@ export async function GET(req: NextRequest) {
           genericName: item.genericName,
           description: item.description,
           unitOfMeasure: item.unitOfMeasure,
-          sellingPrice: item.sellingPrice,
           currency: item.currency || 'PKR',
           totalAvailable: itemBalances.reduce(
             (sum, balance) => sum + Number(balance.available || 0),

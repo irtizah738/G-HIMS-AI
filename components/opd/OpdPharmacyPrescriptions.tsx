@@ -34,16 +34,16 @@ interface OpdPharmacyPrescriptionsProps {
       safetyOverrideReason?: string;
     }
   ) => Promise<void> | void;
-  onDispensePrescription: (prescriptionId: string, dispensedBy: string) => void;
+  onDispensePrescription: (prescriptionId: string) => Promise<void> | void;
 }
 
 const DEMO_FORMULARY = [
-  { code: 'RX-FUROS-40', drugName: 'Furosemide', formulation: 'Tablet', strength: '40 mg', defaultRoute: 'Oral', defaultFreq: 'OD (Once Daily Morning)', defaultDays: 14, unitCost: 15, stock: 450, batch: 'BTH-2026-088', expiry: '2027-11-30' },
-  { code: 'RX-LISIN-10', drugName: 'Lisinopril', formulation: 'Tablet', strength: '10 mg', defaultRoute: 'Oral', defaultFreq: 'OD (Once Daily)', defaultDays: 30, unitCost: 22, stock: 320, batch: 'BTH-2026-142', expiry: '2028-04-15' },
-  { code: 'RX-METFOR-500', drugName: 'Metformin HCl', formulation: 'Tablet', strength: '500 mg', defaultRoute: 'Oral', defaultFreq: 'BD (Twice Daily with meals)', defaultDays: 30, unitCost: 12, stock: 800, batch: 'BTH-2026-009', expiry: '2027-09-20' },
-  { code: 'RX-AMOX-500', drugName: 'Amoxicillin', formulation: 'Capsule', strength: '500 mg', defaultRoute: 'Oral', defaultFreq: 'TDS (Three Times Daily)', defaultDays: 7, unitCost: 25, stock: 210, batch: 'BTH-2026-991', expiry: '2027-05-10' },
-  { code: 'RX-PARAC-500', drugName: 'Paracetamol', formulation: 'Tablet', strength: '500 mg', defaultRoute: 'Oral', defaultFreq: 'PRN (As needed for pain/fever)', defaultDays: 5, unitCost: 5, stock: 1200, batch: 'BTH-2026-301', expiry: '2028-10-01' },
-  { code: 'RX-ATORV-20', drugName: 'Atorvastatin', formulation: 'Tablet', strength: '20 mg', defaultRoute: 'Oral', defaultFreq: 'HS (At Bedtime)', defaultDays: 30, unitCost: 35, stock: 540, batch: 'BTH-2026-512', expiry: '2028-02-18' },
+  { code: 'RX-FUROS-40', drugName: 'Furosemide', formulation: 'Tablet', strength: '40 mg', defaultRoute: 'Oral', defaultFreq: 'OD (Once Daily Morning)', defaultDays: 14, stock: 450, batch: 'BTH-2026-088', expiry: '2027-11-30' },
+  { code: 'RX-LISIN-10', drugName: 'Lisinopril', formulation: 'Tablet', strength: '10 mg', defaultRoute: 'Oral', defaultFreq: 'OD (Once Daily)', defaultDays: 30, stock: 320, batch: 'BTH-2026-142', expiry: '2028-04-15' },
+  { code: 'RX-METFOR-500', drugName: 'Metformin HCl', formulation: 'Tablet', strength: '500 mg', defaultRoute: 'Oral', defaultFreq: 'BD (Twice Daily with meals)', defaultDays: 30, stock: 800, batch: 'BTH-2026-009', expiry: '2027-09-20' },
+  { code: 'RX-AMOX-500', drugName: 'Amoxicillin', formulation: 'Capsule', strength: '500 mg', defaultRoute: 'Oral', defaultFreq: 'TDS (Three Times Daily)', defaultDays: 7, stock: 210, batch: 'BTH-2026-991', expiry: '2027-05-10' },
+  { code: 'RX-PARAC-500', drugName: 'Paracetamol', formulation: 'Tablet', strength: '500 mg', defaultRoute: 'Oral', defaultFreq: 'PRN (As needed for pain/fever)', defaultDays: 5, stock: 1200, batch: 'BTH-2026-301', expiry: '2028-10-01' },
+  { code: 'RX-ATORV-20', drugName: 'Atorvastatin', formulation: 'Tablet', strength: '20 mg', defaultRoute: 'Oral', defaultFreq: 'HS (At Bedtime)', defaultDays: 30, stock: 540, batch: 'BTH-2026-512', expiry: '2028-02-18' },
 ];
 
 
@@ -57,7 +57,6 @@ interface FormularyDrug {
   defaultRoute: string;
   defaultFreq: string;
   defaultDays: number;
-  unitCost: number;
   stock: number;
   nextFefoBatch?: {
     batchNumber: string;
@@ -102,7 +101,6 @@ export function OpdPharmacyPrescriptions({
   const [safetyOverrideReason, setSafetyOverrideReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [dispenseModalItem, setDispenseModalItem] = useState<PharmacyPrescriptionItem | null>(null);
-  const [pharmacistName, setPharmacistName] = useState<string>('');
 
   useEffect(() => {
     if (IS_DEMO_RUNTIME) return;
@@ -131,7 +129,6 @@ export function OpdPharmacyPrescriptions({
           defaultRoute: 'Oral',
           defaultFreq: 'As directed',
           defaultDays: 1,
-          unitCost: Number(item.sellingPrice || 0),
           stock: Number(item.totalAvailable || 0),
           nextFefoBatch: item.nextFefoBatch || null,
         }));
@@ -200,8 +197,6 @@ export function OpdPharmacyPrescriptions({
       frequency,
       durationDays,
       quantity,
-      unitPriceMinorUnits: selectedDrug.unitCost * 100,
-      totalAmountMinorUnits: selectedDrug.unitCost * quantity * 100,
       specialInstructions,
       substitutionAllowed: allowGeneric,
       status: 'PRESCRIBED',
@@ -523,7 +518,7 @@ export function OpdPharmacyPrescriptions({
         <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center justify-between">
           <span>Outpatient Prescription Items ({prescriptions.length})</span>
           <span className="text-xs font-normal text-slate-400">
-            Total Medication Cost: PKR {(prescriptions.reduce((acc, p) => acc + (p.totalAmountMinorUnits || 0), 0) / 100).toLocaleString()}
+            Billing is posted from authoritative Item Master pricing at dispense.
           </span>
         </h3>
 
@@ -630,16 +625,6 @@ export function OpdPharmacyPrescriptions({
               </p>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold mb-1">Dispensing Licensed Pharmacist</label>
-              <input
-                type="text"
-                value={pharmacistName}
-                onChange={(e) => setPharmacistName(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
-              />
-            </div>
-
             <div className="flex justify-end gap-2 pt-2">
               <button
                 onClick={() => setDispenseModalItem(null)}
@@ -649,8 +634,17 @@ export function OpdPharmacyPrescriptions({
               </button>
               <button
                 onClick={() => {
-                  onDispensePrescription(dispenseModalItem.id, pharmacistName);
-                  setDispenseModalItem(null);
+                  void Promise.resolve(
+                    onDispensePrescription(dispenseModalItem.id)
+                  )
+                    .then(() => setDispenseModalItem(null))
+                    .catch((error) =>
+                      setPrescriptionError(
+                        error instanceof Error
+                          ? error.message
+                          : 'Medication dispensing failed.'
+                      )
+                    );
                 }}
                 className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold cursor-pointer"
               >

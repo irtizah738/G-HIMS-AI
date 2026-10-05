@@ -73,6 +73,12 @@ export interface WaitlistEntry {
   createdAt: number;
 }
 
+export interface ConsentCaptureDecision {
+  consentType: 'GENERAL_OUTPATIENT' | 'DATA_SHARING_HIE';
+  status: 'GRANTED' | 'WITHHELD';
+  method: 'DIGITAL_ATTESTATION';
+}
+
 export interface ConsentRecord {
   id: string;
   consentType: 'GENERAL_OUTPATIENT' | 'DATA_SHARING_HIE' | 'INVASIVE_PROCEDURE' | 'BLOOD_TRANSFUSION' | 'RESEARCH_TELEMETRY';
@@ -93,12 +99,12 @@ export interface PatientDemographics {
   mrn: string;
   fullName: string;
   preferredName?: string;
-  gender: 'Male' | 'Female' | 'Other';
+  gender: 'Male' | 'Female' | 'Other' | 'Unknown';
   dob: string;
   age: number;
   nationalId: string; // CNIC / SSN
   passportNumber?: string;
-  maritalStatus: 'Single' | 'Married' | 'Divorced' | 'Widowed';
+  maritalStatus: 'Single' | 'Married' | 'Divorced' | 'Widowed' | 'Unknown';
   nationality: string;
   primaryLanguage: string;
   occupation?: string;
@@ -111,7 +117,7 @@ export interface PatientDemographics {
     relation: string;
     phone: string;
   };
-  tariffPlan: 'OUT_OF_POCKET' | 'CORPORATE_PPO' | 'SEHAT_CARD_UNIVERSAL' | 'STATE_INSURANCE';
+  tariffPlan: 'OUT_OF_POCKET' | 'CORPORATE_PPO' | 'SEHAT_CARD_UNIVERSAL' | 'STATE_INSURANCE' | 'UNASSIGNED';
   insuranceDetails?: {
     payerName?: string;
     policyNumber?: string;
@@ -123,7 +129,8 @@ export interface PatientDemographics {
     expiryDate?: string;
   };
   consents?: ConsentRecord[];
-  bloodGroup: 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-';
+  registrationConsentDecisions?: ConsentCaptureDecision[];
+  bloodGroup: 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-' | 'Unknown';
   knownAllergies?: string[];
   chronicConditions?: string[];
   createdAt: number;
@@ -160,6 +167,7 @@ export interface AppointmentRecord {
 }
 
 export type QueueStatus =
+  | 'PAYMENT_PENDING'
   | 'WAITING'
   | 'CALLED'
   | 'IN_SERVICE'
@@ -211,6 +219,7 @@ export interface ComprehensiveVitals {
   respiratoryRate: number; // breaths/min
   temperatureCelsius: number; // °C
   spo2Percent: number; // %
+  spO2Scale?: 1 | 2; // NEWS2 oxygen saturation scale explicitly selected at triage
   onSupplementalOxygen: boolean;
   oxygenFlowRateLpm?: number;
   bloodGlucoseMgDl?: number;
@@ -238,7 +247,7 @@ export interface ComprehensiveVitals {
   news2Risk?: 'LOW' | 'LOW_MEDIUM' | 'MEDIUM' | 'HIGH';
   pediatricGrowth?: PediatricGrowthMetrics;
   measuredAt: number;
-  measuredBy: string;
+  measuredBy?: string;
   triageNotes?: string;
 }
 
@@ -714,7 +723,7 @@ export interface ComprehensiveOpdEncounter {
   patientId: string;
   mrn: string;
   patientName: string;
-  gender: 'Male' | 'Female' | 'Other';
+  gender: 'Male' | 'Female' | 'Other' | 'Unknown';
   age: number;
   tokenNumber?: string;
   chiefComplaint?: string;
@@ -723,7 +732,7 @@ export interface ComprehensiveOpdEncounter {
   department?: SpecialtyDepartment | string;
   attendingDoctorId?: string;
   attendingDoctorName?: string;
-  tariffPlan: 'OUT_OF_POCKET' | 'CORPORATE_PPO' | 'SEHAT_CARD_UNIVERSAL' | 'STATE_INSURANCE';
+  tariffPlan: 'OUT_OF_POCKET' | 'CORPORATE_PPO' | 'SEHAT_CARD_UNIVERSAL' | 'STATE_INSURANCE' | 'UNASSIGNED';
   copayRatio?: { insurancePercent: number; patientPercent: number };
   financialClearance?: {
     ingressFeePaid: boolean;
@@ -746,6 +755,7 @@ export interface ComprehensiveOpdEncounter {
   soapDocumentation?: SoapDocumentation;
   diagnosticOrders: DiagnosticOrderItem[];
   prescriptions: PharmacyPrescriptionItem[];
+  consultationInvoice?: OpdInvoice;
   invoice?: OpdInvoice | any;
   ledgerVouchers?: LedgerJournalVoucher[];
   dispositionData?: DispositionAndAdmission | EncounterDisposition;
@@ -805,6 +815,7 @@ export interface OpdInvoice {
   patientId: string;
   invoiceNumber: string;
   payerTariffPlan: string;
+  billingPurpose?: 'OPD_CONSULTATION' | 'FINAL_ENCOUNTER';
   totalAmountMinorUnits: number;
   payerCoverageAmountMinorUnits: number;
   patientCopayAmountMinorUnits: number;

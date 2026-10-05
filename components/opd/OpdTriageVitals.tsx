@@ -20,6 +20,7 @@ import {
   ComprehensiveOpdEncounter,
   PediatricGrowthMetrics,
 } from '@/types/opd-domain';
+import { calculateNEWS2 } from '@/lib/clinical/news2';
 
 interface OpdTriageVitalsProps {
   encounter: ComprehensiveOpdEncounter;
@@ -29,136 +30,178 @@ interface OpdTriageVitalsProps {
 export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProps) {
   const isPediatric = encounter.age < 12;
 
-  // Physiological Parameters
-  const [hr, setHr] = useState<number>(encounter.vitalsAssessment?.heartRate || 82);
-  const [sysBp, setSysBp] = useState<number>(encounter.vitalsAssessment?.systolicBp || 128);
-  const [diaBp, setDiaBp] = useState<number>(encounter.vitalsAssessment?.diastolicBp || 82);
-  const [rr, setRr] = useState<number>(encounter.vitalsAssessment?.respiratoryRate || 16);
-  const [temp, setTemp] = useState<number>(encounter.vitalsAssessment?.temperatureCelsius || 37.0);
-  const [spo2, setSpo2] = useState<number>(encounter.vitalsAssessment?.spo2Percent || 98);
-  const [onO2, setOnO2] = useState<boolean>(encounter.vitalsAssessment?.onSupplementalOxygen || false);
-  const [o2Flow, setO2Flow] = useState<number>(encounter.vitalsAssessment?.oxygenFlowRateLpm || 2);
-  const [glucose, setGlucose] = useState<number>(encounter.vitalsAssessment?.bloodGlucoseMgDl || 108);
+  // No production clinical measurement is pre-populated. Existing committed
+  // evidence may be displayed for review; a new triage assessment starts blank.
+  const blank = Number.NaN;
+  const inputValue = (value: number): number | '' =>
+    Number.isFinite(value) ? value : '';
+  const parseNumericInput = (value: string): number =>
+    value.trim() === '' ? Number.NaN : Number(value);
+  const [hr, setHr] = useState<number>(encounter.vitalsAssessment?.heartRate ?? blank);
+  const [sysBp, setSysBp] = useState<number>(encounter.vitalsAssessment?.systolicBp ?? blank);
+  const [diaBp, setDiaBp] = useState<number>(encounter.vitalsAssessment?.diastolicBp ?? blank);
+  const [rr, setRr] = useState<number>(encounter.vitalsAssessment?.respiratoryRate ?? blank);
+  const [temp, setTemp] = useState<number>(encounter.vitalsAssessment?.temperatureCelsius ?? blank);
+  const [spo2, setSpo2] = useState<number>(encounter.vitalsAssessment?.spo2Percent ?? blank);
+  const [spO2Scale, setSpO2Scale] = useState<1 | 2 | ''>(
+    encounter.vitalsAssessment?.spO2Scale ?? ''
+  );
+  const [onO2, setOnO2] = useState<boolean | null>(
+    encounter.vitalsAssessment?.onSupplementalOxygen ?? null
+  );
+  const [o2Flow, setO2Flow] = useState<number>(
+    encounter.vitalsAssessment?.oxygenFlowRateLpm ?? blank
+  );
+  const [glucose, setGlucose] = useState<number>(
+    encounter.vitalsAssessment?.bloodGlucoseMgDl ?? blank
+  );
 
-  // Anthropometrics
-  const [heightCm, setHeightCm] = useState<number>(encounter.vitalsAssessment?.heightCm || (isPediatric ? 105 : 172));
-  const [weightKg, setWeightKg] = useState<number>(encounter.vitalsAssessment?.weightKg || (isPediatric ? 18.5 : 74.0));
-  const [painScale, setPainScale] = useState<number>(encounter.vitalsAssessment?.painScale || 2);
-  const [fallRisk, setFallRisk] = useState<number>(encounter.vitalsAssessment?.fallRiskScore || 1);
+  const [heightCm, setHeightCm] = useState<number>(
+    encounter.vitalsAssessment?.heightCm ?? blank
+  );
+  const [weightKg, setWeightKg] = useState<number>(
+    encounter.vitalsAssessment?.weightKg ?? blank
+  );
+  const [painScale, setPainScale] = useState<number>(
+    encounter.vitalsAssessment?.painScale ?? blank
+  );
+  const [fallRisk, setFallRisk] = useState<number>(
+    encounter.vitalsAssessment?.fallRiskScore ?? blank
+  );
 
-  // GCS Subscales
-  const [gcsEye, setGcsEye] = useState<number>(encounter.vitalsAssessment?.gcsEye || 4);
-  const [gcsVerbal, setGcsVerbal] = useState<number>(encounter.vitalsAssessment?.gcsVerbal || 5);
-  const [gcsMotor, setGcsMotor] = useState<number>(encounter.vitalsAssessment?.gcsMotor || 6);
+  const [gcsEye, setGcsEye] = useState<number>(
+    encounter.vitalsAssessment?.gcsEye ?? blank
+  );
+  const [gcsVerbal, setGcsVerbal] = useState<number>(
+    encounter.vitalsAssessment?.gcsVerbal ?? blank
+  );
+  const [gcsMotor, setGcsMotor] = useState<number>(
+    encounter.vitalsAssessment?.gcsMotor ?? blank
+  );
 
-  // Screening
   const [feverTravelExposure, setFeverTravelExposure] = useState<boolean>(false);
   const [activeCoughOrRash, setActiveCoughOrRash] = useState<boolean>(false);
   const [isPregnant, setIsPregnant] = useState<boolean>(false);
-  const [gestWeeks, setGestWeeks] = useState<number>(24);
+  const [gestWeeks, setGestWeeks] = useState<number>(blank);
   const [triageNotes, setTriageNotes] = useState<string>(
-    encounter.vitalsAssessment?.triageNotes || 'Patient ambulatory, alert, coherent. Oriented x 3.'
+    encounter.vitalsAssessment?.triageNotes ?? ''
   );
 
-  // Pediatric Growth
   const [headCircumference, setHeadCircumference] = useState<number>(
-    encounter.vitalsAssessment?.pediatricGrowth?.headCircumferenceCm || 48
+    encounter.vitalsAssessment?.pediatricGrowth?.headCircumferenceCm ?? blank
   );
-  const [immunizationStatus, setImmunizationStatus] = useState<'UP_TO_DATE' | 'DELAYED' | 'EXEMPT' | 'UNKNOWN'>(
-    encounter.vitalsAssessment?.pediatricGrowth?.immunizationStatus || 'UP_TO_DATE'
-  );
-  const [milestones, setMilestones] = useState<'APPROPRIATE' | 'DELAY_OBSERVED' | 'UNDER_EVALUATION'>(
-    encounter.vitalsAssessment?.pediatricGrowth?.developmentalMilestones || 'APPROPRIATE'
-  );
+  const [immunizationStatus, setImmunizationStatus] = useState<
+    'UP_TO_DATE' | 'DELAYED' | 'EXEMPT' | 'UNKNOWN'
+  >(encounter.vitalsAssessment?.pediatricGrowth?.immunizationStatus ?? 'UNKNOWN');
+  const [milestones, setMilestones] = useState<
+    'APPROPRIATE' | 'DELAY_OBSERVED' | 'UNDER_EVALUATION'
+  >(encounter.vitalsAssessment?.pediatricGrowth?.developmentalMilestones ?? 'UNDER_EVALUATION');
 
-  // Computed Total GCS and AVPU
-  const totalGcs = gcsEye + gcsVerbal + gcsMotor;
-  const avpuDerived: 'ALERT' | 'VOICE' | 'PAIN' | 'UNRESPONSIVE' = useMemo(() => {
+  const gcsComplete =
+    Number.isInteger(gcsEye) &&
+    gcsEye >= 1 &&
+    gcsEye <= 4 &&
+    Number.isInteger(gcsVerbal) &&
+    gcsVerbal >= 1 &&
+    gcsVerbal <= 5 &&
+    Number.isInteger(gcsMotor) &&
+    gcsMotor >= 1 &&
+    gcsMotor <= 6;
+
+  const totalGcs = gcsComplete ? gcsEye + gcsVerbal + gcsMotor : Number.NaN;
+  const avpuDerived: 'ALERT' | 'VOICE' | 'PAIN' | 'UNRESPONSIVE' | null = useMemo(() => {
+    if (!Number.isFinite(totalGcs)) return null;
     if (totalGcs >= 15) return 'ALERT';
     if (totalGcs >= 12) return 'VOICE';
     if (totalGcs >= 8) return 'PAIN';
     return 'UNRESPONSIVE';
   }, [totalGcs]);
 
-  // Computed BMI
   const bmiComputed = useMemo(() => {
-    if (!heightCm || !weightKg) return 22.0;
+    if (!Number.isFinite(heightCm) || !Number.isFinite(weightKg) || heightCm <= 0 || weightKg <= 0) {
+      return Number.NaN;
+    }
     const hM = heightCm / 100;
     return Number((weightKg / (hM * hM)).toFixed(1));
   }, [heightCm, weightKg]);
 
-  // Computed NEWS2 Score Engine
+  const news2Ready =
+    Number.isFinite(hr) &&
+    Number.isFinite(sysBp) &&
+    Number.isFinite(rr) &&
+    Number.isFinite(temp) &&
+    Number.isFinite(spo2) &&
+    spO2Scale !== '' &&
+    onO2 !== null &&
+    avpuDerived !== null;
+
   const liveNews2 = useMemo(() => {
-    let score = 0;
+    if (!news2Ready || onO2 === null || avpuDerived === null) return null;
 
-    // Respiration Rate
-    if (rr <= 8) score += 3;
-    else if (rr >= 9 && rr <= 11) score += 1;
-    else if (rr >= 12 && rr <= 20) score += 0;
-    else if (rr >= 21 && rr <= 24) score += 2;
-    else if (rr >= 25) score += 3;
+    const result = calculateNEWS2({
+      respirationRate: rr,
+      spO2: spo2,
+      spO2Scale,
+      onSupplementalOxygen: onO2,
+      systolicBP: sysBp,
+      heartRate: hr,
+      consciousness: avpuDerived === 'ALERT'
+        ? 'Alert'
+        : avpuDerived === 'VOICE'
+          ? 'Voice'
+          : avpuDerived === 'PAIN'
+            ? 'Pain'
+            : 'Unresponsive',
+      gcsScore: totalGcs,
+      temperature: temp,
+    });
 
-    // SpO2 Scale 1
-    if (spo2 <= 91) score += 3;
-    else if (spo2 >= 92 && spo2 <= 93) score += 2;
-    else if (spo2 >= 94 && spo2 <= 95) score += 1;
-    else if (spo2 >= 96) score += 0;
+    const risk: 'LOW' | 'LOW_MEDIUM' | 'MEDIUM' | 'HIGH' =
+      result.riskLevel === 'High'
+        ? 'HIGH'
+        : result.riskLevel === 'Medium'
+          ? 'MEDIUM'
+          : result.riskLevel === 'Low-Medium'
+            ? 'LOW_MEDIUM'
+            : 'LOW';
 
-    // Air or Oxygen
-    if (onO2) score += 2;
-
-    // Systolic BP
-    if (sysBp <= 90) score += 3;
-    else if (sysBp >= 91 && sysBp <= 100) score += 2;
-    else if (sysBp >= 101 && sysBp <= 110) score += 1;
-    else if (sysBp >= 111 && sysBp <= 219) score += 0;
-    else if (sysBp >= 220) score += 3;
-
-    // Pulse / Heart Rate
-    if (hr <= 40) score += 3;
-    else if (hr >= 41 && hr <= 50) score += 1;
-    else if (hr >= 51 && hr <= 90) score += 0;
-    else if (hr >= 91 && hr <= 110) score += 1;
-    else if (hr >= 111 && hr <= 130) score += 2;
-    else if (hr >= 131) score += 3;
-
-    // Consciousness
-    if (avpuDerived !== 'ALERT') score += 3;
-
-    // Temperature
-    if (temp <= 35.0) score += 3;
-    else if (temp >= 35.1 && temp <= 36.0) score += 1;
-    else if (temp >= 36.1 && temp <= 38.0) score += 0;
-    else if (temp >= 38.1 && temp <= 39.0) score += 1;
-    else if (temp >= 39.1) score += 2;
-
-    let risk: 'LOW' | 'LOW_MEDIUM' | 'MEDIUM' | 'HIGH' = 'LOW';
-    let routing = 'Standard OPD Physician Consultation Queue';
-
-    if (score >= 7 || totalGcs <= 8) {
-      risk = 'HIGH';
-      routing = 'Immediate Emergency Resuscitation Track / Critical Alert';
-    } else if (score >= 5) {
-      risk = 'MEDIUM';
-      routing = 'Urgent Medical Officer Triage / Stat Review';
-    } else if (score >= 1) {
-      risk = 'LOW_MEDIUM';
-      routing = 'Standard Specialist OPD Bay';
-    }
-
-    return { totalScore: score, risk, routing };
-  }, [rr, spo2, onO2, sysBp, hr, avpuDerived, temp, totalGcs]);
+    return {
+      totalScore: result.score,
+      risk,
+      routing: result.clinicalResponse,
+    };
+  }, [news2Ready, rr, spo2, spO2Scale, onO2, sysBp, hr, avpuDerived, totalGcs, temp]);
 
   const handleSave = () => {
+    if (
+      !liveNews2 ||
+      spO2Scale === '' ||
+      onO2 === null ||
+      avpuDerived === null ||
+      !Number.isFinite(diaBp) ||
+      !Number.isFinite(heightCm) ||
+      !Number.isFinite(weightKg) ||
+      !Number.isFinite(bmiComputed)
+    ) {
+      alert(
+        'Complete all required triage measurements, NEWS2 SpO₂ scale, oxygen status, GCS, height and weight before committing vitals.'
+      );
+      return;
+    }
+
+    if (onO2 && (!Number.isFinite(o2Flow) || o2Flow <= 0)) {
+      alert('Enter the supplemental oxygen flow rate before committing vitals.');
+      return;
+    }
+
     const pediatricGrowth: PediatricGrowthMetrics | undefined = isPediatric
       ? {
           isPediatric: true,
-          weightForAgePercentile: 50,
-          heightForAgePercentile: 60,
-          headCircumferenceCm: headCircumference,
+          ...(Number.isFinite(headCircumference) && headCircumference > 0
+            ? { headCircumferenceCm: headCircumference }
+            : {}),
           immunizationStatus,
           developmentalMilestones: milestones,
-          guardianName: 'Parent / Legal Guardian',
         }
       : undefined;
 
@@ -169,14 +212,15 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
       respiratoryRate: rr,
       temperatureCelsius: temp,
       spo2Percent: spo2,
+      spO2Scale,
       onSupplementalOxygen: onO2,
       oxygenFlowRateLpm: onO2 ? o2Flow : undefined,
-      bloodGlucoseMgDl: glucose,
+      bloodGlucoseMgDl: Number.isFinite(glucose) ? glucose : undefined,
       heightCm,
       weightKg,
       bmi: bmiComputed,
-      painScale,
-      fallRiskScore: fallRisk,
+      painScale: Number.isFinite(painScale) ? painScale : undefined,
+      fallRiskScore: Number.isFinite(fallRisk) ? fallRisk : undefined,
       infectionScreening: {
         feverTravelExposure,
         activeCoughOrRash,
@@ -186,7 +230,8 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
         encounter.gender === 'Female' && encounter.age >= 12 && encounter.age <= 55
           ? {
               isPregnant,
-              gestationalWeeks: isPregnant ? gestWeeks : undefined,
+              gestationalWeeks:
+                isPregnant && Number.isFinite(gestWeeks) ? gestWeeks : undefined,
             }
           : undefined,
       gcsScore: totalGcs,
@@ -198,8 +243,7 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
       news2Risk: liveNews2.risk,
       pediatricGrowth,
       measuredAt: Date.now(),
-      measuredBy: 'Staff Nurse R. Chen (RN)',
-      triageNotes,
+      triageNotes: triageNotes.trim() || undefined,
     };
 
     onSaveVitals(record);
@@ -240,8 +284,8 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
               </label>
               <input
                 type="number"
-                value={hr}
-                onChange={(e) => setHr(Number(e.target.value))}
+                value={inputValue(hr)}
+                onChange={(e) => setHr(parseNumericInput(e.target.value))}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
               />
             </div>
@@ -251,8 +295,8 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
               </label>
               <input
                 type="number"
-                value={sysBp}
-                onChange={(e) => setSysBp(Number(e.target.value))}
+                value={inputValue(sysBp)}
+                onChange={(e) => setSysBp(parseNumericInput(e.target.value))}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
               />
             </div>
@@ -262,8 +306,8 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
               </label>
               <input
                 type="number"
-                value={diaBp}
-                onChange={(e) => setDiaBp(Number(e.target.value))}
+                value={inputValue(diaBp)}
+                onChange={(e) => setDiaBp(parseNumericInput(e.target.value))}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
               />
             </div>
@@ -273,8 +317,8 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
               </label>
               <input
                 type="number"
-                value={rr}
-                onChange={(e) => setRr(Number(e.target.value))}
+                value={inputValue(rr)}
+                onChange={(e) => setRr(parseNumericInput(e.target.value))}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
               />
             </div>
@@ -285,8 +329,8 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
               <input
                 type="number"
                 step="0.1"
-                value={temp}
-                onChange={(e) => setTemp(Number(e.target.value))}
+                value={inputValue(temp)}
+                onChange={(e) => setTemp(parseNumericInput(e.target.value))}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
               />
             </div>
@@ -296,33 +340,61 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
               </label>
               <input
                 type="number"
-                value={spo2}
-                onChange={(e) => setSpo2(Number(e.target.value))}
+                value={inputValue(spo2)}
+                onChange={(e) => setSpo2(parseNumericInput(e.target.value))}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold text-blue-600"
               />
             </div>
           </div>
 
-          <div className="flex items-center gap-4 pt-1">
-            <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={onO2}
-                onChange={(e) => setOnO2(e.target.checked)}
-                className="w-4 h-4 rounded text-blue-600"
-              />
-              On Supplemental Oxygen (FiO2 &gt; 21%)
-            </label>
-            {onO2 && (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-500">Flow:</span>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+            <div>
+              <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                NEWS2 SpO₂ Scale
+              </label>
+              <select
+                value={spO2Scale}
+                onChange={(e) =>
+                  setSpO2Scale(e.target.value === '' ? '' : (Number(e.target.value) as 1 | 2))
+                }
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+              >
+                <option value="">Select scale</option>
+                <option value="1">Scale 1 — Standard</option>
+                <option value="2">Scale 2 — Hypercapnic respiratory failure</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                Oxygen Status
+              </label>
+              <select
+                value={onO2 === null ? '' : onO2 ? 'SUPPLEMENTAL' : 'ROOM_AIR'}
+                onChange={(e) =>
+                  setOnO2(
+                    e.target.value === ''
+                      ? null
+                      : e.target.value === 'SUPPLEMENTAL'
+                  )
+                }
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+              >
+                <option value="">Select oxygen status</option>
+                <option value="ROOM_AIR">Room air</option>
+                <option value="SUPPLEMENTAL">Supplemental oxygen</option>
+              </select>
+            </div>
+            {onO2 === true && (
+              <div>
+                <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                  Oxygen Flow (L/min)
+                </label>
                 <input
                   type="number"
-                  value={o2Flow}
-                  onChange={(e) => setO2Flow(Number(e.target.value))}
-                  className="w-16 px-2 py-1 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold text-center"
+                  value={inputValue(o2Flow)}
+                  onChange={(e) => setO2Flow(parseNumericInput(e.target.value))}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
                 />
-                <span className="text-xs text-slate-500">L/min</span>
               </div>
             )}
           </div>
@@ -336,7 +408,7 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
               2. Glasgow Coma Scale (GCS) Subscale Breakdown
             </h3>
             <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-              Total Score: {totalGcs}/15 (AVPU: {avpuDerived})
+              Total Score: {gcsComplete ? totalGcs : '—'}/15 (AVPU: {avpuDerived || '—'})
             </span>
           </div>
 
@@ -346,10 +418,11 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
                 Eye Opening (1 - 4)
               </label>
               <select
-                value={gcsEye}
-                onChange={(e) => setGcsEye(Number(e.target.value))}
+                value={inputValue(gcsEye)}
+                onChange={(e) => setGcsEye(parseNumericInput(e.target.value))}
                 className="w-full px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
               >
+                <option value="">Select eye response</option>
                 <option value={4}>4 — Spontaneous</option>
                 <option value={3}>3 — To Speech / Voice</option>
                 <option value={2}>2 — To Pain</option>
@@ -362,10 +435,11 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
                 Verbal Response (1 - 5)
               </label>
               <select
-                value={gcsVerbal}
-                onChange={(e) => setGcsVerbal(Number(e.target.value))}
+                value={inputValue(gcsVerbal)}
+                onChange={(e) => setGcsVerbal(parseNumericInput(e.target.value))}
                 className="w-full px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
               >
+                <option value="">Select verbal response</option>
                 <option value={5}>5 — Oriented & Conversing</option>
                 <option value={4}>4 — Confused / Disoriented</option>
                 <option value={3}>3 — Inappropriate Words</option>
@@ -379,10 +453,11 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
                 Motor Response (1 - 6)
               </label>
               <select
-                value={gcsMotor}
-                onChange={(e) => setGcsMotor(Number(e.target.value))}
+                value={inputValue(gcsMotor)}
+                onChange={(e) => setGcsMotor(parseNumericInput(e.target.value))}
                 className="w-full px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
               >
+                <option value="">Select motor response</option>
                 <option value={6}>6 — Obeys Commands</option>
                 <option value={5}>5 — Localizes Pain</option>
                 <option value={4}>4 — Flexion / Withdrawal</option>
@@ -404,8 +479,8 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
               <label className="block text-xs font-semibold mb-1">Height (cm)</label>
               <input
                 type="number"
-                value={heightCm}
-                onChange={(e) => setHeightCm(Number(e.target.value))}
+                value={inputValue(heightCm)}
+                onChange={(e) => setHeightCm(parseNumericInput(e.target.value))}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
               />
             </div>
@@ -414,15 +489,15 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
               <input
                 type="number"
                 step="0.1"
-                value={weightKg}
-                onChange={(e) => setWeightKg(Number(e.target.value))}
+                value={inputValue(weightKg)}
+                onChange={(e) => setWeightKg(parseNumericInput(e.target.value))}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
               />
             </div>
             <div>
               <label className="block text-xs font-semibold mb-1">Computed BMI</label>
               <div className="px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 font-black text-slate-900 dark:text-slate-100">
-                {bmiComputed} kg/m²
+                {Number.isFinite(bmiComputed) ? bmiComputed : '—'} kg/m²
               </div>
             </div>
             <div>
@@ -431,8 +506,8 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
                 type="number"
                 min={0}
                 max={10}
-                value={painScale}
-                onChange={(e) => setPainScale(Number(e.target.value))}
+                value={inputValue(painScale)}
+                onChange={(e) => setPainScale(parseNumericInput(e.target.value))}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold text-center"
               />
             </div>
@@ -446,8 +521,8 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
                 <input
                   type="number"
                   step="0.5"
-                  value={headCircumference}
-                  onChange={(e) => setHeadCircumference(Number(e.target.value))}
+                  value={inputValue(headCircumference)}
+                  onChange={(e) => setHeadCircumference(parseNumericInput(e.target.value))}
                   className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-purple-200 dark:border-purple-700 bg-white dark:bg-slate-900"
                 />
               </div>
@@ -510,24 +585,28 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
 
           <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-center">
             <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Calculated NEWS2 Total</span>
-            <p className="text-4xl font-black text-rose-600 my-1">{liveNews2.totalScore}</p>
+            <p className="text-4xl font-black text-rose-600 my-1">
+              {liveNews2 ? liveNews2.totalScore : '—'}
+            </p>
             <span
               className={`inline-block px-3 py-1 rounded-full text-xs font-black uppercase ${
-                liveNews2.risk === 'HIGH'
-                  ? 'bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200'
-                  : liveNews2.risk === 'MEDIUM'
-                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200'
-                  : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200'
+                !liveNews2
+                  ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                  : liveNews2.risk === 'HIGH'
+                    ? 'bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200'
+                    : liveNews2.risk === 'MEDIUM'
+                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200'
+                      : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200'
               }`}
             >
-              {liveNews2.risk} Clinical Risk
+              {liveNews2 ? `${liveNews2.risk} Clinical Risk` : 'Incomplete NEWS2'}
             </span>
           </div>
 
           <div className="space-y-2 text-xs">
             <span className="font-semibold text-slate-700 dark:text-slate-300">Triage Decision Routing:</span>
             <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 text-blue-900 dark:text-blue-200 font-bold">
-              {liveNews2.routing}
+              {liveNews2?.routing || 'Complete required NEWS2 inputs to calculate routing.'}
             </div>
           </div>
         </div>

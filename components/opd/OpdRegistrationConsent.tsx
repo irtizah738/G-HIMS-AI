@@ -14,7 +14,7 @@ import {
   FileText,
   Lock,
 } from 'lucide-react';
-import { PatientDemographics, ConsentRecord } from '@/types/opd-domain';
+import { PatientDemographics, ConsentCaptureDecision } from '@/types/opd-domain';
 
 interface OpdRegistrationConsentProps {
   initialData?: Partial<PatientDemographics>;
@@ -29,139 +29,129 @@ export function OpdRegistrationConsent({
 }: OpdRegistrationConsentProps) {
   const [fullName, setFullName] = useState<string>(initialData?.fullName || '');
   const [preferredName, setPreferredName] = useState<string>(initialData?.preferredName || '');
-  const [gender, setGender] = useState<'Male' | 'Female' | 'Other'>(initialData?.gender || 'Female');
-  const [dob, setDob] = useState<string>(initialData?.dob || '1990-05-14');
-  const [age, setAge] = useState<number>(initialData?.age || 36);
+  const [gender, setGender] = useState<'Male' | 'Female' | 'Other' | 'Unknown' | ''>(
+    initialData?.gender || ''
+  );
+  const [dob, setDob] = useState<string>(initialData?.dob || '');
+  const [age, setAge] = useState<number | ''>(initialData?.age ?? '');
   const [nationalId, setNationalId] = useState<string>(initialData?.nationalId || '');
   const [passportNumber, setPassportNumber] = useState<string>(initialData?.passportNumber || '');
-  const [maritalStatus, setMaritalStatus] = useState<'Single' | 'Married' | 'Divorced' | 'Widowed'>('Married');
-  const [nationality, setNationality] = useState<string>('Pakistani');
-  const [primaryLanguage, setPrimaryLanguage] = useState<string>('English / Urdu');
-  const [occupation, setOccupation] = useState<string>('Academic Researcher');
+  const maritalStatus: PatientDemographics['maritalStatus'] = 'Unknown';
+  const [nationality, setNationality] = useState<string>('');
+  const [primaryLanguage, setPrimaryLanguage] = useState<string>('');
+  const [occupation, setOccupation] = useState<string>('');
 
-  const [phone, setPhone] = useState<string>(initialData?.phone || '+92 300 8877665');
+  const [phone, setPhone] = useState<string>(initialData?.phone || '');
   const [secondaryPhone, setSecondaryPhone] = useState<string>('');
-  const [email, setEmail] = useState<string>('patient@example.org');
-  const [residentialAddress, setResidentialAddress] = useState<string>('Sector F-7/2, Islamabad, ICT');
+  const [email, setEmail] = useState<string>('');
+  const [residentialAddress, setResidentialAddress] = useState<string>('');
 
-  const [emergencyName, setEmergencyName] = useState<string>('Tariq Vance');
-  const [emergencyRelation, setEmergencyRelation] = useState<string>('Spouse');
-  const [emergencyPhone, setEmergencyPhone] = useState<string>('+92 321 9988771');
+  const [emergencyName, setEmergencyName] = useState<string>('');
+  const [emergencyRelation, setEmergencyRelation] = useState<string>('');
+  const [emergencyPhone, setEmergencyPhone] = useState<string>('');
 
-  const [tariffPlan, setTariffPlan] = useState<'OUT_OF_POCKET' | 'CORPORATE_PPO' | 'SEHAT_CARD_UNIVERSAL' | 'STATE_INSURANCE'>('CORPORATE_PPO');
-  const [payerName, setPayerName] = useState<string>('Jubilee Life Insurance / PPO');
-  const [policyNumber, setPolicyNumber] = useState<string>('POL-992019-JUB');
-  const [bloodGroup, setBloodGroup] = useState<'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-'>('O+');
-  const [knownAllergies, setKnownAllergies] = useState<string>('Penicillin, NSAIDs');
+  const [tariffPlan, setTariffPlan] = useState<
+    'OUT_OF_POCKET' | 'CORPORATE_PPO' | 'SEHAT_CARD_UNIVERSAL' | 'STATE_INSURANCE' | 'UNASSIGNED' | ''
+  >('');
+  const [payerName, setPayerName] = useState<string>('');
+  const [policyNumber, setPolicyNumber] = useState<string>('');
+  const [bloodGroup, setBloodGroup] = useState<
+    'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-' | 'Unknown'
+  >('Unknown');
+  const [knownAllergies, setKnownAllergies] = useState<string>('');
 
-  // Configurable dynamic consent states
-  const [generalConsentGranted, setGeneralConsentGranted] = useState<boolean>(true);
-  const [dataSharingGranted, setDataSharingGranted] = useState<boolean>(true);
-  const [procedureConsentGranted, setProcedureConsentGranted] = useState<boolean>(true);
-  const [consentMethod, setConsentMethod] = useState<'DIGITAL_SIGNATURE' | 'PAPER_SCANNED' | 'VERBAL_WITNESSED'>('DIGITAL_SIGNATURE');
+  // Consent decisions are explicit and unselected by default. Procedure-specific
+  // consent is intentionally not collected as a blanket registration consent.
+  const [generalConsentGranted, setGeneralConsentGranted] = useState<boolean | null>(null);
+  const [dataSharingGranted, setDataSharingGranted] = useState<boolean | null>(null);
+  const consentMethod: ConsentCaptureDecision['method'] = 'DIGITAL_ATTESTATION';
 
   const handleDobChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setDob(val);
-    if (val) {
-      const birthYear = new Date(val).getFullYear();
-      const currentYear = new Date().getFullYear();
-      if (!isNaN(birthYear)) {
-        setAge(Math.max(0, currentYear - birthYear));
-      }
+    if (!val) {
+      setAge('');
+      return;
     }
+    const birthDate = new Date(`${val}T00:00:00`);
+    const now = new Date();
+    if (Number.isNaN(birthDate.getTime()) || birthDate > now) {
+      setAge('');
+      return;
+    }
+    let calculated = now.getFullYear() - birthDate.getFullYear();
+    const monthDelta = now.getMonth() - birthDate.getMonth();
+    if (
+      monthDelta < 0 ||
+      (monthDelta === 0 && now.getDate() < birthDate.getDate())
+    ) {
+      calculated -= 1;
+    }
+    setAge(Math.max(0, calculated));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    const mrnGenerated = `MRN-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
-
-    const consents: ConsentRecord[] = [
+    if (!gender || age === '' || !tariffPlan) {
+      alert('Complete gender, date of birth and tariff class before registration.');
+      return;
+    }
+    if (tariffPlan !== 'OUT_OF_POCKET') {
+      alert('The controlled OPD pilot currently supports cash / out-of-pocket billing only.');
+      return;
+    }
+    if (generalConsentGranted === null || dataSharingGranted === null) {
+      alert('Record an explicit Grant or Withhold decision for each registration consent.');
+      return;
+    }
+    const consentDecisions: ConsentCaptureDecision[] = [
       {
-        id: `cst-gen-${Date.now()}`,
         consentType: 'GENERAL_OUTPATIENT',
-        title: 'Institutional General Outpatient Care Consent',
         status: generalConsentGranted ? 'GRANTED' : 'WITHHELD',
-        version: 'v2.4',
-        effectiveDate: new Date().toISOString().slice(0, 10),
-        expiryDate: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString().slice(0, 10),
         method: consentMethod,
-        actorName: fullName,
-        actorRole: 'Patient / Self',
-        witnessName: 'Staff Registrar K. Ahmed',
-        documentHash: `SHA256:CONSENT:GEN:${mrnGenerated}`,
       },
       {
-        id: `cst-hie-${Date.now()}`,
         consentType: 'DATA_SHARING_HIE',
-        title: 'National Health Information Exchange (HIE) Data Sharing Consent',
         status: dataSharingGranted ? 'GRANTED' : 'WITHHELD',
-        version: 'v1.2',
-        effectiveDate: new Date().toISOString().slice(0, 10),
-        expiryDate: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString().slice(0, 10),
         method: consentMethod,
-        actorName: fullName,
-        actorRole: 'Patient / Self',
-        witnessName: 'Staff Registrar K. Ahmed',
-        documentHash: `SHA256:CONSENT:HIE:${mrnGenerated}`,
-      },
-      {
-        id: `cst-proc-${Date.now()}`,
-        consentType: 'INVASIVE_PROCEDURE',
-        title: 'Minor Outpatient Diagnostics & Procedures Consent',
-        status: procedureConsentGranted ? 'GRANTED' : 'WITHHELD',
-        version: 'v3.1',
-        effectiveDate: new Date().toISOString().slice(0, 10),
-        expiryDate: new Date(Date.now() + 180 * 24 * 3600 * 1000).toISOString().slice(0, 10),
-        method: consentMethod,
-        actorName: fullName,
-        actorRole: 'Patient / Self',
-        witnessName: 'Staff Registrar K. Ahmed',
-        documentHash: `SHA256:CONSENT:PROC:${mrnGenerated}`,
       },
     ];
 
     const newPatient: PatientDemographics = {
-      id: `pat-${Date.now()}`,
-      mrn: mrnGenerated,
-      fullName,
-      preferredName: preferredName || undefined,
+      // IDs/MRN are server-owned and replaced by the registration orchestrator.
+      id: '',
+      mrn: '',
+      fullName: fullName.trim(),
+      preferredName: preferredName.trim() || undefined,
       gender,
       dob,
       age,
-      nationalId: nationalId || `CNIC-${Math.floor(1000000000000 + Math.random() * 9000000000000)}`,
-      passportNumber: passportNumber || undefined,
+      nationalId: nationalId.trim(),
+      passportNumber: passportNumber.trim() || undefined,
       maritalStatus,
-      nationality,
-      primaryLanguage,
-      occupation,
-      phone,
-      secondaryPhone: secondaryPhone || undefined,
-      email: email || undefined,
-      residentialAddress,
-      emergencyContact: {
-        name: emergencyName,
-        relation: emergencyRelation,
-        phone: emergencyPhone,
-      },
-      tariffPlan,
-      insuranceDetails:
-        tariffPlan === 'CORPORATE_PPO' || tariffPlan === 'STATE_INSURANCE'
+      nationality: nationality.trim(),
+      primaryLanguage: primaryLanguage.trim(),
+      occupation: occupation.trim() || undefined,
+      phone: phone.trim(),
+      secondaryPhone: secondaryPhone.trim() || undefined,
+      email: email.trim() || undefined,
+      residentialAddress: residentialAddress.trim(),
+      emergencyContact:
+        emergencyName.trim() && emergencyRelation.trim() && emergencyPhone.trim()
           ? {
-              payerName,
-              policyNumber,
-              coveragePercent: tariffPlan === 'CORPORATE_PPO' ? 80 : 100,
-              copayPercent: tariffPlan === 'CORPORATE_PPO' ? 20 : 0,
-              expiryDate: '2027-12-31',
+              name: emergencyName.trim(),
+              relation: emergencyRelation.trim(),
+              phone: emergencyPhone.trim(),
             }
           : undefined,
-      consents,
+      tariffPlan,
+      registrationConsentDecisions: consentDecisions,
       bloodGroup,
-      knownAllergies: knownAllergies ? knownAllergies.split(',').map((s) => s.trim()) : [],
-      chronicConditions: ['Hypertension'],
-      createdAt: Date.now(),
-      registeredBy: 'Registrar K. Ahmed (Counter 1)',
+      knownAllergies: knownAllergies.trim()
+        ? knownAllergies.split(',').map((value) => value.trim()).filter(Boolean)
+        : undefined,
+      createdAt: 0,
     };
 
     onRegisterSuccess(newPatient);
@@ -264,9 +254,11 @@ export function OpdRegistrationConsent({
                 onChange={(e) => setGender(e.target.value as any)}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
               >
+                <option value="">Select gender</option>
                 <option value="Female">Female</option>
                 <option value="Male">Male</option>
                 <option value="Other">Other</option>
+                <option value="Unknown">Unknown / not disclosed</option>
               </select>
             </div>
 
@@ -277,6 +269,7 @@ export function OpdRegistrationConsent({
                 onChange={(e) => setBloodGroup(e.target.value as any)}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold text-rose-600"
               >
+                <option value="Unknown">Unknown / not tested</option>
                 <option value="A+">A+ (Rh Positive)</option>
                 <option value="A-">A- (Rh Negative)</option>
                 <option value="B+">B+ (Rh Positive)</option>
@@ -322,6 +315,7 @@ export function OpdRegistrationConsent({
               <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">Residential Address</label>
               <input
                 type="text"
+                required
                 value={residentialAddress}
                 onChange={(e) => setResidentialAddress(e.target.value)}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
@@ -372,10 +366,11 @@ export function OpdRegistrationConsent({
                 onChange={(e) => setTariffPlan(e.target.value as any)}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
               >
-                <option value="CORPORATE_PPO">Corporate PPO (80% Payer / 20% Co-Pay)</option>
-                <option value="SEHAT_CARD_UNIVERSAL">Sehat Sahulat Universal Health Card (100% Free)</option>
-                <option value="OUT_OF_POCKET">Private Out-of-Pocket Cash</option>
-                <option value="STATE_INSURANCE">State Civil Employee Health Scheme</option>
+                <option value="">Select tariff class</option>
+                <option value="OUT_OF_POCKET">Private Out-of-Pocket Cash — pilot enabled</option>
+                <option value="CORPORATE_PPO" disabled>Corporate PPO — not enabled in controlled pilot</option>
+                <option value="SEHAT_CARD_UNIVERSAL" disabled>Sehat Sahulat — not enabled in controlled pilot</option>
+                <option value="STATE_INSURANCE" disabled>State insurance — not enabled in controlled pilot</option>
               </select>
             </div>
             <div>
@@ -399,72 +394,80 @@ export function OpdRegistrationConsent({
           </div>
         </div>
 
-        {/* Section 4: Versioned Consent Engine */}
+        {/* Section 4: Versioned Consent Authority */}
         <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-bold uppercase tracking-wider text-blue-600 flex items-center gap-1.5">
               <FileCheck className="w-4 h-4" />
-              4. Versioned Informed Consent Engine
+              4. Explicit Registration Consent Decisions
             </h3>
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-slate-500 font-medium">Capture Method:</span>
-              <select
-                value={consentMethod}
-                onChange={(e) => setConsentMethod(e.target.value as any)}
-                className="px-2 py-1 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-semibold"
-              >
-                <option value="DIGITAL_SIGNATURE">Digital Signature Pad</option>
-                <option value="PAPER_SCANNED">Paper Scanned Document</option>
-                <option value="VERBAL_WITNESSED">Verbal Witnessed (Nurse Witnessed)</option>
-              </select>
-            </div>
+            <span className="text-[11px] font-semibold text-slate-500">
+              Digital attestation • server-issued immutable consent record
+            </span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/40 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-900 dark:text-slate-100">General OPD Care (v2.4)</span>
-                <input
-                  type="checkbox"
-                  checked={generalConsentGranted}
-                  onChange={(e) => setGeneralConsentGranted(e.target.checked)}
-                  className="w-4 h-4 text-blue-600 rounded"
-                />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {[
+              {
+                key: 'general',
+                title: 'General OPD Care',
+                description:
+                  'Routine outpatient history, examination and ordinary non-invasive care. Emergency stabilization remains governed by emergency-care policy.',
+                value: generalConsentGranted,
+                setValue: setGeneralConsentGranted,
+              },
+              {
+                key: 'hie',
+                title: 'Health Information Exchange Sharing',
+                description:
+                  'Permission to share authorized clinical data with external health-information exchange participants when an integration is enabled.',
+                value: dataSharingGranted,
+                setValue: setDataSharingGranted,
+              },
+            ].map((item) => (
+              <div
+                key={item.key}
+                className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/40 space-y-3"
+              >
+                <div>
+                  <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                    {item.title}
+                  </span>
+                  <p className="text-[11px] text-slate-500 mt-1">{item.description}</p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => item.setValue(true)}
+                    className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold border ${
+                      item.value === true
+                        ? 'bg-emerald-600 text-white border-emerald-600'
+                        : 'border-slate-200 dark:border-slate-700'
+                    }`}
+                  >
+                    Grant
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => item.setValue(false)}
+                    className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold border ${
+                      item.value === false
+                        ? 'bg-amber-600 text-white border-amber-600'
+                        : 'border-slate-200 dark:border-slate-700'
+                    }`}
+                  >
+                    Withhold
+                  </button>
+                </div>
               </div>
-              <p className="text-[11px] text-slate-500">
-                Authorizes routine clinical history, non-invasive physical examination, and emergency stabilization.
-              </p>
-            </div>
+            ))}
+          </div>
 
-            <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/40 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-900 dark:text-slate-100">HIE Data Sharing (v1.2)</span>
-                <input
-                  type="checkbox"
-                  checked={dataSharingGranted}
-                  onChange={(e) => setDataSharingGranted(e.target.checked)}
-                  className="w-4 h-4 text-blue-600 rounded"
-                />
-              </div>
-              <p className="text-[11px] text-slate-500">
-                Authorizes secure HL7 FHIR laboratory telemetry transmission across regional healthcare networks.
-              </p>
-            </div>
-
-            <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/40 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-900 dark:text-slate-100">Minor Diagnostics (v3.1)</span>
-                <input
-                  type="checkbox"
-                  checked={procedureConsentGranted}
-                  onChange={(e) => setProcedureConsentGranted(e.target.checked)}
-                  className="w-4 h-4 text-blue-600 rounded"
-                />
-              </div>
-              <p className="text-[11px] text-slate-500">
-                Covers venous phlebotomy, diagnostic radiography, and minor dressing applications.
-              </p>
-            </div>
+          <div className="p-3.5 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/60 dark:bg-amber-950/30">
+            <p className="text-[11px] text-amber-900 dark:text-amber-200">
+              Invasive procedures, blood products and other intervention-specific consents are not
+              granted here. They require a separate consent event tied to the actual ordered procedure.
+            </p>
           </div>
         </div>
 

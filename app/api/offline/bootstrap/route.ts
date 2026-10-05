@@ -32,6 +32,9 @@ const CLINICAL_COLLECTIONS = [
 const BILLING_COLLECTIONS = [
   'billingMismatches',
   'encounterCharges',
+  'invoices',
+  'invoiceSettlements',
+  'arOpenItems',
   'journalEntries',
   'cashReceipts',
 ] as const;

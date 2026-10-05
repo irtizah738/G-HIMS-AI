@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Users,
   Search,
@@ -55,6 +55,11 @@ import { OpdPatientTimelineAudit } from './OpdPatientTimelineAudit';
 import { OpdOfflineSyncManager } from './OpdOfflineSyncManager';
 import { executeActiveTenantCommand, registerActiveTenantPatient } from '@/lib/api/command-client';
 import { useAuth } from '@/lib/auth/auth-context';
+import { hydrateEdgeSnapshot } from '@/lib/offline/hydration';
+import {
+  adaptAuthoritativeConsultationInvoice,
+  buildOpdWorkspaceReadModel,
+} from '@/lib/opd/workspace-read-model';
 
 const IS_DEMO_RUNTIME = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
 
@@ -86,6 +91,7 @@ const OPD_TAB_ROLES: Record<string, OpdRole[]> = {
   DISPOSITION: ['ADMINISTRATOR','CLINICAL_DIRECTOR','SPECIALIST_CONSULTANT','MEDICAL_OFFICER'],
   AUDIT: ['ADMINISTRATOR','CLINICAL_DIRECTOR','SPECIALIST_CONSULTANT','MEDICAL_OFFICER','TRIAGE_NURSE'],
 };
+
 
 // Initial Mock Seed Data (DEMO runtime only)
 const SEED_PATIENTS: PatientDemographics[] = [
@@ -457,6 +463,35 @@ export function OpdMasterWorkspace() {
   const [isOnline, setIsOnline] = useState<boolean>(true);
   const [pendingSyncCount, setPendingSyncCount] = useState<number>(0);
 
+  useEffect(() => {
+    if (IS_DEMO_RUNTIME || auth.loading || !auth.activeTenant?.tenantId) return;
+
+    let cancelled = false;
+    const hydrate = async () => {
+      const snapshot = await hydrateEdgeSnapshot(auth.activeTenant!.tenantId);
+      if (cancelled) return;
+
+      const readModel = buildOpdWorkspaceReadModel(snapshot);
+      setPatients(readModel.patients);
+      setEncounters(readModel.encounters);
+      setQueue(readModel.queue);
+      setSelectedEncounterId((current) => {
+        if (current && readModel.encounters.some((encounter) => encounter.id === current)) {
+          return current;
+        }
+        return readModel.encounters[0]?.id || '';
+      });
+    };
+
+    void hydrate().catch((error) => {
+      console.error('OPD authoritative hydration failed:', error);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [auth.activeTenant?.tenantId, auth.loading, auth.user?.uid]);
+
   // Selected encounter object
   const activeEncounter = useMemo(() => {
     return encounters.find((e) => e.id === selectedEncounterId) || encounters[0];
@@ -494,6 +529,13 @@ export function OpdMasterWorkspace() {
   // HANDLER: Register new patient and start encounter through the
   // authoritative registration orchestrator. React state below is a read-model cache only.
   const handleRegisterSuccess = async (newPatient: PatientDemographics) => {
+    if (newPatient.tariffPlan !== 'OUT_OF_POCKET') {
+      throw new Error(
+        'OPD_PILOT_PAYER_NOT_SUPPORTED: controlled OPD registration currently supports OUT_OF_POCKET only.'
+      );
+    }
+    const registrationTariffPlan: 'OUT_OF_POCKET' = newPatient.tariffPlan;
+
     const registration = await registerActiveTenantPatient<{
       patient: {
         id: string;
@@ -532,8 +574,15 @@ export function OpdMasterWorkspace() {
           ? [{ type: 'PHONE', value: newPatient.phone, issuer: 'Telecom' }]
           : []),
       ],
-      allergies: newPatient.knownAllergies || [],
-      chronicConditions: newPatient.chronicConditions || [],
+      ...(newPatient.knownAllergies
+        ? { allergies: newPatient.knownAllergies }
+        : {}),
+      ...(newPatient.chronicConditions
+        ? { chronicConditions: newPatient.chronicConditions }
+        : {}),
+      tariffPlan: registrationTariffPlan,
+      insuranceDetails: newPatient.insuranceDetails,
+      consentDecisions: newPatient.registrationConsentDecisions,
       encounterType: 'OPD',
       department: 'General Medicine',
       priority: 'ROUTINE',
@@ -551,6 +600,23 @@ export function OpdMasterWorkspace() {
 
     const tokenNum = registration.queueToken.tokenNumber;
     const newEncId = registration.encounter.id;
+
+    const consultationBilling = await executeActiveTenantCommand<{
+      invoice: Record<string, any>;
+    }>(
+      'CreateOpdConsultationInvoiceCommand',
+      { encounterId: newEncId },
+      { idempotencyKey: `opd-consultation-invoice:${newEncId}` }
+    );
+    if (!consultationBilling.success || !consultationBilling.data?.invoice) {
+      throw new Error(
+        consultationBilling.error?.message ||
+          'Authoritative consultation invoice creation failed. The patient is registered, but OPD service remains blocked until billing configuration is corrected.'
+      );
+    }
+    const consultationInvoice = adaptAuthoritativeConsultationInvoice(
+      consultationBilling.data.invoice
+    );
     const newEncounter: ComprehensiveOpdEncounter = {
       id: newEncId,
       tenantId: registration.patient.tenantId,
@@ -565,11 +631,11 @@ export function OpdMasterWorkspace() {
       tokenNumber: tokenNum,
       encounterType: 'OPD_ROUTINE',
       department: registration.queueToken.department || 'General Medicine',
-      currentStage: 'QUEUE_ASSIGNMENT',
+      currentStage: 'REGISTRATION',
       stageProgress: {
         REGISTRATION: { status: 'COMPLETED', enteredAt: Date.now(), completedAt: Date.now(), completedBy: 'Server Registration Orchestrator' },
-        BILLING_AUTHORIZATION: { status: 'PENDING' },
-        QUEUE_ASSIGNMENT: { status: 'ACTIVE', enteredAt: Date.now() },
+        BILLING_AUTHORIZATION: { status: 'ACTIVE', enteredAt: Date.now() },
+        QUEUE_ASSIGNMENT: { status: 'PENDING' },
         NURSING_INTAKE: { status: 'PENDING' },
         MO_ASSESSMENT: { status: 'PENDING' },
         SPECIALTY_CONSULTATION: { status: 'PENDING' },
@@ -581,22 +647,9 @@ export function OpdMasterWorkspace() {
       },
       diagnosticOrders: [],
       prescriptions: [],
-      invoice: {
-        id: `inv-${newEncId}`,
-        invoiceNumber: `INV-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${newEncId.slice(-6).toUpperCase()}`,
-        payerTariffPlan: authoritativePatient.tariffPlan,
-        lineItems: [],
-        totalAmountMinorUnits: 0,
-        payerCoverageAmountMinorUnits: 0,
-        patientCopayAmountMinorUnits: 0,
-        amountPaidMinorUnits: 0,
-        balanceDueMinorUnits: 0,
-        settlementStatus: 'PENDING',
-        payments: [],
-        createdAt: Date.now(),
-      },
+      consultationInvoice,
       startedAt: Date.now(),
-      status: 'IN_QUEUE',
+      status: 'REGISTERED',
     };
 
     const newQueueEntry: QueueEntry = {
@@ -606,9 +659,9 @@ export function OpdMasterWorkspace() {
       patientName: authoritativePatient.fullName,
       mrn: authoritativePatient.mrn,
       department: registration.queueToken.department,
-      assignedRoomOrBay: 'Triage Room A',
+      assignedRoomOrBay: 'UNASSIGNED',
       triagePriority: String(registration.queueToken.priority || 'routine').toUpperCase(),
-      status: 'WAITING',
+      status: 'PAYMENT_PENDING',
       issuedAt: registration.queueToken.createdAt || Date.now(),
     };
 
@@ -617,7 +670,7 @@ export function OpdMasterWorkspace() {
     setQueue((prev) => [newQueueEntry, ...prev.filter((q) => q.id !== newQueueEntry.id)]);
     setSelectedEncounterId(newEncId);
     recordEvent('PATIENT_REGISTERED', `Patient ${authoritativePatient.fullName} registered. Token ${tokenNum} issued.`);
-    setActiveTab('QUEUE');
+    setActiveTab('DASHBOARD');
   };
 
   // HANDLER: Check-in appointment by creating an authoritative OPD encounter
@@ -657,6 +710,23 @@ export function OpdMasterWorkspace() {
 
     const tokenNum = result.data.queueToken.tokenNumber;
     const newEncId = result.data.encounter.encounterId;
+
+    const consultationBilling = await executeActiveTenantCommand<{
+      invoice: Record<string, any>;
+    }>(
+      'CreateOpdConsultationInvoiceCommand',
+      { encounterId: newEncId },
+      { idempotencyKey: `opd-consultation-invoice:${newEncId}` }
+    );
+    if (!consultationBilling.success || !consultationBilling.data?.invoice) {
+      throw new Error(
+        consultationBilling.error?.message ||
+          'Authoritative consultation invoice creation failed for appointment check-in.'
+      );
+    }
+    const consultationInvoice = adaptAuthoritativeConsultationInvoice(
+      consultationBilling.data.invoice
+    );
     const newEncounter: ComprehensiveOpdEncounter = {
       id: newEncId,
       tenantId: result.data.encounter.tenantId,
@@ -673,11 +743,11 @@ export function OpdMasterWorkspace() {
       department: appt.department,
       attendingDoctorId: appt.doctorId,
       attendingDoctorName: appt.doctorName,
-      currentStage: 'QUEUE_ASSIGNMENT',
+      currentStage: 'REGISTRATION',
       stageProgress: {
         REGISTRATION: { status: 'COMPLETED', enteredAt: Date.now(), completedAt: Date.now(), completedBy: 'Authoritative OPD Encounter Service' },
-        BILLING_AUTHORIZATION: { status: 'PENDING' },
-        QUEUE_ASSIGNMENT: { status: 'ACTIVE', enteredAt: Date.now() },
+        BILLING_AUTHORIZATION: { status: 'ACTIVE', enteredAt: Date.now() },
+        QUEUE_ASSIGNMENT: { status: 'PENDING' },
         NURSING_INTAKE: { status: 'PENDING' },
         MO_ASSESSMENT: { status: 'PENDING' },
         SPECIALTY_CONSULTATION: { status: 'PENDING' },
@@ -689,20 +759,7 @@ export function OpdMasterWorkspace() {
       },
       diagnosticOrders: [],
       prescriptions: [],
-      invoice: {
-        id: `inv-${newEncId}`,
-        invoiceNumber: `INV-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${newEncId.slice(-6).toUpperCase()}`,
-        payerTariffPlan: patient.tariffPlan,
-        lineItems: [],
-        totalAmountMinorUnits: 0,
-        payerCoverageAmountMinorUnits: 0,
-        patientCopayAmountMinorUnits: 0,
-        amountPaidMinorUnits: 0,
-        balanceDueMinorUnits: 0,
-        settlementStatus: 'PENDING',
-        payments: [],
-        createdAt: Date.now(),
-      },
+      consultationInvoice,
       startedAt: Date.now(),
       status: 'IN_QUEUE',
     };
@@ -715,9 +772,9 @@ export function OpdMasterWorkspace() {
       mrn: patient.mrn,
       department: result.data.queueToken.department,
       assignedDoctorName: appt.doctorName,
-      assignedRoomOrBay: 'Consultation Room 104',
+      assignedRoomOrBay: 'UNASSIGNED',
       triagePriority: String(result.data.queueToken.priority || 'routine').toUpperCase(),
-      status: 'WAITING',
+      status: 'PAYMENT_PENDING',
       issuedAt: result.data.queueToken.createdAt || Date.now(),
     };
 
@@ -728,7 +785,7 @@ export function OpdMasterWorkspace() {
     setQueue((prev) => [newQueueEntry, ...prev.filter((q) => q.id !== newQueueEntry.id)]);
     setSelectedEncounterId(newEncId);
     recordEvent('APPOINTMENT_CHECKED_IN', `Appointment ${appt.scheduledTimeSlot} checked in for ${appt.patientName}.`);
-    setActiveTab('QUEUE');
+    setActiveTab('DASHBOARD');
   };
 
   // HANDLER: Save Triage Vitals through authoritative encounter evidence.
@@ -748,6 +805,7 @@ export function OpdMasterWorkspace() {
         temperature: vitals.temperatureCelsius,
         respiratoryRate: vitals.respiratoryRate,
         oxygenSaturation: vitals.spo2Percent,
+        spO2Scale: vitals.spO2Scale,
         onSupplementalOxygen: vitals.onSupplementalOxygen,
         gcsScore: vitals.gcsScore,
         consciousness:
@@ -1094,7 +1152,142 @@ export function OpdMasterWorkspace() {
   // optimistic balance, but it cannot skip the server-owned billing stage or
   // advance to disposition until the local invoice is fully settled.
   const handleSettlePayment = async (payment: PaymentTransaction) => {
-    if (!activeEncounter.invoice) throw new Error('INVOICE_REQUIRED');
+    const consultationInvoice = activeEncounter.consultationInvoice;
+    if (
+      consultationInvoice &&
+      consultationInvoice.billingPurpose === 'OPD_CONSULTATION' &&
+      activeEncounter.currentStage === 'REGISTRATION'
+    ) {
+      if (payment.mode !== 'CASH') {
+        throw new Error(
+          'EXTERNAL_PAYMENT_GATEWAY_REQUIRED: only cash settlement is enabled for the offline-first pilot.'
+        );
+      }
+      if (!Number.isSafeInteger(payment.amountMinorUnits) || payment.amountMinorUnits <= 0) {
+        throw new Error('INVALID_PAYMENT_AMOUNT: enter a positive whole minor-unit amount.');
+      }
+
+      const currentPaid = consultationInvoice.payments.reduce(
+        (sum, item) => sum + item.amountMinorUnits,
+        0
+      );
+      const outstanding = Math.max(
+        0,
+        consultationInvoice.patientCopayAmountMinorUnits - currentPaid
+      );
+      if (payment.amountMinorUnits > outstanding) {
+        throw new Error(
+          'PAYMENT_EXCEEDS_BALANCE: cash collection cannot exceed the outstanding consultation balance.'
+        );
+      }
+
+      const result = await executeActiveTenantCommand<{
+        receipt: { receiptId: string; journalId: string };
+        journal: { journalId: string };
+        invoice: Record<string, any>;
+        encounter?: Record<string, any>;
+      }>(
+        'RecordCashReceiptCommand',
+        {
+          receiptId: payment.id,
+          invoiceId: consultationInvoice.id,
+          encounterId: activeEncounter.id,
+          patientId: activeEncounter.patientId,
+          amountMinorUnits: payment.amountMinorUnits,
+          currency: 'PKR',
+          referenceNumber: payment.referenceNumber,
+          collectedAt: payment.processedAt,
+          cashierName: payment.processedBy,
+        },
+        {
+          idempotencyKey: `opd-consultation-cash-receipt:${payment.id}`,
+          offlineQueue: {
+            enabled: true,
+            collection: 'cashReceipts',
+            resourceId: payment.id,
+            action: 'CREATE',
+            optimisticCache: false,
+          },
+        }
+      );
+
+      if (!result.success || !result.data) {
+        throw new Error(result.error?.message || 'Consultation cash receipt command failed.');
+      }
+
+      const governedPayment: PaymentTransaction = {
+        ...payment,
+        invoiceId: consultationInvoice.id,
+        glJournalEntryId:
+          result.data.journal?.journalId ||
+          result.data.receipt?.journalId ||
+          '',
+      };
+      const totalPaid = currentPaid + governedPayment.amountMinorUnits;
+      const newBalance = Math.max(
+        0,
+        consultationInvoice.patientCopayAmountMinorUnits - totalPaid
+      );
+      const isSettled = newBalance === 0;
+
+      setEncounters((prev) =>
+        prev.map((encounter) =>
+          encounter.id === activeEncounter.id
+            ? {
+                ...encounter,
+                consultationInvoice: {
+                  ...consultationInvoice,
+                  payments: [...consultationInvoice.payments, governedPayment],
+                  balanceDueMinorUnits: newBalance,
+                  settlementStatus: isSettled ? 'SETTLED' : 'PARTIALLY_PAID',
+                  ...(isSettled ? { settledAt: Date.now() } : {}),
+                },
+                financialClearance: {
+                  ingressFeePaid: isSettled,
+                  ingressReceiptNumber: isSettled
+                    ? governedPayment.referenceNumber
+                    : undefined,
+                  amountPaid: totalPaid / 100,
+                },
+                stageProgress: {
+                  ...encounter.stageProgress,
+                  BILLING_AUTHORIZATION: {
+                    status: isSettled ? 'COMPLETED' : 'ACTIVE',
+                    enteredAt:
+                      encounter.stageProgress?.BILLING_AUTHORIZATION?.enteredAt ||
+                      Date.now(),
+                    ...(isSettled
+                      ? {
+                          completedAt: Date.now(),
+                          completedBy: governedPayment.processedBy,
+                        }
+                      : {}),
+                  },
+                  QUEUE_ASSIGNMENT: {
+                    status: isSettled ? 'ACTIVE' : 'PENDING',
+                    ...(isSettled ? { enteredAt: Date.now() } : {}),
+                  },
+                },
+              }
+            : encounter
+        )
+      );
+
+      if (isSettled) {
+        setQueue((prev) =>
+          prev.map((token) =>
+            token.encounterId === activeEncounter.id
+              ? { ...token, status: 'WAITING' as const }
+              : token
+          )
+        );
+      }
+
+      setActiveTab(isSettled ? 'QUEUE' : 'BILLING');
+      return;
+    }
+
+    if (!activeEncounter.invoice) throw new Error('FINAL_INVOICE_REQUIRED');
     if (payment.mode !== 'CASH') {
       throw new Error(
         'EXTERNAL_PAYMENT_GATEWAY_REQUIRED: only cash settlement is enabled for the offline-first pilot.'
@@ -1177,7 +1370,10 @@ export function OpdMasterWorkspace() {
 
     const governedPayment: PaymentTransaction = {
       ...payment,
-      glJournalEntryId: `je_cash_${payment.id}`,
+      glJournalEntryId:
+        result.data?.journal?.journalId ||
+        result.data?.receipt?.journalId ||
+        '',
     };
     const totalPaid = currentPaid + governedPayment.amountMinorUnits;
     const newBalance = Math.max(
@@ -1603,37 +1799,55 @@ export function OpdMasterWorkspace() {
           onStartService={async (tokenId) => {
             const item = queue.find((q) => q.id === tokenId);
             if (!item) return;
-            try {
-              const queueResult = await executeActiveTenantCommand(
-                'UpdateOpdQueueStatusCommand',
-                { tokenId, targetStatus: 'in_consultation' },
-                { idempotencyKey: `opd-queue-start:${tokenId}` }
-              );
-              if (!queueResult.success) {
-                console.warn('Queue update warning:', queueResult.error);
-              }
 
-              const transition = await executeActiveTenantCommand(
-                'AdvanceStageCommand',
-                {
-                  encounterId: item.encounterId,
-                  currentStage: 'REGISTERED',
-                  targetStage: 'TRIAGE',
-                },
-                { idempotencyKey: `opd-stage-registration-triage:${item.encounterId}` }
+            const result = await executeActiveTenantCommand<{
+              queueToken: Record<string, unknown>;
+              encounter: Record<string, unknown>;
+            }>(
+              'StartOpdServiceCommand',
+              { tokenId, assignedRoomOrBay: item.assignedRoomOrBay },
+              { idempotencyKey: `opd-start-service:${tokenId}` }
+            );
+
+            if (!result.success) {
+              throw new Error(
+                result.error?.message ||
+                  'OPD service start was rejected by the authoritative payment/workflow gate.'
               );
-              if (!transition.success) {
-                console.warn('Queue stage advance notice:', transition.error);
-              }
-            } catch (err) {
-              console.warn('Non-blocking queue start service notice:', err);
-            } finally {
-              setQueue((prev) =>
-                prev.map((q) => (q.id === tokenId ? { ...q, status: 'IN_SERVICE' as const } : q))
-              );
-              setSelectedEncounterId(item.encounterId);
-              setActiveTab('TRIAGE');
             }
+
+            setQueue((prev) =>
+              prev.map((q) =>
+                q.id === tokenId
+                  ? { ...q, status: 'IN_SERVICE' as const, serviceStartedAt: Date.now() }
+                  : q
+              )
+            );
+            setEncounters((prev) =>
+              prev.map((encounter) =>
+                encounter.id === item.encounterId
+                  ? {
+                      ...encounter,
+                      currentStage: 'TRIAGE',
+                      status: 'IN_TRIAGE',
+                      stageProgress: {
+                        ...encounter.stageProgress,
+                        REGISTRATION: {
+                          ...(encounter.stageProgress?.REGISTRATION || {}),
+                          status: 'COMPLETED',
+                          completedAt: Date.now(),
+                        },
+                        NURSING_INTAKE: {
+                          status: 'ACTIVE',
+                          enteredAt: Date.now(),
+                        },
+                      },
+                    }
+                  : encounter
+              )
+            );
+            setSelectedEncounterId(item.encounterId);
+            setActiveTab('TRIAGE');
           }}
           onCompleteService={async (tokenId) => {
             const result = await executeActiveTenantCommand(
@@ -1761,10 +1975,13 @@ export function OpdMasterWorkspace() {
       )}
 
       {/* 10. Billing, Payer Split & General Ledger Settlement */}
-      {activeTab === 'BILLING' && canAccessTab('BILLING') && activeEncounter && activeEncounter.invoice && (
+      {activeTab === 'BILLING' &&
+        canAccessTab('BILLING') &&
+        activeEncounter &&
+        (activeEncounter.consultationInvoice || activeEncounter.invoice) && (
         <OpdBillingLedger
           encounter={activeEncounter}
-          invoice={activeEncounter.invoice}
+          invoice={(activeEncounter.consultationInvoice || activeEncounter.invoice)!}
           canSettlePayment={canSettlePayment}
           onSettlePayment={(payment) => handleSettlePayment(payment)}
         />

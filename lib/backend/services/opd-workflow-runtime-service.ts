@@ -8,6 +8,7 @@
 
 import { CompiledGeneralOpdWorkflow, WorkflowCompiler } from '@/lib/clinical/workflow/compiler';
 import type { ClinicalStageType } from '@/types/clinical-workflow';
+import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 
 export interface OpdWorkflowTransitionCheck {
   allowed: boolean;
@@ -144,4 +145,116 @@ export class OpdWorkflowRuntimeService {
 
     return { allowed: true, sourceStage, targetStage };
   }
+
+  /**
+   * Evidence-sensitive transitions validate the authoritative evidence record,
+   * not a caller-provided identifier. This closes the gap where an incomplete
+   * NEWS2 record (or unrelated evidence) could previously unlock progression.
+   */
+  public static async validateAuthoritativeEvidence(input: {
+    tenantId: string;
+    encounterId: string;
+    patientId: string;
+    currentStage: unknown;
+    targetStage: unknown;
+    evidenceId?: string;
+  }): Promise<OpdWorkflowTransitionCheck> {
+    const structural = this.validateTransition(input);
+    if (!structural.allowed) return structural;
+
+    const sourceStage = structural.sourceStage;
+    const targetStage = structural.targetStage;
+    const evidenceId = String(input.evidenceId || '').trim();
+
+    const requiresEvidence =
+      sourceStage === 'TRIAGE' ||
+      (sourceStage === 'CONSULTATION' && targetStage !== 'TRIAGE');
+
+    if (!requiresEvidence) return structural;
+
+    const evidence = await DomainStateRepository.getById<Record<string, unknown>>(
+      input.tenantId,
+      'encounterEvidence',
+      evidenceId
+    );
+
+    if (!evidence) {
+      return {
+        allowed: false,
+        code: 'OPD_AUTHORITATIVE_EVIDENCE_NOT_FOUND',
+        message: 'The supplied OPD transition evidence does not exist in authoritative state.',
+        sourceStage,
+        targetStage,
+      };
+    }
+
+    if (
+      String(evidence.encounterId || '') !== input.encounterId ||
+      String(evidence.patientId || '') !== input.patientId
+    ) {
+      return {
+        allowed: false,
+        code: 'OPD_EVIDENCE_LINEAGE_MISMATCH',
+        message: 'Transition evidence does not belong to this patient encounter.',
+        sourceStage,
+        targetStage,
+      };
+    }
+
+    if (String(evidence.status || '').toUpperCase() !== 'FINAL') {
+      return {
+        allowed: false,
+        code: 'OPD_EVIDENCE_NOT_FINAL',
+        message: 'Only final authoritative clinical evidence may unlock an OPD transition.',
+        sourceStage,
+        targetStage,
+      };
+    }
+
+    if (sourceStage === 'TRIAGE') {
+      if (String(evidence.evidenceType || '').toUpperCase() !== 'VITALS') {
+        return {
+          allowed: false,
+          code: 'OPD_TRIAGE_VITALS_EVIDENCE_REQUIRED',
+          message: 'TRIAGE to CONSULTATION requires authoritative final vitals evidence.',
+          sourceStage,
+          targetStage,
+        };
+      }
+
+      if (
+        String(evidence.news2Status || '').toUpperCase() !== 'VERIFIED' ||
+        !Number.isFinite(Number(evidence.news2Score))
+      ) {
+        return {
+          allowed: false,
+          code: 'NEWS2_INCOMPLETE',
+          message:
+            'NEWS2 inputs are incomplete or unverified. Consultation cannot begin until NEWS2 is calculated from complete authoritative vitals.',
+          sourceStage,
+          targetStage,
+        };
+      }
+    }
+
+    if (sourceStage === 'CONSULTATION' && targetStage !== 'TRIAGE') {
+      if (
+        String(evidence.evidenceType || '').toUpperCase() !== 'SIGNED_CLINICAL_NOTE' ||
+        !String(evidence.signedBy || '').trim() ||
+        !Number.isFinite(Number(evidence.signedAt))
+      ) {
+        return {
+          allowed: false,
+          code: 'SIGNED_CONSULTATION_EVIDENCE_REQUIRED',
+          message:
+            'Advancing beyond consultation requires a final signed clinical note linked to this encounter.',
+          sourceStage,
+          targetStage,
+        };
+      }
+    }
+
+    return structural;
+  }
+
 }

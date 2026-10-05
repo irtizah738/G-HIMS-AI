@@ -382,6 +382,37 @@ export class EncounterDomainService {
         error: { code: 'PATIENT_NOT_ACTIVE', message: 'Only an active patient can start a new OPD encounter.' },
       };
     }
+
+    const generalOpdConsent = (
+      patient.consentSummary as
+        | Record<string, { status?: string; consentId?: string }>
+        | undefined
+    )?.GENERAL_OUTPATIENT;
+    if (String(generalOpdConsent?.status || '').toUpperCase() !== 'GRANTED') {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'GENERAL_OPD_CONSENT_REQUIRED',
+          message:
+            'Authoritative General OPD Care consent is required before appointment check-in can open an OPD encounter.',
+        },
+      };
+    }
+
+    if (String(patient.tariffPlan || '').toUpperCase() !== 'OUT_OF_POCKET') {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'OPD_PILOT_PAYER_NOT_SUPPORTED',
+          message:
+            'The controlled OPD pilot currently supports OUT_OF_POCKET cash billing only.',
+        },
+      };
+    }
     const carePointers = normalizePatientCarePointers(
       patient.activeCareContexts as any
     );
@@ -472,7 +503,7 @@ export class EncounterDomainService {
       tokenNumber,
       department: payload.departmentId,
       priority: String(payload.priority || 'ROUTINE').toLowerCase(),
-      status: 'waiting',
+      status: 'payment_pending',
       arrivalTime: new Date(now).toISOString(),
       createdAt: now,
     };
@@ -799,6 +830,29 @@ export class EncounterDomainService {
             message:
               dagCheck.message ||
               'OPD workflow runtime rejected the requested stage transition.',
+          },
+        };
+      }
+
+      const evidenceCheck = await OpdWorkflowRuntimeService.validateAuthoritativeEvidence({
+        tenantId: context.tenantId,
+        encounterId: encounter.encounterId,
+        patientId: encounter.patientId,
+        currentStage: persistedClinicalState,
+        targetStage: targetClinicalState,
+        evidenceId: payload.evidenceId,
+      });
+
+      if (!evidenceCheck.allowed) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: evidenceCheck.code || 'OPD_EVIDENCE_GATE_BLOCKED',
+            message:
+              evidenceCheck.message ||
+              'Authoritative OPD evidence did not satisfy the workflow transition guard.',
           },
         };
       }

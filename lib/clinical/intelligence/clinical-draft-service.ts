@@ -3,7 +3,9 @@ import { getAdminFirestore } from '@/server/firebase/admin';
 import { sanitizeForFirestore } from '@/lib/firestore/sanitize';
 import { AIGateway } from '@/lib/ai/gateway';
 import { ClinicalEvidenceService } from '@/lib/clinical/intelligence/clinical-evidence-service';
+import { ClinicalIntelligenceSafetyEvaluator } from '@/lib/clinical/intelligence/clinical-intelligence-safety-evaluator';
 import { clinicalDraftContentHash } from '@/lib/clinical/intelligence/clinical-draft-lifecycle';
+import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
 import type { CommandContext, DomainEventEnvelope } from '@/lib/backend/types';
 import type { ClinicalCareSetting } from '@/types/consultant-visibility';
 import type { ClinicalEvidenceSnapshot, CopilotClaim } from '@/types/clinical-intelligence-evidence';
@@ -14,6 +16,7 @@ import type {
   ClinicalDraftType,
   GovernedClinicalDraft,
 } from '@/types/clinical-draft';
+import type { ClinicalSafetyEvaluation } from '@/types/clinical-intelligence-safety';
 
 const POLICY_VERSION = 'ci10f-clinical-drafting-v1';
 
@@ -172,6 +175,105 @@ function evidenceIndex(snapshot: ClinicalEvidenceSnapshot) {
   }));
 }
 
+async function persistBlockedSafetyEvaluation(
+  context: CommandContext,
+  snapshot: ClinicalEvidenceSnapshot,
+  evaluation: ClinicalSafetyEvaluation,
+  draftType: ClinicalDraftType,
+  provider: string,
+  model: string
+): Promise<void> {
+  const db = getAdminFirestore();
+  if (!db) throw new Error('CI10H_SAFETY_EVALUATION_STORE_UNAVAILABLE');
+
+  const tenantRef = db.collection('tenants').doc(context.tenantId);
+  const evaluationRef = tenantRef
+    .collection('clinicalIntelligenceSafetyEvaluations')
+    .doc(evaluation.evaluationId);
+
+  await db.runTransaction(async (transaction) => {
+    const existing = await transaction.get(evaluationRef);
+    if (existing.exists) return;
+
+    const now = Date.now();
+    const eventId = `evt_${crypto.randomUUID()}`;
+    const auditId = `aud_${crypto.randomUUID()}`;
+    const outboxId = `obx_${crypto.randomUUID()}`;
+    const event: DomainEventEnvelope = {
+      eventId,
+      tenantId: context.tenantId,
+      aggregateType: 'CLINICAL_INTELLIGENCE_SAFETY_EVALUATION',
+      aggregateId: evaluation.evaluationId,
+      eventType: 'CLINICAL_INTELLIGENCE_SAFETY_BLOCKED',
+      eventVersion: 1,
+      payload: {
+        evaluationId: evaluation.evaluationId,
+        patientId: snapshot.patientId,
+        purpose: snapshot.purpose,
+        draftType,
+        evidenceSnapshotId: snapshot.snapshotId,
+        evidenceSnapshotHash: snapshot.snapshotHash,
+        blockerCount: evaluation.blockerCount,
+        blockerCodes: evaluation.findings
+          .filter((item) => item.severity === 'BLOCKER')
+          .map((item) => item.code),
+        provider,
+        model,
+      },
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'CLINICIAN',
+      occurredAt: now,
+      recordedAt: now,
+      correlationId: context.correlationId,
+      commandId: `ci10h-safety-block:${evaluation.evaluationId}`,
+      idempotencyKey: evaluation.evaluationId,
+      source: 'system',
+      schemaVersion: 1,
+    };
+
+    transaction.create(evaluationRef, sanitizeForFirestore(evaluation));
+    transaction.create(
+      tenantRef.collection('events').doc(eventId),
+      sanitizeForFirestore(event)
+    );
+    transaction.create(
+      tenantRef.collection('audit_logs').doc(auditId),
+      sanitizeForFirestore({
+        auditId,
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.roles[0] || 'CLINICIAN',
+        action: 'BLOCK_UNSAFE_CLINICAL_INTELLIGENCE',
+        resourceType: 'CLINICAL_INTELLIGENCE_SAFETY_EVALUATION',
+        resourceId: evaluation.evaluationId,
+        commandId: event.commandId,
+        eventId,
+        correlationId: context.correlationId,
+        occurredAt: now,
+        recordedAt: now,
+        reason: 'CI-10H safety evaluation blocked clinical AI output before draft persistence.',
+        metadata: event.payload,
+      })
+    );
+    transaction.create(
+      tenantRef.collection('outbox').doc(outboxId),
+      sanitizeForFirestore({
+        outboxId,
+        tenantId: context.tenantId,
+        eventId,
+        eventType: event.eventType,
+        topic: 'g-hims-clinical-intelligence-events',
+        payload: event.payload,
+        status: 'PENDING',
+        attempts: 0,
+        maxAttempts: 5,
+        nextAttemptAt: now,
+        createdAt: now,
+      })
+    );
+  });
+}
+
 export class ClinicalDraftService {
   public static async generateAuthoritatively(
     context: CommandContext,
@@ -247,6 +349,46 @@ export class ClinicalDraftService {
     const content = contentFromSections(normalized.sections);
     if (!content) throw new Error('CI10F_AI_OUTPUT_CONTENT_REQUIRED');
 
+    const currentProjection = await Patient360ProjectionService.getProjection(
+      context.tenantId,
+      patientId
+    );
+    if (!currentProjection) {
+      throw new Error('CI10H_CURRENT_PATIENT360_UNAVAILABLE');
+    }
+
+    const safetyEvaluation = ClinicalIntelligenceSafetyEvaluator.evaluate({
+      tenantId: context.tenantId,
+      patientId,
+      purpose: 'CLINICAL_DRAFT',
+      snapshot,
+      claims: normalized.claims,
+      renderedText: [
+        normalized.title,
+        ...normalized.sections.map((section) => section.text),
+      ],
+      currentPatient360Revision: currentProjection.revision,
+      currentPatient360SourceCheckpoint: currentProjection.sourceCheckpoint,
+      generationProvenance: generation.provenance,
+    });
+
+    if (safetyEvaluation.status === 'BLOCKED') {
+      await persistBlockedSafetyEvaluation(
+        context,
+        snapshot,
+        safetyEvaluation,
+        draftType,
+        generation.provenance.provider,
+        generation.provenance.model
+      );
+      const blockerCodes = safetyEvaluation.findings
+        .filter((item) => item.severity === 'BLOCKER')
+        .map((item) => item.code);
+      throw new Error(
+        `CI10H_SAFETY_GATE_REJECTED:${Array.from(new Set(blockerCodes)).join(',')}`
+      );
+    }
+
     const generatedAt = Date.now();
     const revisionId = `${draftId}_r1`;
     const contentHash = clinicalDraftContentHash(normalized.title, content);
@@ -254,6 +396,9 @@ export class ClinicalDraftService {
     const warnings = Array.from(new Set([
       ...snapshot.limitations,
       ...normalized.warnings,
+      ...safetyEvaluation.findings
+        .filter((item) => item.severity === 'WARNING')
+        .map((item) => `Safety warning: ${item.message}`),
       'AI-generated content is non-authoritative until a qualified clinician edits, reviews, explicitly approves, and signs the current revision.',
       'Any edit after approval invalidates approval and requires a new approval.',
     ]));
@@ -272,6 +417,9 @@ export class ClinicalDraftService {
       patient360SourceCheckpoint: snapshot.patient360SourceCheckpoint,
       generationPolicyVersion: POLICY_VERSION,
       generationProvenance: generation.provenance,
+      safetyEvaluationId: safetyEvaluation.evaluationId,
+      safetyPolicyVersion: safetyEvaluation.policyVersion,
+      safetyGateStatus: 'PASSED',
       generatedBy: context.actorId,
       generatedAt,
       currentRevisionId: revisionId,
@@ -321,6 +469,9 @@ export class ClinicalDraftService {
     const tenantRef = db.collection('tenants').doc(context.tenantId);
     const draftRef = tenantRef.collection('clinicalDrafts').doc(draftId);
     const revisionRef = tenantRef.collection('clinicalDraftRevisions').doc(revisionId);
+    const safetyEvaluationRef = tenantRef
+      .collection('clinicalIntelligenceSafetyEvaluations')
+      .doc(safetyEvaluation.evaluationId);
 
     await db.runTransaction(async (transaction) => {
       const now = Date.now();
@@ -345,6 +496,9 @@ export class ClinicalDraftService {
           evidenceSnapshotHash: snapshot.snapshotHash,
           contentHash,
           generationPolicyVersion: POLICY_VERSION,
+          safetyEvaluationId: safetyEvaluation.evaluationId,
+          safetyPolicyVersion: safetyEvaluation.policyVersion,
+          safetyGateStatus: safetyEvaluation.status,
         },
         actorId: context.actorId,
         actorRole: context.roles[0] || 'CLINICIAN',
@@ -359,6 +513,10 @@ export class ClinicalDraftService {
 
       transaction.create(draftRef, sanitizeForFirestore(draft));
       transaction.create(revisionRef, sanitizeForFirestore(revision));
+      transaction.create(
+        safetyEvaluationRef,
+        sanitizeForFirestore(safetyEvaluation)
+      );
       transaction.create(tenantRef.collection('events').doc(eventId), sanitizeForFirestore(event));
       transaction.create(tenantRef.collection('audit_logs').doc(auditId), sanitizeForFirestore({
         auditId,
@@ -384,6 +542,9 @@ export class ClinicalDraftService {
           contentHash,
           provider: generation.provenance.provider,
           model: generation.provenance.model,
+          safetyEvaluationId: safetyEvaluation.evaluationId,
+          safetyPolicyVersion: safetyEvaluation.policyVersion,
+          safetyGateStatus: safetyEvaluation.status,
         },
       }));
       transaction.create(tenantRef.collection('outbox').doc(outboxId), sanitizeForFirestore({

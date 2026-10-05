@@ -16,6 +16,7 @@ import type {
   ClinicalDraftType,
   GovernedClinicalDraft,
 } from '@/types/clinical-draft';
+import { CLINICAL_SAFETY_POLICY_VERSION } from '@/types/clinical-intelligence-safety';
 
 export interface ReviewClinicalDraftPayload {
   draftId: string;
@@ -474,11 +475,52 @@ export class ClinicalDraftDomainService {
             entityId: visibleDraft.encounterId,
             required: true,
           },
+          {
+            key: 'patient360',
+            entityType: 'PATIENT360_PROJECTION',
+            entityId: visibleDraft.patientId,
+            required: true,
+          },
         ],
         prepare: (current) => {
           const draft = current.draft as unknown as GovernedClinicalDraft;
           const revision = current.revision as unknown as ClinicalDraftRevision;
           const encounter = current.encounter || {};
+          const patient360 = current.patient360 || {};
+
+          if (
+            draft.safetyGateStatus !== 'PASSED' ||
+            !draft.safetyEvaluationId ||
+            draft.safetyPolicyVersion !== CLINICAL_SAFETY_POLICY_VERSION
+          ) {
+            throw new AtomicMutationRejectedError(
+              'CI10H_SAFETY_EVALUATION_REQUIRED',
+              'This governed draft predates or does not satisfy the current clinical intelligence safety policy. Generate and review a new draft before signing.',
+              {
+                safetyGateStatus: draft.safetyGateStatus || null,
+                safetyEvaluationId: draft.safetyEvaluationId || null,
+                draftSafetyPolicyVersion: draft.safetyPolicyVersion || null,
+                requiredSafetyPolicyVersion: CLINICAL_SAFETY_POLICY_VERSION,
+              }
+            );
+          }
+
+          if (
+            Number(patient360.revision || 0) !== draft.patient360Revision ||
+            String(patient360.sourceCheckpoint || '') !==
+              draft.patient360SourceCheckpoint
+          ) {
+            throw new AtomicMutationRejectedError(
+              'CI10H_STALE_DRAFT_EVIDENCE',
+              'Patient 360 changed after this governed draft was generated. Generate and review a new draft before signing.',
+              {
+                draftRevision: draft.patient360Revision,
+                currentRevision: patient360.revision,
+                draftCheckpoint: draft.patient360SourceCheckpoint,
+                currentCheckpoint: patient360.sourceCheckpoint,
+              }
+            );
+          }
 
           if (
             draft.patientId !== visibleDraft.patientId ||

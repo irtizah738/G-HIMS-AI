@@ -633,8 +633,27 @@ export function GovernedClinicalDraftPanel({
             {draft.generationProvenance.model}
           </div>
           <div>
-            Policy: <span className="font-mono">{draft.generationPolicyVersion}</span>
+            Generation policy:{' '}
+            <span className="font-mono">{draft.generationPolicyVersion}</span>
           </div>
+          {draft.safetyEvaluationId && (
+            <div>
+              Safety evaluation:{' '}
+              <span className="font-mono">{draft.safetyEvaluationId}</span>
+            </div>
+          )}
+          {draft.safetyPolicyVersion && (
+            <div>
+              Safety policy:{' '}
+              <span className="font-mono">{draft.safetyPolicyVersion}</span>
+            </div>
+          )}
+          {draft.safetyGateStatus && (
+            <div>
+              Safety gate:{' '}
+              <span className="font-bold">{draft.safetyGateStatus}</span>
+            </div>
+          )}
           <div>Direct clinical mutation allowed: no</div>
         </div>
       </details>

@@ -1,0 +1,100 @@
+name: Clinical Intelligence CI-10H Safety Evaluation
+
+on:
+  push:
+    branches:
+      - ci10/safety-evaluation
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci10h-safety-evaluation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci10h:
+    name: CI-10H clinical intelligence safety qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-ci10h
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-ci10h
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-ci10h
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-ci10h
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      GHIMS_INTEGRATION_HL7_STATE: DISABLED
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_INTEGRATION_DICOMWEB_STATE: DISABLED
+      GHIMS_INTEGRATION_DEVICE_TELEMETRY_STATE: DISABLED
+      GHIMS_INTEGRATION_EDI_X12_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: TypeScript
+        run: bun run typecheck
+
+      - name: Lint
+        run: bun run lint
+
+      - name: CI-10H safety framework guards
+        run: bun run test:ci10h
+
+      - name: Deterministic adversarial release gate
+        run: bun run ops:ci10h:safety-eval
+
+      - name: Preserve CI-10G through CI-10A guarantees
+        run: bun run test:ci10g && bun run test:ci10f && bun run test:ci10e && bun run test:ci10d && bun run test:ci10c && bun run test:ci10b && bun run test:ci10
+
+      - name: Preserve CI-9 consultant and deterioration guarantees
+        run: bun run test:ci9 && bun run test:cbe && bun run test:ci8
+
+      - name: Preserve offline and pilot guarantees
+        run: bun run test:p8 && bun run test:p6 && bun run test:p7
+
+      - name: Security regression
+        run: bun run test:security
+
+      - name: Production build
+        run: bun run build
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "## G-HIMS CI-10H — Safety / Evaluation Framework"
+            echo ""
+            echo "- Unsafe adversarial case block rate = 100%: PASS"
+            echo "- Safe baseline pass rate = 100%: PASS"
+            echo "- Hallucination / unsupported claim containment: PASS"
+            echo "- Critical omission / medication-safety containment: PASS"
+            echo "- Stale revision + source-checkpoint containment: PASS"
+            echo "- Temporal and contradictory evidence containment: PASS"
+            echo "- Prompt-injection source isolation + leakage blocking: PASS"
+            echo "- Autonomous clinical action blocking: PASS"
+            echo "- Provider / safety-boundary degradation blocking: PASS"
+            echo "- Evidence hash / tenant / patient scope integrity: PASS"
+            echo "- Post-model Patient 360 revalidation: PASS"
+            echo "- Atomic stale-draft signature rejection: PASS"
+            echo "- Server-only immutable safety evaluation evidence: PASS"
+            echo "- CI-10G/F/E/D/C/B/A / CI-9 / CBE / CI-8 / P8 / P6 / P7 / security regressions: PASS"
+            echo "- Production build: PASS"
+          } >> "$GITHUB_STEP_SUMMARY"

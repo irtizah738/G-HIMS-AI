@@ -50,6 +50,7 @@ function tenantFrom(req: NextRequest, body?: Record<string, unknown>) {
 }
 
 function statusFor(message: string) {
+  if (/CI10H_SAFETY_GATE_REJECTED|CI10H_STALE_DRAFT_EVIDENCE/i.test(message)) return 422;
   if (/AUTH|SESSION|TENANT|ACCESS|PRIVILEGE|UNAUTHORIZED/i.test(message)) return 403;
   if (/NOT_FOUND|PATIENT_NOT_FOUND|ENCOUNTER_PATIENT_MISMATCH/i.test(message)) return 404;
   if (/PATIENT360|ACTIVE_ENCOUNTER|NOT_READY|INTEGRATION_NOT_LIVE/i.test(message)) return 409;

@@ -9,6 +9,7 @@ import { ClinicalOrderDomainService } from '../services/clinical-order-domain-se
 import { ClinicalDocumentationDomainService } from '../services/clinical-documentation-domain-service';
 import { ClinicalDraftDomainService } from '../services/clinical-draft-domain-service';
 import { OpdQueueDomainService } from '../services/opd-queue-domain-service';
+import { OpdBillingDomainService } from '../services/opd-billing-domain-service';
 import { FinanceGlDomainService } from '../services/finance-gl-domain-service';
 import { FinanceArRevenueDomainService } from '../services/finance-ar-revenue-domain-service';
 import { FinanceTreasuryDomainService } from '../services/finance-treasury-domain-service';
@@ -496,6 +497,15 @@ export class CommandBus {
 
         case 'StartOpdServiceCommand':
           result = await OpdQueueDomainService.startService(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'CreateOpdConsultationInvoiceCommand':
+          result = await OpdBillingDomainService.createConsultationInvoice(
             context,
             command.commandId,
             command.idempotencyKey,

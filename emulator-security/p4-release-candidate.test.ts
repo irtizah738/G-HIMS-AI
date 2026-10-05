@@ -382,7 +382,7 @@ describe('G-HIMS P4 release-candidate Firestore recovery journey', () => {
         'PATIENT_REGISTERED',
         'VITALS_RECORDED',
         'CLINICAL_NOTE_SIGNED',
-        'INVESTIGATION_ORDERED',
+        'INVESTIGATION_ORDERED_PAYMENT_LOCKED',
         'MEDICATION_PRESCRIBED',
         'JOURNAL_ENTRY_POSTED',
       ])

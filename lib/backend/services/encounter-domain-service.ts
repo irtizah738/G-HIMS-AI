@@ -9,6 +9,13 @@ import { TransactionManager } from '../transactions/transaction-manager';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import { OpdWorkflowRuntimeService } from './opd-workflow-runtime-service';
 import {
+  activateCareContext,
+  closeCareContext,
+  compatibilityEncounterId,
+  normalizeCareSetting,
+  normalizePatientCarePointers,
+} from '@/lib/clinical/patient360/care-context';
+import {
   type ClinicalEncounterState,
   type FinancialClearanceState,
   type OperationalQueueState,
@@ -329,20 +336,43 @@ export class EncounterDomainService {
         error: { code: 'PATIENT_NOT_ACTIVE', message: 'Only an active patient can start a new OPD encounter.' },
       };
     }
-    if (patient.activeEncounterId) {
-      const active = await DomainStateRepository.getById<Record<string, unknown>>(
+    const carePointers = normalizePatientCarePointers(
+      patient.activeCareContexts as any
+    );
+    const candidateOpdIds = [...carePointers.activeOpdEncounterIds];
+    if (candidateOpdIds.length === 0 && patient.activeEncounterId) {
+      const legacyActive = await DomainStateRepository.getById<Record<string, unknown>>(
         context.tenantId,
         'encounters',
         String(patient.activeEncounterId)
       );
-      if (active && !['COMPLETED', 'DISCHARGED', 'TRANSFERRED', 'CANCELLED'].includes(String(active.status || '').toUpperCase())) {
+      if (
+        legacyActive &&
+        normalizeCareSetting(legacyActive.encounterType || legacyActive.type) === 'OPD'
+      ) {
+        candidateOpdIds.push(String(patient.activeEncounterId));
+      }
+    }
+
+    for (const activeOpdEncounterId of candidateOpdIds) {
+      const active = await DomainStateRepository.getById<Record<string, unknown>>(
+        context.tenantId,
+        'encounters',
+        activeOpdEncounterId
+      );
+      if (
+        active &&
+        !['COMPLETED', 'DISCHARGED', 'TRANSFERRED', 'CANCELLED'].includes(
+          String(active.status || '').toUpperCase()
+        )
+      ) {
         return {
           success: false,
           commandId,
           idempotencyKey,
           error: {
-            code: 'PATIENT_ACTIVE_ENCOUNTER_CONFLICT',
-            message: `Patient already has active encounter ${String(patient.activeEncounterId)}.`,
+            code: 'PATIENT_ACTIVE_OPD_ENCOUNTER_CONFLICT',
+            message: `Patient already has active OPD encounter ${activeOpdEncounterId}.`,
           },
         };
       }
@@ -374,9 +404,16 @@ export class EncounterDomainService {
       updatedAt: now,
     };
 
+    const activeCareContexts = activateCareContext(
+      patient.activeCareContexts as any,
+      'OPD',
+      encounterId,
+      now
+    );
     const patientState = {
       ...patient,
-      activeEncounterId: encounterId,
+      activeCareContexts,
+      activeEncounterId: compatibilityEncounterId(activeCareContexts),
       updatedAt: now,
     };
 
@@ -544,20 +581,26 @@ export class EncounterDomainService {
       updatedAt: now,
     };
 
-    const patientState = inpatientPending
-      ? {
-          ...patient,
-          activeEncounterId: encounter.encounterId,
-          updatedAt: now,
-        }
-      : {
-          ...patient,
-          activeEncounterId:
-            patient.activeEncounterId === encounter.encounterId
-              ? undefined
-              : patient.activeEncounterId,
-          updatedAt: now,
-        };
+    const encounterCareSetting = normalizeCareSetting(encounter.encounterType);
+    const nextCareContexts = inpatientPending
+      ? activateCareContext(
+          patient.activeCareContexts as any,
+          encounterCareSetting,
+          encounter.encounterId,
+          now
+        )
+      : closeCareContext(
+          patient.activeCareContexts as any,
+          encounterCareSetting,
+          encounter.encounterId,
+          now
+        );
+    const patientState = {
+      ...patient,
+      activeCareContexts: nextCareContexts,
+      activeEncounterId: compatibilityEncounterId(nextCareContexts),
+      updatedAt: now,
+    };
 
     const tx = await TransactionManager.executeAtomicMutation({
       tenantId: context.tenantId,

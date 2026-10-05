@@ -33,6 +33,26 @@ describe('OPD-RP9 consultation and Patient 360 facts', () => {
     expect(service).not.toContain('AI_EXTRACTED');
   });
 
+  test('structured diagnosis boundary rejects ambiguous role and verification semantics', async () => {
+    const service = await source(
+      'lib/backend/services/clinical-documentation-domain-service.ts'
+    );
+
+    expect(service).toContain("Unsupported structured diagnosis type");
+    expect(service).toContain("Unsupported diagnosis verification status");
+    expect(service).toContain("A signed consultation may contain at most one principal diagnosis.");
+    expect(service).toContain("isPrincipal = record.isPrincipal === true || rawType === 'PRINCIPAL'");
+  });
+
+  test('Patient 360 UI separates encounter diagnoses from reconciled problem list', async () => {
+    const view = await source('components/patient360/Patient360View.tsx');
+
+    expect(view).toContain("item.category !== 'ENCOUNTER_DIAGNOSIS'");
+    expect(view).toContain("item.category === 'ENCOUNTER_DIAGNOSIS'");
+    expect(view).toContain('Longitudinal problem list');
+    expect(view).toContain('Signed encounter diagnoses');
+  });
+
   test('canonical encounter diagnosis preserves signed-note evidence lineage', () => {
     const condition = buildCanonicalCondition({
       tenantId: 'tenant-rp9',

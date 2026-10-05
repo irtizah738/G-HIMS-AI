@@ -98,6 +98,7 @@ export class OpdBillingReconciliationDomainService {
         'BILLING_ADMIN',
         'CASHIER',
         'FINANCE_MANAGER',
+        'ACCOUNTANT',
         'REVENUE_CYCLE',
         'SYSTEM_ADMIN',
         'ADMINISTRATOR',

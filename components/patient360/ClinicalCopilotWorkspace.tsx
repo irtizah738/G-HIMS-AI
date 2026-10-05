@@ -973,6 +973,7 @@ export function ClinicalCopilotWorkspace({
                 careSetting={careSetting}
                 offline={offline}
                 currentRevision={currentRevision}
+                currentSourceCheckpoint={currentSourceCheckpoint}
                 value={artifacts.draft}
                 onChange={(draft) =>
                   setArtifacts((current) => ({ ...current, draft }))

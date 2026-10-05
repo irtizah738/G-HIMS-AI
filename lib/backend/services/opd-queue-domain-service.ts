@@ -4,7 +4,7 @@
  */
 
 import { AuthorizationPipeline } from '../auth/authorization-pipeline';
-import { TransactionManager } from '../transactions/transaction-manager';
+import { AtomicMutationRejectedError, TransactionManager } from '../transactions/transaction-manager';
 import { CommandContext, CommandResult } from '../types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 
@@ -65,52 +65,34 @@ export class OpdQueueDomainService {
       };
     }
 
-    const token = await DomainStateRepository.getById<OpdQueueState>(
+    // Resolve the immutable encounter linkage first, then re-read both token and
+    // encounter inside the committing transaction. This prevents a stale UI or
+    // concurrent cashier/queue action from bypassing the payment gate.
+    const tokenLink = await DomainStateRepository.getById<OpdQueueState>(
       context.tenantId,
       'opd_queue',
       payload.tokenId
     );
 
-    if (!token) {
+    if (!tokenLink?.encounterId) {
       return {
         success: false,
         commandId,
         idempotencyKey,
         error: {
           code: 'OPD_TOKEN_NOT_FOUND',
-          message: `OPD token ${payload.tokenId} was not found.`,
+          message: `OPD token ${payload.tokenId} was not found or has no encounter linkage.`,
         },
       };
     }
 
-    if (!ALLOWED_TRANSITIONS[token.status]?.includes(payload.targetStatus)) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: {
-          code: 'INVALID_OPD_QUEUE_TRANSITION',
-          message: `Cannot transition OPD token from ${token.status} to ${payload.targetStatus}.`,
-        },
-      };
-    }
-
-    const updated: OpdQueueState = {
-      ...token,
-      status: payload.targetStatus,
-      ...(payload.targetDepartment ? { department: payload.targetDepartment } : {}),
-      ...(payload.assignedDoctorName ? { assignedDoctorName: payload.assignedDoctorName } : {}),
-      ...(payload.assignedRoomOrBay ? { assignedRoomOrBay: payload.assignedRoomOrBay } : {}),
-      updatedAt: Date.now(),
-    };
-
-    const tx = await TransactionManager.executeAtomicWrite(
-      context,
-      commandId,
-      idempotencyKey,
-      {
-        entityType: 'OPD_QUEUE_TOKEN',
-        entityId: token.id,
+    try {
+      const tx = await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.roles[0] || 'OPD_STAFF',
+        aggregateType: 'OPD_QUEUE_TOKEN',
+        aggregateId: payload.tokenId,
         eventType:
           payload.targetStatus === 'called'
             ? 'OPD_PATIENT_CALLED'
@@ -121,28 +103,137 @@ export class OpdQueueDomainService {
                 : payload.targetStatus === 'transferred'
                   ? 'OPD_QUEUE_TRANSFERRED'
                   : 'OPD_PATIENT_NO_SHOW',
-        domainState: updated,
-        eventPayload: {
-          tokenId: token.id,
-          encounterId: token.encounterId,
-          patientId: token.patientId,
-          previousStatus: token.status,
-          newStatus: payload.targetStatus,
-        },
-        auditReason: `OPD token ${token.tokenNumber} transitioned from ${token.status} to ${payload.targetStatus}`,
+        auditAction: 'UPDATE_OPD_QUEUE_STATUS',
+        auditResourceType: 'OPD_QUEUE_TOKEN',
+        auditResourceId: payload.tokenId,
         outboxTopic: 'g-hims-clinical-events',
-      }
-    );
+        idempotencyKey,
+        commandId,
+        correlationId: context.correlationId,
+        readTargets: [
+          {
+            key: 'token',
+            entityType: 'OPD_QUEUE_TOKEN',
+            entityId: payload.tokenId,
+            required: true,
+          },
+          {
+            key: 'encounter',
+            entityType: 'ENCOUNTER',
+            entityId: tokenLink.encounterId,
+            required: true,
+          },
+        ],
+        prepare: (current) => {
+          const token = current.token as unknown as OpdQueueState;
+          const encounter = current.encounter || {};
 
-    return {
-      success: true,
-      commandId,
-      idempotencyKey,
-      entityId: token.id,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: updated,
-    };
+          if (String(token.encounterId || '') !== tokenLink.encounterId) {
+            throw new AtomicMutationRejectedError(
+              'OPD_TOKEN_ENCOUNTER_CHANGED',
+              'Queue token encounter linkage changed during service-start validation.'
+            );
+          }
+
+          if (!ALLOWED_TRANSITIONS[token.status]?.includes(payload.targetStatus)) {
+            throw new AtomicMutationRejectedError(
+              'INVALID_OPD_QUEUE_TRANSITION',
+              `Cannot transition OPD token from ${token.status} to ${payload.targetStatus}.`
+            );
+          }
+
+          if (payload.targetStatus === 'in_consultation') {
+            const clearance = String(
+              encounter.financialClearanceState || 'CONSULTATION_PAYMENT_PENDING'
+            ).toUpperCase();
+            if (!['CONSULTATION_CLEARED', 'NOT_REQUIRED'].includes(clearance)) {
+              throw new AtomicMutationRejectedError(
+                'CONSULTATION_PAYMENT_REQUIRED',
+                'Consultation payment must be authoritatively cleared before OPD service can start.',
+                { financialClearanceState: clearance }
+              );
+            }
+
+            const clinicalState = String(
+              encounter.clinicalState || encounter.currentStage || ''
+            ).toUpperCase();
+            if (!['REGISTERED', 'TRIAGE'].includes(clinicalState)) {
+              throw new AtomicMutationRejectedError(
+                'OPD_QUEUE_CLINICAL_STATE_MISMATCH',
+                `Queue service cannot start while encounter clinical state is '${clinicalState}'.`
+              );
+            }
+          }
+
+          const now = Date.now();
+          const updated: OpdQueueState = {
+            ...token,
+            status: payload.targetStatus,
+            ...(payload.targetDepartment ? { department: payload.targetDepartment } : {}),
+            ...(payload.assignedDoctorName ? { assignedDoctorName: payload.assignedDoctorName } : {}),
+            ...(payload.assignedRoomOrBay ? { assignedRoomOrBay: payload.assignedRoomOrBay } : {}),
+            updatedAt: now,
+          };
+
+          const updatedEncounter =
+            payload.targetStatus === 'in_consultation'
+              ? {
+                  ...encounter,
+                  operationalState: 'IN_SERVICE',
+                  updatedAt: now,
+                }
+              : encounter;
+
+          return {
+            domainState: updated,
+            additionalStateWrites:
+              payload.targetStatus === 'in_consultation'
+                ? [
+                    {
+                      entityType: 'ENCOUNTER',
+                      entityId: token.encounterId,
+                      domainState: updatedEncounter,
+                    },
+                  ]
+                : [],
+            eventPayload: {
+              tokenId: token.id,
+              encounterId: token.encounterId,
+              patientId: token.patientId,
+              previousStatus: token.status,
+              newStatus: payload.targetStatus,
+              financialClearanceState: encounter.financialClearanceState,
+            },
+            auditReason: `OPD token ${token.tokenNumber} transitioned from ${token.status} to ${payload.targetStatus}`,
+            resultData: updated,
+          };
+        },
+      });
+
+      return {
+        success: true,
+        commandId,
+        idempotencyKey,
+        entityId: payload.tokenId,
+        eventId: tx.eventId,
+        auditId: tx.auditId,
+        outboxId: tx.outboxId,
+        data: tx.resultData,
+      };
+    } catch (error) {
+      if (error instanceof AtomicMutationRejectedError) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+          },
+        };
+      }
+      throw error;
+    }
   }
 }

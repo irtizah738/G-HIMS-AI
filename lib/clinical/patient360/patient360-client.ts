@@ -4,9 +4,15 @@ import { AuthClient } from '@/lib/auth/auth-client';
 import { getCachedAuthSession } from '@/lib/offline/auth-storage';
 import { listSecureEdgeEntities } from '@/lib/offline/secure-store';
 import type {
+  Patient360EncounterSummary,
   Patient360Projection,
   Patient360TimelineItem,
 } from '@/types/patient360-projection';
+import type {
+  ClinicalCareSetting,
+  ConsultantPatientStateProjection,
+} from '@/types/consultant-visibility';
+import { selectCareContextEncounter } from '@/lib/clinical/patient360/care-context';
 import type { DischargeReadinessProjection } from '@/types/discharge-readiness';
 import type { DeteriorationProjection } from '@/types/clinical-deterioration';
 
@@ -15,8 +21,10 @@ export interface Patient360ClinicalView {
   patientId: string;
   projection: Patient360Projection;
   timeline: Patient360TimelineItem[];
+  selectedCareContext: Patient360EncounterSummary | null;
   dischargeReadiness: DischargeReadinessProjection | null;
   deterioration: DeteriorationProjection | null;
+  consultantVisibility: ConsultantPatientStateProjection | null;
   source: 'SERVER' | 'LOCAL_EDGE';
   freshness: {
     projectionVersion: number;

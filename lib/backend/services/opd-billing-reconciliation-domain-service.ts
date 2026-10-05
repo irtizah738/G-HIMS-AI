@@ -162,7 +162,7 @@ export class OpdBillingReconciliationDomainService {
     }
 
     const stage = OpdWorkflowRuntimeService.resolveStage(
-      encounter.clinicalState || encounter.currentStage
+      encounter.currentStage || encounter.clinicalState
     );
     if (stage !== 'BILLING_SETTLEMENT') {
       return reject(

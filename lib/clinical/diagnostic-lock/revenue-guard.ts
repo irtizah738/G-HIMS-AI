@@ -42,17 +42,13 @@ export class DiagnosticRevenueGuard {
   }
 
   /**
-   * Simulates settlement of diagnostic order invoice unlocking it for lab/radiology execution
+   * Legacy callers must not manufacture diagnostic financial clearance in the
+   * browser. Only RecordCashReceiptCommand may release the authoritative gate.
    */
-  public static unlockOrderAfterPayment(
-    order: DiagnosticOrderItem,
-    settlementType: 'CASH' | 'CARD' | 'INSURANCE_PREAUTH',
-    receiptRef: string
-  ): DiagnosticOrderItem {
-    return {
-      ...order,
-      paymentStatus: settlementType === 'INSURANCE_PREAUTH' ? 'INSURANCE_PREAUTH' : 'PAID_SETTLED',
-      worklistStatus: 'READY_FOR_COLLECTION',
-    };
+  public static unlockOrderAfterPayment(): never {
+    throw new Error(
+      'SERVER_PAYMENT_AUTHORITY_REQUIRED: diagnostic payment clearance is server-owned.'
+    );
   }
+
 }

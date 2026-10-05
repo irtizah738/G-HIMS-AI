@@ -7,6 +7,7 @@ import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient36
 import { selectCareContextEncounter } from '@/lib/clinical/patient360/care-context';
 import { ClinicalEvidenceService } from '@/lib/clinical/intelligence/clinical-evidence-service';
 import { ClinicalLongitudinalSummaryService } from '@/lib/clinical/intelligence/clinical-longitudinal-summary-service';
+import { observeClinicalIntelligenceOperation } from '@/lib/clinical/intelligence/clinical-intelligence-observability';
 import type { CommandContext } from '@/lib/backend/types';
 import type {
   ClinicalLongitudinalSummary,
@@ -126,11 +127,19 @@ export async function POST(req: NextRequest) {
     }
 
     await assertSummaryPatientAccess(context, patientId);
-    const result =
-      await ClinicalLongitudinalSummaryService.generateAuthoritatively(
-        context,
-        patientId
-      );
+    const result = await observeClinicalIntelligenceOperation(
+      {
+        operation: 'GENERATE_LONGITUDINAL_SUMMARY',
+        purpose: 'LONGITUDINAL_SUMMARY',
+        tenantId: context.tenantId,
+        correlationId: context.correlationId,
+      },
+      () =>
+        ClinicalLongitudinalSummaryService.generateAuthoritatively(
+          context,
+          patientId
+        )
+    );
 
     return NextResponse.json(
       { success: true, ...result },

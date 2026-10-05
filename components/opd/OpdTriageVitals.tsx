@@ -136,7 +136,7 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
     avpuDerived !== null;
 
   const liveNews2 = useMemo(() => {
-    if (!news2Ready || spO2Scale === '' || onO2 === null || avpuDerived === null) return null;
+    if (!news2Ready || onO2 === null || avpuDerived === null) return null;
 
     const result = calculateNEWS2({
       respirationRate: rr,

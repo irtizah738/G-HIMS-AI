@@ -74,6 +74,21 @@ describe('OPD-RP12 final billing reconciliation', () => {
     );
   });
 
+  test('Revenue Integrity charge acceptance participates in the OPD billing sequence', async () => {
+    const revenue = await source(
+      'lib/backend/services/revenue-integrity-domain-service.ts'
+    );
+
+    expect(revenue).toContain("'OPD_BILLING_ALREADY_RECONCILED'");
+    expect(revenue).toContain('billingMutationSequence');
+    expect(revenue).toContain(
+      'Number(encounter.billingMutationSequence || 0) + 1'
+    );
+    expect(revenue).toContain("entityType: 'ENCOUNTER'");
+    expect(revenue).toContain('expectedServerVersion');
+    expect(revenue).toContain('chargeId,');
+  });
+
   test('reconciled encounters are frozen against new billable OPD state', async () => {
     const billing = await source(
       'lib/backend/services/opd-billing-domain-service.ts'

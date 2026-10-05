@@ -305,6 +305,52 @@ export async function recordConsultantPatientReview(
   return payload as Record<string, unknown>;
 }
 
+export async function completeMedicationReconciliation(
+  tenantId: string,
+  input: {
+    patientId: string;
+    encounterId: string;
+    reconciledMedicationIds: string[];
+    discrepancyCount: number;
+    unresolvedDiscrepancies?: string[];
+    notes?: string;
+  }
+): Promise<Record<string, unknown>> {
+  const commandId = `cmd_medrec_${crypto.randomUUID()}`;
+  const idempotencyKey = `medrec:${input.encounterId}:${crypto.randomUUID()}`;
+
+  const response = await AuthClient.authorizedFetch(
+    '/api/commands/execute',
+    {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        command: {
+          commandId,
+          idempotencyKey,
+          tenantId,
+          commandType: 'CompleteMedicationReconciliationCommand',
+          payload: input,
+          clientTimestamp: Date.now(),
+          schemaVersion: 1,
+        },
+      }),
+    },
+    tenantId
+  );
+
+  const payload = await response.json();
+  if (!response.ok || !payload?.success) {
+    throw new Error(
+      payload?.error?.message ||
+        payload?.error ||
+        'Medication reconciliation could not be completed.'
+    );
+  }
+  return payload as Record<string, unknown>;
+}
+
 export async function recordDischargeReadinessReview(
   tenantId: string,
   input: {

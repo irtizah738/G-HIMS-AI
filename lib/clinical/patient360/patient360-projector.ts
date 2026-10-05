@@ -8,6 +8,11 @@ import type {
   MedicationOrder,
   PatientClinicalKnowledgeStatus,
 } from '@/types/clinical-canonical';
+import {
+  buildPatient360CareContexts,
+  normalizeCareSetting,
+  preferredCompatibilityEncounter,
+} from './care-context';
 import type {
   Patient360AllergySummary,
   Patient360ConditionSummary,
@@ -81,11 +86,24 @@ function firstCoding(concept: { codings?: Array<{ system?: string; code?: string
 }
 
 function encounterSummary(raw: Record<string, unknown>): Patient360EncounterSummary {
+  const encounterType = asString(raw.encounterType || raw.type, 'UNKNOWN');
   return {
     encounterId: asString(raw.encounterId || raw.id),
-    encounterType: asString(raw.encounterType || raw.type, 'UNKNOWN'),
+    encounterType,
+    careSetting: normalizeCareSetting(raw.careSetting || encounterType),
+    episodeId: asString(raw.episodeId) || undefined,
+    sourceEncounterId: asString(raw.sourceEncounterId) || undefined,
+    assignedProviderId:
+      asString(
+        raw.assignedProviderId ||
+        raw.attendingConsultantId ||
+        raw.attendingDoctorId ||
+        raw.assignedDoctorId ||
+        raw.assignedDoctor
+      ) || undefined,
     status: asString(raw.status, 'UNKNOWN'),
-    department: asString(raw.department) || undefined,
+    department: asString(raw.departmentId || raw.department) || undefined,
+    facilityId: asString(raw.facilityId) || undefined,
     chiefComplaint: asString(raw.chiefComplaint) || undefined,
     startedAt: timestamp(raw.startedAt || raw.createdAt || raw.admitDate),
     completedAt: timestamp(raw.completedAt || raw.dischargeDate),
@@ -261,10 +279,8 @@ export class Patient360Projector {
     const diagnosticReports = samePatient(sources.diagnosticReports);
     const documents = samePatient(sources.documents);
 
-    const activeEncounterId = asString(sources.patient.activeEncounterId);
-    const activeEncounter =
-      encounters.find((item) => item.encounterId === activeEncounterId) ||
-      encounters.find((item) => !['COMPLETED', 'DISCHARGED', 'TRANSFERRED', 'CANCELLED'].includes(item.status.toUpperCase()));
+    const careContexts = buildPatient360CareContexts(encounters);
+    const activeEncounter = preferredCompatibilityEncounter(careContexts);
 
     const activeProblems = conditions
       .filter((item) =>
@@ -353,9 +369,29 @@ export class Patient360Projector {
       tenantId: sources.tenantId,
       patientId,
       encounterId: asString(event.payload?.encounterId) || undefined,
+      careSetting: normalizeCareSetting(
+        event.payload?.careSetting ||
+        event.payload?.encounterType ||
+        patientEncounterSources.find(
+          (encounter) =>
+            asString(encounter.encounterId || encounter.id) ===
+            asString(event.payload?.encounterId)
+        )?.encounterType
+      ),
+      episodeId:
+        asString(event.payload?.episodeId) ||
+        asString(
+          patientEncounterSources.find(
+            (encounter) =>
+              asString(encounter.encounterId || encounter.id) ===
+              asString(event.payload?.encounterId)
+          )?.episodeId
+        ) ||
+        undefined,
       eventId: event.eventId,
       eventType: event.eventType,
       occurredAt: Number(event.occurredAt || event.recordedAt || 0),
+      recordedAt: Number(event.recordedAt || event.occurredAt || 0),
       summary: eventSummary(event),
     }));
 
@@ -389,6 +425,7 @@ export class Patient360Projector {
         status: asString(sources.patient.status) || undefined,
       },
       activeEncounter,
+      careContexts,
       recentEncounters: encounters.slice(0, 20),
       activeProblems,
       resolvedProblems,
@@ -469,7 +506,7 @@ export class Patient360Projector {
         diagnosticReports: diagnosticReports.length,
         documents: documents.length,
       },
-      projectionVersion: 1,
+      projectionVersion: 2,
       revision: patientEvents.length,
       eventCheckpoint,
       sourceFingerprint,

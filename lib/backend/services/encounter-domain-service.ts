@@ -96,6 +96,7 @@ interface EncounterState {
   billingReconciliationState?: 'CLEARED' | string;
   billingClosedAt?: number;
   billingClosedBy?: string;
+  _serverVersion?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -178,6 +179,7 @@ export class EncounterDomainService {
         billingClosedBy: persisted.billingClosedBy
           ? String(persisted.billingClosedBy)
           : undefined,
+        _serverVersion: Number(persisted._serverVersion || 0),
         createdAt: Number(persisted.createdAt || persisted.startedAt || Date.now()),
         updatedAt: Number(persisted.updatedAt || persisted.startedAt || Date.now()),
       };
@@ -646,7 +648,11 @@ export class EncounterDomainService {
         !reconciliation ||
         String(reconciliation.status || '').toUpperCase() !== 'CLEARED' ||
         String(reconciliation.encounterId || '') !== encounter.encounterId ||
-        String(reconciliation.patientId || '') !== encounter.patientId
+        String(reconciliation.patientId || '') !== encounter.patientId ||
+        String(encounter.billingReconciliationState || '').toUpperCase() !==
+          'CLEARED' ||
+        Number(reconciliation.billingMutationSequence || -1) !==
+          Number(encounter.billingMutationSequence || 0)
       ) {
         return {
           success: false,
@@ -753,6 +759,7 @@ export class EncounterDomainService {
       commandId,
       correlationId: context.correlationId,
       domainState: updatedEncounter,
+      expectedPrimaryServerVersion: Number(encounter._serverVersion || 0),
       additionalStateWrites: [
         { entityType: 'PATIENT_MPI', entityId: encounter.patientId, domainState: patientState },
       ],

@@ -288,6 +288,10 @@ function collectionForEntityType(entityType: string): string {
     INVOICE_SETTLEMENT: 'invoiceSettlements',
     DISCHARGE_READINESS_REVIEW: 'dischargeReadinessReviews',
     CONSULTANT_REVIEW_CHECKPOINT: 'consultantReviewCheckpoints',
+    CLINICAL_CONSULTATION_REQUEST: 'consultationRequests',
+    CLINICAL_HANDOFF: 'clinicalHandoffs',
+    CLINICAL_OPEN_ITEM: 'clinicalOpenItems',
+    CLINICAL_ESCALATION: 'clinicalEscalations',
     BED_TRANSFER: 'bedTransfers',
     RADIO_TRANSMISSION: 'radioTransmissions',
   };

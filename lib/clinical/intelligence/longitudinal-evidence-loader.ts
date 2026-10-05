@@ -9,17 +9,26 @@ import type {
 } from '@/types/clinical-canonical';
 import type { ClinicalEvidenceSourceType } from '@/types/clinical-intelligence-evidence';
 
-export interface LongitudinalEvidenceCandidate {
+export interface ClinicalEvidenceSupplementalCandidate {
   sourceType: ClinicalEvidenceSourceType;
   sourceEntityId: string;
   label: string;
   status?: string;
   occurredAt?: number;
+  sourceEventIds?: string[];
+  sourceEntityRefs?: string[];
   content: unknown;
 }
 
-export interface LongitudinalEvidenceSources {
-  candidates: LongitudinalEvidenceCandidate[];
+export interface ClinicalEvidenceSupplementalSources {
+  candidates: ClinicalEvidenceSupplementalCandidate[];
+  scope?: {
+    encounterId?: string;
+    careSetting?: string;
+    actorId?: string;
+    lastReviewedAt?: number;
+    lastReviewedRevision?: number;
+  };
   coverage: Record<
     string,
     {
@@ -47,6 +56,9 @@ function timestamp(value: unknown): number | undefined {
     ? value
     : undefined;
 }
+
+export type LongitudinalEvidenceCandidate = ClinicalEvidenceSupplementalCandidate;
+export type LongitudinalEvidenceSources = ClinicalEvidenceSupplementalSources;
 
 export class LongitudinalEvidenceLoader {
   public static async load(

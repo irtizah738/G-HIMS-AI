@@ -272,7 +272,7 @@ export class EncounterDomainService {
       clinicalState: payload.encounterType === 'TELEHEALTH' ? 'CONSULTATION' : 'TRIAGE',
       operationalState: 'NOT_QUEUED',
       financialClearanceState:
-        payload.encounterType === 'EMERGENCY' || payload.encounterType === 'IPD'
+        payload.encounterType === 'EMERGENCY'
           ? 'NOT_REQUIRED'
           : 'CONSULTATION_PAYMENT_PENDING',
       resourceAssignmentState: 'NONE',

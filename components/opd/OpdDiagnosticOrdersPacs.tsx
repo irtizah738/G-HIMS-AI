@@ -137,6 +137,7 @@ export function OpdDiagnosticOrdersPacs({
   );
   const [statOverrideReason, setStatOverrideReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [activeDicomViewerOrder, setActiveDicomViewerOrder] =
     useState<DiagnosticOrderItem | null>(null);
 
@@ -190,11 +191,32 @@ export function OpdDiagnosticOrdersPacs({
     };
 
     setSubmitting(true);
+    setActionError(null);
     try {
       await onAddOrder(intent);
       setStatOverrideReason('');
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : 'Diagnostic order failed.'
+      );
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const advanceWorklist = async (
+    orderId: string,
+    targetStatus: 'SPECIMEN_COLLECTED' | 'IN_PROCESSING'
+  ) => {
+    setActionError(null);
+    try {
+      await onAdvanceOrderWorklist(orderId, targetStatus);
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : 'Diagnostic worklist transition failed.'
+      );
     }
   };
 
@@ -328,6 +350,13 @@ export function OpdDiagnosticOrdersPacs({
             </div>
           )}
         </form>
+
+        {actionError && (
+          <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{actionError}</span>
+          </div>
+        )}
       </div>
 
       <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-xs dark:border-slate-800 dark:bg-slate-900">
@@ -481,7 +510,7 @@ export function OpdDiagnosticOrdersPacs({
                             <button
                               type="button"
                               onClick={() =>
-                                void onAdvanceOrderWorklist(
+                                void advanceWorklist(
                                   order.id,
                                   'SPECIMEN_COLLECTED'
                                 )
@@ -498,7 +527,7 @@ export function OpdDiagnosticOrdersPacs({
                               <button
                                 type="button"
                                 onClick={() =>
-                                  void onAdvanceOrderWorklist(
+                                  void advanceWorklist(
                                     order.id,
                                     'IN_PROCESSING'
                                   )
@@ -515,7 +544,7 @@ export function OpdDiagnosticOrdersPacs({
                               <button
                                 type="button"
                                 onClick={() =>
-                                  void onAdvanceOrderWorklist(
+                                  void advanceWorklist(
                                     order.id,
                                     'IN_PROCESSING'
                                   )

@@ -327,6 +327,21 @@ service cloud.firestore {
       match /consultantReviewCheckpoints/{checkpointId} {
         allow read, write: if false;
       }
+      match /consultantAttentionCheckpoints/{eventId} {
+        allow read, write: if false;
+      }
+      match /clinicalOpenItems/{openItemId} {
+        allow read, write: if false;
+      }
+      match /clinicalEscalations/{escalationId} {
+        allow read, write: if false;
+      }
+      match /consultationRequests/{consultationId} {
+        allow read, write: if false;
+      }
+      match /clinicalHandoffs/{handoffId} {
+        allow read, write: if false;
+      }
 
       match /diagnosticResultAcknowledgements/{acknowledgementId} {
         allow read, write: if false;

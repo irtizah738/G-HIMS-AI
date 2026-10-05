@@ -58,6 +58,9 @@ const PRUNABLE_COLLECTIONS = new Set([
   'patientConsumptions',
   'telehealthSessions',
   'employees',
+  // CI-10I cached intelligence is read-only convenience data. It may be
+  // regenerated online and must yield storage to critical operational state.
+  'clinicalIntelligenceArtifacts',
 ]);
 
 export async function pruneNonCriticalEdgeHistory(

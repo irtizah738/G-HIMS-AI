@@ -63,6 +63,7 @@ function snapshotFingerprint(input: {
   journals: DomainRecord[];
   diagnosticOrders: DomainRecord[];
   prescriptions: DomainRecord[];
+  revenueFindings: DomainRecord[];
 }): string {
   const normalize = (rows: DomainRecord[], idField: string) =>
     [...rows]
@@ -81,6 +82,7 @@ function snapshotFingerprint(input: {
         journals: normalize(input.journals, 'journalId'),
         diagnosticOrders: normalize(input.diagnosticOrders, 'orderId'),
         prescriptions: normalize(input.prescriptions, 'prescriptionId'),
+        revenueFindings: normalize(input.revenueFindings, 'id'),
       })
     )
     .digest('hex');
@@ -197,8 +199,14 @@ export class OpdBillingReconciliationDomainService {
       );
     }
 
-    const [invoices, charges, arItems, diagnosticOrders, prescriptions] =
-      await Promise.all([
+    const [
+      invoices,
+      charges,
+      arItems,
+      diagnosticOrders,
+      prescriptions,
+      revenueFindings,
+    ] = await Promise.all([
         DomainStateRepository.queryAllEqual<DomainRecord>(
           context.tenantId,
           'invoices',
@@ -230,6 +238,13 @@ export class OpdBillingReconciliationDomainService {
         DomainStateRepository.queryAllEqual<DomainRecord>(
           context.tenantId,
           'prescriptions',
+          'encounterId',
+          payload.encounterId,
+          { pageSize: 200, maxRows: 500 }
+        ),
+        DomainStateRepository.queryAllEqual<DomainRecord>(
+          context.tenantId,
+          'billingMismatches',
           'encounterId',
           payload.encounterId,
           { pageSize: 200, maxRows: 500 }
@@ -436,6 +451,55 @@ export class OpdBillingReconciliationDomainService {
           `Invoice charge ${chargeId} does not resolve to exactly one encounter charge.`
         );
       }
+    }
+
+    const chargeById = new Map(
+      charges.map((charge) => [String(charge.chargeId || ''), charge])
+    );
+    const revenueIntegrityFindingIds: string[] = [];
+    for (const finding of revenueFindings) {
+      const findingId = String(finding.id || '').trim();
+      const findingStatus = String(finding.status || '').toUpperCase();
+      if (!findingId) {
+        return reject(
+          commandId,
+          idempotencyKey,
+          'OPD_REVENUE_INTEGRITY_IDENTITY_MISSING',
+          'A Revenue Integrity finding is missing its authoritative identity.'
+        );
+      }
+      if (findingStatus === 'PENDING_REVIEW') {
+        return reject(
+          commandId,
+          idempotencyKey,
+          'OPD_REVENUE_INTEGRITY_PENDING_REVIEW',
+          `Revenue Integrity finding ${findingId} must be reconciled or dismissed before OPD financial closure.`
+        );
+      }
+      if (findingStatus === 'RECONCILED') {
+        const chargeId = String(finding.chargeId || '').trim();
+        const charge = chargeById.get(chargeId);
+        if (
+          !chargeId ||
+          !charge ||
+          String(charge.sourceFindingId || '') !== findingId
+        ) {
+          return reject(
+            commandId,
+            idempotencyKey,
+            'OPD_REVENUE_INTEGRITY_CHARGE_MISSING',
+            `Reconciled Revenue Integrity finding ${findingId} does not resolve to its authoritative encounter charge.`
+          );
+        }
+      } else if (findingStatus !== 'DISMISSED') {
+        return reject(
+          commandId,
+          idempotencyKey,
+          'OPD_REVENUE_INTEGRITY_STATUS_INVALID',
+          `Revenue Integrity finding ${findingId} has unsupported status ${findingStatus || 'UNKNOWN'}.`
+        );
+      }
+      revenueIntegrityFindingIds.push(findingId);
     }
 
     const arByInvoiceId = new Map<string, FinanceArOpenItem>();
@@ -675,6 +739,7 @@ export class OpdBillingReconciliationDomainService {
         (id) => diagnosticById.get(id)!
       ),
       prescriptions: prescriptionIds.map((id) => prescriptionById.get(id)!),
+      revenueFindings,
     });
     const reconciliationId = `opd_billrec_${payload.encounterId}`;
     const reconciledAt = Date.now();
@@ -693,6 +758,9 @@ export class OpdBillingReconciliationDomainService {
       journalIds: [...new Set(journalIds)].sort(),
       diagnosticOrderIds: [...new Set(diagnosticOrderIds)].sort(),
       prescriptionIds: [...new Set(prescriptionIds)].sort(),
+      revenueIntegrityFindingIds: [
+        ...new Set(revenueIntegrityFindingIds),
+      ].sort(),
       invoiceCount: invoiceById.size,
       chargeCount: new Set(chargeIds).size,
       totalPatientDueMinorUnits,
@@ -751,6 +819,12 @@ export class OpdBillingReconciliationDomainService {
       ...reconciliation.prescriptionIds.map((id) => ({
         key: `prescription:${id}`,
         entityType: 'PRESCRIPTION',
+        entityId: id,
+        required: true,
+      })),
+      ...reconciliation.revenueIntegrityFindingIds.map((id) => ({
+        key: `revenueFinding:${id}`,
+        entityType: 'REVENUE_INTEGRITY_FINDING',
         entityId: id,
         required: true,
       })),
@@ -829,6 +903,10 @@ export class OpdBillingReconciliationDomainService {
           const currentPrescriptions = reconciliation.prescriptionIds.map(
             (id) => current[`prescription:${id}`] || {}
           );
+          const currentRevenueFindings =
+            reconciliation.revenueIntegrityFindingIds.map(
+              (id) => current[`revenueFinding:${id}`] || {}
+            );
           const currentFingerprint = snapshotFingerprint({
             billingMutationSequence,
             invoices: currentInvoices,
@@ -837,6 +915,7 @@ export class OpdBillingReconciliationDomainService {
             journals: currentJournals,
             diagnosticOrders: currentDiagnostics,
             prescriptions: currentPrescriptions,
+            revenueFindings: currentRevenueFindings,
           });
           if (currentFingerprint !== preflightFingerprint) {
             throw new AtomicMutationRejectedError(

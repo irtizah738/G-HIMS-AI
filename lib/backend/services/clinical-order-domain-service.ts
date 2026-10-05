@@ -202,7 +202,6 @@ export class ClinicalOrderDomainService {
 
     if (
       !catalog ||
-      catalog.id !== payload.catalogCode ||
       catalog.status !== 'ACTIVE' ||
       catalog.orderType !== payload.orderType ||
       catalog.category !== expectedCategory ||
@@ -255,6 +254,19 @@ export class ClinicalOrderDomainService {
           code: 'CASH_TARIFF_NOT_CONFIGURED',
           message:
             'The active tariff-standard-cash configuration is required and must assign 100% patient responsibility.',
+        },
+      };
+    }
+
+    const serviceCatalogId = String(catalog.id || payload.catalogCode).trim();
+    if (!serviceCatalogId) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'DIAGNOSTIC_CATALOG_IDENTITY_INVALID',
+          message: 'Diagnostic billing catalog identity is missing.',
         },
       };
     }
@@ -450,7 +462,7 @@ export class ClinicalOrderDomainService {
       patientId: payload.patientId,
       orderType: payload.orderType,
       catalogCode: payload.catalogCode,
-      serviceCatalogId: catalog.id,
+      serviceCatalogId,
       orderName: catalog.description,
       priority: payload.priority,
       clinicalIndication: payload.clinicalIndication.trim(),
@@ -553,7 +565,7 @@ export class ClinicalOrderDomainService {
       currency,
       billingPurpose: 'OPD_DIAGNOSTIC',
       sourceOrderId: orderId,
-      serviceCatalogId: catalog.id,
+      serviceCatalogId,
       deferredRevenueAccountCode: catalog.deferredRevenueAccountCode,
       revenueAccountCode: catalog.revenueAccountCode,
       createdAt: new Date(orderedAt).toISOString(),
@@ -686,7 +698,7 @@ export class ClinicalOrderDomainService {
                   patientId: payload.patientId,
                   sourceType: 'DIAGNOSTIC_ORDER',
                   sourceId: orderId,
-                  serviceCatalogId: catalog.id,
+                  serviceCatalogId,
                   serviceCode: catalog.serviceCode,
                   description: catalog.description,
                   currency,

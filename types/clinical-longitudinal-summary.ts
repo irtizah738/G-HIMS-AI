@@ -50,6 +50,9 @@ export interface LongitudinalEvidenceIndexItem {
   status?: string;
   occurredAt?: number;
   provenanceStatus: 'EVENT_VERIFIED' | 'PROJECTION_ONLY';
+  sourceEventIds: string[];
+  contentHash: string;
+  content: unknown;
 }
 
 export interface ClinicalLongitudinalSummary {

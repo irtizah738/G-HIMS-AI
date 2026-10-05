@@ -771,6 +771,7 @@ export class EncounterDomainService {
         'CASHIER',
         'BILLING_CASHIER',
         'FINANCE_MANAGER',
+        'ACCOUNTANT',
         'REVENUE_CYCLE',
         'SYSTEM_ADMIN',
         'ADMINISTRATOR',
@@ -821,6 +822,7 @@ export class EncounterDomainService {
       'CASHIER',
       'BILLING_CASHIER',
       'FINANCE_MANAGER',
+      'ACCOUNTANT',
       'REVENUE_CYCLE',
     ].some((role) => normalizedRoles.has(role));
 

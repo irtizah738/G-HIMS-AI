@@ -5,19 +5,16 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTenant } from '@/lib/tenant/context';
 import { HeaderProfileMenu } from '@/components/auth/header-profile-menu';
-import { FloatingCopilotBot } from '@/components/ai/floating-copilot-bot';
 import { 
   Building2, 
   ChevronDown, 
   ArrowLeft, 
   CheckCircle2, 
 } from 'lucide-react';
-import { ClinicalCopilotDrawer } from '@/components/ai/ClinicalCopilotDrawer';
 
 export function TenantShellHeader() {
   const { currentTenant, tenantId, userTenants, switchTenant } = useTenant();
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [copilotOpen, setCopilotOpen] = useState(false);
   const router = useRouter();
 
   const handleSelectTenant = async (newTenantId: string) => {
@@ -124,18 +121,6 @@ export function TenantShellHeader() {
         </div>
       </div>
 
-      {/* Slide-out Clinical AI Copilot Drawer */}
-      <ClinicalCopilotDrawer
-        isOpen={copilotOpen}
-        onClose={() => setCopilotOpen(false)}
-        tenantId={tenantId}
-      />
-
-      {/* Floating Bottom-Right Clinical AI Copilot Trigger */}
-      <FloatingCopilotBot
-        isOpen={copilotOpen}
-        onToggle={() => setCopilotOpen(!copilotOpen)}
-      />
     </header>
   );
 }

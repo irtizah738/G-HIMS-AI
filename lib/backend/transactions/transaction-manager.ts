@@ -289,6 +289,8 @@ function collectionForEntityType(entityType: string): string {
     CASH_RECEIPT: 'cashReceipts',
     INVOICE: 'invoices',
     INVOICE_SETTLEMENT: 'invoiceSettlements',
+    BILLING_SERVICE_CATALOG: 'billingServiceCatalog',
+    TARIFF: 'tariffs',
     DISCHARGE_READINESS_REVIEW: 'dischargeReadinessReviews',
     CONSULTANT_REVIEW_CHECKPOINT: 'consultantReviewCheckpoints',
     CLINICAL_CONSULTATION_REQUEST: 'consultationRequests',
@@ -371,6 +373,57 @@ export class TransactionManager {
       throw new Error('EPHEMERAL_STATE_READ_FORBIDDEN_OUTSIDE_TEST_OR_DEMO');
     }
     return this.getEphemeralState(tenantId,entityType,entityId);
+  }
+
+  public static getEphemeralCollectionForTesting(
+    tenantId: string,
+    collectionName: string
+  ): Array<Record<string, unknown>> {
+    if (!canUseEphemeralPersistence()) {
+      throw new Error('EPHEMERAL_STATE_READ_FORBIDDEN_OUTSIDE_TEST_OR_DEMO');
+    }
+
+    const prefix = `${tenantId}\u0000`;
+    const rows: Array<Record<string, unknown>> = [];
+    for (const [key, value] of this.inMemoryDomainState.entries()) {
+      if (!key.startsWith(prefix)) continue;
+      const [, entityType] = key.split('\u0000');
+      if (!entityType) continue;
+      try {
+        if (collectionForEntityType(entityType) === collectionName) {
+          rows.push(value);
+        }
+      } catch {
+        // Unknown ephemeral entity types are not part of repository-backed state.
+      }
+    }
+    return rows;
+  }
+
+  public static getEphemeralStateByCollectionForTesting(
+    tenantId: string,
+    collectionName: string,
+    entityId: string
+  ): Record<string, unknown> | null {
+    if (!canUseEphemeralPersistence()) {
+      throw new Error('EPHEMERAL_STATE_READ_FORBIDDEN_OUTSIDE_TEST_OR_DEMO');
+    }
+
+    const suffix = `\u0000${entityId}`;
+    const prefix = `${tenantId}\u0000`;
+    for (const [key, value] of this.inMemoryDomainState.entries()) {
+      if (!key.startsWith(prefix) || !key.endsWith(suffix)) continue;
+      const [, entityType] = key.split('\u0000');
+      if (!entityType) continue;
+      try {
+        if (collectionForEntityType(entityType) === collectionName) {
+          return value;
+        }
+      } catch {
+        // Unknown ephemeral entity types are not part of repository-backed state.
+      }
+    }
+    return null;
   }
 
   private static buildRecords(params: {

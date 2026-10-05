@@ -85,12 +85,12 @@ export function OpdPharmacyPrescriptions({
   const [selectedFormularyCode, setSelectedFormularyCode] = useState<string>(() =>
     IS_DEMO_RUNTIME ? DEMO_FORMULARY[0].code : ''
   );
-  const [dosage, setDosage] = useState<string>('40 mg');
-  const [route, setRoute] = useState<string>('Oral');
-  const [frequency, setFrequency] = useState<string>('OD (Once Daily Morning)');
-  const [durationDays, setDurationDays] = useState<number>(14);
-  const [quantity, setQuantity] = useState<number>(14);
-  const [specialInstructions, setSpecialInstructions] = useState<string>('Take with a full glass of water in the morning.');
+  const [dosage, setDosage] = useState<string>(IS_DEMO_RUNTIME ? '40 mg' : '');
+  const [route, setRoute] = useState<string>(IS_DEMO_RUNTIME ? 'Oral' : '');
+  const [frequency, setFrequency] = useState<string>(IS_DEMO_RUNTIME ? 'OD (Once Daily Morning)' : '');
+  const [durationDays, setDurationDays] = useState<number>(IS_DEMO_RUNTIME ? 14 : 1);
+  const [quantity, setQuantity] = useState<number>(IS_DEMO_RUNTIME ? 14 : 1);
+  const [specialInstructions, setSpecialInstructions] = useState<string>(IS_DEMO_RUNTIME ? 'Take with a full glass of water in the morning.' : '');
   const [allowGeneric, setAllowGeneric] = useState<boolean>(true);
 
   // State for prescription submission error
@@ -102,7 +102,7 @@ export function OpdPharmacyPrescriptions({
   const [safetyOverrideReason, setSafetyOverrideReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [dispenseModalItem, setDispenseModalItem] = useState<PharmacyPrescriptionItem | null>(null);
-  const [pharmacistName, setPharmacistName] = useState<string>('Pharm. Tariq Bilal (R.Ph)');
+  const [pharmacistName, setPharmacistName] = useState<string>('');
 
   useEffect(() => {
     if (IS_DEMO_RUNTIME) return;
@@ -141,6 +141,7 @@ export function OpdPharmacyPrescriptions({
         setFormularyError(null);
         if (mapped[0]) {
           setSelectedFormularyCode(mapped[0].code);
+          setDosage(mapped[0].strength);
           setRoute(mapped[0].defaultRoute);
           setFrequency(mapped[0].defaultFreq);
           setDurationDays(mapped[0].defaultDays);

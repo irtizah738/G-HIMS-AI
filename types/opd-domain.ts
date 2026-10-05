@@ -167,6 +167,7 @@ export interface AppointmentRecord {
 }
 
 export type QueueStatus =
+  | 'PAYMENT_PENDING'
   | 'WAITING'
   | 'CALLED'
   | 'IN_SERVICE'

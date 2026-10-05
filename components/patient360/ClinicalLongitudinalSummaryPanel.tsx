@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { FileText, Loader2, RefreshCw } from 'lucide-react';
 import { generateLongitudinalClinicalSummary } from '@/lib/clinical/patient360/patient360-client';
 import type { ClinicalLongitudinalSummaryResponse } from '@/types/clinical-longitudinal-summary';
@@ -11,7 +11,7 @@ function dateTime(value?: number): string {
   return Number.isFinite(date.getTime()) ? date.toLocaleString() : String(value);
 }
 
-function EmptyState({ children }: { children: React.ReactNode }) {
+function EmptyState({ children }: { children: ReactNode }) {
   return (
     <div className="rounded-lg border border-dashed border-slate-200 bg-white p-3 text-xs text-slate-500">
       {children}

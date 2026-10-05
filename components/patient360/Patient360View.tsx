@@ -21,6 +21,7 @@ import {
 import {
   acknowledgeCriticalDiagnosticResult,
   loadPatient360ClinicalView,
+  recordConsultantPatientReview,
   recordDischargeReadinessReview,
   type Patient360ClinicalView,
 } from '@/lib/clinical/patient360/patient360-client';

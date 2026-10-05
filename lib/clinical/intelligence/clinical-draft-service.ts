@@ -42,8 +42,22 @@ function normalize(value: unknown): string {
   return String(value ?? '').trim();
 }
 
+const REQUIRED_SECTIONS: Record<ClinicalDraftType, string[]> = {
+  SOAP: ['subjective', 'objective', 'assessment', 'plan'],
+  ENCOUNTER_SUMMARY: ['reason-for-encounter', 'key-findings', 'assessment', 'plan-and-pending-work'],
+  HANDOVER: ['situation', 'background', 'assessment', 'recommendation-and-pending-work'],
+  DISCHARGE_SUMMARY: ['admission-context', 'clinical-course', 'key-results-and-procedures', 'medications', 'follow-up-and-instructions'],
+  REFERRAL: ['reason-for-referral', 'clinical-background', 'key-findings-and-treatment', 'pending-work', 'referral-question'],
+  PATIENT_INSTRUCTIONS: ['visit-summary', 'documented-medication-plan', 'documented-care-instructions', 'documented-warning-signs', 'documented-follow-up'],
+};
+
+function requiredSections(draftType: ClinicalDraftType): string[] {
+  return REQUIRED_SECTIONS[draftType];
+}
+
 function validateProviderOutput(
   snapshot: ClinicalEvidenceSnapshot,
+  draftType: ClinicalDraftType,
   output: ProviderOutput
 ): { title: string; sections: ClinicalDraftSection[]; claims: CopilotClaim[]; warnings: string[] } {
   const title = normalize(output?.title);
@@ -79,6 +93,12 @@ function validateProviderOutput(
     return { sectionId, heading, text, claims };
   });
 
+  const required = requiredSections(draftType);
+  const missingSections = required.filter((sectionId) => !sectionIds.has(sectionId));
+  if (missingSections.length > 0) {
+    throw new Error(`CI10F_REQUIRED_SECTIONS_MISSING:${missingSections.join(',')}`);
+  }
+
   const claims = sections.flatMap((section) => section.claims);
   const grounding = ClinicalEvidenceService.validateClaims(snapshot, claims);
   if (!grounding.valid) {
@@ -104,8 +124,9 @@ function schemaFor(draftType: ClinicalDraftType) {
   return JSON.stringify({
     title: 'string',
     draftType,
+    requiredSectionIds: requiredSections(draftType),
     sections: [{
-      sectionId: 'stable short string',
+      sectionId: 'one of requiredSectionIds; every required section must be returned exactly once',
       heading: 'string',
       text: 'draft text containing only evidence-supported or explicitly uncertain content',
       claims: [{
@@ -125,7 +146,8 @@ function instructionFor(draftType: ClinicalDraftType): string {
     `Create a ${draftType} DRAFT for a qualified clinician to edit, review, approve, and sign.`,
     'This is non-authoritative clinical drafting. Never issue orders, diagnoses, prescriptions, medication changes, disposition decisions, referrals, or patient instructions as completed clinical actions.',
     'Use only facts contained in the supplied frozen evidence snapshot. Never fill missing information from general medical knowledge or assumptions.',
-    'Every clinical assertion must appear as a claim and cite evidenceIds from the supplied snapshot. If a statement is uncertain or evidence is incomplete, say so explicitly.',
+    `Return every required section exactly once: ${requiredSections(draftType).join(', ')}.`,
+    'Every clinical assertion must appear as a claim and cite evidenceIds from the supplied snapshot. If evidence needed for a required section is absent, write "Not documented in available evidence" and represent that statement with an UNCERTAIN claim rather than inventing content.',
     'Do not invent negative findings. Absence of evidence is not evidence of absence.',
     'Do not fabricate examination findings, stability statements, diagnoses, medication adherence, procedures, follow-up intervals, appointments, or warning signs.',
     'For patient instructions, draft wording only from already documented clinician plans/orders; do not create new treatment advice.',
@@ -196,26 +218,32 @@ export class ClinicalDraftService {
       throw new Error('CI10F_EVIDENCE_PURPOSE_MISMATCH');
     }
 
+    const promptEvidence = {
+      snapshotId: snapshot.snapshotId,
+      snapshotHash: snapshot.snapshotHash,
+      patientId: snapshot.patientId,
+      patient360Revision: snapshot.patient360Revision,
+      patient360SourceCheckpoint: snapshot.patient360SourceCheckpoint,
+      limitations: snapshot.limitations,
+      evidenceRefs: snapshot.evidenceRefs,
+    };
+    const promptBytes = Buffer.byteLength(JSON.stringify(promptEvidence), 'utf8');
+    if (promptBytes > 500_000) {
+      throw new Error(`CI10F_PROMPT_EVIDENCE_TOO_LARGE:${promptBytes}`);
+    }
+
     const generation = await AIGateway.generateJson<ProviderOutput>({
       purpose: 'CLINICAL_GOVERNED_DRAFT',
       systemInstruction: instructionFor(draftType),
       sourceData: {
         draftType,
-        evidenceSnapshot: {
-          snapshotId: snapshot.snapshotId,
-          snapshotHash: snapshot.snapshotHash,
-          patientId: snapshot.patientId,
-          patient360Revision: snapshot.patient360Revision,
-          patient360SourceCheckpoint: snapshot.patient360SourceCheckpoint,
-          limitations: snapshot.limitations,
-          evidenceRefs: snapshot.evidenceRefs,
-        },
+        evidenceSnapshot: promptEvidence,
       },
       responseSchema: schemaFor(draftType),
       temperature: 0,
     });
 
-    const normalized = validateProviderOutput(snapshot, generation.data);
+    const normalized = validateProviderOutput(snapshot, draftType, generation.data);
     const content = contentFromSections(normalized.sections);
     if (!content) throw new Error('CI10F_AI_OUTPUT_CONTENT_REQUIRED');
 

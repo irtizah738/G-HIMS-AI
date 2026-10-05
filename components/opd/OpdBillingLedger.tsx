@@ -54,10 +54,20 @@ export function OpdBillingLedger({
       return;
     }
 
+    const amountMinorUnits = Math.round(paymentAmount * 100);
+    if (
+      !Number.isSafeInteger(amountMinorUnits) ||
+      amountMinorUnits <= 0 ||
+      amountMinorUnits > invoice.balanceDueMinorUnits
+    ) {
+      alert('Enter a valid payment amount that does not exceed the outstanding balance.');
+      return;
+    }
+
     const payment: PaymentTransaction = {
       id: `pay-${Date.now()}`,
       invoiceId: invoice.id,
-      amountMinorUnits: paymentAmount * 100,
+      amountMinorUnits,
       mode: selectedPaymentMode,
       referenceNumber: transactionRef,
       status: 'CAPTURED',

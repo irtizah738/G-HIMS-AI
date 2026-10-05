@@ -107,6 +107,16 @@ export class OpdBillingDomainService {
 
     // Pilot RP6 is deliberately cash-only. Other payer models require their own
     // eligibility/preauthorization authority and may not silently fall back to cash.
+    const generalConsent = patient.consentSummary?.GENERAL_OUTPATIENT;
+    if (String(generalConsent?.status || '').toUpperCase() !== 'GRANTED') {
+      return reject(
+        commandId,
+        idempotencyKey,
+        'GENERAL_OPD_CONSENT_REQUIRED',
+        'A consultation charge cannot be created unless General OPD Care consent is explicitly granted.'
+      );
+    }
+
     if (patient.tariffPlan !== 'OUT_OF_POCKET') {
       return reject(
         commandId,

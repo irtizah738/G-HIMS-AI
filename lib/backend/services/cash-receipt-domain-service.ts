@@ -408,8 +408,16 @@ export class CashReceiptDomainService {
           const queueToken = current.opdQueueToken || null;
           const diagnosticOrder = current.diagnosticOrder || null;
 
+          if (diagnosticOrderId && !isDiagnosticInvoice) {
+            throw new AtomicMutationRejectedError(
+              'DIAGNOSTIC_INVOICE_PURPOSE_CHANGED',
+              'Diagnostic invoice purpose changed before cash settlement could commit.'
+            );
+          }
+
           if (isDiagnosticInvoice) {
             if (
+              String(invoice.sourceOrderId || '') !== diagnosticOrderId ||
               !diagnosticOrder ||
               String(diagnosticOrder.orderId || '') !== diagnosticOrderId ||
               String(diagnosticOrder.billingInvoiceId || '') !== payload.invoiceId ||

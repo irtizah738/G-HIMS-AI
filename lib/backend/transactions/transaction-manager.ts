@@ -287,6 +287,7 @@ function collectionForEntityType(entityType: string): string {
     INVOICE: 'invoices',
     INVOICE_SETTLEMENT: 'invoiceSettlements',
     DISCHARGE_READINESS_REVIEW: 'dischargeReadinessReviews',
+    CONSULTANT_REVIEW_CHECKPOINT: 'consultantReviewCheckpoints',
     BED_TRANSFER: 'bedTransfers',
     RADIO_TRANSMISSION: 'radioTransmissions',
   };

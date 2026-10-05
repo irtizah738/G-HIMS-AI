@@ -3,6 +3,7 @@ import { getAdminFirestore } from '@/server/firebase/admin';
 import { sanitizeForFirestore } from '@/lib/firestore/sanitize';
 import type { CommandContext, DomainEventEnvelope } from '@/lib/backend/types';
 import { ClinicalEvidenceService } from '@/lib/clinical/intelligence/clinical-evidence-service';
+import { ClinicalTrendEngine } from '@/lib/clinical/intelligence/clinical-trend-engine';
 import type {
   ClinicalEvidenceRef,
   ClinicalEvidenceSnapshot,
@@ -70,20 +71,6 @@ function iso(value: unknown): string | undefined {
   if (numeric === undefined) return undefined;
   const date = new Date(numeric);
   return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
-}
-
-function conceptText(value: unknown, fallback: string): string {
-  const data = record(value);
-  const text = stringValue(data.text);
-  if (text) return text;
-
-  const codings = Array.isArray(data.codings) ? data.codings : [];
-  const first = codings.length > 0 ? record(codings[0]) : {};
-  return (
-    stringValue(first.display) ||
-    stringValue(first.code) ||
-    fallback
-  );
 }
 
 function dedupeByEntity(
@@ -190,45 +177,6 @@ function knowledgeStatus(
 ): string {
   const evidence = knowledgeRef(snapshot);
   return stringValue(record(evidence?.content)[field]).toUpperCase();
-}
-
-function quantity(
-  evidence: ClinicalEvidenceRef
-): { value: number; unit: string } | null {
-  const content = record(evidence.content);
-  const observationValue = record(content.value);
-  const valueType = stringValue(observationValue.valueType).toUpperCase();
-  if (valueType !== 'QUANTITY') return null;
-
-  const quantityValue = record(observationValue.quantity);
-  const value = numberValue(quantityValue.value);
-  if (value === undefined) return null;
-
-  return {
-    value,
-    unit:
-      stringValue(quantityValue.unit) ||
-      stringValue(quantityValue.code),
-  };
-}
-
-function interpretationText(evidence: ClinicalEvidenceRef): string {
-  const content = record(evidence.content);
-  const interpretation = content.interpretation;
-
-  if (typeof interpretation === 'string') {
-    return interpretation.trim();
-  }
-  if (!Array.isArray(interpretation)) return '';
-
-  return interpretation
-    .map((item) => conceptText(item, ''))
-    .filter(Boolean)
-    .join(', ');
-}
-
-function isAbnormalInterpretation(value: string): boolean {
-  return /\b(H|L|HH|LL|HIGH|LOW|ABNORMAL|CRITICAL|PANIC)\b/i.test(value);
 }
 
 function buildActiveProblems(
@@ -503,66 +451,62 @@ function buildDiagnostics(
 function buildAbnormalTrends(
   snapshot: ClinicalEvidenceSnapshot
 ): LongitudinalSummarySection {
-  const observations = dedupeByEntity(
-    snapshot.evidenceRefs.filter((item) =>
-      ['OBSERVATION_HISTORY', 'OBSERVATION'].includes(item.sourceType)
-    ),
-    ['OBSERVATION_HISTORY', 'OBSERVATION']
+  const computed = ClinicalTrendEngine.compute(snapshot);
+  const evidenceById = new Map(
+    snapshot.evidenceRefs.map((item) => [item.evidenceId, item])
   );
-
   const claims: LongitudinalSummaryClaim[] = [];
+  const caveats = new Set<string>([
+    'Trend statements are computed by the CI-10D deterministic trend engine and require clinician interpretation.',
+  ]);
 
-  for (const item of observations) {
-    const interpretation = interpretationText(item);
-    if (interpretation && isAbnormalInterpretation(interpretation)) {
+  for (const metric of computed.metrics) {
+    for (const point of metric.points.filter((item) => item.abnormal)) {
+      const evidence = evidenceById.get(point.evidenceId);
+      if (!evidence) continue;
       claims.push(
         claim(
           snapshot,
           'ABNORMAL_TRENDS',
-          `${item.label} is source-marked with interpretation: ${interpretation}.`,
-          [item],
+          `${metric.display} has a source-marked abnormal observation of ${point.value}${point.unit ? ` ${point.unit}` : ''}.`,
+          [evidence],
           'DIRECT_FACT',
-          'The source interpretation is reported without adding an independent diagnosis.',
-          item.occurredAt
+          'The abnormal marker comes from source interpretation/reference range evidence; no independent diagnosis is inferred.',
+          point.effectiveAt
         )
+      );
+    }
+
+    if (metric.explanation) {
+      const refs = metric.explanation.evidenceRefs
+        .map((evidenceId) => evidenceById.get(evidenceId))
+        .filter((item): item is ClinicalEvidenceRef => Boolean(item));
+
+      if (refs.length > 0) {
+        claims.push(
+          claim(
+            snapshot,
+            'ABNORMAL_TRENDS',
+            metric.explanation.text,
+            refs,
+            'TREND',
+            'This is deterministic numeric trend description only; clinical significance is not inferred.',
+            metric.points[metric.points.length - 1]?.effectiveAt
+          )
+        );
+      }
+    }
+
+    if (metric.status !== 'COMPUTED') {
+      caveats.add(
+        `${metric.display}: trend suppressed (${metric.status.toLowerCase().replace(/_/g, ' ')}).`
       );
     }
   }
 
-  const grouped = new Map<
-    string,
-    Array<{ ref: ClinicalEvidenceRef; value: number; unit: string }>
-  >();
-  for (const item of observations) {
-    const q = quantity(item);
-    if (!q || item.occurredAt === undefined) continue;
-    const key = `${item.label.toLowerCase()}|${q.unit.toLowerCase()}`;
-    const list = grouped.get(key) || [];
-    list.push({ ref: item, value: q.value, unit: q.unit });
-    grouped.set(key, list);
-  }
-
-  for (const values of grouped.values()) {
-    values.sort(
-      (left, right) =>
-        Number(left.ref.occurredAt || 0) - Number(right.ref.occurredAt || 0)
-    );
-    if (values.length < 2) continue;
-
-    const first = values[0];
-    const last = values[values.length - 1];
-    if (first.value === last.value) continue;
-
-    claims.push(
-      claim(
-        snapshot,
-        'ABNORMAL_TRENDS',
-        `Descriptive trend: ${last.ref.label} changed from ${first.value}${first.unit ? ` ${first.unit}` : ''} to ${last.value}${last.unit ? ` ${last.unit}` : ''} across ${values.length} represented observations.`,
-        [first.ref, last.ref],
-        'TREND',
-        'This is a numeric description only; clinical significance is not inferred.',
-        last.ref.occurredAt
-      )
+  for (const item of computed.excludedEvidence) {
+    caveats.add(
+      `Observation evidence excluded: ${item.reason.toLowerCase().replace(/_/g, ' ')}.`
     );
   }
 
@@ -570,8 +514,8 @@ function buildAbnormalTrends(
     'ABNORMAL_TRENDS',
     'Abnormal results and descriptive trends',
     claims,
-    ['Trend statements are descriptive only and require clinician interpretation.'],
-    'No source-marked abnormal observation or multi-point numeric trend is represented in this snapshot.'
+    Array.from(caveats),
+    'No source-marked abnormal observation or CI-10D-computable quantitative trend is represented in this snapshot.'
   );
 }
 

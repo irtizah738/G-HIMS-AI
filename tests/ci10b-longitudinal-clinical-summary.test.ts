@@ -139,9 +139,20 @@ function snapshot(): ClinicalEvidenceSnapshot {
         {
           status: 'FINAL',
           effectiveAt: 1_000,
+          code: {
+            text: 'HbA1c',
+            codings: [
+              { system: 'LOINC', code: '4548-4', display: 'HbA1c' },
+            ],
+          },
           value: {
             valueType: 'QUANTITY',
-            quantity: { value: 7.1, unit: '%' },
+            quantity: {
+              value: 7.1,
+              unit: '%',
+              system: 'UCUM',
+              code: '%',
+            },
           },
           interpretation: [{ text: 'HIGH' }],
         },
@@ -155,9 +166,20 @@ function snapshot(): ClinicalEvidenceSnapshot {
         {
           status: 'FINAL',
           effectiveAt: 2_000,
+          code: {
+            text: 'HbA1c',
+            codings: [
+              { system: 'LOINC', code: '4548-4', display: 'HbA1c' },
+            ],
+          },
           value: {
             valueType: 'QUANTITY',
-            quantity: { value: 8.4, unit: '%' },
+            quantity: {
+              value: 8.4,
+              unit: '%',
+              system: 'UCUM',
+              code: '%',
+            },
           },
           interpretation: [{ text: 'HIGH' }],
         },

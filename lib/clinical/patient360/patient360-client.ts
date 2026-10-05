@@ -19,6 +19,7 @@ import type { DeteriorationProjection } from '@/types/clinical-deterioration';
 import type { MedicationSafetyProjection } from '@/types/medication-safety';
 import type { ClinicalLongitudinalSummaryResponse } from '@/types/clinical-longitudinal-summary';
 import type { ClinicalEncounterPreparationResponse } from '@/types/clinical-encounter-preparation';
+import type { ClinicalTrendIntelligenceResponse } from '@/types/clinical-trend-intelligence';
 
 export interface Patient360ClinicalView {
   tenantId: string;
@@ -509,4 +510,35 @@ export async function generateEncounterPreparationBrief(
     brief: payload.brief,
     evidenceIndex: payload.evidenceIndex || [],
   } as ClinicalEncounterPreparationResponse;
+}
+
+
+export async function generateClinicalTrendIntelligence(
+  tenantId: string,
+  patientId: string
+): Promise<ClinicalTrendIntelligenceResponse> {
+  const response = await AuthClient.authorizedFetch(
+    `/api/clinical/intelligence/trends?tenantId=${encodeURIComponent(tenantId)}`,
+    {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tenantId, patientId }),
+    },
+    tenantId
+  );
+
+  const payload = await response.json();
+  if (!response.ok || !payload?.success || !payload?.artifact) {
+    throw new Error(
+      payload?.error?.message ||
+        payload?.error ||
+        'Clinical trend intelligence could not be generated.'
+    );
+  }
+
+  return {
+    artifact: payload.artifact,
+    evidenceIndex: payload.evidenceIndex || [],
+  } as ClinicalTrendIntelligenceResponse;
 }

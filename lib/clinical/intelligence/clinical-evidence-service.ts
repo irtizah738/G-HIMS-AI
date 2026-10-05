@@ -12,6 +12,10 @@ import {
   type EncounterPreparationEvidenceSources,
 } from '@/lib/clinical/intelligence/encounter-preparation-evidence-loader';
 import type { ClinicalCareSetting } from '@/types/consultant-visibility';
+import {
+  TrendEvidenceLoader,
+  type TrendEvidenceSources,
+} from '@/lib/clinical/intelligence/trend-evidence-loader';
 import type {
   Patient360AllergySummary,
   Patient360ConditionSummary,
@@ -48,7 +52,8 @@ type EvidenceCandidate = {
 
 type EvidenceSupplement =
   | LongitudinalEvidenceSources
-  | EncounterPreparationEvidenceSources;
+  | EncounterPreparationEvidenceSources
+  | TrendEvidenceSources;
 
 function canonicalStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'undefined';
@@ -390,7 +395,9 @@ export class ClinicalEvidenceService {
       limitations: [
         purpose === 'ENCOUNTER_PREP'
           ? 'This encounter-preparation snapshot combines Patient 360, canonical longitudinal facts, consultant change/open-item state and current governed clinical-intelligence projections frozen at generation time.'
-          : supplemental
+          : purpose === 'TREND_EXPLANATION'
+            ? 'This trend snapshot freezes the canonical quantitative observation history represented at generation time.'
+            : supplemental
             ? 'This longitudinal snapshot combines Patient 360 evidence with canonical encounter, medication, observation, diagnostic-order, diagnostic-report, procedure and care-plan facts frozen at generation time.'
             : 'This snapshot contains only evidence represented in the current Patient 360 projection contract.',
         'Missing or incomplete source data must not be interpreted as clinical absence.',
@@ -511,7 +518,9 @@ export class ClinicalEvidenceService {
               projection,
               options
             )
-          : undefined;
+          : purpose === 'TREND_EXPLANATION'
+            ? await TrendEvidenceLoader.load(context.tenantId, patientId)
+            : undefined;
 
     const snapshot = this.buildSnapshot(
       projection,

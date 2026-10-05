@@ -29,6 +29,7 @@ import {
 import type { Patient360ObservationSummary } from '@/types/patient360-projection';
 import type { KnownStatus } from '@/types/clinical-canonical';
 import { ClinicalLongitudinalSummaryPanel } from '@/components/patient360/ClinicalLongitudinalSummaryPanel';
+import { ClinicalTrendIntelligencePanel } from '@/components/patient360/ClinicalTrendIntelligencePanel';
 
 function valueText(value: Patient360ObservationSummary['value']): string {
   switch (value.valueType) {
@@ -564,6 +565,13 @@ export function Patient360View({
         </section>
 
         <ClinicalLongitudinalSummaryPanel
+          tenantId={tenantId}
+          patientId={patientId}
+          offline={offline}
+          currentRevision={freshness.revision}
+        />
+
+        <ClinicalTrendIntelligencePanel
           tenantId={tenantId}
           patientId={patientId}
           offline={offline}

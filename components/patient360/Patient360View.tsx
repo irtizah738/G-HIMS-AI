@@ -30,6 +30,7 @@ import type { Patient360ObservationSummary } from '@/types/patient360-projection
 import type { KnownStatus } from '@/types/clinical-canonical';
 import { ClinicalLongitudinalSummaryPanel } from '@/components/patient360/ClinicalLongitudinalSummaryPanel';
 import { ClinicalTrendIntelligencePanel } from '@/components/patient360/ClinicalTrendIntelligencePanel';
+import { MedicationReconciliationCopilotPanel } from '@/components/patient360/MedicationReconciliationCopilotPanel';
 
 function valueText(value: Patient360ObservationSummary['value']): string {
   switch (value.valueType) {
@@ -780,6 +781,17 @@ export function Patient360View({
             </EmptyState>
           )}
         </section>
+
+        {view.selectedCareContext && (
+          <MedicationReconciliationCopilotPanel
+            tenantId={tenantId}
+            patientId={patientId}
+            encounterId={view.selectedCareContext.encounterId}
+            careSetting={view.selectedCareContext.careSetting}
+            offline={offline}
+            currentRevision={freshness.revision}
+          />
+        )}
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

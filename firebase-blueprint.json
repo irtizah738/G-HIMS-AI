@@ -708,6 +708,21 @@
         "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "encounterId", "patientId", "patientName", "status", "roomToken"]
+    },
+    "ScmDomainEvent": {
+      "title": "ScmDomainEvent",
+      "description": "Immutable supply chain management domain event and audit log",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128 },
+        "tenantId": { "type": "string", "maxLength": 128 },
+        "eventType": { "type": "string", "maxLength": 64 },
+        "aggregateId": { "type": "string", "maxLength": 128 },
+        "aggregateType": { "type": "string", "maxLength": 64 },
+        "description": { "type": "string", "maxLength": 512 },
+        "occurredAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["eventId", "tenantId", "eventType", "aggregateId", "aggregateType"]
     }
   },
   "firestore": {
@@ -854,6 +869,10 @@
     "/tenants/{tenantId}/cashRegisterShifts/{shiftId}": {
       "schema": "CashRegisterShift",
       "description": "Tenant point-of-care cashier shift reconciliations"
+    },
+    "/tenants/{tenantId}/scmEvents/{eventId}": {
+      "schema": "ScmDomainEvent",
+      "description": "Tenant immutable SCM domain audit events and compliance ledger"
     }
   }
 }

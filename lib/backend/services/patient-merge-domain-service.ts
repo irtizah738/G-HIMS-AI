@@ -24,7 +24,20 @@ export class PatientMergeDomainService {
     payload: DurablePatientMergePayload
   ): Promise<CommandResult> {
     const auth = AuthorizationPipeline.evaluate(context, {
-      requiredRoles: ['MEDICAL_DIRECTOR', 'SYSTEM_ADMIN', 'SUPER_ADMIN'],
+      requiredRoles: [
+        'ADMINISTRATOR',
+        'SYSTEM_ADMIN',
+        'SUPER_ADMIN',
+        'MEDICAL_DIRECTOR',
+        'REGISTRAR',
+        'RECEPTIONIST',
+        'HIM_OFFICER',
+        'RECORDS_OFFICER',
+        'PATIENT_SAFETY_OFFICER',
+        'QUALITY_MANAGER',
+        'DOCTOR',
+        'CONSULTANT',
+      ],
     });
 
     if (!auth.authorized) {

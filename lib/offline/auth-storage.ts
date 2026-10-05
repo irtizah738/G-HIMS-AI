@@ -88,6 +88,11 @@ export async function saveCachedAuthSession(user: AuthenticatedUser, session: Us
   // Identity/session material is stored in IndexedDB only. Do not mirror clinical
   // identity or session records into localStorage on shared workstations.
   try {
+    const encryptedPayload = await encryptEdgeJson(user.tenantId, user.uid, {
+      user,
+      session,
+    });
+
     const db = await Promise.race([
       openDatabase(),
       new Promise<IDBDatabase>((_, reject) => setTimeout(() => reject(new Error('IDB timeout')), 800)),
@@ -99,10 +104,7 @@ export async function saveCachedAuthSession(user: AuthenticatedUser, session: Us
       id: 'current_active_session',
       tenantId: user.tenantId,
       actorId: user.uid,
-      encryptedPayload: await encryptEdgeJson(user.tenantId, user.uid, {
-        user,
-        session,
-      }),
+      encryptedPayload,
       cachedAt: new Date().toISOString(),
       expiresAt: session.expiresAt,
     };
@@ -240,12 +242,8 @@ export async function saveCachedTenantMemberships(memberships: TenantMembership[
     const cached = await getCachedAuthSession();
     if (!cached) return;
 
-    const db = await openDatabase();
-    const tx = db.transaction(STORE_MEMBERSHIPS, 'readwrite');
-    const store = tx.objectStore(STORE_MEMBERSHIPS);
-    store.clear();
-    for (const item of memberships) {
-      const record: CachedMembershipRecord = {
+    const records: CachedMembershipRecord[] = await Promise.all(
+      memberships.map(async (item) => ({
         tenantId: item.tenantId,
         cryptoTenantId: cached.user.tenantId,
         actorId: cached.user.uid,
@@ -254,9 +252,22 @@ export async function saveCachedTenantMemberships(memberships: TenantMembership[
           cached.user.uid,
           item
         ),
-      };
+      }))
+    );
+
+    const db = await openDatabase();
+    const tx = db.transaction(STORE_MEMBERSHIPS, 'readwrite');
+    const store = tx.objectStore(STORE_MEMBERSHIPS);
+    store.clear();
+    for (const record of records) {
       store.put(record);
     }
+
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('IDB membership write aborted'));
+    });
   } catch {
     // Membership cache is optional; never downgrade to plaintext/localStorage.
   }
@@ -299,20 +310,28 @@ export async function queueOfflineAuditLog(auditEvent: Record<string, unknown>):
     const cached = await getCachedAuthSession();
     if (!cached) return;
 
+    const encryptedPayload = await encryptEdgeJson(
+      cached.user.tenantId,
+      cached.user.uid,
+      auditEvent
+    );
+
     const db = await openDatabase();
     const tx = db.transaction(STORE_AUDIT_QUEUE, 'readwrite');
     const store = tx.objectStore(STORE_AUDIT_QUEUE);
     const row: CachedAuditRecord = {
       tenantId: cached.user.tenantId,
       actorId: cached.user.uid,
-      encryptedPayload: await encryptEdgeJson(
-        cached.user.tenantId,
-        cached.user.uid,
-        auditEvent
-      ),
+      encryptedPayload,
       queuedAt: new Date().toISOString(),
     };
     store.add(row);
+
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('IDB audit write aborted'));
+    });
   } catch {
     // Audit persistence must never downgrade PHI/security context to plaintext.
   }

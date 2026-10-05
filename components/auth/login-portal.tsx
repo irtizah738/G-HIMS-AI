@@ -267,181 +267,182 @@ export function LoginPortal() {
       </header>
 
       {/* Main Login Workspace */}
-      <main className="flex-1 flex items-center justify-center p-4 sm:p-6 lg:p-12">
-        <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">
-          
-          {/* Left Column: Login Form */}
-          <div className="lg:col-span-7 bg-slate-900/80 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl backdrop-blur flex flex-col justify-between">
-            <div>
-              <div className="mb-6 space-y-1">
-                <h1 className="text-xl font-bold text-white tracking-tight">
-                  Hospital Personnel Sign In
-                </h1>
-                <p className="text-xs text-slate-400">
-                  Authenticate with authorized hospital credentials to access the EHR & clinical runtime.
-                </p>
+      <main className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 lg:p-12 relative">
+        <div className="w-full max-w-xl space-y-4">
+          {/* Main Card: Login Form */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl backdrop-blur-md">
+            <div className="mb-6 space-y-1.5 text-center sm:text-left">
+              <div className="flex items-center justify-center sm:justify-start gap-2 text-xs font-semibold text-blue-400">
+                <ShieldCheck className="w-4 h-4" />
+                <span>Clinical & Operational Authentication</span>
+              </div>
+              <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+                Hospital Personnel Sign In
+              </h1>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Authenticate with authorized institutional credentials to access the EHR & clinical runtime.
+              </p>
+            </div>
+
+            {displayError && (
+              <div className="mb-6 p-3.5 bg-red-500/10 border border-red-500/30 rounded-xl flex items-start gap-3 text-xs text-red-300 animate-in fade-in">
+                <AlertCircle className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
+                <div className="flex-1 leading-relaxed">{displayError}</div>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {/* Facility Scope */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-slate-300">
+                  Hospital Facility Scope
+                </label>
+                <div className="relative">
+                  <select
+                    value={tenantId}
+                    onChange={(e) => setTenantId(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-xs font-medium text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition appearance-none cursor-pointer"
+                  >
+                    {TENANTS.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                  <Building2 className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                </div>
               </div>
 
-              {displayError && (
-                <div className="mb-6 p-3.5 bg-red-500/10 border border-red-500/30 rounded-xl flex items-start gap-3 text-xs text-red-300 animate-in fade-in">
-                  <AlertCircle className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
-                  <div className="flex-1 leading-relaxed">{displayError}</div>
+              {/* Email Input */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-slate-300">
+                  Staff Email Address
+                </label>
+                <div className="relative">
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="physician@centralmetro.health"
+                    className="w-full pl-10 pr-4 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-xs font-medium text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition placeholder:text-slate-600"
+                  />
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                 </div>
-              )}
+              </div>
 
-              <form onSubmit={handleSubmit} className="space-y-4">
-                {/* Facility Scope */}
-                <div className="space-y-1.5">
+              {/* Password Input */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
                   <label className="block text-xs font-semibold text-slate-300">
-                    Hospital Facility Scope
+                    Security Password
                   </label>
-                  <div className="relative">
-                    <select
-                      value={tenantId}
-                      onChange={(e) => setTenantId(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-xs font-medium text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition appearance-none cursor-pointer"
-                    >
-                      {TENANTS.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </select>
-                    <Building2 className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-                  </div>
+                  <Link
+                    href="/forgot-password"
+                    className="text-[11px] text-blue-400 hover:text-blue-300 transition"
+                  >
+                    Forgot password?
+                  </Link>
                 </div>
-
-                {/* Email Input */}
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-semibold text-slate-300">
-                    Staff Email Address
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="email"
-                      required
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="physician@centralmetro.health"
-                      className="w-full pl-10 pr-4 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-xs font-medium text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition placeholder:text-slate-600"
-                    />
-                    <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-                  </div>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••••••"
+                    className="w-full pl-10 pr-10 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-xs font-medium text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition placeholder:text-slate-600 font-mono"
+                  />
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3.5 top-3 text-slate-400 hover:text-slate-200 transition cursor-pointer"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
                 </div>
+              </div>
 
-                {/* Password Input */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="block text-xs font-semibold text-slate-300">
-                      Security Password
-                    </label>
-                    <Link
-                      href="/forgot-password"
-                      className="text-[11px] text-blue-400 hover:text-blue-300 transition"
-                    >
-                      Forgot password?
-                    </Link>
-                  </div>
-                  <div className="relative">
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      required
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="••••••••••••"
-                      className="w-full pl-10 pr-10 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-xs font-medium text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition placeholder:text-slate-600 font-mono"
-                    />
-                    <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3.5 top-3 text-slate-400 hover:text-slate-200 transition"
-                    >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
+              {/* Remember Workstation Checkbox */}
+              <div className="flex items-center justify-between pt-1">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={rememberDevice}
+                    onChange={(e) => setRememberDevice(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-xs text-slate-300 flex items-center gap-1.5">
+                    <Laptop className="w-3.5 h-3.5 text-slate-400" />
+                    Register this workstation terminal
+                  </span>
+                </label>
+              </div>
 
-                {/* Remember Workstation Checkbox */}
-                <div className="flex items-center justify-between pt-1">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={rememberDevice}
-                      onChange={(e) => setRememberDevice(e.target.checked)}
-                      className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span className="text-xs text-slate-300 flex items-center gap-1.5">
-                      <Laptop className="w-3.5 h-3.5 text-slate-400" />
-                      Register this workstation terminal
-                    </span>
-                  </label>
-                </div>
+              {/* Submit Action */}
+              <button
+                type="submit"
+                disabled={submitting || ssoLoading}
+                className="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold text-xs shadow-lg shadow-blue-600/25 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed mt-2 cursor-pointer"
+              >
+                {submitting ? (
+                  <span className="flex items-center gap-2">
+                    <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Verifying Credentials & Establishing Session...</span>
+                  </span>
+                ) : (
+                  <>
+                    <Lock className="w-4 h-4" />
+                    <span>Sign In to G-HIMS</span>
+                  </>
+                )}
+              </button>
 
-                {/* Submit Action */}
+              {/* SSO & Federated Identity Divider */}
+              <div className="relative my-3 flex items-center justify-center">
+                <div className="border-t border-slate-800 w-full" />
+                <span className="bg-slate-900/90 px-2 text-[10px] uppercase font-mono font-bold text-slate-500 shrink-0">
+                  or Federated Identity
+                </span>
+                <div className="border-t border-slate-800 w-full" />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {/* Google Workspace / Hospital Identity Sign In */}
                 <button
-                  type="submit"
-                  disabled={submitting || ssoLoading}
-                  className="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold text-xs shadow-lg shadow-blue-600/25 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed mt-2 cursor-pointer"
+                  type="button"
+                  onClick={handleGoogleSignIn}
+                  disabled={submitting || googleLoading}
+                  className="w-full py-2.5 px-3 rounded-xl border border-slate-700/80 bg-slate-950/70 hover:bg-slate-800 text-slate-200 font-semibold text-xs transition flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
                 >
-                  {submitting ? (
-                    <span className="flex items-center gap-2">
-                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      <span>Verifying Credentials & Establishing Session...</span>
+                  {googleLoading ? (
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Authenticating...
                     </span>
                   ) : (
                     <>
-                      <Lock className="w-4 h-4" />
-                      <span>Sign In to G-HIMS</span>
+                      <Globe className="w-3.5 h-3.5 text-blue-400" />
+                      <span>Google Identity</span>
                     </>
                   )}
                 </button>
 
-                {/* SSO & Federated Identity Divider */}
-                <div className="relative my-3 flex items-center justify-center">
-                  <div className="border-t border-slate-800 w-full" />
-                  <span className="bg-slate-900/90 px-2 text-[10px] uppercase font-mono font-bold text-slate-500 shrink-0">
-                    or Federated Identity
-                  </span>
-                  <div className="border-t border-slate-800 w-full" />
-                </div>
+                {/* SSO Modal Button */}
+                <button
+                  type="button"
+                  onClick={() => setSsoModalOpen(true)}
+                  className="w-full py-2.5 px-3 rounded-xl border border-slate-700/80 bg-slate-950/60 hover:bg-slate-800/80 text-slate-300 font-semibold text-xs transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                >
+                  <Key className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Hospital SSO</span>
+                </button>
+              </div>
+            </form>
 
-                <div className="space-y-2">
-                  {/* Google Workspace / Hospital Identity Sign In */}
-                  <button
-                    type="button"
-                    onClick={handleGoogleSignIn}
-                    disabled={submitting || googleLoading}
-                    className="w-full py-2.5 px-4 rounded-xl border border-slate-700/80 bg-slate-950/70 hover:bg-slate-800 text-slate-200 font-semibold text-xs transition flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
-                  >
-                    {googleLoading ? (
-                      <span className="flex items-center gap-2">
-                        <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        Authenticating Google Workspace...
-                      </span>
-                    ) : (
-                      <>
-                        <Globe className="w-3.5 h-3.5 text-blue-400" />
-                        <span>Continue with Google Identity</span>
-                      </>
-                    )}
-                  </button>
-
-                  {/* SSO Modal Button */}
-                  <button
-                    type="button"
-                    onClick={() => setSsoModalOpen(true)}
-                    className="w-full py-2.5 px-4 rounded-xl border border-slate-700/80 bg-slate-950/60 hover:bg-slate-800/80 text-slate-300 font-semibold text-xs transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
-                  >
-                    <Key className="w-3.5 h-3.5 text-slate-400" />
-                    <span>Hospital SSO (Okta / Azure AD / SAML)</span>
-                  </button>
-                </div>
-              </form>
-            </div>
-
-            <div className="mt-6 pt-4 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-500">
-              <span className="flex items-center gap-1">
+            <div className="mt-6 pt-4 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-500">
+              <span className="flex items-center gap-1.5">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                 Firebase identity + server session
               </span>
@@ -451,82 +452,13 @@ export function LoginPortal() {
             </div>
           </div>
 
-          {/* Right Column: Fast Persona Auto-Fill */}
-          <div className="lg:col-span-5 flex flex-col justify-between space-y-4">
-            <div className="bg-slate-900/60 border border-slate-800/90 rounded-2xl p-5 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-blue-400" />
-                  Demo Staff Personas
-                </div>
-                <span className="text-[10px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded-full">
-                  DEMO only
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400 leading-normal">
-                Demo personas only select an identity email. They do not contain passwords or bypass Firebase Authentication.
-              </p>
-
-              <div className="grid grid-cols-1 gap-2 pt-1 max-h-[380px] overflow-y-auto pr-1">
-                {showDemoPersonas ? DEMO_PERSONAS.map((p) => {
-                  const Icon = p.icon;
-                  const isSelected = email === p.email;
-                  return (
-                    <div
-                      key={p.id}
-                      className={`w-full p-2.5 rounded-xl border transition flex items-center justify-between gap-3 ${
-                        isSelected
-                          ? 'bg-blue-600/10 border-blue-500/50 ring-1 ring-blue-500/30'
-                          : 'bg-slate-950/40 border-slate-800 hover:border-slate-700 hover:bg-slate-800/40'
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => handleSelectPersona(p)}
-                        className="flex items-center gap-3 min-w-0 flex-1 text-left cursor-pointer"
-                      >
-                        <div
-                          className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border ${p.color}`}
-                        >
-                          <Icon className="w-4 h-4" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-semibold text-white truncate">
-                              {p.name}
-                            </span>
-                            <span className="text-[10px] font-mono text-slate-400 truncate ml-1">
-                              {p.role}
-                            </span>
-                          </div>
-                          <div className="text-[11px] text-slate-400 truncate">
-                            {p.department}
-                          </div>
-                        </div>
-                      </button>
-
-                      <span className="shrink-0 px-2 py-1 text-[10px] font-semibold text-slate-400 border border-slate-700 rounded-lg">
-                        Select
-                      </span>
-                    </div>
-                  );
-                }) : (
-                  <div className="p-4 rounded-xl border border-slate-800 bg-slate-950/40 text-[11px] text-slate-400 leading-relaxed">
-                    Demo personas are disabled outside the DEMO runtime. Use a provisioned Firebase identity and an active tenant membership.
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Offline Mode Banner */}
-            <div className="bg-slate-900/40 border border-slate-800/60 rounded-xl p-3.5 flex items-center gap-3 text-xs text-slate-400">
-              <Laptop className="w-4 h-4 text-blue-400 shrink-0" />
-              <div className="text-[11px] leading-tight">
-                <span className="font-semibold text-slate-200">Offline-Ready Architecture:</span> Offline continuity is bounded by the cached authenticated session. Protected server mutations require an online authoritative session.
-              </div>
+          {/* Offline & Architecture Assurance Banner */}
+          <div className="bg-slate-900/40 border border-slate-800/60 rounded-xl p-3.5 flex items-center gap-3 text-xs text-slate-400">
+            <Laptop className="w-4 h-4 text-blue-400 shrink-0" />
+            <div className="text-[11px] leading-tight">
+              <span className="font-semibold text-slate-200">Offline-Ready Architecture:</span> Offline continuity is bounded by cached authenticated sessions; protected mutations synchronize automatically upon reconnection.
             </div>
           </div>
-
         </div>
       </main>
 

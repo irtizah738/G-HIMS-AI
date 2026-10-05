@@ -123,7 +123,14 @@ service cloud.firestore {
     }
 
     function canReadAudit(tenantId) {
-      return hasAnyRole(tenantId, ['administrator']);
+      return hasAnyRole(tenantId, [
+        'administrator',
+        'ADMINISTRATOR',
+        'SYSTEM_ADMIN',
+        'system_admin',
+        'auditor',
+        'AUDITOR'
+      ]);
     }
 
     // Default deny. Firebase Admin/server SDK bypasses these rules and is the
@@ -565,6 +572,10 @@ service cloud.firestore {
       }
       match /scmSupplierPayments/{id} {
         allow read: if canReadFinance(tenantId);
+        allow write: if false;
+      }
+      match /scmEvents/{id} {
+        allow read: if canReadScm(tenantId) || canReadAudit(tenantId);
         allow write: if false;
       }
 

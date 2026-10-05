@@ -73,6 +73,112 @@ function iso(value: unknown): string | undefined {
   return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
 }
 
+function dedupeByEntity(
+  refs: ClinicalEvidenceRef[],
+  preferredTypes: string[] = []
+): ClinicalEvidenceRef[] {
+  const rank = new Map(preferredTypes.map((type, index) => [type, index]));
+  const sorted = [...refs].sort(
+    (left, right) =>
+      (rank.get(left.sourceType) ?? Number.MAX_SAFE_INTEGER) -
+        (rank.get(right.sourceType) ?? Number.MAX_SAFE_INTEGER) ||
+      Number(right.occurredAt || 0) - Number(left.occurredAt || 0) ||
+      left.evidenceId.localeCompare(right.evidenceId)
+  );
+
+  const seen = new Set<string>();
+  return sorted.filter((item) => {
+    const key = item.sourceEntityId;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function claim(
+  snapshot: ClinicalEvidenceSnapshot,
+  sectionId: LongitudinalSummarySectionId,
+  text: string,
+  evidence: ClinicalEvidenceRef[],
+  classification: LongitudinalSummaryClaim['classification'] = 'DIRECT_FACT',
+  caveat?: string,
+  occurredAt?: number
+): LongitudinalSummaryClaim {
+  const evidenceRefs = Array.from(
+    new Set(evidence.map((item) => item.evidenceId))
+  ).sort();
+
+  return {
+    claimId: stableId('ciclaim', [
+      snapshot.snapshotId,
+      sectionId,
+      classification,
+      text,
+      ...evidenceRefs,
+    ]),
+    sectionId,
+    text,
+    classification,
+    evidenceRefs,
+    confidence: 1,
+    ...(caveat ? { caveat } : {}),
+    ...(occurredAt !== undefined ? { occurredAt } : {}),
+  };
+}
+
+function section(
+  sectionId: LongitudinalSummarySectionId,
+  title: string,
+  allClaims: LongitudinalSummaryClaim[],
+  caveats: string[] = [],
+  emptyCaveat = 'No represented evidence is available in this snapshot.'
+): LongitudinalSummarySection {
+  const ordered = [...allClaims].sort(
+    (left, right) =>
+      Number(right.occurredAt || 0) - Number(left.occurredAt || 0) ||
+      left.claimId.localeCompare(right.claimId)
+  );
+
+  let state: LongitudinalSummarySectionState =
+    ordered.length > 0 ? 'SUPPORTED' : 'NO_REPRESENTED_DATA';
+  let claims = ordered;
+  const nextCaveats = [...caveats];
+
+  if (ordered.length === 0) {
+    nextCaveats.push(emptyCaveat);
+  } else if (ordered.length > MAX_SECTION_CLAIMS) {
+    claims = ordered.slice(0, MAX_SECTION_CLAIMS);
+    state = 'PARTIAL';
+    nextCaveats.push(
+      `Showing ${MAX_SECTION_CLAIMS} of ${ordered.length} evidence-backed claims. Full evidence remains available in the frozen snapshot.`
+    );
+  }
+
+  return {
+    sectionId,
+    title,
+    state,
+    claims,
+    caveats: Array.from(new Set(nextCaveats)),
+  };
+}
+
+function knowledgeRef(
+  snapshot: ClinicalEvidenceSnapshot
+): ClinicalEvidenceRef | undefined {
+  return snapshot.evidenceRefs.find(
+    (item) => item.sourceType === 'KNOWLEDGE_STATUS'
+  );
+}
+
+function knowledgeStatus(
+  snapshot: ClinicalEvidenceSnapshot,
+  field: string
+): string {
+  const evidence = knowledgeRef(snapshot);
+  return stringValue(record(evidence?.content)[field]).toUpperCase();
+}
+
 function buildActiveProblems(
   snapshot: ClinicalEvidenceSnapshot
 ): LongitudinalSummarySection {

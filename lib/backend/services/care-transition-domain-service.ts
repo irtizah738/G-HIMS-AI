@@ -175,6 +175,30 @@ export class CareTransitionDomainService {
       };
     }
 
+    const actorRoles = new Set(
+      context.roles.map((role) => String(role || '').trim().toUpperCase())
+    );
+    const actorCanAssumeInpatientClinicalResponsibility =
+      actorRoles.has('DOCTOR') ||
+      actorRoles.has('CONSULTANT') ||
+      actorRoles.has('ATTENDING_PHYSICIAN');
+    const assignedDoctor =
+      String(payload.assignedDoctor || '').trim() ||
+      (actorCanAssumeInpatientClinicalResponsibility ? context.actorId : '');
+
+    if (!assignedDoctor) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INPATIENT_CLINICIAN_ASSIGNMENT_REQUIRED',
+          message:
+            'Admission staff must assign a receiving doctor or consultant before inpatient admission can be committed.',
+        },
+      };
+    }
+
     const now = Date.now();
     const encounterId = `enc_ipd_${crypto.randomUUID()}`;
     const admissionDate = new Date(now).toISOString().slice(0, 10);
@@ -193,7 +217,7 @@ export class CareTransitionDomainService {
       financialClearanceState: 'NOT_REQUIRED',
       resourceAssignmentState: 'BED_ASSIGNED',
       priority: payload.priority || 'ROUTINE',
-      assignedProviderId: payload.assignedDoctor || context.actorId,
+      assignedProviderId: assignedDoctor,
       sourceEncounterId: payload.sourceEncounterId,
       createdAt: now,
       updatedAt: now,
@@ -208,7 +232,7 @@ export class CareTransitionDomainService {
       patientMRN: patient.mrn,
       currentEncounterId: encounterId,
       admissionDate,
-      assignedDoctor: payload.assignedDoctor || bed.assignedDoctor,
+      assignedDoctor,
       assignedNurse: payload.assignedNurse || bed.assignedNurse,
     };
 
@@ -239,7 +263,7 @@ export class CareTransitionDomainService {
     const admissionHandoffId = sourceEncounter
       ? `handoff_admission_${encounterId}`
       : undefined;
-    const receivingClinicianId = String(payload.assignedDoctor || context.actorId).trim();
+    const receivingClinicianId = assignedDoctor;
     const admissionHandoff: ClinicalHandoff | null = sourceEncounter && admissionHandoffId
       ? {
           handoffId: admissionHandoffId,

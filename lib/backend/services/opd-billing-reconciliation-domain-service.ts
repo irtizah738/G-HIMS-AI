@@ -457,6 +457,82 @@ export class OpdBillingReconciliationDomainService {
     const chargeById = new Map(
       charges.map((charge) => [String(charge.chargeId || ''), charge])
     );
+
+    for (const invoice of invoices) {
+      const invoiceId = String(invoice.id || '').trim();
+      const invoiceCurrency = String(invoice.currency || '').trim().toUpperCase();
+      const items = Array.isArray(invoice.items) ? invoice.items : [];
+      let invoiceLinePatientMinor = 0;
+
+      for (const item of items) {
+        const chargeId = String(item?.id || '').trim();
+        const charge = chargeById.get(chargeId);
+        if (!charge) {
+          return reject(
+            commandId,
+            idempotencyKey,
+            'OPD_INVOICE_CHARGE_ORPHANED',
+            `Invoice charge ${chargeId || 'UNKNOWN'} does not resolve to an authoritative encounter charge.`
+          );
+        }
+
+        const itemPatientMinor = majorToMinor(
+          item?.patientPortion ?? item?.netAmount
+        );
+        const chargeMinorCandidates = [
+          charge.patientResponsibilityMinorUnits,
+          charge.amountMinorUnits,
+          charge.netAmountMinorUnits,
+        ]
+          .map((value) => Number(value))
+          .filter(
+            (value) => Number.isSafeInteger(value) && value >= 0
+          );
+        const chargePatientMinor = chargeMinorCandidates[0];
+
+        if (
+          itemPatientMinor < 0 ||
+          chargePatientMinor === undefined ||
+          itemPatientMinor !== chargePatientMinor ||
+          (String(charge.currency || '').trim() &&
+            String(charge.currency || '').trim().toUpperCase() !==
+              invoiceCurrency)
+        ) {
+          return reject(
+            commandId,
+            idempotencyKey,
+            'OPD_CHARGE_INVOICE_MONETARY_MISMATCH',
+            `Charge ${chargeId} does not match invoice ${invoiceId} patient responsibility or currency.`,
+            {
+              chargeId,
+              invoiceId,
+              itemPatientMinor,
+              chargePatientMinor,
+            }
+          );
+        }
+        invoiceLinePatientMinor += itemPatientMinor;
+      }
+
+      const invoicePatientMinor = majorToMinor(invoice.totalPatientDue);
+      if (
+        invoicePatientMinor < 0 ||
+        invoiceLinePatientMinor !== invoicePatientMinor
+      ) {
+        return reject(
+          commandId,
+          idempotencyKey,
+          'OPD_INVOICE_LINE_TOTAL_MISMATCH',
+          `Invoice ${invoiceId} line patient portions do not equal total patient responsibility.`,
+          {
+            invoiceId,
+            invoiceLinePatientMinor,
+            invoicePatientMinor,
+          }
+        );
+      }
+    }
+
     const revenueIntegrityFindingIds: string[] = [];
     for (const finding of revenueFindings) {
       const findingId = String(finding.id || '').trim();
@@ -525,10 +601,15 @@ export class OpdBillingReconciliationDomainService {
           'Every encounter invoice must resolve to exactly one patient AR open item.'
         );
       }
+      const arInvoice = invoiceById.get(row.invoiceId)!;
+      const invoicePatientMinor = majorToMinor(arInvoice.totalPatientDue);
       if (
         row.status !== 'SETTLED' ||
         row.outstandingMinorUnits !== 0 ||
-        row.originalMinorUnits !== row.allocatedMinorUnits
+        row.originalMinorUnits !== row.allocatedMinorUnits ||
+        row.originalMinorUnits !== invoicePatientMinor ||
+        String(row.currency || '').toUpperCase() !==
+          String(arInvoice.currency || '').toUpperCase()
       ) {
         return reject(
           commandId,

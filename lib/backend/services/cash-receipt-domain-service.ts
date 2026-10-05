@@ -232,6 +232,12 @@ export class CashReceiptDomainService {
             entityId: payload.invoiceId,
             required: false,
           },
+          {
+            key: 'encounter',
+            entityType: 'ENCOUNTER',
+            entityId: payload.encounterId,
+            required: true,
+          },
         ],
         prepare: (current) => {
           const period = current.period as unknown as FinancePeriodRecord;
@@ -262,6 +268,7 @@ export class CashReceiptDomainService {
           }
 
           const invoice = current.invoice || {};
+          const encounter = current.encounter || {};
           const invoicePatientId = String(invoice.patientId || '');
           const invoiceEncounterId = String(invoice.encounterId || '');
           const invoiceCurrency = String(invoice.currency || currency).toUpperCase();
@@ -354,6 +361,18 @@ export class CashReceiptDomainService {
             paymentMethod: 'cash',
             updatedAt: new Date().toISOString(),
           };
+          const isConsultationInvoice =
+            String(invoice.billingPurpose || '').toUpperCase() === 'OPD_CONSULTATION';
+          const nextEncounter =
+            isConsultationInvoice && newBalanceMinorUnits === 0
+              ? {
+                  ...encounter,
+                  financialClearanceState: 'CONSULTATION_CLEARED',
+                  consultationClearedByReceiptId: payload.receiptId,
+                  consultationClearedAt: payload.collectedAt,
+                  updatedAt: Date.now(),
+                }
+              : encounter;
 
           const priorReceiptIds = Array.isArray(previousSettlement.receiptIds)
             ? previousSettlement.receiptIds.map(String)
@@ -397,6 +416,15 @@ export class CashReceiptDomainService {
                 entityId: payload.invoiceId,
                 domainState: nextInvoice,
               },
+              ...(isConsultationInvoice && newBalanceMinorUnits === 0
+                ? [
+                    {
+                      entityType: 'ENCOUNTER',
+                      entityId: payload.encounterId,
+                      domainState: nextEncounter,
+                    },
+                  ]
+                : []),
             ],
             eventPayload: {
               receiptId: payload.receiptId,
@@ -410,6 +438,8 @@ export class CashReceiptDomainService {
               journalId,
               arOpenItemId: patientOpenItemId,
               arOutstandingMinorUnits: nextArOutstanding,
+              consultationClearanceGranted:
+                isConsultationInvoice && newBalanceMinorUnits === 0,
             },
             auditReason: `Captured cash receipt ${payload.referenceNumber} for ${payload.amountMinorUnits / 100} ${currency}`,
             resultData: {
@@ -418,6 +448,9 @@ export class CashReceiptDomainService {
               settlement: settlementState,
               invoice: nextInvoice,
               arOpenItem: nextArOpenItem,
+              ...(isConsultationInvoice && newBalanceMinorUnits === 0
+                ? { encounter: nextEncounter }
+                : {}),
             },
           };
         },

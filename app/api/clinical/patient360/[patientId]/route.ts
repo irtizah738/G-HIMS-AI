@@ -129,16 +129,54 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
       );
     }
 
-    const [dischargeReadiness, deterioration] = await Promise.all([
-      DischargeReadinessService.getForPatient(
-        context.tenantId,
-        normalizedPatientId
-      ),
-      ClinicalDeteriorationService.getForPatient(
-        context.tenantId,
-        normalizedPatientId
-      ),
-    ]);
+    const selectedCareContext =
+      requestedEncounterId
+        ? projection.recentEncounters.find(
+            (item) => item.encounterId === requestedEncounterId
+          )
+        : selectCareContextEncounter(
+            projection.careContexts,
+            requestedCareSetting
+          );
+
+    const consultantRoles = new Set(
+      context.roles.map((role) => String(role).toUpperCase())
+    );
+    const canUseConsultantVisibility = [
+      'DOCTOR',
+      'CONSULTANT',
+      'ATTENDING_PHYSICIAN',
+      'SYSTEM_ADMIN',
+      'ADMINISTRATOR',
+    ].some((role) => consultantRoles.has(role));
+
+    const [dischargeReadiness, deterioration, consultantVisibility] =
+      await Promise.all([
+        selectedCareContext?.careSetting === 'IPD'
+          ? DischargeReadinessService.getProjection(
+              context.tenantId,
+              selectedCareContext.encounterId
+            )
+          : Promise.resolve(null),
+        selectedCareContext
+          ? ClinicalDeteriorationService.getProjection(
+              context.tenantId,
+              selectedCareContext.encounterId
+            )
+          : Promise.resolve(null),
+        canUseConsultantVisibility
+          ? ConsultantVisibilityService.buildForActor(
+              context,
+              normalizedPatientId,
+              {
+                encounterId: selectedCareContext?.encounterId,
+                careSetting:
+                  requestedCareSetting || selectedCareContext?.careSetting,
+                timelineLimit,
+              }
+            )
+          : Promise.resolve(null),
+      ]);
 
     return NextResponse.json(
       {

@@ -774,6 +774,10 @@ export interface ComprehensiveOpdEncounter {
   consultationInvoice?: OpdInvoice;
   diagnosticInvoices?: OpdInvoice[];
   pharmacyInvoices?: OpdInvoice[];
+  billingMutationSequence?: number;
+  billingReconciliationId?: string;
+  billingReconciliationState?: 'CLEARED' | string;
+  billingClosedAt?: number;
   invoice?: OpdInvoice | any;
   ledgerVouchers?: LedgerJournalVoucher[];
   dispositionData?: DispositionAndAdmission | EncounterDisposition;

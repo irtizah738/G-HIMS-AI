@@ -245,8 +245,8 @@ export function OpdBillingLedger({
               <input
                 type="text"
                 value={cashierName}
-                onChange={(e) => setCashierName(e.target.value)
-                placeholder="Authenticated actor identity is server-authoritative"}
+                onChange={(e) => setCashierName(e.target.value)}
+                placeholder="Authenticated actor identity is server-authoritative"
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
               />
             </div>

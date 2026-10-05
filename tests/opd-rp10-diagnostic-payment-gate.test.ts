@@ -123,7 +123,11 @@ describe('OPD-RP10 diagnostic payment gate', () => {
     expect(bootstrap).toContain("'CASHIER'");
     expect(bootstrap).toContain("'FINANCE_MANAGER'");
     expect(bootstrap).toContain('billingEncounterIds');
+    expect(bootstrap).toContain('billingOnlyRole');
     expect(bootstrap).toContain('collections.invoices');
+    expect(bootstrap).toContain('scoped.journalEntries');
+    expect(bootstrap).toContain('allowedReferences');
+    expect(bootstrap).toContain('isFullFinanceRole');
   });
 
   test('billing UI does not invent journal account postings', async () => {

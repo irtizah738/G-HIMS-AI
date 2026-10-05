@@ -111,6 +111,36 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       acceptedStructuredData: z.record(z.string(), z.unknown()).optional(),
     }).strict(),
   },
+  ReviewClinicalDraftCommand: {
+    1: z.object({
+      draftId: nonEmpty.max(200),
+      expectedRevisionNumber: z.number().int().positive().max(10000),
+      title: z.string().trim().min(1).max(1000).optional(),
+      content: nonEmpty.max(100000),
+      reviewNote: z.string().trim().max(8000).optional(),
+    }).strict(),
+  },
+  ApproveClinicalDraftCommand: {
+    1: z.object({
+      draftId: nonEmpty.max(200),
+      expectedRevisionNumber: z.number().int().positive().max(10000),
+      approvalAttestation: z.literal(true),
+    }).strict(),
+  },
+  SignClinicalDraftCommand: {
+    1: z.object({
+      draftId: nonEmpty.max(200),
+      expectedRevisionNumber: z.number().int().positive().max(10000),
+      signatureAttestation: z.literal(true),
+    }).strict(),
+  },
+  RejectClinicalDraftCommand: {
+    1: z.object({
+      draftId: nonEmpty.max(200),
+      expectedRevisionNumber: z.number().int().positive().max(10000),
+      reason: nonEmpty.min(3).max(8000),
+    }).strict(),
+  },
   CompleteMedicationReconciliationCommand: {
     1: z.object({
       encounterId: nonEmpty.max(150),

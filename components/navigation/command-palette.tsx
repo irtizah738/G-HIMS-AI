@@ -150,6 +150,16 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         },
       },
       {
+        id: 'consultant-command',
+        title: 'Consultant Command Center — Critical, Pending, Handoffs & Reviews',
+        category: 'Clinical & EHR',
+        icon: Stethoscope,
+        action: () => {
+          setActiveTab('consultant-command');
+          onClose();
+        },
+      },
+      {
         id: 'opd',
         title: 'OPD Encounters, Nursing Triage & Specialist Queue',
         category: 'Clinical & EHR',

@@ -342,7 +342,7 @@ export class DiagnosticResultDomainService {
   ): Promise<CommandResult> {
     const auth = AuthorizationPipeline.evaluate(context, {
       requiredRoles: ['DOCTOR', 'CONSULTANT', 'SYSTEM_ADMIN'],
-      requiredPrivilege: 'DISCHARGE_INPATIENT',
+      requiredPrivilege: 'ACKNOWLEDGE_CRITICAL_RESULT',
     });
     if (!auth.authorized) {
       return {

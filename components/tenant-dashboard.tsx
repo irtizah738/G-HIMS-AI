@@ -31,6 +31,7 @@ const ViewSkeleton = () => (
 // Dynamic module code-splitting to prevent massive initial bundle timeout
 const BillingErpView = dynamic(() => import('@/components/views/billing-erp-view').then(m => m.BillingErpView), { loading: ViewSkeleton, ssr: false });
 const OpdEncountersView = dynamic(() => import('@/components/views/opd-encounters-view').then(m => m.OpdEncountersView), { loading: ViewSkeleton, ssr: false });
+const ConsultantCommandCenterView = dynamic(() => import('@/components/views/consultant-command-center-view').then(m => m.ConsultantCommandCenterView), { loading: ViewSkeleton, ssr: false });
 const GovernedBedBoard = dynamic(() => import('@/components/inpatient/governed-bed-board').then(m => m.GovernedBedBoard), { loading: ViewSkeleton, ssr: false });
 const AncillaryServicesView = dynamic(() => import('@/components/views/ancillary-services-view').then(m => m.AncillaryServicesView), { loading: ViewSkeleton, ssr: false });
 const OrdersInteropView = dynamic(() => import('@/components/views/orders-interop-view').then(m => m.OrdersInteropView), { loading: ViewSkeleton, ssr: false });
@@ -264,6 +265,11 @@ export function TenantDashboard() {
             {(activeTab === 'opd' || activeTab === 'workflow-runtime') && (
               <RbacModuleGate moduleId="opd" moduleName="OPD Encounters & Consultations">
                 <OpdEncountersView initialViewMode="master_suite" />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'consultant-command' && (
+              <RbacModuleGate moduleId="patients" moduleName="Consultant Command Center">
+                <ConsultantCommandCenterView />
               </RbacModuleGate>
             )}
             {activeTab === 'emergency' && (

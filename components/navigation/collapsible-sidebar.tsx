@@ -199,6 +199,12 @@ export function CollapsibleSidebar({
           icon: Users,
         },
         {
+          id: 'consultant-command',
+          name: 'Consultant Command Center',
+          shortName: 'Consultant',
+          icon: Stethoscope,
+        },
+        {
           id: 'opd',
           name: 'OPD Consultations',
           shortName: 'OPD',

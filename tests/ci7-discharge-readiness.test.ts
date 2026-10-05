@@ -304,7 +304,7 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
 
     expect(diagnostic).toContain('AcknowledgeCriticalDiagnosticResultPayload');
     expect(diagnostic).toContain('public static async acknowledgeCriticalResult');
-    expect(diagnostic).toContain("requiredPrivilege: 'DISCHARGE_INPATIENT'");
+    expect(diagnostic).toContain("requiredPrivilege: 'ACKNOWLEDGE_CRITICAL_RESULT'");
     expect(diagnostic).toContain(
       "eventType: 'CRITICAL_DIAGNOSTIC_RESULT_ACKNOWLEDGED'"
     );

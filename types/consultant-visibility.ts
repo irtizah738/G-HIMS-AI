@@ -91,9 +91,22 @@ export interface ClinicalOpenItemProjection {
   clinicalPriority: ConsultantChangeSeverity;
   ownerType: 'CONSULTANT' | 'CARE_TEAM' | 'DEPARTMENT' | 'ROLE';
   ownerId?: string;
+  ownerDepartmentId?: string;
+  ownerRole?: string;
   status: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED';
+  resolutionMode?: 'SOURCE_STATE' | 'MANUAL';
   createdAt: number;
   dueAt?: number;
+  acknowledgedAt?: number;
+  acknowledgedBy?: string;
+  acknowledgementNote?: string;
+  resolvedAt?: number;
+  resolvedBy?: string;
+  resolutionReason?: string;
+  resolutionRef?: string;
+  generatedBy?: string;
+  lastSourceEventId?: string;
+  updatedAt?: number;
   sourceRefs: string[];
 }
 

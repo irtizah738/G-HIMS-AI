@@ -43,6 +43,7 @@ import { DiagnosticResultDomainService } from '../services/diagnostic-result-dom
 import { PatientClinicalKnowledgeDomainService } from '../services/patient-clinical-knowledge-domain-service';
 import { DischargeReadinessReviewDomainService } from '../services/discharge-readiness-review-domain-service';
 import { ConsultantReviewDomainService } from '../services/consultant-review-domain-service';
+import { ClinicalCoordinationDomainService } from '../services/clinical-coordination-domain-service';
 import { IdempotencyService } from '../idempotency/idempotency-service';
 import { validateCommandPayload } from './command-schema-registry';
 import { emitOperationalEvent, operationalTimer } from '@/lib/observability/server-telemetry';
@@ -399,6 +400,54 @@ export class CommandBus {
             command.commandId,
             command.idempotencyKey,
             command.payload as any
+          );
+          break;
+
+        case 'RequestConsultationCommand':
+          result = await ClinicalCoordinationDomainService.requestConsultation(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'AcceptConsultationCommand':
+          result = await ClinicalCoordinationDomainService.acceptConsultation(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'CompleteConsultationCommand':
+          result = await ClinicalCoordinationDomainService.completeConsultation(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'CreateClinicalHandoffCommand':
+          result = await ClinicalCoordinationDomainService.createHandoff(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'AcceptClinicalHandoffCommand':
+          result = await ClinicalCoordinationDomainService.acceptHandoff(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'AcknowledgeClinicalOpenItemCommand':
+          result = await ClinicalCoordinationDomainService.acknowledgeOpenItem(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'ResolveClinicalOpenItemCommand':
+          result = await ClinicalCoordinationDomainService.resolveOpenItem(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'AcknowledgeClinicalEscalationCommand':
+          result = await ClinicalCoordinationDomainService.acknowledgeEscalation(
+            context, command.commandId, command.idempotencyKey, command.payload as any
           );
           break;
 

@@ -190,7 +190,7 @@ export function AllModulesDirectory() {
         primaryMetric: 'NEWS2 Active',
         primaryMetricLabel: 'Continuous Hemodynamic CDS',
         isAiEnhanced: true,
-        targetTab: 'command',
+        targetTab: 'consultant-command',
         standards: ['NEWS2 Score', 'CDS Hooks', 'NICE Guidelines'],
         status: 'PRODUCTION',
       },

@@ -139,14 +139,18 @@ export async function replaceSecureTenantEdgeSnapshot(
     for (const entity of entities || []) {
       const entityId = String(
         (entity as any).id ||
-        (entity as any).patientId ||
-        (entity as any).encounterId ||
+        (entity as any).openItemId ||
+        (entity as any).escalationId ||
+        (entity as any).consultationId ||
+        (entity as any).handoffId ||
         (entity as any).orderId ||
         (entity as any).tokenId ||
         (entity as any).evidenceId ||
         (entity as any).findingId ||
         (entity as any).balanceId ||
         (entity as any).itemId ||
+        (entity as any).encounterId ||
+        (entity as any).patientId ||
         ''
       ).trim();
       if (!entityId) continue;
@@ -242,11 +246,15 @@ export async function putSecureEdgeEntities(
   for (const entity of entities) {
     const entityId = String(
       (entity as any).id ||
-      (entity as any).patientId ||
-      (entity as any).encounterId ||
+      (entity as any).openItemId ||
+      (entity as any).escalationId ||
+      (entity as any).consultationId ||
+      (entity as any).handoffId ||
       (entity as any).orderId ||
       (entity as any).tokenId ||
       (entity as any).evidenceId ||
+      (entity as any).encounterId ||
+      (entity as any).patientId ||
       ''
     ).trim();
     if (!entityId) continue;

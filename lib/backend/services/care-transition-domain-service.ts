@@ -7,6 +7,7 @@
 
 import { AuthorizationPipeline } from '../auth/authorization-pipeline';
 import { TransactionManager } from '../transactions/transaction-manager';
+import type { ClinicalHandoff } from '@/types/clinical-coordination';
 import type { CommandContext, CommandResult } from '../types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import { PatientClinicalKnowledgeDomainService } from './patient-clinical-knowledge-domain-service';
@@ -174,6 +175,30 @@ export class CareTransitionDomainService {
       };
     }
 
+    const actorRoles = new Set(
+      context.roles.map((role) => String(role || '').trim().toUpperCase())
+    );
+    const actorCanAssumeInpatientClinicalResponsibility =
+      actorRoles.has('DOCTOR') ||
+      actorRoles.has('CONSULTANT') ||
+      actorRoles.has('ATTENDING_PHYSICIAN');
+    const assignedDoctor =
+      String(payload.assignedDoctor || '').trim() ||
+      (actorCanAssumeInpatientClinicalResponsibility ? context.actorId : '');
+
+    if (!assignedDoctor) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INPATIENT_CLINICIAN_ASSIGNMENT_REQUIRED',
+          message:
+            'Admission staff must assign a receiving doctor or consultant before inpatient admission can be committed.',
+        },
+      };
+    }
+
     const now = Date.now();
     const encounterId = `enc_ipd_${crypto.randomUUID()}`;
     const admissionDate = new Date(now).toISOString().slice(0, 10);
@@ -192,7 +217,7 @@ export class CareTransitionDomainService {
       financialClearanceState: 'NOT_REQUIRED',
       resourceAssignmentState: 'BED_ASSIGNED',
       priority: payload.priority || 'ROUTINE',
-      assignedProviderId: payload.assignedDoctor || context.actorId,
+      assignedProviderId: assignedDoctor,
       sourceEncounterId: payload.sourceEncounterId,
       createdAt: now,
       updatedAt: now,
@@ -207,7 +232,7 @@ export class CareTransitionDomainService {
       patientMRN: patient.mrn,
       currentEncounterId: encounterId,
       admissionDate,
-      assignedDoctor: payload.assignedDoctor || bed.assignedDoctor,
+      assignedDoctor,
       assignedNurse: payload.assignedNurse || bed.assignedNurse,
     };
 
@@ -234,6 +259,51 @@ export class CareTransitionDomainService {
       activeEncounterId: compatibilityEncounterId(activeCareContexts),
       updatedAt: now,
     };
+
+    const admissionHandoffId = sourceEncounter
+      ? `handoff_admission_${encounterId}`
+      : undefined;
+    const receivingClinicianId = assignedDoctor;
+    const admissionHandoff: ClinicalHandoff | null = sourceEncounter && admissionHandoffId
+      ? {
+          handoffId: admissionHandoffId,
+          tenantId: context.tenantId,
+          patientId: patient.id,
+          encounterId,
+          sourceEncounterId: sourceEncounter.encounterId,
+          careSetting: 'IPD',
+          fromClinicianId: context.actorId,
+          fromDepartmentId: sourceEncounter.departmentId,
+          toClinicianId: receivingClinicianId || undefined,
+          toDepartmentId: payload.targetWard,
+          toRole: receivingClinicianId ? undefined : 'CONSULTANT',
+          currentProblemSummary: payload.admittingDiagnosis,
+          activeRisks: [],
+          pendingDiagnostics: [],
+          pendingProcedures: [],
+          pendingConsultations: [],
+          medicationConcerns: [],
+          unresolvedItems: [],
+          expectedActions: [
+            'Review admission context and active Patient 360 evidence.',
+            'Accept inpatient clinical responsibility.',
+          ],
+          status:
+            receivingClinicianId && receivingClinicianId === context.actorId
+              ? 'ACCEPTED'
+              : 'PENDING_ACCEPTANCE',
+          createdAt: now,
+          acceptedAt:
+            receivingClinicianId && receivingClinicianId === context.actorId
+              ? now
+              : undefined,
+          acceptedBy:
+            receivingClinicianId && receivingClinicianId === context.actorId
+              ? context.actorId
+              : undefined,
+          updatedAt: now,
+        }
+      : null;
 
     const sourceEncounterState = sourceEncounter
       ? {
@@ -264,6 +334,7 @@ export class CareTransitionDomainService {
         sourceEncounterId: payload.sourceEncounterId,
         targetWard: payload.targetWard,
         admittingDiagnosis: payload.admittingDiagnosis,
+        admissionHandoffId,
       },
       auditAction: 'ADMIT_PATIENT_TO_INPATIENT_CARE',
       auditResourceType: 'ENCOUNTER',
@@ -299,6 +370,14 @@ export class CareTransitionDomainService {
               expectedServerVersion: Number(
                 (sourceEncounter as PersistedEncounter & { _serverVersion?: number })._serverVersion || 0
               ),
+            }]
+          : []),
+        ...(admissionHandoff
+          ? [{
+              entityType: 'CLINICAL_HANDOFF',
+              entityId: admissionHandoff.handoffId,
+              domainState: admissionHandoff,
+              expectedServerVersion: 0,
             }]
           : []),
       ],

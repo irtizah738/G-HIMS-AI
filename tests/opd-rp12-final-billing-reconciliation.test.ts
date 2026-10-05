@@ -32,6 +32,9 @@ describe('OPD-RP12 final billing reconciliation', () => {
     expect(service).toContain("'OPD_INVOICE_CHARGE_ORPHANED'");
     expect(service).toContain("'LEGACY_FINAL_INVOICE_AUTHORITY_PRESENT'");
     expect(service).toContain("'OPD_MULTI_CURRENCY_RECONCILIATION_BLOCKED'");
+    expect(service).toContain("'OPD_BILLING_JOURNAL_CARDINALITY_INVALID'");
+    expect(service).toContain("'OPD_BILLING_JOURNAL_INVALID'");
+    expect(service).toContain("'OPD_RECONCILIATION_TOO_LARGE'");
   });
 
   test('reconciliation validates service completion behind diagnostic and pharmacy invoices', async () => {

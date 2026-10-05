@@ -132,7 +132,9 @@
     "test:drp-all": "bun run test:drp1 && bun run test:drp2-4 && bun run test:drp5 && bun run test:drp6 && bun run test:drp7-9 && bun run test:drp10 && bun run test:drp11",
     "test:drp-critical": "bun run test:drp1 && bun run test:drp5 && bun run test:drp10 && bun run test:drp11",
     "test:ci10": "bun test tests/ci10-evidence-provenance.test.ts",
-    "validate:ci10": "bun run typecheck && bun run lint && bun run test:ci10 && bun run test:ci9 && bun run test:cbe && bun run test:ci8 && bun run test:p8 && bun run test:p6 && bun run test:p7 && bun run test:security && bun run build"
+    "validate:ci10": "bun run typecheck && bun run lint && bun run test:ci10 && bun run test:ci9 && bun run test:cbe && bun run test:ci8 && bun run test:p8 && bun run test:p6 && bun run test:p7 && bun run test:security && bun run build",
+    "test:ci10b": "bun test tests/ci10b-longitudinal-clinical-summary.test.ts",
+    "validate:ci10b": "bun run typecheck && bun run lint && bun run test:ci10b && bun run test:ci10 && bun run test:ci9 && bun run test:cbe && bun run test:ci8 && bun run test:p8 && bun run test:p6 && bun run test:p7 && bun run test:security && bun run build"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

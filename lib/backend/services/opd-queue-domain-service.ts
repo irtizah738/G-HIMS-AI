@@ -64,6 +64,19 @@ export class OpdQueueDomainService {
         },
       };
     }
+    if (payload.targetStatus === 'in_consultation') {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'START_OPD_SERVICE_COMMAND_REQUIRED',
+          message:
+            'Starting OPD service must use StartOpdServiceCommand so consultation clearance, queue state and TRIAGE transition commit atomically.',
+        },
+      };
+    }
+
 
     // Resolve the immutable encounter linkage first, then re-read both token and
     // encounter inside the committing transaction. This prevents a stale UI or
@@ -236,4 +249,191 @@ export class OpdQueueDomainService {
       throw error;
     }
   }
+
+  public static async startService(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: { tokenId: string; assignedRoomOrBay?: string }
+  ): Promise<CommandResult> {
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: [
+        'RECEPTIONIST',
+        'NURSE',
+        'DOCTOR',
+        'CONSULTANT',
+        'SYSTEM_ADMIN',
+        'ADMINISTRATOR',
+      ],
+    });
+    if (!auth.authorized) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Not authorized to start OPD service.',
+        },
+      };
+    }
+
+    const tokenLink = await DomainStateRepository.getById<OpdQueueState>(
+      context.tenantId,
+      'opd_queue',
+      payload.tokenId
+    );
+    if (!tokenLink?.encounterId) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'OPD_TOKEN_NOT_FOUND',
+          message: `OPD token ${payload.tokenId} was not found or has no encounter linkage.`,
+        },
+      };
+    }
+
+    try {
+      const tx = await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.roles[0] || 'OPD_STAFF',
+        aggregateType: 'OPD_QUEUE_TOKEN',
+        aggregateId: payload.tokenId,
+        eventType: 'OPD_SERVICE_STARTED',
+        auditAction: 'START_OPD_SERVICE',
+        auditResourceType: 'OPD_QUEUE_TOKEN',
+        auditResourceId: payload.tokenId,
+        outboxTopic: 'g-hims-clinical-events',
+        idempotencyKey,
+        commandId,
+        correlationId: context.correlationId,
+        readTargets: [
+          {
+            key: 'token',
+            entityType: 'OPD_QUEUE_TOKEN',
+            entityId: payload.tokenId,
+            required: true,
+          },
+          {
+            key: 'encounter',
+            entityType: 'ENCOUNTER',
+            entityId: tokenLink.encounterId,
+            required: true,
+          },
+        ],
+        prepare: (current) => {
+          const token = current.token as unknown as OpdQueueState;
+          const encounter = current.encounter || {};
+
+          if (String(token.encounterId || '') !== tokenLink.encounterId) {
+            throw new AtomicMutationRejectedError(
+              'OPD_TOKEN_ENCOUNTER_CHANGED',
+              'Queue token encounter linkage changed during service-start validation.'
+            );
+          }
+
+          if (!['waiting', 'called'].includes(token.status)) {
+            throw new AtomicMutationRejectedError(
+              'INVALID_OPD_QUEUE_TRANSITION',
+              `Cannot start OPD service from queue status '${token.status}'.`
+            );
+          }
+
+          const clearance = String(
+            encounter.financialClearanceState || 'CONSULTATION_PAYMENT_PENDING'
+          ).toUpperCase();
+          if (!['CONSULTATION_CLEARED', 'NOT_REQUIRED'].includes(clearance)) {
+            throw new AtomicMutationRejectedError(
+              'CONSULTATION_PAYMENT_REQUIRED',
+              'Consultation payment must be authoritatively cleared before OPD service can start.',
+              { financialClearanceState: clearance }
+            );
+          }
+
+          const clinicalState = String(
+            encounter.clinicalState || encounter.currentStage || ''
+          ).toUpperCase();
+          if (clinicalState !== 'REGISTERED') {
+            throw new AtomicMutationRejectedError(
+              'OPD_QUEUE_CLINICAL_STATE_MISMATCH',
+              `OPD service start requires REGISTERED clinical state; found '${clinicalState}'.`
+            );
+          }
+
+          const now = Date.now();
+          const updatedQueue: OpdQueueState = {
+            ...token,
+            status: 'in_consultation',
+            ...(payload.assignedRoomOrBay
+              ? { assignedRoomOrBay: payload.assignedRoomOrBay }
+              : {}),
+            updatedAt: now,
+          };
+          const updatedEncounter = {
+            ...encounter,
+            currentStage: 'TRIAGE',
+            clinicalState: 'TRIAGE',
+            operationalState: 'IN_SERVICE',
+            updatedAt: now,
+          };
+
+          return {
+            domainState: updatedQueue,
+            additionalStateWrites: [
+              {
+                entityType: 'ENCOUNTER',
+                entityId: token.encounterId,
+                domainState: updatedEncounter,
+              },
+            ],
+            eventPayload: {
+              tokenId: token.id,
+              encounterId: token.encounterId,
+              patientId: token.patientId,
+              previousQueueStatus: token.status,
+              newQueueStatus: 'in_consultation',
+              previousClinicalState: clinicalState,
+              newClinicalState: 'TRIAGE',
+              financialClearanceState: clearance,
+            },
+            auditReason:
+              `Started OPD service for token ${token.tokenNumber}; consultation payment cleared and encounter entered TRIAGE atomically.`,
+            resultData: {
+              queueToken: updatedQueue,
+              encounter: updatedEncounter,
+            },
+          };
+        },
+      });
+
+      return {
+        success: true,
+        commandId,
+        idempotencyKey,
+        entityId: payload.tokenId,
+        eventId: tx.eventId,
+        auditId: tx.auditId,
+        outboxId: tx.outboxId,
+        data: tx.resultData,
+      };
+    } catch (error) {
+      if (error instanceof AtomicMutationRejectedError) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+          },
+        };
+      }
+      throw error;
+    }
+  }
+
 }

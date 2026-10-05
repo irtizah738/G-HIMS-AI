@@ -13,6 +13,7 @@ export interface OpdBillingReconciliation {
   journalIds: string[];
   diagnosticOrderIds: string[];
   prescriptionIds: string[];
+  revenueIntegrityFindingIds: string[];
   invoiceCount: number;
   chargeCount: number;
   totalPatientDueMinorUnits: number;

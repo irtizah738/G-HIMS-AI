@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Users,
   Search,
@@ -55,6 +55,11 @@ import { OpdPatientTimelineAudit } from './OpdPatientTimelineAudit';
 import { OpdOfflineSyncManager } from './OpdOfflineSyncManager';
 import { executeActiveTenantCommand, registerActiveTenantPatient } from '@/lib/api/command-client';
 import { useAuth } from '@/lib/auth/auth-context';
+import { hydrateEdgeSnapshot } from '@/lib/offline/hydration';
+import {
+  adaptAuthoritativeConsultationInvoice,
+  buildOpdWorkspaceReadModel,
+} from '@/lib/opd/workspace-read-model';
 
 const IS_DEMO_RUNTIME = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
 
@@ -86,55 +91,6 @@ const OPD_TAB_ROLES: Record<string, OpdRole[]> = {
   DISPOSITION: ['ADMINISTRATOR','CLINICAL_DIRECTOR','SPECIALIST_CONSULTANT','MEDICAL_OFFICER'],
   AUDIT: ['ADMINISTRATOR','CLINICAL_DIRECTOR','SPECIALIST_CONSULTANT','MEDICAL_OFFICER','TRIAGE_NURSE'],
 };
-
-function adaptAuthoritativeConsultationInvoice(raw: Record<string, any>): OpdInvoice {
-  const items = Array.isArray(raw.items) ? raw.items : [];
-  const payments = Array.isArray(raw.paymentHistory) ? raw.paymentHistory : [];
-  return {
-    id: String(raw.id || ''),
-    tenantId: String(raw.tenantId || ''),
-    encounterId: String(raw.encounterId || ''),
-    patientId: String(raw.patientId || ''),
-    invoiceNumber: String(raw.invoiceNumber || ''),
-    payerTariffPlan: String(raw.tariffName || raw.planName || 'cash'),
-    billingPurpose: 'OPD_CONSULTATION',
-    totalAmountMinorUnits: Math.round(Number(raw.totalGross || 0) * 100),
-    payerCoverageAmountMinorUnits: Math.round(Number(raw.totalCoverage || 0) * 100),
-    patientCopayAmountMinorUnits: Math.round(Number(raw.totalPatientDue || 0) * 100),
-    balanceDueMinorUnits: Math.round(Number(raw.balanceDue || 0) * 100),
-    settlementStatus:
-      String(raw.paymentStatus || '').toLowerCase() === 'paid'
-        ? 'SETTLED'
-        : String(raw.paymentStatus || '').toLowerCase() === 'partially_paid'
-          ? 'PARTIALLY_PAID'
-          : 'PENDING',
-    lineItems: items.map((item: Record<string, any>) => ({
-      id: String(item.id || ''),
-      serviceCode: String(item.code || ''),
-      description: String(item.description || ''),
-      category: 'CONSULTATION',
-      quantity: Number(item.quantity || 1),
-      unitPriceMinorUnits: Math.round(Number(item.unitPrice || 0) * 100),
-      totalMinorUnits: Math.round(Number(item.netAmount || 0) * 100),
-    })),
-    payments: payments.map((payment: Record<string, any>) => ({
-      id: String(payment.id || payment.receiptId || ''),
-      invoiceId: String(raw.id || ''),
-      amountMinorUnits: Math.round(Number(payment.amount || 0) * 100),
-      mode: 'CASH',
-      referenceNumber: String(payment.referenceNumber || ''),
-      status: 'CAPTURED',
-      processedAt: Number(payment.timestamp || Date.now()),
-      processedBy: String(payment.recordedBy || payment.cashierId || ''),
-      glJournalEntryId: String(payment.journalId || ''),
-    })),
-    issuedAt: Date.parse(String(raw.createdAt || '')) || Date.now(),
-    issuedBy: 'SERVER_BILLING_AUTHORITY',
-    ...(String(raw.paymentStatus || '').toLowerCase() === 'paid'
-      ? { settledAt: Date.parse(String(raw.updatedAt || '')) || Date.now() }
-      : {}),
-  };
-}
 
 
 // Initial Mock Seed Data (DEMO runtime only)
@@ -506,6 +462,35 @@ export function OpdMasterWorkspace() {
   const [activeTab, setActiveTab] = useState<string>('DASHBOARD');
   const [isOnline, setIsOnline] = useState<boolean>(true);
   const [pendingSyncCount, setPendingSyncCount] = useState<number>(0);
+
+  useEffect(() => {
+    if (IS_DEMO_RUNTIME || auth.loading || !auth.activeTenant?.tenantId) return;
+
+    let cancelled = false;
+    const hydrate = async () => {
+      const snapshot = await hydrateEdgeSnapshot(auth.activeTenant!.tenantId);
+      if (cancelled) return;
+
+      const readModel = buildOpdWorkspaceReadModel(snapshot);
+      setPatients(readModel.patients);
+      setEncounters(readModel.encounters);
+      setQueue(readModel.queue);
+      setSelectedEncounterId((current) => {
+        if (current && readModel.encounters.some((encounter) => encounter.id === current)) {
+          return current;
+        }
+        return readModel.encounters[0]?.id || '';
+      });
+    };
+
+    void hydrate().catch((error) => {
+      console.error('OPD authoritative hydration failed:', error);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [auth.activeTenant?.tenantId, auth.loading, auth.user?.uid]);
 
   // Selected encounter object
   const activeEncounter = useMemo(() => {

@@ -143,6 +143,33 @@ describe('G-HIMS P4 release-candidate Firestore recovery journey', () => {
     );
     expect(lab.success).toBe(true);
 
+    // CI-9 fail-closed prescribing requires explicit allergy knowledge and
+    // care-context medication reconciliation before the synthetic prescription.
+    const allergyReview = await CommandBus.dispatch(
+      clinician,
+      command(tenantId, 'ReviewPatientClinicalKnowledgeCommand', {
+        patientId,
+        encounterId,
+        domain: 'ALLERGIES',
+        status: 'KNOWN_NONE',
+        reason: 'P4 synthetic journey verified no known medication allergies.',
+      })
+    );
+    expect(allergyReview.success).toBe(true);
+
+    const medicationReconciliation = await CommandBus.dispatch(
+      clinician,
+      command(tenantId, 'CompleteMedicationReconciliationCommand', {
+        encounterId,
+        patientId,
+        reconciledMedicationIds: [],
+        discrepancyCount: 0,
+        unresolvedDiscrepancies: [],
+        notes: 'P4 synthetic journey baseline medication reconciliation.',
+      })
+    );
+    expect(medicationReconciliation.success).toBe(true);
+
     const prescriptionKey = unique('idem_rx');
     const prescriptionCommand = command(
       tenantId,

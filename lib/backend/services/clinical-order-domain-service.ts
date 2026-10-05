@@ -14,7 +14,7 @@ import { DomainStateRepository } from '@/server/repositories/domain-state-reposi
 import { EncounterDomainService } from './encounter-domain-service';
 import { PatientClinicalKnowledgeDomainService } from './patient-clinical-knowledge-domain-service';
 import { MedicationSafetyService } from '@/lib/clinical/intelligence/medication-safety-service';
-import type { InventoryBalance } from '@/types/scm-domain';
+import type { InventoryBalance, ItemMaster } from '@/types/scm-domain';
 import type {
   DiagnosticBillingCatalogRecord,
   OperationalDiagnosticOrder,
@@ -52,15 +52,12 @@ export interface PrescribeMedicationPayload {
   encounterId: string;
   patientId: string;
   drugCode: string;
-  drugName: string;
   dosage: string;
   route: string;
   frequency: string;
   durationDays: number;
   quantityPrescribed?: number;
   unitOfMeasure?: string;
-  unitPriceMinorUnits?: number;
-  inventoryItemId?: string;
   instructions?: string;
   safetyAcknowledgementFindingIds?: string[];
   safetyOverrideReason?: string;

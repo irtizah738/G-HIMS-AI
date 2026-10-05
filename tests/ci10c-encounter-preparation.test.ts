@@ -569,6 +569,9 @@ describe('CI-10C encounter preparation intelligence', () => {
     expect(consultation).toContain("encounter.soap?.subjective || ''");
     expect(consultation).toContain("encounter.soap?.assessment || ''");
     expect(consultation).toContain("encounter.soap?.plan || ''");
+    expect(consultation).toContain('canSignClinicalNotes');
+    expect(consultation).toContain('SIGN_CLINICAL_NOTES privilege');
+    expect(consultation).toContain('Encounter Preparation Intelligence remains read-only');
   });
 
   test('clinical note signing rejects empty SOAP shells and encounter-patient mismatch server-side', async () => {
@@ -579,6 +582,7 @@ describe('CI-10C encounter preparation intelligence', () => {
     expect(service).toContain(
       'section labels alone cannot be signed'
     );
+    expect(service).toContain("[^\\p{L}\\p{N}]");
     expect(service).toContain(
       "code: 'ENCOUNTER_PATIENT_MISMATCH'"
     );

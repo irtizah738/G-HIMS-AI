@@ -29,7 +29,7 @@ export function OpdRegistrationConsent({
 }: OpdRegistrationConsentProps) {
   const [fullName, setFullName] = useState<string>(initialData?.fullName || '');
   const [preferredName, setPreferredName] = useState<string>(initialData?.preferredName || '');
-  const [gender, setGender] = useState<'Male' | 'Female' | 'Other' | ''>(
+  const [gender, setGender] = useState<'Male' | 'Female' | 'Other' | 'Unknown' | ''>(
     initialData?.gender || ''
   );
   const [dob, setDob] = useState<string>(initialData?.dob || '');
@@ -51,7 +51,7 @@ export function OpdRegistrationConsent({
   const [emergencyPhone, setEmergencyPhone] = useState<string>('');
 
   const [tariffPlan, setTariffPlan] = useState<
-    'OUT_OF_POCKET' | 'CORPORATE_PPO' | 'SEHAT_CARD_UNIVERSAL' | 'STATE_INSURANCE' | ''
+    'OUT_OF_POCKET' | 'CORPORATE_PPO' | 'SEHAT_CARD_UNIVERSAL' | 'STATE_INSURANCE' | 'UNASSIGNED' | ''
   >('');
   const [payerName, setPayerName] = useState<string>('');
   const [policyNumber, setPolicyNumber] = useState<string>('');
@@ -265,6 +265,7 @@ export function OpdRegistrationConsent({
                 <option value="Female">Female</option>
                 <option value="Male">Male</option>
                 <option value="Other">Other</option>
+                <option value="Unknown">Unknown / not disclosed</option>
               </select>
             </div>
 

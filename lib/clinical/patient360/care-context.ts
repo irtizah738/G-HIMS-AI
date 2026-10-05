@@ -91,6 +91,18 @@ function latestBySetting(
   return encounters.find((encounter) => encounter.careSetting === setting);
 }
 
+export function compatibilityEncounterId(
+  current: Partial<PatientCareContextPointers> | undefined
+): string | undefined {
+  const pointers = normalizePatientCarePointers(current);
+  return (
+    pointers.activeIpdEncounterId ||
+    pointers.activeEmergencyEncounterId ||
+    pointers.activeOpdEncounterIds[0] ||
+    pointers.activeTelehealthEncounterIds[0]
+  );
+}
+
 export function buildPatient360CareContexts(
   encounters: Patient360EncounterSummary[]
 ): Patient360CareContexts {

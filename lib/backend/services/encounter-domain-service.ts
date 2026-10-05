@@ -382,6 +382,37 @@ export class EncounterDomainService {
         error: { code: 'PATIENT_NOT_ACTIVE', message: 'Only an active patient can start a new OPD encounter.' },
       };
     }
+
+    const generalOpdConsent = (
+      patient.consentSummary as
+        | Record<string, { status?: string; consentId?: string }>
+        | undefined
+    )?.GENERAL_OUTPATIENT;
+    if (String(generalOpdConsent?.status || '').toUpperCase() !== 'GRANTED') {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'GENERAL_OPD_CONSENT_REQUIRED',
+          message:
+            'Authoritative General OPD Care consent is required before appointment check-in can open an OPD encounter.',
+        },
+      };
+    }
+
+    if (String(patient.tariffPlan || '').toUpperCase() !== 'OUT_OF_POCKET') {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'OPD_PILOT_PAYER_NOT_SUPPORTED',
+          message:
+            'The controlled OPD pilot currently supports OUT_OF_POCKET cash billing only.',
+        },
+      };
+    }
     const carePointers = normalizePatientCarePointers(
       patient.activeCareContexts as any
     );

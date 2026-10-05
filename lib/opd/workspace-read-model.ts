@@ -58,6 +58,8 @@ export function adaptAuthoritativeOpdInvoice(
   const billingPurpose: OpdInvoice['billingPurpose'] =
     purpose === 'OPD_DIAGNOSTIC'
       ? 'OPD_DIAGNOSTIC'
+      : purpose === 'OPD_PHARMACY'
+        ? 'OPD_PHARMACY'
       : purpose === 'FINAL_ENCOUNTER'
         ? 'FINAL_ENCOUNTER'
         : 'OPD_CONSULTATION';
@@ -72,6 +74,9 @@ export function adaptAuthoritativeOpdInvoice(
     currency: String(raw.currency || '').trim().toUpperCase() || undefined,
     billingPurpose,
     sourceOrderId: raw.sourceOrderId ? String(raw.sourceOrderId) : undefined,
+    sourcePrescriptionId: raw.sourcePrescriptionId
+      ? String(raw.sourcePrescriptionId)
+      : undefined,
     totalAmountMinorUnits: Math.round(Number(raw.totalGross || 0) * 100),
     payerCoverageAmountMinorUnits: Math.round(Number(raw.totalCoverage || 0) * 100),
     patientCopayAmountMinorUnits: Math.round(Number(raw.totalPatientDue || 0) * 100),
@@ -261,6 +266,7 @@ export function buildOpdWorkspaceReadModel(
   const patientById = new Map(patients.map((patient) => [patient.id, patient]));
   const consultationInvoiceByEncounter = new Map<string, OpdInvoice>();
   const diagnosticInvoicesByEncounter = new Map<string, OpdInvoice[]>();
+  const pharmacyInvoicesByEncounter = new Map<string, OpdInvoice[]>();
   const finalInvoiceByEncounter = new Map<string, OpdInvoice>();
 
   for (const row of rawInvoices) {
@@ -277,6 +283,10 @@ export function buildOpdWorkspaceReadModel(
       const current = diagnosticInvoicesByEncounter.get(encounterId) || [];
       current.push(adaptAuthoritativeOpdInvoice(invoice));
       diagnosticInvoicesByEncounter.set(encounterId, current);
+    } else if (purpose === 'OPD_PHARMACY') {
+      const current = pharmacyInvoicesByEncounter.get(encounterId) || [];
+      current.push(adaptAuthoritativeOpdInvoice(invoice));
+      pharmacyInvoicesByEncounter.set(encounterId, current);
     } else if (purpose === 'FINAL_ENCOUNTER') {
       finalInvoiceByEncounter.set(
         encounterId,
@@ -297,6 +307,8 @@ export function buildOpdWorkspaceReadModel(
       const patient = patientById.get(patientId);
       const consultationInvoice = consultationInvoiceByEncounter.get(id);
       const diagnosticInvoices = (diagnosticInvoicesByEncounter.get(id) || [])
+        .sort((left, right) => left.issuedAt - right.issuedAt);
+      const pharmacyInvoices = (pharmacyInvoicesByEncounter.get(id) || [])
         .sort((left, right) => left.issuedAt - right.issuedAt);
       const financialState = String(encounter.financialClearanceState || '').toUpperCase();
 
@@ -354,6 +366,7 @@ export function buildOpdWorkspaceReadModel(
           .map((prescription) => asRecord(prescription) as any),
         consultationInvoice,
         diagnosticInvoices,
+        pharmacyInvoices,
         invoice: finalInvoiceByEncounter.get(id),
         startedAt: Number(encounter.startedAt || 0),
         status:

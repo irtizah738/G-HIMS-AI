@@ -69,6 +69,7 @@ export function adaptAuthoritativeOpdInvoice(
     patientId: String(raw.patientId || ''),
     invoiceNumber: String(raw.invoiceNumber || ''),
     payerTariffPlan: String(raw.tariffName || raw.planName || ''),
+    currency: String(raw.currency || '').trim().toUpperCase() || undefined,
     billingPurpose,
     sourceOrderId: raw.sourceOrderId ? String(raw.sourceOrderId) : undefined,
     totalAmountMinorUnits: Math.round(Number(raw.totalGross || 0) * 100),

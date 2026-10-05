@@ -20,6 +20,7 @@ import type { MedicationSafetyProjection } from '@/types/medication-safety';
 import type { ClinicalLongitudinalSummaryResponse } from '@/types/clinical-longitudinal-summary';
 import type { ClinicalEncounterPreparationResponse } from '@/types/clinical-encounter-preparation';
 import type { ClinicalTrendIntelligenceResponse } from '@/types/clinical-trend-intelligence';
+import type { MedicationReconciliationCopilotResponse } from '@/types/medication-reconciliation-copilot';
 
 export interface Patient360ClinicalView {
   tenantId: string;
@@ -541,4 +542,39 @@ export async function generateClinicalTrendIntelligence(
     artifact: payload.artifact,
     evidenceIndex: payload.evidenceIndex || [],
   } as ClinicalTrendIntelligenceResponse;
+}
+
+
+export async function generateMedicationReconciliationCopilot(
+  tenantId: string,
+  input: {
+    patientId: string;
+    encounterId: string;
+    careSetting?: ClinicalCareSetting;
+  }
+): Promise<MedicationReconciliationCopilotResponse> {
+  const response = await AuthClient.authorizedFetch(
+    `/api/clinical/intelligence/medication-reconciliation?tenantId=${encodeURIComponent(tenantId)}`,
+    {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tenantId, ...input }),
+    },
+    tenantId
+  );
+
+  const payload = await response.json();
+  if (!response.ok || !payload?.success || !payload?.artifact) {
+    throw new Error(
+      payload?.error?.message ||
+        payload?.error ||
+        'Medication reconciliation review could not be generated.'
+    );
+  }
+
+  return {
+    artifact: payload.artifact,
+    evidenceIndex: payload.evidenceIndex || [],
+  } as MedicationReconciliationCopilotResponse;
 }

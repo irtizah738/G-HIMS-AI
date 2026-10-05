@@ -38,7 +38,7 @@ function majorToMinor(value: unknown, field: string): number {
   const numeric = Number(value);
   const minor = Math.round(numeric * 100);
   if (!Number.isFinite(numeric) || !Number.isSafeInteger(minor) || minor < 0) {
-    throw new Error(`INVALID_MONEY:${field}`);
+    return -1;
   }
   return minor;
 }
@@ -312,7 +312,12 @@ export class OpdBillingReconciliationDomainService {
         invoice.balanceDue || 0,
         `${invoiceId}.balanceDue`
       );
-      if (totalPaid + balanceDue !== patientDue) {
+      if (
+        patientDue < 0 ||
+        totalPaid < 0 ||
+        balanceDue < 0 ||
+        totalPaid + balanceDue !== patientDue
+      ) {
         return reject(
           commandId,
           idempotencyKey,

@@ -60,6 +60,7 @@ function snapshotFingerprint(input: {
   invoices: DomainRecord[];
   charges: DomainRecord[];
   arItems: DomainRecord[];
+  journals: DomainRecord[];
   diagnosticOrders: DomainRecord[];
   prescriptions: DomainRecord[];
 }): string {
@@ -77,6 +78,7 @@ function snapshotFingerprint(input: {
         invoices: normalize(input.invoices, 'id'),
         charges: normalize(input.charges, 'chargeId'),
         arItems: normalize(input.arItems, 'openItemId'),
+        journals: normalize(input.journals, 'journalId'),
         diagnosticOrders: normalize(input.diagnosticOrders, 'orderId'),
         prescriptions: normalize(input.prescriptions, 'prescriptionId'),
       })
@@ -481,6 +483,67 @@ export class OpdBillingReconciliationDomainService {
       );
     }
 
+    const journalGroups = await Promise.all(
+      [...invoiceById.keys()].map((invoiceId) =>
+        DomainStateRepository.queryAllEqual<DomainRecord>(
+          context.tenantId,
+          'journalEntries',
+          'referenceDocumentId',
+          invoiceId,
+          { pageSize: 10, maxRows: 10 }
+        )
+      )
+    );
+    const journals: DomainRecord[] = [];
+    const journalIds: string[] = [];
+    let journalGroupIndex = 0;
+    for (const invoiceId of invoiceById.keys()) {
+      const group = journalGroups[journalGroupIndex++] || [];
+      if (group.length !== 1) {
+        return reject(
+          commandId,
+          idempotencyKey,
+          'OPD_BILLING_JOURNAL_CARDINALITY_INVALID',
+          `Invoice ${invoiceId} must resolve to exactly one initial billing journal.`
+        );
+      }
+      const journal = group[0];
+      const journalId = String(journal.journalId || '').trim();
+      const invoice = invoiceById.get(invoiceId)!;
+      const expectedMinor = majorToMinor(invoice.totalPatientDue);
+      const lines = Array.isArray(journal.lines) ? journal.lines : [];
+      const debit = lines.reduce(
+        (sum: number, line: DomainRecord) =>
+          sum + Number(line.debitMinorUnits || 0),
+        0
+      );
+      const credit = lines.reduce(
+        (sum: number, line: DomainRecord) =>
+          sum + Number(line.creditMinorUnits || 0),
+        0
+      );
+      if (
+        !journalId ||
+        String(journal.status || '').toUpperCase() !== 'POSTED' ||
+        String(journal.currency || '').toUpperCase() !==
+          String(invoice.currency || '').toUpperCase() ||
+        Number(journal.totalAmountMinorUnits || 0) !== expectedMinor ||
+        !Number.isSafeInteger(debit) ||
+        !Number.isSafeInteger(credit) ||
+        debit !== expectedMinor ||
+        credit !== expectedMinor
+      ) {
+        return reject(
+          commandId,
+          idempotencyKey,
+          'OPD_BILLING_JOURNAL_INVALID',
+          `Invoice ${invoiceId} billing journal is missing, unbalanced, or monetarily inconsistent.`
+        );
+      }
+      journals.push(journal);
+      journalIds.push(journalId);
+    }
+
     const diagnosticById = new Map(
       diagnosticOrders.map((order) => [String(order.orderId || ''), order])
     );
@@ -536,6 +599,7 @@ export class OpdBillingReconciliationDomainService {
       invoices,
       charges,
       arItems,
+      journals,
       diagnosticOrders: diagnosticOrderIds.map(
         (id) => diagnosticById.get(id)!
       ),
@@ -555,6 +619,7 @@ export class OpdBillingReconciliationDomainService {
       arOpenItemIds: [...arByInvoiceId.values()]
         .map((row) => row.openItemId)
         .sort(),
+      journalIds: [...new Set(journalIds)].sort(),
       diagnosticOrderIds: [...new Set(diagnosticOrderIds)].sort(),
       prescriptionIds: [...new Set(prescriptionIds)].sort(),
       invoiceCount: invoiceById.size,
@@ -599,6 +664,12 @@ export class OpdBillingReconciliationDomainService {
         entityId: id,
         required: true,
       })),
+      ...reconciliation.journalIds.map((id) => ({
+        key: `journal:${id}`,
+        entityType: 'JOURNAL_ENTRY',
+        entityId: id,
+        required: true,
+      })),
       ...reconciliation.diagnosticOrderIds.map((id) => ({
         key: `diagnostic:${id}`,
         entityType: 'DIAGNOSTIC_ORDER',
@@ -612,6 +683,16 @@ export class OpdBillingReconciliationDomainService {
         required: true,
       })),
     ];
+
+    if (readTargets.length > 400) {
+      return reject(
+        commandId,
+        idempotencyKey,
+        'OPD_RECONCILIATION_TOO_LARGE',
+        'Encounter billing state exceeds the bounded transactional reconciliation limit.',
+        { readTargetCount: readTargets.length }
+      );
+    }
 
     try {
       const tx = await TransactionManager.executeAtomicReadModifyMutation({
@@ -667,6 +748,9 @@ export class OpdBillingReconciliationDomainService {
           const currentArItems = reconciliation.arOpenItemIds.map(
             (id) => current[`ar:${id}`] || {}
           );
+          const currentJournals = reconciliation.journalIds.map(
+            (id) => current[`journal:${id}`] || {}
+          );
           const currentDiagnostics = reconciliation.diagnosticOrderIds.map(
             (id) => current[`diagnostic:${id}`] || {}
           );
@@ -678,6 +762,7 @@ export class OpdBillingReconciliationDomainService {
             invoices: currentInvoices,
             charges: currentCharges,
             arItems: currentArItems,
+            journals: currentJournals,
             diagnosticOrders: currentDiagnostics,
             prescriptions: currentPrescriptions,
           });
@@ -746,17 +831,6 @@ export class OpdBillingReconciliationDomainService {
           error.code,
           error.message,
           error.details
-        );
-      }
-      if (
-        error instanceof Error &&
-        error.message.startsWith('INVALID_MONEY:')
-      ) {
-        return reject(
-          commandId,
-          idempotencyKey,
-          'OPD_INVALID_MONETARY_STATE',
-          error.message
         );
       }
       throw error;

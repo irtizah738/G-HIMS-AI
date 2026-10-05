@@ -56,10 +56,12 @@ describe('G-HIMS clinical workflow architecture contract', () => {
     );
 
     expect(route).toContain('Patient360ProjectionService.readClinicalView');
-    expect(route).toContain('DischargeReadinessService.getForPatient');
-    expect(route).toContain('ClinicalDeteriorationService.getForPatient');
+    expect(route).toContain('selectedCareContext');
+    expect(route).toContain('DischargeReadinessService.getProjection');
+    expect(route).toContain('ClinicalDeteriorationService.getProjection');
     expect(route).toContain('dischargeReadiness,');
     expect(route).toContain('deterioration,');
+    expect(route).toContain('consultantVisibility,');
   });
 
   test('STAGING/PILOT Bed Board consumes CI-8 and never derives escalation locally', async () => {

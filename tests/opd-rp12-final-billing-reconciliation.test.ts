@@ -39,6 +39,7 @@ describe('OPD-RP12 final billing reconciliation', () => {
     expect(service).toContain("'OPD_RECONCILIATION_TOO_LARGE'");
     expect(service).toContain("'OPD_REVENUE_INTEGRITY_PENDING_REVIEW'");
     expect(service).toContain("'OPD_REVENUE_INTEGRITY_CHARGE_MISSING'");
+    expect(service).toContain("'OPD_REVENUE_INTEGRITY_INVOICE_REQUIRED'");
   });
 
   test('invoice, charge and AR money must reconcile exactly', async () => {

@@ -17,6 +17,7 @@ import { selectCareContextEncounter } from '@/lib/clinical/patient360/care-conte
 import type { DischargeReadinessProjection } from '@/types/discharge-readiness';
 import type { DeteriorationProjection } from '@/types/clinical-deterioration';
 import type { MedicationSafetyProjection } from '@/types/medication-safety';
+import type { ClinicalLongitudinalSummaryResponse } from '@/types/clinical-longitudinal-summary';
 
 export interface Patient360ClinicalView {
   tenantId: string;
@@ -441,4 +442,35 @@ export async function acknowledgeCriticalDiagnosticResult(
   }
 
   return payload as Record<string, unknown>;
+}
+
+
+export async function generateLongitudinalClinicalSummary(
+  tenantId: string,
+  patientId: string
+): Promise<ClinicalLongitudinalSummaryResponse> {
+  const response = await AuthClient.authorizedFetch(
+    `/api/clinical/intelligence/longitudinal-summary?tenantId=${encodeURIComponent(tenantId)}`,
+    {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tenantId, patientId }),
+    },
+    tenantId
+  );
+
+  const payload = await response.json();
+  if (!response.ok || !payload?.success || !payload?.summary) {
+    throw new Error(
+      payload?.error?.message ||
+        payload?.error ||
+        'Longitudinal clinical summary could not be generated.'
+    );
+  }
+
+  return {
+    summary: payload.summary,
+    evidenceIndex: payload.evidenceIndex || [],
+  } as ClinicalLongitudinalSummaryResponse;
 }

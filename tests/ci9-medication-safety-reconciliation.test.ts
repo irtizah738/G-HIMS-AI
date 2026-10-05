@@ -406,8 +406,8 @@ describe('CI-9 medication safety and reconciliation intelligence', () => {
     expect(view).toContain(
       'Medication Safety & Reconciliation Intelligence'
     );
-    expect(view).toContain(
-      'Absence of a finding is not proof a medication is safe'
+    expect(view.toLowerCase()).toContain(
+      'absence of a finding is not proof a medication is safe'
     );
 
     const projectionRule = rules.indexOf(

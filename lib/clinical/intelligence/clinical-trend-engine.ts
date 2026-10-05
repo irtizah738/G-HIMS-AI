@@ -661,7 +661,11 @@ export class ClinicalTrendEngine {
     metrics: ClinicalTrendMetric[];
     excludedEvidence: ClinicalTrendExclusion[];
   } {
-    if (snapshot.purpose !== 'TREND_EXPLANATION') {
+    if (
+      !['TREND_EXPLANATION', 'LONGITUDINAL_SUMMARY'].includes(
+        snapshot.purpose
+      )
+    ) {
       throw new Error('CI10D_EVIDENCE_PURPOSE_MISMATCH');
     }
 

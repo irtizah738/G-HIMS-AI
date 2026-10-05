@@ -96,7 +96,7 @@ function hasCriticalSignal(value: unknown): boolean {
 
   if (value && typeof value === 'object') {
     const record = value as Record<string, unknown>;
-    if (record.requiresOverride === true || record.requiresAcknowledgement === true) {
+    if (record.requiresOverride === true) {
       return true;
     }
     if (

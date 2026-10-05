@@ -234,6 +234,15 @@ export class CommandBus {
           );
           break;
 
+        case 'AdvanceDiagnosticWorklistCommand':
+          result = await ClinicalOrderDomainService.advanceDiagnosticWorklist(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
         case 'RecordDiagnosticResultCommand':
           result = await DiagnosticResultDomainService.record(
             context,

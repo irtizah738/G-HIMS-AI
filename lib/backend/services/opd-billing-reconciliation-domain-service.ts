@@ -100,6 +100,7 @@ export class OpdBillingReconciliationDomainService {
         'BILLING_CLERK',
         'BILLING_ADMIN',
         'CASHIER',
+        'BILLING_CASHIER',
         'FINANCE_MANAGER',
         'ACCOUNTANT',
         'REVENUE_CYCLE',

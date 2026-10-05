@@ -75,14 +75,17 @@ export async function POST(req: NextRequest) {
     const encounterId = String(body.encounterId || '').trim();
     const careSetting = String(body.careSetting || 'UNKNOWN').trim().toUpperCase() as ClinicalCareSetting;
     const draftType = String(body.draftType || '').trim().toUpperCase() as ClinicalDraftType;
+    const idempotencyKey = String(
+      body.idempotencyKey || req.headers.get('x-idempotency-key') || ''
+    ).trim();
 
-    if (!patientId || !encounterId || !CLINICAL_DRAFT_TYPES.includes(draftType)) {
+    if (!patientId || !encounterId || !idempotencyKey || !CLINICAL_DRAFT_TYPES.includes(draftType)) {
       return NextResponse.json(
         {
           success: false,
           error: {
             code: 'CI10F_CONTEXT_REQUIRED',
-            message: 'patientId, encounterId and a supported draftType are required.',
+            message: 'patientId, encounterId, idempotencyKey and a supported draftType are required.',
           },
         },
         { status: 400, headers: { 'Cache-Control': 'no-store' } }
@@ -95,7 +98,8 @@ export async function POST(req: NextRequest) {
       patientId,
       encounterId,
       careSetting,
-      draftType
+      draftType,
+      idempotencyKey
     );
 
     return NextResponse.json(

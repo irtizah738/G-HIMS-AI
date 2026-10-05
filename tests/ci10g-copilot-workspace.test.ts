@@ -70,6 +70,23 @@ describe('CI-10G clinician-facing copilot workspace', () => {
     expect(workspace).toContain("return 'STALE'");
   });
 
+  test('governed draft freshness is bound to both Patient 360 revision and source checkpoint', async () => {
+    const panel = await source(
+      'components/patient360/GovernedClinicalDraftPanel.tsx'
+    );
+    const workspace = await source(
+      'components/patient360/ClinicalCopilotWorkspace.tsx'
+    );
+
+    expect(panel).toContain('currentSourceCheckpoint: string');
+    expect(panel).toContain(
+      'draft.patient360SourceCheckpoint !== currentSourceCheckpoint'
+    );
+    expect(workspace).toContain(
+      'currentSourceCheckpoint={currentSourceCheckpoint}'
+    );
+  });
+
   test('drafting UI preserves explicit clinician edit, approval and signature attestations', async () => {
     const panel = await source(
       'components/patient360/GovernedClinicalDraftPanel.tsx'

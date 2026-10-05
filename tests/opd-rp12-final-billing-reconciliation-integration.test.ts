@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { TransactionManager } from '@/lib/backend/transactions/transaction-manager';
 import { OpdBillingReconciliationDomainService } from '@/lib/backend/services/opd-billing-reconciliation-domain-service';
-import { EncounterDomainService } from '@/lib/backend/services/encounter-domain-service';
+import { OpdWorkflowRuntimeService } from '@/lib/backend/services/opd-workflow-runtime-service';
 import type { CommandContext } from '@/lib/backend/types';
 
 function context(tenantId: string): CommandContext {
@@ -188,18 +188,16 @@ describe('OPD-RP12 executable final billing reconciliation', () => {
     expect(encounter?.billingReconciliationId).toBe(reconciliationId);
     expect(encounter?.financialClearanceState).toBe('FINAL_BILLING_CLEARED');
 
-    const advance = await EncounterDomainService.advanceStage(
-      context(tenantId),
-      'cmd-rp12-advance',
-      'idem-rp12-advance',
-      {
+    const advance =
+      await OpdWorkflowRuntimeService.validateAuthoritativeEvidence({
+        tenantId,
         encounterId,
+        patientId: `patient-${encounterId}`,
         currentStage: 'BILLING_SETTLEMENT',
         targetStage: 'DISCHARGE_OR_REFERRAL',
         evidenceId: reconciliationId,
-      }
-    );
-    expect(advance.success).toBe(true);
+      });
+    expect(advance.allowed).toBe(true);
 
     const duplicate = await OpdBillingReconciliationDomainService.reconcile(
       context(tenantId),

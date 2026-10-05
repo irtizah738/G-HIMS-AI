@@ -112,6 +112,8 @@ describe('CBE consultant blindness foundation', () => {
     expect(mpi).toContain('activeIpdEncounterId?: string');
     expect(care).toContain('compatibilityEncounterId');
     expect(encounter).toContain('PATIENT_ACTIVE_OPD_ENCOUNTER_CONFLICT');
+    expect(encounter).toContain("'CARE_TRANSITION_COMMAND_REQUIRED'");
+    expect(encounter).toContain("additionalStateWrites");
     expect(transition).toContain('PATIENT_ACTIVE_IPD_ENCOUNTER_CONFLICT');
     expect(transition).toContain("closeCareContext(");
     expect(transition).toContain("activateCareContext(");

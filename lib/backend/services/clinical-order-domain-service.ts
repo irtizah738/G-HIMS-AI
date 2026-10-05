@@ -1067,6 +1067,27 @@ export class ClinicalOrderDomainService {
     const patientId = String(prescription.patientId || '');
     const encounterId = String(prescription.encounterId || '');
     const itemId = String(prescription.inventoryItemId || prescription.drugCode || '');
+    const prescribedQuantity = Number(prescription.quantityPrescribed || 0);
+    if (
+      !Number.isFinite(prescribedQuantity) ||
+      prescribedQuantity <= 0 ||
+      payload.quantityDispensed !== prescribedQuantity
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'PHARMACY_DISPENSE_QUANTITY_MISMATCH',
+          message:
+            'Controlled OPD dispensing requires the authoritative prescribed quantity to be dispensed in full.',
+          details: {
+            prescribedQuantity,
+            requestedQuantity: payload.quantityDispensed,
+          },
+        },
+      };
+    }
     if (!patientId || !encounterId || !itemId) {
       return {
         success: false,

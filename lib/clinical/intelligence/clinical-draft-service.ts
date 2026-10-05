@@ -156,8 +156,35 @@ export class ClinicalDraftService {
     patientId: string,
     encounterId: string,
     careSetting: ClinicalCareSetting,
-    draftType: ClinicalDraftType
+    draftType: ClinicalDraftType,
+    idempotencyKey: string
   ): Promise<ClinicalDraftGenerationResponse> {
+    const normalizedIdempotencyKey = normalize(idempotencyKey);
+    if (!normalizedIdempotencyKey) throw new Error('CI10F_IDEMPOTENCY_KEY_REQUIRED');
+    const draftId = `cdraft_${crypto.createHash('sha256')
+      .update([context.tenantId, context.actorId, normalizedIdempotencyKey].join('|'))
+      .digest('hex')
+      .slice(0, 32)}`;
+
+    const existing = await this.get(context.tenantId, draftId);
+    if (existing) {
+      if (
+        existing.patientId !== patientId ||
+        existing.encounterId !== encounterId ||
+        existing.draftType !== draftType
+      ) {
+        throw new Error('CI10F_IDEMPOTENCY_SCOPE_CONFLICT');
+      }
+      const [revision, persistedEvidence] = await Promise.all([
+        this.getRevision(context.tenantId, existing.currentRevisionId),
+        ClinicalEvidenceService.getSnapshot(context.tenantId, existing.evidenceSnapshotId),
+      ]);
+      if (!revision || !persistedEvidence || persistedEvidence.snapshotHash !== existing.evidenceSnapshotHash) {
+        throw new Error('CI10F_IDEMPOTENT_REPLAY_INTEGRITY_FAILURE');
+      }
+      return { draft: existing, revision, evidenceIndex: evidenceIndex(persistedEvidence) };
+    }
+
     const snapshot = await ClinicalEvidenceService.createAuthoritativeSnapshot(
       context,
       patientId,
@@ -193,7 +220,6 @@ export class ClinicalDraftService {
     if (!content) throw new Error('CI10F_AI_OUTPUT_CONTENT_REQUIRED');
 
     const generatedAt = Date.now();
-    const draftId = `cdraft_${crypto.randomUUID()}`;
     const revisionId = `${draftId}_r1`;
     const contentHash = clinicalDraftContentHash(normalized.title, content);
 
@@ -298,7 +324,7 @@ export class ClinicalDraftService {
         recordedAt: now,
         correlationId: context.correlationId,
         commandId: `ci10f-generate:${draftId}`,
-        idempotencyKey: draftId,
+        idempotencyKey: normalizedIdempotencyKey,
         source: 'system',
         schemaVersion: 1,
       };

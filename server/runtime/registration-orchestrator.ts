@@ -22,6 +22,30 @@ import { compileWorkflow } from '@/lib/workflow/compiler';
 
 const REGISTRATION_COMMAND_TYPE = 'RegisterPatientAndEncounterCommand';
 
+const REGISTRATION_CONSENT_POLICY_VERSION = {
+  GENERAL_OUTPATIENT: '2026.1',
+  DATA_SHARING_HIE: '2026.1',
+} as const;
+
+export interface RegistrationConsentDecision {
+  consentType: keyof typeof REGISTRATION_CONSENT_POLICY_VERSION;
+  status: 'GRANTED' | 'WITHHELD';
+  method: 'DIGITAL_ATTESTATION';
+}
+
+export interface AuthoritativeRegistrationConsent {
+  consentId: string;
+  tenantId: string;
+  patientId: string;
+  consentType: RegistrationConsentDecision['consentType'];
+  status: RegistrationConsentDecision['status'];
+  method: RegistrationConsentDecision['method'];
+  policyVersion: string;
+  capturedAt: number;
+  capturedBy: string;
+  source: 'OPD_REGISTRATION';
+}
+
 export interface RegisterPatientEncounterParams {
   tenantId: string;
   commandId: string;
@@ -44,6 +68,13 @@ export interface RegisterPatientEncounterParams {
   bloodGroup?: string;
   allergies?: string[];
   chronicConditions?: string[];
+  tariffPlan?: 'OUT_OF_POCKET' | 'CORPORATE_PPO' | 'SEHAT_CARD_UNIVERSAL' | 'STATE_INSURANCE';
+  insuranceDetails?: {
+    payerName?: string;
+    policyNumber?: string;
+    memberId?: string;
+  };
+  consentDecisions?: RegistrationConsentDecision[];
 }
 
 export interface OrchestrationResult {
@@ -53,6 +84,7 @@ export interface OrchestrationResult {
   workflowSnapshot: WorkflowSnapshot;
   timelineEvent: PatientTimelineProjection;
   outboxEvent: OutboxEventRecord;
+  consentRecords: AuthoritativeRegistrationConsent[];
   queueToken: {
     id: string;
     encounterId: string;
@@ -96,7 +128,10 @@ function registrationPayload(params: RegisterPatientEncounterParams): Record<str
     assignedDoctor: params.assignedDoctor || '',
     bloodGroup: params.bloodGroup,
     allergies: params.allergies || [],
-    chronicConditions: params.chronicConditions || [],
+    chronicConditions: params.chronicConditions,
+    tariffPlan: params.tariffPlan,
+    insuranceDetails: params.insuranceDetails,
+    consentDecisions: params.consentDecisions || [],
   };
 }
 
@@ -139,6 +174,41 @@ export async function registerPatientAndEncounter(
 
   const activeCareContexts = activateCareContext(undefined, normalizeCareSetting(params.encounterType || 'OPD'), encounterId, now);
 
+  const uniqueConsentTypes = new Set(
+    (params.consentDecisions || []).map((decision) => decision.consentType)
+  );
+  if (uniqueConsentTypes.size !== (params.consentDecisions || []).length) {
+    throw new Error('DUPLICATE_CONSENT_DECISION: each registration consent type may appear only once.');
+  }
+
+  const consentRecords: AuthoritativeRegistrationConsent[] = (params.consentDecisions || []).map(
+    (decision) => ({
+      consentId: `consent_${crypto.randomUUID()}`,
+      tenantId,
+      patientId,
+      consentType: decision.consentType,
+      status: decision.status,
+      method: decision.method,
+      policyVersion: REGISTRATION_CONSENT_POLICY_VERSION[decision.consentType],
+      capturedAt: now,
+      capturedBy: params.actorId,
+      source: 'OPD_REGISTRATION',
+    })
+  );
+
+  const consentSummary = Object.fromEntries(
+    consentRecords.map((record) => [
+      record.consentType,
+      {
+        consentId: record.consentId,
+        status: record.status,
+        method: record.method,
+        policyVersion: record.policyVersion,
+        capturedAt: record.capturedAt,
+      },
+    ])
+  ) as PatientMPI['consentSummary'];
+
   const patientRecord: PatientMPI = {
     id: patientId,
     tenantId,
@@ -151,7 +221,10 @@ export async function registerPatientAndEncounter(
     address: params.address,
     bloodGroup: params.bloodGroup || 'Unknown',
     allergies: params.allergies || [],
-    chronicConditions: params.chronicConditions || [],
+    ...(params.chronicConditions ? { chronicConditions: params.chronicConditions } : {}),
+    ...(params.tariffPlan ? { tariffPlan: params.tariffPlan } : {}),
+    ...(params.insuranceDetails ? { insuranceDetails: params.insuranceDetails } : {}),
+    ...(consentRecords.length > 0 ? { consentSummary } : {}),
     createdAt: now,
     updatedAt: now,
     createdById: params.actorId,
@@ -227,6 +300,7 @@ export async function registerPatientAndEncounter(
       chiefComplaint: encounterRecord.chiefComplaint,
       priority: encounterRecord.priority,
       initialStage: encounterRecord.currentStageId,
+      consentRecordIds: consentRecords.map((record) => record.consentId),
     },
     actorId: params.actorId,
     actorRole: params.actorRole,
@@ -338,6 +412,7 @@ export async function registerPatientAndEncounter(
     workflowSnapshot,
     timelineEvent: timelineRecord,
     outboxEvent: outboxRecord,
+    consentRecords,
     queueToken,
   };
 
@@ -352,6 +427,10 @@ export async function registerPatientAndEncounter(
     const canonicalEventRef = tenantRef.collection('events').doc(canonicalEventId);
     const canonicalOutboxRef = tenantRef.collection('outbox').doc(canonicalOutboxId);
     const queueRef = tenantRef.collection('opd_queue').doc(queueToken.id);
+    const consentRefs = consentRecords.map((record) => ({
+      record,
+      ref: tenantRef.collection('patientConsents').doc(record.consentId),
+    }));
     const idempotencyRef = tenantRef
       .collection('idempotency')
       .doc(IdempotencyService.getDocumentId(params.idempotencyKey));
@@ -399,6 +478,9 @@ export async function registerPatientAndEncounter(
     transaction.create(canonicalOutboxRef, sanitizeForFirestore(canonicalOutbox));
     transaction.create(auditRef, sanitizeForFirestore(auditLogEntry));
     transaction.create(queueRef, sanitizeForFirestore(queueToken));
+    for (const item of consentRefs) {
+      transaction.create(item.ref, sanitizeForFirestore(item.record));
+    }
 
     if (mpiRef && mpiKey) {
       transaction.create(mpiRef, sanitizeForFirestore({

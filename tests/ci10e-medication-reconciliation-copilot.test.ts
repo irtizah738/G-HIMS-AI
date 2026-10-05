@@ -469,6 +469,23 @@ describe('CI-10E medication reconciliation copilot', () => {
     );
   });
 
+  test('production pharmacy workflow does not seed demo dose, instructions or pharmacist identity', async () => {
+    const pharmacy = await source(
+      'components/opd/OpdPharmacyPrescriptions.tsx'
+    );
+
+    expect(pharmacy).toContain(
+      "useState<string>(IS_DEMO_RUNTIME ? '40 mg' : '')"
+    );
+    expect(pharmacy).toContain(
+      "IS_DEMO_RUNTIME ? 'Take with a full glass of water in the morning.' : ''"
+    );
+    expect(pharmacy).toContain(
+      "const [pharmacistName, setPharmacistName] = useState<string>('')"
+    );
+    expect(pharmacy).toContain('setDosage(mapped[0].strength)');
+  });
+
   test('CI-10E introduces no model-provider or medication mutation side door', async () => {
     const engine = await source(
       'lib/clinical/intelligence/medication-reconciliation-copilot-engine.ts'

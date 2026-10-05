@@ -3,15 +3,10 @@
 import React, { useState } from 'react';
 import {
   Stethoscope,
-  Brain,
-  Heart,
-  Baby,
   ShieldCheck,
   Search,
   CheckCircle2,
   FileText,
-  ChevronDown,
-  Eye,
   Activity,
   Plus,
   Trash2,

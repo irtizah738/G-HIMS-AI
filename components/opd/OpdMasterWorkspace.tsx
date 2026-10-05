@@ -1717,6 +1717,7 @@ export function OpdMasterWorkspace() {
           onSaveConsultation={(soap) => handleSaveConsultation(soap)}
           onPlaceDiagnosticOrders={() => setActiveTab('DIAGNOSTICS')}
           onPlacePrescriptions={() => setActiveTab('PHARMACY')}
+          online={isOnline}
         />
       )}
 

@@ -64,6 +64,16 @@ export function OpdBillingLedger({
       return;
     }
 
+    const paymentMinorUnits = Math.round(paymentAmount * 100);
+    if (
+      !Number.isSafeInteger(paymentMinorUnits) ||
+      paymentMinorUnits <= 0 ||
+      paymentMinorUnits > invoice.balanceDueMinorUnits
+    ) {
+      alert('Enter a valid amount no greater than the authoritative outstanding balance.');
+      return;
+    }
+
     const payment: PaymentTransaction = {
       id: `pay-${Date.now()}`,
       invoiceId: invoice.id,

@@ -231,4 +231,281 @@ describe('OPD-RP12 executable final billing reconciliation', () => {
       )
     ).toBeNull();
   });
+
+  test('billing-to-disposition evidence becomes stale after a later billing mutation', async () => {
+    const tenantId = 'tenant-rp12-stale';
+    const encounterId = 'enc-rp12-stale';
+    seedEncounter(tenantId, encounterId, { settled: true });
+
+    const result = await OpdBillingReconciliationDomainService.reconcile(
+      context(tenantId),
+      'cmd-rp12-stale-reconcile',
+      'idem-rp12-stale-reconcile',
+      { encounterId }
+    );
+    expect(result.success).toBe(true);
+    const reconciliationId = String(result.entityId || '');
+
+    const encounter =
+      TransactionManager.getEphemeralStateForTesting(
+        tenantId,
+        'ENCOUNTER',
+        encounterId
+      ) || {};
+    TransactionManager.seedEphemeralStateForTesting(
+      tenantId,
+      'ENCOUNTER',
+      encounterId,
+      {
+        ...encounter,
+        billingMutationSequence:
+          Number(encounter.billingMutationSequence || 0) + 1,
+      }
+    );
+
+    const advance =
+      await OpdWorkflowRuntimeService.validateAuthoritativeEvidence({
+        tenantId,
+        encounterId,
+        patientId: `patient-${encounterId}`,
+        currentStage: 'BILLING_SETTLEMENT',
+        targetStage: 'DISCHARGE_OR_REFERRAL',
+        evidenceId: reconciliationId,
+      });
+
+    expect(advance.allowed).toBe(false);
+    expect(advance.code).toBe('OPD_BILLING_RECONCILIATION_STALE');
+  });
+
+  test('finalized diagnostic service reconciles both deferred billing and revenue-recognition journals', async () => {
+    const tenantId = 'tenant-rp12-diagnostic';
+    const encounterId = 'enc-rp12-diagnostic';
+    const { patientId } = seedEncounter(tenantId, encounterId, {
+      settled: true,
+    });
+
+    const invoiceId = `diag-invoice-${encounterId}`;
+    const chargeId = `diag-charge-${encounterId}`;
+    const arId = `ar_patient_${invoiceId}`;
+    const orderId = `diag-order-${encounterId}`;
+    const deferredJournalId = `diag-deferred-${encounterId}`;
+    const recognitionJournalId = `diag-recognition-${encounterId}`;
+
+    TransactionManager.seedEphemeralStateForTesting(
+      tenantId,
+      'INVOICE',
+      invoiceId,
+      {
+        id: invoiceId,
+        tenantId,
+        patientId,
+        encounterId,
+        billingPurpose: 'OPD_DIAGNOSTIC',
+        sourceOrderId: orderId,
+        currency: 'PKR',
+        totalPatientDue: 50,
+        totalPaid: 50,
+        balanceDue: 0,
+        paymentStatus: 'paid',
+        items: [
+          {
+            id: chargeId,
+            entitySource: 'lab',
+            code: 'LAB-RP12',
+            description: 'RP12 diagnostic',
+            quantity: 1,
+            unitPrice: 50,
+            grossAmount: 50,
+            discountAmount: 0,
+            tax: 5,
+            netAmount: 50,
+            patientPortion: 50,
+            insurancePortion: 0,
+          },
+        ],
+      }
+    );
+    TransactionManager.seedEphemeralStateForTesting(
+      tenantId,
+      'ENCOUNTER_CHARGE',
+      chargeId,
+      {
+        chargeId,
+        tenantId,
+        patientId,
+        encounterId,
+        invoiceId,
+        status: 'BILLED_DEFERRED',
+        patientResponsibilityMinorUnits: 5_000,
+      }
+    );
+    TransactionManager.seedEphemeralStateForTesting(
+      tenantId,
+      'AR_OPEN_ITEM',
+      arId,
+      {
+        openItemId: arId,
+        tenantId,
+        invoiceId,
+        debtorType: 'PATIENT',
+        debtorId: patientId,
+        patientId,
+        encounterId,
+        issueAt: 1,
+        dueAt: 1,
+        currency: 'PKR',
+        originalMinorUnits: 5_000,
+        allocatedMinorUnits: 5_000,
+        writtenOffMinorUnits: 0,
+        refundedMinorUnits: 0,
+        outstandingMinorUnits: 0,
+        status: 'SETTLED',
+        createdAt: new Date(1).toISOString(),
+        updatedAt: new Date(1).toISOString(),
+      }
+    );
+    TransactionManager.seedEphemeralStateForTesting(
+      tenantId,
+      'DIAGNOSTIC_ORDER',
+      orderId,
+      {
+        orderId,
+        tenantId,
+        patientId,
+        encounterId,
+        worklistStatus: 'FINALIZED',
+        revenueRecognizedAt: 2,
+        deferredRevenueJournalId: deferredJournalId,
+        recognitionJournalId,
+        netRevenueMinorUnits: 4_500,
+      }
+    );
+    TransactionManager.seedEphemeralStateForTesting(
+      tenantId,
+      'JOURNAL_ENTRY',
+      deferredJournalId,
+      {
+        journalId: deferredJournalId,
+        tenantId,
+        referenceDocumentId: invoiceId,
+        currency: 'PKR',
+        totalAmountMinorUnits: 5_000,
+        status: 'POSTED',
+        lines: [
+          {
+            glAccountId: '1110',
+            debitMinorUnits: 5_000,
+            creditMinorUnits: 0,
+          },
+          {
+            glAccountId: '2050',
+            debitMinorUnits: 0,
+            creditMinorUnits: 4_500,
+          },
+          {
+            glAccountId: '2040',
+            debitMinorUnits: 0,
+            creditMinorUnits: 500,
+          },
+        ],
+      }
+    );
+    TransactionManager.seedEphemeralStateForTesting(
+      tenantId,
+      'JOURNAL_ENTRY',
+      recognitionJournalId,
+      {
+        journalId: recognitionJournalId,
+        tenantId,
+        referenceDocumentId: invoiceId,
+        currency: 'PKR',
+        totalAmountMinorUnits: 4_500,
+        status: 'POSTED',
+        lines: [
+          {
+            glAccountId: '2050',
+            debitMinorUnits: 4_500,
+            creditMinorUnits: 0,
+          },
+          {
+            glAccountId: '4020',
+            debitMinorUnits: 0,
+            creditMinorUnits: 4_500,
+          },
+        ],
+      }
+    );
+
+    const encounter =
+      TransactionManager.getEphemeralStateForTesting(
+        tenantId,
+        'ENCOUNTER',
+        encounterId
+      ) || {};
+    TransactionManager.seedEphemeralStateForTesting(
+      tenantId,
+      'ENCOUNTER',
+      encounterId,
+      { ...encounter, billingMutationSequence: 2 }
+    );
+
+    const result = await OpdBillingReconciliationDomainService.reconcile(
+      context(tenantId),
+      'cmd-rp12-diagnostic',
+      'idem-rp12-diagnostic',
+      { encounterId }
+    );
+
+    expect(result.success).toBe(true);
+    expect((result.data as any)?.reconciliation?.invoiceCount).toBe(2);
+    expect((result.data as any)?.reconciliation?.journalIds).toContain(
+      deferredJournalId
+    );
+    expect((result.data as any)?.reconciliation?.journalIds).toContain(
+      recognitionJournalId
+    );
+  });
+
+  test('pending Revenue Integrity candidate blocks final financial closure', async () => {
+    const tenantId = 'tenant-rp12-ri-pending';
+    const encounterId = 'enc-rp12-ri-pending';
+    const { patientId } = seedEncounter(tenantId, encounterId, {
+      settled: true,
+    });
+
+    TransactionManager.seedEphemeralStateForTesting(
+      tenantId,
+      'REVENUE_INTEGRITY_FINDING',
+      'ri-rp12-pending',
+      {
+        id: 'ri-rp12-pending',
+        tenantId,
+        patientId,
+        encounterId,
+        sourceEvidenceId: 'ev-rp12',
+        documentedItem: 'Potential missed procedure',
+        category: 'Procedure',
+        suggestedCode: 'PROC-RP12',
+        estimatedRecoverableAmountMinorUnits: 2_500,
+        currency: 'PKR',
+        status: 'PENDING_REVIEW',
+        evidenceSnippet: 'Signed evidence',
+        createdAt: 1,
+        createdBy: 'doctor-rp12',
+      }
+    );
+
+    const result = await OpdBillingReconciliationDomainService.reconcile(
+      context(tenantId),
+      'cmd-rp12-ri-pending',
+      'idem-rp12-ri-pending',
+      { encounterId }
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe(
+      'OPD_REVENUE_INTEGRITY_PENDING_REVIEW'
+    );
+  });
+
 });

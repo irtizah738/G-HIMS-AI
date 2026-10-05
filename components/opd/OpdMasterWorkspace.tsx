@@ -1201,7 +1201,7 @@ export function OpdMasterWorkspace() {
     }
   ) => {
     try {
-      const result = await executeActiveTenantCommand<Record<string, unknown>>(
+      const result = await executeActiveTenantCommand<Record<string, any>>(
         'PrescribeMedicationCommand',
         {
           encounterId: activeEncounter.id,
@@ -1228,11 +1228,47 @@ export function OpdMasterWorkspace() {
         throw new Error(result.error?.message || 'Prescription failed.');
       }
 
+      const authoritative = result.data || {};
       const governedPrescription: PharmacyPrescriptionItem = {
         ...item,
-        id: result.entityId || item.id,
-        encounterId: activeEncounter.id,
+        id: String(
+          authoritative.prescriptionId || result.entityId || item.id
+        ),
+        encounterId: String(
+          authoritative.encounterId || activeEncounter.id
+        ),
+        medicationCode: String(
+          authoritative.drugCode || item.medicationCode || ''
+        ),
+        drugName: String(authoritative.drugName || ''),
+        dosage: String(authoritative.dosage || item.dosage),
+        route: String(authoritative.route || item.route),
+        frequency: String(authoritative.frequency || item.frequency),
+        durationDays: Number(
+          authoritative.durationDays || item.durationDays
+        ),
+        quantity: Number(
+          authoritative.quantityPrescribed ||
+            item.quantity ||
+            item.quantityPrescribed ||
+            0
+        ),
+        quantityPrescribed: Number(
+          authoritative.quantityPrescribed ||
+            item.quantityPrescribed ||
+            item.quantity ||
+            0
+        ),
+        formulation: String(
+          authoritative.unitOfMeasure || item.formulation || ''
+        ),
         status: 'PRESCRIBED',
+        prescribedBy: String(
+          authoritative.prescribedBy || item.prescribedBy || ''
+        ),
+        prescribedAt: Number(
+          authoritative.createdAt || item.prescribedAt || Date.now()
+        ),
       };
       setEncounters((prev) =>
         prev.map((e) =>

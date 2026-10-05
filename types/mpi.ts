@@ -50,6 +50,22 @@ export interface PatientMPI {
   bloodGroup?: string;
   allergies?: string[];
   chronicConditions?: string[];
+  tariffPlan?: 'OUT_OF_POCKET' | 'CORPORATE_PPO' | 'SEHAT_CARD_UNIVERSAL' | 'STATE_INSURANCE';
+  insuranceDetails?: {
+    payerName?: string;
+    policyNumber?: string;
+    memberId?: string;
+  };
+  consentSummary?: Partial<Record<
+    'GENERAL_OUTPATIENT' | 'DATA_SHARING_HIE',
+    {
+      consentId: string;
+      status: 'GRANTED' | 'WITHHELD';
+      method: 'DIGITAL_ATTESTATION';
+      policyVersion: string;
+      capturedAt: number;
+    }
+  >>;
   emergencyContact?: {
     name: string;
     relationship: string;

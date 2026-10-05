@@ -446,20 +446,29 @@ describe('CI-10E medication reconciliation copilot', () => {
     );
   });
 
-  test('Patient 360 embeds CI-10E and preserves human-authoritative completion', async () => {
-    const panel = await source(
-      'components/patient360/MedicationReconciliationCopilotPanel.tsx'
+  test('Patient 360 exposes CI-10E through the canonical copilot workspace and preserves human-authoritative completion', async () => {
+    const workspace = await source(
+      'components/patient360/ClinicalCopilotWorkspace.tsx'
     );
     const view = await source(
       'components/patient360/Patient360View.tsx'
+    );
+    const client = await source(
+      'lib/clinical/patient360/patient360-client.ts'
     );
     const documentation = await source(
       'lib/backend/services/clinical-documentation-domain-service.ts'
     );
 
-    expect(view).toContain('MedicationReconciliationCopilotPanel');
-    expect(panel).toContain('cannot complete medication reconciliation');
-    expect(panel).toContain('authoritative medication workflows');
+    expect(view).toContain('ClinicalCopilotWorkspace');
+    expect(workspace).toContain('generateMedicationReconciliationCopilot');
+    expect(workspace).toContain("'MEDICATIONS'");
+    expect(workspace).toContain(
+      'does not prove medication reconciliation is clinically'
+    );
+    expect(client).toContain(
+      '/api/clinical/intelligence/medication-reconciliation'
+    );
     expect(documentation).toContain(
       "eventType: 'MEDICATION_RECONCILIATION_COMPLETED'"
     );

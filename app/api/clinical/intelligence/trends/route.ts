@@ -7,6 +7,7 @@ import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient36
 import { selectCareContextEncounter } from '@/lib/clinical/patient360/care-context';
 import { ClinicalEvidenceService } from '@/lib/clinical/intelligence/clinical-evidence-service';
 import { ClinicalTrendIntelligenceService } from '@/lib/clinical/intelligence/clinical-trend-intelligence-service';
+import { observeClinicalIntelligenceOperation } from '@/lib/clinical/intelligence/clinical-intelligence-observability';
 import type { CommandContext } from '@/lib/backend/types';
 
 function authorize(context: CommandContext) {
@@ -113,11 +114,19 @@ export async function POST(req: NextRequest) {
     }
 
     await assertTrendAccess(context, patientId);
-    const result =
-      await ClinicalTrendIntelligenceService.generateAuthoritatively(
-        context,
-        patientId
-      );
+    const result = await observeClinicalIntelligenceOperation(
+      {
+        operation: 'GENERATE_TREND_INTELLIGENCE',
+        purpose: 'TREND_EXPLANATION',
+        tenantId: context.tenantId,
+        correlationId: context.correlationId,
+      },
+      () =>
+        ClinicalTrendIntelligenceService.generateAuthoritatively(
+          context,
+          patientId
+        )
+    );
 
     return NextResponse.json(
       { success: true, ...result },

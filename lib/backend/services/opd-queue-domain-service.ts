@@ -323,10 +323,17 @@ export class OpdQueueDomainService {
             entityId: tokenLink.encounterId,
             required: true,
           },
+          {
+            key: 'patient',
+            entityType: 'PATIENT_MPI',
+            entityId: tokenLink.patientId,
+            required: true,
+          },
         ],
         prepare: (current) => {
           const token = current.token as unknown as OpdQueueState;
           const encounter = current.encounter || {};
+          const patient = current.patient || {};
 
           if (String(token.encounterId || '') !== tokenLink.encounterId) {
             throw new AtomicMutationRejectedError(
@@ -339,6 +346,19 @@ export class OpdQueueDomainService {
             throw new AtomicMutationRejectedError(
               'INVALID_OPD_QUEUE_TRANSITION',
               `Cannot start OPD service from queue status '${token.status}'.`
+            );
+          }
+
+          const generalConsent = (
+            patient.consentSummary as
+              | Record<string, { status?: string; consentId?: string }>
+              | undefined
+          )?.GENERAL_OUTPATIENT;
+          if (String(generalConsent?.status || '').toUpperCase() !== 'GRANTED') {
+            throw new AtomicMutationRejectedError(
+              'GENERAL_OPD_CONSENT_REQUIRED',
+              'General OPD care consent must be explicitly granted before routine service can start.',
+              { consentId: generalConsent?.consentId || null }
             );
           }
 

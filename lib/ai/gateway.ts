@@ -40,7 +40,6 @@ function cleanJsonPayload(value: string): string {
 }
 
 function generateDeterministicFallback<T>(request: AIGenerateJsonRequest): T {
-  const data = (request.sourceData && typeof request.sourceData === 'object' ? request.sourceData : {}) as Record<string, unknown>;
   switch (request.purpose) {
     case 'SUPPLY_CHAIN_ANALYSIS': {
       const fallback = {

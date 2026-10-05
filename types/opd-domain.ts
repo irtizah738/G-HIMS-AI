@@ -130,7 +130,7 @@ export interface PatientDemographics {
   };
   consents?: ConsentRecord[];
   registrationConsentDecisions?: ConsentCaptureDecision[];
-  bloodGroup: 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-';
+  bloodGroup: 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-' | 'Unknown';
   knownAllergies?: string[];
   chronicConditions?: string[];
   createdAt: number;

@@ -21,7 +21,7 @@ import {
 
 interface OpdConsultationSpecialtiesProps {
   encounter: ComprehensiveOpdEncounter;
-  onSaveConsultation: (soap: SoapDocumentation) => void;
+  onSaveConsultation: (soap: SoapDocumentation) => void | Promise<void>;
   onPlaceDiagnosticOrders?: () => void;
   onPlacePrescriptions?: () => void;
   offline?: boolean;
@@ -131,10 +131,7 @@ export function OpdConsultationSpecialties({
 
     const substantiveContent = [
       subjective,
-      historyOfPresentIllness,
-      reviewOfSystems,
       objective,
-      physicalExamination,
       assessment,
       plan,
     ]

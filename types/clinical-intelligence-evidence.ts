@@ -30,6 +30,8 @@ export type ClinicalEvidenceSourceType =
   | 'DETERIORATION_FINDING'
   | 'DISCHARGE_READINESS_FINDING'
   | 'CLINICAL_DOCUMENT'
+  | 'CLINICAL_CONSULTATION'
+  | 'CLINICAL_HANDOFF'
   | 'KNOWLEDGE_STATUS';
 
 export interface ClinicalEvidenceRef {

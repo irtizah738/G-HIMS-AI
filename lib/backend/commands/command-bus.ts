@@ -7,6 +7,7 @@ import { BaseCommand, CommandContext, CommandResult } from '../types';
 import { EncounterDomainService } from '../services/encounter-domain-service';
 import { ClinicalOrderDomainService } from '../services/clinical-order-domain-service';
 import { ClinicalDocumentationDomainService } from '../services/clinical-documentation-domain-service';
+import { ClinicalDraftDomainService } from '../services/clinical-draft-domain-service';
 import { OpdQueueDomainService } from '../services/opd-queue-domain-service';
 import { FinanceGlDomainService } from '../services/finance-gl-domain-service';
 import { FinanceArRevenueDomainService } from '../services/finance-ar-revenue-domain-service';
@@ -355,6 +356,30 @@ export class CommandBus {
             command.commandId,
             command.idempotencyKey,
             command.payload as any
+          );
+          break;
+
+        case 'ReviewClinicalDraftCommand':
+          result = await ClinicalDraftDomainService.reviewAndRevise(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'ApproveClinicalDraftCommand':
+          result = await ClinicalDraftDomainService.approve(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'SignClinicalDraftCommand':
+          result = await ClinicalDraftDomainService.sign(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'RejectClinicalDraftCommand':
+          result = await ClinicalDraftDomainService.reject(
+            context, command.commandId, command.idempotencyKey, command.payload as any
           );
           break;
 

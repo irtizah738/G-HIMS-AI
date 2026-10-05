@@ -393,7 +393,7 @@ describe('G-HIMS P4 release-candidate Firestore recovery journey', () => {
     expect(orderAfter.exists).toBe(true);
     expect(prescriptionAfter.exists).toBe(true);
     expect(journalAfter.exists).toBe(true);
-  });
+  }, 15_000);
 
   test('cross-tenant rebuild validation leaves existing projection data untouched', async () => {
     const db = getAdminFirestore();

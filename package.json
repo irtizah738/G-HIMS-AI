@@ -140,7 +140,9 @@
     "test:ci10d": "bun test tests/ci10d-clinical-trend-intelligence.test.ts",
     "validate:ci10d": "bun run typecheck && bun run lint && bun run test:ci10d && bun run test:ci10c && bun run test:ci10b && bun run test:ci10 && bun run test:ci9 && bun run test:cbe && bun run test:ci8 && bun run test:p8 && bun run test:p6 && bun run test:p7 && bun run test:security && bun run build",
     "test:ci10e": "bun test tests/ci10e-medication-reconciliation-copilot.test.ts",
-    "validate:ci10e": "bun run typecheck && bun run lint && bun run test:ci10e && bun run test:ci10d && bun run test:ci10c && bun run test:ci10b && bun run test:ci10 && bun run test:ci9 && bun run test:cbe && bun run test:ci8 && bun run test:p8 && bun run test:p6 && bun run test:p7 && bun run test:security && bun run build"
+    "validate:ci10e": "bun run typecheck && bun run lint && bun run test:ci10e && bun run test:ci10d && bun run test:ci10c && bun run test:ci10b && bun run test:ci10 && bun run test:ci9 && bun run test:cbe && bun run test:ci8 && bun run test:p8 && bun run test:p6 && bun run test:p7 && bun run test:security && bun run build",
+    "test:ci10f": "bun test tests/ci10f-clinical-drafting.test.ts",
+    "validate:ci10f": "bun run typecheck && bun run lint && bun run test:ci10f && bun run test:ci10e && bun run test:ci10d && bun run test:ci10c && bun run test:ci10b && bun run test:ci10 && bun run test:ci9 && bun run test:cbe && bun run test:ci8 && bun run test:p8 && bun run test:p6 && bun run test:p7 && bun run test:security && bun run build"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

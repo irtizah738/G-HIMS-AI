@@ -20,6 +20,10 @@ import {
   MedicationReconciliationEvidenceLoader,
   type MedicationReconciliationEvidenceSources,
 } from '@/lib/clinical/intelligence/medication-reconciliation-evidence-loader';
+import {
+  ClinicalDraftEvidenceLoader,
+  type ClinicalDraftEvidenceSources,
+} from '@/lib/clinical/intelligence/clinical-draft-evidence-loader';
 import type {
   Patient360AllergySummary,
   Patient360ConditionSummary,
@@ -58,7 +62,8 @@ type EvidenceSupplement =
   | LongitudinalEvidenceSources
   | EncounterPreparationEvidenceSources
   | TrendEvidenceSources
-  | MedicationReconciliationEvidenceSources;
+  | MedicationReconciliationEvidenceSources
+  | ClinicalDraftEvidenceSources;
 
 function canonicalStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'undefined';
@@ -404,7 +409,9 @@ export class ClinicalEvidenceService {
             ? 'This trend snapshot freezes the canonical quantitative observation history represented at generation time.'
             : purpose === 'MEDICATION_RECONCILIATION'
               ? 'This medication-reconciliation snapshot freezes the selected encounter context, canonical medication orders, dispenses, administrations, medication reconciliation records, medication-allergy records and current CI-9 findings represented at generation time.'
-              : supplemental
+              : purpose === 'CLINICAL_DRAFT'
+                ? 'This clinical-drafting snapshot freezes the selected encounter context, longitudinal canonical facts, consultations, handoffs, open items, medication-safety, deterioration and discharge-readiness evidence represented at generation time.'
+                : supplemental
             ? 'This longitudinal snapshot combines Patient 360 evidence with canonical encounter, medication, observation, diagnostic-order, diagnostic-report, procedure and care-plan facts frozen at generation time.'
             : 'This snapshot contains only evidence represented in the current Patient 360 projection contract.',
         'Missing or incomplete source data must not be interpreted as clinical absence.',
@@ -534,7 +541,14 @@ export class ClinicalEvidenceService {
                   projection,
                   options
                 )
-              : undefined;
+              : purpose === 'CLINICAL_DRAFT'
+                ? await ClinicalDraftEvidenceLoader.load(
+                    context,
+                    patientId,
+                    projection,
+                    options
+                  )
+                : undefined;
 
     const snapshot = this.buildSnapshot(
       projection,

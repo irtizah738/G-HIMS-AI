@@ -246,6 +246,8 @@ function collectionForEntityType(entityType: string): string {
     REVENUE_INTEGRITY_FINDING: 'billingMismatches',
     ENCOUNTER_CHARGE: 'encounterCharges',
     AI_DRAFT: 'aiDrafts',
+    CLINICAL_DRAFT: 'clinicalDrafts',
+    CLINICAL_DRAFT_REVISION: 'clinicalDraftRevisions',
     ITEM_MASTER: 'items',
     BATCH_LOT: 'batches',
     INVENTORY_LOCATION: 'inventoryLocations',

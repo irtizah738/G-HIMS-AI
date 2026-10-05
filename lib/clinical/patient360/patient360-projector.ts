@@ -205,6 +205,7 @@ function eventSummary(event: Patient360SourceEvent): string {
     case 'VITALS_RECORDED':
       return 'Vital signs recorded';
     case 'CLINICAL_NOTE_SIGNED':
+    case 'CLINICAL_DRAFT_SIGNED':
       return 'Clinical document signed';
     case 'INVESTIGATION_ORDERED':
       return `Diagnostic order placed: ${asString(payload.catalogCode, 'investigation')}`;

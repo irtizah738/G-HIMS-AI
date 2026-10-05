@@ -7,6 +7,7 @@ export type AIPurpose =
   | 'DENIAL_APPEAL_DRAFT'
   | 'CLINICAL_NOTE_EXTRACTION'
   | 'CLINICAL_COPILOT'
+  | 'CLINICAL_GOVERNED_DRAFT'
   | 'SUPPLY_CHAIN_ANALYSIS';
 
 export interface AIGenerationProvenance {
@@ -39,47 +40,7 @@ function cleanJsonPayload(value: string): string {
 }
 
 function generateDeterministicFallback<T>(request: AIGenerateJsonRequest): T {
-  const data = (request.sourceData && typeof request.sourceData === 'object' ? request.sourceData : {}) as Record<string, unknown>;
   switch (request.purpose) {
-    case 'CLINICAL_COPILOT': {
-      const patient = (data.patientContext && typeof data.patientContext === 'object' ? data.patientContext : {}) as Record<string, unknown>;
-      const fallback = {
-        chiefComplaint: String(patient.chiefComplaint || 'Clinical evaluation in progress'),
-        diagnoses: ['Essential hypertension (primary) [I10]', 'Routine medical examination [Z00.00]'],
-        medicationsPrescribed: ['Amlodipine 5mg oral daily', 'Lisinopril 10mg oral daily'],
-        recommendedProcedures: ['12-lead Electrocardiogram (ECG)', 'Comprehensive metabolic panel (CMP)'],
-        billingCodes: [{ code: '99214', description: 'Office or other outpatient visit, moderate complexity' }],
-        followUpDays: 14,
-        clinicalAlerts: ['Review vitals trend and follow-up lab investigations prior to next visit.'],
-      };
-      return fallback as T;
-    }
-    case 'CLINICAL_SOAP_DRAFT': {
-      const fallback = {
-        subjective: 'Patient presents for clinical evaluation. Symptoms and history reviewed.',
-        objective: 'Vitals stable. Physical examination completed per departmental guidelines.',
-        assessment: 'Clinical condition evaluated. Plan formulated with patient engagement.',
-        plan: 'Initiate standard conservative management. Schedule follow-up in 2 weeks.',
-      };
-      return fallback as T;
-    }
-    case 'ICD10_CODING_DRAFT': {
-      const fallback = {
-        suggestedCodes: [
-          { code: 'I10', description: 'Essential (primary) hypertension', confidence: 0.95 },
-          { code: 'E11.9', description: 'Type 2 diabetes mellitus without complications', confidence: 0.88 },
-        ],
-      };
-      return fallback as T;
-    }
-    case 'DENIAL_APPEAL_DRAFT': {
-      const fallback = {
-        appealSummary: 'Services rendered were medically necessary based on clinical presentation and guidelines.',
-        supportingEvidence: ['Clinical consultation notes', 'Diagnostic verification records'],
-        recommendedAction: 'Resubmit claim with itemized physician documentation.',
-      };
-      return fallback as T;
-    }
     case 'SUPPLY_CHAIN_ANALYSIS': {
       const fallback = {
         parVarianceAnalysis: 'Current ward stock is within normal operational par thresholds.',
@@ -89,7 +50,7 @@ function generateDeterministicFallback<T>(request: AIGenerateJsonRequest): T {
       return fallback as T;
     }
     default: {
-      return {} as T;
+      throw new Error(`AI_PROVIDER_FAILURE_NO_SAFE_FALLBACK:${request.purpose}`);
     }
   }
 }
@@ -144,7 +105,11 @@ class GoogleGenAIProvider implements AIProvider {
         },
       };
     } catch (genError) {
-      console.warn('AI generation quota/provider fallback engaged:', genError);
+      if (request.purpose !== 'SUPPLY_CHAIN_ANALYSIS') {
+        const message = genError instanceof Error ? genError.message : 'unknown provider failure';
+        throw new Error(`AI_PROVIDER_FAILURE_NO_SAFE_FALLBACK:${request.purpose}:${message}`);
+      }
+      console.warn('Non-clinical AI generation fallback engaged:', genError);
       return {
         data: generateDeterministicFallback<T>(request),
         provenance: {

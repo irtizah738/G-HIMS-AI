@@ -8,7 +8,6 @@ import { TransactionManager } from '../transactions/transaction-manager';
 import { CommandContext, CommandResult } from '../types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import type { RevenueIntegrityFinding } from './revenue-integrity-domain-service';
-import { AIDraftRepository, type AIDraftRecord } from '@/server/ai/ai-draft-repository';
 import { PatientClinicalKnowledgeDomainService } from './patient-clinical-knowledge-domain-service';
 import { calculateNEWS2 } from '@/lib/clinical/news2';
 import {
@@ -730,33 +729,16 @@ export class ClinicalDocumentationDomainService {
       };
     }
 
-    let sourceDraft: AIDraftRecord | null = null;
     if (payload.sourceDraftId) {
-      sourceDraft = await AIDraftRepository.get(context.tenantId, payload.sourceDraftId);
-      if (!sourceDraft) {
-        return {
-          success: false, commandId, idempotencyKey,
-          error: { code: 'AI_DRAFT_NOT_FOUND', message: 'Referenced AI draft was not found.' },
-        };
-      }
-      if (sourceDraft.status !== 'DRAFT_REQUIRES_CLINICIAN_REVIEW') {
-        return {
-          success: false, commandId, idempotencyKey,
-          error: { code: 'AI_DRAFT_NOT_REVIEWABLE', message: 'Referenced AI draft is not in reviewable state.' },
-        };
-      }
-      if (sourceDraft.patientId && sourceDraft.patientId !== payload.patientId) {
-        return {
-          success: false, commandId, idempotencyKey,
-          error: { code: 'AI_DRAFT_PATIENT_MISMATCH', message: 'AI draft belongs to a different patient.' },
-        };
-      }
-      if (sourceDraft.encounterId && sourceDraft.encounterId !== payload.encounterId) {
-        return {
-          success: false, commandId, idempotencyKey,
-          error: { code: 'AI_DRAFT_ENCOUNTER_MISMATCH', message: 'AI draft belongs to a different encounter.' },
-        };
-      }
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'CI10F_LEGACY_AI_DRAFT_SIGNING_DISABLED',
+          message: 'AI-generated clinical content must use the governed CI-10F review, edit, approval, and signature workflow.',
+        },
+      };
     }
 
     const evidenceId = `ev_note_${crypto.randomUUID()}`;
@@ -858,19 +840,6 @@ export class ClinicalDocumentationDomainService {
           entityId: finding.id,
           domainState: finding,
         })),
-        ...(sourceDraft
-          ? [{
-              entityType: 'AI_DRAFT',
-              entityId: sourceDraft.draftId,
-              domainState: AIDraftRepository.buildAcceptedState(sourceDraft, {
-                actorId: context.actorId,
-                evidenceId,
-                signedContent: payload.content,
-                acceptedStructuredData: payload.acceptedStructuredData,
-                acceptedAt: signedAt,
-              }),
-            }]
-          : []),
       ],
     });
 

@@ -1039,14 +1039,10 @@ export function OpdMasterWorkspace() {
           : {}),
       },
       {
+        // RP15 will re-enable diagnostic offline ordering only after financial
+        // replay/remap is qualified. Until then, fail closed on transport loss
+        // rather than creating an invisible queued charge that a retry can duplicate.
         idempotencyKey: `opd-diagnostic:${activeEncounter.id}:${order.id}`,
-        offlineQueue: {
-          enabled: true,
-          collection: 'orders',
-          resourceId: order.id,
-          action: 'CREATE',
-          optimisticCache: false,
-        },
       }
     );
     if (!orderResult.success || !orderResult.data?.order || !orderResult.data?.invoice) {

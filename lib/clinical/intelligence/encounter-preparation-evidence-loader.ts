@@ -1,6 +1,7 @@
 import { ConsultantVisibilityService } from '@/lib/clinical/intelligence/consultant-visibility-service';
 import { LongitudinalEvidenceLoader } from '@/lib/clinical/intelligence/longitudinal-evidence-loader';
 import { MedicationSafetyService } from '@/lib/clinical/intelligence/medication-safety-service';
+import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
 import type { CommandContext } from '@/lib/backend/types';
 import type {
   ClinicalEvidenceSupplementalCandidate,
@@ -24,14 +25,18 @@ export class EncounterPreparationEvidenceLoader {
     patientId: string,
     encounterId: string
   ): Promise<ClinicalEvidenceSupplementalSources> {
-    const [longitudinal, visibility, medicationSafety] = await Promise.all([
+    const [longitudinal, visibility, patient360] = await Promise.all([
       LongitudinalEvidenceLoader.load(context.tenantId, patientId),
       ConsultantVisibilityService.buildForActor(context, patientId, {
         encounterId,
         timelineLimit: 500,
       }),
-      MedicationSafetyService.getProjection(context.tenantId, patientId),
+      Patient360ProjectionService.getProjection(context.tenantId, patientId),
     ]);
+
+    if (!patient360) {
+      throw new Error('CI10_PATIENT360_PROJECTION_NOT_READY');
+    }
 
     if (!visibility?.encounter || visibility.encounterId !== encounterId) {
       throw new Error('CI10C_ENCOUNTER_CONTEXT_NOT_FOUND');
@@ -40,6 +45,16 @@ export class EncounterPreparationEvidenceLoader {
     if (visibility.patientId !== patientId) {
       throw new Error('CI10C_ENCOUNTER_PATIENT_MISMATCH');
     }
+
+    if (
+      visibility.patient360Revision !== patient360.revision ||
+      visibility.patient360SourceCheckpoint !== patient360.sourceCheckpoint
+    ) {
+      throw new Error('CI10C_CONTEXT_REVISION_RACE');
+    }
+
+    const medicationSafety =
+      MedicationSafetyService.evaluateProjection(patient360);
 
     const candidates: ClinicalEvidenceSupplementalCandidate[] = [
       ...longitudinal.candidates,
@@ -81,7 +96,7 @@ export class EncounterPreparationEvidenceLoader {
         sourceEntityRefs: item.sourceRefs,
         content: item,
       })),
-      ...(medicationSafety?.findings || [])
+      ...medicationSafety.findings
         .filter(
           (item) => !item.encounterId || item.encounterId === encounterId
         )
@@ -120,8 +135,10 @@ export class EncounterPreparationEvidenceLoader {
           recordCount: visibility.openItems.length,
         },
         medicationSafetyFindings: {
-          status: medicationSafety ? 'COMPLETE' : 'NOT_INCLUDED',
-          recordCount: medicationSafety?.findings.length || 0,
+          status: 'COMPLETE',
+          recordCount: medicationSafety.findings.filter(
+            (item) => !item.encounterId || item.encounterId === encounterId
+          ).length,
         },
       },
     };

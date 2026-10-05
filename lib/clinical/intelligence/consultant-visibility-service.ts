@@ -1,9 +1,6 @@
 import crypto from 'node:crypto';
 import { getAdminFirestore } from '@/server/firebase/admin';
-import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
-import { ClinicalDeteriorationService } from './clinical-deterioration-service';
-import { DischargeReadinessService } from './discharge-readiness-service';
 import { normalizeCareSetting } from '@/lib/clinical/patient360/care-context';
 import type { CommandContext } from '@/lib/backend/types';
 import type {
@@ -186,149 +183,53 @@ export class ConsultantVisibilityService {
         };
       });
 
-    const [
-      deterioration,
-      dischargeReadiness,
-      diagnosticOrders,
-      inpatientOrders,
-    ] = await Promise.all([
-      encounterId ? ClinicalDeteriorationService.getProjection(context.tenantId, encounterId) : Promise.resolve(null),
-      careSetting === 'IPD' && encounterId
-        ? DischargeReadinessService.getProjection(context.tenantId, encounterId)
-        : Promise.resolve(null),
-      encounterId
-        ? DomainStateRepository.queryAllEqual<Record<string, unknown>>(
-            context.tenantId,
-            'orders',
-            'encounterId',
-            encounterId
-          )
-        : Promise.resolve([]),
-      encounterId
-        ? DomainStateRepository.queryAllEqual<Record<string, unknown>>(
-            context.tenantId,
-            'inpatientOrders',
-            'encounterId',
-            encounterId
-          )
-        : Promise.resolve([]),
-    ]);
+    const db = getAdminFirestore();
+    const openItems: ClinicalOpenItemProjection[] =
+      db && encounterId
+        ? (
+            await db
+              .collection('tenants')
+              .doc(context.tenantId)
+              .collection('clinicalOpenItems')
+              .where('encounterId', '==', encounterId)
+              .get()
+          ).docs
+            .map((doc) => doc.data() as ClinicalOpenItemProjection)
+            .filter((item) => item.status !== 'RESOLVED')
+            .sort(
+              (left, right) =>
+                (
+                  {
+                    CRITICAL_REVIEW_REQUIRED: 0,
+                    ACTION_REQUIRED: 1,
+                    REVIEW_REQUIRED: 2,
+                    INFORMATION: 3,
+                  } as Record<string, number>
+                )[left.clinicalPriority] -
+                  (
+                    {
+                      CRITICAL_REVIEW_REQUIRED: 0,
+                      ACTION_REQUIRED: 1,
+                      REVIEW_REQUIRED: 2,
+                      INFORMATION: 3,
+                    } as Record<string, number>
+                  )[right.clinicalPriority] ||
+                Number(left.dueAt || Number.MAX_SAFE_INTEGER) -
+                  Number(right.dueAt || Number.MAX_SAFE_INTEGER) ||
+                Number(left.createdAt || 0) - Number(right.createdAt || 0)
+            )
+        : [];
 
+    const pendingDiagnosticCount = openItems.filter(
+      (item) => item.category === 'DIAGNOSTIC'
+    ).length;
+    const unacknowledgedResultCount = openItems.filter(
+      (item) =>
+        item.category === 'DIAGNOSTIC' &&
+        item.clinicalPriority === 'CRITICAL_REVIEW_REQUIRED' &&
+        item.status === 'OPEN'
+    ).length;
     const now = Date.now();
-    const openItems: ClinicalOpenItemProjection[] = [];
-
-    if (
-      deterioration &&
-      ['ESCALATION_REQUIRED', 'CRITICAL_REVIEW_REQUIRED'].includes(deterioration.state)
-    ) {
-      openItems.push({
-        openItemId: stableId('open', [patientId, encounterId || '', 'deterioration', deterioration.evaluationId]),
-        tenantId: context.tenantId,
-        patientId,
-        encounterId,
-        careSetting,
-        category: 'DETERIORATION',
-        description:
-          deterioration.state === 'CRITICAL_REVIEW_REQUIRED'
-            ? 'Clinical deterioration requires critical consultant review.'
-            : 'Clinical deterioration requires consultant escalation review.',
-        clinicalPriority:
-          deterioration.state === 'CRITICAL_REVIEW_REQUIRED'
-            ? 'CRITICAL_REVIEW_REQUIRED'
-            : 'ACTION_REQUIRED',
-        ownerType: 'CONSULTANT',
-        ownerId: context.actorId,
-        status: 'OPEN',
-        createdAt: deterioration.evaluatedAt,
-        sourceRefs: [deterioration.evaluationId],
-      });
-    }
-
-    for (const finding of dischargeReadiness?.blockers || []) {
-      openItems.push({
-        openItemId: stableId('open', [patientId, encounterId || '', 'discharge', finding.findingId]),
-        tenantId: context.tenantId,
-        patientId,
-        encounterId,
-        careSetting,
-        category: 'DISCHARGE',
-        description: finding.title,
-        clinicalPriority: 'ACTION_REQUIRED',
-        ownerType: 'CARE_TEAM',
-        status: 'OPEN',
-        createdAt: dischargeReadiness?.evaluatedAt || now,
-        sourceRefs: [finding.findingId],
-      });
-    }
-
-    const pendingDiagnosticOrders = diagnosticOrders.filter((item) =>
-      !['COMPLETED', 'CANCELLED', 'RESULTS_READY', 'FINALIZED'].includes(
-        String(item.status || '').toUpperCase()
-      )
-    );
-    for (const order of pendingDiagnosticOrders.slice(0, 100)) {
-      const orderId = String(order.orderId || order.id || '');
-      openItems.push({
-        openItemId: stableId('open', [patientId, encounterId || '', 'diagnostic', orderId]),
-        tenantId: context.tenantId,
-        patientId,
-        encounterId,
-        careSetting,
-        category: 'DIAGNOSTIC',
-        description: `Pending diagnostic order: ${String(order.orderName || order.catalogCode || orderId || 'investigation')}`,
-        clinicalPriority:
-          String(order.priority || '').toUpperCase() === 'STAT'
-            ? 'CRITICAL_REVIEW_REQUIRED'
-            : 'REVIEW_REQUIRED',
-        ownerType: 'CARE_TEAM',
-        status: 'OPEN',
-        createdAt: Number(order.createdAt || order.orderedAt || now),
-        sourceRefs: [orderId].filter(Boolean),
-      });
-    }
-
-    const unresolvedInpatientOrders = inpatientOrders.filter((item) =>
-      !['COMPLETED', 'CANCELLED', 'DISCONTINUED'].includes(
-        String(item.status || '').toUpperCase()
-      )
-    );
-    for (const order of unresolvedInpatientOrders.slice(0, 100)) {
-      const orderId = String(order.orderId || order.id || '');
-      openItems.push({
-        openItemId: stableId('open', [patientId, encounterId || '', 'ipd-order', orderId]),
-        tenantId: context.tenantId,
-        patientId,
-        encounterId,
-        careSetting,
-        category: 'ORDER',
-        description: `Unresolved inpatient order: ${String(order.description || order.orderType || orderId || 'order')}`,
-        clinicalPriority:
-          String(order.priority || '').toUpperCase() === 'STAT'
-            ? 'CRITICAL_REVIEW_REQUIRED'
-            : 'REVIEW_REQUIRED',
-        ownerType: 'CARE_TEAM',
-        status: 'OPEN',
-        createdAt: Number(order.createdAt || now),
-        sourceRefs: [orderId].filter(Boolean),
-      });
-    }
-
-    for (const code of projection.dataQuality.missingCanonicalFacts) {
-      openItems.push({
-        openItemId: stableId('open', [patientId, encounterId || '', 'quality', code]),
-        tenantId: context.tenantId,
-        patientId,
-        encounterId,
-        careSetting,
-        category: 'DATA_QUALITY',
-        description: code.replace(/_/g, ' ').toLowerCase(),
-        clinicalPriority: 'REVIEW_REQUIRED',
-        ownerType: 'CARE_TEAM',
-        status: 'OPEN',
-        createdAt: projection.projectedAt,
-        sourceRefs: [code],
-      });
-    }
 
     const criticalItemsCount = openItems.filter(
       (item) => item.clinicalPriority === 'CRITICAL_REVIEW_REQUIRED'
@@ -352,8 +253,8 @@ export class ConsultantVisibilityService {
       unreadClinicalChanges: changes.length,
       unresolvedItemsCount: openItems.length,
       criticalItemsCount,
-      pendingDiagnosticCount: pendingDiagnosticOrders.length,
-      unacknowledgedResultCount: 0,
+      pendingDiagnosticCount,
+      unacknowledgedResultCount,
       medicationChangesCount,
       dataQualityState:
         projection.dataQuality.missingCanonicalFacts.length > 0

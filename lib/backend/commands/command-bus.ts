@@ -494,6 +494,15 @@ export class CommandBus {
           );
           break;
 
+        case 'StartOpdServiceCommand':
+          result = await OpdQueueDomainService.startService(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
         case 'AdmitPatientToInpatientCareCommand':
           result = await CareTransitionDomainService.admitToInpatientCare(
             context,

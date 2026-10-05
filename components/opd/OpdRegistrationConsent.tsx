@@ -146,13 +146,6 @@ export function OpdRegistrationConsent({
             }
           : undefined,
       tariffPlan,
-      insuranceDetails:
-        tariffPlan === 'CORPORATE_PPO' || tariffPlan === 'STATE_INSURANCE'
-          ? {
-              payerName: payerName.trim(),
-              policyNumber: policyNumber.trim(),
-            }
-          : undefined,
       registrationConsentDecisions: consentDecisions,
       bloodGroup,
       knownAllergies: knownAllergies.trim()

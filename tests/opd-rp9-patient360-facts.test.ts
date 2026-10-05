@@ -33,6 +33,18 @@ describe('OPD-RP9 consultation and Patient 360 facts', () => {
     expect(service).not.toContain('AI_EXTRACTED');
   });
 
+  test('nursing-note authority cannot create canonical diagnoses', async () => {
+    const service = await source(
+      'lib/backend/services/clinical-documentation-domain-service.ts'
+    );
+
+    expect(service).toContain("payload.category === 'NURSING'");
+    expect(service).toContain("'DIAGNOSIS_AUTHORITY_REQUIRED'");
+    expect(service).toContain(
+      'Nursing-note authority cannot create canonical encounter diagnoses'
+    );
+  });
+
   test('structured diagnosis boundary rejects ambiguous role and verification semantics', async () => {
     const service = await source(
       'lib/backend/services/clinical-documentation-domain-service.ts'

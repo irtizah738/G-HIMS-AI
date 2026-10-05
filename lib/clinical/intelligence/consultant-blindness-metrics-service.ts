@@ -1,4 +1,5 @@
 import { getAdminFirestore } from '@/server/firebase/admin';
+import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import type { CommandContext } from '@/lib/backend/types';
 import { ConsultantAttentionProjectionService } from '@/lib/clinical/intelligence/consultant-attention-projection-service';
 import type { ConsultantBlindnessMetrics } from '@/types/consultant-blindness-metrics';
@@ -103,17 +104,21 @@ export class ConsultantBlindnessMetricsService {
     const db = getAdminFirestore();
     if (!db) throw new Error('CONSULTANT_BLINDNESS_METRICS_STORE_UNAVAILABLE');
     const now = Date.now();
-    const snapshot = await db
-      .collection('tenants')
-      .doc(context.tenantId)
-      .collection('clinicalOpenItems')
-      .where('status', 'in', ['OPEN', 'ACKNOWLEDGED'])
-      .limit(1000)
-      .get();
-
-    const items = snapshot.docs.map(
-      (doc) => doc.data() as ClinicalOpenItemProjection
-    );
+    const [openItems, acknowledgedItems] = await Promise.all([
+      DomainStateRepository.queryAllEqual<ClinicalOpenItemProjection>(
+        context.tenantId,
+        'clinicalOpenItems',
+        'status',
+        'OPEN'
+      ),
+      DomainStateRepository.queryAllEqual<ClinicalOpenItemProjection>(
+        context.tenantId,
+        'clinicalOpenItems',
+        'status',
+        'ACKNOWLEDGED'
+      ),
+    ]);
+    const items = [...openItems, ...acknowledgedItems];
     const ownedItems = items.filter((item) => Boolean(item.ownerId)).length;
     const evidenceLinkedItems = items.filter(
       (item) => Array.isArray(item.sourceRefs) && item.sourceRefs.length > 0

@@ -51,6 +51,7 @@ export function GovernedClinicalDraftPanel({
   careSetting,
   offline,
   currentRevision,
+  currentSourceCheckpoint,
   value,
   onChange,
   onAuthoritativeChange,
@@ -61,6 +62,7 @@ export function GovernedClinicalDraftPanel({
   careSetting: ClinicalCareSetting;
   offline: boolean;
   currentRevision: number;
+  currentSourceCheckpoint: string;
   value: ClinicalDraftGenerationResponse | null;
   onChange: (value: ClinicalDraftGenerationResponse | null) => void;
   onAuthoritativeChange?: () => Promise<void> | void;
@@ -101,7 +103,11 @@ export function GovernedClinicalDraftPanel({
   ]);
 
   const draft = value?.draft || null;
-  const stale = Boolean(draft && draft.patient360Revision !== currentRevision);
+  const stale = Boolean(
+    draft &&
+      (draft.patient360Revision !== currentRevision ||
+        draft.patient360SourceCheckpoint !== currentSourceCheckpoint)
+  );
   const editable = Boolean(
     draft && draft.status !== 'SIGNED' && draft.status !== 'REJECTED'
   );

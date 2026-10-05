@@ -18,6 +18,7 @@ import type { DischargeReadinessProjection } from '@/types/discharge-readiness';
 import type { DeteriorationProjection } from '@/types/clinical-deterioration';
 import type { MedicationSafetyProjection } from '@/types/medication-safety';
 import type { ClinicalLongitudinalSummaryResponse } from '@/types/clinical-longitudinal-summary';
+import type { ClinicalEncounterPreparationResponse } from '@/types/clinical-encounter-preparation';
 
 export interface Patient360ClinicalView {
   tenantId: string;
@@ -473,4 +474,39 @@ export async function generateLongitudinalClinicalSummary(
     summary: payload.summary,
     evidenceIndex: payload.evidenceIndex || [],
   } as ClinicalLongitudinalSummaryResponse;
+}
+
+
+export async function generateEncounterPreparationBrief(
+  tenantId: string,
+  input: {
+    patientId: string;
+    encounterId: string;
+    careSetting?: ClinicalCareSetting;
+  }
+): Promise<ClinicalEncounterPreparationResponse> {
+  const response = await AuthClient.authorizedFetch(
+    `/api/clinical/intelligence/encounter-preparation?tenantId=${encodeURIComponent(tenantId)}`,
+    {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tenantId, ...input }),
+    },
+    tenantId
+  );
+
+  const payload = await response.json();
+  if (!response.ok || !payload?.success || !payload?.brief) {
+    throw new Error(
+      payload?.error?.message ||
+        payload?.error ||
+        'Encounter preparation brief could not be generated.'
+    );
+  }
+
+  return {
+    brief: payload.brief,
+    evidenceIndex: payload.evidenceIndex || [],
+  } as ClinicalEncounterPreparationResponse;
 }

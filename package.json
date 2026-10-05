@@ -134,7 +134,9 @@
     "test:ci10": "bun test tests/ci10-evidence-provenance.test.ts",
     "validate:ci10": "bun run typecheck && bun run lint && bun run test:ci10 && bun run test:ci9 && bun run test:cbe && bun run test:ci8 && bun run test:p8 && bun run test:p6 && bun run test:p7 && bun run test:security && bun run build",
     "test:ci10b": "bun test tests/ci10b-longitudinal-clinical-summary.test.ts",
-    "validate:ci10b": "bun run typecheck && bun run lint && bun run test:ci10b && bun run test:ci10 && bun run test:ci9 && bun run test:cbe && bun run test:ci8 && bun run test:p8 && bun run test:p6 && bun run test:p7 && bun run test:security && bun run build"
+    "validate:ci10b": "bun run typecheck && bun run lint && bun run test:ci10b && bun run test:ci10 && bun run test:ci9 && bun run test:cbe && bun run test:ci8 && bun run test:p8 && bun run test:p6 && bun run test:p7 && bun run test:security && bun run build",
+    "test:ci10c": "bun test tests/ci10c-encounter-preparation.test.ts",
+    "validate:ci10c": "bun run typecheck && bun run lint && bun run test:ci10c && bun run test:ci10b && bun run test:ci10 && bun run test:ci9 && bun run test:cbe && bun run test:ci8 && bun run test:p8 && bun run test:p6 && bun run test:p7 && bun run test:security && bun run build"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

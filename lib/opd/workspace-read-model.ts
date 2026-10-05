@@ -92,6 +92,7 @@ export function adaptAuthoritativeConsultationInvoice(
 
 function mapQueueStatus(value: unknown): QueueEntry['status'] {
   const status = String(value || '').trim().toLowerCase();
+  if (status === 'payment_pending') return 'PAYMENT_PENDING';
   if (status === 'called') return 'CALLED';
   if (status === 'in_consultation') return 'IN_SERVICE';
   if (status === 'completed') return 'COMPLETED';

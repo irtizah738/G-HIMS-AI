@@ -1,7 +1,9 @@
 import crypto from 'node:crypto';
 import { getAdminFirestore } from '@/server/firebase/admin';
+import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
 import { sanitizeForFirestore } from '@/lib/firestore/sanitize';
 import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
+import { Patient360Projector } from '@/lib/clinical/patient360/patient360-projector';
 import { normalizeCareSetting } from '@/lib/clinical/patient360/care-context';
 import type {
   MedicationSafetyCandidate,
@@ -423,7 +425,16 @@ export class MedicationSafetyService {
         (item) => item.encounterId === encounterId
       )?.careSetting || context.careSetting
     );
-    const findings: MedicationSafetyFinding[] = [];
+    const findings: MedicationSafetyFinding[] = this.evaluateProjection(
+      projection,
+      evaluatedAt
+    ).findings.filter((item) =>
+      [
+        'ALLERGY_STATUS_INCOMPLETE',
+        'MEDICATION_HISTORY_INCOMPLETE',
+        'MEDICATION_RECONCILIATION_REQUIRED',
+      ].includes(item.type)
+    );
 
     for (const allergy of projection.allergies.filter(
       (item) => item.category === 'MEDICATION'
@@ -534,6 +545,42 @@ export class MedicationSafetyService {
         .map((item) => item.findingId),
       evaluatedAt,
     };
+  }
+
+  public static async evaluateCandidateAuthoritatively(
+    tenantId: string,
+    patientId: string,
+    encounterId: string,
+    candidate: MedicationSafetyCandidate
+  ): Promise<MedicationSafetyCandidateEvaluation> {
+    const db = getAdminFirestore();
+    if (!db) {
+      const mode = getRuntimeMode();
+      if (mode === 'TEST' || mode === 'DEMO') {
+        return {
+          patientId,
+          encounterId,
+          candidate,
+          findings: [],
+          blockingFindingIds: [],
+          acknowledgementFindingIds: [],
+          evaluatedAt: Date.now(),
+        };
+      }
+      throw new Error('MEDICATION_SAFETY_AUTHORITATIVE_STORE_UNAVAILABLE');
+    }
+
+    const sources = await Patient360ProjectionService.loadSources(
+      tenantId,
+      patientId
+    );
+    const { projection } = Patient360Projector.project(sources);
+    return this.evaluateCandidate(
+      projection,
+      encounterId,
+      candidate,
+      Date.now()
+    );
   }
 
   public static async getProjection(

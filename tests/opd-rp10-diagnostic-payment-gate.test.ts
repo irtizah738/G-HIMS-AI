@@ -79,6 +79,8 @@ describe('OPD-RP10 diagnostic payment gate', () => {
     expect(service).toContain("'REVENUE_RECOGNITION'");
     expect(service).toContain('expectedServerVersion');
     expect(service).toContain('revenueRecognizedAt');
+    expect(service).toContain('postFinalRevision');
+    expect(service).toContain("['AMENDED', 'CORRECTED']");
     expect(service).toContain('Trusted LIS/RIS result ingestion');
   });
 
@@ -105,6 +107,7 @@ describe('OPD-RP10 diagnostic payment gate', () => {
     expect(workspace).toContain("'AdvanceDiagnosticWorklistCommand'");
     expect(workspace).toContain('activeBillingInvoice');
     expect(workspace).toContain("'RecordCashReceiptCommand'");
+    expect(workspace).not.toContain("offlineQueue: {\n          enabled: true,\n          collection: 'orders'");
   });
 
   test('hydration reconstructs diagnostic order and invoice authority for role handoffs', async () => {

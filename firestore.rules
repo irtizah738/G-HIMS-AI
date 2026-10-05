@@ -360,6 +360,11 @@ service cloud.firestore {
         allow read, write: if false;
       }
 
+      // CI-10H safety evaluations are immutable server-owned release/runtime evidence.
+      match /clinicalIntelligenceSafetyEvaluations/{evaluationId} {
+        allow read, write: if false;
+      }
+
       match /consultantReviewCheckpoints/{checkpointId} {
         allow read, write: if false;
       }

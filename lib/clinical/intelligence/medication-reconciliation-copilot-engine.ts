@@ -214,6 +214,7 @@ export class MedicationReconciliationCopilotEngine {
     const context = contextEvidence(snapshot, encounterIdValue);
     const contextData = record(context.content);
     const encounter = record(contextData.encounter);
+    const careSetting = text(encounter.careSetting).toUpperCase();
     const startedAt =
       numberValue(encounter.startedAt) ||
       numberValue(context.occurredAt) ||
@@ -535,9 +536,7 @@ export class MedicationReconciliationCopilotEngine {
     }
 
     if (
-      ['IPD', 'EMERGENCY'].includes(
-        text(record(context.content).encounter && record(context.content).encounter && record(record(context.content).encounter).careSetting).toUpperCase()
-      ) &&
+      ['IPD', 'EMERGENCY'].includes(careSetting) &&
       currentOrders.length > 0 &&
       administrations.length === 0
     ) {

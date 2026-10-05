@@ -24,6 +24,8 @@ import { AuthClient } from '@/lib/auth/auth-client';
 interface OpdPharmacyPrescriptionsProps {
   encounter: ComprehensiveOpdEncounter;
   prescriptions: PharmacyPrescriptionItem[];
+  canPrescribe?: boolean;
+  canDispense?: boolean;
   onAddPrescription: (item: PharmacyPrescriptionItem) => Promise<void> | void;
   onDispensePrescription: (prescriptionId: string, dispensedBy: string) => void;
 }
@@ -65,6 +67,8 @@ const IS_DEMO_RUNTIME = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
 export function OpdPharmacyPrescriptions({
   encounter,
   prescriptions,
+  canPrescribe = false,
+  canDispense = false,
   onAddPrescription,
   onDispensePrescription,
 }: OpdPharmacyPrescriptionsProps) {
@@ -201,6 +205,11 @@ export function OpdPharmacyPrescriptions({
       prescribedAt: Date.now(),
       prescribedBy: 'Authenticated Clinician',
     };
+
+    if (!canPrescribe) {
+      setPrescriptionError('The authenticated user is not authorized to prescribe medication.');
+      return;
+    }
 
     setIsSubmitting(true);
     try {
@@ -434,7 +443,7 @@ export function OpdPharmacyPrescriptions({
                       </span>
                     </td>
                     <td className="p-3 text-right">
-                      {rx.status !== 'DISPENSED' ? (
+                      {rx.status !== 'DISPENSED' && canDispense ? (
                         <button
                           onClick={() => setDispenseModalItem(rx)}
                           className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold cursor-pointer"
@@ -456,7 +465,7 @@ export function OpdPharmacyPrescriptions({
       </div>
 
       {/* Dispensing Modal */}
-      {dispenseModalItem && (
+      {dispenseModalItem && canDispense && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-xl space-y-4">
             <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">

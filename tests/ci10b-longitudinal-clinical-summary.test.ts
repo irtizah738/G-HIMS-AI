@@ -369,7 +369,7 @@ describe('CI-10B longitudinal clinical summary', () => {
       (item) => item.sourceType === 'KNOWLEDGE_STATUS'
     )!;
     knowledge.content = {
-      ...knowledge.content as Record<string, unknown>,
+      ...(knowledge.content as Record<string, unknown>),
       allergyKnowledge: 'KNOWN_NONE',
     };
 

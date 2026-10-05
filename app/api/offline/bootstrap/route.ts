@@ -174,7 +174,14 @@ function authorizedCollections(roles: string[]): string[] {
   }
 
   if (
-    ['BILLING_CLERK', 'BILLING_ADMIN', 'FINANCE', 'REVENUE_CYCLE']
+    [
+      'BILLING_CLERK',
+      'BILLING_ADMIN',
+      'CASHIER',
+      'FINANCE_MANAGER',
+      'FINANCE',
+      'REVENUE_CYCLE',
+    ]
       .some((role) => normalized.has(role))
   ) {
     add(...BILLING_COLLECTIONS);
@@ -219,6 +226,36 @@ function isAdministrativeRole(roles: string[]): boolean {
   return ['SYSTEM_ADMIN', 'ADMINISTRATOR', 'ADMIN'].some((role) => normalized.has(role));
 }
 
+function isBillingRole(roles: string[]): boolean {
+  const normalized = new Set(
+    roles.map((role) => String(role || '').trim().toUpperCase())
+  );
+  return [
+    'BILLING_CLERK',
+    'BILLING_ADMIN',
+    'CASHIER',
+    'FINANCE_MANAGER',
+    'FINANCE',
+    'REVENUE_CYCLE',
+  ].some((role) => normalized.has(role));
+}
+
+function isFullFinanceRole(roles: string[]): boolean {
+  const normalized = new Set(
+    roles.map((role) => String(role || '').trim().toUpperCase())
+  );
+  return [
+    'ACCOUNTANT',
+    'FINANCE_MANAGER',
+    'TREASURY_MANAGER',
+    'AUDITOR',
+    'TAX_ACCOUNTANT',
+    'BUDGET_MANAGER',
+    'FIXED_ASSET_ACCOUNTANT',
+    'FINANCE',
+  ].some((role) => normalized.has(role));
+}
+
 function valueMatchesScope(
   value: unknown,
   allowed: Set<string>
@@ -249,8 +286,24 @@ function scopeOfflineCollections(
       .map((value) => String(value || '').trim())
       .filter(Boolean)
   );
+  const billingRole = isBillingRole(context.roles);
+  const billingOnlyRole = billingRole && !isFullFinanceRole(context.roles);
+  const billingEncounterIds = new Set(
+    billingOnlyRole
+      ? (collections.invoices || [])
+          .map((invoice) => String(invoice.encounterId || '').trim())
+          .filter(Boolean)
+      : []
+  );
 
   const encounters = (collections.encounters || []).filter((encounter) => {
+    const encounterId = String(encounter.id || encounter.encounterId || '').trim();
+    if (billingOnlyRole) {
+      if (!encounterId || !billingEncounterIds.has(encounterId)) return false;
+      if (!valueMatchesScope(encounter.facilityId, facilities)) return false;
+      return true;
+    }
+
     if (!valueMatchesScope(encounter.facilityId, facilities)) return false;
     if (!valueMatchesScope(encounter.departmentId, departments)) return false;
 
@@ -383,8 +436,109 @@ function scopeOfflineCollections(
     'clinicalHandoffs',
   ]);
 
+  if (billingOnlyRole) {
+    const scopedInvoices = (collections.invoices || []).filter((row) => {
+      const encounterId = String(row.encounterId || '').trim();
+      const patientId = String(row.patientId || '').trim();
+      return (
+        (encounterId && encounterIds.has(encounterId)) ||
+        (patientId && patientIds.has(patientId))
+      );
+    });
+    const invoiceIds = new Set(
+      scopedInvoices
+        .map((row) => String(row.id || row.invoiceId || '').trim())
+        .filter(Boolean)
+    );
+
+    const scopedReceipts = (collections.cashReceipts || []).filter((row) =>
+      invoiceIds.has(String(row.invoiceId || '').trim())
+    );
+    const receiptIds = new Set(
+      scopedReceipts
+        .map((row) => String(row.id || row.receiptId || '').trim())
+        .filter(Boolean)
+    );
+
+    const scopedCharges = (collections.encounterCharges || []).filter((row) => {
+      const encounterId = String(row.encounterId || '').trim();
+      const patientId = String(row.patientId || '').trim();
+      return (
+        (encounterId && encounterIds.has(encounterId)) ||
+        (patientId && patientIds.has(patientId))
+      );
+    });
+    const chargeIds = new Set(
+      scopedCharges
+        .map((row) => String(row.id || row.chargeId || '').trim())
+        .filter(Boolean)
+    );
+
+    scoped.invoices = scopedInvoices;
+    if (collections.invoiceSettlements) {
+      scoped.invoiceSettlements = collections.invoiceSettlements.filter((row) =>
+        invoiceIds.has(String(row.invoiceId || row.id || '').trim())
+      );
+    }
+    if (collections.arOpenItems) {
+      scoped.arOpenItems = collections.arOpenItems.filter((row) => {
+        const invoiceId = String(row.invoiceId || '').trim();
+        const encounterId = String(row.encounterId || '').trim();
+        const patientId = String(row.patientId || '').trim();
+        return (
+          (invoiceId && invoiceIds.has(invoiceId)) ||
+          (encounterId && encounterIds.has(encounterId)) ||
+          (patientId && patientIds.has(patientId))
+        );
+      });
+    }
+    if (collections.cashReceipts) {
+      scoped.cashReceipts = scopedReceipts;
+    }
+    if (collections.encounterCharges) {
+      scoped.encounterCharges = scopedCharges;
+    }
+    if (collections.billingMismatches) {
+      scoped.billingMismatches = collections.billingMismatches.filter((row) => {
+        const invoiceId = String(row.invoiceId || '').trim();
+        const encounterId = String(row.encounterId || '').trim();
+        const patientId = String(row.patientId || '').trim();
+        return (
+          (invoiceId && invoiceIds.has(invoiceId)) ||
+          (encounterId && encounterIds.has(encounterId)) ||
+          (patientId && patientIds.has(patientId))
+        );
+      });
+    }
+    if (collections.journalEntries) {
+      const allowedReferences = new Set([
+        ...invoiceIds,
+        ...receiptIds,
+        ...chargeIds,
+        ...encounterIds,
+      ]);
+      scoped.journalEntries = collections.journalEntries.filter((row) =>
+        allowedReferences.has(String(row.referenceDocumentId || '').trim())
+      );
+    }
+  }
+
   for (const [collection, rows] of Object.entries(collections)) {
     if (collection === 'encounters') continue;
+    if (
+      billingOnlyRole &&
+      [
+        'invoices',
+        'invoiceSettlements',
+        'arOpenItems',
+        'cashReceipts',
+        'encounterCharges',
+        'billingMismatches',
+        'journalEntries',
+      ].includes(collection)
+    ) {
+      continue;
+    }
 
     if (collection === 'patients' || collection === 'patient360Projections') {
       scoped[collection] = rows.filter((row) =>

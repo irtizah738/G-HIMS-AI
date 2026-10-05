@@ -7,6 +7,7 @@ import { ProjectionRecoveryService } from '@/lib/backend/recovery/projection-rec
 import type { CommandContext } from '@/lib/backend/types';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { registerPatientAndEncounter } from '@/server/runtime/registration-orchestrator';
+import { financePeriodId } from '@/lib/finance/finance-engine';
 
 function unique(prefix: string): string {
   return `${prefix}_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
@@ -91,6 +92,81 @@ describe('G-HIMS P4 release-candidate Firestore recovery journey', () => {
     });
 
     const encounterId = registration.encounter.id;
+
+    // RP10 diagnostic execution is financially governed. Seed the same
+    // authoritative tenant billing state required in production so this
+    // recovery journey exercises the real payment-gated order path.
+    const patientRef = tenantRef.collection('patients').doc(patientId);
+    await patientRef.set({ tariffPlan: 'OUT_OF_POCKET' }, { merge: true });
+
+    await tenantRef.collection('billingServiceCatalog').doc('CBC').set({
+      id: 'CBC',
+      serviceCode: 'CBC',
+      description: 'Complete Blood Count',
+      orderType: 'LAB',
+      category: 'laboratory',
+      status: 'ACTIVE',
+      currency: 'PKR',
+      unitPriceMinorUnits: 1500,
+      taxRateBasisPoints: 0,
+      revenueAccountCode: '402100',
+      deferredRevenueAccountCode: '205000',
+      specimenType: 'EDTA Whole Blood',
+    });
+
+    await tenantRef.collection('tariffs').doc('tariff-standard-cash').set({
+      id: 'tariff-standard-cash',
+      name: 'Standard cash tariff',
+      status: 'active',
+      planName: 'cash',
+      copayPercent: 100,
+      defaultDiscountPercent: 0,
+    });
+
+    for (const account of [
+      {
+        id: 'acct-ar-patient',
+        accountCode: '1110',
+        accountName: 'Patient Accounts Receivable',
+        category: 'asset',
+      },
+      {
+        id: 'acct-deferred-diagnostic',
+        accountCode: '205000',
+        accountName: 'Deferred Diagnostic Revenue',
+        category: 'liability',
+      },
+      {
+        id: 'acct-diagnostic-revenue',
+        accountCode: '402100',
+        accountName: 'Diagnostic Service Revenue',
+        category: 'revenue',
+      },
+    ]) {
+      await tenantRef.collection('accounts').doc(account.id).set({
+        ...account,
+        currency: 'PKR',
+        isActive: true,
+        allowManualPosting: false,
+        allowCashReceipts: false,
+        allowSupplierPayments: false,
+        isSystemLocked: true,
+      });
+    }
+
+    const diagnosticNow = new Date();
+    const diagnosticPeriodId = financePeriodId(
+      diagnosticNow.getUTCFullYear(),
+      diagnosticNow.getUTCMonth() + 1
+    );
+    await tenantRef.collection('accountingPeriods').doc(diagnosticPeriodId).set({
+      periodId: diagnosticPeriodId,
+      periodKey: diagnosticPeriodId,
+      fiscalYear: diagnosticNow.getUTCFullYear(),
+      postingPeriod: diagnosticNow.getUTCMonth() + 1,
+      status: 'OPEN',
+    });
+
     const clinician = clinicalContext(tenantId);
 
     const vitals = await CommandBus.dispatch(
@@ -135,10 +211,8 @@ describe('G-HIMS P4 release-candidate Firestore recovery journey', () => {
         patientId,
         orderType: 'LAB',
         catalogCode: 'CBC',
-        orderName: 'Complete Blood Count',
         priority: 'ROUTINE',
         clinicalIndication: 'Synthetic release-candidate validation',
-        estimatedCostMinorUnits: 1500,
       })
     );
     expect(lab.success).toBe(true);
@@ -308,7 +382,7 @@ describe('G-HIMS P4 release-candidate Firestore recovery journey', () => {
         'PATIENT_REGISTERED',
         'VITALS_RECORDED',
         'CLINICAL_NOTE_SIGNED',
-        'INVESTIGATION_ORDERED',
+        'INVESTIGATION_ORDERED_PAYMENT_LOCKED',
         'MEDICATION_PRESCRIBED',
         'JOURNAL_ENTRY_POSTED',
       ])

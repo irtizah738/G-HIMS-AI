@@ -141,7 +141,9 @@ export class ProjectionWorkers {
         break;
       }
 
-      case 'INVESTIGATION_ORDERED': {
+      case 'INVESTIGATION_ORDERED':
+      case 'INVESTIGATION_ORDERED_PAYMENT_LOCKED':
+      case 'INVESTIGATION_ORDERED_STAT_OVERRIDE': {
         const patientId = String(payload.patientId || '');
         if (patientId) {
           const key = `${event.tenantId}:${patientId}`;
@@ -279,7 +281,9 @@ export class ProjectionWorkers {
           break;
         }
 
-        case 'INVESTIGATION_ORDERED': {
+        case 'INVESTIGATION_ORDERED':
+        case 'INVESTIGATION_ORDERED_PAYMENT_LOCKED':
+        case 'INVESTIGATION_ORDERED_STAT_OVERRIDE': {
           const patientId = String(payload.patientId || '');
           if (patientId) {
             const timelineRef = tenantRef.collection('timelineProjections').doc(event.eventId);

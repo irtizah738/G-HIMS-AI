@@ -70,6 +70,30 @@ export class CashReceiptDomainService {
     }
 
     const currency = String(payload.currency || 'PKR').toUpperCase();
+    const invoiceLink = await DomainStateRepository.getById<Record<string, unknown>>(
+      context.tenantId,
+      'invoices',
+      payload.invoiceId
+    );
+    const diagnosticOrderId =
+      String(invoiceLink?.billingPurpose || '').toUpperCase() === 'OPD_DIAGNOSTIC'
+        ? String(invoiceLink?.sourceOrderId || '')
+        : '';
+    if (
+      String(invoiceLink?.billingPurpose || '').toUpperCase() === 'OPD_DIAGNOSTIC' &&
+      !diagnosticOrderId
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'DIAGNOSTIC_INVOICE_ORDER_LINK_MISSING',
+          message: 'Diagnostic invoice is missing its authoritative source order linkage.',
+        },
+      };
+    }
+
     const patientOpenItemId = `ar_patient_${payload.invoiceId}`;
     const postingDate = new Date(payload.collectedAt);
     const fiscalYear = postingDate.getUTCFullYear();
@@ -244,6 +268,16 @@ export class CashReceiptDomainService {
             entityId: `opd_${payload.encounterId}`,
             required: false,
           },
+          ...(diagnosticOrderId
+            ? [
+                {
+                  key: 'diagnosticOrder',
+                  entityType: 'DIAGNOSTIC_ORDER',
+                  entityId: diagnosticOrderId,
+                  required: true,
+                },
+              ]
+            : []),
         ],
         prepare: (current) => {
           const period = current.period as unknown as FinancePeriodRecord;
@@ -369,7 +403,33 @@ export class CashReceiptDomainService {
           };
           const isConsultationInvoice =
             String(invoice.billingPurpose || '').toUpperCase() === 'OPD_CONSULTATION';
+          const isDiagnosticInvoice =
+            String(invoice.billingPurpose || '').toUpperCase() === 'OPD_DIAGNOSTIC';
           const queueToken = current.opdQueueToken || null;
+          const diagnosticOrder = current.diagnosticOrder || null;
+
+          if (diagnosticOrderId && !isDiagnosticInvoice) {
+            throw new AtomicMutationRejectedError(
+              'DIAGNOSTIC_INVOICE_PURPOSE_CHANGED',
+              'Diagnostic invoice purpose changed before cash settlement could commit.'
+            );
+          }
+
+          if (isDiagnosticInvoice) {
+            if (
+              String(invoice.sourceOrderId || '') !== diagnosticOrderId ||
+              !diagnosticOrder ||
+              String(diagnosticOrder.orderId || '') !== diagnosticOrderId ||
+              String(diagnosticOrder.billingInvoiceId || '') !== payload.invoiceId ||
+              String(diagnosticOrder.patientId || '') !== payload.patientId ||
+              String(diagnosticOrder.encounterId || '') !== payload.encounterId
+            ) {
+              throw new AtomicMutationRejectedError(
+                'DIAGNOSTIC_PAYMENT_SCOPE_MISMATCH',
+                'Diagnostic cash settlement does not match the authoritative order/invoice lineage.'
+              );
+            }
+          }
 
           if (
             isConsultationInvoice &&
@@ -404,6 +464,22 @@ export class CashReceiptDomainService {
                   updatedAt: Date.now(),
                 }
               : queueToken;
+
+          const nextDiagnosticOrder =
+            isDiagnosticInvoice && newBalanceMinorUnits === 0 && diagnosticOrder
+              ? {
+                  ...diagnosticOrder,
+                  revenueLockStatus: 'PAID_SETTLED',
+                  worklistStatus:
+                    String(diagnosticOrder.worklistStatus || '') ===
+                    'BLOCKED_BY_REVENUE_GATE'
+                      ? 'READY_FOR_EXECUTION'
+                      : diagnosticOrder.worklistStatus,
+                  paymentReceiptId: payload.receiptId,
+                  paymentClearedAt: payload.collectedAt,
+                  updatedAt: Date.now(),
+                }
+              : diagnosticOrder;
 
           const priorReceiptIds = Array.isArray(previousSettlement.receiptIds)
             ? previousSettlement.receiptIds.map(String)
@@ -461,6 +537,15 @@ export class CashReceiptDomainService {
                     },
                   ]
                 : []),
+              ...(isDiagnosticInvoice && newBalanceMinorUnits === 0
+                ? [
+                    {
+                      entityType: 'DIAGNOSTIC_ORDER',
+                      entityId: diagnosticOrderId,
+                      domainState: nextDiagnosticOrder,
+                    },
+                  ]
+                : []),
             ],
             eventPayload: {
               receiptId: payload.receiptId,
@@ -478,6 +563,9 @@ export class CashReceiptDomainService {
                 isConsultationInvoice && newBalanceMinorUnits === 0,
               queueReleased:
                 isConsultationInvoice && newBalanceMinorUnits === 0,
+              diagnosticClearanceGranted:
+                isDiagnosticInvoice && newBalanceMinorUnits === 0,
+              diagnosticOrderId: isDiagnosticInvoice ? diagnosticOrderId : undefined,
             },
             auditReason: `Captured cash receipt ${payload.referenceNumber} for ${payload.amountMinorUnits / 100} ${currency}`,
             resultData: {
@@ -488,6 +576,9 @@ export class CashReceiptDomainService {
               arOpenItem: nextArOpenItem,
               ...(isConsultationInvoice && newBalanceMinorUnits === 0
                 ? { encounter: nextEncounter }
+                : {}),
+              ...(isDiagnosticInvoice && newBalanceMinorUnits === 0
+                ? { diagnosticOrder: nextDiagnosticOrder }
                 : {}),
             },
           };

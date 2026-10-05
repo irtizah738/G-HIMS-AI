@@ -19,8 +19,9 @@ export class DiagnosticRevenueGuard {
    * Evaluates if a diagnostic order can be processed by laboratory/radiology technicians
    */
   public static evaluateOrderExecutionGate(order: DiagnosticOrderItem): DiagnosticLockStatus {
-    // Orders settled by cash or covered by verified insurance are UNLOCKED
-    if (order.paymentStatus === 'PAID_SETTLED' || order.paymentStatus === 'INSURANCE_PREAUTH') {
+    // Legacy evaluation is display-only. Controlled OPD execution is released
+    // only by the server-owned cash settlement command.
+    if (order.paymentStatus === 'PAID_SETTLED') {
       return {
         orderId: order.id,
         isLocked: false,
@@ -42,17 +43,13 @@ export class DiagnosticRevenueGuard {
   }
 
   /**
-   * Simulates settlement of diagnostic order invoice unlocking it for lab/radiology execution
+   * Legacy callers must not manufacture diagnostic financial clearance in the
+   * browser. Only RecordCashReceiptCommand may release the authoritative gate.
    */
-  public static unlockOrderAfterPayment(
-    order: DiagnosticOrderItem,
-    settlementType: 'CASH' | 'CARD' | 'INSURANCE_PREAUTH',
-    receiptRef: string
-  ): DiagnosticOrderItem {
-    return {
-      ...order,
-      paymentStatus: settlementType === 'INSURANCE_PREAUTH' ? 'INSURANCE_PREAUTH' : 'PAID_SETTLED',
-      worklistStatus: 'READY_FOR_COLLECTION',
-    };
+  public static unlockOrderAfterPayment(): never {
+    throw new Error(
+      'SERVER_PAYMENT_AUTHORITY_REQUIRED: diagnostic payment clearance is server-owned.'
+    );
   }
+
 }

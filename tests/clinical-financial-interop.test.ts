@@ -10,7 +10,7 @@ import { parseHL7, extractORU_R01, generateACK } from '../lib/interop/hl7-parser
 import { DeviceTelemetryAdapter, RawTelemetryPacket } from '../lib/interop/device-telemetry-adapter';
 import { RadioIntercomAdapter } from '../lib/interop/radio-intercom-adapter';
 import { ReconciliationDomainService } from '../lib/backend/services/reconciliation-domain-service';
-import { validateGovernedJournal } from '../lib/finance/finance-engine';
+import { financePeriodId, validateGovernedJournal } from '../lib/finance/finance-engine';
 import { TransactionManager } from '../lib/backend/transactions/transaction-manager';
 
 describe('G-HIMS Clinical Safety, Financial & Interoperability Engine', () => {
@@ -46,12 +46,91 @@ describe('G-HIMS Clinical Safety, Financial & Interoperability Engine', () => {
           tenantId,
           mrn: `MRN-${patientId}`,
           fullName: 'Synthetic Security Qualification Patient',
+          tariffPlan: 'OUT_OF_POCKET',
           status: 'ACTIVE',
           createdAt: Date.now(),
           updatedAt: Date.now(),
         }
       );
     }
+
+    TransactionManager.seedEphemeralStateForTesting(
+      tenantId,
+      'BILLING_SERVICE_CATALOG',
+      'LAB-STAT-TROP',
+      {
+        id: 'LAB-STAT-TROP',
+        serviceCode: 'LAB-STAT-TROP',
+        description: 'STAT High Sensitivity Troponin I',
+        orderType: 'LAB',
+        category: 'laboratory',
+        status: 'ACTIVE',
+        currency: 'USD',
+        unitPriceMinorUnits: 4500,
+        taxRateBasisPoints: 0,
+        revenueAccountCode: '402100',
+        deferredRevenueAccountCode: '205000',
+        specimenType: 'Serum',
+      }
+    );
+    TransactionManager.seedEphemeralStateForTesting(
+      tenantId,
+      'TARIFF',
+      'tariff-standard-cash',
+      {
+        id: 'tariff-standard-cash',
+        name: 'Standard cash tariff',
+        status: 'active',
+        planName: 'cash',
+        copayPercent: 100,
+        defaultDiscountPercent: 0,
+      }
+    );
+
+    for (const account of [
+      {
+        accountCode: '1110',
+        accountName: 'Patient Accounts Receivable',
+        category: 'asset',
+      },
+      {
+        accountCode: '205000',
+        accountName: 'Deferred Diagnostic Revenue',
+        category: 'liability',
+      },
+      {
+        accountCode: '402100',
+        accountName: 'Diagnostic Service Revenue',
+        category: 'revenue',
+      },
+    ]) {
+      TransactionManager.seedEphemeralStateForTesting(
+        tenantId,
+        'GL_ACCOUNT',
+        account.accountCode,
+        {
+          ...account,
+          currency: 'USD',
+          isActive: true,
+        }
+      );
+    }
+
+    const now = new Date();
+    const periodId = financePeriodId(
+      now.getUTCFullYear(),
+      now.getUTCMonth() + 1
+    );
+    TransactionManager.seedEphemeralStateForTesting(
+      tenantId,
+      'FINANCE_PERIOD',
+      periodId,
+      {
+        periodId,
+        periodKey: periodId,
+        status: 'OPEN',
+      }
+    );
   });
 
   describe('1. Clinical Safety & Governed Stage Workflow', () => {
@@ -133,17 +212,19 @@ describe('G-HIMS Clinical Safety, Financial & Interoperability Engine', () => {
           patientId: 'pat_trauma_victim',
           orderType: 'LAB',
           catalogCode: 'LAB-STAT-TROP',
-          orderName: 'STAT High Sensitivity Troponin I',
           priority: 'STAT',
           clinicalIndication: 'Suspected acute transmural myocardial infarction',
-          estimatedCostMinorUnits: 4500,
+          statOverrideReason:
+            'Immediate troponin execution is required for a time-critical suspected myocardial infarction.',
         },
       };
 
       const result = await CommandBus.dispatch(doctorContext, statOrderCmd);
       expect(result.success).toBe(true);
-      const order = result.data as any;
-      expect(order.revenueLockStatus).toBe('UNLOCKED_STAT_OVERRIDE');
+      const order = (result.data as any)?.order;
+      expect(order?.revenueLockStatus).toBe('UNLOCKED_STAT_OVERRIDE');
+      expect(order?.worklistStatus).toBe('READY_FOR_EXECUTION');
+      expect((result.data as any)?.invoice?.paymentStatus).toBe('pending');
     });
   });
 

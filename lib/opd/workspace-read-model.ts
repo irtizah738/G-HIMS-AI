@@ -49,11 +49,19 @@ function normalizeBloodGroup(value: unknown): PatientDemographics['bloodGroup'] 
     : 'Unknown';
 }
 
-export function adaptAuthoritativeConsultationInvoice(
+export function adaptAuthoritativeOpdInvoice(
   rawInput: Record<string, any>
 ): OpdInvoice {
   const raw = asRecord(rawInput);
   const items = Array.isArray(raw.items) ? raw.items.map(asRecord) : [];
+  const purpose = String(raw.billingPurpose || '').toUpperCase();
+  const billingPurpose: OpdInvoice['billingPurpose'] =
+    purpose === 'OPD_DIAGNOSTIC'
+      ? 'OPD_DIAGNOSTIC'
+      : purpose === 'FINAL_ENCOUNTER'
+        ? 'FINAL_ENCOUNTER'
+        : 'OPD_CONSULTATION';
+
   return {
     id: String(raw.id || ''),
     tenantId: String(raw.tenantId || ''),
@@ -61,7 +69,9 @@ export function adaptAuthoritativeConsultationInvoice(
     patientId: String(raw.patientId || ''),
     invoiceNumber: String(raw.invoiceNumber || ''),
     payerTariffPlan: String(raw.tariffName || raw.planName || ''),
-    billingPurpose: 'OPD_CONSULTATION',
+    currency: String(raw.currency || '').trim().toUpperCase() || undefined,
+    billingPurpose,
+    sourceOrderId: raw.sourceOrderId ? String(raw.sourceOrderId) : undefined,
     totalAmountMinorUnits: Math.round(Number(raw.totalGross || 0) * 100),
     payerCoverageAmountMinorUnits: Math.round(Number(raw.totalCoverage || 0) * 100),
     patientCopayAmountMinorUnits: Math.round(Number(raw.totalPatientDue || 0) * 100),
@@ -71,16 +81,31 @@ export function adaptAuthoritativeConsultationInvoice(
         ? 'SETTLED'
         : String(raw.paymentStatus || '').toLowerCase() === 'partially_paid'
           ? 'PARTIALLY_PAID'
-          : 'PENDING',
-    lineItems: items.map((item) => ({
-      id: String(item.id || ''),
-      serviceCode: String(item.code || ''),
-      description: String(item.description || ''),
-      category: 'CONSULTATION',
-      quantity: Number(item.quantity || 1),
-      unitPriceMinorUnits: Math.round(Number(item.unitPrice || 0) * 100),
-      totalMinorUnits: Math.round(Number(item.netAmount || 0) * 100),
-    })),
+          : String(raw.paymentStatus || '').toLowerCase() === 'waived'
+            ? 'VOIDED'
+            : 'PENDING',
+    lineItems: items.map((item) => {
+      const source = String(item.entitySource || '').toLowerCase();
+      const category =
+        source === 'lab'
+          ? 'LABORATORY'
+          : source === 'radiology'
+            ? 'RADIOLOGY'
+            : source === 'procedure'
+              ? 'PROCEDURE'
+              : source === 'consultation'
+                ? 'CONSULTATION'
+                : 'CONSULTATION';
+      return {
+        id: String(item.id || ''),
+        serviceCode: String(item.code || ''),
+        description: String(item.description || ''),
+        category,
+        quantity: Number(item.quantity || 1),
+        unitPriceMinorUnits: Math.round(Number(item.unitPrice || 0) * 100),
+        totalMinorUnits: Math.round(Number(item.netAmount || 0) * 100),
+      };
+    }),
     payments: [],
     issuedAt: Date.parse(String(raw.createdAt || '')) || 0,
     issuedBy: 'SERVER_BILLING_AUTHORITY',
@@ -88,6 +113,75 @@ export function adaptAuthoritativeConsultationInvoice(
       ? { settledAt: Date.parse(String(raw.updatedAt || '')) || 0 }
       : {}),
   };
+}
+
+export function adaptAuthoritativeConsultationInvoice(
+  rawInput: Record<string, any>
+): OpdInvoice {
+  return adaptAuthoritativeOpdInvoice({
+    ...rawInput,
+    billingPurpose: 'OPD_CONSULTATION',
+  });
+}
+
+function adaptDiagnosticOrder(row: unknown) {
+  const order = asRecord(row);
+  const orderType = String(order.orderType || '').toUpperCase();
+  const worklistStatus = String(order.worklistStatus || '');
+  const status = String(order.status || '').toUpperCase();
+
+  return {
+    id: String(order.orderId || order.id || ''),
+    encounterId: String(order.encounterId || ''),
+    patientId: String(order.patientId || ''),
+    type:
+      orderType === 'RADIOLOGY'
+        ? 'RADIOLOGY'
+        : orderType === 'PROCEDURE'
+          ? 'PROCEDURE'
+          : 'LABORATORY',
+    category:
+      orderType === 'RADIOLOGY'
+        ? 'RADIOLOGY'
+        : orderType === 'PROCEDURE'
+          ? 'PROCEDURE'
+          : 'LABORATORY',
+    testCode: String(order.catalogCode || ''),
+    testName: String(order.orderName || ''),
+    clinicalIndication: String(order.clinicalIndication || ''),
+    reasonForOrder: String(order.clinicalIndication || ''),
+    costAmountMinorUnits: Number(order.costMinorUnits || 0),
+    currency: String(order.currency || ''),
+    billingInvoiceId: String(order.billingInvoiceId || ''),
+    chargeId: String(order.chargeId || ''),
+    revenueLockStatus: String(order.revenueLockStatus || ''),
+    paymentStatus:
+      String(order.revenueLockStatus || '') === 'PAID_SETTLED'
+        ? 'PAID_SETTLED'
+        : 'LOCKED_PENDING_PAYMENT',
+    worklistStatus,
+    specimenType: order.specimenType ? String(order.specimenType) : undefined,
+    specimenBarcode: order.specimenBarcode ? String(order.specimenBarcode) : undefined,
+    statOverrideReason: order.statOverrideReason
+      ? String(order.statOverrideReason)
+      : undefined,
+    orderedBy: String(order.orderedBy || ''),
+    orderedAt: Number(order.createdAt || order.orderedAt || 0),
+    urgency:
+      String(order.priority || '').toUpperCase() === 'STAT'
+        ? 'STAT_EMERGENCY'
+        : String(order.priority || '').toUpperCase() === 'URGENT'
+          ? 'URGENT'
+          : 'ROUTINE',
+    status:
+      status === 'COMPLETED' || worklistStatus === 'FINALIZED'
+        ? 'COMPLETED'
+        : status === 'PROCESSING' || worklistStatus === 'IN_PROCESSING'
+          ? 'PROCESSING'
+          : worklistStatus === 'SPECIMEN_COLLECTED'
+            ? 'COLLECTED'
+            : 'ORDERED',
+  } as const;
 }
 
 function mapQueueStatus(value: unknown): QueueEntry['status'] {
@@ -166,16 +260,27 @@ export function buildOpdWorkspaceReadModel(
 
   const patientById = new Map(patients.map((patient) => [patient.id, patient]));
   const consultationInvoiceByEncounter = new Map<string, OpdInvoice>();
+  const diagnosticInvoicesByEncounter = new Map<string, OpdInvoice[]>();
   const finalInvoiceByEncounter = new Map<string, OpdInvoice>();
 
   for (const row of rawInvoices) {
     const invoice = asRecord(row);
     const encounterId = String(invoice.encounterId || '');
     if (!encounterId) continue;
-    if (String(invoice.billingPurpose || '').toUpperCase() === 'OPD_CONSULTATION') {
+    const purpose = String(invoice.billingPurpose || '').toUpperCase();
+    if (purpose === 'OPD_CONSULTATION') {
       consultationInvoiceByEncounter.set(
         encounterId,
         adaptAuthoritativeConsultationInvoice(invoice)
+      );
+    } else if (purpose === 'OPD_DIAGNOSTIC') {
+      const current = diagnosticInvoicesByEncounter.get(encounterId) || [];
+      current.push(adaptAuthoritativeOpdInvoice(invoice));
+      diagnosticInvoicesByEncounter.set(encounterId, current);
+    } else if (purpose === 'FINAL_ENCOUNTER') {
+      finalInvoiceByEncounter.set(
+        encounterId,
+        adaptAuthoritativeOpdInvoice(invoice)
       );
     }
   }
@@ -191,6 +296,8 @@ export function buildOpdWorkspaceReadModel(
       const patientId = String(encounter.patientId || '');
       const patient = patientById.get(patientId);
       const consultationInvoice = consultationInvoiceByEncounter.get(id);
+      const diagnosticInvoices = (diagnosticInvoicesByEncounter.get(id) || [])
+        .sort((left, right) => left.issuedAt - right.issuedAt);
       const financialState = String(encounter.financialClearanceState || '').toUpperCase();
 
       return {
@@ -241,11 +348,12 @@ export function buildOpdWorkspaceReadModel(
         },
         diagnosticOrders: rawOrders
           .filter((order) => String(asRecord(order).encounterId || '') === id)
-          .map((order) => asRecord(order) as any),
+          .map(adaptDiagnosticOrder),
         prescriptions: rawPrescriptions
           .filter((prescription) => String(asRecord(prescription).encounterId || '') === id)
           .map((prescription) => asRecord(prescription) as any),
         consultationInvoice,
+        diagnosticInvoices,
         invoice: finalInvoiceByEncounter.get(id),
         startedAt: Number(encounter.startedAt || 0),
         status:

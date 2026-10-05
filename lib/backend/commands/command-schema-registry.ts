@@ -48,10 +48,30 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       patientId: nonEmpty.max(150),
       orderType: z.enum(['LAB','RADIOLOGY','PROCEDURE']),
       catalogCode: nonEmpty.max(100),
-      orderName: nonEmpty.max(500),
       priority: z.enum(['STAT','URGENT','ROUTINE']),
       clinicalIndication: nonEmpty.max(4000),
-      estimatedCostMinorUnits: z.number().int().safe().nonnegative(),
+      statOverrideReason: z.string().trim().min(10).max(4000).optional(),
+    }).strict().superRefine((value, ctx) => {
+      if (value.priority === 'STAT' && !value.statOverrideReason) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['statOverrideReason'],
+          message: 'STAT diagnostic orders require an emergency override reason.',
+        });
+      }
+      if (value.priority !== 'STAT' && value.statOverrideReason) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['statOverrideReason'],
+          message: 'statOverrideReason is only valid for STAT diagnostic orders.',
+        });
+      }
+    }),
+  },
+  AdvanceDiagnosticWorklistCommand: {
+    1: z.object({
+      orderId: nonEmpty.max(150),
+      targetStatus: z.enum(['SPECIMEN_COLLECTED','IN_PROCESSING']),
     }).strict(),
   },
   DispensePrescriptionCommand: {

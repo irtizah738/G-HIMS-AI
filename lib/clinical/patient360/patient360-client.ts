@@ -16,6 +16,7 @@ import type {
 import { selectCareContextEncounter } from '@/lib/clinical/patient360/care-context';
 import type { DischargeReadinessProjection } from '@/types/discharge-readiness';
 import type { DeteriorationProjection } from '@/types/clinical-deterioration';
+import type { MedicationSafetyProjection } from '@/types/medication-safety';
 
 export interface Patient360ClinicalView {
   tenantId: string;
@@ -25,6 +26,7 @@ export interface Patient360ClinicalView {
   selectedCareContext: Patient360EncounterSummary | null;
   dischargeReadiness: DischargeReadinessProjection | null;
   deterioration: DeteriorationProjection | null;
+  medicationSafety: MedicationSafetyProjection | null;
   consultantVisibility: ConsultantPatientStateProjection | null;
   source: 'SERVER' | 'LOCAL_EDGE';
   freshness: {
@@ -113,6 +115,15 @@ async function loadLocalPatient360(
           item.encounterId === selectedCareContext.encounterId)
     ) || null;
 
+  const medicationSafetyRows = await listSecureEdgeEntities<Record<string, unknown>>(
+    tenantId,
+    cached.user.uid,
+    'medicationSafetyProjections'
+  );
+  const medicationSafety =
+    (medicationSafetyRows as unknown as MedicationSafetyProjection[])
+      .find((item) => item.patientId === patientId) || null;
+
   const openItemRows = await listSecureEdgeEntities<Record<string, unknown>>(
     tenantId,
     cached.user.uid,
@@ -178,6 +189,7 @@ async function loadLocalPatient360(
     selectedCareContext,
     dischargeReadiness,
     deterioration,
+    medicationSafety,
     consultantVisibility,
     source: 'LOCAL_EDGE',
     freshness: freshness(projection),
@@ -220,6 +232,8 @@ export async function loadPatient360ClinicalView(
         (payload.dischargeReadiness as DischargeReadinessProjection | null) || null,
       deterioration:
         (payload.deterioration as DeteriorationProjection | null) || null,
+      medicationSafety:
+        (payload.medicationSafety as MedicationSafetyProjection | null) || null,
       consultantVisibility:
         (payload.consultantVisibility as ConsultantPatientStateProjection | null) || null,
       source: 'SERVER',

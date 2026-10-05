@@ -328,9 +328,9 @@ export function buildOpdWorkspaceReadModel(
           : undefined,
         encounterType: 'OPD',
         currentStage: String(
-          encounter.clinicalState ||
-            encounter.currentStage ||
+          encounter.currentStage ||
             encounter.currentStageId ||
+            encounter.clinicalState ||
             'REGISTERED'
         ),
         department: encounter.department

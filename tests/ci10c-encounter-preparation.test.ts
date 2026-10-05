@@ -287,6 +287,9 @@ describe('CI-10C encounter preparation intelligence', () => {
     expect(consultation).not.toContain('AI Differential Proposals');
     expect(consultation).not.toContain('ACC/AHA Heart Failure 2026');
     expect(consultation).not.toContain('Known Allergy Alert: Penicillin');
+    expect(consultation).toContain("const IS_DEMO_RUNTIME = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO'");
+    expect(consultation).toContain("IS_DEMO_RUNTIME ? 'Decompensated Heart Failure");
+    expect(consultation).toContain(": [])");
     expect(panel).toContain('generateEncounterPreparationBrief');
     expect(panel).toContain('will not fabricate a fresh brief from stale offline-only state');
   });

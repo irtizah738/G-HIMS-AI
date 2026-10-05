@@ -533,7 +533,8 @@ describe('CI-10C encounter preparation intelligence', () => {
     );
 
     expect(loader).toContain('ConsultantVisibilityService.buildForActor');
-    expect(loader).toContain('MedicationSafetyService.getProjection');
+    expect(loader).toContain('MedicationSafetyService.evaluateProjection');
+    expect(loader).toContain('CI10C_CONTEXT_REVISION_RACE');
     expect(loader).toContain("sourceType: 'CONSULTANT_CHANGE'");
     expect(loader).toContain("sourceType: 'CLINICAL_OPEN_ITEM'");
     expect(loader).toContain("sourceType: 'MEDICATION_SAFETY_FINDING'");

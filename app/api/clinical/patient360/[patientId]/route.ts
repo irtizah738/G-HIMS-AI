@@ -5,6 +5,7 @@ import { assertPatient360PatientAccess } from '@/lib/clinical/patient360/patient
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import { DischargeReadinessService } from '@/lib/clinical/intelligence/discharge-readiness-service';
 import { ClinicalDeteriorationService } from '@/lib/clinical/intelligence/clinical-deterioration-service';
+import { MedicationSafetyService } from '@/lib/clinical/intelligence/medication-safety-service';
 import { ConsultantVisibilityService } from '@/lib/clinical/intelligence/consultant-visibility-service';
 import { normalizeCareSetting, selectCareContextEncounter } from '@/lib/clinical/patient360/care-context';
 
@@ -150,8 +151,12 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
       'ADMINISTRATOR',
     ].some((role) => consultantRoles.has(role));
 
-    const [dischargeReadiness, deterioration, consultantVisibility] =
-      await Promise.all([
+    const [
+      dischargeReadiness,
+      deterioration,
+      medicationSafety,
+      consultantVisibility,
+    ] = await Promise.all([
         selectedCareContext?.careSetting === 'IPD'
           ? DischargeReadinessService.getProjection(
               context.tenantId,
@@ -164,6 +169,10 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
               selectedCareContext.encounterId
             )
           : Promise.resolve(null),
+        MedicationSafetyService.getProjection(
+          context.tenantId,
+          normalizedPatientId
+        ),
         canUseConsultantVisibility
           ? ConsultantVisibilityService.buildForActor(
               context,
@@ -188,6 +197,7 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
         selectedCareContext: selectedCareContext || null,
         dischargeReadiness,
         deterioration,
+        medicationSafety,
         consultantVisibility,
         freshness: {
           projectionVersion: projection.projectionVersion,

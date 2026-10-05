@@ -350,6 +350,7 @@ export function buildOpdWorkspaceReadModel(
         financialClearance: {
           ingressFeePaid:
             financialState === 'CONSULTATION_CLEARED' ||
+            financialState === 'FINAL_BILLING_CLEARED' ||
             financialState === 'NOT_REQUIRED',
           amountPaid: consultationInvoice
             ? Math.max(
@@ -369,6 +370,18 @@ export function buildOpdWorkspaceReadModel(
         consultationInvoice,
         diagnosticInvoices,
         pharmacyInvoices,
+        billingMutationSequence: Number(
+          encounter.billingMutationSequence || 0
+        ),
+        billingReconciliationId: encounter.billingReconciliationId
+          ? String(encounter.billingReconciliationId)
+          : undefined,
+        billingReconciliationState: encounter.billingReconciliationState
+          ? String(encounter.billingReconciliationState)
+          : undefined,
+        billingClosedAt: encounter.billingClosedAt
+          ? Number(encounter.billingClosedAt)
+          : undefined,
         invoice: finalInvoiceByEncounter.get(id),
         startedAt: Number(encounter.startedAt || 0),
         status:

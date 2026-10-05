@@ -27,6 +27,7 @@ export type ClinicalCopilotArtifactKey =
 export type ClinicalCopilotArtifactState =
   | 'NOT_GENERATED'
   | 'CURRENT'
+  | 'OFFLINE_CACHED'
   | 'STALE'
   | 'UNAVAILABLE_OFFLINE'
   | 'ERROR';

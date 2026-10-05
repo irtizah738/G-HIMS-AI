@@ -430,6 +430,16 @@ export function OpdMasterWorkspace() {
     [auth.clinicalPrivileges]
   );
   const isAdministrator = normalizedRoles.has('SYSTEM_ADMIN') || normalizedRoles.has('ADMINISTRATOR') || normalizedRoles.has('ADMIN');
+  const canSignClinicalNotes =
+    (
+      normalizedRoles.has('DOCTOR') ||
+      normalizedRoles.has('CONSULTANT') ||
+      normalizedRoles.has('SYSTEM_ADMIN')
+    ) &&
+    (
+      normalizedPrivileges.has('SIGN_CLINICAL_NOTES') ||
+      normalizedPrivileges.has('UNRESTRICTED_CLINICAL_CHIEF')
+    );
   const canPrescribe = isAdministrator || (
     (normalizedRoles.has('DOCTOR') || normalizedRoles.has('CONSULTANT')) &&
     normalizedPrivileges.has('PRESCRIBE')
@@ -1718,6 +1728,7 @@ export function OpdMasterWorkspace() {
           onPlaceDiagnosticOrders={() => setActiveTab('DIAGNOSTICS')}
           onPlacePrescriptions={() => setActiveTab('PHARMACY')}
           offline={!isOnline}
+          canSignClinicalNotes={canSignClinicalNotes}
         />
       )}
 

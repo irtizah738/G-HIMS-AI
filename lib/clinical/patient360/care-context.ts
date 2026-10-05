@@ -124,6 +124,24 @@ export function buildPatient360CareContexts(
   };
 }
 
+export function selectCareContextEncounter(
+  careContexts: Patient360CareContexts,
+  careSetting?: ClinicalCareSetting
+): Patient360EncounterSummary | undefined {
+  switch (careSetting) {
+    case 'IPD':
+      return careContexts.activeIpdEncounter || careContexts.latestIpdEncounter;
+    case 'EMERGENCY':
+      return careContexts.activeEmergencyEncounter || careContexts.latestEmergencyEncounter;
+    case 'OPD':
+      return careContexts.activeOpdEncounters[0] || careContexts.latestOpdEncounter;
+    case 'TELEHEALTH':
+      return careContexts.activeTelehealthEncounters[0] || careContexts.latestTelehealthEncounter;
+    default:
+      return preferredCompatibilityEncounter(careContexts);
+  }
+}
+
 export function preferredCompatibilityEncounter(
   careContexts: Patient360CareContexts
 ): Patient360EncounterSummary | undefined {

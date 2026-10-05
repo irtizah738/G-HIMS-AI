@@ -42,6 +42,7 @@ import { CashReceiptDomainService } from '../services/cash-receipt-domain-servic
 import { DiagnosticResultDomainService } from '../services/diagnostic-result-domain-service';
 import { PatientClinicalKnowledgeDomainService } from '../services/patient-clinical-knowledge-domain-service';
 import { DischargeReadinessReviewDomainService } from '../services/discharge-readiness-review-domain-service';
+import { ConsultantReviewDomainService } from '../services/consultant-review-domain-service';
 import { IdempotencyService } from '../idempotency/idempotency-service';
 import { validateCommandPayload } from './command-schema-registry';
 import { emitOperationalEvent, operationalTimer } from '@/lib/observability/server-telemetry';
@@ -385,6 +386,15 @@ export class CommandBus {
 
         case 'ReviewPatientClinicalKnowledgeCommand':
           result = await PatientClinicalKnowledgeDomainService.review(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RecordConsultantPatientReviewCommand':
+          result = await ConsultantReviewDomainService.record(
             context,
             command.commandId,
             command.idempotencyKey,

@@ -145,6 +145,10 @@ export async function replaceSecureTenantEdgeSnapshot(
         (entity as any).tokenId ||
         (entity as any).evidenceId ||
         (entity as any).findingId ||
+        (entity as any).openItemId ||
+        (entity as any).escalationId ||
+        (entity as any).consultationId ||
+        (entity as any).handoffId ||
         (entity as any).balanceId ||
         (entity as any).itemId ||
         ''
@@ -247,6 +251,10 @@ export async function putSecureEdgeEntities(
       (entity as any).orderId ||
       (entity as any).tokenId ||
       (entity as any).evidenceId ||
+      (entity as any).openItemId ||
+      (entity as any).escalationId ||
+      (entity as any).consultationId ||
+      (entity as any).handoffId ||
       ''
     ).trim();
     if (!entityId) continue;

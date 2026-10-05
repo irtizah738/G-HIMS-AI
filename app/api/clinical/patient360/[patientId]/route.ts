@@ -5,6 +5,8 @@ import { assertPatient360PatientAccess } from '@/lib/clinical/patient360/patient
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import { DischargeReadinessService } from '@/lib/clinical/intelligence/discharge-readiness-service';
 import { ClinicalDeteriorationService } from '@/lib/clinical/intelligence/clinical-deterioration-service';
+import { ConsultantVisibilityService } from '@/lib/clinical/intelligence/consultant-visibility-service';
+import { normalizeCareSetting, selectCareContextEncounter } from '@/lib/clinical/patient360/care-context';
 
 interface RouteContext {
   params: Promise<{ patientId: string }>;

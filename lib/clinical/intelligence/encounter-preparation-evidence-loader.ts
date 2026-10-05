@@ -7,6 +7,17 @@ import type {
   ClinicalEvidenceSupplementalSources,
 } from '@/lib/clinical/intelligence/longitudinal-evidence-loader';
 
+function timestamp(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return numeric;
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
 export class EncounterPreparationEvidenceLoader {
   public static async load(
     context: CommandContext,
@@ -37,7 +48,7 @@ export class EncounterPreparationEvidenceLoader {
         sourceEntityId: encounterId,
         label: `${visibility.careSetting} encounter preparation context`,
         status: visibility.encounter.status,
-        occurredAt: visibility.encounter.startedAt,
+        occurredAt: timestamp(visibility.encounter.startedAt),
         sourceEntityRefs: [encounterId],
         content: {
           encounter: visibility.encounter,

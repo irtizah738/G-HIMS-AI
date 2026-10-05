@@ -650,15 +650,6 @@ export class ClinicalOrderDomainService {
         auditAction: 'PLACE_DIAGNOSTIC_ORDER',
         auditResourceType: 'DIAGNOSTIC_ORDER',
         auditResourceId: orderId,
-        auditReason: isStat
-          ? `STAT diagnostic order ${catalog.description}; payment lock bypassed for emergency reason: ${payload.statOverrideReason}`
-          : `Ordered ${payload.orderType} ${catalog.description}; worklist locked pending payment.`,
-        auditMetadata: isStat
-          ? {
-              statOverride: true,
-              statOverrideReason: payload.statOverrideReason,
-            }
-          : { statOverride: false },
         outboxTopic: 'g-hims-clinical-events',
         idempotencyKey,
         commandId,
@@ -742,6 +733,15 @@ export class ClinicalOrderDomainService {
               statOverride: isStat,
               canonicalDiagnosticOrderId: canonicalOrder.diagnosticOrderId,
             },
+            auditReason: isStat
+              ? `STAT diagnostic order ${catalog.description}; payment lock bypassed for emergency reason: ${payload.statOverrideReason}`
+              : `Ordered ${payload.orderType} ${catalog.description}; worklist locked pending payment.`,
+            auditMetadata: isStat
+              ? {
+                  statOverride: true,
+                  statOverrideReason: payload.statOverrideReason,
+                }
+              : { statOverride: false },
             resultData: {
               order: orderState,
               invoice,

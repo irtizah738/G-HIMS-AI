@@ -58,6 +58,7 @@ import { useAuth } from '@/lib/auth/auth-context';
 import { hydrateEdgeSnapshot } from '@/lib/offline/hydration';
 import {
   adaptAuthoritativeConsultationInvoice,
+  adaptAuthoritativeOpdInvoice,
   buildOpdWorkspaceReadModel,
 } from '@/lib/opd/workspace-read-model';
 
@@ -496,6 +497,27 @@ export function OpdMasterWorkspace() {
   const activeEncounter = useMemo(() => {
     return encounters.find((e) => e.id === selectedEncounterId) || encounters[0];
   }, [encounters, selectedEncounterId]);
+
+  const activeBillingInvoice = useMemo(() => {
+    if (!activeEncounter) return undefined;
+
+    if (
+      activeEncounter.consultationInvoice &&
+      activeEncounter.consultationInvoice.settlementStatus !== 'SETTLED'
+    ) {
+      return activeEncounter.consultationInvoice;
+    }
+
+    const openDiagnosticInvoice = (activeEncounter.diagnosticInvoices || []).find(
+      (invoice) =>
+        invoice.billingPurpose === 'OPD_DIAGNOSTIC' &&
+        invoice.settlementStatus !== 'SETTLED' &&
+        invoice.settlementStatus !== 'VOIDED'
+    );
+    if (openDiagnosticInvoice) return openDiagnosticInvoice;
+
+    return activeEncounter.invoice;
+  }, [activeEncounter]);
 
   // DEMO-only visual event helper. Production audit events are server-generated.
   const recordEvent = (eventType: any, description: string, payload?: any) => {
@@ -979,29 +1001,42 @@ export function OpdMasterWorkspace() {
     setActiveTab('DIAGNOSTICS');
   };
 
-  // HANDLER: Add Diagnostic Order through the clinical order domain.
+  // HANDLER: Add Diagnostic Order through the authoritative clinical/financial domain.
+  // The client supplies clinical intent and a catalog identity only. Price,
+  // specimen identity, invoice, AR and GL state are all server-owned.
   const handleAddDiagnosticOrder = async (order: DiagnosticOrderItem) => {
-    const orderResult = await executeActiveTenantCommand<Record<string, unknown>>(
+    const category = String(order.type || order.category || '').toUpperCase();
+    const orderType =
+      category === 'RADIOLOGY'
+        ? 'RADIOLOGY'
+        : category === 'PROCEDURE'
+          ? 'PROCEDURE'
+          : 'LAB';
+
+    const orderResult = await executeActiveTenantCommand<{
+      order: Record<string, any>;
+      invoice: Record<string, any>;
+    }>(
       'PlaceDiagnosticOrderCommand',
       {
         encounterId: activeEncounter.id,
         patientId: activeEncounter.patientId,
-        orderType:
-          order.type === 'RADIOLOGY'
-            ? 'RADIOLOGY'
-            : order.type === 'PROCEDURE'
-              ? 'PROCEDURE'
-              : 'LAB',
+        orderType,
         catalogCode: order.testCode || order.code || order.id,
-        orderName: order.testName,
         priority:
           String(order.urgency || '').toUpperCase().includes('STAT')
             ? 'STAT'
             : String(order.urgency || '').toUpperCase() === 'URGENT'
               ? 'URGENT'
               : 'ROUTINE',
-        clinicalIndication: order.clinicalIndication || order.reasonForOrder || 'Clinical evaluation',
-        estimatedCostMinorUnits: order.costAmountMinorUnits || Math.round((order.price || 0) * 100),
+        clinicalIndication:
+          order.clinicalIndication ||
+          order.reasonForOrder ||
+          'Clinical evaluation',
+        ...(String(order.urgency || '').toUpperCase().includes('STAT') &&
+        order.statOverrideReason
+          ? { statOverrideReason: order.statOverrideReason }
+          : {}),
       },
       {
         idempotencyKey: `opd-diagnostic:${activeEncounter.id}:${order.id}`,
@@ -1010,30 +1045,147 @@ export function OpdMasterWorkspace() {
           collection: 'orders',
           resourceId: order.id,
           action: 'CREATE',
-          optimisticCache: true,
+          optimisticCache: false,
         },
       }
     );
-    if (!orderResult.success) {
+    if (!orderResult.success || !orderResult.data?.order || !orderResult.data?.invoice) {
       throw new Error(orderResult.error?.message || 'Diagnostic order failed.');
     }
 
+    const authoritative = orderResult.data.order;
     const governedOrder: DiagnosticOrderItem = {
       ...order,
-      id: orderResult.entityId || order.id,
-      encounterId: activeEncounter.id,
-      patientId: activeEncounter.patientId,
+      id: String(authoritative.orderId || orderResult.entityId || order.id),
+      encounterId: String(authoritative.encounterId || activeEncounter.id),
+      patientId: String(authoritative.patientId || activeEncounter.patientId),
+      type:
+        String(authoritative.orderType || '').toUpperCase() === 'RADIOLOGY'
+          ? 'RADIOLOGY'
+          : String(authoritative.orderType || '').toUpperCase() === 'PROCEDURE'
+            ? 'PROCEDURE'
+            : 'LABORATORY',
+      category:
+        String(authoritative.orderType || '').toUpperCase() === 'RADIOLOGY'
+          ? 'RADIOLOGY'
+          : String(authoritative.orderType || '').toUpperCase() === 'PROCEDURE'
+            ? 'PROCEDURE'
+            : 'LABORATORY',
+      testCode: String(authoritative.catalogCode || order.testCode || ''),
+      testName: String(authoritative.orderName || order.testName || ''),
+      clinicalIndication: String(
+        authoritative.clinicalIndication || order.clinicalIndication || ''
+      ),
+      reasonForOrder: String(
+        authoritative.clinicalIndication || order.reasonForOrder || ''
+      ),
+      costAmountMinorUnits: Number(authoritative.costMinorUnits || 0),
+      currency: String(authoritative.currency || ''),
+      billingInvoiceId: String(authoritative.billingInvoiceId || ''),
+      chargeId: String(authoritative.chargeId || ''),
+      revenueLockStatus: String(authoritative.revenueLockStatus || ''),
+      paymentStatus:
+        String(authoritative.revenueLockStatus || '') === 'PAID_SETTLED'
+          ? 'PAID_SETTLED'
+          : 'LOCKED_PENDING_PAYMENT',
+      worklistStatus: String(authoritative.worklistStatus || ''),
+      specimenType: authoritative.specimenType
+        ? String(authoritative.specimenType)
+        : undefined,
+      specimenBarcode: authoritative.specimenBarcode
+        ? String(authoritative.specimenBarcode)
+        : undefined,
+      orderedBy: String(authoritative.orderedBy || ''),
+      orderedAt: Number(authoritative.createdAt || Date.now()),
       status: 'ORDERED',
     };
+    const diagnosticInvoice = adaptAuthoritativeOpdInvoice(
+      orderResult.data.invoice
+    );
 
     setEncounters((prev) =>
-      prev.map((e) =>
-        e.id === activeEncounter.id
-          ? { ...e, diagnosticOrders: [...e.diagnosticOrders, governedOrder] }
-          : e
+      prev.map((encounter) =>
+        encounter.id === activeEncounter.id
+          ? {
+              ...encounter,
+              diagnosticOrders: [
+                ...encounter.diagnosticOrders.filter(
+                  (existing) => existing.id !== governedOrder.id
+                ),
+                governedOrder,
+              ],
+              diagnosticInvoices: [
+                ...(encounter.diagnosticInvoices || []).filter(
+                  (invoice) => invoice.id !== diagnosticInvoice.id
+                ),
+                diagnosticInvoice,
+              ],
+            }
+          : encounter
       )
     );
-    recordEvent('DIAGNOSTIC_ORDERED', `Ordered: ${order.testName}.`, governedOrder);
+
+    recordEvent(
+      'DIAGNOSTIC_ORDERED',
+      governedOrder.revenueLockStatus === 'UNLOCKED_STAT_OVERRIDE'
+        ? `STAT diagnostic order ${governedOrder.testName} dispatched under audited emergency override.`
+        : `Diagnostic order ${governedOrder.testName} created and locked pending cashier settlement.`,
+      governedOrder
+    );
+  };
+
+  const handleAdvanceDiagnosticWorklist = async (
+    orderId: string,
+    targetStatus: 'SPECIMEN_COLLECTED' | 'IN_PROCESSING'
+  ) => {
+    const result = await executeActiveTenantCommand<Record<string, any>>(
+      'AdvanceDiagnosticWorklistCommand',
+      { orderId, targetStatus },
+      {
+        idempotencyKey: `opd-diagnostic-work:${orderId}:${targetStatus}`,
+      }
+    );
+    if (!result.success || !result.data) {
+      throw new Error(
+        result.error?.message || 'Diagnostic worklist transition failed.'
+      );
+    }
+
+    const authoritative = result.data;
+    setEncounters((prev) =>
+      prev.map((encounter) =>
+        encounter.id === activeEncounter.id
+          ? {
+              ...encounter,
+              diagnosticOrders: encounter.diagnosticOrders.map((existing) =>
+                existing.id === orderId
+                  ? {
+                      ...existing,
+                      revenueLockStatus: String(
+                        authoritative.revenueLockStatus ||
+                          existing.revenueLockStatus ||
+                          ''
+                      ),
+                      worklistStatus: String(
+                        authoritative.worklistStatus ||
+                          existing.worklistStatus ||
+                          ''
+                      ),
+                      status:
+                        String(authoritative.worklistStatus || '') ===
+                        'SPECIMEN_COLLECTED'
+                          ? 'COLLECTED'
+                          : String(authoritative.worklistStatus || '') ===
+                              'IN_PROCESSING'
+                            ? 'PROCESSING'
+                            : existing.status,
+                    }
+                  : existing
+              ),
+            }
+          : encounter
+      )
+    );
   };
 
   // HANDLER: Add Prescription Item through credential-gated prescribing.

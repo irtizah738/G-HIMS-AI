@@ -5,6 +5,7 @@ import { DomainStateRepository } from '@/server/repositories/domain-state-reposi
 import { assertPatient360PatientAccess } from '@/lib/clinical/patient360/patient360-access';
 import { ClinicalEncounterPreparationService } from '@/lib/clinical/intelligence/clinical-encounter-preparation-service';
 import { ClinicalEvidenceService } from '@/lib/clinical/intelligence/clinical-evidence-service';
+import { observeClinicalIntelligenceOperation } from '@/lib/clinical/intelligence/clinical-intelligence-observability';
 import type { CommandContext } from '@/lib/backend/types';
 import type { ClinicalCareSetting } from '@/types/consultant-visibility';
 
@@ -63,11 +64,20 @@ export async function POST(req: NextRequest) {
     }
 
     await assertAccess(context, patientId, encounterId);
-    const result = await ClinicalEncounterPreparationService.generateAuthoritatively(
-      context,
-      patientId,
-      encounterId,
-      careSetting || undefined
+    const result = await observeClinicalIntelligenceOperation(
+      {
+        operation: 'GENERATE_ENCOUNTER_PREPARATION',
+        purpose: 'ENCOUNTER_PREP',
+        tenantId: context.tenantId,
+        correlationId: context.correlationId,
+      },
+      () =>
+        ClinicalEncounterPreparationService.generateAuthoritatively(
+          context,
+          patientId,
+          encounterId,
+          careSetting || undefined
+        )
     );
 
     return NextResponse.json(

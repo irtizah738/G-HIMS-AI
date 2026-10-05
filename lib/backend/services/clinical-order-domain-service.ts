@@ -1249,6 +1249,96 @@ export class ClinicalOrderDomainService {
     const consumptionId = `consume_${crypto.randomUUID()}`;
     const chargeId = `chg_rx_${crypto.randomUUID()}`;
     const amountMinorUnits = Math.round(unitPriceMinorUnits * quantity);
+    if (!Number.isSafeInteger(amountMinorUnits) || amountMinorUnits <= 0) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INVALID_PHARMACY_MONETARY_STATE',
+          message: 'Dispensed pharmacy amount is invalid.',
+        },
+      };
+    }
+
+    const postingDate = new Date(dispensedAt);
+    const periodId = financePeriodId(
+      postingDate.getUTCFullYear(),
+      postingDate.getUTCMonth() + 1
+    );
+    const [arAccounts, revenueAccounts, period] = await Promise.all([
+      DomainStateRepository.queryAllEqual<FinanceAccountRecord>(
+        context.tenantId,
+        'accounts',
+        'accountCode',
+        '1110',
+        { pageSize: 10, maxRows: 10 }
+      ),
+      DomainStateRepository.queryAllEqual<FinanceAccountRecord>(
+        context.tenantId,
+        'accounts',
+        'accountCode',
+        '4030',
+        { pageSize: 10, maxRows: 10 }
+      ),
+      DomainStateRepository.getById<FinancePeriodRecord>(
+        context.tenantId,
+        'accountingPeriods',
+        periodId
+      ),
+    ]);
+    const arAccount = arAccounts[0];
+    const revenueAccount = revenueAccounts[0];
+    if (
+      arAccounts.length !== 1 ||
+      !arAccount?.isActive ||
+      arAccount.category !== 'asset' ||
+      arAccount.currency.trim().toUpperCase() !== currency
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'AR_CONTROL_ACCOUNT_INVALID',
+          message:
+            'Accounts Receivable control account 1110 must be uniquely active and currency-compatible.',
+        },
+      };
+    }
+    if (
+      revenueAccounts.length !== 1 ||
+      !revenueAccount?.isActive ||
+      revenueAccount.category !== 'revenue' ||
+      revenueAccount.currency.trim().toUpperCase() !== currency
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'PHARMACY_REVENUE_ACCOUNT_INVALID',
+          message:
+            'Pharmacy revenue account 4030 must be uniquely active and currency-compatible.',
+        },
+      };
+    }
+    if (!period || !['OPEN', 'SOFT_CLOSE'].includes(period.status)) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'FINANCE_PERIOD_NOT_POSTABLE',
+          message:
+            'Pharmacy dispensing requires an open finance period for patient billing.',
+        },
+      };
+    }
+
+    const invoiceId = `inv_rx_${payload.prescriptionId}`;
+    const arOpenItemId = `ar_patient_${invoiceId}`;
+    const journalId = `je_rx_${payload.prescriptionId}`;
 
     const prescriptionState = {
       ...prescription,
@@ -1359,8 +1449,123 @@ export class ClinicalOrderDomainService {
       quantity,
       unitPriceMinorUnits,
       amountMinorUnits,
-      status: amountMinorUnits > 0 ? 'UNBILLED' : 'PRICE_PENDING',
+      currency,
+      invoiceId,
+      status: 'BILLED',
       createdAt: dispensedAt,
+      createdBy: context.actorId,
+    };
+
+    const invoice: Invoice & {
+      currency: string;
+      billingPurpose: 'OPD_PHARMACY';
+      sourcePrescriptionId: string;
+      chargeId: string;
+    } = {
+      id: invoiceId,
+      tenantId: context.tenantId,
+      invoiceNumber: `RX-${payload.prescriptionId
+        .replace(/[^a-zA-Z0-9]/g, '')
+        .slice(-12)
+        .toUpperCase()}`,
+      patientId,
+      patientName: patient.fullName,
+      mrn: patient.mrn,
+      encounterId,
+      tariffId: tariff.id,
+      tariffName: tariff.name,
+      planName: tariff.planName,
+      totalGross: amountMinorUnits / 100,
+      totalDiscount: 0,
+      totalTax: 0,
+      totalCoverage: 0,
+      totalPatientDue: amountMinorUnits / 100,
+      totalPaid: 0,
+      balanceDue: amountMinorUnits / 100,
+      paymentStatus: 'pending',
+      paymentMethod: 'cash',
+      items: [
+        {
+          id: chargeId,
+          entitySource: 'pharmacy',
+          code: String(prescription.drugCode || itemId),
+          description: String(
+            prescription.drugName || selectedBalance.itemName
+          ),
+          quantity,
+          unitPrice: unitPriceMinorUnits / 100,
+          grossAmount: amountMinorUnits / 100,
+          discountAmount: 0,
+          tax: 0,
+          netAmount: amountMinorUnits / 100,
+          insurancePortion: 0,
+          patientPortion: amountMinorUnits / 100,
+          timestamp: new Date(dispensedAt).toISOString(),
+          status: 'billed',
+          sourceReferenceId: payload.prescriptionId,
+        },
+      ],
+      paymentHistory: [],
+      currency,
+      billingPurpose: 'OPD_PHARMACY',
+      sourcePrescriptionId: payload.prescriptionId,
+      chargeId,
+      createdAt: new Date(dispensedAt).toISOString(),
+      updatedAt: new Date(dispensedAt).toISOString(),
+    };
+
+    const arOpenItem: FinanceArOpenItem = {
+      openItemId: arOpenItemId,
+      tenantId: context.tenantId,
+      invoiceId,
+      debtorType: 'PATIENT',
+      debtorId: patientId,
+      patientId,
+      encounterId,
+      issueAt: dispensedAt,
+      dueAt: dispensedAt,
+      currency,
+      originalMinorUnits: amountMinorUnits,
+      allocatedMinorUnits: 0,
+      writtenOffMinorUnits: 0,
+      refundedMinorUnits: 0,
+      outstandingMinorUnits: amountMinorUnits,
+      status: 'OPEN',
+      createdAt: new Date(dispensedAt).toISOString(),
+      updatedAt: new Date(dispensedAt).toISOString(),
+    };
+
+    const journalState = {
+      journalId,
+      tenantId: context.tenantId,
+      fiscalYear: postingDate.getUTCFullYear(),
+      postingPeriod: postingDate.getUTCMonth() + 1,
+      documentDate: dispensedAt,
+      postingDate: dispensedAt,
+      referenceDocumentId: invoiceId,
+      documentHeader: `OPD pharmacy dispense ${invoice.invoiceNumber}`,
+      currency,
+      totalAmountMinorUnits: amountMinorUnits,
+      lines: [
+        {
+          glAccountId: '1110',
+          glAccountName: arAccount.accountName,
+          debitMinorUnits: amountMinorUnits,
+          creditMinorUnits: 0,
+          lineDescription: `Patient receivable for ${medicationItem.name}`,
+        },
+        {
+          glAccountId: '4030',
+          glAccountName: revenueAccount.accountName,
+          debitMinorUnits: 0,
+          creditMinorUnits: amountMinorUnits,
+          lineDescription: `Pharmacy revenue for ${medicationItem.name}`,
+        },
+      ],
+      sourceModule: 'PHARMACY',
+      status: 'POSTED',
+      postedBy: context.actorId,
+      postedAt: dispensedAt,
     };
 
     const tx = await TransactionManager.executeAtomicMutation({
@@ -1382,7 +1587,11 @@ export class ClinicalOrderDomainService {
         stockTransactionId,
         consumptionId,
         chargeId,
+        invoiceId,
+        arOpenItemId,
+        journalId,
         amountMinorUnits,
+        currency,
         dispensedAt,
       },
       auditAction: 'DISPENSE_MEDICATION',
@@ -1418,6 +1627,21 @@ export class ClinicalOrderDomainService {
           domainState: chargeState,
         },
         {
+          entityType: 'INVOICE',
+          entityId: invoiceId,
+          domainState: invoice,
+        },
+        {
+          entityType: 'AR_OPEN_ITEM',
+          entityId: arOpenItemId,
+          domainState: arOpenItem,
+        },
+        {
+          entityType: 'JOURNAL_ENTRY',
+          entityId: journalId,
+          domainState: journalState,
+        },
+        {
           entityType: 'MEDICATION_DISPENSE',
           entityId: canonicalDispense.medicationDispenseId,
           domainState: canonicalDispense,
@@ -1439,6 +1663,9 @@ export class ClinicalOrderDomainService {
         stockTransaction: stockTransactionState,
         patientConsumption: consumptionState,
         charge: chargeState,
+        invoice,
+        arOpenItem,
+        journal: journalState,
         canonicalMedicationDispense: canonicalDispense,
       },
     };

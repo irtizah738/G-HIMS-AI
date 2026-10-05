@@ -30,6 +30,8 @@ describe('OPD-RP12 final billing reconciliation', () => {
     expect(service).toContain("'OPD_AR_NOT_SETTLED'");
     expect(service).toContain("'OPD_CHARGE_INVOICE_CARDINALITY_INVALID'");
     expect(service).toContain("'OPD_INVOICE_CHARGE_ORPHANED'");
+    expect(service).toContain("'OPD_CHARGE_INVOICE_MONETARY_MISMATCH'");
+    expect(service).toContain("'OPD_INVOICE_LINE_TOTAL_MISMATCH'");
     expect(service).toContain("'LEGACY_FINAL_INVOICE_AUTHORITY_PRESENT'");
     expect(service).toContain("'OPD_MULTI_CURRENCY_RECONCILIATION_BLOCKED'");
     expect(service).toContain("'OPD_BILLING_JOURNAL_CARDINALITY_INVALID'");
@@ -37,6 +39,23 @@ describe('OPD-RP12 final billing reconciliation', () => {
     expect(service).toContain("'OPD_RECONCILIATION_TOO_LARGE'");
     expect(service).toContain("'OPD_REVENUE_INTEGRITY_PENDING_REVIEW'");
     expect(service).toContain("'OPD_REVENUE_INTEGRITY_CHARGE_MISSING'");
+  });
+
+  test('invoice, charge and AR money must reconcile exactly', async () => {
+    const service = await source(
+      'lib/backend/services/opd-billing-reconciliation-domain-service.ts'
+    );
+
+    expect(service).toContain('itemPatientMinor !== chargePatientMinor');
+    expect(service).toContain(
+      'invoiceLinePatientMinor !== invoicePatientMinor'
+    );
+    expect(service).toContain(
+      'row.originalMinorUnits !== invoicePatientMinor'
+    );
+    expect(service).toContain(
+      "String(row.currency || '').toUpperCase()"
+    );
   });
 
   test('reconciliation validates service completion behind diagnostic and pharmacy invoices', async () => {

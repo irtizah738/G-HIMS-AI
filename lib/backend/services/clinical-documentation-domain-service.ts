@@ -865,6 +865,19 @@ export class ClinicalDocumentationDomainService {
       };
     }
 
+    if (payload.category === 'NURSING' && normalizedDiagnoses.diagnoses.length > 0) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'DIAGNOSIS_AUTHORITY_REQUIRED',
+          message:
+            'Nursing-note authority cannot create canonical encounter diagnoses. Use an authorized clinician note or diagnosis command.',
+        },
+      };
+    }
+
     if (payload.sourceDraftId) {
       return {
         success: false,

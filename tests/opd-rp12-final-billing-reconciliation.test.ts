@@ -35,6 +35,8 @@ describe('OPD-RP12 final billing reconciliation', () => {
     expect(service).toContain("'OPD_BILLING_JOURNAL_CARDINALITY_INVALID'");
     expect(service).toContain("'OPD_BILLING_JOURNAL_INVALID'");
     expect(service).toContain("'OPD_RECONCILIATION_TOO_LARGE'");
+    expect(service).toContain("'OPD_REVENUE_INTEGRITY_PENDING_REVIEW'");
+    expect(service).toContain("'OPD_REVENUE_INTEGRITY_CHARGE_MISSING'");
   });
 
   test('reconciliation validates service completion behind diagnostic and pharmacy invoices', async () => {
@@ -47,6 +49,22 @@ describe('OPD-RP12 final billing reconciliation', () => {
     expect(service).toContain('revenueRecognizedAt');
     expect(service).toContain("'OPD_PHARMACY_NOT_DISPENSED'");
     expect(service).toContain("String(prescription.status || '') !== 'DISPENSED'");
+  });
+
+  test('signed-note Revenue Integrity candidates participate in billing mutation sequencing', async () => {
+    const documentation = await source(
+      'lib/backend/services/clinical-documentation-domain-service.ts'
+    );
+
+    expect(documentation).toContain(
+      'revenueIntegrityFindings.length > 0 && billingEncounter'
+    );
+    expect(documentation).toContain(
+      'Number(billingEncounter.billingMutationSequence || 0) + 1'
+    );
+    expect(documentation).toContain(
+      'A signed note may not introduce new billing candidates after final OPD billing reconciliation.'
+    );
   });
 
   test('billing mutation sequencing prevents phantom late charges during reconciliation', async () => {
@@ -133,6 +151,8 @@ describe('OPD-RP12 final billing reconciliation', () => {
     expect(runtime).toContain("'OPD_BILLING_RECONCILIATION_NOT_FOUND'");
     expect(runtime).toContain("'OPD_BILLING_RECONCILIATION_INVALID'");
     expect(encounter).toContain("'OPD_FINAL_BILLING_RECONCILIATION_REQUIRED'");
+    expect(runtime).toContain("'OPD_BILLING_RECONCILIATION_STALE'");
+    expect(runtime).toContain('billingMutationSequence');
   });
 
   test('pharmacy invoice cash settlement is first class and final reconciliation follows it', async () => {
@@ -158,6 +178,8 @@ describe('OPD-RP12 final billing reconciliation', () => {
     expect(service).toContain('snapshotFingerprint');
     expect(service).toContain("'OPD_BILLING_ALREADY_RECONCILED'");
     expect(type).toContain("status: OpdBillingReconciliationStatus");
+    expect(type).toContain('billingMutationSequence: number');
+    expect(type).toContain('revenueIntegrityFindingIds: string[]');
     expect(type).toContain("schemaVersion: 1");
   });
 });

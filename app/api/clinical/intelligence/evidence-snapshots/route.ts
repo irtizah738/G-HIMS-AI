@@ -4,6 +4,8 @@ import { AuthorizationPipeline } from '@/lib/backend/auth/authorization-pipeline
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import { assertPatient360PatientAccess } from '@/lib/clinical/patient360/patient360-access';
 import { ClinicalEvidenceService } from '@/lib/clinical/intelligence/clinical-evidence-service';
+import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
+import { selectCareContextEncounter } from '@/lib/clinical/patient360/care-context';
 import type { ClinicalIntelligencePurpose } from '@/types/clinical-intelligence-evidence';
 
 const PURPOSES = new Set<ClinicalIntelligencePurpose>([
@@ -84,7 +86,45 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    assertPatient360PatientAccess(context, patient, null);
+    const projection = await Patient360ProjectionService.getProjection(
+      context.tenantId,
+      patientId
+    );
+    if (!projection) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: { code: 'PATIENT360_PROJECTION_NOT_READY' },
+        },
+        { status: 409, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
+    const careContext =
+      selectCareContextEncounter(projection.careContexts) ||
+      projection.activeEncounter;
+    const accessEncounter = careContext?.encounterId
+      ? await DomainStateRepository.getById<Record<string, unknown>>(
+          context.tenantId,
+          'encounters',
+          careContext.encounterId
+        )
+      : null;
+
+    if (
+      accessEncounter &&
+      String(accessEncounter.patientId || '') !== patientId
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: { code: 'ENCOUNTER_PATIENT_MISMATCH' },
+        },
+        { status: 409, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
+    assertPatient360PatientAccess(context, patient, accessEncounter);
 
     const snapshot = await ClinicalEvidenceService.createAuthoritativeSnapshot(
       context,

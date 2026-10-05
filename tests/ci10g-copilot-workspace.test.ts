@@ -87,6 +87,17 @@ describe('CI-10G clinician-facing copilot workspace', () => {
     );
   });
 
+  test('stale governed drafts cannot be reviewed, approved or signed in the workspace', async () => {
+    const panel = await source(
+      'components/patient360/GovernedClinicalDraftPanel.tsx'
+    );
+
+    expect(panel).toContain('Start new draft from current chart');
+    expect(panel).toContain('offline ||\n              stale ||');
+    expect(panel).toContain('offline || stale || busy !== null || !approvalAttestation');
+    expect(panel).toContain('offline || stale || busy !== null || !signatureAttestation');
+  });
+
   test('drafting UI preserves explicit clinician edit, approval and signature attestations', async () => {
     const panel = await source(
       'components/patient360/GovernedClinicalDraftPanel.tsx'

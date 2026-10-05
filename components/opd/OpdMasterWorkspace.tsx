@@ -748,6 +748,7 @@ export function OpdMasterWorkspace() {
         temperature: vitals.temperatureCelsius,
         respiratoryRate: vitals.respiratoryRate,
         oxygenSaturation: vitals.spo2Percent,
+        spO2Scale: vitals.spO2Scale,
         onSupplementalOxygen: vitals.onSupplementalOxygen,
         gcsScore: vitals.gcsScore,
         consciousness:

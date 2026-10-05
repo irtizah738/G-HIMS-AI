@@ -15,6 +15,7 @@ export interface AIGenerationProvenance {
   model: string;
   purpose: AIPurpose;
   generatedAt: number;
+  safetyBoundaryVersion?: string;
 }
 
 export interface AIGenerateJsonRequest {
@@ -102,6 +103,7 @@ class GoogleGenAIProvider implements AIProvider {
           model: this.model,
           purpose: request.purpose,
           generatedAt: Date.now(),
+          safetyBoundaryVersion: 'ci10h-untrusted-source-v1',
         },
       };
     } catch (genError) {

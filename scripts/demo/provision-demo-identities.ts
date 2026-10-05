@@ -116,7 +116,7 @@ for (const persona of personas) {
 
     const privilegeTypes =
       persona.role === 'doctor'
-        ? ['PRESCRIBE_MEDICATION', 'ORDER_LAB', 'ORDER_RADIOLOGY', 'ORDER_PROCEDURE', 'SIGN_CLINICAL_NOTE']
+        ? ['PRESCRIBE_MEDICATION', 'ORDER_LAB', 'ORDER_RADIOLOGY', 'ORDER_PROCEDURE', 'SIGN_CLINICAL_NOTE', 'ACKNOWLEDGE_CRITICAL_RESULT']
         : persona.role === 'pharmacy'
           ? ['DISPENSE_MEDICATION']
           : persona.role === 'lab'

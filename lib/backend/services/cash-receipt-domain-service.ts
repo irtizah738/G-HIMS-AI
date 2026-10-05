@@ -238,6 +238,12 @@ export class CashReceiptDomainService {
             entityId: payload.encounterId,
             required: true,
           },
+          {
+            key: 'opdQueueToken',
+            entityType: 'OPD_QUEUE_TOKEN',
+            entityId: `opd_${payload.encounterId}`,
+            required: false,
+          },
         ],
         prepare: (current) => {
           const period = current.period as unknown as FinancePeriodRecord;
@@ -363,6 +369,19 @@ export class CashReceiptDomainService {
           };
           const isConsultationInvoice =
             String(invoice.billingPurpose || '').toUpperCase() === 'OPD_CONSULTATION';
+          const queueToken = current.opdQueueToken || null;
+
+          if (
+            isConsultationInvoice &&
+            newBalanceMinorUnits === 0 &&
+            (!queueToken || String(queueToken.status || '').toLowerCase() !== 'payment_pending')
+          ) {
+            throw new AtomicMutationRejectedError(
+              'OPD_QUEUE_PAYMENT_STATE_INVALID',
+              'Consultation settlement cannot release an OPD queue token unless it is in payment_pending state.'
+            );
+          }
+
           const nextEncounter =
             isConsultationInvoice && newBalanceMinorUnits === 0
               ? {
@@ -370,9 +389,21 @@ export class CashReceiptDomainService {
                   financialClearanceState: 'CONSULTATION_CLEARED',
                   consultationClearedByReceiptId: payload.receiptId,
                   consultationClearedAt: payload.collectedAt,
+                  operationalState: 'QUEUED',
                   updatedAt: Date.now(),
                 }
               : encounter;
+
+          const nextQueueToken =
+            isConsultationInvoice && newBalanceMinorUnits === 0 && queueToken
+              ? {
+                  ...queueToken,
+                  status: 'waiting',
+                  paymentClearedAt: payload.collectedAt,
+                  paymentReceiptId: payload.receiptId,
+                  updatedAt: Date.now(),
+                }
+              : queueToken;
 
           const priorReceiptIds = Array.isArray(previousSettlement.receiptIds)
             ? previousSettlement.receiptIds.map(String)
@@ -423,6 +454,11 @@ export class CashReceiptDomainService {
                       entityId: payload.encounterId,
                       domainState: nextEncounter,
                     },
+                    {
+                      entityType: 'OPD_QUEUE_TOKEN',
+                      entityId: `opd_${payload.encounterId}`,
+                      domainState: nextQueueToken,
+                    },
                   ]
                 : []),
             ],
@@ -439,6 +475,8 @@ export class CashReceiptDomainService {
               arOpenItemId: patientOpenItemId,
               arOutstandingMinorUnits: nextArOutstanding,
               consultationClearanceGranted:
+                isConsultationInvoice && newBalanceMinorUnits === 0,
+              queueReleased:
                 isConsultationInvoice && newBalanceMinorUnits === 0,
             },
             auditReason: `Captured cash receipt ${payload.referenceNumber} for ${payload.amountMinorUnits / 100} ${currency}`,

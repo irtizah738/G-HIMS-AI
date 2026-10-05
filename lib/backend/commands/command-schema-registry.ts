@@ -296,6 +296,12 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       assignedRoomOrBay: z.string().trim().min(1).max(200).optional(),
     }).strict(),
   },
+  StartOpdServiceCommand: {
+    1: z.object({
+      tokenId: nonEmpty.max(150),
+      assignedRoomOrBay: z.string().trim().min(1).max(200).optional(),
+    }).strict(),
+  },
   AdmitPatientToInpatientCareCommand: {
     1: z.object({
       patientId: nonEmpty.max(150),

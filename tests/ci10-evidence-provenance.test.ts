@@ -221,9 +221,22 @@ describe('CI-10A evidence and provenance fabric', () => {
     );
 
     expect(condition?.sourceEventIds).toContain('evt-condition');
+    expect(condition?.provenanceStatus).toBe('EVENT_VERIFIED');
+    expect(condition?.content).toMatchObject({
+      conditionId: 'cond-dm',
+      display: 'Type 2 diabetes mellitus',
+    });
     expect(medication?.sourceEventIds).toContain('evt-med');
+    expect(medication?.content).toMatchObject({
+      medicationOrderId: 'med-metformin',
+      medication: 'Metformin',
+    });
     expect(result?.sourceEventIds).toContain('evt-result');
     expect(result?.latestSourceEventId).toBe('evt-result');
+    expect(result?.content).toMatchObject({
+      diagnosticReportId: 'report-a1c',
+      conclusion: '8.4%',
+    });
   });
 
   test('rejects factual claims with missing or foreign evidence', () => {

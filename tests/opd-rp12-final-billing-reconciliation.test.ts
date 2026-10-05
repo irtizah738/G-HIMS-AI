@@ -155,6 +155,14 @@ describe('OPD-RP12 final billing reconciliation', () => {
     expect(runtime).toContain('billingMutationSequence');
   });
 
+  test('OPD hydration preserves workflow currentStage over canonical clinicalState', async () => {
+    const model = await source('lib/opd/workspace-read-model.ts');
+
+    expect(model).toContain(
+      "encounter.currentStage ||\n            encounter.currentStageId ||\n            encounter.clinicalState"
+    );
+  });
+
   test('pharmacy invoice cash settlement is first class and final reconciliation follows it', async () => {
     const workspace = await source('components/opd/OpdMasterWorkspace.tsx');
 

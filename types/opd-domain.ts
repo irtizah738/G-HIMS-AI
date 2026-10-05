@@ -723,7 +723,7 @@ export interface ComprehensiveOpdEncounter {
   patientId: string;
   mrn: string;
   patientName: string;
-  gender: 'Male' | 'Female' | 'Other';
+  gender: 'Male' | 'Female' | 'Other' | 'Unknown';
   age: number;
   tokenNumber?: string;
   chiefComplaint?: string;
@@ -732,7 +732,7 @@ export interface ComprehensiveOpdEncounter {
   department?: SpecialtyDepartment | string;
   attendingDoctorId?: string;
   attendingDoctorName?: string;
-  tariffPlan: 'OUT_OF_POCKET' | 'CORPORATE_PPO' | 'SEHAT_CARD_UNIVERSAL' | 'STATE_INSURANCE';
+  tariffPlan: 'OUT_OF_POCKET' | 'CORPORATE_PPO' | 'SEHAT_CARD_UNIVERSAL' | 'STATE_INSURANCE' | 'UNASSIGNED';
   copayRatio?: { insurancePercent: number; patientPercent: number };
   financialClearance?: {
     ingressFeePaid: boolean;

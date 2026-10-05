@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
+import type { DocumentReference } from 'firebase-admin/firestore';
 import { getAdminFirestore } from '@/server/firebase/admin';
+import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import { sanitizeForFirestore } from '@/lib/firestore/sanitize';
 import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
 import { ClinicalDeteriorationService } from '@/lib/clinical/intelligence/clinical-deterioration-service';
@@ -549,8 +551,11 @@ export class ConsultantAttentionProjectionService {
     );
     const activeIds = new Set(active.map((entry) => entry.openItemId));
 
-    const batch = db.batch();
-    for (const next of active.slice(0, 350)) {
+    const writes: Array<{
+      ref: DocumentReference;
+      data: Record<string, unknown>;
+    }> = [];
+    for (const next of active) {
       const previous = existing.get(next.openItemId);
       const status =
         previous?.status === 'ACKNOWLEDGED'
@@ -578,10 +583,10 @@ export class ConsultantAttentionProjectionService {
           status === 'RESOLVED' ? previous?.resolutionRef : undefined,
         updatedAt: now,
       };
-      batch.set(
-        tenantRef.collection('clinicalOpenItems').doc(next.openItemId),
-        sanitizeForFirestore(merged)
-      );
+      writes.push({
+        ref: tenantRef.collection('clinicalOpenItems').doc(next.openItemId),
+        data: sanitizeForFirestore(merged),
+      });
     }
 
     for (const [openItemId, previous] of existing) {
@@ -592,9 +597,9 @@ export class ConsultantAttentionProjectionService {
       ) {
         continue;
       }
-      batch.set(
-        tenantRef.collection('clinicalOpenItems').doc(openItemId),
-        sanitizeForFirestore({
+      writes.push({
+        ref: tenantRef.collection('clinicalOpenItems').doc(openItemId),
+        data: sanitizeForFirestore({
           ...previous,
           status: 'RESOLVED',
           resolvedAt: now,
@@ -603,8 +608,8 @@ export class ConsultantAttentionProjectionService {
             'Authoritative source state no longer indicates an unresolved item.',
           resolutionRef: trigger?.eventId,
           updatedAt: now,
-        })
-      );
+        }),
+      });
     }
 
     const escalationRef = tenantRef
@@ -668,23 +673,32 @@ export class ConsultantAttentionProjectionService {
             : undefined,
         updatedAt: now,
       };
-      batch.set(escalationRef, sanitizeForFirestore(nextEscalation));
+      writes.push({
+        ref: escalationRef,
+        data: sanitizeForFirestore(nextEscalation),
+      });
     } else if (
       currentEscalation &&
       currentEscalation.state !== 'RESOLVED'
     ) {
-      batch.set(
-        escalationRef,
-        sanitizeForFirestore({
+      writes.push({
+        ref: escalationRef,
+        data: sanitizeForFirestore({
           ...currentEscalation,
           state: 'RESOLVED',
           resolvedAt: now,
           updatedAt: now,
-        })
-      );
+        }),
+      });
     }
 
-    await batch.commit();
+    for (let offset = 0; offset < writes.length; offset += 400) {
+      const batch = db.batch();
+      for (const write of writes.slice(offset, offset + 400)) {
+        batch.set(write.ref, write.data);
+      }
+      await batch.commit();
+    }
     return active;
   }
 
@@ -812,16 +826,51 @@ export class ConsultantAttentionProjectionService {
         .filter(Boolean)
     );
 
-    const snapshot = await db
-      .collection('tenants')
-      .doc(context.tenantId)
-      .collection('clinicalOpenItems')
-      .where('status', 'in', ['OPEN', 'ACKNOWLEDGED'])
-      .limit(500)
-      .get();
+    let rawItems: ClinicalOpenItemProjection[] = [];
+    if (roles.has('SYSTEM_ADMIN')) {
+      const [open, acknowledged] = await Promise.all([
+        DomainStateRepository.queryAllEqual<ClinicalOpenItemProjection>(
+          context.tenantId,
+          'clinicalOpenItems',
+          'status',
+          'OPEN'
+        ),
+        DomainStateRepository.queryAllEqual<ClinicalOpenItemProjection>(
+          context.tenantId,
+          'clinicalOpenItems',
+          'status',
+          'ACKNOWLEDGED'
+        ),
+      ]);
+      rawItems = [...open, ...acknowledged];
+    } else {
+      const ownershipKeys = Array.from(
+        new Set([
+          context.actorId,
+          ...Array.from(departments),
+          ...Array.from(roles),
+        ])
+      ).filter(Boolean);
 
-    const items = snapshot.docs
-      .map((doc) => doc.data() as ClinicalOpenItemProjection)
+      const ownershipRows = await Promise.all(
+        ownershipKeys.map((ownerId) =>
+          DomainStateRepository.queryAllEqual<ClinicalOpenItemProjection>(
+            context.tenantId,
+            'clinicalOpenItems',
+            'ownerId',
+            ownerId
+          )
+        )
+      );
+      const byId = new Map<string, ClinicalOpenItemProjection>();
+      for (const entry of ownershipRows.flat()) {
+        if (entry.status !== 'OPEN' && entry.status !== 'ACKNOWLEDGED') continue;
+        byId.set(entry.openItemId, entry);
+      }
+      rawItems = [...byId.values()];
+    }
+
+    const items = rawItems
       .filter((entry) => {
         if (roles.has('SYSTEM_ADMIN')) return true;
         if (entry.ownerType === 'CONSULTANT') {

@@ -136,6 +136,17 @@ describe('OPD-RP10 diagnostic payment gate', () => {
     expect(bootstrap).toContain('isFullFinanceRole');
   });
 
+  test('projection workers preserve governed diagnostic events in patient timeline', async () => {
+    const projections = await source(
+      'lib/backend/projections/projection-workers.ts'
+    );
+
+    expect(projections).toContain("'INVESTIGATION_ORDERED_PAYMENT_LOCKED'");
+    expect(projections).toContain("'INVESTIGATION_ORDERED_STAT_OVERRIDE'");
+    expect(projections).toContain("case 'INVESTIGATION_ORDERED':");
+    expect(projections).toContain('Investigation ordered:');
+  });
+
   test('billing UI does not invent journal account postings', async () => {
     const billing = await source('components/opd/OpdBillingLedger.tsx');
 

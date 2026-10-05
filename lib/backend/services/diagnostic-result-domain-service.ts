@@ -173,6 +173,13 @@ export class DiagnosticResultDomainService {
       };
     }
 
+    const status = reportStatus(payload.reportStatus);
+    const postFinalRevision =
+      order.worklistStatus === 'FINALIZED' &&
+      ['AMENDED', 'CORRECTED'].includes(status) &&
+      Boolean(order.latestDiagnosticReportId) &&
+      Boolean(Number(order.revenueRecognizedAt || 0));
+
     const trustedIntegrationResult =
       integrationService &&
       ['EXTERNAL_HL7', 'LAB_SYSTEM', 'RADIOLOGY_SYSTEM'].includes(
@@ -182,7 +189,10 @@ export class DiagnosticResultDomainService {
       ? ['READY_FOR_EXECUTION', 'SPECIMEN_COLLECTED', 'IN_PROCESSING']
       : ['IN_PROCESSING'];
 
-    if (!allowedResultWorklistStates.includes(order.worklistStatus)) {
+    if (
+      !postFinalRevision &&
+      !allowedResultWorklistStates.includes(order.worklistStatus)
+    ) {
       return {
         success: false,
         commandId,
@@ -239,7 +249,6 @@ export class DiagnosticResultDomainService {
         payload.orderId
       );
 
-    const status = reportStatus(payload.reportStatus);
     const issuedAt = payload.issuedAt || Date.now();
     const recognizeRevenue =
       isFinalLike(status) && !Number(order.revenueRecognizedAt || 0);

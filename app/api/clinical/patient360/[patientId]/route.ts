@@ -185,8 +185,10 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
         patientId: normalizedPatientId,
         projection,
         timeline,
+        selectedCareContext: selectedCareContext || null,
         dischargeReadiness,
         deterioration,
+        consultantVisibility,
         freshness: {
           projectionVersion: projection.projectionVersion,
           revision: projection.revision,

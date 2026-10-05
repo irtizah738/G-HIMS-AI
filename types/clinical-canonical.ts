@@ -259,7 +259,17 @@ export interface DiagnosticReport extends ClinicalFactBase {
 
 export interface ClinicalDocument extends ClinicalFactBase {
   clinicalDocumentId: string;
-  documentType: 'SOAP' | 'PROGRESS' | 'CONSULTATION' | 'DISCHARGE' | 'NURSING' | 'OTHER';
+  documentType:
+    | 'SOAP'
+    | 'PROGRESS'
+    | 'CONSULTATION'
+    | 'DISCHARGE'
+    | 'NURSING'
+    | 'ENCOUNTER_SUMMARY'
+    | 'HANDOVER'
+    | 'REFERRAL'
+    | 'PATIENT_INSTRUCTIONS'
+    | 'OTHER';
   status: 'FINAL' | 'AMENDED' | 'ENTERED_IN_ERROR';
   title?: string;
   content: string;

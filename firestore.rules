@@ -347,6 +347,10 @@ service cloud.firestore {
         allow read, write: if false;
       }
 
+      match /medicationReconciliationCopilotArtifacts/{artifactId} {
+        allow read, write: if false;
+      }
+
       match /consultantReviewCheckpoints/{checkpointId} {
         allow read, write: if false;
       }

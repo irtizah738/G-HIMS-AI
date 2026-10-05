@@ -151,23 +151,27 @@ export function OpdDiagnosticOrdersPacs({
   const handleCreateOrder = async (event: React.FormEvent) => {
     event.preventDefault();
 
+    setActionError(null);
     if (!clinicalReason.trim()) {
-      throw new Error(
+      setActionError(
         'CLINICAL_INDICATION_REQUIRED: document the indication before ordering.'
       );
+      return;
     }
     if (selectedItem.consentNeeded) {
-      throw new Error(
+      setActionError(
         'PROCEDURE_SPECIFIC_CONSENT_REQUIRED: this service must use the governed procedure-consent workflow.'
       );
+      return;
     }
     if (
       urgency === 'STAT_EMERGENCY' &&
       statOverrideReason.trim().length < 10
     ) {
-      throw new Error(
+      setActionError(
         'STAT_OVERRIDE_REASON_REQUIRED: document the emergency reason for bypassing the payment execution lock.'
       );
+      return;
     }
 
     const intent: DiagnosticOrderItem = {
@@ -191,7 +195,6 @@ export function OpdDiagnosticOrdersPacs({
     };
 
     setSubmitting(true);
-    setActionError(null);
     try {
       await onAddOrder(intent);
       setStatOverrideReason('');

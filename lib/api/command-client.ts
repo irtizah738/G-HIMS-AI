@@ -198,6 +198,17 @@ export interface RegistrationRequest {
   identifiers?: Array<{ type: string; value: string; issuer?: string }>;
   allergies?: string[];
   chronicConditions?: string[];
+  tariffPlan?: 'OUT_OF_POCKET' | 'CORPORATE_PPO' | 'SEHAT_CARD_UNIVERSAL' | 'STATE_INSURANCE';
+  insuranceDetails?: {
+    payerName?: string;
+    policyNumber?: string;
+    memberId?: string;
+  };
+  consentDecisions?: Array<{
+    consentType: 'GENERAL_OUTPATIENT' | 'DATA_SHARING_HIE';
+    status: 'GRANTED' | 'WITHHELD';
+    method: 'DIGITAL_ATTESTATION';
+  }>;
   encounterType?: string;
   department?: string;
   priority?: string;

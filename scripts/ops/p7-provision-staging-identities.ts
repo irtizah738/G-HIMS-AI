@@ -331,6 +331,7 @@ for (const persona of personas) {
             'ORDER_RADIOLOGY',
             'ORDER_PROCEDURE',
             'SIGN_CLINICAL_NOTE',
+            'ACKNOWLEDGE_CRITICAL_RESULT',
             // Keep the narrower specialty grants explicit for qualification.
             // They no longer imply ordering authority in authorization-context.
             'ORDER_HIGH_COMPLEXITY_LAB',

@@ -407,7 +407,6 @@ export class ClinicalEvidenceService {
 
       if (
         claim.classification !== 'UNCERTAIN' &&
-        claim.classification !== 'DRAFT' &&
         claim.evidenceRefs.length === 0
       ) {
         errors.push(`CLAIM_EVIDENCE_REQUIRED:${claim.claimId}`);

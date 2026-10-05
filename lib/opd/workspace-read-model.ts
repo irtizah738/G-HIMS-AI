@@ -98,9 +98,11 @@ export function adaptAuthoritativeOpdInvoice(
             ? 'RADIOLOGY'
             : source === 'procedure'
               ? 'PROCEDURE'
-              : source === 'consultation'
-                ? 'CONSULTATION'
-                : 'CONSULTATION';
+              : source === 'pharmacy'
+                ? 'PHARMACY'
+                : source === 'consultation'
+                  ? 'CONSULTATION'
+                  : 'CONSULTATION';
       return {
         id: String(item.id || ''),
         serviceCode: String(item.code || ''),

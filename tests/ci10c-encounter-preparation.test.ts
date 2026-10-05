@@ -543,6 +543,7 @@ describe('CI-10C encounter preparation intelligence', () => {
     );
     expect(evidenceService).toContain('EncounterPreparationEvidenceLoader.load');
     expect(evidenceService).toContain('scope: supplemental?.scope');
+    expect(evidenceService).toContain('scope: snapshot.scope');
   });
 
   test('consultation no longer contains fabricated patient facts or simulated AI chart insertion', async () => {
@@ -568,6 +569,22 @@ describe('CI-10C encounter preparation intelligence', () => {
     expect(consultation).toContain("encounter.soap?.subjective || ''");
     expect(consultation).toContain("encounter.soap?.assessment || ''");
     expect(consultation).toContain("encounter.soap?.plan || ''");
+  });
+
+  test('clinical note signing rejects empty SOAP shells and encounter-patient mismatch server-side', async () => {
+    const service = await source(
+      'lib/backend/services/clinical-documentation-domain-service.ts'
+    );
+
+    expect(service).toContain(
+      'section labels alone cannot be signed'
+    );
+    expect(service).toContain(
+      "code: 'ENCOUNTER_PATIENT_MISMATCH'"
+    );
+    expect(service).toContain(
+      "String(encounter.patientId || '') !== payload.patientId"
+    );
   });
 
   test('API and persistence preserve patient/encounter ABAC, immutability, audit and server-only storage', async () => {

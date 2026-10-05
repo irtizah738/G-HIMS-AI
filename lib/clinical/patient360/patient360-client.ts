@@ -3,6 +3,11 @@
 import { AuthClient } from '@/lib/auth/auth-client';
 import { getCachedAuthSession } from '@/lib/offline/auth-storage';
 import { listSecureEdgeEntities } from '@/lib/offline/secure-store';
+import { probeApplicationConnectivity } from '@/lib/offline/connectivity';
+import {
+  cacheAuthoritativeClinicalIntelligence,
+  loadCachedClinicalIntelligence,
+} from '@/lib/clinical/intelligence/clinical-intelligence-edge-cache';
 import type {
   Patient360EncounterSummary,
   Patient360Projection,
@@ -29,6 +34,57 @@ import type {
 } from '@/types/clinical-draft';
 import type { ClinicalCopilotDraftCommandResponse } from '@/types/clinical-copilot-workspace';
 import { executeCommand } from '@/lib/api/command-client';
+
+const CI10I_CLIENT_REQUEST_TIMEOUT_MS = 95_000;
+
+async function assertClinicalIntelligenceOnlineAuthority(): Promise<void> {
+  const connectivity = await probeApplicationConnectivity(4_000);
+  if (!connectivity.isOnline) {
+    throw new Error(
+      'CI10I_ONLINE_AUTHORITY_REQUIRED: Clinical Intelligence generation and governed draft lifecycle actions require authoritative server connectivity.'
+    );
+  }
+}
+
+async function clinicalIntelligenceAuthorizedFetch(
+  input: string,
+  init: RequestInit,
+  tenantId: string
+): Promise<Response> {
+  await assertClinicalIntelligenceOnlineAuthority();
+
+  const controller = new AbortController();
+  const timeout = window.setTimeout(
+    () => controller.abort(),
+    CI10I_CLIENT_REQUEST_TIMEOUT_MS
+  );
+
+  try {
+    return await AuthClient.authorizedFetch(
+      input,
+      {
+        ...init,
+        signal: controller.signal,
+        cache: 'no-store',
+      },
+      tenantId
+    );
+  } catch (error) {
+    if (
+      error instanceof DOMException &&
+      error.name === 'AbortError'
+    ) {
+      throw new Error(
+        `CI10I_CLIENT_REQUEST_TIMEOUT:${CI10I_CLIENT_REQUEST_TIMEOUT_MS}`
+      );
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+export { loadCachedClinicalIntelligence };
 
 export interface Patient360ClinicalView {
   tenantId: string;
@@ -460,7 +516,7 @@ export async function generateLongitudinalClinicalSummary(
   tenantId: string,
   patientId: string
 ): Promise<ClinicalLongitudinalSummaryResponse> {
-  const response = await AuthClient.authorizedFetch(
+  const response = await clinicalIntelligenceAuthorizedFetch(
     `/api/clinical/intelligence/longitudinal-summary?tenantId=${encodeURIComponent(tenantId)}`,
     {
       method: 'POST',
@@ -480,10 +536,20 @@ export async function generateLongitudinalClinicalSummary(
     );
   }
 
-  return {
+  const result = {
     summary: payload.summary,
     evidenceIndex: payload.evidenceIndex || [],
   } as ClinicalLongitudinalSummaryResponse;
+
+  await cacheAuthoritativeClinicalIntelligence(
+    tenantId,
+    patientId,
+    undefined,
+    'LONGITUDINAL',
+    result
+  ).catch(() => undefined);
+
+  return result;
 }
 
 
@@ -495,7 +561,7 @@ export async function generateEncounterPreparationBrief(
     careSetting?: ClinicalCareSetting;
   }
 ): Promise<ClinicalEncounterPreparationResponse> {
-  const response = await AuthClient.authorizedFetch(
+  const response = await clinicalIntelligenceAuthorizedFetch(
     `/api/clinical/intelligence/encounter-preparation?tenantId=${encodeURIComponent(tenantId)}`,
     {
       method: 'POST',
@@ -515,10 +581,20 @@ export async function generateEncounterPreparationBrief(
     );
   }
 
-  return {
+  const result = {
     brief: payload.brief,
     evidenceIndex: payload.evidenceIndex || [],
   } as ClinicalEncounterPreparationResponse;
+
+  await cacheAuthoritativeClinicalIntelligence(
+    tenantId,
+    input.patientId,
+    input.encounterId,
+    'ENCOUNTER_PREP',
+    result
+  ).catch(() => undefined);
+
+  return result;
 }
 
 
@@ -526,7 +602,7 @@ export async function generateClinicalTrendIntelligence(
   tenantId: string,
   patientId: string
 ): Promise<ClinicalTrendIntelligenceResponse> {
-  const response = await AuthClient.authorizedFetch(
+  const response = await clinicalIntelligenceAuthorizedFetch(
     `/api/clinical/intelligence/trends?tenantId=${encodeURIComponent(tenantId)}`,
     {
       method: 'POST',
@@ -546,10 +622,20 @@ export async function generateClinicalTrendIntelligence(
     );
   }
 
-  return {
+  const result = {
     artifact: payload.artifact,
     evidenceIndex: payload.evidenceIndex || [],
   } as ClinicalTrendIntelligenceResponse;
+
+  await cacheAuthoritativeClinicalIntelligence(
+    tenantId,
+    patientId,
+    undefined,
+    'TRENDS',
+    result
+  ).catch(() => undefined);
+
+  return result;
 }
 
 
@@ -561,7 +647,7 @@ export async function generateMedicationReconciliationCopilot(
     careSetting?: ClinicalCareSetting;
   }
 ): Promise<MedicationReconciliationCopilotResponse> {
-  const response = await AuthClient.authorizedFetch(
+  const response = await clinicalIntelligenceAuthorizedFetch(
     `/api/clinical/intelligence/medication-reconciliation?tenantId=${encodeURIComponent(tenantId)}`,
     {
       method: 'POST',
@@ -581,10 +667,20 @@ export async function generateMedicationReconciliationCopilot(
     );
   }
 
-  return {
+  const result = {
     artifact: payload.artifact,
     evidenceIndex: payload.evidenceIndex || [],
   } as MedicationReconciliationCopilotResponse;
+
+  await cacheAuthoritativeClinicalIntelligence(
+    tenantId,
+    input.patientId,
+    input.encounterId,
+    'MEDICATIONS',
+    result
+  ).catch(() => undefined);
+
+  return result;
 }
 
 
@@ -598,7 +694,7 @@ export async function generateGovernedClinicalDraft(
     idempotencyKey: string;
   }
 ): Promise<ClinicalDraftGenerationResponse> {
-  const response = await AuthClient.authorizedFetch(
+  const response = await clinicalIntelligenceAuthorizedFetch(
     `/api/clinical/intelligence/drafts?tenantId=${encodeURIComponent(tenantId)}`,
     {
       method: 'POST',
@@ -632,7 +728,7 @@ export async function loadGovernedClinicalDraft(
   tenantId: string,
   draftId: string
 ): Promise<ClinicalDraftGenerationResponse> {
-  const response = await AuthClient.authorizedFetch(
+  const response = await clinicalIntelligenceAuthorizedFetch(
     `/api/clinical/intelligence/drafts?tenantId=${encodeURIComponent(
       tenantId
     )}&draftId=${encodeURIComponent(draftId)}`,
@@ -669,6 +765,7 @@ export async function reviewGovernedClinicalDraft(
     reviewNote?: string;
   }
 ): Promise<ClinicalCopilotDraftCommandResponse> {
+  await assertClinicalIntelligenceOnlineAuthority();
   const result = await executeCommand<{
     draft: GovernedClinicalDraft;
     revision: ClinicalDraftRevision;
@@ -696,6 +793,7 @@ export async function approveGovernedClinicalDraft(
     approvalAttestation: true;
   }
 ): Promise<ClinicalCopilotDraftCommandResponse> {
+  await assertClinicalIntelligenceOnlineAuthority();
   const result = await executeCommand<GovernedClinicalDraft>({
     tenantId,
     commandType: 'ApproveClinicalDraftCommand',
@@ -720,6 +818,7 @@ export async function signGovernedClinicalDraft(
     signatureAttestation: true;
   }
 ): Promise<ClinicalCopilotDraftCommandResponse> {
+  await assertClinicalIntelligenceOnlineAuthority();
   const result = await executeCommand<{
     draft: GovernedClinicalDraft;
     evidenceId: string;
@@ -753,6 +852,7 @@ export async function rejectGovernedClinicalDraft(
     reason: string;
   }
 ): Promise<ClinicalCopilotDraftCommandResponse> {
+  await assertClinicalIntelligenceOnlineAuthority();
   const result = await executeCommand<GovernedClinicalDraft>({
     tenantId,
     commandType: 'RejectClinicalDraftCommand',

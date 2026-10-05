@@ -461,6 +461,10 @@ export class ClinicalOrderDomainService {
       billingInvoiceId: invoiceId,
       chargeId,
       deferredRevenueJournalId,
+      deferredRevenueAccountCode: catalog.deferredRevenueAccountCode,
+      revenueAccountCode: catalog.revenueAccountCode,
+      netRevenueMinorUnits: netBeforeTaxMinor,
+      taxMinorUnits: taxMinor,
       ...(isStat
         ? {
             statOverrideReason: payload.statOverrideReason!.trim(),

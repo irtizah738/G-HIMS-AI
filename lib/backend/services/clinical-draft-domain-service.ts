@@ -16,6 +16,7 @@ import type {
   ClinicalDraftType,
   GovernedClinicalDraft,
 } from '@/types/clinical-draft';
+import { CLINICAL_SAFETY_POLICY_VERSION } from '@/types/clinical-intelligence-safety';
 
 export interface ReviewClinicalDraftPayload {
   draftId: string;
@@ -486,6 +487,23 @@ export class ClinicalDraftDomainService {
           const revision = current.revision as unknown as ClinicalDraftRevision;
           const encounter = current.encounter || {};
           const patient360 = current.patient360 || {};
+
+          if (
+            draft.safetyGateStatus !== 'PASSED' ||
+            !draft.safetyEvaluationId ||
+            draft.safetyPolicyVersion !== CLINICAL_SAFETY_POLICY_VERSION
+          ) {
+            throw new AtomicMutationRejectedError(
+              'CI10H_SAFETY_EVALUATION_REQUIRED',
+              'This governed draft predates or does not satisfy the current clinical intelligence safety policy. Generate and review a new draft before signing.',
+              {
+                safetyGateStatus: draft.safetyGateStatus || null,
+                safetyEvaluationId: draft.safetyEvaluationId || null,
+                draftSafetyPolicyVersion: draft.safetyPolicyVersion || null,
+                requiredSafetyPolicyVersion: CLINICAL_SAFETY_POLICY_VERSION,
+              }
+            );
+          }
 
           if (
             Number(patient360.revision || 0) !== draft.patient360Revision ||

@@ -114,6 +114,50 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (generalConsent.status !== 'GRANTED') {
+      return NextResponse.json(
+        {
+          success: false,
+          code: 'GENERAL_OPD_CONSENT_REQUIRED',
+          error:
+            'This command creates an OPD encounter and queue token; General OPD Care consent must be granted before that care workflow can be opened.',
+        },
+        { status: 409 }
+      );
+    }
+
+    const requestedEncounterType = String(body.encounterType || 'OPD').trim().toUpperCase();
+    const requestedTariffPlan = String(body.tariffPlan || '').trim().toUpperCase();
+    const allowedTariffPlans = new Set([
+      'OUT_OF_POCKET',
+      'CORPORATE_PPO',
+      'SEHAT_CARD_UNIVERSAL',
+      'STATE_INSURANCE',
+    ]);
+
+    if (!allowedTariffPlans.has(requestedTariffPlan)) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: 'INVALID_TARIFF_PLAN',
+          error: 'A supported tariff plan is required for OPD encounter registration.',
+        },
+        { status: 400 }
+      );
+    }
+
+    if (requestedEncounterType === 'OPD' && requestedTariffPlan !== 'OUT_OF_POCKET') {
+      return NextResponse.json(
+        {
+          success: false,
+          code: 'OPD_PILOT_PAYER_NOT_SUPPORTED',
+          error:
+            'The controlled OPD pilot currently supports OUT_OF_POCKET cash billing only.',
+        },
+        { status: 409 }
+      );
+    }
+
     const normalizedParams: RegisterPatientEncounterParams = {
       tenantId: context.tenantId,
       commandId: String(body.commandId || `cmd_${crypto.randomUUID()}`),

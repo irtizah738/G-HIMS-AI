@@ -1,5 +1,12 @@
 import { FieldPath, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import { getAdminFirestore } from '@/server/firebase/admin';
+import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
+import { TransactionManager } from '@/lib/backend/transactions/transaction-manager';
+
+function canReadEphemeralRepository(): boolean {
+  const mode = getRuntimeMode();
+  return mode === 'TEST' || mode === 'DEMO';
+}
 
 export class DomainStateRepository {
   public static isAvailable(): boolean {
@@ -12,7 +19,14 @@ export class DomainStateRepository {
     documentId: string
   ): Promise<T | null> {
     const db = getAdminFirestore();
-    if (!db) return null;
+    if (!db) {
+      if (!canReadEphemeralRepository()) return null;
+      return TransactionManager.getEphemeralStateByCollectionForTesting(
+        tenantId,
+        collectionName,
+        documentId
+      ) as T | null;
+    }
 
     const snapshot = await db
       .collection('tenants')
@@ -30,7 +44,13 @@ export class DomainStateRepository {
     limit = 500
   ): Promise<T[]> {
     const db = getAdminFirestore();
-    if (!db) return [];
+    if (!db) {
+      if (!canReadEphemeralRepository()) return [];
+      return TransactionManager.getEphemeralCollectionForTesting(
+        tenantId,
+        collectionName
+      ).slice(0, limit) as T[];
+    }
 
     const snapshot = await db
       .collection('tenants')
@@ -50,7 +70,15 @@ export class DomainStateRepository {
     limit = 100
   ): Promise<T[]> {
     const db = getAdminFirestore();
-    if (!db) return [];
+    if (!db) {
+      if (!canReadEphemeralRepository()) return [];
+      return TransactionManager.getEphemeralCollectionForTesting(
+        tenantId,
+        collectionName
+      )
+        .filter((row) => row[field] === value)
+        .slice(0, limit) as T[];
+    }
 
     const snapshot = await db
       .collection('tenants')
@@ -71,7 +99,20 @@ export class DomainStateRepository {
     options: { pageSize?: number; maxRows?: number } = {}
   ): Promise<T[]> {
     const db = getAdminFirestore();
-    if (!db) return [];
+    if (!db) {
+      if (!canReadEphemeralRepository()) return [];
+      const maxRows = Math.max(1, options.maxRows || 50000);
+      const rows = TransactionManager.getEphemeralCollectionForTesting(
+        tenantId,
+        collectionName
+      ).filter((row) => row[field] === value);
+      if (rows.length > maxRows) {
+        throw new Error(
+          `DOMAIN_QUERY_LIMIT_EXCEEDED:${collectionName}:${field}:${maxRows}`
+        );
+      }
+      return rows as T[];
+    }
 
     const pageSize = Math.max(1, Math.min(500, options.pageSize || 500));
     const maxRows = Math.max(pageSize, options.maxRows || 50000);

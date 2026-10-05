@@ -18,6 +18,7 @@ export interface OpdBillingReconciliation {
   totalPatientDueMinorUnits: number;
   totalPaidMinorUnits: number;
   totalOutstandingMinorUnits: number;
+  billingMutationSequence: number;
   snapshotFingerprint: string;
   reconciledBy: string;
   reconciledAt: number;

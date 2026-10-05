@@ -1,18 +1,11 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   DollarSign,
   Receipt,
-  CreditCard,
-  Building,
   CheckCircle2,
-  AlertCircle,
-  FileCheck,
-  QrCode,
   ShieldCheck,
-  Layers,
-  ArrowRight,
 } from 'lucide-react';
 import {
   ComprehensiveOpdEncounter,
@@ -36,19 +29,23 @@ export function OpdBillingLedger({
   onSettlePayment,
 }: OpdBillingLedgerProps) {
   const [selectedPaymentMode, setSelectedPaymentMode] = useState<PaymentMode>('CASH');
-  const [paymentAmount, setPaymentAmount] = useState<number>(invoice.patientCopayAmountMinorUnits / 100);
-  const [transactionRef, setTransactionRef] = useState<string>(`TXN-${Date.now().toString().slice(-6)}`);
-  const [cashierName, setCashierName] = useState<string>('Cashier Bilal Malik (Counter 3)');
+  const [paymentAmount, setPaymentAmount] = useState<number>(
+    invoice.balanceDueMinorUnits / 100
+  );
+  const [transactionRef, setTransactionRef] = useState<string>(
+    `TXN-${Date.now().toString().slice(-6)}`
+  );
+  const [cashierName, setCashierName] = useState<string>('');
+
+  useEffect(() => {
+    setPaymentAmount(invoice.balanceDueMinorUnits / 100);
+    setTransactionRef(`TXN-${Date.now().toString().slice(-6)}`);
+  }, [invoice.id, invoice.balanceDueMinorUnits]);
 
   const grossTotal = invoice.totalAmountMinorUnits / 100;
   const payerPortion = invoice.payerCoverageAmountMinorUnits / 100;
   const copayDue = invoice.patientCopayAmountMinorUnits / 100;
   const balanceDue = invoice.balanceDueMinorUnits / 100;
-
-  // General Ledger double-entry preview
-  const glDebits = grossTotal;
-  const glCredits = grossTotal;
-  const isGlBalanced = glDebits === glCredits;
 
   const handleSettle = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -66,7 +63,7 @@ export function OpdBillingLedger({
       status: 'CAPTURED',
       processedAt: Date.now(),
       processedBy: cashierName,
-      glJournalEntryId: `JE-OPD-GL-${Date.now().toString().slice(-6)}`,
+      glJournalEntryId: '',
     };
 
     try {
@@ -84,10 +81,12 @@ export function OpdBillingLedger({
           <div>
             <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
               <DollarSign className="w-5 h-5 text-teal-600" />
-              Universal Journal Financial Settlement & Double-Entry Ledger
+              Authoritative Patient Financial Settlement
             </h2>
             <p className="text-xs text-slate-500">
-              Invoice #{invoice.invoiceNumber} | Tariff: <strong>{invoice.payerTariffPlan.replace(/_/g, ' ')}</strong> | Payer: {encounter.insuranceDetails?.payerName || 'Direct Private'}
+              Invoice #{invoice.invoiceNumber} | Purpose:{' '}
+              <strong>{(invoice.billingPurpose || 'FINAL_ENCOUNTER').replace(/_/g, ' ')}</strong>{' '}
+              | Tariff: <strong>{invoice.payerTariffPlan.replace(/_/g, ' ')}</strong>
             </p>
           </div>
 
@@ -175,26 +174,17 @@ export function OpdBillingLedger({
             </table>
           </div>
 
-          {/* Double Entry General Ledger Verification Block */}
-          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs space-y-2">
-            <div className="flex items-center justify-between font-bold">
-              <span className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300">
-                <ShieldCheck className="w-4 h-4 text-teal-600" />
-                SAP-Style General Ledger Journal Posting (Double-Entry Invariance)
-              </span>
-              <span className="text-[10px] font-mono text-emerald-600 font-extrabold">
-                {isGlBalanced ? 'BALANCED (Σ Dr = Σ Cr)' : 'UNBALANCED'}
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-2 font-mono text-[11px] text-slate-600 dark:text-slate-400">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs dark:border-slate-700 dark:bg-slate-800/60">
+            <div className="flex items-start gap-2 text-slate-700 dark:text-slate-300">
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-teal-600" />
               <div>
-                <p className="font-bold text-slate-800 dark:text-slate-200">DEBITS:</p>
-                <p>• 1001 Cash on Hand / Petty Cash: PKR {copayDue.toLocaleString()}</p>
-                <p>• 1100 AR Insurance Payer ({encounter.insuranceDetails?.payerName || 'Direct'}): PKR {payerPortion.toLocaleString()}</p>
-              </div>
-              <div>
-                <p className="font-bold text-slate-800 dark:text-slate-200">CREDITS:</p>
-                <p>• 4001 OPD Consultation & Diagnostic Revenue: PKR {grossTotal.toLocaleString()}</p>
+                <p className="font-bold">Server-owned double-entry posting</p>
+                <p className="mt-1 text-[11px] text-slate-500">
+                  The browser does not calculate or assert ledger accounts. Cash
+                  receipt, AR allocation, diagnostic clearance, deferred-revenue
+                  handling and journal IDs are committed by the finance command
+                  boundary and returned as authoritative evidence.
+                </p>
               </div>
             </div>
           </div>
@@ -227,6 +217,9 @@ export function OpdBillingLedger({
               </label>
               <input
                 type="number"
+                min={0.01}
+                max={balanceDue}
+                step={0.01}
                 value={paymentAmount}
                 onChange={(e) => setPaymentAmount(Number(e.target.value))}
                 className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-black text-teal-600"
@@ -247,12 +240,13 @@ export function OpdBillingLedger({
 
             <div>
               <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
-                Cashier Officer
+                Cashier display name (optional)
               </label>
               <input
                 type="text"
                 value={cashierName}
-                onChange={(e) => setCashierName(e.target.value)}
+                onChange={(e) => setCashierName(e.target.value)
+                placeholder="Authenticated actor identity is server-authoritative"}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
               />
             </div>
@@ -263,7 +257,7 @@ export function OpdBillingLedger({
               className="w-full py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <CheckCircle2 className="w-4 h-4" />
-              Collect Cash & Post Balanced General Ledger
+              Collect Cash Through Finance Authority
             </button>
           </form>
 

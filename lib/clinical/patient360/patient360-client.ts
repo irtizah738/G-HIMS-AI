@@ -128,13 +128,14 @@ async function loadLocalPatient360(
 
 export async function loadPatient360ClinicalView(
   tenantId: string,
-  patientId: string
+  patientId: string,
+  options: { careSetting?: ClinicalCareSetting; encounterId?: string } = {}
 ): Promise<Patient360ClinicalView> {
   let serverResponseStatus: number | null = null;
 
   try {
     const response = await AuthClient.authorizedFetch(
-      `/api/clinical/patient360/${encodeURIComponent(patientId)}?tenantId=${encodeURIComponent(tenantId)}`,
+      `/api/clinical/patient360/${encodeURIComponent(patientId)}?tenantId=${encodeURIComponent(tenantId)}${options.careSetting ? `&careSetting=${encodeURIComponent(options.careSetting)}` : ''}${options.encounterId ? `&encounterId=${encodeURIComponent(options.encounterId)}` : ''}`,
       {
         method: 'GET',
         cache: 'no-store',
@@ -155,10 +156,14 @@ export async function loadPatient360ClinicalView(
       patientId: payload.patientId,
       projection: payload.projection as Patient360Projection,
       timeline: (payload.timeline || []) as Patient360TimelineItem[],
+      selectedCareContext:
+        (payload.selectedCareContext as Patient360EncounterSummary | null) || null,
       dischargeReadiness:
         (payload.dischargeReadiness as DischargeReadinessProjection | null) || null,
       deterioration:
         (payload.deterioration as DeteriorationProjection | null) || null,
+      consultantVisibility:
+        (payload.consultantVisibility as ConsultantPatientStateProjection | null) || null,
       source: 'SERVER',
       freshness: payload.freshness || freshness(payload.projection),
     };
@@ -173,7 +178,7 @@ export async function loadPatient360ClinicalView(
       throw error;
     }
 
-    const local = await loadLocalPatient360(tenantId, patientId);
+    const local = await loadLocalPatient360(tenantId, patientId, options);
     if (local) return local;
     throw error;
   }

@@ -497,12 +497,15 @@ describe('CI-10B longitudinal clinical summary', () => {
     );
   });
 
-  test('API and Patient 360 UI enforce authenticated evidence inspection rather than direct Firestore access', async () => {
+  test('API and canonical Patient 360 workspace enforce authenticated evidence inspection rather than direct Firestore access', async () => {
     const route = await source(
       'app/api/clinical/intelligence/longitudinal-summary/route.ts'
     );
-    const panel = await source(
-      'components/patient360/ClinicalLongitudinalSummaryPanel.tsx'
+    const workspace = await source(
+      'components/patient360/ClinicalCopilotWorkspace.tsx'
+    );
+    const evidence = await source(
+      'components/patient360/ClinicalCopilotEvidencePanel.tsx'
     );
     const view = await source(
       'components/patient360/Patient360View.tsx'
@@ -512,13 +515,14 @@ describe('CI-10B longitudinal clinical summary', () => {
     expect(route).toContain('assertPatient360PatientAccess');
     expect(route).toContain('ClinicalLongitudinalSummaryService');
     expect(route).toContain('ClinicalEvidenceService.getSnapshot');
-    expect(panel).toContain('sourceEventIds');
-    expect(panel).toContain('contentHash');
-    expect(panel).toContain('JSON.stringify(evidence.content');
-    expect(panel).toContain(
-      'will not generate a new summary from stale edge data'
+    expect(workspace).toContain('generateLongitudinalClinicalSummary');
+    expect(workspace).toContain(
+      'CI-10G will not generate new summaries, trends'
     );
-    expect(view).toContain('ClinicalLongitudinalSummaryPanel');
+    expect(evidence).toContain('sourceEventIds');
+    expect(evidence).toContain('contentHash');
+    expect(evidence).toContain('JSON.stringify(item.content');
+    expect(view).toContain('ClinicalCopilotWorkspace');
   });
 
   test('CI-10B remains provider-neutral and does not add a model side door', async () => {

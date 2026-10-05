@@ -1160,7 +1160,132 @@ export function OpdMasterWorkspace() {
   // optimistic balance, but it cannot skip the server-owned billing stage or
   // advance to disposition until the local invoice is fully settled.
   const handleSettlePayment = async (payment: PaymentTransaction) => {
-    if (!activeEncounter.invoice) throw new Error('INVOICE_REQUIRED');
+    const consultationInvoice = activeEncounter.consultationInvoice;
+    if (
+      consultationInvoice &&
+      consultationInvoice.billingPurpose === 'OPD_CONSULTATION' &&
+      activeEncounter.currentStage === 'REGISTRATION'
+    ) {
+      if (payment.mode !== 'CASH') {
+        throw new Error(
+          'EXTERNAL_PAYMENT_GATEWAY_REQUIRED: only cash settlement is enabled for the offline-first pilot.'
+        );
+      }
+      if (!Number.isSafeInteger(payment.amountMinorUnits) || payment.amountMinorUnits <= 0) {
+        throw new Error('INVALID_PAYMENT_AMOUNT: enter a positive whole minor-unit amount.');
+      }
+
+      const currentPaid = consultationInvoice.payments.reduce(
+        (sum, item) => sum + item.amountMinorUnits,
+        0
+      );
+      const outstanding = Math.max(
+        0,
+        consultationInvoice.patientCopayAmountMinorUnits - currentPaid
+      );
+      if (payment.amountMinorUnits > outstanding) {
+        throw new Error(
+          'PAYMENT_EXCEEDS_BALANCE: cash collection cannot exceed the outstanding consultation balance.'
+        );
+      }
+
+      const result = await executeActiveTenantCommand<{
+        receipt: { receiptId: string; journalId: string };
+        journal: { journalId: string };
+        invoice: Record<string, any>;
+        encounter?: Record<string, any>;
+      }>(
+        'RecordCashReceiptCommand',
+        {
+          receiptId: payment.id,
+          invoiceId: consultationInvoice.id,
+          encounterId: activeEncounter.id,
+          patientId: activeEncounter.patientId,
+          amountMinorUnits: payment.amountMinorUnits,
+          currency: 'PKR',
+          referenceNumber: payment.referenceNumber,
+          collectedAt: payment.processedAt,
+          cashierName: payment.processedBy,
+        },
+        {
+          idempotencyKey: `opd-consultation-cash-receipt:${payment.id}`,
+          offlineQueue: {
+            enabled: true,
+            collection: 'cashReceipts',
+            resourceId: payment.id,
+            action: 'CREATE',
+            optimisticCache: false,
+          },
+        }
+      );
+
+      if (!result.success || !result.data) {
+        throw new Error(result.error?.message || 'Consultation cash receipt command failed.');
+      }
+
+      const governedPayment: PaymentTransaction = {
+        ...payment,
+        invoiceId: consultationInvoice.id,
+        glJournalEntryId:
+          result.data.journal?.journalId ||
+          result.data.receipt?.journalId ||
+          '',
+      };
+      const totalPaid = currentPaid + governedPayment.amountMinorUnits;
+      const newBalance = Math.max(
+        0,
+        consultationInvoice.patientCopayAmountMinorUnits - totalPaid
+      );
+      const isSettled = newBalance === 0;
+
+      setEncounters((prev) =>
+        prev.map((encounter) =>
+          encounter.id === activeEncounter.id
+            ? {
+                ...encounter,
+                consultationInvoice: {
+                  ...consultationInvoice,
+                  payments: [...consultationInvoice.payments, governedPayment],
+                  balanceDueMinorUnits: newBalance,
+                  settlementStatus: isSettled ? 'SETTLED' : 'PARTIALLY_PAID',
+                  ...(isSettled ? { settledAt: Date.now() } : {}),
+                },
+                financialClearance: {
+                  ingressFeePaid: isSettled,
+                  ingressReceiptNumber: isSettled
+                    ? governedPayment.referenceNumber
+                    : undefined,
+                  amountPaid: totalPaid / 100,
+                },
+                stageProgress: {
+                  ...encounter.stageProgress,
+                  BILLING_AUTHORIZATION: {
+                    status: isSettled ? 'COMPLETED' : 'ACTIVE',
+                    enteredAt:
+                      encounter.stageProgress?.BILLING_AUTHORIZATION?.enteredAt ||
+                      Date.now(),
+                    ...(isSettled
+                      ? {
+                          completedAt: Date.now(),
+                          completedBy: governedPayment.processedBy,
+                        }
+                      : {}),
+                  },
+                  QUEUE_ASSIGNMENT: {
+                    status: isSettled ? 'ACTIVE' : 'PENDING',
+                    ...(isSettled ? { enteredAt: Date.now() } : {}),
+                  },
+                },
+              }
+            : encounter
+        )
+      );
+
+      setActiveTab(isSettled ? 'QUEUE' : 'BILLING');
+      return;
+    }
+
+    if (!activeEncounter.invoice) throw new Error('FINAL_INVOICE_REQUIRED');
     if (payment.mode !== 'CASH') {
       throw new Error(
         'EXTERNAL_PAYMENT_GATEWAY_REQUIRED: only cash settlement is enabled for the offline-first pilot.'
@@ -1243,7 +1368,10 @@ export function OpdMasterWorkspace() {
 
     const governedPayment: PaymentTransaction = {
       ...payment,
-      glJournalEntryId: `je_cash_${payment.id}`,
+      glJournalEntryId:
+        result.data?.journal?.journalId ||
+        result.data?.receipt?.journalId ||
+        '',
     };
     const totalPaid = currentPaid + governedPayment.amountMinorUnits;
     const newBalance = Math.max(
@@ -1845,10 +1973,13 @@ export function OpdMasterWorkspace() {
       )}
 
       {/* 10. Billing, Payer Split & General Ledger Settlement */}
-      {activeTab === 'BILLING' && canAccessTab('BILLING') && activeEncounter && activeEncounter.invoice && (
+      {activeTab === 'BILLING' &&
+        canAccessTab('BILLING') &&
+        activeEncounter &&
+        (activeEncounter.consultationInvoice || activeEncounter.invoice) && (
         <OpdBillingLedger
           encounter={activeEncounter}
-          invoice={activeEncounter.invoice}
+          invoice={(activeEncounter.consultationInvoice || activeEncounter.invoice)!}
           canSettlePayment={canSettlePayment}
           onSettlePayment={(payment) => handleSettlePayment(payment)}
         />

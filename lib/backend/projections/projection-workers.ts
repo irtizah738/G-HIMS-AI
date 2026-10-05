@@ -11,6 +11,7 @@ import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
 import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
 import { DischargeReadinessService } from '@/lib/clinical/intelligence/discharge-readiness-service';
 import { ClinicalDeteriorationService } from '@/lib/clinical/intelligence/clinical-deterioration-service';
+import { MedicationSafetyService } from '@/lib/clinical/intelligence/medication-safety-service';
 import { ConsultantAttentionProjectionService } from '@/lib/clinical/intelligence/consultant-attention-projection-service';
 
 export interface ConsumableEvent {
@@ -327,6 +328,7 @@ export class ProjectionWorkers {
       await Patient360ProjectionService.refreshFromEvent(event);
       await DischargeReadinessService.refreshFromEvent(event);
       await ClinicalDeteriorationService.refreshFromEvent(event);
+      await MedicationSafetyService.refreshFromEvent(event);
       await ConsultantAttentionProjectionService.refreshFromEvent(event);
     }
   }
@@ -438,6 +440,8 @@ export class ProjectionWorkers {
       'dischargeReadinessProjections',
       'deteriorationCheckpoints',
       'deteriorationProjections',
+      'medicationSafetyCheckpoints',
+      'medicationSafetyProjections',
       'consultantAttentionCheckpoints',
       'clinicalOpenItems',
       'clinicalEscalations',
@@ -458,6 +462,10 @@ export class ProjectionWorkers {
       orderedEvents
     );
     await ClinicalDeteriorationService.rebuildTenantFromEvents(
+      tenantId,
+      orderedEvents
+    );
+    await MedicationSafetyService.rebuildTenantFromEvents(
       tenantId,
       orderedEvents
     );

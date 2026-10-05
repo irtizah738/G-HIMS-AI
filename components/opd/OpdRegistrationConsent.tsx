@@ -36,9 +36,7 @@ export function OpdRegistrationConsent({
   const [age, setAge] = useState<number | ''>(initialData?.age ?? '');
   const [nationalId, setNationalId] = useState<string>(initialData?.nationalId || '');
   const [passportNumber, setPassportNumber] = useState<string>(initialData?.passportNumber || '');
-  const [maritalStatus, setMaritalStatus] = useState<
-    'Single' | 'Married' | 'Divorced' | 'Widowed' | ''
-  >('');
+  const maritalStatus: PatientDemographics['maritalStatus'] = 'Unknown';
   const [nationality, setNationality] = useState<string>('');
   const [primaryLanguage, setPrimaryLanguage] = useState<string>('');
   const [occupation, setOccupation] = useState<string>('');
@@ -95,8 +93,8 @@ export function OpdRegistrationConsent({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!gender || age === '' || !tariffPlan || !maritalStatus) {
-      alert('Complete gender, date of birth, marital status and tariff class before registration.');
+    if (!gender || age === '' || !tariffPlan) {
+      alert('Complete gender, date of birth and tariff class before registration.');
       return;
     }
     if (tariffPlan !== 'OUT_OF_POCKET') {
@@ -107,14 +105,6 @@ export function OpdRegistrationConsent({
       alert('Record an explicit Grant or Withhold decision for each registration consent.');
       return;
     }
-    if (
-      (tariffPlan === 'CORPORATE_PPO' || tariffPlan === 'STATE_INSURANCE') &&
-      (!payerName.trim() || !policyNumber.trim())
-    ) {
-      alert('Payer name and policy/card number are required for the selected payer plan.');
-      return;
-    }
-
     const consentDecisions: ConsentCaptureDecision[] = [
       {
         consentType: 'GENERAL_OUTPATIENT',
@@ -331,6 +321,7 @@ export function OpdRegistrationConsent({
               <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">Residential Address</label>
               <input
                 type="text"
+                required
                 value={residentialAddress}
                 onChange={(e) => setResidentialAddress(e.target.value)}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
@@ -382,10 +373,10 @@ export function OpdRegistrationConsent({
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
               >
                 <option value="">Select tariff class</option>
-                <option value="CORPORATE_PPO">Corporate PPO</option>
-                <option value="SEHAT_CARD_UNIVERSAL">Sehat Sahulat Universal Health Card (100% Free)</option>
-                <option value="OUT_OF_POCKET">Private Out-of-Pocket Cash</option>
-                <option value="STATE_INSURANCE">State Civil Employee Health Scheme</option>
+                <option value="OUT_OF_POCKET">Private Out-of-Pocket Cash — pilot enabled</option>
+                <option value="CORPORATE_PPO" disabled>Corporate PPO — not enabled in controlled pilot</option>
+                <option value="SEHAT_CARD_UNIVERSAL" disabled>Sehat Sahulat — not enabled in controlled pilot</option>
+                <option value="STATE_INSURANCE" disabled>State insurance — not enabled in controlled pilot</option>
               </select>
             </div>
             <div>

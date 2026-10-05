@@ -174,7 +174,14 @@ function authorizedCollections(roles: string[]): string[] {
   }
 
   if (
-    ['BILLING_CLERK', 'BILLING_ADMIN', 'FINANCE', 'REVENUE_CYCLE']
+    [
+      'BILLING_CLERK',
+      'BILLING_ADMIN',
+      'CASHIER',
+      'FINANCE_MANAGER',
+      'FINANCE',
+      'REVENUE_CYCLE',
+    ]
       .some((role) => normalized.has(role))
   ) {
     add(...BILLING_COLLECTIONS);

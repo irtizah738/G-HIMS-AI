@@ -69,6 +69,13 @@ export class DiagnosticResultDomainService {
     idempotencyKey: string,
     payload: RecordDiagnosticResultPayload
   ): Promise<CommandResult> {
+    const integrationService = context.roles.some(
+      (role) => String(role).toUpperCase() === 'INTEGRATION_SERVICE'
+    );
+    const resultPrivilege =
+      payload.category === 'RADIOLOGY'
+        ? 'INTERPRET_IMAGING'
+        : 'VERIFY_LAB_RESULT';
     const auth = AuthorizationPipeline.evaluate(context, {
       requiredRoles: [
         'LAB_TECH',
@@ -80,6 +87,7 @@ export class DiagnosticResultDomainService {
         'INTEGRATION_SERVICE',
         'SYSTEM_ADMIN',
       ],
+      ...(integrationService ? {} : { requiredPrivilege: resultPrivilege }),
     });
     if (!auth.authorized) {
       return {

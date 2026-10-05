@@ -585,7 +585,7 @@ export class ConsultantAttentionProjectionService {
       };
       writes.push({
         ref: tenantRef.collection('clinicalOpenItems').doc(next.openItemId),
-        data: sanitizeForFirestore(merged) as Record<string, unknown>,
+        data: sanitizeForFirestore(merged) as unknown as Record<string, unknown>,
       });
     }
 
@@ -675,7 +675,7 @@ export class ConsultantAttentionProjectionService {
       };
       writes.push({
         ref: escalationRef,
-        data: sanitizeForFirestore(nextEscalation) as Record<string, unknown>,
+        data: sanitizeForFirestore(nextEscalation) as unknown as Record<string, unknown>,
       });
     } else if (
       currentEscalation &&

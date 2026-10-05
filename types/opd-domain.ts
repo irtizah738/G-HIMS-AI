@@ -99,12 +99,12 @@ export interface PatientDemographics {
   mrn: string;
   fullName: string;
   preferredName?: string;
-  gender: 'Male' | 'Female' | 'Other';
+  gender: 'Male' | 'Female' | 'Other' | 'Unknown';
   dob: string;
   age: number;
   nationalId: string; // CNIC / SSN
   passportNumber?: string;
-  maritalStatus: 'Single' | 'Married' | 'Divorced' | 'Widowed';
+  maritalStatus: 'Single' | 'Married' | 'Divorced' | 'Widowed' | 'Unknown';
   nationality: string;
   primaryLanguage: string;
   occupation?: string;
@@ -117,7 +117,7 @@ export interface PatientDemographics {
     relation: string;
     phone: string;
   };
-  tariffPlan: 'OUT_OF_POCKET' | 'CORPORATE_PPO' | 'SEHAT_CARD_UNIVERSAL' | 'STATE_INSURANCE';
+  tariffPlan: 'OUT_OF_POCKET' | 'CORPORATE_PPO' | 'SEHAT_CARD_UNIVERSAL' | 'STATE_INSURANCE' | 'UNASSIGNED';
   insuranceDetails?: {
     payerName?: string;
     policyNumber?: string;
@@ -246,7 +246,7 @@ export interface ComprehensiveVitals {
   news2Risk?: 'LOW' | 'LOW_MEDIUM' | 'MEDIUM' | 'HIGH';
   pediatricGrowth?: PediatricGrowthMetrics;
   measuredAt: number;
-  measuredBy: string;
+  measuredBy?: string;
   triageNotes?: string;
 }
 

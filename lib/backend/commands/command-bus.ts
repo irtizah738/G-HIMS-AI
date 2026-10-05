@@ -10,6 +10,7 @@ import { ClinicalDocumentationDomainService } from '../services/clinical-documen
 import { ClinicalDraftDomainService } from '../services/clinical-draft-domain-service';
 import { OpdQueueDomainService } from '../services/opd-queue-domain-service';
 import { OpdBillingDomainService } from '../services/opd-billing-domain-service';
+import { OpdBillingReconciliationDomainService } from '../services/opd-billing-reconciliation-domain-service';
 import { FinanceGlDomainService } from '../services/finance-gl-domain-service';
 import { FinanceArRevenueDomainService } from '../services/finance-ar-revenue-domain-service';
 import { FinanceTreasuryDomainService } from '../services/finance-treasury-domain-service';
@@ -200,6 +201,15 @@ export class CommandBus {
 
         case 'CreateOpdEncounterCommand':
           result = await EncounterDomainService.createOpdEncounter(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'ReconcileOpdBillingCommand':
+          result = await OpdBillingReconciliationDomainService.reconcile(
             context,
             command.commandId,
             command.idempotencyKey,

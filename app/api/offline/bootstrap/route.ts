@@ -226,6 +226,20 @@ function isAdministrativeRole(roles: string[]): boolean {
   return ['SYSTEM_ADMIN', 'ADMINISTRATOR', 'ADMIN'].some((role) => normalized.has(role));
 }
 
+function isBillingRole(roles: string[]): boolean {
+  const normalized = new Set(
+    roles.map((role) => String(role || '').trim().toUpperCase())
+  );
+  return [
+    'BILLING_CLERK',
+    'BILLING_ADMIN',
+    'CASHIER',
+    'FINANCE_MANAGER',
+    'FINANCE',
+    'REVENUE_CYCLE',
+  ].some((role) => normalized.has(role));
+}
+
 function valueMatchesScope(
   value: unknown,
   allowed: Set<string>
@@ -256,8 +270,23 @@ function scopeOfflineCollections(
       .map((value) => String(value || '').trim())
       .filter(Boolean)
   );
+  const billingRole = isBillingRole(context.roles);
+  const billingEncounterIds = new Set(
+    billingRole
+      ? (collections.invoices || [])
+          .map((invoice) => String(invoice.encounterId || '').trim())
+          .filter(Boolean)
+      : []
+  );
 
   const encounters = (collections.encounters || []).filter((encounter) => {
+    const encounterId = String(encounter.id || encounter.encounterId || '').trim();
+    if (billingRole) {
+      if (!encounterId || !billingEncounterIds.has(encounterId)) return false;
+      if (!valueMatchesScope(encounter.facilityId, facilities)) return false;
+      return true;
+    }
+
     if (!valueMatchesScope(encounter.facilityId, facilities)) return false;
     if (!valueMatchesScope(encounter.departmentId, departments)) return false;
 

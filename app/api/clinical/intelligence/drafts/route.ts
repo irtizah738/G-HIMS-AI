@@ -5,6 +5,7 @@ import { DomainStateRepository } from '@/server/repositories/domain-state-reposi
 import { assertPatient360PatientAccess } from '@/lib/clinical/patient360/patient360-access';
 import { ClinicalDraftService } from '@/lib/clinical/intelligence/clinical-draft-service';
 import { ClinicalEvidenceService } from '@/lib/clinical/intelligence/clinical-evidence-service';
+import { observeClinicalIntelligenceOperation } from '@/lib/clinical/intelligence/clinical-intelligence-observability';
 import { CLINICAL_DRAFT_TYPES, type ClinicalDraftType } from '@/types/clinical-draft';
 import type { CommandContext } from '@/lib/backend/types';
 import type { ClinicalCareSetting } from '@/types/consultant-visibility';
@@ -94,13 +95,22 @@ export async function POST(req: NextRequest) {
     }
 
     await assertAccess(context, patientId, encounterId);
-    const result = await ClinicalDraftService.generateAuthoritatively(
-      context,
-      patientId,
-      encounterId,
-      careSetting,
-      draftType,
-      idempotencyKey
+    const result = await observeClinicalIntelligenceOperation(
+      {
+        operation: 'GENERATE_GOVERNED_DRAFT',
+        purpose: 'CLINICAL_DRAFT',
+        tenantId: context.tenantId,
+        correlationId: context.correlationId,
+      },
+      () =>
+        ClinicalDraftService.generateAuthoritatively(
+          context,
+          patientId,
+          encounterId,
+          careSetting,
+          draftType,
+          idempotencyKey
+        )
     );
 
     return NextResponse.json(

@@ -11,6 +11,18 @@ export interface PatientIdentifier {
   issuer: string;
 }
 
+export interface PatientCareContextPointers {
+  activeOpdEncounterIds: string[];
+  activeIpdEncounterId?: string;
+  activeEmergencyEncounterId?: string;
+  activeTelehealthEncounterIds: string[];
+  latestOpdEncounterId?: string;
+  latestIpdEncounterId?: string;
+  latestEmergencyEncounterId?: string;
+  latestTelehealthEncounterId?: string;
+  updatedAt?: number;
+}
+
 export interface PatientMPI {
   id: string;
   tenantId: string;
@@ -27,7 +39,12 @@ export interface PatientMPI {
   version: number;
   status?: 'ACTIVE' | 'MERGED' | 'DECEASED' | 'INACTIVE';
   mergedIntoPatientId?: string;
+  /**
+   * Compatibility pointer for legacy consumers. New care-setting logic must use
+   * activeCareContexts so concurrent OPD/IPD/ED contexts cannot overwrite each other.
+   */
   activeEncounterId?: string;
+  activeCareContexts?: PatientCareContextPointers;
   activeBedId?: string;
   email?: string;
   bloodGroup?: string;

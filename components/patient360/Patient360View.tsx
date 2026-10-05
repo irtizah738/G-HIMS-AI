@@ -21,6 +21,7 @@ import {
 import {
   acknowledgeCriticalDiagnosticResult,
   loadPatient360ClinicalView,
+  recordConsultantPatientReview,
   recordDischargeReadinessReview,
   type Patient360ClinicalView,
 } from '@/lib/clinical/patient360/patient360-client';
@@ -189,12 +190,22 @@ export function Patient360View({
   const [reviewMessage, setReviewMessage] = useState<string | null>(null);
   const [criticalAckReportId, setCriticalAckReportId] = useState<string | null>(null);
   const [criticalAckMessage, setCriticalAckMessage] = useState<string | null>(null);
+  const [careContextRequest, setCareContextRequest] = useState<{
+    careSetting?: 'OPD' | 'IPD' | 'EMERGENCY' | 'TELEHEALTH';
+    encounterId?: string;
+  }>({});
+  const [consultantReviewSubmitting, setConsultantReviewSubmitting] = useState(false);
+  const [consultantReviewMessage, setConsultantReviewMessage] = useState<string | null>(null);
 
   const load = async () => {
     try {
       setLoading(true);
       setError(null);
-      const next = await loadPatient360ClinicalView(tenantId, patientId);
+      const next = await loadPatient360ClinicalView(
+        tenantId,
+        patientId,
+        careContextRequest
+      );
       setView(next);
     } catch (caught) {
       setError(
@@ -209,9 +220,14 @@ export function Patient360View({
 
   useEffect(() => {
     void load();
-    // tenantId/patientId are the identity boundary for this clinical view.
+    // tenant/patient/context are the authority boundary for this clinical view.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenantId, patientId]);
+  }, [
+    tenantId,
+    patientId,
+    careContextRequest.careSetting,
+    careContextRequest.encounterId,
+  ]);
 
   const submitReadinessReview = async (
     outcome: 'ACKNOWLEDGED' | 'ESCALATE' | 'PROCEED_WITH_WARNINGS'
@@ -282,6 +298,47 @@ export function Patient360View({
       );
     } finally {
       setCriticalAckReportId(null);
+    }
+  };
+
+  const recordCurrentConsultantReview = async () => {
+    if (
+      !view?.consultantVisibility ||
+      !view.selectedCareContext ||
+      view.source === 'LOCAL_EDGE'
+    ) {
+      return;
+    }
+
+    try {
+      setConsultantReviewSubmitting(true);
+      setConsultantReviewMessage(null);
+      await recordConsultantPatientReview(tenantId, {
+        patientId,
+        encounterId: view.selectedCareContext.encounterId,
+        careSetting: view.selectedCareContext.careSetting as
+          | 'OPD'
+          | 'IPD'
+          | 'EMERGENCY'
+          | 'TELEHEALTH',
+        patient360Revision: view.freshness.revision,
+        patient360SourceCheckpoint: view.freshness.sourceCheckpoint,
+        reviewedChangeIds: view.consultantVisibility.changes.map(
+          (item) => item.changeId
+        ),
+      });
+      setConsultantReviewMessage(
+        'Current Patient 360 state marked reviewed for this consultant and care context.'
+      );
+      await load();
+    } catch (caught) {
+      setConsultantReviewMessage(
+        caught instanceof Error
+          ? caught.message
+          : 'Unable to record consultant review checkpoint.'
+      );
+    } finally {
+      setConsultantReviewSubmitting(false);
     }
   };
 
@@ -452,7 +509,204 @@ export function Patient360View({
           )}
         </section>
 
-        {projection.activeEncounter && (
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <Stethoscope className="h-4 w-4 text-indigo-600" />
+                <h2 className="text-sm font-bold">Care-setting context</h2>
+              </div>
+              <p className="mt-1 text-xs text-slate-500">
+                Patient 360 remains longitudinal; actions and consultant attention are scoped to the selected encounter.
+              </p>
+            </div>
+            {view.selectedCareContext && (
+              <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-900">
+                <span className="font-bold">{view.selectedCareContext.careSetting}</span>
+                {' · '}
+                <span className="font-mono">{view.selectedCareContext.encounterId}</span>
+                {view.selectedCareContext.department
+                  ? ` · ${view.selectedCareContext.department}`
+                  : ''}
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {[
+              ...projection.careContexts.activeOpdEncounters,
+              ...(projection.careContexts.activeIpdEncounter
+                ? [projection.careContexts.activeIpdEncounter]
+                : []),
+              ...(projection.careContexts.activeEmergencyEncounter
+                ? [projection.careContexts.activeEmergencyEncounter]
+                : []),
+              ...projection.careContexts.activeTelehealthEncounters,
+            ].map((encounter) => {
+              const selected =
+                view.selectedCareContext?.encounterId === encounter.encounterId;
+              return (
+                <button
+                  key={encounter.encounterId}
+                  type="button"
+                  onClick={() =>
+                    setCareContextRequest({
+                      careSetting:
+                        encounter.careSetting === 'UNKNOWN'
+                          ? undefined
+                          : encounter.careSetting,
+                      encounterId: encounter.encounterId,
+                    })
+                  }
+                  className={
+                    selected
+                      ? 'rounded-lg border border-indigo-300 bg-indigo-600 px-3 py-2 text-xs font-semibold text-white'
+                      : 'rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50'
+                  }
+                >
+                  {encounter.careSetting} · {encounter.department || 'Clinical service'}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <ClipboardCheck className="h-4 w-4 text-blue-600" />
+                <h2 className="text-sm font-bold">Consultant attention state</h2>
+              </div>
+              <p className="mt-1 max-w-3xl text-xs text-slate-500">
+                Deterministic changes and unresolved work since this consultant last reviewed the selected care context.
+              </p>
+            </div>
+            {view.consultantVisibility && !offline && (
+              <button
+                type="button"
+                onClick={() => void recordCurrentConsultantReview()}
+                disabled={consultantReviewSubmitting}
+                className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+              >
+                {consultantReviewSubmitting ? 'Recording review…' : 'Mark current state reviewed'}
+              </button>
+            )}
+          </div>
+
+          {view.consultantVisibility ? (
+            <>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                <div className="rounded-xl bg-slate-50 p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-slate-400">Since review</div>
+                  <div className="mt-1 text-xl font-bold">{view.consultantVisibility.unreadClinicalChanges}</div>
+                </div>
+                <div className="rounded-xl bg-slate-50 p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-slate-400">Open items</div>
+                  <div className="mt-1 text-xl font-bold">{view.consultantVisibility.unresolvedItemsCount}</div>
+                </div>
+                <div className="rounded-xl bg-rose-50 p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-rose-500">Critical</div>
+                  <div className="mt-1 text-xl font-bold text-rose-800">{view.consultantVisibility.criticalItemsCount}</div>
+                </div>
+                <div className="rounded-xl bg-slate-50 p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-slate-400">Pending diagnostics</div>
+                  <div className="mt-1 text-xl font-bold">{view.consultantVisibility.pendingDiagnosticCount}</div>
+                </div>
+                <div className="rounded-xl bg-slate-50 p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-slate-400">Medication changes</div>
+                  <div className="mt-1 text-xl font-bold">{view.consultantVisibility.medicationChangesCount}</div>
+                </div>
+              </div>
+
+              <div className="mt-3 text-[11px] text-slate-500">
+                {view.consultantVisibility.lastReviewedAt
+                  ? `Last reviewed ${dateTime(view.consultantVisibility.lastReviewedAt)} · revision ${view.consultantVisibility.lastReviewedRevision ?? '—'}`
+                  : 'No prior consultant review checkpoint exists for this care context.'}
+              </div>
+
+              <div className="mt-5 grid gap-5 lg:grid-cols-2">
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                    What changed since your last review
+                  </h3>
+                  <div className="mt-2 space-y-2">
+                    {view.consultantVisibility.changes.length ? (
+                      view.consultantVisibility.changes.slice(0, 12).map((item) => (
+                        <div
+                          key={item.changeId}
+                          className={
+                            item.severity === 'CRITICAL_REVIEW_REQUIRED'
+                              ? 'rounded-xl border border-rose-200 bg-rose-50 p-3'
+                              : item.severity === 'ACTION_REQUIRED'
+                                ? 'rounded-xl border border-amber-200 bg-amber-50 p-3'
+                                : 'rounded-xl border border-slate-200 p-3'
+                          }
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="text-xs font-semibold text-slate-800">{item.statement}</div>
+                            <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                              {item.severity.replace(/_/g, ' ')}
+                            </span>
+                          </div>
+                          <div className="mt-1 text-[10px] text-slate-400">
+                            {item.category.replace(/_/g, ' ')} · {dateTime(item.occurredAt)}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <EmptyState>No new authoritative clinical changes since the last review checkpoint.</EmptyState>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                    Unresolved attention
+                  </h3>
+                  <div className="mt-2 space-y-2">
+                    {view.consultantVisibility.openItems.length ? (
+                      view.consultantVisibility.openItems.slice(0, 12).map((item) => (
+                        <div
+                          key={item.openItemId}
+                          className={
+                            item.clinicalPriority === 'CRITICAL_REVIEW_REQUIRED'
+                              ? 'rounded-xl border border-rose-200 bg-rose-50 p-3'
+                              : 'rounded-xl border border-slate-200 p-3'
+                          }
+                        >
+                          <div className="text-xs font-semibold text-slate-800">{item.description}</div>
+                          <div className="mt-1 text-[10px] text-slate-400">
+                            {item.category} · owner {item.ownerType}
+                            {item.ownerId ? ` ${item.ownerId}` : ''}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <EmptyState>No unresolved consultant-attention items are currently derived.</EmptyState>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {consultantReviewMessage && (
+                <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                  {consultantReviewMessage}
+                </div>
+              )}
+            </>
+          ) : offline ? (
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900">
+              Consultant review deltas require authoritative server connectivity. The offline snapshot remains available, but G-HIMS will not fabricate a current review state.
+            </div>
+          ) : (
+            <EmptyState>
+              Consultant attention intelligence is available to authenticated consultant/doctor roles for a selected encounter.
+            </EmptyState>
+          )}
+        </section>
+
+        {view.selectedCareContext && (
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
@@ -599,7 +853,7 @@ export function Patient360View({
           </section>
         )}
 
-        {projection.activeEncounter?.encounterType?.toUpperCase() === 'IPD' && (
+        {view.selectedCareContext?.careSetting === 'IPD' && (
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>

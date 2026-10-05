@@ -133,7 +133,13 @@ export class ClinicalDeteriorationService {
       tenantId,
       patientId
     );
-    const encounterId = String(patient360?.activeEncounter?.encounterId || '');
+    const encounterId = String(
+      patient360?.careContexts.activeIpdEncounter?.encounterId ||
+      patient360?.careContexts.activeEmergencyEncounter?.encounterId ||
+      patient360?.careContexts.activeOpdEncounters[0]?.encounterId ||
+      patient360?.activeEncounter?.encounterId ||
+      ''
+    );
     return encounterId ? this.getProjection(tenantId, encounterId) : null;
   }
 
@@ -190,7 +196,11 @@ export class ClinicalDeteriorationService {
       tenantId,
       patientId
     );
-    const activeEncounter = patient360?.activeEncounter;
+    const activeEncounter =
+      patient360?.careContexts.activeIpdEncounter ||
+      patient360?.careContexts.activeEmergencyEncounter ||
+      patient360?.careContexts.activeOpdEncounters[0] ||
+      patient360?.activeEncounter;
     if (!patient360 || !activeEncounter?.encounterId) return null;
 
     const encounterId = activeEncounter.encounterId;

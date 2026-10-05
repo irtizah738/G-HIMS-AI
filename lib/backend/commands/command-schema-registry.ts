@@ -158,6 +158,17 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       reason: z.string().trim().max(4000).optional(),
     }).strict(),
   },
+  RecordConsultantPatientReviewCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      encounterId: nonEmpty.max(150),
+      careSetting: z.enum(['OPD','IPD','EMERGENCY','TELEHEALTH']),
+      patient360Revision: z.number().int().nonnegative(),
+      patient360SourceCheckpoint: nonEmpty.max(500),
+      reviewedChangeIds: z.array(nonEmpty.max(200)).max(500).optional(),
+      note: z.string().trim().max(8000).optional(),
+    }).strict(),
+  },
   RecordDischargeReadinessReviewCommand: {
     1: z.object({
       patientId: nonEmpty.max(150),

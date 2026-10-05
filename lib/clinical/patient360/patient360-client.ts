@@ -4,9 +4,15 @@ import { AuthClient } from '@/lib/auth/auth-client';
 import { getCachedAuthSession } from '@/lib/offline/auth-storage';
 import { listSecureEdgeEntities } from '@/lib/offline/secure-store';
 import type {
+  Patient360EncounterSummary,
   Patient360Projection,
   Patient360TimelineItem,
 } from '@/types/patient360-projection';
+import type {
+  ClinicalCareSetting,
+  ConsultantPatientStateProjection,
+} from '@/types/consultant-visibility';
+import { selectCareContextEncounter } from '@/lib/clinical/patient360/care-context';
 import type { DischargeReadinessProjection } from '@/types/discharge-readiness';
 import type { DeteriorationProjection } from '@/types/clinical-deterioration';
 
@@ -15,8 +21,10 @@ export interface Patient360ClinicalView {
   patientId: string;
   projection: Patient360Projection;
   timeline: Patient360TimelineItem[];
+  selectedCareContext: Patient360EncounterSummary | null;
   dischargeReadiness: DischargeReadinessProjection | null;
   deterioration: DeteriorationProjection | null;
+  consultantVisibility: ConsultantPatientStateProjection | null;
   source: 'SERVER' | 'LOCAL_EDGE';
   freshness: {
     projectionVersion: number;
@@ -43,7 +51,8 @@ function freshness(projection: Patient360Projection) {
 
 async function loadLocalPatient360(
   tenantId: string,
-  patientId: string
+  patientId: string,
+  options: { careSetting?: ClinicalCareSetting; encounterId?: string } = {}
 ): Promise<Patient360ClinicalView | null> {
   const cached = await getCachedAuthSession();
   if (
@@ -65,6 +74,15 @@ async function loadLocalPatient360(
 
   if (!projection) return null;
 
+  const selectedCareContext =
+    (options.encounterId
+      ? projection.recentEncounters.find(
+          (item) => item.encounterId === options.encounterId
+        )
+      : projection.careContexts
+        ? selectCareContextEncounter(projection.careContexts, options.careSetting)
+        : projection.activeEncounter) || null;
+
   const readinessRows = await listSecureEdgeEntities<Record<string, unknown>>(
     tenantId,
     cached.user.uid,
@@ -75,8 +93,8 @@ async function loadLocalPatient360(
     readiness.find(
       (item) =>
         item.patientId === patientId &&
-        (!projection.activeEncounter?.encounterId ||
-          item.encounterId === projection.activeEncounter.encounterId)
+        (!selectedCareContext?.encounterId ||
+          item.encounterId === selectedCareContext.encounterId)
     ) || null;
 
   const deteriorationRows = await listSecureEdgeEntities<Record<string, unknown>>(
@@ -90,8 +108,8 @@ async function loadLocalPatient360(
     deteriorationItems.find(
       (item) =>
         item.patientId === patientId &&
-        (!projection.activeEncounter?.encounterId ||
-          item.encounterId === projection.activeEncounter.encounterId)
+        (!selectedCareContext?.encounterId ||
+          item.encounterId === selectedCareContext.encounterId)
     ) || null;
 
   return {
@@ -99,8 +117,10 @@ async function loadLocalPatient360(
     patientId,
     projection,
     timeline: [],
+    selectedCareContext,
     dischargeReadiness,
     deterioration,
+    consultantVisibility: null,
     source: 'LOCAL_EDGE',
     freshness: freshness(projection),
   };
@@ -108,13 +128,14 @@ async function loadLocalPatient360(
 
 export async function loadPatient360ClinicalView(
   tenantId: string,
-  patientId: string
+  patientId: string,
+  options: { careSetting?: ClinicalCareSetting; encounterId?: string } = {}
 ): Promise<Patient360ClinicalView> {
   let serverResponseStatus: number | null = null;
 
   try {
     const response = await AuthClient.authorizedFetch(
-      `/api/clinical/patient360/${encodeURIComponent(patientId)}?tenantId=${encodeURIComponent(tenantId)}`,
+      `/api/clinical/patient360/${encodeURIComponent(patientId)}?tenantId=${encodeURIComponent(tenantId)}${options.careSetting ? `&careSetting=${encodeURIComponent(options.careSetting)}` : ''}${options.encounterId ? `&encounterId=${encodeURIComponent(options.encounterId)}` : ''}`,
       {
         method: 'GET',
         cache: 'no-store',
@@ -135,10 +156,14 @@ export async function loadPatient360ClinicalView(
       patientId: payload.patientId,
       projection: payload.projection as Patient360Projection,
       timeline: (payload.timeline || []) as Patient360TimelineItem[],
+      selectedCareContext:
+        (payload.selectedCareContext as Patient360EncounterSummary | null) || null,
       dischargeReadiness:
         (payload.dischargeReadiness as DischargeReadinessProjection | null) || null,
       deterioration:
         (payload.deterioration as DeteriorationProjection | null) || null,
+      consultantVisibility:
+        (payload.consultantVisibility as ConsultantPatientStateProjection | null) || null,
       source: 'SERVER',
       freshness: payload.freshness || freshness(payload.projection),
     };
@@ -153,12 +178,60 @@ export async function loadPatient360ClinicalView(
       throw error;
     }
 
-    const local = await loadLocalPatient360(tenantId, patientId);
+    const local = await loadLocalPatient360(tenantId, patientId, options);
     if (local) return local;
     throw error;
   }
 }
 
+
+export async function recordConsultantPatientReview(
+  tenantId: string,
+  input: {
+    patientId: string;
+    encounterId: string;
+    careSetting: 'OPD' | 'IPD' | 'EMERGENCY' | 'TELEHEALTH';
+    patient360Revision: number;
+    patient360SourceCheckpoint: string;
+    reviewedChangeIds?: string[];
+    note?: string;
+  }
+): Promise<Record<string, unknown>> {
+  const commandId = `cmd_consultant_review_${crypto.randomUUID()}`;
+  const idempotencyKey = `consultant-review:${input.encounterId}:${input.patient360SourceCheckpoint}`;
+
+  const response = await AuthClient.authorizedFetch(
+    '/api/commands/execute',
+    {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        command: {
+          commandId,
+          idempotencyKey,
+          tenantId,
+          commandType: 'RecordConsultantPatientReviewCommand',
+          payload: input,
+          clientTimestamp: Date.now(),
+          schemaVersion: 1,
+        },
+      }),
+    },
+    tenantId
+  );
+
+  const payload = await response.json();
+  if (!response.ok || !payload?.success) {
+    throw new Error(
+      payload?.error?.message ||
+      payload?.error ||
+      'Consultant review checkpoint could not be recorded.'
+    );
+  }
+
+  return payload as Record<string, unknown>;
+}
 
 export async function recordDischargeReadinessReview(
   tenantId: string,

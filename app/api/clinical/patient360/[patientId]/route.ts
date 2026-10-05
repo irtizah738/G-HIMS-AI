@@ -5,6 +5,8 @@ import { assertPatient360PatientAccess } from '@/lib/clinical/patient360/patient
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import { DischargeReadinessService } from '@/lib/clinical/intelligence/discharge-readiness-service';
 import { ClinicalDeteriorationService } from '@/lib/clinical/intelligence/clinical-deterioration-service';
+import { ConsultantVisibilityService } from '@/lib/clinical/intelligence/consultant-visibility-service';
+import { normalizeCareSetting, selectCareContextEncounter } from '@/lib/clinical/patient360/care-context';
 
 interface RouteContext {
   params: Promise<{ patientId: string }>;
@@ -41,18 +43,62 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
       );
     }
 
-    const activeEncounterId = String(
-      patient.activeEncounterId || patient.currentEncounterId || ''
+    const requestedCareSettingRaw = String(
+      req.nextUrl.searchParams.get('careSetting') || ''
     ).trim();
-    const activeEncounter = activeEncounterId
+    const requestedCareSetting = requestedCareSettingRaw
+      ? normalizeCareSetting(requestedCareSettingRaw)
+      : undefined;
+    if (requestedCareSettingRaw && requestedCareSetting === 'UNKNOWN') {
+      return NextResponse.json(
+        { success: false, error: 'INVALID_CARE_SETTING' },
+        { status: 400, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
+    const requestedEncounterId = String(
+      req.nextUrl.searchParams.get('encounterId') || ''
+    ).trim();
+
+    const projectionPreview = await Patient360ProjectionService.getProjection(
+      context.tenantId,
+      normalizedPatientId
+    );
+    const previewContext = projectionPreview
+      ? (
+          requestedEncounterId
+            ? projectionPreview.recentEncounters.find(
+                (item) => item.encounterId === requestedEncounterId
+              )
+            : selectCareContextEncounter(
+                projectionPreview.careContexts,
+                requestedCareSetting
+              )
+        )
+      : undefined;
+    const accessEncounterId =
+      requestedEncounterId ||
+      previewContext?.encounterId ||
+      String(patient.activeEncounterId || patient.currentEncounterId || '').trim();
+    const accessEncounter = accessEncounterId
       ? await DomainStateRepository.getById<Record<string, unknown>>(
           context.tenantId,
           'encounters',
-          activeEncounterId
+          accessEncounterId
         )
       : null;
 
-    assertPatient360PatientAccess(context, patient, activeEncounter);
+    if (
+      requestedEncounterId &&
+      (!accessEncounter || String(accessEncounter.patientId || '') !== normalizedPatientId)
+    ) {
+      return NextResponse.json(
+        { success: false, error: 'ENCOUNTER_PATIENT_MISMATCH' },
+        { status: 404, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
+    assertPatient360PatientAccess(context, patient, accessEncounter);
 
     const timelineLimit = Math.max(
       1,
@@ -83,16 +129,54 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
       );
     }
 
-    const [dischargeReadiness, deterioration] = await Promise.all([
-      DischargeReadinessService.getForPatient(
-        context.tenantId,
-        normalizedPatientId
-      ),
-      ClinicalDeteriorationService.getForPatient(
-        context.tenantId,
-        normalizedPatientId
-      ),
-    ]);
+    const selectedCareContext =
+      requestedEncounterId
+        ? projection.recentEncounters.find(
+            (item) => item.encounterId === requestedEncounterId
+          )
+        : selectCareContextEncounter(
+            projection.careContexts,
+            requestedCareSetting
+          );
+
+    const consultantRoles = new Set(
+      context.roles.map((role) => String(role).toUpperCase())
+    );
+    const canUseConsultantVisibility = [
+      'DOCTOR',
+      'CONSULTANT',
+      'ATTENDING_PHYSICIAN',
+      'SYSTEM_ADMIN',
+      'ADMINISTRATOR',
+    ].some((role) => consultantRoles.has(role));
+
+    const [dischargeReadiness, deterioration, consultantVisibility] =
+      await Promise.all([
+        selectedCareContext?.careSetting === 'IPD'
+          ? DischargeReadinessService.getProjection(
+              context.tenantId,
+              selectedCareContext.encounterId
+            )
+          : Promise.resolve(null),
+        selectedCareContext
+          ? ClinicalDeteriorationService.getProjection(
+              context.tenantId,
+              selectedCareContext.encounterId
+            )
+          : Promise.resolve(null),
+        canUseConsultantVisibility
+          ? ConsultantVisibilityService.buildForActor(
+              context,
+              normalizedPatientId,
+              {
+                encounterId: selectedCareContext?.encounterId,
+                careSetting:
+                  requestedCareSetting || selectedCareContext?.careSetting,
+                timelineLimit,
+              }
+            )
+          : Promise.resolve(null),
+      ]);
 
     return NextResponse.json(
       {
@@ -101,8 +185,10 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
         patientId: normalizedPatientId,
         projection,
         timeline,
+        selectedCareContext: selectedCareContext || null,
         dischargeReadiness,
         deterioration,
+        consultantVisibility,
         freshness: {
           projectionVersion: projection.projectionVersion,
           revision: projection.revision,

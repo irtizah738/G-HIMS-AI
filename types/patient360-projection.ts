@@ -1,3 +1,4 @@
+import type { ClinicalCareSetting } from '@/types/consultant-visibility';
 import type {
   ClinicalAllergy,
   ClinicalCondition,
@@ -21,11 +22,27 @@ export interface Patient360IdentitySummary {
 export interface Patient360EncounterSummary {
   encounterId: string;
   encounterType: string;
+  careSetting: ClinicalCareSetting;
+  episodeId?: string;
+  sourceEncounterId?: string;
+  assignedProviderId?: string;
   status: string;
   department?: string;
+  facilityId?: string;
   chiefComplaint?: string;
   startedAt?: number | string;
   completedAt?: number | string;
+}
+
+export interface Patient360CareContexts {
+  activeOpdEncounters: Patient360EncounterSummary[];
+  activeIpdEncounter?: Patient360EncounterSummary;
+  activeEmergencyEncounter?: Patient360EncounterSummary;
+  activeTelehealthEncounters: Patient360EncounterSummary[];
+  latestOpdEncounter?: Patient360EncounterSummary;
+  latestIpdEncounter?: Patient360EncounterSummary;
+  latestEmergencyEncounter?: Patient360EncounterSummary;
+  latestTelehealthEncounter?: Patient360EncounterSummary;
 }
 
 export interface Patient360ConditionSummary {
@@ -110,7 +127,12 @@ export interface Patient360Projection {
   tenantId: string;
   patientId: string;
   identity: Patient360IdentitySummary;
+  /**
+   * Compatibility context only. New consumers must select from careContexts.
+   * Preference order is IPD -> emergency -> OPD -> telehealth.
+   */
   activeEncounter?: Patient360EncounterSummary;
+  careContexts: Patient360CareContexts;
   recentEncounters: Patient360EncounterSummary[];
   activeProblems: Patient360ConditionSummary[];
   resolvedProblems: Patient360ConditionSummary[];
@@ -153,8 +175,11 @@ export interface Patient360TimelineItem {
   tenantId: string;
   patientId: string;
   encounterId?: string;
+  careSetting?: ClinicalCareSetting;
+  episodeId?: string;
   eventId: string;
   eventType: string;
   occurredAt: number;
+  recordedAt?: number;
   summary: string;
 }

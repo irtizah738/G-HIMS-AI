@@ -12,6 +12,7 @@ import {
 } from '@/lib/firestore/paths';
 import { sanitizeForFirestore } from '@/lib/firestore/sanitize';
 import { PatientMPI, PatientIdentifier } from '@/types/mpi';
+import { activateCareContext, compatibilityEncounterId, normalizeCareSetting } from '@/lib/clinical/patient360/care-context';
 import { EncounterRuntime, WorkflowSnapshot, EncounterType } from '@/types/encounter-runtime';
 import { PatientTimelineProjection } from '@/types/patient-timeline';
 import { OutboxEventRecord } from '@/types/clinical-event';
@@ -136,6 +137,8 @@ export async function registerPatientAndEncounter(
   const canonicalEventId = `evt_${crypto.randomUUID()}`;
   const canonicalOutboxId = `obx_${crypto.randomUUID()}`;
 
+  const activeCareContexts = activateCareContext(undefined, normalizeCareSetting(params.encounterType || 'OPD'), encounterId, now);
+
   const patientRecord: PatientMPI = {
     id: patientId,
     tenantId,
@@ -154,7 +157,8 @@ export async function registerPatientAndEncounter(
     createdById: params.actorId,
     version: 1,
     status: 'ACTIVE',
-    activeEncounterId: encounterId,
+    activeCareContexts,
+    activeEncounterId: compatibilityEncounterId(activeCareContexts),
   };
 
   const encounterRecord: EncounterRuntime = {

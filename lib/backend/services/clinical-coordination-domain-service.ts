@@ -84,17 +84,77 @@ function clinicalCoordinatorAuth(context: CommandContext) {
 }
 
 function handoffAuth(context: CommandContext) {
+  const roles = new Set(
+    context.roles.map((role) => String(role || '').trim().toUpperCase())
+  );
+
+  if (
+    roles.has('DOCTOR') ||
+    roles.has('CONSULTANT') ||
+    roles.has('ATTENDING_PHYSICIAN') ||
+    roles.has('SYSTEM_ADMIN')
+  ) {
+    return AuthorizationPipeline.evaluate(context, {
+      requiredRoles: [
+        'DOCTOR',
+        'CONSULTANT',
+        'ATTENDING_PHYSICIAN',
+        'SYSTEM_ADMIN',
+      ],
+      requiredPrivilege: 'SIGN_CLINICAL_NOTES',
+      allowBreakGlass: true,
+    });
+  }
+
   return AuthorizationPipeline.evaluate(context, {
-    requiredRoles: [
-      'NURSE',
-      'DOCTOR',
-      'CONSULTANT',
-      'ATTENDING_PHYSICIAN',
-      'SYSTEM_ADMIN',
-    ],
+    requiredRoles: ['NURSE'],
     requiredPrivilege: 'RECORD_VITALS',
     allowBreakGlass: true,
   });
+}
+
+function actorOwnsAttention(
+  context: CommandContext,
+  item: {
+    ownerType: 'CONSULTANT' | 'CARE_TEAM' | 'DEPARTMENT' | 'ROLE';
+    ownerId?: string;
+    ownerDepartmentId?: string;
+    ownerRole?: string;
+  }
+): boolean {
+  const roles = new Set(
+    context.roles.map((role) => String(role || '').trim().toUpperCase())
+  );
+  const departments = new Set(
+    [
+      ...(context.departmentIds || []),
+      ...(context.departmentId ? [context.departmentId] : []),
+    ]
+      .map((department) => String(department || '').trim().toUpperCase())
+      .filter(Boolean)
+  );
+
+  if (item.ownerType === 'CONSULTANT') {
+    return Boolean(item.ownerId && item.ownerId === context.actorId);
+  }
+
+  if (item.ownerType === 'DEPARTMENT' || item.ownerType === 'CARE_TEAM') {
+    const department = String(
+      item.ownerDepartmentId || item.ownerId || ''
+    )
+      .trim()
+      .toUpperCase();
+    return Boolean(department && departments.has(department));
+  }
+
+  if (item.ownerType === 'ROLE') {
+    const role = String(item.ownerRole || item.ownerId || '')
+      .trim()
+      .toUpperCase();
+    return Boolean(role && roles.has(role));
+  }
+
+  return false;
 }
 
 async function loadScopedPatientEncounter(
@@ -581,8 +641,7 @@ export class ClinicalCoordinationDomainService {
     }
     if (
       current.toClinicianId &&
-      current.toClinicianId !== context.actorId &&
-      !context.roles.some((role) => String(role).toUpperCase() === 'SYSTEM_ADMIN')
+      current.toClinicianId !== context.actorId
     ) {
       return failure(commandId, idempotencyKey, 'HANDOFF_ASSIGNEE_MISMATCH', 'Handoff is assigned to another clinician.');
     }
@@ -594,8 +653,7 @@ export class ClinicalCoordinationDomainService {
     );
     if (
       current.toDepartmentId &&
-      !actorDepartments.has(current.toDepartmentId.toUpperCase()) &&
-      !context.roles.some((role) => String(role).toUpperCase() === 'SYSTEM_ADMIN')
+      !actorDepartments.has(current.toDepartmentId.toUpperCase())
     ) {
       return failure(commandId, idempotencyKey, 'HANDOFF_DEPARTMENT_MISMATCH', 'Receiving clinician is outside the targeted handoff department.');
     }
@@ -675,6 +733,14 @@ export class ClinicalCoordinationDomainService {
     }
     if (current.status === 'RESOLVED') {
       return failure(commandId, idempotencyKey, 'CLINICAL_OPEN_ITEM_ALREADY_RESOLVED', 'Resolved attention items cannot be acknowledged.');
+    }
+    if (!actorOwnsAttention(context, current)) {
+      return failure(
+        commandId,
+        idempotencyKey,
+        'CLINICAL_OPEN_ITEM_OWNER_MISMATCH',
+        'Only the assigned consultant, care team, department, or role may acknowledge this attention item.'
+      );
     }
 
     const now = Date.now();
@@ -756,6 +822,14 @@ export class ClinicalCoordinationDomainService {
         idempotencyKey,
         'CLINICAL_OPEN_ITEM_SOURCE_CONTROLLED',
         'This attention item is controlled by authoritative source state and will resolve automatically when that source is resolved.'
+      );
+    }
+    if (!actorOwnsAttention(context, current)) {
+      return failure(
+        commandId,
+        idempotencyKey,
+        'CLINICAL_OPEN_ITEM_OWNER_MISMATCH',
+        'Only the assigned consultant, care team, department, or role may resolve this attention item.'
       );
     }
 
@@ -841,6 +915,14 @@ export class ClinicalCoordinationDomainService {
     }
     if (current.state === 'RESOLVED') {
       return failure(commandId, idempotencyKey, 'CLINICAL_ESCALATION_ALREADY_RESOLVED', 'Resolved escalation cannot be acknowledged.');
+    }
+    if (!actorOwnsAttention(context, current)) {
+      return failure(
+        commandId,
+        idempotencyKey,
+        'CLINICAL_ESCALATION_OWNER_MISMATCH',
+        'Only the assigned consultant, care team, department, or role may acknowledge this escalation.'
+      );
     }
 
     const now = Date.now();

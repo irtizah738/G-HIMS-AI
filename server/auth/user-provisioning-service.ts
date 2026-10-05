@@ -99,6 +99,7 @@ function deriveClinicalPrivileges(canonicalRole: string): string[] {
       'ORDER_RADIOLOGY',
       'ADMIT_INPATIENT',
       'DISCHARGE_INPATIENT',
+      'RECORD_VITALS',
       'PERFORM_PROCEDURES',
       'SIGN_CLINICAL_NOTES',
       'SIGN_PRESCRIPTIONS',

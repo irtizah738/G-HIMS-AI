@@ -64,7 +64,12 @@ export class ClinicalOrderDomainService {
     idempotencyKey: string,
     payload: PlaceOrderPayload
   ): Promise<CommandResult> {
-    const requiredPrivilege = payload.orderType === 'LAB' ? 'ORDER_LAB' : 'ORDER_RADIOLOGY';
+    const requiredPrivilege =
+      payload.orderType === 'LAB'
+        ? 'ORDER_LAB'
+        : payload.orderType === 'RADIOLOGY'
+          ? 'ORDER_RADIOLOGY'
+          : 'ORDER_PROCEDURE';
     const auth = AuthorizationPipeline.evaluate(context, {
       requiredRoles: ['DOCTOR', 'CONSULTANT', 'SYSTEM_ADMIN'],
       requiredPrivilege,
@@ -203,6 +208,7 @@ export class ClinicalOrderDomainService {
   ): Promise<CommandResult> {
     const auth = AuthorizationPipeline.evaluate(context, {
       requiredRoles: ['PHARMACIST', 'SYSTEM_ADMIN'],
+      requiredPrivilege: 'DISPENSE_MEDICATION',
     });
     if (!auth.authorized) {
       return {

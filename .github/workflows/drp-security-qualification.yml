@@ -49,8 +49,11 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
-      - name: Dependency vulnerability audit
-        run: bun audit --audit-level high
+      - name: Production dependency vulnerability audit
+        # Clinical runtime qualification must fail on vulnerable production dependencies.
+        # Dev-only tooling is excluded here; repository secret scanning and CI toolchain
+        # controls remain separate gates.
+        run: bun audit --prod --audit-level high
 
       - name: DRP security contracts
         run: bun test tests/drp11-security-qualification.test.ts

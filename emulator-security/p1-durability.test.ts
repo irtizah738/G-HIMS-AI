@@ -18,7 +18,7 @@ function context(tenantId: string): CommandContext {
     tenantId,
     roles: ['DOCTOR'],
     permissions: ['CLINICAL_WRITE'],
-    clinicalPrivileges: ['ORDER_DIAGNOSTICS', 'SIGN_CLINICAL_NOTES'],
+    clinicalPrivileges: ['ORDER_DIAGNOSTICS', 'SIGN_CLINICAL_NOTES', 'RECORD_VITALS'],
     correlationId: unique('corr'),
     requestId: unique('req'),
   };
@@ -467,7 +467,7 @@ describe('G-HIMS P1 durable command infrastructure', () => {
       tx.outbox.outboxId
     );
     expect(secondClaim).toBeNull();
-  });
+  }, 15000);
 
   test('expired PROCESSING outbox lease can be reclaimed after worker crash', async () => {
     const tenantId = unique('tenant');

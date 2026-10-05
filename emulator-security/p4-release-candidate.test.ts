@@ -39,6 +39,7 @@ function clinicalContext(tenantId: string): CommandContext {
       'ORDER_RADIOLOGY',
       'PRESCRIBE',
       'SIGN_CLINICAL_NOTES',
+      'RECORD_VITALS',
     ],
     correlationId: unique('corr'),
     requestId: unique('req'),

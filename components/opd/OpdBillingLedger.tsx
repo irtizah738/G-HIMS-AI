@@ -25,12 +25,14 @@ import {
 interface OpdBillingLedgerProps {
   encounter: ComprehensiveOpdEncounter;
   invoice: OpdInvoice;
+  canSettlePayment?: boolean;
   onSettlePayment: (payment: PaymentTransaction) => void | Promise<void>;
 }
 
 export function OpdBillingLedger({
   encounter,
   invoice,
+  canSettlePayment = false,
   onSettlePayment,
 }: OpdBillingLedgerProps) {
   const [selectedPaymentMode, setSelectedPaymentMode] = useState<PaymentMode>('CASH');
@@ -50,6 +52,10 @@ export function OpdBillingLedger({
 
   const handleSettle = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canSettlePayment) {
+      alert('The authenticated user is not authorized to collect or settle patient payments.');
+      return;
+    }
 
     const payment: PaymentTransaction = {
       id: `pay-${Date.now()}`,
@@ -253,7 +259,8 @@ export function OpdBillingLedger({
 
             <button
               type="submit"
-              className="w-full py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-all"
+              disabled={!canSettlePayment}
+              className="w-full py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <CheckCircle2 className="w-4 h-4" />
               Collect Cash & Post Balanced General Ledger

@@ -54,8 +54,38 @@ import { OpdDispositionReferrals } from './OpdDispositionReferrals';
 import { OpdPatientTimelineAudit } from './OpdPatientTimelineAudit';
 import { OpdOfflineSyncManager } from './OpdOfflineSyncManager';
 import { executeActiveTenantCommand, registerActiveTenantPatient } from '@/lib/api/command-client';
+import { useAuth } from '@/lib/auth/auth-context';
 
 const IS_DEMO_RUNTIME = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
+
+function resolveOpdRole(roles: string[]): OpdRole {
+  const normalized = new Set(roles.map((role) => String(role).trim().toUpperCase()));
+  if (normalized.has('SYSTEM_ADMIN') || normalized.has('ADMINISTRATOR') || normalized.has('ADMIN')) return 'ADMINISTRATOR';
+  if (normalized.has('MEDICAL_DIRECTOR')) return 'CLINICAL_DIRECTOR';
+  if (normalized.has('CONSULTANT')) return 'SPECIALIST_CONSULTANT';
+  if (normalized.has('DOCTOR') || normalized.has('PHYSICIAN')) return 'MEDICAL_OFFICER';
+  if (normalized.has('NURSE')) return 'TRIAGE_NURSE';
+  if (normalized.has('PHARMACIST')) return 'PHARMACIST';
+  if (normalized.has('LAB_TECH') || normalized.has('LAB_TECHNICIAN')) return 'LAB_TECH';
+  if (normalized.has('BILLING_CLERK') || normalized.has('BILLING_ADMIN') || normalized.has('CASHIER') || normalized.has('FINANCE_MANAGER')) return 'BILLING_CASHIER';
+  if (normalized.has('RECEPTIONIST') || normalized.has('REGISTRAR')) return 'RECEPTIONIST';
+  return 'UNAUTHORIZED';
+}
+
+const OPD_TAB_ROLES: Record<string, OpdRole[]> = {
+  DASHBOARD: ['ADMINISTRATOR','CLINICAL_DIRECTOR','SPECIALIST_CONSULTANT','MEDICAL_OFFICER','TRIAGE_NURSE','PHARMACIST','LAB_TECH','BILLING_CASHIER','RECEPTIONIST'],
+  SEARCH_MPI: ['ADMINISTRATOR','CLINICAL_DIRECTOR','SPECIALIST_CONSULTANT','MEDICAL_OFFICER','TRIAGE_NURSE','RECEPTIONIST'],
+  REGISTRATION: ['ADMINISTRATOR','RECEPTIONIST'],
+  APPOINTMENTS: ['ADMINISTRATOR','RECEPTIONIST'],
+  QUEUE: ['ADMINISTRATOR','SPECIALIST_CONSULTANT','MEDICAL_OFFICER','TRIAGE_NURSE','RECEPTIONIST'],
+  TRIAGE: ['ADMINISTRATOR','SPECIALIST_CONSULTANT','MEDICAL_OFFICER','TRIAGE_NURSE'],
+  CONSULTATION: ['ADMINISTRATOR','CLINICAL_DIRECTOR','SPECIALIST_CONSULTANT','MEDICAL_OFFICER'],
+  DIAGNOSTICS: ['ADMINISTRATOR','CLINICAL_DIRECTOR','SPECIALIST_CONSULTANT','MEDICAL_OFFICER','LAB_TECH'],
+  PHARMACY: ['ADMINISTRATOR','CLINICAL_DIRECTOR','SPECIALIST_CONSULTANT','MEDICAL_OFFICER','PHARMACIST'],
+  BILLING: ['ADMINISTRATOR','BILLING_CASHIER'],
+  DISPOSITION: ['ADMINISTRATOR','CLINICAL_DIRECTOR','SPECIALIST_CONSULTANT','MEDICAL_OFFICER'],
+  AUDIT: ['ADMINISTRATOR','CLINICAL_DIRECTOR','SPECIALIST_CONSULTANT','MEDICAL_OFFICER','TRIAGE_NURSE'],
+};
 
 // Initial Mock Seed Data (DEMO runtime only)
 const SEED_PATIENTS: PatientDemographics[] = [
@@ -389,6 +419,30 @@ const SEED_EVENTS: OpdTimelineEvent[] = [
 ];
 
 export function OpdMasterWorkspace() {
+  const auth = useAuth();
+  const activeRole = useMemo(() => resolveOpdRole(auth.roles), [auth.roles]);
+  const normalizedRoles = useMemo(
+    () => new Set(auth.roles.map((role) => String(role).trim().toUpperCase())),
+    [auth.roles]
+  );
+  const normalizedPrivileges = useMemo(
+    () => new Set(auth.clinicalPrivileges.map((privilege) => String(privilege).trim().toUpperCase())),
+    [auth.clinicalPrivileges]
+  );
+  const isAdministrator = normalizedRoles.has('SYSTEM_ADMIN') || normalizedRoles.has('ADMINISTRATOR') || normalizedRoles.has('ADMIN');
+  const canPrescribe = isAdministrator || (
+    (normalizedRoles.has('DOCTOR') || normalizedRoles.has('CONSULTANT')) &&
+    normalizedPrivileges.has('PRESCRIBE')
+  );
+  const canDispense = isAdministrator || (
+    normalizedRoles.has('PHARMACIST') &&
+    normalizedPrivileges.has('DISPENSE_MEDICATION')
+  );
+  const canSettlePayment = isAdministrator || ['BILLING_CLERK','BILLING_ADMIN','CASHIER','FINANCE_MANAGER','ACCOUNTANT']
+    .some((role) => normalizedRoles.has(role));
+  const canAccessTab = (tabId: string) =>
+    (OPD_TAB_ROLES[tabId] || []).includes(activeRole);
+
   // Global State
   const [patients, setPatients] = useState<PatientDemographics[]>(() => IS_DEMO_RUNTIME ? SEED_PATIENTS : []);
   const [appointments, setAppointments] = useState<AppointmentRecord[]>(() => IS_DEMO_RUNTIME ? SEED_APPOINTMENTS : []);
@@ -400,7 +454,6 @@ export function OpdMasterWorkspace() {
   // Active Context
   const [selectedEncounterId, setSelectedEncounterId] = useState<string>(() => IS_DEMO_RUNTIME ? 'enc-101' : '');
   const [activeTab, setActiveTab] = useState<string>('DASHBOARD');
-  const [activeRole, setActiveRole] = useState<OpdRole>('SPECIALIST_CONSULTANT');
   const [isOnline, setIsOnline] = useState<boolean>(true);
   const [pendingSyncCount, setPendingSyncCount] = useState<number>(0);
 
@@ -1340,7 +1393,7 @@ export function OpdMasterWorkspace() {
     { id: 'BILLING', label: 'Billing / GL', icon: DollarSign },
     { id: 'DISPOSITION', label: 'Disposition', icon: FileCheck },
     { id: 'AUDIT', label: 'Audit Trail', icon: ShieldCheck },
-  ];
+  ].filter((tab) => canAccessTab(tab.id));
 
   return (
     <div className="space-y-6">
@@ -1349,13 +1402,20 @@ export function OpdMasterWorkspace() {
         isOnline={isOnline}
         pendingSyncCount={pendingSyncCount}
         activeRole={activeRole}
-        onRoleChange={(role) => setActiveRole(role)}
+        allowPersonaSwitch={false}
+        onRoleChange={() => undefined}
         onTriggerManualSync={() => {
           setPendingSyncCount(0);
           alert('Offline IndexedDB outbox batch synced to Firestore with zero conflict exceptions.');
         }}
         onToggleOnlineStatus={() => setIsOnline(!isOnline)}
       />
+
+      {activeRole === 'UNAUTHORIZED' && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-800">
+          Your authenticated account has no OPD departmental role. Contact Hospital IAM/Credentialing instead of changing a client-side persona.
+        </div>
+      )}
 
       {/* Primary OPD Workspace Navigation Bar */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-2 shadow-xs">
@@ -1634,7 +1694,7 @@ export function OpdMasterWorkspace() {
       )}
 
       {/* 6. Triage Vitals Station & Risk Scoring */}
-      {activeTab === 'TRIAGE' && activeEncounter && (
+      {activeTab === 'TRIAGE' && canAccessTab('TRIAGE') && activeEncounter && (
         <OpdTriageVitals
           encounter={activeEncounter}
           onSaveVitals={(vitals) => handleSaveVitals(vitals)}
@@ -1642,7 +1702,7 @@ export function OpdMasterWorkspace() {
       )}
 
       {/* 7. Specialist Consultation & SOAP */}
-      {activeTab === 'CONSULTATION' && activeEncounter && (
+      {activeTab === 'CONSULTATION' && canAccessTab('CONSULTATION') && activeEncounter && (
         <OpdConsultationSpecialties
           encounter={activeEncounter}
           onSaveConsultation={(soap) => handleSaveConsultation(soap)}
@@ -1652,7 +1712,7 @@ export function OpdMasterWorkspace() {
       )}
 
       {/* 8. Laboratory (LIS), PACS Radiology & Procedures */}
-      {activeTab === 'DIAGNOSTICS' && activeEncounter && (
+      {activeTab === 'DIAGNOSTICS' && canAccessTab('DIAGNOSTICS') && activeEncounter && (
         <OpdDiagnosticOrdersPacs
           encounter={activeEncounter}
           orders={activeEncounter.diagnosticOrders}
@@ -1677,26 +1737,29 @@ export function OpdMasterWorkspace() {
       )}
 
       {/* 9. e-Prescriptions & Pharmacy FEFO Dispensing */}
-      {activeTab === 'PHARMACY' && activeEncounter && (
+      {activeTab === 'PHARMACY' && canAccessTab('PHARMACY') && activeEncounter && (
         <OpdPharmacyPrescriptions
           encounter={activeEncounter}
           prescriptions={activeEncounter.prescriptions}
+          canPrescribe={canPrescribe}
+          canDispense={canDispense}
           onAddPrescription={(item) => handleAddPrescription(item)}
           onDispensePrescription={(rxId, dispensedBy) => handleDispensePrescription(rxId, dispensedBy)}
         />
       )}
 
       {/* 10. Billing, Payer Split & General Ledger Settlement */}
-      {activeTab === 'BILLING' && activeEncounter && activeEncounter.invoice && (
+      {activeTab === 'BILLING' && canAccessTab('BILLING') && activeEncounter && activeEncounter.invoice && (
         <OpdBillingLedger
           encounter={activeEncounter}
           invoice={activeEncounter.invoice}
+          canSettlePayment={canSettlePayment}
           onSettlePayment={(payment) => handleSettlePayment(payment)}
         />
       )}
 
       {/* 11. Disposition, Referrals & SBAR Handoff */}
-      {activeTab === 'DISPOSITION' && activeEncounter && (
+      {activeTab === 'DISPOSITION' && canAccessTab('DISPOSITION') && activeEncounter && (
         <OpdDispositionReferrals
           encounter={activeEncounter}
           onCommitDisposition={(disposition) => handleCommitDisposition(disposition)}

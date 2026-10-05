@@ -374,6 +374,7 @@ export class ClinicalDocumentationDomainService {
   ): Promise<CommandResult> {
     const auth = AuthorizationPipeline.evaluate(context, {
       requiredRoles: ['NURSE', 'DOCTOR', 'CONSULTANT', 'SYSTEM_ADMIN'],
+      requiredPrivilege: 'RECORD_VITALS',
     });
     if (!auth.authorized) {
       return {
@@ -382,7 +383,7 @@ export class ClinicalDocumentationDomainService {
         idempotencyKey,
         error: {
           code: auth.code || 'UNAUTHORIZED',
-          message: auth.reason || 'Not authorized to record vitals.',
+          message: auth.reason || 'Active credentialed vitals-recording authority required.',
         },
       };
     }

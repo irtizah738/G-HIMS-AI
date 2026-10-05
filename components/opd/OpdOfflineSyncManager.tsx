@@ -17,6 +17,7 @@ interface OpdOfflineSyncManagerProps {
   isOnline: boolean;
   pendingSyncCount: number;
   activeRole: OpdRole;
+  allowPersonaSwitch?: boolean;
   onRoleChange: (role: OpdRole) => void;
   onTriggerManualSync: () => void;
   onToggleOnlineStatus: () => void;
@@ -26,6 +27,7 @@ export function OpdOfflineSyncManager({
   isOnline,
   pendingSyncCount,
   activeRole,
+  allowPersonaSwitch = false,
   onRoleChange,
   onTriggerManualSync,
   onToggleOnlineStatus,
@@ -74,19 +76,26 @@ export function OpdOfflineSyncManager({
           <UserCheck className="w-3.5 h-3.5 text-indigo-400" />
           Active Workspace Persona:
         </span>
-        <select
-          value={activeRole}
-          onChange={(e) => onRoleChange(e.target.value as OpdRole)}
-          className="px-2.5 py-1 rounded-xl bg-slate-800 text-white border border-slate-700 font-bold focus:outline-hidden text-xs"
-        >
-          <option value="RECEPTIONIST">Front Desk Registrar (Receptionist)</option>
-          <option value="TRIAGE_NURSE">Triage & Intake Nurse</option>
-          <option value="MEDICAL_OFFICER">General Medical Officer (MO)</option>
-          <option value="SPECIALIST_CONSULTANT">Attending Specialist Consultant</option>
-          <option value="PHARMACIST">Licensed Clinical Pharmacist</option>
-          <option value="BILLING_CASHIER">Billing Officer & Cashier</option>
-          <option value="CLINICAL_DIRECTOR">Medical Director / Audit Lead</option>
-        </select>
+        {allowPersonaSwitch ? (
+          <select
+            value={activeRole}
+            onChange={(e) => onRoleChange(e.target.value as OpdRole)}
+            className="px-2.5 py-1 rounded-xl bg-slate-800 text-white border border-slate-700 font-bold focus:outline-hidden text-xs"
+          >
+            <option value="RECEPTIONIST">Front Desk Registrar (Receptionist)</option>
+            <option value="TRIAGE_NURSE">Triage & Intake Nurse</option>
+            <option value="MEDICAL_OFFICER">General Medical Officer (MO)</option>
+            <option value="SPECIALIST_CONSULTANT">Attending Specialist Consultant</option>
+            <option value="LAB_TECH">Laboratory Technologist</option>
+            <option value="PHARMACIST">Licensed Clinical Pharmacist</option>
+            <option value="BILLING_CASHIER">Billing Officer & Cashier</option>
+            <option value="CLINICAL_DIRECTOR">Medical Director / Audit Lead</option>
+          </select>
+        ) : (
+          <span className="px-2.5 py-1 rounded-xl bg-slate-800 text-indigo-200 border border-slate-700 font-bold text-xs">
+            {String(activeRole).replace(/_/g, ' ')}
+          </span>
+        )}
       </div>
     </div>
   );

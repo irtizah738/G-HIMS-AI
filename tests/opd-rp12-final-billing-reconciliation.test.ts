@@ -100,8 +100,10 @@ describe('OPD-RP12 final billing reconciliation', () => {
     );
 
     expect(encounter).toContain("'BILLING_STAGE_AUTHORITY_SCOPE_VIOLATION'");
-    expect(encounter).toContain("persistedClinicalState !== 'BILLING_SETTLEMENT'");
-    expect(encounter).toContain("targetClinicalState !== 'BILLING_SETTLEMENT'");
+    expect(encounter).toContain("persistedOpdStage !== 'BILLING_SETTLEMENT'");
+    expect(encounter).toContain("targetOpdStage !== 'BILLING_SETTLEMENT'");
+    expect(encounter).toContain('currentStage: targetWorkflowStage');
+    expect(encounter).toContain('clinicalState: targetClinicalState');
   });
 
   test('billing to disposition requires authoritative cleared reconciliation evidence', async () => {

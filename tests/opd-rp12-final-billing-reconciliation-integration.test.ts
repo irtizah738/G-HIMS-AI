@@ -95,6 +95,32 @@ function seedEncounter(
 
   TransactionManager.seedEphemeralStateForTesting(
     tenantId,
+    'JOURNAL_ENTRY',
+    `journal-${encounterId}`,
+    {
+      journalId: `journal-${encounterId}`,
+      tenantId,
+      referenceDocumentId: invoiceId,
+      currency: 'PKR',
+      totalAmountMinorUnits: 10_000,
+      status: 'POSTED',
+      lines: [
+        {
+          glAccountId: '1110',
+          debitMinorUnits: 10_000,
+          creditMinorUnits: 0,
+        },
+        {
+          glAccountId: '4000',
+          debitMinorUnits: 0,
+          creditMinorUnits: 10_000,
+        },
+      ],
+    }
+  );
+
+  TransactionManager.seedEphemeralStateForTesting(
+    tenantId,
     'AR_OPEN_ITEM',
     arId,
     {
@@ -152,6 +178,7 @@ describe('OPD-RP12 executable final billing reconciliation', () => {
       );
     expect(persisted?.status).toBe('CLEARED');
     expect(persisted?.totalOutstandingMinorUnits).toBe(0);
+    expect((persisted?.journalIds as string[])?.length).toBe(1);
 
     const encounter = TransactionManager.getEphemeralStateForTesting(
       tenantId,

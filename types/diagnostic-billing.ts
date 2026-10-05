@@ -47,6 +47,10 @@ export interface OperationalDiagnosticOrder {
   billingInvoiceId: string;
   chargeId: string;
   deferredRevenueJournalId: string;
+  deferredRevenueAccountCode: string;
+  revenueAccountCode: string;
+  netRevenueMinorUnits: number;
+  taxMinorUnits: number;
   recognitionJournalId?: string;
   revenueRecognizedAt?: number;
   paymentReceiptId?: string;

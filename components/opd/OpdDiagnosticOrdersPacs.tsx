@@ -206,6 +206,11 @@ export function OpdDiagnosticOrdersPacs({
         : 0),
     0
   );
+  const orderCurrencies = Array.from(
+    new Set(orders.map((order) => order.currency).filter(Boolean))
+  );
+  const totalCurrency =
+    orderCurrencies.length === 1 ? orderCurrencies[0] : undefined;
 
   return (
     <div className="space-y-6">
@@ -331,8 +336,14 @@ export function OpdDiagnosticOrdersPacs({
             Diagnostic worklist ({orders.length})
           </h3>
           <span className="text-xs font-normal text-slate-400">
-            Authoritative ordered amount: PKR{' '}
-            {(authoritativeTotalMinorUnits / 100).toLocaleString()}
+            Authoritative ordered amount:{' '}
+            {totalCurrency
+              ? `${totalCurrency} ${(
+                  authoritativeTotalMinorUnits / 100
+                ).toLocaleString()}`
+              : orders.length > 0
+                ? 'multiple/unknown currencies'
+                : '—'}
           </span>
         </div>
 

@@ -190,12 +190,22 @@ export function Patient360View({
   const [reviewMessage, setReviewMessage] = useState<string | null>(null);
   const [criticalAckReportId, setCriticalAckReportId] = useState<string | null>(null);
   const [criticalAckMessage, setCriticalAckMessage] = useState<string | null>(null);
+  const [careContextRequest, setCareContextRequest] = useState<{
+    careSetting?: 'OPD' | 'IPD' | 'EMERGENCY' | 'TELEHEALTH';
+    encounterId?: string;
+  }>({});
+  const [consultantReviewSubmitting, setConsultantReviewSubmitting] = useState(false);
+  const [consultantReviewMessage, setConsultantReviewMessage] = useState<string | null>(null);
 
   const load = async () => {
     try {
       setLoading(true);
       setError(null);
-      const next = await loadPatient360ClinicalView(tenantId, patientId);
+      const next = await loadPatient360ClinicalView(
+        tenantId,
+        patientId,
+        careContextRequest
+      );
       setView(next);
     } catch (caught) {
       setError(
@@ -210,9 +220,14 @@ export function Patient360View({
 
   useEffect(() => {
     void load();
-    // tenantId/patientId are the identity boundary for this clinical view.
+    // tenant/patient/context are the authority boundary for this clinical view.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenantId, patientId]);
+  }, [
+    tenantId,
+    patientId,
+    careContextRequest.careSetting,
+    careContextRequest.encounterId,
+  ]);
 
   const submitReadinessReview = async (
     outcome: 'ACKNOWLEDGED' | 'ESCALATE' | 'PROCEED_WITH_WARNINGS'
@@ -283,6 +298,47 @@ export function Patient360View({
       );
     } finally {
       setCriticalAckReportId(null);
+    }
+  };
+
+  const recordCurrentConsultantReview = async () => {
+    if (
+      !view?.consultantVisibility ||
+      !view.selectedCareContext ||
+      view.source === 'LOCAL_EDGE'
+    ) {
+      return;
+    }
+
+    try {
+      setConsultantReviewSubmitting(true);
+      setConsultantReviewMessage(null);
+      await recordConsultantPatientReview(tenantId, {
+        patientId,
+        encounterId: view.selectedCareContext.encounterId,
+        careSetting: view.selectedCareContext.careSetting as
+          | 'OPD'
+          | 'IPD'
+          | 'EMERGENCY'
+          | 'TELEHEALTH',
+        patient360Revision: view.freshness.revision,
+        patient360SourceCheckpoint: view.freshness.sourceCheckpoint,
+        reviewedChangeIds: view.consultantVisibility.changes.map(
+          (item) => item.changeId
+        ),
+      });
+      setConsultantReviewMessage(
+        'Current Patient 360 state marked reviewed for this consultant and care context.'
+      );
+      await load();
+    } catch (caught) {
+      setConsultantReviewMessage(
+        caught instanceof Error
+          ? caught.message
+          : 'Unable to record consultant review checkpoint.'
+      );
+    } finally {
+      setConsultantReviewSubmitting(false);
     }
   };
 

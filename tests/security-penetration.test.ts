@@ -245,7 +245,6 @@ describe('G-HIMS Security Penetration & Zero-Trust Engine', () => {
           encounterId: 'enc_999',
           patientId: 'pat_888',
           drugCode: 'RX-OPI-01',
-          drugName: 'Fentanyl 50mcg IV',
           dosage: '50 mcg',
           route: 'IV',
           frequency: 'PRN',

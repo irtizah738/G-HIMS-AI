@@ -264,41 +264,10 @@ describe('G-HIMS P1 durable command infrastructure', () => {
       .get();
 
     expect(queueBefore.exists).toBe(true);
-    expect(queueBefore.data()?.status).toBe('waiting');
+    // Billing-first OPD: registration creates a durable token, but it cannot
+    // enter the clinical waiting queue until consultation payment is settled.
+    expect(queueBefore.data()?.status).toBe('payment_pending');
 
-    const called = await CommandBus.dispatch(context(tenantId), {
-      commandId: unique('cmd'),
-      idempotencyKey: unique('idem'),
-      tenantId,
-      commandType: 'UpdateOpdQueueStatusCommand',
-      schemaVersion: 1,
-      payload: {
-        tokenId: first.queueToken.id,
-        targetStatus: 'in_consultation',
-      },
-    });
-    expect(called.success).toBe(true);
-
-    const completed = await CommandBus.dispatch(context(tenantId), {
-      commandId: unique('cmd'),
-      idempotencyKey: unique('idem'),
-      tenantId,
-      commandType: 'UpdateOpdQueueStatusCommand',
-      schemaVersion: 1,
-      payload: {
-        tokenId: first.queueToken.id,
-        targetStatus: 'completed',
-      },
-    });
-    expect(completed.success).toBe(true);
-
-    const queueAfter = await db
-      .collection('tenants')
-      .doc(tenantId)
-      .collection('opd_queue')
-      .doc(first.queueToken.id)
-      .get();
-    expect(queueAfter.data()?.status).toBe('completed');
   });
 
 

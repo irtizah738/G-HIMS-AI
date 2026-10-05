@@ -615,7 +615,7 @@ export class EncounterDomainService {
     // calling CommitEncounterDispositionCommand directly.
     if (encounter.encounterType === 'OPD') {
       const authoritativeStage = OpdWorkflowRuntimeService.resolveStage(
-        encounter.clinicalState || encounter.currentStage
+        encounter.currentStage || encounter.clinicalState
       );
       if (authoritativeStage !== 'DISCHARGE_OR_REFERRAL') {
         return {

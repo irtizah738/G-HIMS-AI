@@ -1004,7 +1004,6 @@ export class ClinicalOrderDomainService {
       quantityDispensed: number;
       batchNumber?: string;
       expiryDate?: string;
-      dispensedByName?: string;
     }
   ): Promise<CommandResult> {
     const auth = AuthorizationPipeline.evaluate(context, {
@@ -1080,8 +1079,12 @@ export class ClinicalOrderDomainService {
       };
     }
 
-    const [patient, encounter, balances] = await Promise.all([
-      DomainStateRepository.getById<Record<string, unknown>>(context.tenantId, 'patients', patientId),
+    const [patient, encounter, balances, medicationItem, tariff] = await Promise.all([
+      DomainStateRepository.getById<PatientMPI>(
+        context.tenantId,
+        'patients',
+        patientId
+      ),
       EncounterDomainService.getAuthoritativeEncounter(context.tenantId, encounterId),
       DomainStateRepository.queryEqual<VersionedInventoryBalance>(
         context.tenantId,
@@ -1089,6 +1092,16 @@ export class ClinicalOrderDomainService {
         'itemId',
         itemId,
         200
+      ),
+      DomainStateRepository.getById<ItemMaster>(
+        context.tenantId,
+        'items',
+        itemId
+      ),
+      DomainStateRepository.getById<Tariff>(
+        context.tenantId,
+        'tariffs',
+        'tariff-standard-cash'
       ),
     ]);
 
@@ -1111,6 +1124,63 @@ export class ClinicalOrderDomainService {
         error: {
           code: 'ENCOUNTER_ALREADY_CLOSED',
           message: 'Medication cannot be dispensed against a closed encounter.',
+        },
+      };
+    }
+    if (
+      !medicationItem ||
+      medicationItem.itemType !== 'MEDICATION' ||
+      medicationItem.isActive !== true ||
+      medicationItem.itemId !== itemId ||
+      medicationItem.itemCode !== String(prescription.drugCode || '')
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'PHARMACY_ITEM_AUTHORITY_MISMATCH',
+          message:
+            'Prescription medication identity no longer matches the authoritative active Item Master record.',
+        },
+      };
+    }
+    if (
+      patient.tariffPlan !== 'OUT_OF_POCKET' ||
+      !tariff ||
+      tariff.status !== 'active' ||
+      tariff.planName !== 'cash' ||
+      tariff.copayPercent !== 100
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'OPD_PHARMACY_CASH_TARIFF_REQUIRED',
+          message:
+            'Controlled OPD pharmacy billing requires an OUT_OF_POCKET patient and active 100% cash tariff.',
+        },
+      };
+    }
+    const currency = String(medicationItem.currency || '').trim().toUpperCase();
+    const sellingPriceMajor = Number(medicationItem.sellingPrice);
+    const unitPriceMinorUnits = Math.round(sellingPriceMajor * 100);
+    if (
+      currency.length !== 3 ||
+      !Number.isFinite(sellingPriceMajor) ||
+      sellingPriceMajor <= 0 ||
+      !Number.isSafeInteger(unitPriceMinorUnits) ||
+      unitPriceMinorUnits <= 0
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'PHARMACY_PRICE_NOT_CONFIGURED',
+          message:
+            'Medication requires a positive authoritative selling price and ISO currency before dispensing.',
         },
       };
     }
@@ -1178,7 +1248,6 @@ export class ClinicalOrderDomainService {
     const stockTransactionId = `stk_dispense_${crypto.randomUUID()}`;
     const consumptionId = `consume_${crypto.randomUUID()}`;
     const chargeId = `chg_rx_${crypto.randomUUID()}`;
-    const unitPriceMinorUnits = Math.max(0, Number(prescription.unitPriceMinorUnits || 0));
     const amountMinorUnits = Math.round(unitPriceMinorUnits * quantity);
 
     const prescriptionState = {
@@ -1190,7 +1259,6 @@ export class ClinicalOrderDomainService {
       expiryDate: selectedBalance.expiryDate,
       inventoryBalanceId: selectedBalance.balanceId,
       dispensedBy: context.actorId,
-      dispensedByName: payload.dispensedByName,
       dispensedAt,
     };
 
@@ -1223,7 +1291,7 @@ export class ClinicalOrderDomainService {
       normalizedQuantity: quantity,
       unitCost: selectedBalance.unitCost,
       totalCost: quantity * selectedBalance.unitCost,
-      currency: 'PKR',
+      currency,
       transactionType: 'DISPENSE',
       referenceType: 'PRESCRIPTION',
       referenceId: payload.prescriptionId,
@@ -1231,7 +1299,7 @@ export class ClinicalOrderDomainService {
       encounterId,
       performedBy: {
         userId: context.actorId,
-        userName: payload.dispensedByName || context.actorId,
+        userName: context.actorId,
         role: context.roles[0] || 'PHARMACIST',
       },
       occurredAt: new Date(dispensedAt).toISOString(),
@@ -1427,6 +1495,39 @@ export class ClinicalOrderDomainService {
       };
     }
 
+    const formularyRows = await DomainStateRepository.queryAllEqual<ItemMaster>(
+      context.tenantId,
+      'items',
+      'itemCode',
+      payload.drugCode,
+      { pageSize: 10, maxRows: 10 }
+    );
+    const medicationItem = formularyRows[0];
+    if (
+      formularyRows.length !== 1 ||
+      !medicationItem ||
+      medicationItem.itemType !== 'MEDICATION' ||
+      medicationItem.isActive !== true ||
+      !medicationItem.itemId?.trim() ||
+      !medicationItem.name?.trim()
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'FORMULARY_MEDICATION_NOT_FOUND',
+          message:
+            'Prescription requires one active authoritative medication item matching the submitted formulary code.',
+        },
+      };
+    }
+
+    const authoritativeDrugName = medicationItem.name.trim();
+    const authoritativeUnitOfMeasure = String(
+      medicationItem.issueUOM || medicationItem.unitOfMeasure || payload.unitOfMeasure || 'unit'
+    ).trim();
+
     let safetyEvaluation;
     try {
       safetyEvaluation =
@@ -1435,8 +1536,8 @@ export class ClinicalOrderDomainService {
           payload.patientId,
           payload.encounterId,
           {
-            drugCode: payload.drugCode,
-            drugName: payload.drugName,
+            drugCode: medicationItem.itemCode,
+            drugName: authoritativeDrugName,
           }
         );
     } catch (error) {
@@ -1506,16 +1607,15 @@ export class ClinicalOrderDomainService {
       tenantId: context.tenantId,
       encounterId: payload.encounterId,
       patientId: payload.patientId,
-      drugCode: payload.drugCode,
-      drugName: payload.drugName,
+      drugCode: medicationItem.itemCode,
+      drugName: authoritativeDrugName,
       dosage: payload.dosage,
       route: payload.route,
       frequency: payload.frequency,
       durationDays: payload.durationDays,
       quantityPrescribed: payload.quantityPrescribed,
-      unitOfMeasure: payload.unitOfMeasure,
-      unitPriceMinorUnits: payload.unitPriceMinorUnits,
-      inventoryItemId: payload.inventoryItemId || payload.drugCode,
+      unitOfMeasure: authoritativeUnitOfMeasure,
+      inventoryItemId: medicationItem.itemId,
       instructions: payload.instructions,
       prescribedBy: context.actorId,
       status: 'PRESCRIBED',
@@ -1528,14 +1628,14 @@ export class ClinicalOrderDomainService {
       encounterId: payload.encounterId,
       prescriptionId,
       actorId: context.actorId,
-      drugCode: payload.drugCode,
-      drugName: payload.drugName,
+      drugCode: medicationItem.itemCode,
+      drugName: authoritativeDrugName,
       dosage: payload.dosage,
       route: payload.route,
       frequency: payload.frequency,
       durationDays: payload.durationDays,
       quantityPrescribed: payload.quantityPrescribed,
-      unitOfMeasure: payload.unitOfMeasure,
+      unitOfMeasure: authoritativeUnitOfMeasure,
       instructions: payload.instructions,
       authoredAt: domainState.createdAt,
     });
@@ -1563,8 +1663,8 @@ export class ClinicalOrderDomainService {
         prescriptionId,
         encounterId: payload.encounterId,
         patientId: payload.patientId,
-        drugCode: payload.drugCode,
-        drugName: payload.drugName,
+        drugCode: medicationItem.itemCode,
+        drugName: authoritativeDrugName,
         quantityPrescribed: payload.quantityPrescribed,
         canonicalMedicationOrderId: canonicalMedicationOrder.medicationOrderId,
         medicationKnowledgeStatus: 'KNOWN',
@@ -1577,7 +1677,7 @@ export class ClinicalOrderDomainService {
       auditAction: 'PRESCRIBE_MEDICATION',
       auditResourceType: 'PRESCRIPTION',
       auditResourceId: prescriptionId,
-      auditReason: `Prescribed ${payload.drugName} ${payload.dosage} (${payload.route})`,
+      auditReason: `Prescribed ${authoritativeDrugName} ${payload.dosage} (${payload.route})`,
       auditMetadata: {
         medicationSafetyFindingIds: safetyEvaluation.findings.map(
           (finding) => finding.findingId

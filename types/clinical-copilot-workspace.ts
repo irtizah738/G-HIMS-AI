@@ -56,5 +56,6 @@ export interface ClinicalCopilotEvidenceDisplayItem {
   provenanceStatus: string;
   sourceEventIds: string[];
   contentHash: string;
+  content?: unknown;
   sourceArtifact: ClinicalCopilotArtifactKey;
 }

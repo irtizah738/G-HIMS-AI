@@ -14,7 +14,7 @@ import {
   FileText,
   Lock,
 } from 'lucide-react';
-import { PatientDemographics, ConsentRecord } from '@/types/opd-domain';
+import { PatientDemographics, ConsentCaptureDecision } from '@/types/opd-domain';
 
 interface OpdRegistrationConsentProps {
   initialData?: Partial<PatientDemographics>;
@@ -29,139 +29,142 @@ export function OpdRegistrationConsent({
 }: OpdRegistrationConsentProps) {
   const [fullName, setFullName] = useState<string>(initialData?.fullName || '');
   const [preferredName, setPreferredName] = useState<string>(initialData?.preferredName || '');
-  const [gender, setGender] = useState<'Male' | 'Female' | 'Other'>(initialData?.gender || 'Female');
-  const [dob, setDob] = useState<string>(initialData?.dob || '1990-05-14');
-  const [age, setAge] = useState<number>(initialData?.age || 36);
+  const [gender, setGender] = useState<'Male' | 'Female' | 'Other' | ''>(
+    initialData?.gender || ''
+  );
+  const [dob, setDob] = useState<string>(initialData?.dob || '');
+  const [age, setAge] = useState<number | ''>(initialData?.age ?? '');
   const [nationalId, setNationalId] = useState<string>(initialData?.nationalId || '');
   const [passportNumber, setPassportNumber] = useState<string>(initialData?.passportNumber || '');
-  const [maritalStatus, setMaritalStatus] = useState<'Single' | 'Married' | 'Divorced' | 'Widowed'>('Married');
-  const [nationality, setNationality] = useState<string>('Pakistani');
-  const [primaryLanguage, setPrimaryLanguage] = useState<string>('English / Urdu');
-  const [occupation, setOccupation] = useState<string>('Academic Researcher');
+  const [maritalStatus, setMaritalStatus] = useState<
+    'Single' | 'Married' | 'Divorced' | 'Widowed' | ''
+  >('');
+  const [nationality, setNationality] = useState<string>('');
+  const [primaryLanguage, setPrimaryLanguage] = useState<string>('');
+  const [occupation, setOccupation] = useState<string>('');
 
-  const [phone, setPhone] = useState<string>(initialData?.phone || '+92 300 8877665');
+  const [phone, setPhone] = useState<string>(initialData?.phone || '');
   const [secondaryPhone, setSecondaryPhone] = useState<string>('');
-  const [email, setEmail] = useState<string>('patient@example.org');
-  const [residentialAddress, setResidentialAddress] = useState<string>('Sector F-7/2, Islamabad, ICT');
+  const [email, setEmail] = useState<string>('');
+  const [residentialAddress, setResidentialAddress] = useState<string>('');
 
-  const [emergencyName, setEmergencyName] = useState<string>('Tariq Vance');
-  const [emergencyRelation, setEmergencyRelation] = useState<string>('Spouse');
-  const [emergencyPhone, setEmergencyPhone] = useState<string>('+92 321 9988771');
+  const [emergencyName, setEmergencyName] = useState<string>('');
+  const [emergencyRelation, setEmergencyRelation] = useState<string>('');
+  const [emergencyPhone, setEmergencyPhone] = useState<string>('');
 
-  const [tariffPlan, setTariffPlan] = useState<'OUT_OF_POCKET' | 'CORPORATE_PPO' | 'SEHAT_CARD_UNIVERSAL' | 'STATE_INSURANCE'>('CORPORATE_PPO');
-  const [payerName, setPayerName] = useState<string>('Jubilee Life Insurance / PPO');
-  const [policyNumber, setPolicyNumber] = useState<string>('POL-992019-JUB');
-  const [bloodGroup, setBloodGroup] = useState<'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-'>('O+');
-  const [knownAllergies, setKnownAllergies] = useState<string>('Penicillin, NSAIDs');
+  const [tariffPlan, setTariffPlan] = useState<
+    'OUT_OF_POCKET' | 'CORPORATE_PPO' | 'SEHAT_CARD_UNIVERSAL' | 'STATE_INSURANCE' | ''
+  >('');
+  const [payerName, setPayerName] = useState<string>('');
+  const [policyNumber, setPolicyNumber] = useState<string>('');
+  const [bloodGroup, setBloodGroup] = useState<
+    'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-' | 'Unknown'
+  >('Unknown');
+  const [knownAllergies, setKnownAllergies] = useState<string>('');
 
-  // Configurable dynamic consent states
-  const [generalConsentGranted, setGeneralConsentGranted] = useState<boolean>(true);
-  const [dataSharingGranted, setDataSharingGranted] = useState<boolean>(true);
-  const [procedureConsentGranted, setProcedureConsentGranted] = useState<boolean>(true);
-  const [consentMethod, setConsentMethod] = useState<'DIGITAL_SIGNATURE' | 'PAPER_SCANNED' | 'VERBAL_WITNESSED'>('DIGITAL_SIGNATURE');
+  // Consent decisions are explicit and unselected by default. Procedure-specific
+  // consent is intentionally not collected as a blanket registration consent.
+  const [generalConsentGranted, setGeneralConsentGranted] = useState<boolean | null>(null);
+  const [dataSharingGranted, setDataSharingGranted] = useState<boolean | null>(null);
+  const consentMethod: ConsentCaptureDecision['method'] = 'DIGITAL_ATTESTATION';
 
   const handleDobChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setDob(val);
-    if (val) {
-      const birthYear = new Date(val).getFullYear();
-      const currentYear = new Date().getFullYear();
-      if (!isNaN(birthYear)) {
-        setAge(Math.max(0, currentYear - birthYear));
-      }
+    if (!val) {
+      setAge('');
+      return;
     }
+    const birthDate = new Date(`${val}T00:00:00`);
+    const now = new Date();
+    if (Number.isNaN(birthDate.getTime()) || birthDate > now) {
+      setAge('');
+      return;
+    }
+    let calculated = now.getFullYear() - birthDate.getFullYear();
+    const monthDelta = now.getMonth() - birthDate.getMonth();
+    if (
+      monthDelta < 0 ||
+      (monthDelta === 0 && now.getDate() < birthDate.getDate())
+    ) {
+      calculated -= 1;
+    }
+    setAge(Math.max(0, calculated));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    const mrnGenerated = `MRN-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
+    if (!gender || age === '' || !tariffPlan || !maritalStatus) {
+      alert('Complete gender, date of birth, marital status and tariff class before registration.');
+      return;
+    }
+    if (generalConsentGranted === null || dataSharingGranted === null) {
+      alert('Record an explicit Grant or Withhold decision for each registration consent.');
+      return;
+    }
+    if (
+      (tariffPlan === 'CORPORATE_PPO' || tariffPlan === 'STATE_INSURANCE') &&
+      (!payerName.trim() || !policyNumber.trim())
+    ) {
+      alert('Payer name and policy/card number are required for the selected payer plan.');
+      return;
+    }
 
-    const consents: ConsentRecord[] = [
+    const consentDecisions: ConsentCaptureDecision[] = [
       {
-        id: `cst-gen-${Date.now()}`,
         consentType: 'GENERAL_OUTPATIENT',
-        title: 'Institutional General Outpatient Care Consent',
         status: generalConsentGranted ? 'GRANTED' : 'WITHHELD',
-        version: 'v2.4',
-        effectiveDate: new Date().toISOString().slice(0, 10),
-        expiryDate: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString().slice(0, 10),
         method: consentMethod,
-        actorName: fullName,
-        actorRole: 'Patient / Self',
-        witnessName: 'Staff Registrar K. Ahmed',
-        documentHash: `SHA256:CONSENT:GEN:${mrnGenerated}`,
       },
       {
-        id: `cst-hie-${Date.now()}`,
         consentType: 'DATA_SHARING_HIE',
-        title: 'National Health Information Exchange (HIE) Data Sharing Consent',
         status: dataSharingGranted ? 'GRANTED' : 'WITHHELD',
-        version: 'v1.2',
-        effectiveDate: new Date().toISOString().slice(0, 10),
-        expiryDate: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString().slice(0, 10),
         method: consentMethod,
-        actorName: fullName,
-        actorRole: 'Patient / Self',
-        witnessName: 'Staff Registrar K. Ahmed',
-        documentHash: `SHA256:CONSENT:HIE:${mrnGenerated}`,
-      },
-      {
-        id: `cst-proc-${Date.now()}`,
-        consentType: 'INVASIVE_PROCEDURE',
-        title: 'Minor Outpatient Diagnostics & Procedures Consent',
-        status: procedureConsentGranted ? 'GRANTED' : 'WITHHELD',
-        version: 'v3.1',
-        effectiveDate: new Date().toISOString().slice(0, 10),
-        expiryDate: new Date(Date.now() + 180 * 24 * 3600 * 1000).toISOString().slice(0, 10),
-        method: consentMethod,
-        actorName: fullName,
-        actorRole: 'Patient / Self',
-        witnessName: 'Staff Registrar K. Ahmed',
-        documentHash: `SHA256:CONSENT:PROC:${mrnGenerated}`,
       },
     ];
 
     const newPatient: PatientDemographics = {
-      id: `pat-${Date.now()}`,
-      mrn: mrnGenerated,
-      fullName,
-      preferredName: preferredName || undefined,
+      // IDs/MRN are server-owned and replaced by the registration orchestrator.
+      id: '',
+      mrn: '',
+      fullName: fullName.trim(),
+      preferredName: preferredName.trim() || undefined,
       gender,
       dob,
       age,
-      nationalId: nationalId || `CNIC-${Math.floor(1000000000000 + Math.random() * 9000000000000)}`,
-      passportNumber: passportNumber || undefined,
+      nationalId: nationalId.trim(),
+      passportNumber: passportNumber.trim() || undefined,
       maritalStatus,
-      nationality,
-      primaryLanguage,
-      occupation,
-      phone,
-      secondaryPhone: secondaryPhone || undefined,
-      email: email || undefined,
-      residentialAddress,
-      emergencyContact: {
-        name: emergencyName,
-        relation: emergencyRelation,
-        phone: emergencyPhone,
-      },
+      nationality: nationality.trim(),
+      primaryLanguage: primaryLanguage.trim(),
+      occupation: occupation.trim() || undefined,
+      phone: phone.trim(),
+      secondaryPhone: secondaryPhone.trim() || undefined,
+      email: email.trim() || undefined,
+      residentialAddress: residentialAddress.trim(),
+      emergencyContact:
+        emergencyName.trim() && emergencyRelation.trim() && emergencyPhone.trim()
+          ? {
+              name: emergencyName.trim(),
+              relation: emergencyRelation.trim(),
+              phone: emergencyPhone.trim(),
+            }
+          : undefined,
       tariffPlan,
       insuranceDetails:
         tariffPlan === 'CORPORATE_PPO' || tariffPlan === 'STATE_INSURANCE'
           ? {
-              payerName,
-              policyNumber,
-              coveragePercent: tariffPlan === 'CORPORATE_PPO' ? 80 : 100,
-              copayPercent: tariffPlan === 'CORPORATE_PPO' ? 20 : 0,
-              expiryDate: '2027-12-31',
+              payerName: payerName.trim(),
+              policyNumber: policyNumber.trim(),
             }
           : undefined,
-      consents,
-      bloodGroup,
-      knownAllergies: knownAllergies ? knownAllergies.split(',').map((s) => s.trim()) : [],
-      chronicConditions: ['Hypertension'],
-      createdAt: Date.now(),
-      registeredBy: 'Registrar K. Ahmed (Counter 1)',
+      registrationConsentDecisions: consentDecisions,
+      bloodGroup: bloodGroup === 'Unknown' ? ('Unknown' as any) : bloodGroup,
+      knownAllergies: knownAllergies.trim()
+        ? knownAllergies.split(',').map((value) => value.trim()).filter(Boolean)
+        : undefined,
+      createdAt: 0,
     };
 
     onRegisterSuccess(newPatient);

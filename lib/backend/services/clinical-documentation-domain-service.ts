@@ -972,6 +972,49 @@ export class ClinicalDocumentationDomainService {
       }];
     });
 
+    const billingEncounter =
+      revenueIntegrityFindings.length > 0
+        ? await DomainStateRepository.getById<Record<string, unknown>>(
+            context.tenantId,
+            'encounters',
+            payload.encounterId
+          )
+        : null;
+
+    if (
+      revenueIntegrityFindings.length > 0 &&
+      (!billingEncounter ||
+        String(billingEncounter.patientId || '') !== payload.patientId)
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'ENCOUNTER_PATIENT_MISMATCH',
+          message:
+            'Revenue Integrity candidates require the authoritative patient encounter.',
+        },
+      };
+    }
+
+    if (
+      revenueIntegrityFindings.length > 0 &&
+      String(billingEncounter?.billingReconciliationState || '').toUpperCase() ===
+        'CLEARED'
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'OPD_BILLING_ALREADY_RECONCILED',
+          message:
+            'A signed note may not introduce new billing candidates after final OPD billing reconciliation.',
+        },
+      };
+    }
+
     const tx = await TransactionManager.executeAtomicMutation({
       tenantId: context.tenantId,
       actorId: context.actorId,
@@ -1020,6 +1063,23 @@ export class ClinicalDocumentationDomainService {
           entityId: finding.id,
           domainState: finding,
         })),
+        ...(revenueIntegrityFindings.length > 0 && billingEncounter
+          ? [
+              {
+                entityType: 'ENCOUNTER',
+                entityId: payload.encounterId,
+                domainState: {
+                  ...billingEncounter,
+                  billingMutationSequence:
+                    Number(billingEncounter.billingMutationSequence || 0) + 1,
+                  updatedAt: signedAt,
+                },
+                expectedServerVersion: Number(
+                  billingEncounter._serverVersion || 0
+                ),
+              },
+            ]
+          : []),
       ],
     });
 

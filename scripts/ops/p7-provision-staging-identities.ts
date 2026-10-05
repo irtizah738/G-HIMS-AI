@@ -277,9 +277,18 @@ for (const persona of personas) {
     { merge: true }
   );
 
-  if (persona.role === 'doctor' || persona.role === 'nurse') {
+  const clinicalQualificationRoles = new Set(['doctor', 'nurse', 'pharmacy', 'lab']);
+  if (clinicalQualificationRoles.has(persona.role)) {
     const employeeId = `p7_emp_${persona.key}`;
     const credentialId = `p7_cred_${persona.key}`;
+    const credentialType =
+      persona.role === 'doctor'
+        ? 'MEDICAL_LICENSE'
+        : persona.role === 'nurse'
+          ? 'NURSING_BOARD'
+          : persona.role === 'pharmacy'
+            ? 'PHARMACY_LICENSE'
+            : 'PROFESSIONAL_REGISTRATION';
     await db.collection('tenants').doc(tenantId).collection('employees').doc(employeeId).set({
       employeeId,
       tenantId,
@@ -304,8 +313,7 @@ for (const persona of personas) {
         credentialId,
         tenantId,
         employeeId,
-        credentialType:
-          persona.role === 'doctor' ? 'MEDICAL_LICENSE' : 'NURSING_BOARD',
+        credentialType,
         credentialNumber: `P7-SYNTHETIC-${persona.key.toUpperCase()}`,
         issueDate: '2026-01-01',
         expiryDate: '2035-12-31',
@@ -315,15 +323,17 @@ for (const persona of personas) {
         updatedAt: new Date().toISOString(),
       }, { merge: true });
 
-    if (persona.role === 'doctor') {
-      const privilegeTypes = [
-        'PRESCRIBE_MEDICATION',
-        'ORDER_HIGH_COMPLEXITY_LAB',
-        'INTERPRET_RADIOLOGY_CT_MRI',
-        'SIGN_SOAP_CLINICAL_NOTE',
-      ];
+    const privilegeTypes =
+      persona.role === 'doctor'
+        ? ['PRESCRIBE_MEDICATION', 'ORDER_LAB', 'ORDER_RADIOLOGY', 'ORDER_PROCEDURE', 'SIGN_CLINICAL_NOTE']
+        : persona.role === 'pharmacy'
+          ? ['DISPENSE_MEDICATION']
+          : persona.role === 'lab'
+            ? ['VERIFY_LAB_RESULT']
+            : [];
+    if (privilegeTypes.length > 0) {
       for (const privilegeType of privilegeTypes) {
-        const privilegeId = `p7_prv_doctor_${privilegeType.toLowerCase()}`;
+        const privilegeId = `p7_prv_${persona.key}_${privilegeType.toLowerCase()}`;
         await db.collection('tenants').doc(tenantId)
           .collection('clinicalPrivileges').doc(privilegeId).set({
             privilegeId,

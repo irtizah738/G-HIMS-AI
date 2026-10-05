@@ -360,6 +360,21 @@ describe('CI-9 medication safety and reconciliation intelligence', () => {
     expect(client).toContain('CompleteMedicationReconciliationCommand');
   });
 
+  test('Patient 360 rebuild never mistakes patient-scoped knowledge document IDs for patient IDs', async () => {
+    const projectionService = await source(
+      'lib/clinical/patient360/patient360-projection-service.ts'
+    );
+
+    expect(projectionService).toContain('directPatientAggregateId');
+    expect(projectionService).toContain("['PATIENT', 'PATIENT_MPI']");
+    expect(projectionService).not.toContain(
+      "aggregateType.includes('PATIENT') ? event.aggregateId"
+    );
+    expect(projectionService).not.toContain(
+      "toUpperCase().includes('PATIENT')"
+    );
+  });
+
   test('CI-9 is event-driven, rebuildable, and feeds consultant attention', async () => {
     const workers = await source(
       'lib/backend/projections/projection-workers.ts'

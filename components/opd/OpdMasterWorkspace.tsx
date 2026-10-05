@@ -533,7 +533,12 @@ export function OpdMasterWorkspace() {
           : []),
       ],
       allergies: newPatient.knownAllergies || [],
-      chronicConditions: newPatient.chronicConditions || [],
+      ...(newPatient.chronicConditions
+        ? { chronicConditions: newPatient.chronicConditions }
+        : {}),
+      tariffPlan: newPatient.tariffPlan,
+      insuranceDetails: newPatient.insuranceDetails,
+      consentDecisions: newPatient.registrationConsentDecisions,
       encounterType: 'OPD',
       department: 'General Medicine',
       priority: 'ROUTINE',

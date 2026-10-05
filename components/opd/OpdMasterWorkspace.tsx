@@ -663,7 +663,7 @@ export function OpdMasterWorkspace() {
     setQueue((prev) => [newQueueEntry, ...prev.filter((q) => q.id !== newQueueEntry.id)]);
     setSelectedEncounterId(newEncId);
     recordEvent('PATIENT_REGISTERED', `Patient ${authoritativePatient.fullName} registered. Token ${tokenNum} issued.`);
-    setActiveTab('BILLING');
+    setActiveTab('DASHBOARD');
   };
 
   // HANDLER: Check-in appointment by creating an authoritative OPD encounter
@@ -778,7 +778,7 @@ export function OpdMasterWorkspace() {
     setQueue((prev) => [newQueueEntry, ...prev.filter((q) => q.id !== newQueueEntry.id)]);
     setSelectedEncounterId(newEncId);
     recordEvent('APPOINTMENT_CHECKED_IN', `Appointment ${appt.scheduledTimeSlot} checked in for ${appt.patientName}.`);
-    setActiveTab('BILLING');
+    setActiveTab('DASHBOARD');
   };
 
   // HANDLER: Save Triage Vitals through authoritative encounter evidence.

@@ -99,6 +99,10 @@ export function OpdRegistrationConsent({
       alert('Complete gender, date of birth, marital status and tariff class before registration.');
       return;
     }
+    if (tariffPlan !== 'OUT_OF_POCKET') {
+      alert('The controlled OPD pilot currently supports cash / out-of-pocket billing only.');
+      return;
+    }
     if (generalConsentGranted === null || dataSharingGranted === null) {
       alert('Record an explicit Grant or Withhold decision for each registration consent.');
       return;
@@ -160,7 +164,7 @@ export function OpdRegistrationConsent({
             }
           : undefined,
       registrationConsentDecisions: consentDecisions,
-      bloodGroup: bloodGroup === 'Unknown' ? ('Unknown' as any) : bloodGroup,
+      bloodGroup,
       knownAllergies: knownAllergies.trim()
         ? knownAllergies.split(',').map((value) => value.trim()).filter(Boolean)
         : undefined,

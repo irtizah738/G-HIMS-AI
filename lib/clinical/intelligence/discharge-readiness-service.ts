@@ -136,7 +136,7 @@ export class DischargeReadinessService {
       tenantId,
       patientId
     );
-    const encounterId = String(patient360?.activeEncounter?.encounterId || '');
+    const encounterId = String(patient360?.careContexts.activeIpdEncounter?.encounterId || '');
     if (!encounterId) return null;
     return this.getProjection(tenantId, encounterId);
   }
@@ -149,9 +149,9 @@ export class DischargeReadinessService {
       tenantId,
       patientId
     );
-    if (!patient360?.activeEncounter?.encounterId) return null;
+    if (!patient360?.careContexts.activeIpdEncounter?.encounterId) return null;
 
-    const encounterId = patient360.activeEncounter.encounterId;
+    const encounterId = patient360.careContexts.activeIpdEncounter.encounterId;
     const encounter = await DomainStateRepository.getById<Record<string, unknown>>(
       tenantId,
       'encounters',
@@ -216,8 +216,8 @@ export class DischargeReadinessService {
         lastEventRecordedAt: patient360.lastEventRecordedAt,
         activeEncounter: {
           encounterId,
-          encounterType: patient360.activeEncounter.encounterType,
-          status: patient360.activeEncounter.status,
+          encounterType: patient360.careContexts.activeIpdEncounter.encounterType,
+          status: patient360.careContexts.activeIpdEncounter.status,
         },
         currentMedicationCount: patient360.currentMedications.length,
         dataQuality: {

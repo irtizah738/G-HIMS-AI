@@ -58,6 +58,8 @@
     "validate:ci7": "bun run typecheck && bun run lint && bun run test:ci-foundation && bun run test:ci1 && bun run test:ci2 && bun run test:ci3 && bun run test:ci4 && bun run test:ci5 && bun run test:ci6 && bun run test:ci7 && bun run test:p7 && bun run test:p6 && bun run test:security && bun run build",
     "test:ci8": "bun test tests/ci8-deterioration-escalation.test.ts",
     "validate:ci8": "bun run typecheck && bun run lint && bun run test:ci-foundation && bun run test:ci1 && bun run test:ci2 && bun run test:ci3 && bun run test:ci4 && bun run test:ci5 && bun run test:ci6 && bun run test:ci7 && bun run test:ci8 && bun run test:p7 && bun run test:p6 && bun run test:security && bun run build",
+    "test:cbe": "bun test tests/cbe-consultant-blindness-foundation.test.ts tests/cbe-consultant-blindness-completion.test.ts",
+    "validate:cbe": "bun run typecheck && bun run lint && bun run test:cbe && bun run test:p8 && bun run test:ci7 && bun run test:ci8 && bun run test:p6 && bun run test:p7 && bun run test:security && bun run build",
     "test:clinical-architecture": "bun test tests/clinical-workflow-architecture-contract.test.ts",
     "validate:clinical-architecture": "bun run typecheck && bun run lint && bun run test:clinical-architecture && bun run test:ci7 && bun run test:ci8 && bun run test:p6 && bun run test:p7 && bun run test:security && bun run build",
     "test:p8": "bun test tests/p8-main-baseline-hardening.test.ts",

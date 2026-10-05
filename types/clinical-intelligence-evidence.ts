@@ -20,6 +20,10 @@ export type ClinicalEvidenceSourceType =
   | 'PROCEDURE'
   | 'CARE_PLAN'
   | 'ENCOUNTER_HISTORY'
+  | 'ENCOUNTER_CONTEXT'
+  | 'CONSULTANT_CHANGE'
+  | 'CLINICAL_OPEN_ITEM'
+  | 'MEDICATION_SAFETY_FINDING'
   | 'CLINICAL_DOCUMENT'
   | 'KNOWLEDGE_STATUS';
 
@@ -61,6 +65,13 @@ export interface ClinicalEvidenceSnapshot {
   evidenceRefs: ClinicalEvidenceRef[];
   evidenceCount: number;
   sourceEventCount: number;
+  scope?: {
+    encounterId?: string;
+    careSetting?: string;
+    actorId?: string;
+    lastReviewedAt?: number;
+    lastReviewedRevision?: number;
+  };
   coverage?: Record<
     string,
     {

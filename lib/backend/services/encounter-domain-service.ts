@@ -802,6 +802,29 @@ export class EncounterDomainService {
           },
         };
       }
+
+      const evidenceCheck = await OpdWorkflowRuntimeService.validateAuthoritativeEvidence({
+        tenantId: context.tenantId,
+        encounterId: encounter.encounterId,
+        patientId: encounter.patientId,
+        currentStage: persistedClinicalState,
+        targetStage: targetClinicalState,
+        evidenceId: payload.evidenceId,
+      });
+
+      if (!evidenceCheck.allowed) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: evidenceCheck.code || 'OPD_EVIDENCE_GATE_BLOCKED',
+            message:
+              evidenceCheck.message ||
+              'Authoritative OPD evidence did not satisfy the workflow transition guard.',
+          },
+        };
+      }
     }
 
     const transitionedAt = Date.now();

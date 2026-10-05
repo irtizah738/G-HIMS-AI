@@ -10,6 +10,7 @@ export interface OpdBillingReconciliation {
   invoiceIds: string[];
   chargeIds: string[];
   arOpenItemIds: string[];
+  journalIds: string[];
   diagnosticOrderIds: string[];
   prescriptionIds: string[];
   invoiceCount: number;

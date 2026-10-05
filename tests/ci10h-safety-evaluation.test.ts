@@ -118,6 +118,9 @@ describe('CI-10H clinical intelligence safety and evaluation framework', () => {
     );
     expect(domain).toContain("entityType: 'PATIENT360_PROJECTION'");
     expect(domain).toContain("key: 'patient360'");
+    expect(domain).toContain('CI10H_SAFETY_EVALUATION_REQUIRED');
+    expect(domain).toContain("draft.safetyGateStatus !== 'PASSED'");
+    expect(domain).toContain('CLINICAL_SAFETY_POLICY_VERSION');
     expect(domain).toContain('CI10H_STALE_DRAFT_EVIDENCE');
     expect(domain).toContain(
       'Number(patient360.revision || 0) !== draft.patient360Revision'
@@ -185,7 +188,7 @@ describe('CI-10H clinical intelligence safety and evaluation framework', () => {
     expect(evaluator).toContain('PROMPT_INJECTION_LEAKAGE');
     expect(evaluator).toContain('WARNING');
     expect(evaluator).toContain('BLOCKER');
-    expect(evaluator).toContain('UNTRUSTED');
+    expect(evaluator).toContain('Untrusted clinical source data');
   });
 
   test('CI-10H does not weaken the CI-10F clinician authority chain', async () => {

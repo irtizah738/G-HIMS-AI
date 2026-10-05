@@ -112,7 +112,10 @@ function claim(
   };
 }
 
-function provenance(provider = 'google-genai', boundary = CLINICAL_AI_BOUNDARY_VERSION) {
+function provenance(
+  provider = 'google-genai',
+  boundary: string = CLINICAL_AI_BOUNDARY_VERSION
+) {
   return {
     provider,
     model: provider === 'google-genai' ? 'gemini-approved-test' : 'degraded-test',

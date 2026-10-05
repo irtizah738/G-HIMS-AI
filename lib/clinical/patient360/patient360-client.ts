@@ -21,6 +21,14 @@ import type { ClinicalLongitudinalSummaryResponse } from '@/types/clinical-longi
 import type { ClinicalEncounterPreparationResponse } from '@/types/clinical-encounter-preparation';
 import type { ClinicalTrendIntelligenceResponse } from '@/types/clinical-trend-intelligence';
 import type { MedicationReconciliationCopilotResponse } from '@/types/medication-reconciliation-copilot';
+import type {
+  ClinicalDraftGenerationResponse,
+  ClinicalDraftType,
+  GovernedClinicalDraft,
+  ClinicalDraftRevision,
+} from '@/types/clinical-draft';
+import type { ClinicalCopilotDraftCommandResponse } from '@/types/clinical-copilot-workspace';
+import { executeCommand } from '@/lib/api/command-client';
 
 export interface Patient360ClinicalView {
   tenantId: string;
@@ -577,4 +585,186 @@ export async function generateMedicationReconciliationCopilot(
     artifact: payload.artifact,
     evidenceIndex: payload.evidenceIndex || [],
   } as MedicationReconciliationCopilotResponse;
+}
+
+
+export async function generateGovernedClinicalDraft(
+  tenantId: string,
+  input: {
+    patientId: string;
+    encounterId: string;
+    careSetting?: ClinicalCareSetting;
+    draftType: ClinicalDraftType;
+    idempotencyKey: string;
+  }
+): Promise<ClinicalDraftGenerationResponse> {
+  const response = await AuthClient.authorizedFetch(
+    `/api/clinical/intelligence/drafts?tenantId=${encodeURIComponent(tenantId)}`,
+    {
+      method: 'POST',
+      cache: 'no-store',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-idempotency-key': input.idempotencyKey,
+      },
+      body: JSON.stringify({ tenantId, ...input }),
+    },
+    tenantId
+  );
+
+  const payload = await response.json();
+  if (!response.ok || !payload?.success || !payload?.draft || !payload?.revision) {
+    throw new Error(
+      payload?.error?.message ||
+        payload?.error ||
+        'Governed clinical draft could not be generated.'
+    );
+  }
+
+  return {
+    draft: payload.draft,
+    revision: payload.revision,
+    evidenceIndex: payload.evidenceIndex || [],
+  } as ClinicalDraftGenerationResponse;
+}
+
+export async function loadGovernedClinicalDraft(
+  tenantId: string,
+  draftId: string
+): Promise<ClinicalDraftGenerationResponse> {
+  const response = await AuthClient.authorizedFetch(
+    `/api/clinical/intelligence/drafts?tenantId=${encodeURIComponent(
+      tenantId
+    )}&draftId=${encodeURIComponent(draftId)}`,
+    {
+      method: 'GET',
+      cache: 'no-store',
+    },
+    tenantId
+  );
+
+  const payload = await response.json();
+  if (!response.ok || !payload?.success || !payload?.draft || !payload?.revision) {
+    throw new Error(
+      payload?.error?.message ||
+        payload?.error ||
+        'Governed clinical draft could not be loaded.'
+    );
+  }
+
+  return {
+    draft: payload.draft,
+    revision: payload.revision,
+    evidenceIndex: payload.evidenceIndex || [],
+  } as ClinicalDraftGenerationResponse;
+}
+
+export async function reviewGovernedClinicalDraft(
+  tenantId: string,
+  input: {
+    draftId: string;
+    expectedRevisionNumber: number;
+    title?: string;
+    content: string;
+    reviewNote?: string;
+  }
+): Promise<ClinicalCopilotDraftCommandResponse> {
+  const result = await executeCommand<{
+    draft: GovernedClinicalDraft;
+    revision: ClinicalDraftRevision;
+  }>({
+    tenantId,
+    commandType: 'ReviewClinicalDraftCommand',
+    idempotencyKey: `ci10f-review:${input.draftId}:${input.expectedRevisionNumber}:${crypto.randomUUID()}`,
+    payload: input,
+  });
+
+  if (!result.success || !result.data?.draft || !result.data?.revision) {
+    throw new Error(
+      result.error?.message || 'Governed clinical draft review could not be saved.'
+    );
+  }
+
+  return result.data;
+}
+
+export async function approveGovernedClinicalDraft(
+  tenantId: string,
+  input: {
+    draftId: string;
+    expectedRevisionNumber: number;
+    approvalAttestation: true;
+  }
+): Promise<ClinicalCopilotDraftCommandResponse> {
+  const result = await executeCommand<GovernedClinicalDraft>({
+    tenantId,
+    commandType: 'ApproveClinicalDraftCommand',
+    idempotencyKey: `ci10f-approve:${input.draftId}:${input.expectedRevisionNumber}`,
+    payload: input,
+  });
+
+  if (!result.success || !result.data) {
+    throw new Error(
+      result.error?.message || 'Governed clinical draft approval could not be recorded.'
+    );
+  }
+
+  return { draft: result.data };
+}
+
+export async function signGovernedClinicalDraft(
+  tenantId: string,
+  input: {
+    draftId: string;
+    expectedRevisionNumber: number;
+    signatureAttestation: true;
+  }
+): Promise<ClinicalCopilotDraftCommandResponse> {
+  const result = await executeCommand<{
+    draft: GovernedClinicalDraft;
+    evidenceId: string;
+    clinicalDocumentId: string;
+  }>({
+    tenantId,
+    commandType: 'SignClinicalDraftCommand',
+    idempotencyKey: `ci10f-sign:${input.draftId}:${input.expectedRevisionNumber}`,
+    payload: input,
+  });
+
+  if (
+    !result.success ||
+    !result.data?.draft ||
+    !result.data?.evidenceId ||
+    !result.data?.clinicalDocumentId
+  ) {
+    throw new Error(
+      result.error?.message || 'Governed clinical draft signature could not be committed.'
+    );
+  }
+
+  return result.data;
+}
+
+export async function rejectGovernedClinicalDraft(
+  tenantId: string,
+  input: {
+    draftId: string;
+    expectedRevisionNumber: number;
+    reason: string;
+  }
+): Promise<ClinicalCopilotDraftCommandResponse> {
+  const result = await executeCommand<GovernedClinicalDraft>({
+    tenantId,
+    commandType: 'RejectClinicalDraftCommand',
+    idempotencyKey: `ci10f-reject:${input.draftId}:${input.expectedRevisionNumber}`,
+    payload: input,
+  });
+
+  if (!result.success || !result.data) {
+    throw new Error(
+      result.error?.message || 'Governed clinical draft rejection could not be recorded.'
+    );
+  }
+
+  return { draft: result.data };
 }

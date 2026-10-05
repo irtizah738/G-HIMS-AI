@@ -529,6 +529,13 @@ export function OpdMasterWorkspace() {
   // HANDLER: Register new patient and start encounter through the
   // authoritative registration orchestrator. React state below is a read-model cache only.
   const handleRegisterSuccess = async (newPatient: PatientDemographics) => {
+    if (newPatient.tariffPlan !== 'OUT_OF_POCKET') {
+      throw new Error(
+        'OPD_PILOT_PAYER_NOT_SUPPORTED: controlled OPD registration currently supports OUT_OF_POCKET only.'
+      );
+    }
+    const registrationTariffPlan: 'OUT_OF_POCKET' = newPatient.tariffPlan;
+
     const registration = await registerActiveTenantPatient<{
       patient: {
         id: string;
@@ -573,7 +580,7 @@ export function OpdMasterWorkspace() {
       ...(newPatient.chronicConditions
         ? { chronicConditions: newPatient.chronicConditions }
         : {}),
-      tariffPlan: newPatient.tariffPlan,
+      tariffPlan: registrationTariffPlan,
       insuranceDetails: newPatient.insuranceDetails,
       consentDecisions: newPatient.registrationConsentDecisions,
       encounterType: 'OPD',

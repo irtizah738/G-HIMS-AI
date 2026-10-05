@@ -25,6 +25,7 @@ interface OpdConsultationSpecialtiesProps {
   onPlaceDiagnosticOrders?: () => void;
   onPlacePrescriptions?: () => void;
   offline?: boolean;
+  canSignClinicalNotes: boolean;
 }
 
 const COMMON_ICD10_DB: Icd10Diagnosis[] = [
@@ -48,6 +49,7 @@ export function OpdConsultationSpecialties({
   onPlaceDiagnosticOrders,
   onPlacePrescriptions,
   offline = false,
+  canSignClinicalNotes,
 }: OpdConsultationSpecialtiesProps) {
   const [selectedSpecialty, setSelectedSpecialty] = useState<OpdSpecialtyTemplate>(
     encounter.soap?.specialtyTemplate || (encounter.department as any) || 'GENERAL_MEDICINE'
@@ -95,6 +97,8 @@ export function OpdConsultationSpecialties({
   const [neuroCranialNerves, setNeuroCranialNerves] = useState<string>('');
   const [psychMse, setPsychMse] = useState<string>('');
   const [surgAbdomen, setSurgAbdomen] = useState<string>('');
+  const [signing, setSigning] = useState(false);
+  const [signingError, setSigningError] = useState<string | null>(null);
 
   const handleAddDiagnosis = (diag: Icd10Diagnosis) => {
     if (!diagnoses.find((d) => d.code === diag.code)) {
@@ -115,7 +119,35 @@ export function OpdConsultationSpecialties({
     );
   };
 
-  const handleCommitSoap = () => {
+  const handleCommitSoap = async () => {
+    setSigningError(null);
+
+    if (!canSignClinicalNotes) {
+      setSigningError(
+        'Signing is unavailable because this account does not have the active, verified SIGN_CLINICAL_NOTES privilege.'
+      );
+      return;
+    }
+
+    const substantiveContent = [
+      subjective,
+      historyOfPresentIllness,
+      reviewOfSystems,
+      objective,
+      physicalExamination,
+      assessment,
+      plan,
+    ]
+      .join(' ')
+      .replace(/[^\p{L}\p{N}]+/gu, '');
+
+    if (substantiveContent.length < 3) {
+      setSigningError(
+        'Enter substantive clinician-authored SOAP content before signing. Encounter Preparation Intelligence remains read-only and does not prefill the note.'
+      );
+      return;
+    }
+
     const specialtyData: Record<string, any> = {};
     if (selectedSpecialty === 'CARDIOLOGY') {
       if (nyhaClass) specialtyData.nyhaClass = nyhaClass;
@@ -159,7 +191,18 @@ export function OpdConsultationSpecialties({
         'Authenticated clinician',
     };
 
-    onSaveConsultation(soapDoc);
+    try {
+      setSigning(true);
+      await Promise.resolve(onSaveConsultation(soapDoc));
+    } catch (caught) {
+      setSigningError(
+        caught instanceof Error
+          ? caught.message
+          : 'Clinical documentation could not be signed.'
+      );
+    } finally {
+      setSigning(false);
+    }
   };
 
   return (
@@ -603,12 +646,37 @@ export function OpdConsultationSpecialties({
           </div>
 
           {/* Final Commit Button */}
+          {!canSignClinicalNotes && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+              This account can review the consultation workspace but cannot sign
+              clinical notes until the SIGN_CLINICAL_NOTES privilege is active
+              and verified.
+            </div>
+          )}
+
+          {signingError && (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-900 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-100">
+              {signingError}
+            </div>
+          )}
+
           <button
-            onClick={handleCommitSoap}
-            className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-all"
+            type="button"
+            onClick={() => void handleCommitSoap()}
+            disabled={!canSignClinicalNotes || signing}
+            className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-all disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <CheckCircle2 className="w-4 h-4" />
-            Sign & Commit Consultation Documentation
+            {signing ? (
+              <span className="inline-flex items-center gap-2">
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                Signing…
+              </span>
+            ) : (
+              <>
+                <CheckCircle2 className="w-4 h-4" />
+                Sign & Commit Consultation Documentation
+              </>
+            )}
           </button>
         </div>
       </div>

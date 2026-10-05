@@ -444,6 +444,12 @@ export function Patient360View({
   const highCriticalityAllergies = projection.allergies.filter(
     (item) => item.criticality === 'HIGH'
   );
+  const longitudinalProblems = projection.activeProblems.filter(
+    (item) => item.category !== 'ENCOUNTER_DIAGNOSIS'
+  );
+  const encounterDiagnoses = projection.activeProblems.filter(
+    (item) => item.category === 'ENCOUNTER_DIAGNOSIS'
+  );
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -511,7 +517,7 @@ export function Patient360View({
             <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 lg:min-w-[430px]">
               <div className="rounded-xl bg-slate-50 p-3">
                 <div className="text-[10px] uppercase tracking-wide text-slate-400">Problems</div>
-                <div className="mt-1 text-lg font-bold">{projection.activeProblems.length}</div>
+                <div className="mt-1 text-lg font-bold">{longitudinalProblems.length}</div>
               </div>
               <div className="rounded-xl bg-slate-50 p-3">
                 <div className="text-[10px] uppercase tracking-wide text-slate-400">Allergies</div>
@@ -1310,25 +1316,47 @@ export function Patient360View({
               </div>
 
               <div className="mt-4 grid gap-4 md:grid-cols-2">
-                <div>
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                    Active problems
-                  </h3>
-                  <div className="mt-2 space-y-2">
-                    {projection.activeProblems.length ? (
-                      projection.activeProblems.map((item) => (
-                        <div key={item.conditionId} className="rounded-lg border border-slate-200 p-3">
-                          <div className="text-sm font-semibold">{item.display}</div>
-                          <div className="mt-1 text-[11px] text-slate-500">
-                            {item.system || 'LOCAL'} {item.code || ''} · {item.verificationStatus}
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Longitudinal problem list
+                    </h3>
+                    <div className="mt-2 space-y-2">
+                      {longitudinalProblems.length ? (
+                        longitudinalProblems.map((item) => (
+                          <div key={item.conditionId} className="rounded-lg border border-slate-200 p-3">
+                            <div className="text-sm font-semibold">{item.display}</div>
+                            <div className="mt-1 text-[11px] text-slate-500">
+                              {item.system || 'LOCAL'} {item.code || ''} · {item.verificationStatus}
+                            </div>
                           </div>
-                        </div>
-                      ))
-                    ) : (
-                      <EmptyState>
-                        {knowledgeEmptyState('Problem list', projection.dataQuality.problemListKnowledge)}
-                      </EmptyState>
-                    )}
+                        ))
+                      ) : (
+                        <EmptyState>
+                          {knowledgeEmptyState('Problem list', projection.dataQuality.problemListKnowledge)}
+                        </EmptyState>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Signed encounter diagnoses
+                    </h3>
+                    <div className="mt-2 space-y-2">
+                      {encounterDiagnoses.length ? (
+                        encounterDiagnoses.map((item) => (
+                          <div key={item.conditionId} className="rounded-lg border border-blue-100 bg-blue-50/40 p-3">
+                            <div className="text-sm font-semibold">{item.display}</div>
+                            <div className="mt-1 text-[11px] text-slate-500">
+                              {item.system || 'ICD10'} {item.code || ''} · {item.verificationStatus}
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <EmptyState>No signed encounter diagnosis is currently available.</EmptyState>
+                      )}
+                    </div>
                   </div>
                 </div>
 

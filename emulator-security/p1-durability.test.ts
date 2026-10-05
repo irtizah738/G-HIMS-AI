@@ -280,6 +280,15 @@ describe('G-HIMS P1 durable command infrastructure', () => {
     const encounterId = unique('enc');
     const patientId = unique('pat');
 
+    await db.collection('tenants').doc(tenantId).collection('patients').doc(patientId).set({
+      id: patientId,
+      patientId,
+      tenantId,
+      mrn: unique('mrn'),
+      fullName: 'Durability Vitals Patient',
+      status: 'ACTIVE',
+      createdAt: Date.now(),
+    });
     await db.collection('tenants').doc(tenantId).collection('encounters').doc(encounterId).set({
       encounterId,
       tenantId,
@@ -329,6 +338,15 @@ describe('G-HIMS P1 durable command infrastructure', () => {
     const encounterId = unique('enc');
     const patientId = unique('pat');
 
+    await db.collection('tenants').doc(tenantId).collection('patients').doc(patientId).set({
+      id: patientId,
+      patientId,
+      tenantId,
+      mrn: unique('mrn'),
+      fullName: 'Durability Note Patient',
+      status: 'ACTIVE',
+      createdAt: Date.now(),
+    });
     await db.collection('tenants').doc(tenantId).collection('encounters').doc(encounterId).set({
       encounterId,
       tenantId,
@@ -736,6 +754,15 @@ describe('G-HIMS P1 durable command infrastructure', () => {
     const encounterId = unique('enc');
     const patientId = unique('pat');
 
+    await db.collection('tenants').doc(tenantId).collection('patients').doc(patientId).set({
+      id: patientId,
+      patientId,
+      tenantId,
+      mrn: unique('mrn'),
+      fullName: 'Revenue Integrity Note Patient',
+      status: 'ACTIVE',
+      createdAt: Date.now(),
+    });
     await db.collection('tenants').doc(tenantId).collection('encounters').doc(encounterId).set({
       id: encounterId,
       tenantId,

@@ -7,6 +7,7 @@
 
 import { AuthorizationPipeline } from '../auth/authorization-pipeline';
 import { TransactionManager } from '../transactions/transaction-manager';
+import type { ClinicalHandoff } from '@/types/clinical-coordination';
 import type { CommandContext, CommandResult } from '../types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import { PatientClinicalKnowledgeDomainService } from './patient-clinical-knowledge-domain-service';
@@ -235,6 +236,51 @@ export class CareTransitionDomainService {
       updatedAt: now,
     };
 
+    const admissionHandoffId = sourceEncounter
+      ? `handoff_admission_${encounterId}`
+      : undefined;
+    const receivingClinicianId = String(payload.assignedDoctor || context.actorId).trim();
+    const admissionHandoff: ClinicalHandoff | null = sourceEncounter && admissionHandoffId
+      ? {
+          handoffId: admissionHandoffId,
+          tenantId: context.tenantId,
+          patientId: patient.id,
+          encounterId,
+          sourceEncounterId: sourceEncounter.encounterId,
+          careSetting: 'IPD',
+          fromClinicianId: context.actorId,
+          fromDepartmentId: sourceEncounter.departmentId,
+          toClinicianId: receivingClinicianId || undefined,
+          toDepartmentId: payload.targetWard,
+          toRole: receivingClinicianId ? undefined : 'CONSULTANT',
+          currentProblemSummary: payload.admittingDiagnosis,
+          activeRisks: [],
+          pendingDiagnostics: [],
+          pendingProcedures: [],
+          pendingConsultations: [],
+          medicationConcerns: [],
+          unresolvedItems: [],
+          expectedActions: [
+            'Review admission context and active Patient 360 evidence.',
+            'Accept inpatient clinical responsibility.',
+          ],
+          status:
+            receivingClinicianId && receivingClinicianId === context.actorId
+              ? 'ACCEPTED'
+              : 'PENDING_ACCEPTANCE',
+          createdAt: now,
+          acceptedAt:
+            receivingClinicianId && receivingClinicianId === context.actorId
+              ? now
+              : undefined,
+          acceptedBy:
+            receivingClinicianId && receivingClinicianId === context.actorId
+              ? context.actorId
+              : undefined,
+          updatedAt: now,
+        }
+      : null;
+
     const sourceEncounterState = sourceEncounter
       ? {
           ...sourceEncounter,
@@ -264,6 +310,7 @@ export class CareTransitionDomainService {
         sourceEncounterId: payload.sourceEncounterId,
         targetWard: payload.targetWard,
         admittingDiagnosis: payload.admittingDiagnosis,
+        admissionHandoffId,
       },
       auditAction: 'ADMIT_PATIENT_TO_INPATIENT_CARE',
       auditResourceType: 'ENCOUNTER',
@@ -299,6 +346,14 @@ export class CareTransitionDomainService {
               expectedServerVersion: Number(
                 (sourceEncounter as PersistedEncounter & { _serverVersion?: number })._serverVersion || 0
               ),
+            }]
+          : []),
+        ...(admissionHandoff
+          ? [{
+              entityType: 'CLINICAL_HANDOFF',
+              entityId: admissionHandoff.handoffId,
+              domainState: admissionHandoff,
+              expectedServerVersion: 0,
             }]
           : []),
       ],

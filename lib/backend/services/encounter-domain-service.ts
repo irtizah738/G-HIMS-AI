@@ -203,6 +203,21 @@ export class EncounterDomainService {
       };
     }
 
+    // Inpatient admission is a governed care transition because encounter
+    // creation and bed/census assignment must commit atomically.
+    if (payload.encounterType === 'IPD') {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'CARE_TRANSITION_COMMAND_REQUIRED',
+          message:
+            'Inpatient admission must use AdmitPatientToInpatientCareCommand so IPD encounter, patient care context, and bed assignment are committed together.',
+        },
+      };
+    }
+
     // 3. Authoritative patient precondition and state initialization.
     const patient = DomainStateRepository.isAvailable()
       ? await DomainStateRepository.getById<Record<string, unknown>>(
@@ -243,6 +258,7 @@ export class EncounterDomainService {
       };
     }
 
+    const now = Date.now();
     const encounterId = `enc_${crypto.randomUUID()}`;
     const domainState: EncounterState = {
       encounterId,
@@ -262,24 +278,54 @@ export class EncounterDomainService {
       resourceAssignmentState: 'NONE',
       priority: payload.priority || 'ROUTINE',
       assignedProviderId: context.actorId,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      createdAt: now,
+      updatedAt: now,
     };
 
-    // 4. Atomic Transaction Commit
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType: 'ENCOUNTER',
-      entityId: encounterId,
+    const activeCareContexts = activateCareContext(
+      patient.activeCareContexts as any,
+      normalizeCareSetting(payload.encounterType),
+      encounterId,
+      now
+    );
+    const patientState = {
+      ...patient,
+      activeCareContexts,
+      activeEncounterId: compatibilityEncounterId(activeCareContexts),
+      updatedAt: now,
+    };
+
+    // 4. Encounter + patient care context commit atomically.
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'CLINICIAN',
+      aggregateType: 'ENCOUNTER',
+      aggregateId: encounterId,
       eventType: 'ENCOUNTER_CREATED',
-      domainState,
       eventPayload: {
         encounterId,
         patientId: payload.patientId,
         encounterType: payload.encounterType,
+        careSetting: normalizeCareSetting(payload.encounterType),
         chiefComplaint: payload.chiefComplaint,
       },
+      auditAction: 'CREATE_ENCOUNTER',
+      auditResourceType: 'ENCOUNTER',
+      auditResourceId: encounterId,
       auditReason: `Initiated ${payload.encounterType} encounter for patient ${payload.patientId}`,
       outboxTopic: 'g-hims-clinical-events',
+      idempotencyKey,
+      commandId,
+      correlationId: context.correlationId,
+      domainState,
+      additionalStateWrites: [
+        {
+          entityType: 'PATIENT_MPI',
+          entityId: payload.patientId,
+          domainState: patientState,
+        },
+      ],
     });
 
     this.encounterCache.set(this.cacheKey(context.tenantId, encounterId), domainState);
@@ -289,10 +335,10 @@ export class EncounterDomainService {
       commandId,
       idempotencyKey,
       entityId: encounterId,
-      eventId: tx.event.eventId,
-      auditId: tx.audit.auditId,
-      outboxId: tx.outbox.outboxId,
-      data: domainState,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
+      data: { encounter: domainState, patient: patientState },
     };
     return result;
   }

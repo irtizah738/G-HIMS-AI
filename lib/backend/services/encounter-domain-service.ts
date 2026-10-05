@@ -611,6 +611,36 @@ export class EncounterDomainService {
       }
     }
 
+    if (encounter.encounterType === 'OPD') {
+      const reconciliationId = String(
+        (encounter as Record<string, unknown>).billingReconciliationId || ''
+      ).trim();
+      const reconciliation = reconciliationId
+        ? await DomainStateRepository.getById<Record<string, unknown>>(
+            context.tenantId,
+            'opdBillingReconciliations',
+            reconciliationId
+          )
+        : null;
+      if (
+        !reconciliation ||
+        String(reconciliation.status || '').toUpperCase() !== 'CLEARED' ||
+        String(reconciliation.encounterId || '') !== encounter.encounterId ||
+        String(reconciliation.patientId || '') !== encounter.patientId
+      ) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'OPD_FINAL_BILLING_RECONCILIATION_REQUIRED',
+            message:
+              'OPD disposition cannot close until authoritative final billing reconciliation is CLEARED for this encounter.',
+          },
+        };
+      }
+    }
+
     const patient = await DomainStateRepository.getById<Record<string, unknown>>(
       context.tenantId,
       'patients',
@@ -732,7 +762,19 @@ export class EncounterDomainService {
     payload: AdvanceStagePayload
   ): Promise<CommandResult> {
     const auth = AuthorizationPipeline.evaluate(context, {
-      requiredRoles: ['NURSE', 'DOCTOR', 'CONSULTANT', 'SYSTEM_ADMIN'],
+      requiredRoles: [
+        'NURSE',
+        'DOCTOR',
+        'CONSULTANT',
+        'BILLING_CLERK',
+        'BILLING_ADMIN',
+        'CASHIER',
+        'BILLING_CASHIER',
+        'FINANCE_MANAGER',
+        'REVENUE_CYCLE',
+        'SYSTEM_ADMIN',
+        'ADMINISTRATOR',
+      ],
     });
     if (!auth.authorized) {
       return {
@@ -763,6 +805,25 @@ export class EncounterDomainService {
       : persistedClinicalState;
     const targetClinicalState = normalizeClinicalEncounterState(payload.targetStage);
 
+    const normalizedRoles = new Set(
+      context.roles.map((role) => String(role || '').trim().toUpperCase())
+    );
+    const hasClinicalStageAuthority = [
+      'NURSE',
+      'DOCTOR',
+      'CONSULTANT',
+      'SYSTEM_ADMIN',
+      'ADMINISTRATOR',
+    ].some((role) => normalizedRoles.has(role));
+    const hasBillingStageAuthority = [
+      'BILLING_CLERK',
+      'BILLING_ADMIN',
+      'CASHIER',
+      'BILLING_CASHIER',
+      'FINANCE_MANAGER',
+      'REVENUE_CYCLE',
+    ].some((role) => normalizedRoles.has(role));
+
     if (!persistedClinicalState || !callerCurrentState || !targetClinicalState) {
       return {
         success: false,
@@ -771,6 +832,24 @@ export class EncounterDomainService {
         error: {
           code: 'UNKNOWN_CLINICAL_STAGE',
           message: 'Encounter stage must map to the canonical clinical workflow contract.',
+        },
+      };
+    }
+
+    if (
+      !hasClinicalStageAuthority &&
+      hasBillingStageAuthority &&
+      persistedClinicalState !== 'BILLING_SETTLEMENT' &&
+      targetClinicalState !== 'BILLING_SETTLEMENT'
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'BILLING_STAGE_AUTHORITY_SCOPE_VIOLATION',
+          message:
+            'Billing roles may advance only workflow edges entering or leaving BILLING_SETTLEMENT.',
         },
       };
     }

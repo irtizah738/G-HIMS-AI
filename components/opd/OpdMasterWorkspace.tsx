@@ -654,7 +654,7 @@ export function OpdMasterWorkspace() {
       department: registration.queueToken.department,
       assignedRoomOrBay: 'UNASSIGNED',
       triagePriority: String(registration.queueToken.priority || 'routine').toUpperCase(),
-      status: 'WAITING',
+      status: 'PAYMENT_PENDING',
       issuedAt: registration.queueToken.createdAt || Date.now(),
     };
 
@@ -767,7 +767,7 @@ export function OpdMasterWorkspace() {
       assignedDoctorName: appt.doctorName,
       assignedRoomOrBay: 'UNASSIGNED',
       triagePriority: String(result.data.queueToken.priority || 'routine').toUpperCase(),
-      status: 'WAITING',
+      status: 'PAYMENT_PENDING',
       issuedAt: result.data.queueToken.createdAt || Date.now(),
     };
 
@@ -1265,6 +1265,16 @@ export function OpdMasterWorkspace() {
             : encounter
         )
       );
+
+      if (isSettled) {
+        setQueue((prev) =>
+          prev.map((token) =>
+            token.encounterId === activeEncounter.id
+              ? { ...token, status: 'WAITING' as const }
+              : token
+          )
+        );
+      }
 
       setActiveTab(isSettled ? 'QUEUE' : 'BILLING');
       return;

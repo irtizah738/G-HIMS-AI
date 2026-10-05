@@ -91,6 +91,11 @@ interface EncounterState {
   resourceAssignmentState: ResourceAssignmentState;
   priority: 'STAT' | 'URGENT' | 'ROUTINE' | 'EMERGENCY';
   assignedProviderId: string;
+  billingMutationSequence?: number;
+  billingReconciliationId?: string;
+  billingReconciliationState?: 'CLEARED' | string;
+  billingClosedAt?: number;
+  billingClosedBy?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -145,7 +150,7 @@ export class EncounterDomainService {
           String(persisted.status || 'ACTIVE').toUpperCase() === 'IN_PROGRESS'
             ? 'ACTIVE'
             : String(persisted.status || 'ACTIVE').toUpperCase(),
-        currentStage: clinicalState,
+        currentStage: rawStage,
         clinicalState,
         operationalState:
           (persisted.operationalState as OperationalQueueState | undefined) || 'NOT_QUEUED',
@@ -158,6 +163,21 @@ export class EncounterDomainService {
           (persisted.resourceAssignmentState as ResourceAssignmentState | undefined) || 'NONE',
         priority: String(persisted.priority || 'ROUTINE').toUpperCase() as EncounterState['priority'],
         assignedProviderId: String(persisted.assignedProviderId || persisted.assignedDoctor || ''),
+        billingMutationSequence: Number(
+          persisted.billingMutationSequence || 0
+        ),
+        billingReconciliationId: persisted.billingReconciliationId
+          ? String(persisted.billingReconciliationId)
+          : undefined,
+        billingReconciliationState: persisted.billingReconciliationState
+          ? String(persisted.billingReconciliationState)
+          : undefined,
+        billingClosedAt: persisted.billingClosedAt
+          ? Number(persisted.billingClosedAt)
+          : undefined,
+        billingClosedBy: persisted.billingClosedBy
+          ? String(persisted.billingClosedBy)
+          : undefined,
         createdAt: Number(persisted.createdAt || persisted.startedAt || Date.now()),
         updatedAt: Number(persisted.updatedAt || persisted.startedAt || Date.now()),
       };
@@ -613,7 +633,7 @@ export class EncounterDomainService {
 
     if (encounter.encounterType === 'OPD') {
       const reconciliationId = String(
-        (encounter as Record<string, unknown>).billingReconciliationId || ''
+        encounter.billingReconciliationId || ''
       ).trim();
       const reconciliation = reconciliationId
         ? await DomainStateRepository.getById<Record<string, unknown>>(
@@ -800,11 +820,24 @@ export class EncounterDomainService {
     }
 
     const persistedClinicalState =
-      encounter.clinicalState || normalizeClinicalEncounterState(encounter.currentStage);
+      encounter.clinicalState ||
+      normalizeClinicalEncounterState(encounter.currentStage);
     const callerCurrentState = payload.currentStage
       ? normalizeClinicalEncounterState(payload.currentStage)
       : persistedClinicalState;
-    const targetClinicalState = normalizeClinicalEncounterState(payload.targetStage);
+    const targetClinicalState =
+      normalizeClinicalEncounterState(payload.targetStage);
+
+    const isOpd = encounter.encounterType === 'OPD';
+    const persistedOpdStage = isOpd
+      ? OpdWorkflowRuntimeService.resolveStage(encounter.currentStage)
+      : null;
+    const callerOpdStage = isOpd
+      ? OpdWorkflowRuntimeService.resolveStage(payload.currentStage)
+      : null;
+    const targetOpdStage = isOpd
+      ? OpdWorkflowRuntimeService.resolveStage(payload.targetStage)
+      : null;
 
     const normalizedRoles = new Set(
       context.roles.map((role) => String(role || '').trim().toUpperCase())
@@ -826,14 +859,36 @@ export class EncounterDomainService {
       'REVENUE_CYCLE',
     ].some((role) => normalizedRoles.has(role));
 
-    if (!persistedClinicalState || !callerCurrentState || !targetClinicalState) {
+    if (
+      !persistedClinicalState ||
+      !callerCurrentState ||
+      !targetClinicalState ||
+      (isOpd && (!persistedOpdStage || !callerOpdStage || !targetOpdStage))
+    ) {
       return {
         success: false,
         commandId,
         idempotencyKey,
         error: {
           code: 'UNKNOWN_CLINICAL_STAGE',
-          message: 'Encounter stage must map to the canonical clinical workflow contract.',
+          message:
+            'Encounter stage must map to the canonical clinical state and, for OPD, the compiled workflow DAG.',
+        },
+      };
+    }
+
+    if (
+      isOpd &&
+      persistedOpdStage !== callerOpdStage
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'STALE_OPD_WORKFLOW_STAGE',
+          message:
+            `OPD encounter is at workflow stage '${persistedOpdStage}', not caller-declared '${callerOpdStage}'.`,
         },
       };
     }
@@ -841,8 +896,13 @@ export class EncounterDomainService {
     if (
       !hasClinicalStageAuthority &&
       hasBillingStageAuthority &&
-      persistedClinicalState !== 'BILLING_SETTLEMENT' &&
-      targetClinicalState !== 'BILLING_SETTLEMENT'
+      (
+        !isOpd ||
+        (
+          persistedOpdStage !== 'BILLING_SETTLEMENT' &&
+          targetOpdStage !== 'BILLING_SETTLEMENT'
+        )
+      )
     ) {
       return {
         success: false,
@@ -851,12 +911,15 @@ export class EncounterDomainService {
         error: {
           code: 'BILLING_STAGE_AUTHORITY_SCOPE_VIOLATION',
           message:
-            'Billing roles may advance only workflow edges entering or leaving BILLING_SETTLEMENT.',
+            'Billing roles may advance only OPD workflow edges entering or leaving BILLING_SETTLEMENT.',
         },
       };
     }
 
-    if (persistedClinicalState === targetClinicalState) {
+    if (
+      persistedClinicalState === targetClinicalState &&
+      (!isOpd || persistedOpdStage === targetOpdStage)
+    ) {
       return {
         success: true,
         commandId,
@@ -896,8 +959,8 @@ export class EncounterDomainService {
     // The client never gets to decide or manually resolve the graph.
     if (encounter.encounterType === 'OPD') {
       const dagCheck = OpdWorkflowRuntimeService.validateTransition({
-        currentStage: persistedClinicalState,
-        targetStage: targetClinicalState,
+        currentStage: persistedOpdStage,
+        targetStage: targetOpdStage,
         evidenceId: payload.evidenceId,
       });
 
@@ -919,8 +982,8 @@ export class EncounterDomainService {
         tenantId: context.tenantId,
         encounterId: encounter.encounterId,
         patientId: encounter.patientId,
-        currentStage: persistedClinicalState,
-        targetStage: targetClinicalState,
+        currentStage: persistedOpdStage,
+        targetStage: targetOpdStage,
         evidenceId: payload.evidenceId,
       });
 
@@ -941,10 +1004,21 @@ export class EncounterDomainService {
 
     const transitionedAt = Date.now();
     const stageRuntimeId = `stg_${crypto.randomUUID()}`;
+    const persistedWorkflowStage =
+      isOpd && persistedOpdStage
+        ? persistedOpdStage
+        : persistedClinicalState;
+    const targetWorkflowStage =
+      isOpd && targetOpdStage
+        ? targetOpdStage
+        : targetClinicalState;
+
     const stageState = {
       encounterId: payload.encounterId,
-      previousStage: persistedClinicalState,
-      newStage: targetClinicalState,
+      previousStage: persistedWorkflowStage,
+      newStage: targetWorkflowStage,
+      previousClinicalState: persistedClinicalState,
+      newClinicalState: targetClinicalState,
       advancedBy: context.actorId,
       evidenceId: payload.evidenceId,
       sbar: payload.handoffSbar,
@@ -954,7 +1028,7 @@ export class EncounterDomainService {
 
     const updatedEncounter: EncounterState = {
       ...encounter,
-      currentStage: targetClinicalState,
+      currentStage: targetWorkflowStage,
       clinicalState: targetClinicalState,
       status: targetClinicalState === 'COMPLETED' ? 'COMPLETED' : encounter.status,
       operationalState:
@@ -971,11 +1045,14 @@ export class EncounterDomainService {
       eventType: 'STAGE_COMPLETED',
       eventPayload: {
         encounterId: payload.encounterId,
-        fromStage: persistedClinicalState,
-        toStage: targetClinicalState,
+        fromStage: persistedWorkflowStage,
+        toStage: targetWorkflowStage,
+        fromClinicalState: persistedClinicalState,
+        toClinicalState: targetClinicalState,
         evidenceId: payload.evidenceId,
       },
-      auditReason: `Transitioned encounter ${payload.encounterId} from ${persistedClinicalState} to ${targetClinicalState}`,
+      auditReason:
+        `Transitioned encounter ${payload.encounterId} from ${persistedWorkflowStage} to ${targetWorkflowStage} (canonical ${persistedClinicalState} -> ${targetClinicalState})`,
       outboxTopic: 'g-hims-clinical-events',
       idempotencyKey,
       commandId,

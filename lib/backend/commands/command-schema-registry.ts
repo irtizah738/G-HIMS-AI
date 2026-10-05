@@ -158,6 +158,84 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       reason: z.string().trim().max(4000).optional(),
     }).strict(),
   },
+  RequestConsultationCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      encounterId: nonEmpty.max(150),
+      requestedSpecialty: nonEmpty.max(250),
+      requestedConsultantId: z.string().trim().min(1).max(150).optional(),
+      clinicalQuestion: nonEmpty.max(8000),
+      priority: z.enum(['ROUTINE','URGENT','STAT']).optional(),
+      sourceRefs: z.array(nonEmpty.max(250)).max(100).optional(),
+    }).strict(),
+  },
+  AcceptConsultationCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      encounterId: nonEmpty.max(150),
+      consultationId: nonEmpty.max(150),
+    }).strict(),
+  },
+  CompleteConsultationCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      encounterId: nonEmpty.max(150),
+      consultationId: nonEmpty.max(150),
+      assessment: nonEmpty.max(12000),
+      recommendations: z.array(nonEmpty.max(4000)).max(100),
+      followUpRequired: z.boolean().optional(),
+      primaryTeamReviewRequired: z.boolean().optional(),
+    }).strict(),
+  },
+  CreateClinicalHandoffCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      encounterId: nonEmpty.max(150),
+      toClinicianId: z.string().trim().min(1).max(150).optional(),
+      toDepartmentId: z.string().trim().min(1).max(150).optional(),
+      toRole: z.string().trim().min(1).max(150).optional(),
+      currentProblemSummary: nonEmpty.max(12000),
+      activeRisks: z.array(nonEmpty.max(2000)).max(100).optional(),
+      pendingDiagnostics: z.array(nonEmpty.max(2000)).max(100).optional(),
+      pendingProcedures: z.array(nonEmpty.max(2000)).max(100).optional(),
+      pendingConsultations: z.array(nonEmpty.max(2000)).max(100).optional(),
+      medicationConcerns: z.array(nonEmpty.max(2000)).max(100).optional(),
+      unresolvedItems: z.array(nonEmpty.max(2000)).max(200).optional(),
+      expectedActions: z.array(nonEmpty.max(2000)).max(100).optional(),
+    }).strict(),
+  },
+  AcceptClinicalHandoffCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      encounterId: nonEmpty.max(150),
+      handoffId: nonEmpty.max(150),
+    }).strict(),
+  },
+  AcknowledgeClinicalOpenItemCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      encounterId: nonEmpty.max(150),
+      openItemId: nonEmpty.max(200),
+      note: z.string().trim().max(4000).optional(),
+    }).strict(),
+  },
+  ResolveClinicalOpenItemCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      encounterId: nonEmpty.max(150),
+      openItemId: nonEmpty.max(200),
+      resolutionReason: nonEmpty.max(8000),
+      resolutionRef: z.string().trim().min(1).max(250).optional(),
+    }).strict(),
+  },
+  AcknowledgeClinicalEscalationCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      encounterId: nonEmpty.max(150),
+      escalationId: nonEmpty.max(200),
+      note: z.string().trim().max(4000).optional(),
+    }).strict(),
+  },
   RecordConsultantPatientReviewCommand: {
     1: z.object({
       patientId: nonEmpty.max(150),

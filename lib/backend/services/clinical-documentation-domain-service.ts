@@ -530,19 +530,6 @@ export class ClinicalDocumentationDomainService {
       };
     }
 
-    const normalizedDiagnoses = normalizeSignedDiagnoses(payload.acceptedStructuredData);
-    if (!normalizedDiagnoses.ok) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: {
-          code: 'INVALID_STRUCTURED_DIAGNOSES',
-          message: normalizedDiagnoses.message,
-        },
-      };
-    }
-
     const evidenceId = `ev_vitals_${crypto.randomUUID()}`;
     const measuredAt = payload.measuredAt || Date.now();
     const systolicBloodPressure = Number(String(payload.bloodPressure || '').split('/')[0]);
@@ -851,19 +838,29 @@ export class ClinicalDocumentationDomainService {
       };
     }
 
-    const encounter = await DomainStateRepository.getById<Record<string, unknown>>(
+    const lineage = await this.validatePatientEncounter(
       context.tenantId,
-      'encounters',
+      payload.patientId,
       payload.encounterId
     );
-    if (!encounter) {
+    if (!lineage.ok) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: lineage.code, message: lineage.message },
+      };
+    }
+
+    const normalizedDiagnoses = normalizeSignedDiagnoses(payload.acceptedStructuredData);
+    if (!normalizedDiagnoses.ok) {
       return {
         success: false,
         commandId,
         idempotencyKey,
         error: {
-          code: 'ENCOUNTER_NOT_FOUND',
-          message: `Encounter ${payload.encounterId} was not found.`,
+          code: 'INVALID_STRUCTURED_DIAGNOSES',
+          message: normalizedDiagnoses.message,
         },
       };
     }

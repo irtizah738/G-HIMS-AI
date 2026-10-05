@@ -418,10 +418,8 @@ export class ConsultantAttentionProjectionService {
                   ? 'ACTION_REQUIRED'
                   : 'REVIEW_REQUIRED',
             ownerType: consultationOwner ? 'CONSULTANT' : 'ROLE',
-            ownerId: consultationOwner || consultation.requestedSpecialty,
-            ownerRole: consultationOwner
-              ? undefined
-              : consultation.requestedSpecialty,
+            ownerId: consultationOwner || 'CONSULTANT',
+            ownerRole: consultationOwner ? undefined : 'CONSULTANT',
             createdAt: consultation.requestedAt,
             dueAt:
               consultation.priority === 'STAT'

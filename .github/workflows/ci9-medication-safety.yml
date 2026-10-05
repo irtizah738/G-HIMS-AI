@@ -1,0 +1,91 @@
+name: Clinical Intelligence CI-9 Medication Safety
+
+on:
+  push:
+    branches:
+      - ci9/medication-safety-reconciliation
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci9-medication-safety-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci9:
+    name: CI-9 medication safety and reconciliation qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-ci9
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-ci9
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-ci9
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-ci9
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      GHIMS_INTEGRATION_HL7_STATE: DISABLED
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_INTEGRATION_DICOMWEB_STATE: DISABLED
+      GHIMS_INTEGRATION_DEVICE_TELEMETRY_STATE: DISABLED
+      GHIMS_INTEGRATION_EDI_X12_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: TypeScript
+        run: bun run typecheck
+
+      - name: Lint
+        run: bun run lint
+
+      - name: CI-9 medication safety guards
+        run: bun run test:ci9
+
+      - name: Preserve consultant blindness and deterioration guarantees
+        run: bun run test:cbe && bun run test:ci8
+
+      - name: Preserve main baseline and offline/pilot guarantees
+        run: bun run test:p8 && bun run test:p6 && bun run test:p7
+
+      - name: Security regression
+        run: bun run test:security
+
+      - name: Production build
+        run: bun run build
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "## G-HIMS CI-9 — Medication Safety & Reconciliation Intelligence"
+            echo ""
+            echo "- Exact medication-allergy evidence checks: PASS"
+            echo "- Duplicate active medication checks: PASS"
+            echo "- Knowledge and reconciliation completeness: PASS"
+            echo "- Authoritative prescribing-time precheck: PASS"
+            echo "- Explicit finding acknowledgement and override audit: PASS"
+            echo "- Medication reconciliation workflow: PASS"
+            echo "- Consultant attention routing: PASS"
+            echo "- Patient 360 evidence surface: PASS"
+            echo "- Encrypted offline continuity with explicit staleness: PASS"
+            echo "- Server-only projection boundary: PASS"
+            echo "- CBE / CI-8 / P8 / P6 / P7 / security regressions: PASS"
+            echo "- Production build: PASS"
+          } >> "$GITHUB_STEP_SUMMARY"

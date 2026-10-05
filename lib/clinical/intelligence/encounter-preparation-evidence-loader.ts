@@ -43,6 +43,15 @@ function normalized(value: unknown): string {
   return String(value ?? '').trim();
 }
 
+function timestamp(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
 function flattenDeterioration(
   projection: Awaited<ReturnType<typeof ClinicalDeteriorationService.getProjection>>
 ) {
@@ -190,7 +199,7 @@ export class EncounterPreparationEvidenceLoader {
         sourceEntityId: encounterId,
         label: `${careSetting} encounter context`,
         status: encounter.status,
-        occurredAt: encounter.startedAt,
+        occurredAt: timestamp(encounter.startedAt),
         content: {
           encounter,
           authoritativeEncounter: encounterRecord || null,

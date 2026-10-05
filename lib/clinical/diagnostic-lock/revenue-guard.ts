@@ -19,8 +19,9 @@ export class DiagnosticRevenueGuard {
    * Evaluates if a diagnostic order can be processed by laboratory/radiology technicians
    */
   public static evaluateOrderExecutionGate(order: DiagnosticOrderItem): DiagnosticLockStatus {
-    // Orders settled by cash or covered by verified insurance are UNLOCKED
-    if (order.paymentStatus === 'PAID_SETTLED' || order.paymentStatus === 'INSURANCE_PREAUTH') {
+    // Legacy evaluation is display-only. Controlled OPD execution is released
+    // only by the server-owned cash settlement command.
+    if (order.paymentStatus === 'PAID_SETTLED') {
       return {
         orderId: order.id,
         isLocked: false,

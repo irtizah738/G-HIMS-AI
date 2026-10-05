@@ -483,67 +483,6 @@ export class OpdBillingReconciliationDomainService {
       );
     }
 
-    const journalGroups = await Promise.all(
-      [...invoiceById.keys()].map((invoiceId) =>
-        DomainStateRepository.queryAllEqual<DomainRecord>(
-          context.tenantId,
-          'journalEntries',
-          'referenceDocumentId',
-          invoiceId,
-          { pageSize: 10, maxRows: 10 }
-        )
-      )
-    );
-    const journals: DomainRecord[] = [];
-    const journalIds: string[] = [];
-    let journalGroupIndex = 0;
-    for (const invoiceId of invoiceById.keys()) {
-      const group = journalGroups[journalGroupIndex++] || [];
-      if (group.length !== 1) {
-        return reject(
-          commandId,
-          idempotencyKey,
-          'OPD_BILLING_JOURNAL_CARDINALITY_INVALID',
-          `Invoice ${invoiceId} must resolve to exactly one initial billing journal.`
-        );
-      }
-      const journal = group[0];
-      const journalId = String(journal.journalId || '').trim();
-      const invoice = invoiceById.get(invoiceId)!;
-      const expectedMinor = majorToMinor(invoice.totalPatientDue);
-      const lines = Array.isArray(journal.lines) ? journal.lines : [];
-      const debit = lines.reduce(
-        (sum: number, line: DomainRecord) =>
-          sum + Number(line.debitMinorUnits || 0),
-        0
-      );
-      const credit = lines.reduce(
-        (sum: number, line: DomainRecord) =>
-          sum + Number(line.creditMinorUnits || 0),
-        0
-      );
-      if (
-        !journalId ||
-        String(journal.status || '').toUpperCase() !== 'POSTED' ||
-        String(journal.currency || '').toUpperCase() !==
-          String(invoice.currency || '').toUpperCase() ||
-        Number(journal.totalAmountMinorUnits || 0) !== expectedMinor ||
-        !Number.isSafeInteger(debit) ||
-        !Number.isSafeInteger(credit) ||
-        debit !== expectedMinor ||
-        credit !== expectedMinor
-      ) {
-        return reject(
-          commandId,
-          idempotencyKey,
-          'OPD_BILLING_JOURNAL_INVALID',
-          `Invoice ${invoiceId} billing journal is missing, unbalanced, or monetarily inconsistent.`
-        );
-      }
-      journals.push(journal);
-      journalIds.push(journalId);
-    }
-
     const diagnosticById = new Map(
       diagnosticOrders.map((order) => [String(order.orderId || ''), order])
     );
@@ -594,6 +533,138 @@ export class OpdBillingReconciliationDomainService {
       }
     }
 
+    const journalGroups = await Promise.all(
+      [...invoiceById.keys()].map((invoiceId) =>
+        DomainStateRepository.queryAllEqual<DomainRecord>(
+          context.tenantId,
+          'journalEntries',
+          'referenceDocumentId',
+          invoiceId,
+          { pageSize: 10, maxRows: 10 }
+        )
+      )
+    );
+    const journals: DomainRecord[] = [];
+    const journalIds: string[] = [];
+
+    const validateBalancedJournal = (
+      journal: DomainRecord,
+      invoice: DomainRecord,
+      expectedMinor: number
+    ): boolean => {
+      const lines = Array.isArray(journal.lines) ? journal.lines : [];
+      const debit = lines.reduce(
+        (sum: number, line: DomainRecord) =>
+          sum + Number(line.debitMinorUnits || 0),
+        0
+      );
+      const credit = lines.reduce(
+        (sum: number, line: DomainRecord) =>
+          sum + Number(line.creditMinorUnits || 0),
+        0
+      );
+
+      return (
+        Boolean(String(journal.journalId || '').trim()) &&
+        String(journal.status || '').toUpperCase() === 'POSTED' &&
+        String(journal.currency || '').toUpperCase() ===
+          String(invoice.currency || '').toUpperCase() &&
+        Number(journal.totalAmountMinorUnits || 0) === expectedMinor &&
+        Number.isSafeInteger(debit) &&
+        Number.isSafeInteger(credit) &&
+        debit === expectedMinor &&
+        credit === expectedMinor
+      );
+    };
+
+    let journalGroupIndex = 0;
+    for (const invoiceId of invoiceById.keys()) {
+      const group = journalGroups[journalGroupIndex++] || [];
+      const invoice = invoiceById.get(invoiceId)!;
+      const purpose = String(invoice.billingPurpose || '').toUpperCase();
+      const expectedBillingMinor = majorToMinor(invoice.totalPatientDue);
+
+      if (purpose === 'OPD_DIAGNOSTIC') {
+        const orderId = String(invoice.sourceOrderId || '').trim();
+        const order = diagnosticById.get(orderId);
+        const billingJournalId = String(
+          order?.deferredRevenueJournalId || ''
+        ).trim();
+        const recognitionJournalId = String(
+          order?.recognitionJournalId || ''
+        ).trim();
+        const recognitionMinor = Number(order?.netRevenueMinorUnits || 0);
+        const billingJournal = group.find(
+          (journal) => String(journal.journalId || '') === billingJournalId
+        );
+        const recognitionJournal = group.find(
+          (journal) => String(journal.journalId || '') === recognitionJournalId
+        );
+
+        if (
+          group.length !== 2 ||
+          !billingJournalId ||
+          !recognitionJournalId ||
+          billingJournalId === recognitionJournalId ||
+          !billingJournal ||
+          !recognitionJournal
+        ) {
+          return reject(
+            commandId,
+            idempotencyKey,
+            'OPD_BILLING_JOURNAL_CARDINALITY_INVALID',
+            `Diagnostic invoice ${invoiceId} must resolve to exactly its deferred billing and revenue-recognition journals.`
+          );
+        }
+        if (
+          !Number.isSafeInteger(recognitionMinor) ||
+          recognitionMinor <= 0 ||
+          !validateBalancedJournal(
+            billingJournal,
+            invoice,
+            expectedBillingMinor
+          ) ||
+          !validateBalancedJournal(
+            recognitionJournal,
+            invoice,
+            recognitionMinor
+          )
+        ) {
+          return reject(
+            commandId,
+            idempotencyKey,
+            'OPD_BILLING_JOURNAL_INVALID',
+            `Diagnostic invoice ${invoiceId} billing or recognition journal is unbalanced or monetarily inconsistent.`
+          );
+        }
+
+        journals.push(billingJournal, recognitionJournal);
+        journalIds.push(billingJournalId, recognitionJournalId);
+        continue;
+      }
+
+      if (group.length !== 1) {
+        return reject(
+          commandId,
+          idempotencyKey,
+          'OPD_BILLING_JOURNAL_CARDINALITY_INVALID',
+          `Invoice ${invoiceId} must resolve to exactly one initial billing journal.`
+        );
+      }
+
+      const journal = group[0];
+      if (!validateBalancedJournal(journal, invoice, expectedBillingMinor)) {
+        return reject(
+          commandId,
+          idempotencyKey,
+          'OPD_BILLING_JOURNAL_INVALID',
+          `Invoice ${invoiceId} billing journal is missing, unbalanced, or monetarily inconsistent.`
+        );
+      }
+      journals.push(journal);
+      journalIds.push(String(journal.journalId || '').trim());
+    }
+
     const preflightFingerprint = snapshotFingerprint({
       billingMutationSequence,
       invoices,
@@ -627,6 +698,7 @@ export class OpdBillingReconciliationDomainService {
       totalPatientDueMinorUnits,
       totalPaidMinorUnits,
       totalOutstandingMinorUnits: 0,
+      billingMutationSequence,
       snapshotFingerprint: preflightFingerprint,
       reconciledBy: context.actorId,
       reconciledAt,

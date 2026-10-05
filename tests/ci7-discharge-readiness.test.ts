@@ -258,7 +258,8 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
     const view = await source('components/patient360/Patient360View.tsx');
     const bootstrap = await source('app/api/offline/bootstrap/route.ts');
 
-    expect(api).toContain('DischargeReadinessService.getForPatient');
+    expect(api).toContain("selectedCareContext?.careSetting === 'IPD'");
+    expect(api).toContain('DischargeReadinessService.getProjection');
     expect(api).toContain('dischargeReadiness,');
     expect(client).toContain("'dischargeReadinessProjections'");
     expect(client).toContain('recordDischargeReadinessReview');

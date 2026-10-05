@@ -57,8 +57,6 @@ const RbacManagementView = dynamic(() => import('@/components/views/rbac-managem
 import { RbacModuleGate } from '@/components/auth/rbac-gate';
 import { RbacRoleSwitcherModal } from '@/components/auth/rbac-role-switcher';
 import { useRBAC } from '@/lib/auth/rbac-context';
-import { AiCopilotDrawer } from '@/components/ai/ai-copilot-drawer';
-import { FloatingCopilotBot } from '@/components/ai/floating-copilot-bot';
 import { CollapsibleSidebar } from '@/components/navigation/collapsible-sidebar';
 import { SyncStatusIndicator } from '@/components/navigation/sync-status-indicator';
 import { CommandPalette } from '@/components/navigation/command-palette';
@@ -102,7 +100,7 @@ import { formatCurrency } from '@/lib/utils';
 export function TenantDashboard() {
   const { currentTenant } = useTenant();
   const currentTenantId = currentTenant?.id || 'central-metro-hospital';
-  const { activeTab, setActiveTab, stats, mismatches, copilotOpen, setCopilotOpen, networkMode, patients } = useHospital();
+  const { activeTab, setActiveTab, stats, mismatches, networkMode, patients } = useHospital();
   const { user, signInWithGoogle, signOut, loading: authLoading } = useAuth();
   const { currentRole, roleDefinition, canAccessModule, setRole } = useRBAC();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -118,11 +116,6 @@ export function TenantDashboard() {
         e.preventDefault();
         setCommandPaletteOpen((prev) => !prev);
       }
-      // Cmd/Ctrl + J -> AI Copilot
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
-        e.preventDefault();
-        setCopilotOpen(!copilotOpen);
-      }
       // Cmd/Ctrl + B -> Toggle Sidebar
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
         e.preventDefault();
@@ -132,7 +125,7 @@ export function TenantDashboard() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [copilotOpen, setCopilotOpen]);
+  }, []);
 
   const pendingLeakageCount = mismatches.filter((m) => m.status === 'pending_review').length;
 
@@ -374,14 +367,6 @@ export function TenantDashboard() {
         onClose={() => setRoleSwitcherOpen(false)}
       />
 
-      {/* AI Clinical Copilot & Scribe Drawer */}
-      <AiCopilotDrawer />
-
-      {/* Floating Bottom-Right AI Copilot Bot Trigger */}
-      <FloatingCopilotBot
-        isOpen={copilotOpen}
-        onToggle={() => setCopilotOpen(!copilotOpen)}
-      />
     </div>
   );
 }

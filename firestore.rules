@@ -351,6 +351,15 @@ service cloud.firestore {
         allow read, write: if false;
       }
 
+      // CI-10F governed clinical drafts and immutable revisions are derived PHI.
+      // They are readable/mutable only through authenticated server APIs and commands.
+      match /clinicalDrafts/{draftId} {
+        allow read, write: if false;
+      }
+      match /clinicalDraftRevisions/{revisionId} {
+        allow read, write: if false;
+      }
+
       match /consultantReviewCheckpoints/{checkpointId} {
         allow read, write: if false;
       }

@@ -979,7 +979,13 @@ export function OpdMasterWorkspace() {
   };
 
   // HANDLER: Add Prescription Item through credential-gated prescribing.
-  const handleAddPrescription = async (item: PharmacyPrescriptionItem) => {
+  const handleAddPrescription = async (
+    item: PharmacyPrescriptionItem,
+    safety?: {
+      safetyAcknowledgementFindingIds?: string[];
+      safetyOverrideReason?: string;
+    }
+  ) => {
     try {
       const result = await executeActiveTenantCommand<Record<string, unknown>>(
         'PrescribeMedicationCommand',
@@ -997,6 +1003,9 @@ export function OpdMasterWorkspace() {
           unitPriceMinorUnits: item.unitPriceMinorUnits,
           inventoryItemId: item.medicationCode || item.id,
           instructions: item.instructions || item.specialInstructions,
+          safetyAcknowledgementFindingIds:
+            safety?.safetyAcknowledgementFindingIds,
+          safetyOverrideReason: safety?.safetyOverrideReason,
         },
         {
           idempotencyKey: `opd-rx:${activeEncounter.id}:${item.id}`,
@@ -1743,7 +1752,9 @@ export function OpdMasterWorkspace() {
           prescriptions={activeEncounter.prescriptions}
           canPrescribe={canPrescribe}
           canDispense={canDispense}
-          onAddPrescription={(item) => handleAddPrescription(item)}
+          onAddPrescription={(item, safety) =>
+            handleAddPrescription(item, safety)
+          }
           onDispensePrescription={(rxId, dispensedBy) => handleDispensePrescription(rxId, dispensedBy)}
         />
       )}

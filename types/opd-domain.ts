@@ -73,6 +73,12 @@ export interface WaitlistEntry {
   createdAt: number;
 }
 
+export interface ConsentCaptureDecision {
+  consentType: 'GENERAL_OUTPATIENT' | 'DATA_SHARING_HIE';
+  status: 'GRANTED' | 'WITHHELD';
+  method: 'DIGITAL_ATTESTATION';
+}
+
 export interface ConsentRecord {
   id: string;
   consentType: 'GENERAL_OUTPATIENT' | 'DATA_SHARING_HIE' | 'INVASIVE_PROCEDURE' | 'BLOOD_TRANSFUSION' | 'RESEARCH_TELEMETRY';
@@ -123,6 +129,7 @@ export interface PatientDemographics {
     expiryDate?: string;
   };
   consents?: ConsentRecord[];
+  registrationConsentDecisions?: ConsentCaptureDecision[];
   bloodGroup: 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-';
   knownAllergies?: string[];
   chronicConditions?: string[];

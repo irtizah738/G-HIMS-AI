@@ -22,6 +22,10 @@ const CLINICAL_COLLECTIONS = [
   'patient360Projections',
   'dischargeReadinessProjections',
   'deteriorationProjections',
+  'clinicalOpenItems',
+  'clinicalEscalations',
+  'consultationRequests',
+  'clinicalHandoffs',
 ] as const;
 
 const BILLING_COLLECTIONS = [
@@ -368,6 +372,10 @@ function scopeOfflineCollections(
     'opd_queue',
     'dischargeReadinessProjections',
     'deteriorationProjections',
+    'clinicalOpenItems',
+    'clinicalEscalations',
+    'consultationRequests',
+    'clinicalHandoffs',
   ]);
 
   for (const [collection, rows] of Object.entries(collections)) {

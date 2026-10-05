@@ -1,8 +1,16 @@
 import { AuthorizationPipeline } from '@/lib/backend/auth/authorization-pipeline';
-import { TransactionManager } from '@/lib/backend/transactions/transaction-manager';
+import {
+  AtomicMutationRejectedError,
+  TransactionManager,
+} from '@/lib/backend/transactions/transaction-manager';
 import type { CommandContext, CommandResult } from '@/lib/backend/types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import type { DiagnosticOrder } from '@/types/clinical-canonical';
+import type { OperationalDiagnosticOrder } from '@/types/diagnostic-billing';
+import type {
+  FinanceAccountRecord,
+} from '@/types/finance-domain';
+import { financePeriodId } from '@/lib/finance/finance-engine';
 import {
   buildDiagnosticResultFacts,
   type DiagnosticResultItemInput,
@@ -36,20 +44,6 @@ export interface AcknowledgeCriticalDiagnosticResultPayload {
   patientId: string;
   encounterId: string;
   note?: string;
-}
-
-interface OperationalDiagnosticOrder {
-  orderId: string;
-  tenantId: string;
-  encounterId: string;
-  patientId: string;
-  orderType: 'LAB' | 'RADIOLOGY' | 'PROCEDURE';
-  catalogCode: string;
-  orderName: string;
-  priority: 'STAT' | 'URGENT' | 'ROUTINE';
-  status: string;
-  createdAt: number;
-  [key: string]: unknown;
 }
 
 function reportStatus(
@@ -161,6 +155,36 @@ export class DiagnosticResultDomainService {
       };
     }
 
+    if (
+      !['PAID_SETTLED', 'UNLOCKED_STAT_OVERRIDE'].includes(
+        order.revenueLockStatus
+      )
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'DIAGNOSTIC_PAYMENT_REQUIRED',
+          message:
+            'Diagnostic results cannot be recorded while the authoritative payment gate is locked.',
+        },
+      };
+    }
+
+    if (order.worklistStatus !== 'IN_PROCESSING') {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'DIAGNOSTIC_NOT_IN_PROCESSING',
+          message:
+            'Diagnostic results require an authoritative IN_PROCESSING worklist state.',
+        },
+      };
+    }
+
     const patient = await DomainStateRepository.getById<Record<string, unknown>>(
       context.tenantId,
       'patients',
@@ -187,6 +211,146 @@ export class DiagnosticResultDomainService {
 
     const status = reportStatus(payload.reportStatus);
     const issuedAt = payload.issuedAt || Date.now();
+    const recognizeRevenue =
+      isFinalLike(status) && !Number(order.revenueRecognizedAt || 0);
+
+    let recognitionJournal: Record<string, unknown> | null = null;
+    let recognitionState: Record<string, unknown> | null = null;
+    let recognitionId: string | undefined;
+
+    if (recognizeRevenue) {
+      const deferredCode = String(order.deferredRevenueAccountCode || '').trim();
+      const revenueCode = String(order.revenueAccountCode || '').trim();
+      const currency = String(order.currency || '').trim().toUpperCase();
+      const netRevenueMinorUnits = Number(order.netRevenueMinorUnits || 0);
+
+      if (
+        !deferredCode ||
+        !revenueCode ||
+        !currency ||
+        !Number.isSafeInteger(netRevenueMinorUnits) ||
+        netRevenueMinorUnits <= 0
+      ) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'DIAGNOSTIC_REVENUE_ROUTING_INVALID',
+            message:
+              'Diagnostic order is missing valid deferred/revenue accounting metadata.',
+          },
+        };
+      }
+
+      const [deferredRows, revenueRows] = await Promise.all([
+        DomainStateRepository.queryAllEqual<FinanceAccountRecord>(
+          context.tenantId,
+          'accounts',
+          'accountCode',
+          deferredCode,
+          { pageSize: 10, maxRows: 10 }
+        ),
+        DomainStateRepository.queryAllEqual<FinanceAccountRecord>(
+          context.tenantId,
+          'accounts',
+          'accountCode',
+          revenueCode,
+          { pageSize: 10, maxRows: 10 }
+        ),
+      ]);
+      const deferred = deferredRows[0];
+      const revenue = revenueRows[0];
+
+      if (
+        deferredRows.length !== 1 ||
+        !deferred?.isActive ||
+        deferred.category !== 'liability' ||
+        deferred.currency.trim().toUpperCase() !== currency
+      ) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'DIAGNOSTIC_DEFERRED_REVENUE_ACCOUNT_INVALID',
+            message:
+              'Diagnostic deferred revenue account is not an active currency-compatible liability.',
+          },
+        };
+      }
+      if (
+        revenueRows.length !== 1 ||
+        !revenue?.isActive ||
+        revenue.category !== 'revenue' ||
+        revenue.currency.trim().toUpperCase() !== currency
+      ) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'DIAGNOSTIC_REVENUE_ACCOUNT_INVALID',
+            message:
+              'Diagnostic revenue account is not an active currency-compatible revenue account.',
+          },
+        };
+      }
+
+      const postingDate = new Date(issuedAt);
+      const fiscalYear = postingDate.getUTCFullYear();
+      const postingPeriod = postingDate.getUTCMonth() + 1;
+      recognitionId = `revrec_diag_${order.orderId}`;
+      const journalId = `je_diag_recognize_${order.orderId}`;
+
+      recognitionJournal = {
+        journalId,
+        tenantId: context.tenantId,
+        fiscalYear,
+        postingPeriod,
+        documentDate: issuedAt,
+        postingDate: issuedAt,
+        referenceDocumentId: order.billingInvoiceId,
+        documentHeader: `Recognize completed diagnostic service ${order.orderName}`,
+        currency,
+        totalAmountMinorUnits: netRevenueMinorUnits,
+        lines: [
+          {
+            glAccountId: deferredCode,
+            glAccountName: deferred.accountName,
+            debitMinorUnits: netRevenueMinorUnits,
+            creditMinorUnits: 0,
+            lineDescription: `Release deferred revenue for ${order.orderName}`,
+          },
+          {
+            glAccountId: revenueCode,
+            glAccountName: revenue.accountName,
+            debitMinorUnits: 0,
+            creditMinorUnits: netRevenueMinorUnits,
+            lineDescription: `Recognize diagnostic revenue for ${order.orderName}`,
+          },
+        ],
+        sourceModule: 'BILLING',
+        status: 'POSTED',
+        postedBy: context.actorId,
+        postedAt: Date.now(),
+      };
+
+      recognitionState = {
+        recognitionId,
+        tenantId: context.tenantId,
+        invoiceId: order.billingInvoiceId,
+        orderId: order.orderId,
+        patientId: order.patientId,
+        encounterId: order.encounterId,
+        journalId,
+        currency,
+        recognizedMinorUnits: netRevenueMinorUnits,
+        recognizedAt: issuedAt,
+        recognizedBy: context.actorId,
+      };
+    }
+
     const reportId = `diagrep_${crypto.randomUUID()}`;
     const sourceEvidenceId =
       payload.sourceMessageControlId
@@ -241,12 +405,20 @@ export class DiagnosticResultDomainService {
       recordedAt: Date.now(),
     };
 
-    const orderState = {
+    const orderState: OperationalDiagnosticOrder = {
       ...order,
       status: isFinalLike(status) ? 'COMPLETED' : 'PROCESSING',
+      worklistStatus: isFinalLike(status) ? 'FINALIZED' : 'IN_PROCESSING',
       latestDiagnosticReportId: reportId,
       resultStatus: status,
       resultUpdatedAt: issuedAt,
+      ...(recognizeRevenue && recognitionJournal && recognitionId
+        ? {
+            recognitionJournalId: String(recognitionJournal.journalId),
+            revenueRecognizedAt: issuedAt,
+          }
+        : {}),
+      updatedAt: Date.now(),
     };
 
     const canonicalOrderState = canonicalOrder
@@ -273,7 +445,22 @@ export class DiagnosticResultDomainService {
         entityType: 'DIAGNOSTIC_ORDER',
         entityId: payload.orderId,
         domainState: orderState,
+        expectedServerVersion: Number(order._serverVersion || 0),
       },
+      ...(recognizeRevenue && recognitionJournal && recognitionState && recognitionId
+        ? [
+            {
+              entityType: 'JOURNAL_ENTRY',
+              entityId: String(recognitionJournal.journalId),
+              domainState: recognitionJournal,
+            },
+            {
+              entityType: 'REVENUE_RECOGNITION',
+              entityId: recognitionId,
+              domainState: recognitionState,
+            },
+          ]
+        : []),
       ...(canonicalOrderState
         ? [{
             entityType: 'CANONICAL_DIAGNOSTIC_ORDER',
@@ -302,6 +489,10 @@ export class DiagnosticResultDomainService {
         hasCriticalResult: criticalIds.size > 0,
         criticalObservationIds: Array.from(criticalIds),
         sourceMessageControlId: payload.sourceMessageControlId,
+        revenueRecognitionId: recognitionId,
+        recognitionJournalId: recognitionJournal
+          ? String(recognitionJournal.journalId)
+          : undefined,
       },
       auditAction: isFinalLike(status)
         ? 'VERIFY_DIAGNOSTIC_RESULT'

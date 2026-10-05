@@ -173,15 +173,25 @@ export class DiagnosticResultDomainService {
       };
     }
 
-    if (order.worklistStatus !== 'IN_PROCESSING') {
+    const trustedIntegrationResult =
+      integrationService &&
+      ['EXTERNAL_HL7', 'LAB_SYSTEM', 'RADIOLOGY_SYSTEM'].includes(
+        String(payload.sourceType || '').toUpperCase()
+      );
+    const allowedResultWorklistStates = trustedIntegrationResult
+      ? ['READY_FOR_EXECUTION', 'SPECIMEN_COLLECTED', 'IN_PROCESSING']
+      : ['IN_PROCESSING'];
+
+    if (!allowedResultWorklistStates.includes(order.worklistStatus)) {
       return {
         success: false,
         commandId,
         idempotencyKey,
         error: {
           code: 'DIAGNOSTIC_NOT_IN_PROCESSING',
-          message:
-            'Diagnostic results require an authoritative IN_PROCESSING worklist state.',
+          message: trustedIntegrationResult
+            ? 'Trusted LIS/RIS result ingestion requires a paid/overridden order that has entered the executable worklist.'
+            : 'Diagnostic results require an authoritative IN_PROCESSING worklist state.',
         },
       };
     }

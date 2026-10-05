@@ -74,6 +74,46 @@ export async function POST(req: NextRequest) {
       identifiers.push({ type: 'PHONE', value: body.phone, issuer: 'Telecom' });
     }
 
+    const allowedConsentTypes = new Set(['GENERAL_OUTPATIENT', 'DATA_SHARING_HIE']);
+    const consentDecisions = Array.isArray(body.consentDecisions)
+      ? body.consentDecisions.map((raw: any) => ({
+          consentType: String(raw?.consentType || '').trim().toUpperCase(),
+          status: String(raw?.status || '').trim().toUpperCase(),
+          method: String(raw?.method || '').trim().toUpperCase(),
+        }))
+      : [];
+
+    for (const decision of consentDecisions) {
+      if (
+        !allowedConsentTypes.has(decision.consentType) ||
+        !['GRANTED', 'WITHHELD'].includes(decision.status) ||
+        decision.method !== 'DIGITAL_ATTESTATION'
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            code: 'INVALID_REGISTRATION_CONSENT',
+            error: 'Registration consent decisions must use supported consent types, explicit status and DIGITAL_ATTESTATION.',
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    const generalConsent = consentDecisions.find(
+      (decision: any) => decision.consentType === 'GENERAL_OUTPATIENT'
+    );
+    if (!generalConsent) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: 'GENERAL_OPD_CONSENT_DECISION_REQUIRED',
+          error: 'An explicit General OPD Care consent decision is required at registration.',
+        },
+        { status: 400 }
+      );
+    }
+
     const normalizedParams: RegisterPatientEncounterParams = {
       tenantId: context.tenantId,
       commandId: String(body.commandId || `cmd_${crypto.randomUUID()}`),
@@ -95,7 +135,23 @@ export async function POST(req: NextRequest) {
       actorName: context.actorId,
       bloodGroup: body.bloodGroup,
       allergies: Array.isArray(body.allergies) ? body.allergies : [],
-      chronicConditions: Array.isArray(body.chronicConditions) ? body.chronicConditions : [],
+      chronicConditions: Array.isArray(body.chronicConditions) ? body.chronicConditions : undefined,
+      tariffPlan: body.tariffPlan,
+      insuranceDetails:
+        body.insuranceDetails && typeof body.insuranceDetails === 'object'
+          ? {
+              payerName: body.insuranceDetails.payerName
+                ? String(body.insuranceDetails.payerName).trim()
+                : undefined,
+              policyNumber: body.insuranceDetails.policyNumber
+                ? String(body.insuranceDetails.policyNumber).trim()
+                : undefined,
+              memberId: body.insuranceDetails.memberId
+                ? String(body.insuranceDetails.memberId).trim()
+                : undefined,
+            }
+          : undefined,
+      consentDecisions: consentDecisions as RegisterPatientEncounterParams['consentDecisions'],
     };
 
     const result = await registerPatientAndEncounter(normalizedParams);

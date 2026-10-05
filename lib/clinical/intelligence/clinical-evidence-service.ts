@@ -3,6 +3,10 @@ import { getAdminFirestore } from '@/server/firebase/admin';
 import { sanitizeForFirestore } from '@/lib/firestore/sanitize';
 import type { CommandContext, DomainEventEnvelope } from '@/lib/backend/types';
 import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
+import {
+  LongitudinalEvidenceLoader,
+  type LongitudinalEvidenceSources,
+} from '@/lib/clinical/intelligence/longitudinal-evidence-loader';
 import type {
   Patient360AllergySummary,
   Patient360ConditionSummary,
@@ -199,7 +203,10 @@ function candidateFromDocument(item: Patient360DocumentSummary): EvidenceCandida
   };
 }
 
-function candidatesFromProjection(projection: Patient360Projection): EvidenceCandidate[] {
+function candidatesFromProjection(
+  projection: Patient360Projection,
+  supplemental?: LongitudinalEvidenceSources
+): EvidenceCandidate[] {
   const candidates: EvidenceCandidate[] = [
     {
       sourceType: 'PATIENT_IDENTITY',
@@ -216,6 +223,7 @@ function candidatesFromProjection(projection: Patient360Projection): EvidenceCan
     ...projection.latestVitals.map(candidateFromObservation),
     ...projection.recentResults.map(candidateFromResult),
     ...projection.recentDocuments.map(candidateFromDocument),
+    ...(supplemental?.candidates || []),
     {
       sourceType: 'KNOWLEDGE_STATUS',
       sourceEntityId: `${projection.patientId}:knowledge-status`,
@@ -287,13 +295,14 @@ export class ClinicalEvidenceService {
     events: SourceEvent[],
     purpose: ClinicalIntelligencePurpose,
     actorId: string,
-    createdAt = Date.now()
+    createdAt = Date.now(),
+    supplemental?: LongitudinalEvidenceSources
   ): ClinicalEvidenceSnapshot {
     if (!projection.tenantId || !projection.patientId) {
       throw new Error('CI10_EVIDENCE_SCOPE_INVALID');
     }
 
-    const evidenceRefs = candidatesFromProjection(projection)
+    const evidenceRefs = candidatesFromProjection(projection, supplemental)
       .map((candidate) => toEvidenceRef(projection, candidate, events))
       .sort(
         (left, right) =>
@@ -348,7 +357,7 @@ export class ClinicalEvidenceService {
       createdAt,
       createdBy: actorId,
       immutable: true,
-      schemaVersion: 1,
+      schemaVersion: supplemental ? 2 : 1,
       patient360ProjectionVersion: projection.projectionVersion,
       patient360Revision: projection.revision,
       patient360SourceCheckpoint: projection.sourceCheckpoint,
@@ -358,14 +367,18 @@ export class ClinicalEvidenceService {
       sourceEventCount: new Set(
         evidenceRefs.flatMap((item) => item.sourceEventIds)
       ).size,
+      ...(supplemental?.coverage ? { coverage: supplemental.coverage } : {}),
       dateRange: {
         from: occurredTimes.length ? Math.min(...occurredTimes) : undefined,
         to: occurredTimes.length ? Math.max(...occurredTimes) : undefined,
       },
       snapshotHash,
       limitations: [
-        'This snapshot contains only evidence represented in the current Patient 360 projection contract.',
+        supplemental
+          ? 'This longitudinal snapshot combines Patient 360 evidence with canonical encounter, medication, observation, diagnostic-order, diagnostic-report, procedure and care-plan facts frozen at generation time.'
+          : 'This snapshot contains only evidence represented in the current Patient 360 projection contract.',
         'Missing or incomplete source data must not be interpreted as clinical absence.',
+        'No represented record is not equivalent to a negative clinical finding.',
         'The snapshot is evidence for clinician review and is not an autonomous diagnosis or treatment decision.',
       ],
     };
@@ -456,9 +469,12 @@ export class ClinicalEvidenceService {
     patientId: string,
     purpose: ClinicalIntelligencePurpose
   ): Promise<ClinicalEvidenceSnapshot> {
-    const [projection, events] = await Promise.all([
+    const [projection, events, supplemental] = await Promise.all([
       Patient360ProjectionService.getProjection(context.tenantId, patientId),
       Patient360ProjectionService.loadPatientEvents(context.tenantId, patientId),
+      purpose === 'LONGITUDINAL_SUMMARY'
+        ? LongitudinalEvidenceLoader.load(context.tenantId, patientId)
+        : Promise.resolve(undefined),
     ]);
 
     if (!projection) {
@@ -475,7 +491,9 @@ export class ClinicalEvidenceService {
       projection,
       events,
       purpose,
-      context.actorId
+      context.actorId,
+      Date.now(),
+      supplemental
     );
 
     const db = getAdminFirestore();

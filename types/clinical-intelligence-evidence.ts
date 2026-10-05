@@ -11,8 +11,15 @@ export type ClinicalEvidenceSourceType =
   | 'CONDITION'
   | 'ALLERGY'
   | 'MEDICATION'
+  | 'MEDICATION_HISTORY'
   | 'OBSERVATION'
+  | 'OBSERVATION_HISTORY'
   | 'DIAGNOSTIC_REPORT'
+  | 'DIAGNOSTIC_REPORT_HISTORY'
+  | 'DIAGNOSTIC_ORDER'
+  | 'PROCEDURE'
+  | 'CARE_PLAN'
+  | 'ENCOUNTER_HISTORY'
   | 'CLINICAL_DOCUMENT'
   | 'KNOWLEDGE_STATUS';
 
@@ -46,7 +53,7 @@ export interface ClinicalEvidenceSnapshot {
   createdAt: number;
   createdBy: string;
   immutable: true;
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   patient360ProjectionVersion: number;
   patient360Revision: number;
   patient360SourceCheckpoint: string;
@@ -54,6 +61,13 @@ export interface ClinicalEvidenceSnapshot {
   evidenceRefs: ClinicalEvidenceRef[];
   evidenceCount: number;
   sourceEventCount: number;
+  coverage?: Record<
+    string,
+    {
+      status: 'COMPLETE' | 'NOT_INCLUDED';
+      recordCount: number;
+    }
+  >;
   dateRange: {
     from?: number;
     to?: number;

@@ -28,6 +28,7 @@ import {
 } from '@/lib/clinical/patient360/patient360-client';
 import type { Patient360ObservationSummary } from '@/types/patient360-projection';
 import type { KnownStatus } from '@/types/clinical-canonical';
+import { ClinicalLongitudinalSummaryPanel } from '@/components/patient360/ClinicalLongitudinalSummaryPanel';
 
 function valueText(value: Patient360ObservationSummary['value']): string {
   switch (value.valueType) {
@@ -561,6 +562,13 @@ export function Patient360View({
             </div>
           )}
         </section>
+
+        <ClinicalLongitudinalSummaryPanel
+          tenantId={tenantId}
+          patientId={patientId}
+          offline={offline}
+          currentRevision={freshness.revision}
+        />
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">

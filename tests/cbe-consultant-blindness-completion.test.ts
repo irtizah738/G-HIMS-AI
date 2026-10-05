@@ -81,6 +81,9 @@ describe('CBE consultant blindness completion', () => {
 
     expect(service).toContain('assertPatient360PatientAccess');
     expect(service).toContain("'CLINICAL_OPEN_ITEM_SOURCE_CONTROLLED'");
+    expect(service).toContain("'CLINICAL_OPEN_ITEM_OWNER_MISMATCH'");
+    expect(service).toContain("'CLINICAL_ESCALATION_OWNER_MISMATCH'");
+    expect(service).toContain('actorOwnsAttention');
     expect(service).toContain("resolutionMode || 'SOURCE_STATE'");
     expect(service).toContain("eventType: 'CLINICAL_CONSULTATION_REQUESTED'");
     expect(service).toContain("eventType: 'CLINICAL_CONSULTATION_ACCEPTED'");
@@ -128,6 +131,8 @@ describe('CBE consultant blindness completion', () => {
     expect(projection).toContain("'CRITICAL_REVIEW_REQUIRED'");
     expect(projection).toContain("'CONSULTATION'");
     expect(projection).toContain("'HANDOFF'");
+    expect(projection).toContain("ownerId: consultationOwner || 'CONSULTANT'");
+    expect(projection).toContain("ownerRole: consultationOwner ? undefined : 'CONSULTANT'");
     expect(projection).toContain('SYSTEM_PROJECTION');
     expect(projection).toContain('getWorklist');
 
@@ -169,6 +174,9 @@ describe('CBE consultant blindness completion', () => {
     expect(transition).toContain(
       "'Accept inpatient clinical responsibility.'"
     );
+    expect(transition).toContain("'INPATIENT_CLINICIAN_ASSIGNMENT_REQUIRED'");
+    expect(transition).toContain('actorCanAssumeInpatientClinicalResponsibility');
+    expect(transition).toContain('assignedProviderId: assignedDoctor');
   });
 
   test('consultant command center consumes server worklist rather than reconstructing chart authority', async () => {
@@ -208,6 +216,9 @@ describe('CBE consultant blindness completion', () => {
     expect(bootstrap).toContain('byEncounterOrPatient');
     expect(bootstrap).toContain('scopeOfflineCollections');
     expect(secure).toContain('(entity as any).openItemId');
+    expect(secure.indexOf('(entity as any).openItemId')).toBeLessThan(
+      secure.indexOf('(entity as any).patientId')
+    );
     expect(secure).toContain('(entity as any).escalationId');
     expect(secure).toContain('(entity as any).consultationId');
     expect(secure).toContain('(entity as any).handoffId');

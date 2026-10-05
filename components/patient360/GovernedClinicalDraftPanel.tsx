@@ -397,9 +397,21 @@ export function GovernedClinicalDraftPanel({
       {stale && draft.status !== 'SIGNED' && draft.status !== 'REJECTED' && (
         <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          Patient 360 changed after this draft was generated. Review the new
-          chart state before continuing; signing is still server-governed but
-          this draft may no longer represent the latest evidence.
+          <div className="flex-1">
+            Patient 360 changed after this draft was generated. This frozen
+            evidence snapshot is no longer current, so the draft cannot be
+            reviewed, approved, or signed from the workspace.
+            <div className="mt-2">
+              <button
+                type="button"
+                onClick={beginNewDraft}
+                disabled={busy !== null || offline}
+                className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-[10px] font-bold text-amber-900 disabled:opacity-40"
+              >
+                Start new draft from current chart
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -459,7 +471,14 @@ export function GovernedClinicalDraftPanel({
           <button
             type="button"
             onClick={() => void saveReview()}
-            disabled={offline || busy !== null || !changed || !title.trim() || !content.trim()}
+            disabled={
+              offline ||
+              stale ||
+              busy !== null ||
+              !changed ||
+              !title.trim() ||
+              !content.trim()
+            }
             className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white disabled:opacity-40"
           >
             {busy === 'REVIEW' ? (
@@ -500,7 +519,9 @@ export function GovernedClinicalDraftPanel({
           <button
             type="button"
             onClick={() => void approve()}
-            disabled={offline || busy !== null || !approvalAttestation}
+            disabled={
+              offline || stale || busy !== null || !approvalAttestation
+            }
             className="mt-3 inline-flex items-center gap-2 rounded-lg bg-blue-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-40"
           >
             {busy === 'APPROVE' && (
@@ -532,7 +553,9 @@ export function GovernedClinicalDraftPanel({
           <button
             type="button"
             onClick={() => void sign()}
-            disabled={offline || busy !== null || !signatureAttestation}
+            disabled={
+              offline || stale || busy !== null || !signatureAttestation
+            }
             className="mt-3 inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-40"
           >
             {busy === 'SIGN' && (

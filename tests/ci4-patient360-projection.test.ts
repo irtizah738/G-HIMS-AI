@@ -223,6 +223,36 @@ function baseSources(): Patient360ProjectionSources {
         performerIds: ['nurse-a'],
       },
     ],
+    diagnosticOrders: [
+      {
+        diagnosticOrderId: 'ord-a',
+        tenantId: 'tenant-a',
+        patientId: 'patient-a',
+        encounterId: 'enc-a',
+        sourceEvidenceId: 'ord-a',
+        provenance: {
+          provenanceId: 'prov-ord-a',
+          tenantId: 'tenant-a',
+          patientId: 'patient-a',
+          sourceEvidenceId: 'ord-a',
+          sourceType: 'CLINICIAN',
+          recordedBy: 'doctor-a',
+          recordedAt: 1700000000260,
+        },
+        createdAt: 1700000000260,
+        updatedAt: 1700000000260,
+        version: 1,
+        service: {
+          codings: [{ system: 'LOCAL', code: 'CBC', display: 'Complete blood count' }],
+          text: 'Complete blood count',
+        },
+        orderType: 'LAB',
+        priority: 'ROUTINE',
+        status: 'COMPLETED',
+        orderedBy: 'doctor-a',
+        orderedAt: 1700000000260,
+      },
+    ],
     diagnosticReports: [
       {
         diagnosticReportId: 'report-a',
@@ -251,6 +281,68 @@ function baseSources(): Patient360ProjectionSources {
         status: 'FINAL',
         resultObservationIds: ['labobs-a'],
         issuedAt: 1700000000270,
+      },
+    ],
+    procedures: [
+      {
+        procedureId: 'proc-a',
+        tenantId: 'tenant-a',
+        patientId: 'patient-a',
+        encounterId: 'enc-a',
+        sourceEvidenceId: 'proc-a',
+        provenance: {
+          provenanceId: 'prov-proc-a',
+          tenantId: 'tenant-a',
+          patientId: 'patient-a',
+          sourceEvidenceId: 'proc-a',
+          sourceType: 'CLINICIAN',
+          recordedBy: 'doctor-a',
+          recordedAt: 1700000000275,
+        },
+        createdAt: 1700000000275,
+        updatedAt: 1700000000275,
+        version: 1,
+        code: {
+          codings: [{ system: 'LOCAL', code: 'ECG', display: 'Electrocardiogram' }],
+          text: 'Electrocardiogram',
+        },
+        status: 'COMPLETED',
+        performedAt: 1700000000275,
+        performerIds: ['doctor-a'],
+      },
+    ],
+    carePlans: [
+      {
+        carePlanId: 'plan-a',
+        tenantId: 'tenant-a',
+        patientId: 'patient-a',
+        encounterId: 'enc-a',
+        sourceEvidenceId: 'plan-a',
+        provenance: {
+          provenanceId: 'prov-plan-a',
+          tenantId: 'tenant-a',
+          patientId: 'patient-a',
+          sourceEvidenceId: 'plan-a',
+          sourceType: 'CLINICIAN',
+          recordedBy: 'doctor-a',
+          recordedAt: 1700000000278,
+        },
+        createdAt: 1700000000278,
+        updatedAt: 1700000000278,
+        version: 1,
+        status: 'ACTIVE',
+        intent: 'PLAN',
+        title: 'Hypertension follow-up',
+        addressesConditionIds: ['cond-a'],
+        activities: [
+          {
+            activityId: 'activity-a',
+            description: 'Repeat blood pressure review',
+            status: 'SCHEDULED',
+          },
+        ],
+        authoredBy: 'doctor-a',
+        authoredAt: 1700000000278,
       },
     ],
     documents: [
@@ -353,6 +445,13 @@ describe('G-HIMS CI-4 authoritative Patient 360 projection', () => {
     expect(projection.latestVitals[0].observationId).toBe('obs-new');
     expect(projection.activeProblems.map((item) => item.conditionId)).toEqual(['cond-a']);
     expect(projection.allergies.map((item) => item.allergyId)).toEqual(['allergy-a']);
+    expect(projection.recentDiagnosticOrders.map((item) => item.diagnosticOrderId)).toEqual(['ord-a']);
+    expect(projection.recentProcedures.map((item) => item.procedureId)).toEqual(['proc-a']);
+    expect(projection.activeCarePlans.map((item) => item.carePlanId)).toEqual(['plan-a']);
+    expect(projection.counts.diagnosticOrders).toBe(1);
+    expect(projection.counts.procedures).toBe(1);
+    expect(projection.counts.carePlans).toBe(1);
+    expect(projection.projectionVersion).toBe(3);
   });
 
   test('event checkpoint uses authoritative recordedAt ordering and revision is patient-event count', () => {
@@ -391,6 +490,9 @@ describe('G-HIMS CI-4 authoritative Patient 360 projection', () => {
     expect(service).toContain("collection('patient360Projections')");
     expect(service).toContain("collection('patient360ProjectionCheckpoints')");
     expect(service).toContain("collection('patient360Timeline')");
+    expect(service).toContain("collection('canonicalDiagnosticOrders')");
+    expect(service).toContain("collection('clinicalProcedures')");
+    expect(service).toContain("collection('carePlans')");
     expect(service).toContain("where('patientId', '==', patientId)");
     expect(service).toContain("queryEventsByField(eventsRef, 'payload.patientId', patientId)");
     expect(service).toContain("orderBy(FieldPath.documentId())");

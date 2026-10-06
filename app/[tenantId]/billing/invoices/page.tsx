@@ -1,6 +1,6 @@
 'use client';
 
-import React, { use, useEffect, useMemo, useState } from 'react';
+import React, { use, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle,
@@ -66,7 +66,7 @@ export default function InvoicesDirectoryPage({ params }: PageProps) {
     'all'
   );
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     if (!tenantId) {
       setError('BILLING_TENANT_REQUIRED');
       setLoading(false);
@@ -88,11 +88,11 @@ export default function InvoicesDirectoryPage({ params }: PageProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [tenantId]);
 
   useEffect(() => {
     void refresh();
-  }, [tenantId]);
+  }, [refresh]);
 
   const invoices = model?.invoices || [];
   const filteredInvoices = useMemo(() => {

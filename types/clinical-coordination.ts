@@ -3,6 +3,7 @@ import type { ClinicalCareSetting, ConsultantChangeSeverity } from '@/types/cons
 export type ClinicalConsultationStatus =
   | 'REQUESTED'
   | 'ASSIGNED'
+  | 'ACKNOWLEDGED'
   | 'ACCEPTED'
   | 'IN_REVIEW'
   | 'COMPLETED'
@@ -19,14 +20,20 @@ export interface ClinicalConsultationRequest {
   assignedConsultantId?: string;
   clinicalQuestion: string;
   priority: 'ROUTINE' | 'PRIORITY' | 'URGENT' | 'STAT';
-  responseSlaMinutes?: number;
-  responseDueAt?: number;
+  acknowledgementSlaMinutes: number;
+  acknowledgementDueAt: number;
+  acceptanceSlaMinutes: number;
+  acceptanceDueAt: number;
   status: ClinicalConsultationStatus;
   sourceRefs: string[];
   requestedBy: string;
   requestedAt: number;
+  acknowledgedBy?: string;
+  acknowledgedAt?: number;
+  acknowledgementSlaBreached?: boolean;
   acceptedBy?: string;
   acceptedAt?: number;
+  acceptanceSlaBreached?: boolean;
   completedBy?: string;
   completedAt?: number;
   assessment?: string;
@@ -63,6 +70,11 @@ export interface ClinicalHandoff {
   medicationConcerns: string[];
   unresolvedItems: string[];
   expectedActions: string[];
+  sourceRefs: string[];
+  patient360Revision: number;
+  patient360SourceCheckpoint: string;
+  sourceArtifactId?: string;
+  sourceArtifactType?: 'DISEASE_INTAKE' | 'CLINICAL_DOCUMENT' | 'CONSULTATION' | 'OTHER';
   status: ClinicalHandoffStatus;
   createdAt: number;
   acceptedAt?: number;
@@ -113,6 +125,8 @@ export interface ConsultantWorklistItem {
   status: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED';
   createdAt: number;
   dueAt?: number;
+  slaPhase?: 'ACKNOWLEDGEMENT' | 'ACCEPTANCE' | 'COMPLETE';
+  slaState?: 'ON_TRACK' | 'DUE_SOON' | 'BREACHED' | 'COMPLETE';
   acknowledgedAt?: number;
   sourceRefs: string[];
 }

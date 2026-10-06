@@ -95,7 +95,15 @@ export class RevenueIntegrityDomainService {
     commandId: string,
     idempotencyKey: string,
     payload: ReconcileRevenueIntegrityFindingPayload
-  ): Promise<CommandResult<{ finding: RevenueIntegrityFinding; charge: EncounterCharge }>> {
+  ): Promise<
+    CommandResult<{
+      finding: RevenueIntegrityFinding;
+      charge: EncounterCharge;
+      invoice?: Invoice;
+      arOpenItem?: FinanceArOpenItem;
+      journal?: Record<string, unknown>;
+    }>
+  > {
     const auth = revenueAuthorization(context);
     if (!auth.authorized) {
       return {

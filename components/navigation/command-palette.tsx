@@ -7,7 +7,6 @@ import {
   Search,
   Command,
   TrendingUp,
-  ShieldCheck,
   LayoutGrid,
   HeartPulse,
   Users,

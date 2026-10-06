@@ -47,7 +47,7 @@ export interface Patient360ProjectionSources {
   observations: ClinicalObservation[];
   diagnosticReports: DiagnosticReport[];
   documents: ClinicalDocument[];
-  diseaseIntakeArtifacts: DiseaseIntakeArtifact[];
+  diseaseIntakeArtifacts?: DiseaseIntakeArtifact[];
   events: Patient360SourceEvent[];
   knowledgeStatus?: PatientClinicalKnowledgeStatus;
 }
@@ -314,7 +314,7 @@ export class Patient360Projector {
     const observations = samePatient(sources.observations);
     const diagnosticReports = samePatient(sources.diagnosticReports);
     const documents = samePatient(sources.documents);
-    const diseaseIntakeArtifacts = samePatient(sources.diseaseIntakeArtifacts);
+    const diseaseIntakeArtifacts = samePatient(sources.diseaseIntakeArtifacts || []);
 
     const careContexts = buildPatient360CareContexts(encounters);
     const activeEncounter = preferredCompatibilityEncounter(careContexts);

@@ -61,26 +61,11 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
       req.nextUrl.searchParams.get('encounterId') || ''
     ).trim();
 
-    const projectionPreview = await Patient360ProjectionService.getProjection(
-      context.tenantId,
-      normalizedPatientId
-    );
-    const previewContext = projectionPreview
-      ? (
-          requestedEncounterId
-            ? projectionPreview.recentEncounters.find(
-                (item) => item.encounterId === requestedEncounterId
-              )
-            : selectCareContextEncounter(
-                projectionPreview.careContexts,
-                requestedCareSetting
-              )
-        )
-      : undefined;
     const accessEncounterId =
       requestedEncounterId ||
-      previewContext?.encounterId ||
-      String(patient.activeEncounterId || patient.currentEncounterId || '').trim();
+      String(
+        patient.activeEncounterId || patient.currentEncounterId || ''
+      ).trim();
     const accessEncounter = accessEncounterId
       ? await DomainStateRepository.getById<Record<string, unknown>>(
           context.tenantId,
@@ -90,11 +75,18 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
       : null;
 
     if (
-      requestedEncounterId &&
-      (!accessEncounter || String(accessEncounter.patientId || '') !== normalizedPatientId)
+      accessEncounter &&
+      String(accessEncounter.patientId || '').trim() !== normalizedPatientId
     ) {
       return NextResponse.json(
         { success: false, error: 'ENCOUNTER_PATIENT_MISMATCH' },
+        { status: 404, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
+    if (requestedEncounterId && !accessEncounter) {
+      return NextResponse.json(
+        { success: false, error: 'ENCOUNTER_NOT_FOUND' },
         { status: 404, headers: { 'Cache-Control': 'no-store' } }
       );
     }
@@ -227,10 +219,17 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
         : 'Patient 360 read failed';
 
     const unauthorized =
-      /AUTH|TENANT|SESSION|ACCOUNT|DEVICE/i.test(message);
+      /AUTH|TENANT|SESSION|ACCOUNT|DEVICE|PERMISSION|ACCESS|FORBIDDEN|DENIED/i.test(
+        message
+      );
 
     return NextResponse.json(
-      { success: false, error: message },
+      {
+        success: false,
+        error: unauthorized
+          ? 'PATIENT360_ACCESS_DENIED'
+          : 'PATIENT360_READ_FAILED',
+      },
       {
         status: unauthorized ? 403 : 500,
         headers: { 'Cache-Control': 'no-store' },

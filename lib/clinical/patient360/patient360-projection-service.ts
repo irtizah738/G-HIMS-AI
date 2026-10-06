@@ -269,6 +269,57 @@ export class Patient360ProjectionService {
     return { projection, timeline };
   }
 
+  /**
+   * Authorized read-path self-healing for patients whose durable projection has
+   * not yet been materialized (for example pre-CI patients or projection-worker
+   * lag after registration). This remains server-side CQRS: canonical patient,
+   * encounter, clinical facts and event history are loaded from authoritative
+   * stores and projected deterministically. The browser never stitches raw PHI.
+   */
+  public static async readOrRebuildClinicalView(
+    tenantId: string,
+    patientId: string,
+    timelineLimit = 200
+  ): Promise<{
+    projection: Patient360Projection;
+    timeline: Patient360TimelineItem[];
+    repairedMissingProjection: boolean;
+  }> {
+    const current = await this.readClinicalView(
+      tenantId,
+      patientId,
+      timelineLimit
+    );
+    if (current.projection) {
+      return {
+        projection: current.projection,
+        timeline: current.timeline,
+        repairedMissingProjection: false,
+      };
+    }
+
+    // rebuildPatient is monotonic/idempotent at the projection cursor, so
+    // concurrent first reads cannot let an older projection overwrite a newer one.
+    await this.rebuildPatient(tenantId, patientId);
+
+    const rebuilt = await this.readClinicalView(
+      tenantId,
+      patientId,
+      timelineLimit
+    );
+    if (!rebuilt.projection) {
+      throw new Error(
+        `PATIENT360_PROJECTION_REBUILD_DID_NOT_MATERIALIZE:${patientId}`
+      );
+    }
+
+    return {
+      projection: rebuilt.projection,
+      timeline: rebuilt.timeline,
+      repairedMissingProjection: true,
+    };
+  }
+
   public static async loadPatientEvents(
     tenantId: string,
     patientId: string

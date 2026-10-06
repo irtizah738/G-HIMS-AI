@@ -2437,6 +2437,22 @@ export function OpdMasterWorkspace() {
     setActiveTab('AUDIT');
   };
 
+  // Navigation Items
+  const navTabs = [
+    { id: 'DASHBOARD', label: 'Overview', icon: LayoutDashboard },
+    { id: 'SEARCH_MPI', label: 'MPI Search', icon: Search },
+    { id: 'REGISTRATION', label: 'Registration', icon: PlusCircle },
+    { id: 'APPOINTMENTS', label: 'Appointments', icon: Calendar },
+    { id: 'QUEUE', label: 'Live Queue', icon: Clock },
+    { id: 'TRIAGE', label: 'Triage / NEWS2', icon: Activity },
+    { id: 'CONSULTATION', label: 'Consultation', icon: Stethoscope },
+    { id: 'DIAGNOSTICS', label: 'Lab & PACS', icon: FlaskConical },
+    { id: 'PHARMACY', label: 'Pharmacy FEFO', icon: Pill },
+    { id: 'BILLING', label: 'Billing / GL', icon: DollarSign },
+    { id: 'DISPOSITION', label: 'Disposition', icon: FileCheck },
+    { id: 'AUDIT', label: 'Audit Trail', icon: ShieldCheck },
+  ].filter((tab) => canAccessTab(tab.id));
+
   return (
     <div className="space-y-6">
       {/* Offline Sync Status & Role Switcher Bar */}

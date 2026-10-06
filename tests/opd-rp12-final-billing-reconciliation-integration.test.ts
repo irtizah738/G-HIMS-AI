@@ -377,7 +377,6 @@ describe('OPD-RP12 executable final billing reconciliation', () => {
         revenueRecognizedAt: 2,
         deferredRevenueJournalId: deferredJournalId,
         recognitionJournalId,
-        netRevenueMinorUnits: 4_500,
       }
     );
     TransactionManager.seedEphemeralStateForTesting(

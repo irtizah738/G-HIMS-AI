@@ -1,6 +1,20 @@
 import { GoogleGenAI } from '@google/genai';
 import { NextRequest, NextResponse } from 'next/server';
 import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
+import { z } from 'zod';
+
+const sourceLimitedBriefSchema = z.object({
+  executiveSummary: z.string().min(1).max(4000),
+  sbar: z.object({
+    situation: z.string().min(1).max(2000),
+    background: z.string().min(1).max(3000),
+    assessment: z.string().min(1).max(3000),
+    recommendation: z.string().min(1).max(3000),
+  }).strict(),
+  observedRiskSignals: z.array(z.string().min(1).max(1000)).max(30),
+  missingOrUnverifiedInformation: z.array(z.string().min(1).max(1000)).max(30),
+  sourceLimited: z.literal(true),
+}).strict();
 
 export async function POST(req: NextRequest) {
   try {

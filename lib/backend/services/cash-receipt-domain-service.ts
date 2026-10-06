@@ -16,7 +16,7 @@ export interface RecordCashReceiptPayload {
   patientId: string;
   amountMinorUnits: number;
   currency?: string;
-  referenceNumber: string;
+  referenceNumber?: string;
   collectedAt: number;
   cashierName?: string;
 }
@@ -71,6 +71,8 @@ export class CashReceiptDomainService {
     }
 
     const currency = String(payload.currency || 'PKR').toUpperCase();
+    const referenceNumber =
+      String(payload.referenceNumber || '').trim() || payload.receiptId;
     const invoiceLink = await DomainStateRepository.getById<Record<string, unknown>>(
       context.tenantId,
       'invoices',
@@ -162,7 +164,7 @@ export class CashReceiptDomainService {
       amountMinorUnits: payload.amountMinorUnits,
       currency,
       mode: 'CASH',
-      referenceNumber: payload.referenceNumber,
+      referenceNumber,
       status: 'CAPTURED',
       collectedAt: payload.collectedAt,
       recordedAt: Date.now(),
@@ -179,7 +181,7 @@ export class CashReceiptDomainService {
       documentDate: payload.collectedAt,
       postingDate: payload.collectedAt,
       referenceDocumentId: payload.receiptId,
-      documentHeader: `Cash receipt ${payload.referenceNumber} for invoice ${payload.invoiceId}`,
+      documentHeader: `Cash receipt ${referenceNumber} for invoice ${payload.invoiceId}`,
       currency,
       totalAmountMinorUnits: payload.amountMinorUnits,
       lines: [
@@ -568,7 +570,7 @@ export class CashReceiptDomainService {
                 isDiagnosticInvoice && newBalanceMinorUnits === 0,
               diagnosticOrderId: isDiagnosticInvoice ? diagnosticOrderId : undefined,
             },
-            auditReason: `Captured cash receipt ${payload.referenceNumber} for ${payload.amountMinorUnits / 100} ${currency}`,
+            auditReason: `Captured cash receipt ${referenceNumber} for ${payload.amountMinorUnits / 100} ${currency}`,
             resultData: {
               receipt: receiptState,
               journal: journalState,

@@ -1,375 +1,318 @@
 'use client';
 
-import React, { useState, use } from 'react';
+import React, { use, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
-  Receipt,
-  Search,
+  AlertTriangle,
+  ArrowRight,
   CheckCircle2,
   Clock,
-  DollarSign,
-  User,
-  Filter,
-  ArrowRight,
-  Plus,
-  Printer,
+  Receipt,
+  RefreshCw,
   ShieldCheck,
-  Building2,
-  FileSpreadsheet,
 } from 'lucide-react';
-import { Invoice, InvoicePaymentStatus } from '@/types/billing';
-import { formatCurrency } from '@/lib/utils';
+import type { InvoicePaymentStatus } from '@/types/billing';
+import { hydrateEdgeSnapshot } from '@/lib/offline/hydration';
+import {
+  buildBillingInvoiceReadModel,
+  type BillingInvoiceReadModel,
+} from '@/lib/billing/authoritative-read-model';
 
 interface PageProps {
-  params: Promise<{
-    tenantId: string;
-  }>;
+  params: Promise<{ tenantId: string }>;
+}
+
+function formatAuthoritativeMoney(value: number, currency: string) {
+  return `${currency} ${Number(value || 0).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function statusBadge(status: InvoicePaymentStatus) {
+  if (status === 'paid') {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-800">
+        <CheckCircle2 className="h-3 w-3" />
+        Settled
+      </span>
+    );
+  }
+  if (status === 'partially_paid') {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-800">
+        <Clock className="h-3 w-3" />
+        Partially paid
+      </span>
+    );
+  }
+  if (status === 'waived') {
+    return (
+      <span className="rounded-md border border-slate-200 bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-700">
+        Waived
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-100 px-2.5 py-1 text-[11px] font-bold text-blue-800">
+      <Clock className="h-3 w-3" />
+      Pending
+    </span>
+  );
 }
 
 export default function InvoicesDirectoryPage({ params }: PageProps) {
-  const resolvedParams = use(params);
-  const tenantId = resolvedParams.tenantId || 'central-metro-hospital';
-
-  const [invoices, setInvoices] = useState<Invoice[]>([
-    {
-      id: 'inv-enc-8092-441',
-      tenantId,
-      invoiceNumber: 'INV-2026-08491',
-      patientId: 'p-1001',
-      patientName: 'Robert Martinez',
-      mrn: 'GH-2026-1042',
-      encounterId: 'enc-8092-441',
-      tariffId: 'tf-ppo-02',
-      tariffName: 'BlueCross PPO Tier-1',
-      planName: 'private_insurance',
-      payerName: 'BlueCross BlueShield of Texas',
-      policyNumber: 'BCBS-TX-984920',
-      totalGross: 4850.0,
-      totalDiscount: 727.5,
-      totalTax: 0,
-      totalCoverage: 3300.0,
-      totalPatientDue: 822.5,
-      totalPaid: 822.5,
-      balanceDue: 0,
-      paymentStatus: 'paid',
-      paymentMethod: 'card',
-      items: [
-        {
-          id: 'chg-1',
-          entitySource: 'consultation',
-          code: 'CPT-99214',
-          description: 'Detailed Outpatient Cardiology Review',
-          quantity: 1,
-          unitPrice: 145,
-          grossAmount: 145,
-          discountAmount: 25,
-          tax: 0,
-          netAmount: 145,
-          insurancePortion: 116,
-          patientPortion: 29,
-          timestamp: '2026-02-18T10:00:00Z',
-          status: 'billed',
-        },
-        {
-          id: 'chg-2',
-          entitySource: 'procedure',
-          code: 'CPT-33512',
-          description: 'Coronary Artery Bypass Graft (CABG x3)',
-          quantity: 1,
-          unitPrice: 3400,
-          grossAmount: 3400,
-          discountAmount: 600,
-          tax: 0,
-          netAmount: 3400,
-          insurancePortion: 2720,
-          patientPortion: 680,
-          timestamp: '2026-02-18T11:00:00Z',
-          status: 'billed',
-        },
-        {
-          id: 'chg-3',
-          entitySource: 'bed_day',
-          code: 'BED-ICU-01',
-          description: 'ICU Critical Care Day Stay & Continuous Telemetry',
-          quantity: 1,
-          unitPrice: 850,
-          grossAmount: 850,
-          discountAmount: 102.5,
-          tax: 0,
-          netAmount: 850,
-          insurancePortion: 464,
-          patientPortion: 113.5,
-          timestamp: '2026-02-18T14:00:00Z',
-          status: 'billed',
-        },
-      ],
-      createdAt: '2026-02-18T14:30:00Z',
-      updatedAt: '2026-02-18T15:00:00Z',
-    },
-    {
-      id: 'inv-enc-8092-442',
-      tenantId,
-      invoiceNumber: 'INV-2026-08492',
-      patientId: 'p-1002',
-      patientName: 'Eleanor Vance',
-      mrn: 'GH-2026-3391',
-      encounterId: 'enc-8092-442',
-      tariffId: 'tf-cash-01',
-      tariffName: 'Cash / Self-Pay Standard',
-      planName: 'cash',
-      totalGross: 620.0,
-      totalDiscount: 0,
-      totalTax: 0,
-      totalCoverage: 0,
-      totalPatientDue: 620.0,
-      totalPaid: 300.0,
-      balanceDue: 320.0,
-      paymentStatus: 'partially_paid',
-      paymentMethod: 'split',
-      items: [
-        {
-          id: 'chg-4',
-          entitySource: 'consultation',
-          code: 'CPT-99213',
-          description: 'Standard Orthopedic Examination',
-          quantity: 1,
-          unitPrice: 120,
-          grossAmount: 120,
-          discountAmount: 0,
-          tax: 0,
-          netAmount: 120,
-          insurancePortion: 0,
-          patientPortion: 120,
-          timestamp: '2026-02-19T09:00:00Z',
-          status: 'billed',
-        },
-        {
-          id: 'chg-5',
-          entitySource: 'radiology',
-          code: 'RAD-73562',
-          description: 'Right Knee 3-View Radiograph',
-          quantity: 1,
-          unitPrice: 500,
-          grossAmount: 500,
-          discountAmount: 0,
-          tax: 0,
-          netAmount: 500,
-          insurancePortion: 0,
-          patientPortion: 500,
-          timestamp: '2026-02-19T09:30:00Z',
-          status: 'billed',
-        },
-      ],
-      createdAt: '2026-02-19T10:00:00Z',
-      updatedAt: '2026-02-19T10:15:00Z',
-    },
-    {
-      id: 'inv-enc-8092-443',
-      tenantId,
-      invoiceNumber: 'INV-2026-08493',
-      patientId: 'p-1003',
-      patientName: 'Sofia Chen',
-      mrn: 'GH-2026-7731',
-      encounterId: 'enc-8092-443',
-      tariffId: 'tf-corp-03',
-      tariffName: 'Corporate Executive Health',
-      planName: 'corporate',
-      payerName: 'Aramco Energy Corporate Group',
-      totalGross: 1450.0,
-      totalDiscount: 145.0,
-      totalTax: 0,
-      totalCoverage: 1450.0,
-      totalPatientDue: 0,
-      totalPaid: 0,
-      balanceDue: 0,
-      paymentStatus: 'pending',
-      paymentMethod: 'insurance_claim',
-      items: [
-        {
-          id: 'chg-6',
-          entitySource: 'lab',
-          code: 'LAB-80053',
-          description: 'Comprehensive Metabolic Panel (CMP)',
-          quantity: 1,
-          unitPrice: 65,
-          grossAmount: 65,
-          discountAmount: 20,
-          tax: 0,
-          netAmount: 65,
-          insurancePortion: 65,
-          patientPortion: 0,
-          timestamp: '2026-02-19T11:00:00Z',
-          status: 'billed',
-        },
-      ],
-      createdAt: '2026-02-19T11:30:00Z',
-      updatedAt: '2026-02-19T11:30:00Z',
-    },
-  ]);
-
+  const { tenantId: routeTenantId } = use(params);
+  const tenantId = String(routeTenantId || '').trim().toLowerCase();
+  const [model, setModel] = useState<BillingInvoiceReadModel | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | InvoicePaymentStatus>(
+    'all'
+  );
 
-  const filteredInvoices = invoices.filter((inv) => {
-    const matchSearch =
-      inv.invoiceNumber.toLowerCase().includes(search.toLowerCase()) ||
-      inv.patientName.toLowerCase().includes(search.toLowerCase()) ||
-      inv.mrn.toLowerCase().includes(search.toLowerCase());
-    const matchStatus = statusFilter === 'all' || inv.paymentStatus === statusFilter;
-    return matchSearch && matchStatus;
-  });
-
-  const getStatusBadge = (status: InvoicePaymentStatus) => {
-    switch (status) {
-      case 'paid':
-        return (
-          <span className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 flex items-center gap-1">
-            <CheckCircle2 className="w-3 h-3" /> Fully Settled
-          </span>
-        );
-      case 'partially_paid':
-        return (
-          <span className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-200 dark:border-amber-800 flex items-center gap-1">
-            <Clock className="w-3 h-3" /> Partially Paid
-          </span>
-        );
-      case 'pending':
-        return (
-          <span className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border border-blue-200 dark:border-blue-800 flex items-center gap-1">
-            <Clock className="w-3 h-3" /> Payer Pending
-          </span>
-        );
-      default:
-        return null;
+  const refresh = useCallback(async () => {
+    if (!tenantId) {
+      setError('BILLING_TENANT_REQUIRED');
+      setLoading(false);
+      return;
     }
-  };
+
+    setLoading(true);
+    setError(null);
+    try {
+      const snapshot = await hydrateEdgeSnapshot(tenantId);
+      setModel(buildBillingInvoiceReadModel(snapshot));
+    } catch (cause) {
+      setModel(null);
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : 'Unable to hydrate authoritative billing invoices.'
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [tenantId]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const invoices = model?.invoices || [];
+  const filteredInvoices = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return invoices.filter((invoice) => {
+      const searchMatch =
+        !query ||
+        invoice.invoiceNumber.toLowerCase().includes(query) ||
+        invoice.patientName.toLowerCase().includes(query) ||
+        invoice.mrn.toLowerCase().includes(query) ||
+        invoice.encounterId.toLowerCase().includes(query);
+      const statusMatch =
+        statusFilter === 'all' || invoice.paymentStatus === statusFilter;
+      return searchMatch && statusMatch;
+    });
+  }, [invoices, search, statusFilter]);
+
+  const outstandingByCurrency = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const invoice of invoices) {
+      totals.set(
+        invoice.currency,
+        (totals.get(invoice.currency) || 0) + Number(invoice.balanceDue || 0)
+      );
+    }
+    return [...totals.entries()].sort(([left], [right]) =>
+      left.localeCompare(right)
+    );
+  }, [invoices]);
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Header */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="w-9 h-9 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold">
-              <Receipt className="w-5 h-5" />
-            </span>
-            <div>
-              <h1 className="text-lg font-bold text-slate-900 dark:text-slate-100">
-                Point-of-Sale & Split Invoicing Register
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+          <div>
+            <div className="mb-2 flex items-center gap-2">
+              <Receipt className="h-5 w-5 text-blue-600" />
+              <h1 className="text-xl font-black text-slate-900 dark:text-slate-100">
+                Authoritative Billing Invoices
               </h1>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Interactive copay collection, payer coverage allocation, and settlement terminals for {tenantId}
-              </p>
+            </div>
+            <p className="max-w-2xl text-xs text-slate-500">
+              This directory is hydrated from the authenticated tenant billing
+              projection. Invoice creation, charge posting and settlement are
+              server-owned command workflows; this page never creates financial
+              records locally.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            disabled={loading}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="rounded-xl bg-slate-50 p-4 dark:bg-slate-800/60">
+            <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+              Scoped invoices
+            </div>
+            <div className="mt-1 text-xl font-black">{invoices.length}</div>
+          </div>
+          <div className="rounded-xl bg-slate-50 p-4 dark:bg-slate-800/60">
+            <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+              Outstanding patient balance
+            </div>
+            <div className="mt-1 space-y-0.5 text-sm font-black">
+              {outstandingByCurrency.length > 0 ? (
+                outstandingByCurrency.map(([currency, amount]) => (
+                  <div key={currency}>
+                    {formatAuthoritativeMoney(amount, currency)}
+                  </div>
+                ))
+              ) : (
+                <div>—</div>
+              )}
+            </div>
+          </div>
+          <div className="rounded-xl bg-slate-50 p-4 dark:bg-slate-800/60">
+            <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+              <ShieldCheck className="h-3 w-3 text-emerald-600" />
+              Projection source
+            </div>
+            <div className="mt-1 text-sm font-bold">
+              {model?.source || (loading ? 'LOADING' : 'UNAVAILABLE')}
+            </div>
+            <div className="mt-1 truncate font-mono text-[9px] text-slate-400">
+              {model?.snapshotVersion || '—'}
             </div>
           </div>
         </div>
-
-        <div className="flex items-center gap-2">
-          <Link
-            href={`/${tenantId}/billing/tariffs`}
-            className="px-3.5 py-2 text-xs font-semibold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl transition-colors"
-          >
-            Tariff Schedules
-          </Link>
-          <Link
-            href={`/${tenantId}/billing/claims`}
-            className="px-3.5 py-2 text-xs font-semibold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl transition-colors"
-          >
-            Claims Workbench
-          </Link>
-        </div>
       </div>
 
-      {/* Filter Bar */}
-      <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-3">
-        <div className="relative w-full sm:w-72">
-          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            placeholder="Search by invoice #, patient, or MRN..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200"
-          />
+      {error && (
+        <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs text-rose-800">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            <p className="font-bold">Billing hydration failed closed.</p>
+            <p className="mt-1">{error}</p>
+          </div>
         </div>
+      )}
 
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Status:</span>
+      {model && model.rejectedRows > 0 && (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            {model.rejectedRows} malformed or cross-tenant invoice row(s) were
+            excluded from this financial read model.
+          </span>
+        </div>
+      )}
+
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex flex-col gap-3 border-b border-slate-200 p-4 sm:flex-row dark:border-slate-800">
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search invoice, patient, MRN or encounter"
+            className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-800"
+          />
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="text-xs border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200"
+            onChange={(event) =>
+              setStatusFilter(
+                event.target.value as 'all' | InvoicePaymentStatus
+              )
+            }
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-800"
           >
-            <option value="all">All Invoices</option>
-            <option value="paid">Fully Settled</option>
-            <option value="partially_paid">Partially Paid</option>
-            <option value="pending">Payer Pending</option>
+            <option value="all">All statuses</option>
+            <option value="pending">Pending</option>
+            <option value="partially_paid">Partially paid</option>
+            <option value="paid">Paid</option>
+            <option value="waived">Waived</option>
           </select>
         </div>
-      </div>
 
-      {/* Invoices List Table */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-xs overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 text-slate-500 dark:text-slate-400">
-                <th className="py-3.5 px-4 font-bold">Invoice #</th>
-                <th className="py-3.5 px-4 font-bold">Patient / MRN</th>
-                <th className="py-3.5 px-4 font-bold">Tariff / Payer</th>
-                <th className="py-3.5 px-4 font-bold text-right">Gross Total</th>
-                <th className="py-3.5 px-4 font-bold text-right">Payer Portion</th>
-                <th className="py-3.5 px-4 font-bold text-right">Patient Due</th>
-                <th className="py-3.5 px-4 font-bold text-right">Balance Due</th>
-                <th className="py-3.5 px-4 font-bold text-center">Status</th>
-                <th className="py-3.5 px-4 font-bold text-center">Terminal</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {filteredInvoices.map((inv) => (
-                <tr key={inv.id} className="hover:bg-slate-50 dark:hover:bg-slate-850 transition-colors">
-                  <td className="py-3 px-4 font-mono font-bold text-blue-600 dark:text-blue-400">
-                    {inv.invoiceNumber}
-                  </td>
-                  <td className="py-3 px-4">
-                    <span className="font-bold text-slate-900 dark:text-slate-100 block">
-                      {inv.patientName}
-                    </span>
-                    <span className="text-[11px] text-slate-400 font-mono">{inv.mrn}</span>
-                  </td>
-                  <td className="py-3 px-4">
-                    <span className="font-medium text-slate-800 dark:text-slate-200 block">
-                      {inv.tariffName || 'Cash Plan'}
-                    </span>
-                    <span className="text-[11px] text-slate-400">{inv.payerName || 'Direct Payment'}</span>
-                  </td>
-                  <td className="py-3 px-4 text-right font-semibold text-slate-700 dark:text-slate-300">
-                    {formatCurrency(inv.totalGross)}
-                  </td>
-                  <td className="py-3 px-4 text-right font-semibold text-blue-600 dark:text-blue-400">
-                    {formatCurrency(inv.totalCoverage)}
-                  </td>
-                  <td className="py-3 px-4 text-right font-bold text-slate-900 dark:text-slate-100">
-                    {formatCurrency(inv.totalPatientDue)}
-                  </td>
-                  <td className="py-3 px-4 text-right font-black text-rose-600 dark:text-rose-400">
-                    {formatCurrency(inv.balanceDue)}
-                  </td>
-                  <td className="py-3 px-4 text-center">{getStatusBadge(inv.paymentStatus)}</td>
-                  <td className="py-3 px-4 text-center">
-                    <Link
-                      href={`/${tenantId}/billing/invoices/${inv.id}`}
-                      className="px-3 py-1.5 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-700 dark:text-blue-300 font-bold rounded-xl inline-flex items-center gap-1 transition-colors"
-                    >
-                      <span>Open POS</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </Link>
-                  </td>
+        {loading ? (
+          <div className="p-10 text-center text-xs text-slate-500">
+            Loading authoritative invoice projection…
+          </div>
+        ) : filteredInvoices.length === 0 ? (
+          <div className="p-10 text-center text-xs text-slate-500">
+            No authorized invoices are available for this tenant/session scope.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="border-b border-slate-200 bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-800/60">
+                <tr>
+                  <th className="px-4 py-3">Invoice</th>
+                  <th className="px-4 py-3">Patient</th>
+                  <th className="px-4 py-3">Encounter</th>
+                  <th className="px-4 py-3 text-right">Patient due</th>
+                  <th className="px-4 py-3 text-right">Balance</th>
+                  <th className="px-4 py-3 text-center">Status</th>
+                  <th className="px-4 py-3 text-right">Open</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {filteredInvoices.map((invoice) => (
+                  <tr key={invoice.id}>
+                    <td className="px-4 py-3">
+                      <div className="font-mono font-bold text-blue-600">
+                        {invoice.invoiceNumber}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="font-bold">{invoice.patientName}</div>
+                      <div className="font-mono text-[10px] text-slate-400">
+                        {invoice.mrn}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-[10px] text-slate-500">
+                      {invoice.encounterId}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold">
+                      {formatAuthoritativeMoney(
+                        invoice.totalPatientDue,
+                        invoice.currency
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right font-black text-rose-600">
+                      {formatAuthoritativeMoney(
+                        invoice.balanceDue,
+                        invoice.currency
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      {statusBadge(invoice.paymentStatus)}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <Link
+                        href={`/${encodeURIComponent(
+                          tenantId
+                        )}/billing/invoices/${encodeURIComponent(invoice.id)}`}
+                        className="inline-flex items-center gap-1 rounded-lg bg-blue-50 px-2.5 py-1.5 font-bold text-blue-700 hover:bg-blue-100"
+                      >
+                        View
+                        <ArrowRight className="h-3.5 w-3.5" />
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

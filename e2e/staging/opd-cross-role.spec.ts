@@ -126,6 +126,9 @@ test.describe.serial('OPD-SQ1 deployed cross-role staging qualification', () => 
     await reception.page
       .getByTestId('opd-registration-address')
       .fill('Synthetic OPD staging qualification address');
+    await expect(
+      reception.page.getByTestId('opd-registration-facility')
+    ).toHaveValue('P7H0');
     await reception.page
       .getByTestId('opd-registration-tariff')
       .selectOption('OUT_OF_POCKET');

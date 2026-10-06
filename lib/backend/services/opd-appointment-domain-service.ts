@@ -26,6 +26,7 @@ import type {
   OpdAppointmentRecord,
   OpdAppointmentSlotLock,
   OpdWaitlistEntryRecord,
+  OpdWaitlistScopeLock,
 } from '@/types/opd-scheduling';
 
 type DomainRecord = Record<string, any>;
@@ -138,6 +139,46 @@ function patientSlotId(patientId: string, bucketStartAt: number): string {
       .digest('hex')
       .slice(0, 36)
   );
+}
+
+function waitlistScopeId(
+  patientId: string,
+  facilityId: string,
+  departmentId: string
+): string {
+  return (
+    'opdwaitscope_' +
+    createHash('sha256')
+      .update(`${patientId}\u0000${facilityId}\u0000${departmentId}`)
+      .digest('hex')
+      .slice(0, 36)
+  );
+}
+
+function buildWaitlistScopeLock(input: {
+  scopeId: string;
+  tenantId: string;
+  patientId: string;
+  facilityId: string;
+  departmentId: string;
+  status: 'ACTIVE' | 'RELEASED';
+  waitlistId: string;
+  actorId: string;
+  previous?: DomainRecord | null;
+  now: number;
+}): OpdWaitlistScopeLock {
+  return {
+    scopeId: input.scopeId,
+    tenantId: input.tenantId,
+    patientId: input.patientId,
+    facilityId: input.facilityId,
+    departmentId: input.departmentId,
+    status: input.status,
+    waitlistId: input.waitlistId,
+    revision: Number(input.previous?.revision || 0) + 1,
+    updatedAt: input.now,
+    updatedBy: input.actorId,
+  };
 }
 
 function assertTimeZone(timeZone: string): void {
@@ -2091,6 +2132,11 @@ export class OpdAppointmentDomainService {
       }
 
       const waitlistId = deterministicId('opdwl', context.tenantId, commandId);
+      const scopeId = waitlistScopeId(
+        payload.patientId,
+        payload.facilityId,
+        payload.preferredDepartmentId
+      );
       const now = Date.now();
       const entry: OpdWaitlistEntryRecord = {
         waitlistId,
@@ -2139,6 +2185,12 @@ export class OpdAppointmentDomainService {
             entityId: waitlistId,
             required: false,
           },
+          {
+            key: 'scope',
+            entityType: 'OPD_WAITLIST_SCOPE',
+            entityId: scopeId,
+            required: false,
+          },
         ],
         prepare: (current) => {
           if (current.waitlist) {
@@ -2147,8 +2199,48 @@ export class OpdAppointmentDomainService {
               'Waitlist identity already exists.'
             );
           }
+          const currentScope = current.scope || null;
+          if (
+            currentScope &&
+            String(currentScope.status || '').toUpperCase() === 'ACTIVE' &&
+            String(currentScope.waitlistId || '') !== waitlistId
+          ) {
+            throw new AtomicMutationRejectedError(
+              'ACTIVE_WAITLIST_ALREADY_EXISTS',
+              'Patient already has an active waitlist entry for this facility and department.',
+              {
+                activeWaitlistId: String(currentScope.waitlistId || ''),
+                facilityId: payload.facilityId,
+                departmentId: payload.preferredDepartmentId,
+              }
+            );
+          }
+
+          const scopeLock = buildWaitlistScopeLock({
+            scopeId,
+            tenantId: context.tenantId,
+            patientId: payload.patientId,
+            facilityId: payload.facilityId,
+            departmentId: payload.preferredDepartmentId,
+            status: 'ACTIVE',
+            waitlistId,
+            actorId: context.actorId,
+            previous: currentScope,
+            now,
+          });
+
           return {
             domainState: entry,
+            additionalStateWrites: [
+              {
+                entityType: 'OPD_WAITLIST_SCOPE',
+                entityId: scopeId,
+                domainState: scopeLock,
+                expectedServerVersion: Number(
+                  currentScope?._serverVersion || 0
+                ),
+              },
+            ],
             eventPayload: {
               waitlistId,
               patientId: entry.patientId,
@@ -2523,6 +2615,11 @@ export class OpdAppointmentDomainService {
         patientSlotIds.push(patientSlotId(link.patientId, cursor));
       }
       const now = Date.now();
+      const scopeId = waitlistScopeId(
+        link.patientId,
+        link.facilityId,
+        link.preferredDepartmentId
+      );
 
       const tx = await TransactionManager.executeAtomicReadModifyMutation({
         tenantId: context.tenantId,
@@ -2549,6 +2646,12 @@ export class OpdAppointmentDomainService {
             key: 'appointment',
             entityType: 'OPD_APPOINTMENT',
             entityId: appointmentId,
+            required: false,
+          },
+          {
+            key: 'scope',
+            entityType: 'OPD_WAITLIST_SCOPE',
+            entityId: scopeId,
             required: false,
           },
           ...link.offerSlotIds.map((slotId) => ({
@@ -2582,6 +2685,17 @@ export class OpdAppointmentDomainService {
             throw new AtomicMutationRejectedError(
               'APPOINTMENT_IDENTITY_ALREADY_EXISTS',
               'Waitlist appointment identity already exists.'
+            );
+          }
+          const currentScope = current.scope || null;
+          if (
+            currentScope &&
+            String(currentScope.status || '').toUpperCase() === 'ACTIVE' &&
+            String(currentScope.waitlistId || '') !== entry.waitlistId
+          ) {
+            throw new AtomicMutationRejectedError(
+              'WAITLIST_SCOPE_LINEAGE_MISMATCH',
+              'Active waitlist scope no longer belongs to the accepted waitlist entry.'
             );
           }
 
@@ -2660,6 +2774,25 @@ export class OpdAppointmentDomainService {
                 entityType: 'OPD_APPOINTMENT',
                 entityId: appointmentId,
                 domainState: appointment,
+              },
+              {
+                entityType: 'OPD_WAITLIST_SCOPE',
+                entityId: scopeId,
+                domainState: buildWaitlistScopeLock({
+                  scopeId,
+                  tenantId: context.tenantId,
+                  patientId: entry.patientId,
+                  facilityId: entry.facilityId,
+                  departmentId: entry.preferredDepartmentId,
+                  status: 'RELEASED',
+                  waitlistId: entry.waitlistId,
+                  actorId: context.actorId,
+                  previous: current.scope || null,
+                  now,
+                }),
+                expectedServerVersion: Number(
+                  current.scope?._serverVersion || 0
+                ),
               },
               ...(entry.offerSlotIds || []).map((slotId, index) => {
                 const previous = current[`slot:${slotId}`] || null;
@@ -2785,6 +2918,11 @@ export class OpdAppointmentDomainService {
     }
 
     const slotIds = link.offerSlotIds || [];
+    const scopeId = waitlistScopeId(
+      link.patientId,
+      link.facilityId,
+      link.preferredDepartmentId
+    );
     try {
       const tx = await TransactionManager.executeAtomicReadModifyMutation({
         tenantId: context.tenantId,
@@ -2806,6 +2944,12 @@ export class OpdAppointmentDomainService {
             entityType: 'OPD_WAITLIST_ENTRY',
             entityId: payload.waitlistId,
             required: true,
+          },
+          {
+            key: 'scope',
+            entityType: 'OPD_WAITLIST_SCOPE',
+            entityId: scopeId,
+            required: false,
           },
           ...slotIds.map((slotId) => ({
             key: `slot:${slotId}`,
@@ -2873,9 +3017,42 @@ export class OpdAppointmentDomainService {
             expectedServerVersion: number;
           }>;
 
+          const currentScope = current.scope || null;
+          if (
+            currentScope &&
+            String(currentScope.status || '').toUpperCase() === 'ACTIVE' &&
+            String(currentScope.waitlistId || '') !== entry.waitlistId
+          ) {
+            throw new AtomicMutationRejectedError(
+              'WAITLIST_SCOPE_LINEAGE_MISMATCH',
+              'Active waitlist scope no longer belongs to the cancelled waitlist entry.'
+            );
+          }
+
           return {
             domainState: updated,
-            additionalStateWrites: writes,
+            additionalStateWrites: [
+              ...writes,
+              {
+                entityType: 'OPD_WAITLIST_SCOPE',
+                entityId: scopeId,
+                domainState: buildWaitlistScopeLock({
+                  scopeId,
+                  tenantId: context.tenantId,
+                  patientId: entry.patientId,
+                  facilityId: entry.facilityId,
+                  departmentId: entry.preferredDepartmentId,
+                  status: 'RELEASED',
+                  waitlistId: entry.waitlistId,
+                  actorId: context.actorId,
+                  previous: currentScope,
+                  now,
+                }),
+                expectedServerVersion: Number(
+                  currentScope?._serverVersion || 0
+                ),
+              },
+            ],
             eventPayload: {
               waitlistId: entry.waitlistId,
               patientId: entry.patientId,

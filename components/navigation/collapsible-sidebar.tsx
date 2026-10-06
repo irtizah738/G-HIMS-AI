@@ -13,7 +13,6 @@ import { useRouter } from 'next/navigation';
 import {
   TrendingUp,
   LayoutGrid,
-  ShieldCheck,
   DollarSign,
   FileCheck,
   Stethoscope,

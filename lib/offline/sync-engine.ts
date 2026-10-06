@@ -60,6 +60,7 @@ export interface QueueMutationParams {
   idempotencyKey?: string;
   schemaVersion?: number;
   baseEntityVersion?: number;
+  dependsOnMutationIds?: string[];
   optimisticCache?: boolean;
   mutationId?: string;
 }
@@ -362,6 +363,7 @@ class ClinicalSyncEngine {
       idempotencyKey: params.idempotencyKey || `offline_${crypto.randomUUID()}`,
       schemaVersion: params.schemaVersion || 1,
       baseEntityVersion: params.baseEntityVersion ?? entityMetadata?.serverVersion,
+      dependsOnMutationIds: params.dependsOnMutationIds,
       baseVectorClock,
       payload: params.payload,
       vectorClock,
@@ -518,6 +520,7 @@ class ClinicalSyncEngine {
                   ),
                   schemaVersion: mutation.schemaVersion || 1,
                   baseEntityVersion: mutation.baseEntityVersion,
+                  dependsOnMutationIds: mutation.dependsOnMutationIds,
                   vectorClock: mutation.vectorClock,
                   baseVectorClock: mutation.baseVectorClock,
                 }))),

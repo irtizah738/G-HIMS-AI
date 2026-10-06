@@ -62,6 +62,9 @@ jobs:
       - name: Clinical architecture
         run: bun run test:clinical-architecture
 
+      - name: Clinical identity routing and intake rework
+        run: bun run test:clinical-rework
+
       - name: Clinical Intelligence
         run: bun run test:ci7 && bun run test:ci8
 

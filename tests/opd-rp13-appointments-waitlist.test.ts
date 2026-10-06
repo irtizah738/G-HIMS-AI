@@ -89,6 +89,20 @@ describe('OPD-RP13 authoritative appointments and waitlist', () => {
     expect(service).toContain("entry.status === 'APPROVED'");
   });
 
+  test('appointment and waitlist creation revalidate patient MPI inside atomic commits', async () => {
+    const service = await source(
+      'lib/backend/services/opd-appointment-domain-service.ts'
+    );
+
+    expect(service).toContain('assertActivePatientSnapshot');
+    expect(service).toContain("'PATIENT_IDENTITY_CHANGED'");
+    expect(service).toContain("key: 'patient'");
+    expect(service).toContain("entityType: 'PATIENT_MPI'");
+    expect(service).toContain(
+      'Patient identity changed or is no longer active before scheduling commit.'
+    );
+  });
+
   test('provider availability is derived from HCM roster privilege and leave authority', async () => {
     const service = await source(
       'lib/backend/services/opd-appointment-domain-service.ts'

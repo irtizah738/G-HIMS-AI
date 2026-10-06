@@ -25,7 +25,9 @@ import {
 
 interface OpdDispositionReferralsProps {
   encounter: ComprehensiveOpdEncounter;
-  onCommitDisposition: (disposition: EncounterDisposition) => void;
+  onCommitDisposition: (
+    disposition: EncounterDisposition
+  ) => Promise<void> | void;
 }
 
 export function OpdDispositionReferrals({
@@ -66,10 +68,12 @@ export function OpdDispositionReferrals({
   const [admissionBedId, setAdmissionBedId] = useState<string>('');
   const [admissionReason, setAdmissionReason] = useState<string>('IV Inotropic titration & close hemodynamic monitoring');
 
-  const [signingDoctor, setSigningDoctor] = useState<string>('Dr. Sarah Jenkins (Cardiology Specialist)');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
 
     let internalRef: InternalReferral | undefined;
     if (dispositionType === 'INTERNAL_REFERRAL') {
@@ -117,10 +121,21 @@ export function OpdDispositionReferrals({
             }
           : undefined,
       completedAt: Date.now(),
-      completedBy: signingDoctor,
+      completedBy: 'SERVER_AUTHENTICATED_ACTOR',
     };
 
-    onCommitDisposition(disposition);
+    setSubmitting(true);
+    try {
+      await onCommitDisposition(disposition);
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : 'Encounter disposition could not be committed.'
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -397,27 +412,22 @@ export function OpdDispositionReferrals({
           </div>
         </div>
 
-        {/* Doctor Digital Signature */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-100 dark:border-slate-800">
-          <div>
-            <label className="block text-xs font-semibold mb-1">Attending Physician Electronic Signature</label>
-            <input
-              type="text"
-              value={signingDoctor}
-              onChange={(e) => setSigningDoctor(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-semibold"
-            />
+        {submitError && (
+          <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{submitError}</span>
           </div>
+        )}
 
-          <div className="flex items-end justify-end">
-            <button
-              type="submit"
-              className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs cursor-pointer transition-all"
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              Finalize Clinical Closure & Seal Encounter
-            </button>
-          </div>
+        <div className="flex justify-end border-t border-slate-100 pt-3 dark:border-slate-800">
+          <button
+            type="submit"
+            disabled={submitting}
+            className="flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-2.5 text-xs font-bold text-white shadow-xs transition-all hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <CheckCircle2 className="h-4 w-4" />
+            {submitting ? 'Committing…' : 'Commit Disposition'}
+          </button>
         </div>
       </form>
     </div>

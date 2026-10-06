@@ -689,7 +689,8 @@ export class EncounterDomainService {
     const sourceAppointmentId = String(
       encounter.sourceAppointmentId || ''
     ).trim();
-    const [patient, sourceAppointment] = await Promise.all([
+    const queueTokenId = `opd_${encounter.encounterId}`;
+    const [patient, sourceAppointment, queueToken] = await Promise.all([
       DomainStateRepository.getById<Record<string, unknown>>(
         context.tenantId,
         'patients',
@@ -702,6 +703,11 @@ export class EncounterDomainService {
             sourceAppointmentId
           )
         : Promise.resolve(null),
+      DomainStateRepository.getById<Record<string, unknown>>(
+        context.tenantId,
+        'opd_queue',
+        queueTokenId
+      ),
     ]);
     if (!patient) {
       return {
@@ -709,6 +715,23 @@ export class EncounterDomainService {
         commandId,
         idempotencyKey,
         error: { code: 'PATIENT_NOT_FOUND', message: 'Encounter patient does not exist.' },
+      };
+    }
+
+    if (
+      !queueToken ||
+      String(queueToken.encounterId || '') !== encounter.encounterId ||
+      String(queueToken.patientId || '') !== encounter.patientId
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'OPD_QUEUE_LINEAGE_MISSING',
+          message:
+            'OPD disposition requires the authoritative queue token for this patient encounter.',
+        },
       };
     }
 
@@ -913,6 +936,22 @@ export class EncounterDomainService {
           }
         : null;
 
+    const currentQueueStatus = String(queueToken.status || '').toLowerCase();
+    const terminalQueueStatuses = new Set([
+      'completed',
+      'no_show',
+      'transferred',
+    ]);
+    const queueState = terminalQueueStatuses.has(currentQueueStatus)
+      ? null
+      : {
+          ...queueToken,
+          status: 'completed',
+          completedAt: now,
+          completedBy: context.actorId,
+          updatedAt: now,
+        };
+
     const tx = await TransactionManager.executeAtomicMutation({
       tenantId: context.tenantId,
       actorId: context.actorId,
@@ -959,6 +998,18 @@ export class EncounterDomainService {
                 domainState: appointmentState,
                 expectedServerVersion: Number(
                   sourceAppointment._serverVersion || 0
+                ),
+              },
+            ]
+          : []),
+        ...(queueState
+          ? [
+              {
+                entityType: 'OPD_QUEUE_TOKEN',
+                entityId: queueTokenId,
+                domainState: queueState,
+                expectedServerVersion: Number(
+                  queueToken._serverVersion || 0
                 ),
               },
             ]

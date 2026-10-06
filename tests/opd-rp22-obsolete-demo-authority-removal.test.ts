@@ -111,6 +111,8 @@ describe('OPD-RP22 obsolete and demo authority removal', () => {
     expect(page).not.toContain("setInvoice((prev)");
     expect(page).not.toContain("paymentMethod === 'card'");
     expect(page).not.toContain('POS Copay Collection Terminal');
+    expect(page).not.toContain("CASH-${new Date().toISOString()");
+    expect(page).toContain("referenceNumber.trim()");
   });
 
   test('unsupported tariffs and insurance claims fail closed instead of simulating authority', async () => {

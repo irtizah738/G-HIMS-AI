@@ -69,7 +69,7 @@ export interface AdmitPatientToInpatientCarePayload {
   bedId: string;
   sourceEncounterId?: string;
   admittingDiagnosis: string;
-  targetWard: string;
+  targetWard?: string;
   assignedDoctor?: string;
   assignedNurse?: string;
   priority?: 'STAT' | 'URGENT' | 'ROUTINE';

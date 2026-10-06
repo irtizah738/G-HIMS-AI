@@ -16,6 +16,7 @@ describe('OPD-RP16 real timeline and audit', () => {
     expect(route).toContain("'ENCOUNTER_PATIENT_MISMATCH'");
     expect(route).toContain("'Cache-Control': 'no-store'");
     expect(route).toContain("'OPD_TIMELINE_ACCESS_DENIED'");
+    expect(route).toContain('ACCESS|FORBIDDEN|DENIED');
     expect(route).toContain("'OPD_TIMELINE_READ_FAILED'");
     expect(route).toContain('truncated: eventRead.truncated');
     expect(route).toContain('unlinkedEventCount === 0');

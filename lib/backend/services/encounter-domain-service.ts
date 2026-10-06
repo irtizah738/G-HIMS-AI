@@ -779,6 +779,36 @@ export class EncounterDomainService {
         },
       };
     }
+    if (
+      payload.dispositionType !== 'INTERNAL_REFERRAL' &&
+      payload.internalReferral
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INTERNAL_REFERRAL_NOT_ALLOWED',
+          message:
+            'Internal referral details are only valid for INTERNAL_REFERRAL disposition.',
+        },
+      };
+    }
+    if (
+      payload.dispositionType !== 'EXTERNAL_REFERRAL' &&
+      payload.externalReferral
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'EXTERNAL_REFERRAL_NOT_ALLOWED',
+          message:
+            'External referral details are only valid for EXTERNAL_REFERRAL disposition.',
+        },
+      };
+    }
 
     const referralState =
       referralId && payload.dispositionType === 'INTERNAL_REFERRAL'
@@ -863,7 +893,6 @@ export class EncounterDomainService {
               ? 'EXTERNAL'
               : undefined,
         inpatientAdmissionRequest: payload.inpatientAdmissionRequest,
-        referralId: referralId || undefined,
       },
       completedAt: now,
       updatedAt: now,

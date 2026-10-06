@@ -29,6 +29,8 @@ describe('OPD-RP17 real dashboard KPIs', () => {
     const dashboard = await source('components/opd/OpdDashboardKpis.tsx');
 
     expect(dashboard).toContain("'REGISTRATION'");
+    expect(dashboard).toContain("'REGISTERED'");
+    expect(dashboard).toContain("'COMPLETED'");
     expect(dashboard).toContain("'QUEUE'");
     expect(dashboard).toContain("'TRIAGE'");
     expect(dashboard).toContain("'CONSULTATION'");

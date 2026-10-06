@@ -231,5 +231,13 @@ describe('OPD-RP18 least-privilege reads', () => {
     );
   });
 
+  test('clinical OPD timeline redacts financial payload details', async () => {
+    const route = await source('app/api/opd/timeline/route.ts');
+
+    expect(route).toContain('invoice|receipt|journal|amount|price|balance|payment');
+    expect(route).toContain('coverage|copay|charge');
+    expect(route).toContain("output[key] = '[REDACTED]'");
+  });
+
 
 });

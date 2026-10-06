@@ -384,6 +384,7 @@ export class OfflineReconciliationDomainService {
 
         const code = result.error?.code || 'OFFLINE_COMMAND_REJECTED';
         if (
+          category === 'FINANCIAL_CONFLICT' ||
           code === 'IDEMPOTENCY_IN_PROGRESS' ||
           code.includes('CONFLICT') ||
           code.includes('STATE_') ||

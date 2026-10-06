@@ -105,6 +105,23 @@ describe('OPD-RP13 authoritative appointments and waitlist', () => {
     expect(service).toContain("'WAITLIST_SLOT_HOLD_LOST'");
   });
 
+  test('waitlist offers hold provider and patient capacity together', async () => {
+    const service = await source(
+      'lib/backend/services/opd-appointment-domain-service.ts'
+    );
+    const scheduling = await source('types/opd-scheduling.ts');
+
+    expect(scheduling).toContain('offerPatientSlotIds?: string[]');
+    expect(service).toContain('offerPatientSlotIds: newPatientSlotIds');
+    expect(service).toContain("'WAITLIST_PATIENT_SLOT_HOLD_LOST'");
+    expect(service).toContain("'WAITLIST_PATIENT_HOLD_SET_CHANGED'");
+    expect(service).toContain(
+      "'WAITLIST_PATIENT_SLOT_LINEAGE_MISMATCH'"
+    );
+    expect(service).toContain("lockScope: 'PATIENT'");
+    expect(service).toContain("status: 'HELD'");
+  });
+
   test('critical patients cannot be parked on an OPD waitlist', async () => {
     const service = await source(
       'lib/backend/services/opd-appointment-domain-service.ts'

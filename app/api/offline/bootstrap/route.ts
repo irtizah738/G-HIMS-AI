@@ -173,7 +173,11 @@ function authorizedCollections(roles: string[]): string[] {
   }
 
   // Ancillary roles never hydrate the complete patient identity/chart set.
-  if (['LAB_TECHNICIAN', 'LAB_TECH'].some((role) => normalized.has(role))) {
+  if (
+    ['LAB_TECHNICIAN', 'LAB_TECH', 'PATHOLOGIST'].some((role) =>
+      normalized.has(role)
+    )
+  ) {
     add('encounters', 'orders');
   }
 
@@ -366,8 +370,8 @@ function scopeOfflineCollections(
       .filter(Boolean)
   );
   const normalizedRoles = normalizedRoleSet(context.roles);
-  const labRole = ['LAB_TECHNICIAN', 'LAB_TECH'].some((role) =>
-    normalizedRoles.has(role)
+  const labRole = ['LAB_TECHNICIAN', 'LAB_TECH', 'PATHOLOGIST'].some(
+    (role) => normalizedRoles.has(role)
   );
   const radiologyRole = [
     'RADIOLOGY_TECH',
@@ -377,6 +381,25 @@ function scopeOfflineCollections(
   const pharmacistRole = normalizedRoles.has('PHARMACIST');
   const ancillaryRole = labRole || radiologyRole || pharmacistRole;
 
+  const rawEncounterById = new Map(
+    (collections.encounters || [])
+      .map((encounter) => [
+        String(encounter.id || encounter.encounterId || '').trim(),
+        encounter,
+      ] as const)
+      .filter(([encounterId]) => Boolean(encounterId))
+  );
+
+  const resolveRelatedFacility = (
+    row: Record<string, unknown>
+  ): string => {
+    const explicit = String(row.facilityId || '').trim();
+    if (explicit) return explicit;
+    const encounterId = String(row.encounterId || '').trim();
+    const encounter = encounterId ? rawEncounterById.get(encounterId) : null;
+    return String(encounter?.facilityId || '').trim();
+  };
+
   const ancillaryOrderIds = new Set<string>();
   const ancillaryEncounterIds = new Set<string>();
   if (labRole || radiologyRole) {
@@ -384,7 +407,9 @@ function scopeOfflineCollections(
       const orderType = String(order.orderType || '').trim().toUpperCase();
       if (labRole && orderType !== 'LAB') continue;
       if (radiologyRole && orderType !== 'RADIOLOGY') continue;
-      if (!valueMatchesScope(order.facilityId, facilities)) continue;
+      if (!valueMatchesScope(resolveRelatedFacility(order), facilities)) {
+        continue;
+      }
 
       const orderId = String(order.id || order.orderId || '').trim();
       const encounterId = String(order.encounterId || '').trim();
@@ -394,8 +419,8 @@ function scopeOfflineCollections(
   }
   if (pharmacistRole) {
     for (const prescription of collections.prescriptions || []) {
-      const facilityId = String(prescription.facilityId || '').trim();
-      if (facilityId && !valueMatchesScope(facilityId, facilities)) continue;
+      const facilityId = resolveRelatedFacility(prescription);
+      if (!valueMatchesScope(facilityId, facilities)) continue;
       const encounterId = String(prescription.encounterId || '').trim();
       if (encounterId) ancillaryEncounterIds.add(encounterId);
     }

@@ -50,10 +50,15 @@ import {
   Download,
 } from 'lucide-react';
 import { AuthClient } from '@/lib/auth/auth-client';
+import { PatientConsultantRoutingModal } from '@/components/clinical/patient-consultant-routing-modal';
+
+const IS_DEMO_RUNTIME = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
 
 export function DiseaseCentricIntakeView() {
   const { patients, addClinicalNote, selectedPatientId, setSelectedPatientId } = useHospital();
-  const [localPatientId, setLocalPatientId] = useState<string>(selectedPatientId || 'p-1001');
+  const [localPatientId, setLocalPatientId] = useState<string>(
+    selectedPatientId || (IS_DEMO_RUNTIME ? 'p-1001' : '')
+  );
 
   // Synchronize with global hospital context patient
   useEffect(() => {
@@ -79,7 +84,8 @@ export function DiseaseCentricIntakeView() {
 
   // Selected Patient
   const selectedPatient = useMemo(() => {
-    return patients.find((p) => p.id === activePatientId) || patients[0];
+    const exact = patients.find((p) => p.id === activePatientId);
+    return exact || (IS_DEMO_RUNTIME ? patients[0] : undefined);
   }, [patients, activePatientId]);
 
   // Localization and Facility Configuration
@@ -95,8 +101,14 @@ export function DiseaseCentricIntakeView() {
   }, [selectedTierId]);
 
   // Intake State: Tree branch navigation, answers, specialty history
-  const [selectedTreeNodeIds, setSelectedTreeNodeIds] = useState<string[]>(['cardiac_root', 'cardiac_crushing', 'cardiac_radiating_arm_jaw']);
-  const [guidedAnswers, setGuidedAnswers] = useState<Record<string, any>>({
+  const [selectedTreeNodeIds, setSelectedTreeNodeIds] = useState<string[]>(
+    IS_DEMO_RUNTIME
+      ? ['cardiac_root', 'cardiac_crushing', 'cardiac_radiating_arm_jaw']
+      : []
+  );
+  const [guidedAnswers, setGuidedAnswers] = useState<Record<string, any>>(
+    IS_DEMO_RUNTIME
+      ? {
     chest_pain_severity: 8,
     symptom_onset_duration: 'under_2h',
     ecg_telemetry_findings: 'stemi_elevation',
@@ -117,9 +129,14 @@ export function DiseaseCentricIntakeView() {
     obstetric_blood_pressure: 'severe_over_160_110',
     fetal_heart_rate_category: 'category_2_indeterminate',
     gravida_para_history: 'G3 P2 L2',
-  });
+        }
+      : {}
+  );
 
-  const [specialtyHistoryAnswers, setSpecialtyHistoryAnswers] = useState<Record<string, any>>({
+  const [specialtyHistoryAnswers, setSpecialtyHistoryAnswers] =
+    useState<Record<string, any>>(
+      IS_DEMO_RUNTIME
+        ? {
     prior_pci_cabg: 'PCI with Drug-Eluting Stents (< 12 months)',
     baseline_ef: 'Preserved (> 50%)',
     antiplatelet_regimen: ['Aspirin 81mg Daily', 'Ticagrelor (Brilinta) 90mg BID'],
@@ -137,18 +154,20 @@ export function DiseaseCentricIntakeView() {
     rh_factor_antibody: 'O-Positive (Rh+)',
     prior_cesarean_scar: 'None (Prior Vaginal Deliveries Only / Nulliparous)',
     prior_preeclampsia_gdm: ['Prior Preeclampsia / Eclampsia'],
-  });
+          }
+        : {}
+    );
 
   // AI Optimization State
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState<AiOptimizationResult | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
   const [committedSuccess, setCommittedSuccess] = useState(false);
+  const [showRoutingModal, setShowRoutingModal] = useState(false);
 
   // Template Customization / Studio state
   const [customQuestions, setCustomQuestions] = useState<GuidedQuestion[]>([]);
   const [customWeightMultiplier, setCustomWeightMultiplier] = useState<number>(1.0);
-  const [autoDispatchOnCritical, setAutoDispatchOnCritical] = useState<boolean>(true);
 
   // Reset Tree / Answers on template change
   useEffect(() => {
@@ -317,21 +336,53 @@ export function DiseaseCentricIntakeView() {
     }
   };
 
-  // Commit Intake & Dispatch to Longitudinal EHR
-  const handleCommitToLongitudinalEhr = () => {
-    if (!selectedPatient) return;
+  const activeEncounter =
+    selectedPatient?.encounters?.find((encounter) => encounter.status === 'active') ||
+    selectedPatient?.encounters?.[0];
 
-    addClinicalNote(selectedPatient.id, {
-      author: 'Clinical Triage Specialist & G-HIMS Copilot',
-      role: 'Specialist Triage',
-      category: 'SOAP',
-      content: `Disease-Centric Intake Completed: ${currentTemplate.name}\nRisk Level: ${maxRiskSeverity} (Score: ${totalRiskScore}). Protocol: ${currentLocalization.name}.\nSBAR & Specialist Briefing prepared for ${currentTemplate.typicalSpecialists.join(', ')}.`,
-    });
+  const routingClinicalQuestion = selectedPatient
+    ? [
+        activeEncounter?.chiefComplaint
+          ? `Chief complaint: ${activeEncounter.chiefComplaint}.`
+          : '',
+        `Protocol: ${currentTemplate.name}.`,
+        `Clinician-entered intake risk state: ${maxRiskSeverity} (score ${totalRiskScore}).`,
+        activeRiskSignals.length
+          ? `Active protocol flags: ${activeRiskSignals.map((signal) => signal.title).join('; ')}.`
+          : '',
+        'Specialist review requested; no diagnostic or treatment order is implied by this handoff.',
+      ]
+        .filter(Boolean)
+        .join(' ')
+    : '';
 
-    setCommittedSuccess(true);
-    setTimeout(() => {
-      setCommittedSuccess(false);
-    }, 4000);
+  // Finalize the clinician-entered intake note. AI output is not silently written back.
+  const handleCommitToLongitudinalEhr = async () => {
+    if (!selectedPatient) {
+      setAiError('Select a patient before finalizing the intake note.');
+      return;
+    }
+
+    setAiError(null);
+    try {
+      await addClinicalNote(selectedPatient.id, {
+        author: 'Clinical Intake Workflow',
+        role: 'Clinician-entered intake',
+        category: 'SOAP',
+        content: `Disease-Centric Intake Completed: ${currentTemplate.name}\nRisk Level: ${maxRiskSeverity} (Score: ${totalRiskScore}). Protocol: ${currentLocalization.name}.\nSpecialist preparation is available for clinician review; no consultation or diagnostic order was auto-dispatched.`,
+      });
+
+      setCommittedSuccess(true);
+      setTimeout(() => {
+        setCommittedSuccess(false);
+      }, 4000);
+    } catch (error) {
+      setAiError(
+        error instanceof Error
+          ? error.message
+          : 'The intake note could not be finalized.'
+      );
+    }
   };
 
   return (
@@ -368,7 +419,7 @@ export function DiseaseCentricIntakeView() {
             <button
               id="btn-trigger-ai-optimize-top"
               onClick={handleRunAiOptimization}
-              disabled={aiLoading}
+              disabled={aiLoading || !selectedPatient}
               className="px-5 py-3 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold text-sm flex items-center gap-2 shadow-md hover:shadow-lg transition-all cursor-pointer active:scale-95 disabled:opacity-50"
             >
               {aiLoading ? (
@@ -461,16 +512,16 @@ export function DiseaseCentricIntakeView() {
                 {selectedPatient?.fullName || 'Selected Patient'}
               </span>
               <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">
-                ({selectedPatient?.age || 54}y/o {selectedPatient?.gender || 'M'})
+                {selectedPatient ? `(${selectedPatient.age}y/o ${selectedPatient.gender})` : 'No patient selected'}
               </span>
               <span className="text-xs px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-mono text-slate-600 dark:text-slate-300">
-                MRN: {selectedPatient?.mrn || 'MRN-1049'}
+                MRN: {selectedPatient?.mrn || '—'}
               </span>
             </div>
             <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              <span>HR: <strong className="text-slate-800 dark:text-slate-200">{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.heartRate || 88}</strong> bpm</span>
-              <span>BP: <strong className="text-slate-800 dark:text-slate-200">{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.bloodPressure || '138/88'}</strong> mmHg</span>
-              <span>SpO2: <strong className="text-slate-800 dark:text-slate-200">{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.oxygenSaturation || 98}</strong>%</span>
+              <span>HR: <strong className="text-slate-800 dark:text-slate-200">{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.heartRate ?? '—'}</strong> bpm</span>
+              <span>BP: <strong className="text-slate-800 dark:text-slate-200">{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.bloodPressure || '—'}</strong> mmHg</span>
+              <span>SpO2: <strong className="text-slate-800 dark:text-slate-200">{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.oxygenSaturation ?? '—'}</strong>%</span>
             </div>
           </div>
         </div>
@@ -479,10 +530,11 @@ export function DiseaseCentricIntakeView() {
         <div className="flex items-center gap-2">
           <select
             id="select-intake-patient"
-            value={selectedPatient?.id}
+            value={selectedPatient?.id || ''}
             onChange={(e) => setActivePatientId(e.target.value)}
             className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-medium"
           >
+            <option value="">Select patient…</option>
             {patients.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.fullName} ({p.mrn})
@@ -616,11 +668,21 @@ export function DiseaseCentricIntakeView() {
         <div className="flex items-center gap-2">
           <button
             id="btn-commit-longitudinal-ehr"
-            onClick={handleCommitToLongitudinalEhr}
-            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+            onClick={() => void handleCommitToLongitudinalEhr()}
+            disabled={!selectedPatient}
+            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-400 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:cursor-not-allowed"
           >
             <FileCheck2 className="w-4 h-4" />
-            <span>Commit to Longitudinal EHR</span>
+            <span>Finalize Intake Note</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowRoutingModal(true)}
+            disabled={!selectedPatient || !activeEncounter?.id}
+            className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-slate-400 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:cursor-not-allowed"
+          >
+            <Send className="w-4 h-4" />
+            <span>Continue to Specialist Routing</span>
           </button>
         </div>
       </div>
@@ -630,7 +692,7 @@ export function DiseaseCentricIntakeView() {
         <div className="p-3 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 rounded-xl text-xs font-semibold flex items-center justify-between animate-in fade-in">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-            <span>Successfully recorded disease intake in patient longitudinal EHR & dispatched specialist notification!</span>
+            <span>Intake note finalized in the active encounter. No specialist consultation or diagnostic order was auto-dispatched.</span>
           </div>
         </div>
       )}
@@ -1158,7 +1220,7 @@ export function DiseaseCentricIntakeView() {
                 </h2>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Generates SBAR, Differential Diagnosis probability matrix, STAT diagnostic orders, and pre-specialist readiness checklists.
+                Generates a source-context briefing, differential considerations, suggested diagnostics, and a pre-specialist readiness checklist for clinician review.
               </p>
             </div>
 
@@ -1289,7 +1351,7 @@ export function DiseaseCentricIntakeView() {
                 <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-4">
                   <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    Recommended STAT Diagnostic & Intervention Orders
+                    Suggested Diagnostics — Not Ordered
                   </h3>
 
                   <div className="space-y-2.5">
@@ -1394,21 +1456,15 @@ export function DiseaseCentricIntakeView() {
               </p>
             </div>
 
-            {/* Auto Dispatch Trigger */}
-            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 space-y-3">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                  Automated Specialist Paging on Critical Risk
-                </label>
-                <input
-                  type="checkbox"
-                  checked={autoDispatchOnCritical}
-                  onChange={(e) => setAutoDispatchOnCritical(e.target.checked)}
-                  className="rounded text-blue-600 accent-blue-600 w-4 h-4 cursor-pointer"
-                />
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 space-y-2">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                  Governed escalation
+                </span>
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                When enabled, automatically triggers hospital paging and prep commands when severe criteria (e.g. STEMI, LVO, DKA) are detected.
+                Protocol risk can prepare a handoff, but specialist paging, consultation requests, diagnostics and treatment remain explicit governed actions.
               </p>
             </div>
           </div>
@@ -1520,6 +1576,19 @@ export function DiseaseCentricIntakeView() {
             </div>
           </div>
         </div>
+      )}
+      {selectedPatient && (
+        <PatientConsultantRoutingModal
+          isOpen={showRoutingModal}
+          onClose={() => setShowRoutingModal(false)}
+          patientId={selectedPatient.id}
+          encounterId={activeEncounter?.id}
+          patientName={selectedPatient.fullName}
+          mrn={selectedPatient.mrn}
+          chiefComplaint={activeEncounter?.chiefComplaint || ''}
+          triageCategory={`${currentTemplate.specialty} / ${maxRiskSeverity}`}
+          initialClinicalQuestion={routingClinicalQuestion}
+        />
       )}
     </div>
   );

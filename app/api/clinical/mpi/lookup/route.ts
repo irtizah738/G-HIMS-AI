@@ -11,6 +11,50 @@ type LookupResult = {
   patientId: string;
 };
 
+const MPI_LOOKUP_STAFF_ROLES = new Set([
+  'ADMIN',
+  'ADMINISTRATOR',
+  'SYSTEM_ADMIN',
+  'RECEPTION',
+  'RECEPTIONIST',
+  'REGISTRATION',
+  'INTAKE',
+  'DOCTOR',
+  'PHYSICIAN',
+  'CONSULTANT',
+  'ATTENDING_PHYSICIAN',
+  'SURGEON',
+  'NURSE',
+  'HEAD_NURSE',
+  'BILLING',
+  'BILLING_CLERK',
+  'BILLING_STAFF',
+]);
+
+function assertMpiLookupAccess(context: {
+  actorId: string;
+  roles: string[];
+  permissions: string[];
+}): void {
+  const roles = new Set(
+    context.roles.map((role) => String(role || '').trim().toUpperCase())
+  );
+  const hasStaffRole = Array.from(roles).some((role) =>
+    MPI_LOOKUP_STAFF_ROLES.has(role)
+  );
+  const hasExplicitPermission =
+    context.permissions.includes('*') ||
+    context.permissions.some((permission) =>
+      ['MPI:READ', 'PATIENT:READ', 'PATIENT_RECORDS:VIEW'].includes(
+        String(permission || '').trim().toUpperCase()
+      )
+    );
+
+  if (!hasStaffRole && !hasExplicitPermission) {
+    throw new Error('MPI_LOOKUP_ACCESS_DENIED');
+  }
+}
+
 async function resolveIdentifier(
   tenantId: string,
   type: 'MRN' | 'CNIC',
@@ -47,7 +91,8 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    await deriveAuthoritativeContext(req, tenantId);
+    const { context } = await deriveAuthoritativeContext(req, tenantId);
+    assertMpiLookupAccess(context);
 
     const lookups = (
       await Promise.all([
@@ -89,11 +134,18 @@ export async function GET(req: NextRequest) {
       success: true,
       matchType:
         lookups.length === 2 ? 'MRN_AND_CNIC' : lookups[0].type,
-      patient,
+      patient: {
+        patientId: patient.id,
+        mrn: patient.mrn,
+        fullName: patient.fullName,
+        dateOfBirth: patient.dateOfBirth,
+        gender: patient.gender,
+        status: patient.status || 'ACTIVE',
+      },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'MPI lookup failed';
-    const unauthorized = /AUTH|TENANT|UNAUTH/i.test(message);
+    const unauthorized = /AUTH|TENANT|UNAUTH|ACCESS_DENIED/i.test(message);
     return NextResponse.json(
       { success: false, error: message },
       { status: unauthorized ? 403 : 500 }

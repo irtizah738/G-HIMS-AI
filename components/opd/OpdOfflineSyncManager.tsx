@@ -15,43 +15,63 @@ import { OpdRole } from '@/types/opd-domain';
 
 interface OpdOfflineSyncManagerProps {
   isOnline: boolean;
+  isSyncing: boolean;
   pendingSyncCount: number;
+  conflictsCount: number;
+  lastError?: string | null;
   activeRole: OpdRole;
   allowPersonaSwitch?: boolean;
+  allowOfflineSimulation?: boolean;
+  offlineSimulationActive?: boolean;
   onRoleChange: (role: OpdRole) => void;
-  onTriggerManualSync: () => void;
-  onToggleOnlineStatus: () => void;
+  onTriggerManualSync: () => Promise<void> | void;
+  onToggleOfflineSimulation: () => Promise<void> | void;
 }
 
 export function OpdOfflineSyncManager({
   isOnline,
+  isSyncing,
   pendingSyncCount,
+  conflictsCount,
+  lastError,
   activeRole,
   allowPersonaSwitch = false,
+  allowOfflineSimulation = false,
+  offlineSimulationActive = false,
   onRoleChange,
   onTriggerManualSync,
-  onToggleOnlineStatus,
+  onToggleOfflineSimulation,
 }: OpdOfflineSyncManagerProps) {
   return (
     <div className="p-3 bg-slate-900 text-white rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs shadow-md border border-slate-800">
       {/* Network & Outbox Status */}
       <div className="flex items-center gap-3">
         <button
-          onClick={onToggleOnlineStatus}
-          className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+          type="button"
+          onClick={() => {
+            if (allowOfflineSimulation) void onToggleOfflineSimulation();
+          }}
+          disabled={!allowOfflineSimulation}
+          className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 transition-all ${
+            allowOfflineSimulation ? 'cursor-pointer' : 'cursor-default'
+          } ${
             isOnline ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-amber-950 text-amber-300 border border-amber-800'
           }`}
-          title="Click to simulate offline / online network toggle"
+          title={
+            allowOfflineSimulation
+              ? 'Toggle DEMO offline simulation'
+              : 'Connectivity is derived from verified application reachability'
+          }
         >
           {isOnline ? (
             <>
               <Wifi className="w-3.5 h-3.5 text-emerald-400" />
-              <span>ONLINE (Cloud Firestore Synced)</span>
+              <span>{offlineSimulationActive ? 'ONLINE' : 'ONLINE (Server Reachable)'}</span>
             </>
           ) : (
             <>
               <WifiOff className="w-3.5 h-3.5 text-amber-400" />
-              <span>OFFLINE (Local IndexedDB Outbox Active)</span>
+              <span>OFFLINE (Encrypted Edge Outbox Active)</span>
             </>
           )}
         </button>
@@ -61,11 +81,24 @@ export function OpdOfflineSyncManager({
           <span>Outbox Pending: <strong className="text-white">{pendingSyncCount} mutations</strong></span>
           {pendingSyncCount > 0 && (
             <button
-              onClick={onTriggerManualSync}
-              className="px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold flex items-center gap-1 cursor-pointer"
+              type="button"
+              onClick={() => void onTriggerManualSync()}
+              disabled={!isOnline || isSyncing}
+              className="px-2 py-0.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded font-bold flex items-center gap-1 cursor-pointer"
             >
-              <RefreshCw className="w-3 h-3 animate-spin" /> Sync Now
+              <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
+              {isSyncing ? 'Syncing…' : 'Sync Now'}
             </button>
+          )}
+          {conflictsCount > 0 && (
+            <span className="text-amber-300 font-semibold">
+              {conflictsCount} conflict{conflictsCount === 1 ? '' : 's'} require review
+            </span>
+          )}
+          {lastError && (
+            <span className="text-rose-300 font-semibold" title={lastError}>
+              Last sync failed
+            </span>
           )}
         </div>
       </div>

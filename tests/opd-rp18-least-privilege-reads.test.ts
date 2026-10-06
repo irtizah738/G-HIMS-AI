@@ -127,6 +127,10 @@ describe('OPD-RP18 least-privilege reads', () => {
     expect(accessIndex).toBeGreaterThan(0);
     expect(reportIndex).toBeGreaterThan(accessIndex);
     expect(route).toContain('DIAGNOSTIC_RESULT_ACCESS_DENIED');
+    expect(route).toContain('presentDiagnosticOrder(order)');
+    expect(route).not.toContain('billingInvoiceId: order.billingInvoiceId');
+    expect(route).not.toContain('deferredRevenueJournalId');
+    expect(route).not.toContain('recognitionJournalId');
     expect(route).not.toContain('{ success: false, error: message }');
   });
 

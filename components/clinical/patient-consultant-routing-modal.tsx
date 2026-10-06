@@ -287,11 +287,17 @@ export function PatientConsultantRoutingModal({
   onClose,
   patientId,
   encounterId,
-  patientName = 'Elena Rostova',
-  mrn = 'GH-2026-9812',
-  chiefComplaint = 'Acute retrosternal chest pain radiating to jaw, diaphoresis',
-  triageCategory = 'Cardiology / Acute Coronary Syndrome',
-  currentAttending = 'Triage Officer / Emergency MO',
+  patientName = IS_DEMO_RUNTIME ? 'Elena Rostova' : '',
+  mrn = IS_DEMO_RUNTIME ? 'GH-DEMO-2026-9812' : '',
+  chiefComplaint = IS_DEMO_RUNTIME
+    ? 'Acute retrosternal chest pain radiating to jaw, diaphoresis'
+    : '',
+  triageCategory = IS_DEMO_RUNTIME
+    ? 'Cardiology / Acute Coronary Syndrome'
+    : '',
+  currentAttending = IS_DEMO_RUNTIME
+    ? 'Triage Officer / Emergency MO'
+    : '',
   initialClinicalQuestion = '',
   onRoutedSuccess,
 }: PatientConsultantRoutingModalProps) {
@@ -628,14 +634,23 @@ export function PatientConsultantRoutingModal({
             </div>
 
             <div className="max-w-md mx-auto space-y-2">
-              <h3 className="text-xl font-black text-slate-900">Specialist Routing Confirmed!</h3>
-              <p className="text-xs text-slate-600">
-                Patient <strong className="text-slate-900">{dispatchedConfirmation.patientName}</strong> has been directly dispatched to{' '}
-                <strong className="text-blue-700">{dispatchedConfirmation.consultant.name}</strong>.
+              <h3 className="text-xl font-black text-slate-900 dark:text-slate-100">
+                Consultation Request Created
+              </h3>
+              <p className="text-xs text-slate-600 dark:text-slate-400">
+                A governed consultation request for{' '}
+                <strong className="text-slate-900 dark:text-slate-100">
+                  {dispatchedConfirmation.patientName}
+                </strong>{' '}
+                was sent to{' '}
+                <strong className="text-blue-700 dark:text-blue-300">
+                  {dispatchedConfirmation.consultant.name}
+                </strong>.
+                This does not create diagnostic or treatment orders.
               </p>
             </div>
 
-            <div className="max-w-lg mx-auto bg-slate-50 border border-slate-200 rounded-2xl p-5 text-left text-xs space-y-3">
+            <div className="max-w-lg mx-auto bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 text-left text-xs space-y-3">
               <div className="flex justify-between items-center pb-2 border-b border-slate-200">
                 <span className="text-slate-500 font-semibold">Assigned Specialist:</span>
                 <span className="font-bold text-slate-900">{dispatchedConfirmation.consultant.name}</span>
@@ -644,14 +659,19 @@ export function PatientConsultantRoutingModal({
                 <span className="text-slate-500 font-semibold">Specialty / Department:</span>
                 <span className="font-bold text-indigo-700">{dispatchedConfirmation.consultant.department}</span>
               </div>
-              <div className="flex justify-between items-center pb-2 border-b border-slate-200">
-                <span className="text-slate-500 font-semibold">Destination Location:</span>
-                <span className="font-bold text-slate-900">{dispatchedConfirmation.assignedRoom}</span>
+              <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-slate-700">
+                <span className="text-slate-500 font-semibold">Consultant Location:</span>
+                <span className="font-bold text-slate-900 dark:text-slate-100">
+                  {dispatchedConfirmation.assignedRoom || 'Not specified in HCM directory'}
+                </span>
               </div>
-              <div className="flex justify-between items-center pb-2 border-b border-slate-200">
-                <span className="text-slate-500 font-semibold">Urgency Protocol:</span>
-                <span className="px-2 py-0.5 rounded font-black text-[10px] bg-rose-600 text-white">
-                  {dispatchedConfirmation.urgency} ({dispatchedConfirmation.slaMinutes}m Response SLA)
+              <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-slate-700">
+                <span className="text-slate-500 font-semibold">Requested Priority:</span>
+                <span className="px-2 py-0.5 rounded font-black text-[10px] bg-blue-600 text-white">
+                  {dispatchedConfirmation.urgency}
+                  {dispatchedConfirmation.slaMinutes
+                    ? ` • target ${dispatchedConfirmation.slaMinutes} min`
+                    : ''}
                 </span>
               </div>
               {dispatchedConfirmation.consultant.contactExtension && (
@@ -684,7 +704,7 @@ export function PatientConsultantRoutingModal({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
                   <UserCheck className="w-4 h-4 text-blue-600" />
-                  Select Attending Consultant
+                  Select Eligible Consultant
                 </h3>
 
                 <select
@@ -820,7 +840,7 @@ export function PatientConsultantRoutingModal({
               <div className="space-y-4">
                 <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
                   <Zap className="w-4 h-4 text-amber-600" />
-                  Routing Parameters & Target
+                  Consultation Request
                 </h3>
 
                 {/* Urgency SLA Selection */}

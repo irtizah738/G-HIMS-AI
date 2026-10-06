@@ -102,6 +102,47 @@ async function processOfflineRegistration(
     };
   }
 
+  const authorizedFacilityIds = Array.from(
+    new Set(
+      (context.facilityIds || [])
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    )
+  );
+  const requestedFacilityId = String(payload.facilityId || '').trim();
+  const facilityId = requestedFacilityId || (
+    authorizedFacilityIds.length === 1 ? authorizedFacilityIds[0] : ''
+  );
+  if (!facilityId || !authorizedFacilityIds.includes(facilityId)) {
+    return {
+      result: {
+        mutationId: mutation.mutationId,
+        status: 'rejected',
+        conflictCategory: 'SAFE_APPEND',
+        reason:
+          requestedFacilityId
+            ? 'Offline registration facility is outside the authenticated facility scope.'
+            : 'Offline registration requires one unambiguous authorized facility.',
+      },
+      mappings: [],
+    };
+  }
+
+  const departmentId = String(
+    payload.departmentId || payload.department || ''
+  ).trim();
+  if (!departmentId) {
+    return {
+      result: {
+        mutationId: mutation.mutationId,
+        status: 'rejected',
+        conflictCategory: 'SAFE_APPEND',
+        reason: 'Offline registration requires a target clinical department.',
+      },
+      mappings: [],
+    };
+  }
+
   const genderRaw = String(payload.gender || '').toLowerCase();
   const gender =
     genderRaw === 'male' || genderRaw === 'female' || genderRaw === 'unknown'
@@ -119,7 +160,9 @@ async function processOfflineRegistration(
     contactPhone: String(payload.contactPhone || ''),
     address: String(payload.address || ''),
     encounterType: (payload.encounterType || 'OPD') as any,
-    department: String(payload.department || 'General OPD'),
+    facilityId,
+    departmentId,
+    department: String(payload.department || departmentId),
     priority: (payload.priority || 'ROUTINE') as any,
     chiefComplaint: String(payload.chiefComplaint || ''),
     assignedDoctor: String(payload.assignedDoctor || ''),

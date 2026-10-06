@@ -178,8 +178,10 @@ function authorizedCollections(roles: string[]): string[] {
   }
 
   if (normalized.has('PHARMACIST')) {
+    // RP15 makes physical dispensing reconnect-required. Pharmacists need the
+    // scoped encounter/prescription working set offline, not the tenant-wide
+    // SCM inventory graph.
     add('encounters', 'prescriptions');
-    add(...SCM_COLLECTIONS);
   }
 
   if (
@@ -270,7 +272,7 @@ function valueMatchesScope(
   allowed: Set<string>
 ): boolean {
   const normalized = String(value || '').trim();
-  return !normalized || allowed.size === 0 || allowed.has(normalized);
+  return !normalized || allowed.has(normalized);
 }
 
 function scopeOfflineCollections(

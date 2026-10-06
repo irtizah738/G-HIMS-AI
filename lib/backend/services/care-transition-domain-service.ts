@@ -307,9 +307,11 @@ export class CareTransitionDomainService {
       actorRoles.has('DOCTOR') ||
       actorRoles.has('CONSULTANT') ||
       actorRoles.has('ATTENDING_PHYSICIAN');
-    const assignedDoctor =
-      String(payload.assignedDoctor || '').trim() ||
-      (actorCanAssumeInpatientClinicalResponsibility ? context.actorId : '');
+    const assignedDoctor = sourceIsOpd
+      ? String(sourceEncounter?.assignedProviderId || '').trim() ||
+        (actorCanAssumeInpatientClinicalResponsibility ? context.actorId : '')
+      : String(payload.assignedDoctor || '').trim() ||
+        (actorCanAssumeInpatientClinicalResponsibility ? context.actorId : '');
 
     if (!assignedDoctor) {
       return {

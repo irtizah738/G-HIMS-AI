@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "evidenceType": "CLINICAL_COLLABORATOR_ATTESTATION",
+  "status": "PENDING_HUMAN_SIGNATURE",
+  "collaborator": {
+    "name": "",
+    "professionalTitle": "",
+    "institution": "",
+    "roleInPilot": "",
+    "credentialOrRegistrationReference": ""
+  },
+  "attestsTo": {
+    "reviewedPilotScope": false,
+    "reviewedClinicalAuthorityBoundary": false,
+    "participatedInEvaluationDesign": false,
+    "participatedInCaseReview": false,
+    "observedSystemInRelevantEnvironment": false,
+    "reviewedAggregateResults": false
+  },
+  "statement": "",
+  "signedAt": "",
+  "sourceDocumentReference": "",
+  "notes": "Populate only from a real signed collaborator statement. Repository presence is not evidence."
+}

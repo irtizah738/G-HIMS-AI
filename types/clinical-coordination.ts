@@ -20,10 +20,10 @@ export interface ClinicalConsultationRequest {
   assignedConsultantId?: string;
   clinicalQuestion: string;
   priority: 'ROUTINE' | 'PRIORITY' | 'URGENT' | 'STAT';
-  acknowledgementSlaMinutes: number;
-  acknowledgementDueAt: number;
-  acceptanceSlaMinutes: number;
-  acceptanceDueAt: number;
+  acknowledgementSlaMinutes?: number;
+  acknowledgementDueAt?: number;
+  acceptanceSlaMinutes?: number;
+  acceptanceDueAt?: number;
   /** @deprecated Use acknowledgementSlaMinutes. */
   responseSlaMinutes?: number;
   /** @deprecated Use acknowledgementDueAt. */
@@ -74,9 +74,9 @@ export interface ClinicalHandoff {
   medicationConcerns: string[];
   unresolvedItems: string[];
   expectedActions: string[];
-  sourceRefs: string[];
-  patient360Revision: number;
-  patient360SourceCheckpoint: string;
+  sourceRefs?: string[];
+  patient360Revision?: number;
+  patient360SourceCheckpoint?: string;
   sourceArtifactId?: string;
   sourceArtifactType?: 'DISEASE_INTAKE' | 'CLINICAL_DOCUMENT' | 'CONSULTATION' | 'OTHER';
   status: ClinicalHandoffStatus;

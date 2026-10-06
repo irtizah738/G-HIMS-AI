@@ -30,6 +30,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require current main qualification source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
+            echo "OPD-SQ1 must run from refs/heads/main, got ${GITHUB_REF}" >&2
+            exit 1
+          fi
+          git fetch origin main --depth=1
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2

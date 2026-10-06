@@ -46,6 +46,13 @@ interface PersistedEncounter {
   resourceAssignmentState?: ResourceAssignmentState;
   priority?: string;
   assignedProviderId?: string;
+  facilityId?: string;
+  sourceAppointmentId?: string;
+  billingReconciliationId?: string;
+  billingReconciliationState?: string;
+  billingMutationSequence?: number;
+  dispositionData?: Record<string, unknown>;
+  _serverVersion?: number;
   sourceEncounterId?: string;
   linkedEncounterId?: string;
   disposition?: string;
@@ -141,6 +148,124 @@ export class CareTransitionDomainService {
     if (sourceEncounter && sourceEncounter.patientId !== patient.id) {
       return { success: false, commandId, idempotencyKey, error: { code: 'SOURCE_ENCOUNTER_PATIENT_MISMATCH', message: 'Source encounter belongs to a different patient.' } };
     }
+
+    const sourceIsOpd =
+      Boolean(sourceEncounter) &&
+      String(sourceEncounter?.encounterType || '').toUpperCase() === 'OPD';
+    const sourceReconciliationId = sourceIsOpd
+      ? String(sourceEncounter?.billingReconciliationId || '').trim()
+      : '';
+    const sourceAppointmentId = sourceIsOpd
+      ? String(sourceEncounter?.sourceAppointmentId || '').trim()
+      : '';
+
+    const [sourceReconciliation, sourceAppointment] = await Promise.all([
+      sourceReconciliationId
+        ? DomainStateRepository.getById<Record<string, unknown>>(
+            context.tenantId,
+            'opdBillingReconciliations',
+            sourceReconciliationId
+          )
+        : Promise.resolve(null),
+      sourceAppointmentId
+        ? DomainStateRepository.getById<Record<string, unknown>>(
+            context.tenantId,
+            'opdAppointments',
+            sourceAppointmentId
+          )
+        : Promise.resolve(null),
+    ]);
+
+    if (sourceIsOpd) {
+      if (!activeEncounterStatus(sourceEncounter?.status)) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'SOURCE_OPD_ENCOUNTER_NOT_ACTIVE',
+            message:
+              'Only an active OPD encounter may transition atomically to inpatient care.',
+          },
+        };
+      }
+      if (
+        String(sourceEncounter?.currentStage || '').toUpperCase() !==
+        'DISCHARGE_OR_REFERRAL'
+      ) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'SOURCE_OPD_DISPOSITION_STAGE_REQUIRED',
+            message:
+              'OPD-to-IPD transition requires the authoritative OPD workflow to reach DISCHARGE_OR_REFERRAL.',
+          },
+        };
+      }
+      if (
+        !sourceReconciliationId ||
+        !sourceReconciliation ||
+        String(sourceEncounter?.billingReconciliationState || '').toUpperCase() !==
+          'CLEARED' ||
+        String(sourceReconciliation.status || '').toUpperCase() !== 'CLEARED' ||
+        String(sourceReconciliation.encounterId || '') !==
+          sourceEncounter?.encounterId ||
+        String(sourceReconciliation.patientId || '') !== patient.id ||
+        Number(sourceReconciliation.billingMutationSequence || -1) !==
+          Number(sourceEncounter?.billingMutationSequence || 0)
+      ) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'SOURCE_OPD_BILLING_RECONCILIATION_REQUIRED',
+            message:
+              'OPD-to-IPD transition requires current CLEARED final billing reconciliation for the exact source encounter.',
+          },
+        };
+      }
+      if (
+        sourceAppointmentId &&
+        (
+          !sourceAppointment ||
+          String(sourceAppointment.patientId || '') !== patient.id ||
+          String(sourceAppointment.encounterId || '') !==
+            sourceEncounter?.encounterId ||
+          String(sourceAppointment.status || '') !== 'CHECKED_IN'
+        )
+      ) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'SOURCE_OPD_APPOINTMENT_LINEAGE_MISMATCH',
+            message:
+              'OPD source appointment linkage is missing, stale, or no longer CHECKED_IN.',
+          },
+        };
+      }
+      if (
+        sourceEncounter?.facilityId &&
+        bed.facilityId &&
+        String(sourceEncounter.facilityId) !== String(bed.facilityId)
+      ) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'CROSS_FACILITY_OPD_IPD_TRANSITION_NOT_SUPPORTED',
+            message:
+              'Atomic OPD-to-IPD transition currently requires the source encounter and target bed to be in the same facility.',
+          },
+        };
+      }
+    }
+
     if (bed.status !== 'available' || bedPatientId(bed)) {
       return { success: false, commandId, idempotencyKey, error: { code: 'BED_UNAVAILABLE', message: `Bed ${bed.bedNumber || bed.id} is not available.` } };
     }
@@ -199,6 +324,24 @@ export class CareTransitionDomainService {
       };
     }
 
+    const authoritativeTargetWard = String(
+      (bed as Bed & { departmentId?: string }).departmentId ||
+        bed.ward ||
+        ''
+    ).trim();
+    if (!authoritativeTargetWard) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'TARGET_BED_WARD_IDENTITY_REQUIRED',
+          message:
+            'The authoritative target bed must identify its inpatient ward/department before admission.',
+        },
+      };
+    }
+
     const now = Date.now();
     const encounterId = `enc_ipd_${crypto.randomUUID()}`;
     const admissionDate = new Date(now).toISOString().slice(0, 10);
@@ -209,7 +352,7 @@ export class CareTransitionDomainService {
       patientId: patient.id,
       encounterType: 'IPD',
       chiefComplaint: payload.admittingDiagnosis,
-      departmentId: payload.targetWard,
+      departmentId: authoritativeTargetWard,
       status: 'ACTIVE',
       currentStage: 'CONSULTATION',
       clinicalState: 'CONSULTATION',
@@ -275,7 +418,7 @@ export class CareTransitionDomainService {
           fromClinicianId: context.actorId,
           fromDepartmentId: sourceEncounter.departmentId,
           toClinicianId: receivingClinicianId || undefined,
-          toDepartmentId: payload.targetWard,
+          toDepartmentId: authoritativeTargetWard,
           toRole: receivingClinicianId ? undefined : 'CONSULTANT',
           currentProblemSummary: payload.admittingDiagnosis,
           activeRisks: [],
@@ -314,11 +457,31 @@ export class CareTransitionDomainService {
           operationalState: 'COMPLETED',
           resourceAssignmentState: 'RELEASED',
           disposition: 'INPATIENT_ADMISSION',
+          dispositionData: {
+            ...(sourceEncounter.dispositionData || {}),
+            inpatientAdmissionRequest: {
+              targetWard: authoritativeTargetWard,
+              targetBedId: bed.id,
+              clinicalIndication: payload.admittingDiagnosis,
+              requestedTargetWard: payload.targetWard,
+            },
+          },
           linkedEncounterId: encounterId,
           completedAt: now,
           updatedAt: now,
         }
       : null;
+
+    const sourceAppointmentState =
+      sourceAppointmentId && sourceAppointment
+        ? {
+            ...sourceAppointment,
+            status: 'COMPLETED',
+            completedAt: now,
+            completedBy: context.actorId,
+            updatedAt: now,
+          }
+        : null;
 
     const tx = await TransactionManager.executeAtomicMutation({
       tenantId: context.tenantId,
@@ -332,7 +495,8 @@ export class CareTransitionDomainService {
         patientId: patient.id,
         bedId: bed.id,
         sourceEncounterId: payload.sourceEncounterId,
-        targetWard: payload.targetWard,
+        targetWard: authoritativeTargetWard,
+        requestedTargetWard: payload.targetWard,
         admittingDiagnosis: payload.admittingDiagnosis,
         admissionHandoffId,
       },
@@ -380,6 +544,18 @@ export class CareTransitionDomainService {
               expectedServerVersion: 0,
             }]
           : []),
+        ...(sourceAppointmentId &&
+        sourceAppointmentState &&
+        sourceAppointment
+          ? [{
+              entityType: 'OPD_APPOINTMENT',
+              entityId: sourceAppointmentId,
+              domainState: sourceAppointmentState,
+              expectedServerVersion: Number(
+                sourceAppointment._serverVersion || 0
+              ),
+            }]
+          : []),
       ],
     });
 
@@ -396,6 +572,7 @@ export class CareTransitionDomainService {
         patient: patientState,
         bed: bedState,
         sourceEncounter: sourceEncounterState,
+        sourceAppointment: sourceAppointmentState,
       },
     };
   }

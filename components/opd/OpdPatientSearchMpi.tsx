@@ -46,17 +46,17 @@ export function OpdPatientSearchMpi({
     if (!searchTerm.trim()) {
       return patients;
     }
-    const q = searchTerm.toLowerCase().trim();
+    const q = searchTerm.trim();
     return patients.filter((p) => {
       if (searchField === 'MRN') return p.mrn.toLowerCase().includes(q);
       if (searchField === 'CNIC') return p.nationalId.toLowerCase().includes(q);
-      if (searchField === 'PHONE') return p.phone.toLowerCase().includes(q);
-      if (searchField === 'NAME') return p.fullName.toLowerCase().includes(q);
+      if (searchField === 'PHONE') return p.phone.toLowerCase().includes(qLower);
+      if (searchField === 'NAME') return p.fullName.toLowerCase().includes(qLower);
       return (
-        p.fullName.toLowerCase().includes(q) ||
-        p.mrn.toLowerCase().includes(q) ||
-        p.nationalId.toLowerCase().includes(q) ||
-        p.phone.toLowerCase().includes(q) ||
+        p.fullName.toLowerCase().includes(qLower) ||
+        normalizeMrn(p.mrn) === normalizedMrn ||
+        normalizeCnic(p.nationalId) === normalizedCnic ||
+        p.phone.toLowerCase().includes(qLower) ||
         (p.preferredName && p.preferredName.toLowerCase().includes(q))
       );
     });
@@ -72,7 +72,7 @@ export function OpdPatientSearchMpi({
       const matchReasons: string[] = [];
 
       // CNIC exact match (100% deterministic)
-      if (candidate.nationalId.toLowerCase() === q) {
+      if (normalizeCnic(candidate.nationalId) === normalizeCnic(q)) {
         score = 100;
         matchReasons.push('Exact CNIC / National ID Match');
       }

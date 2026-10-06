@@ -1,6 +1,6 @@
 'use client';
 
-import React, { use, useEffect, useMemo, useState } from 'react';
+import React, { use, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle,
@@ -44,7 +44,7 @@ export default function InvoicePosTerminalPage({ params }: PageProps) {
   const [amount, setAmount] = useState('');
   const [referenceNumber, setReferenceNumber] = useState('');
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     if (!tenantId || !invoiceId) {
       setInvoice(null);
       setError('BILLING_INVOICE_ROUTE_INVALID');
@@ -80,11 +80,11 @@ export default function InvoicePosTerminalPage({ params }: PageProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [invoiceId, tenantId]);
 
   useEffect(() => {
     void refresh();
-  }, [tenantId, invoiceId]);
+  }, [refresh]);
 
   const amountMinorUnits = useMemo(() => {
     const numeric = Number(amount);

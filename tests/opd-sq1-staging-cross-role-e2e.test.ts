@@ -31,6 +31,14 @@ describe('OPD-SQ1 deployed cross-role staging qualification contract', () => {
     expect(route).toContain('facilityId,');
     expect(route).toContain('departmentId,');
 
+    const registration = await source(
+      'components/opd/OpdRegistrationConsent.tsx'
+    );
+    expect(registration).toContain(
+      'data-testid="opd-registration-facility"'
+    );
+    expect(registration).toContain('authorizedFacilityIds');
+
     expect(orchestrator).toContain('facilityId: params.facilityId');
     expect(orchestrator).toContain('departmentId: params.departmentId');
     expect(orchestrator).toContain('facilityId: encounterRecord.facilityId');

@@ -175,6 +175,20 @@ describe('OPD-RP13 authoritative appointments and waitlist', () => {
     );
   });
 
+  test('started appointments cannot be rewritten as cancellations or reschedules', async () => {
+    const service = await source(
+      'lib/backend/services/opd-appointment-domain-service.ts'
+    );
+
+    expect(service).toContain("'APPOINTMENT_ALREADY_STARTED'");
+    expect(service).toContain(
+      'An appointment cannot be cancelled after its authoritative scheduled start.'
+    );
+    expect(service).toContain(
+      'An appointment cannot be rescheduled after its authoritative scheduled start.'
+    );
+  });
+
   test('check-in and no-show windows are enforced using server time', async () => {
     const service = await source(
       'lib/backend/services/opd-appointment-domain-service.ts'

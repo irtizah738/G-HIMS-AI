@@ -747,7 +747,7 @@ export function PatientConsultantRoutingModal({
                 </h3>
 
                 {/* Filter Department Pills */}
-                <div className="flex items-center gap-1 overflow-x-auto text-[11px] pb-1">
+                <div className="flex items-center gap-1 flex-wrap text-[11px]">
                   {['ALL', 'Cardiovascular', 'Neuro', 'Ortho', 'Endo', 'OB/GYN', 'Oncology', 'Pediatrics', 'Gastro', 'Radiology', 'Anesthesia', 'Critical Care'].map((dept) => (
                     <button
                       key={dept}
@@ -778,6 +778,17 @@ export function PatientConsultantRoutingModal({
 
               {/* Doctors Roster List */}
               <div className="space-y-2.5 max-h-[340px] overflow-y-auto pr-1">
+                {filteredDoctors.length === 0 && (
+                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                    <UserCheck className="w-7 h-7 text-slate-400 mx-auto mb-2" />
+                    <p className="text-xs font-bold text-slate-700">
+                      No eligible consultants match this filter.
+                    </p>
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Clear the specialty filter or verify HCM credentials, privileges and roster availability.
+                    </p>
+                  </div>
+                )}
                 {filteredDoctors.map((doc) => {
                   const isAiMatch = doc.id === aiMatchId;
                   const isSelected = doc.id === selectedDoctorId;

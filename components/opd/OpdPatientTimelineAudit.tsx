@@ -24,6 +24,7 @@ export interface OpdTimelineIntegritySummary {
   eventCount: number;
   linkedAuditCount: number;
   unlinkedEventCount: number;
+  ambiguousAuditCount: number;
   truncated: boolean;
   fullyLinked: boolean;
 }
@@ -102,9 +103,11 @@ export function OpdPatientTimelineAudit({
 
   const integrityLabel = demo
     ? 'DEMO — non-authoritative'
-    : integrity?.truncated
-      ? 'Integrity warning: timeline truncated by server safety limit'
-      : integrity?.fullyLinked
+    : integrity?.ambiguousAuditCount
+      ? `Integrity warning: ${integrity.ambiguousAuditCount} event(s) have duplicate audit linkage`
+      : integrity?.truncated
+        ? 'Integrity warning: timeline truncated by server safety limit'
+        : integrity?.fullyLinked
         ? 'Server event + audit linked'
         : integrity
           ? `Integrity warning: ${integrity.unlinkedEventCount} unlinked event(s)`

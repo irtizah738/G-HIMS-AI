@@ -49,11 +49,19 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
+      - name: Verify patched source-map-js resolution
+        # GHSA-68fv-2mgg-jv7q affects source-map-js <1.2.2. The repository
+        # override and lockfile must resolve only the patched 1.2.2 release.
+        run: |
+          bun -e "const lock = await Bun.file('bun.lock').text(); const versions = [...lock.matchAll(/source-map-js@([0-9.]+)/g)].map((match) => match[1]); const unique = [...new Set(versions)]; if (unique.length !== 1 || unique[0] !== '1.2.2') { console.error('Unsafe source-map-js resolution:', unique); process.exit(1); }"
+
       - name: Production dependency vulnerability audit
         # Clinical runtime qualification must fail on vulnerable production dependencies.
-        # Dev-only tooling is excluded here; repository secret scanning and CI toolchain
-        # controls remain separate gates.
-        run: bun audit --prod --audit-level high
+        # Bun currently reports GHSA-68fv-2mgg-jv7q against dependency range
+        # metadata even though the frozen lockfile resolves the patched 1.2.2
+        # release; the previous step proves that exact safe resolution first.
+        # All other high/critical production advisories remain blocking.
+        run: bun audit --prod --audit-level high --ignore GHSA-68fv-2mgg-jv7q
 
       - name: DRP security contracts
         run: bun test tests/drp11-security-qualification.test.ts

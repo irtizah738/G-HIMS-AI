@@ -24,6 +24,7 @@ export interface OpdTimelineIntegritySummary {
   eventCount: number;
   linkedAuditCount: number;
   unlinkedEventCount: number;
+  truncated: boolean;
   fullyLinked: boolean;
 }
 
@@ -101,11 +102,13 @@ export function OpdPatientTimelineAudit({
 
   const integrityLabel = demo
     ? 'DEMO — non-authoritative'
-    : integrity?.fullyLinked
-      ? 'Server event + audit linked'
-      : integrity
-        ? `Integrity warning: ${integrity.unlinkedEventCount} unlinked event(s)`
-        : 'Authoritative verification pending';
+    : integrity?.truncated
+      ? 'Integrity warning: timeline truncated by server safety limit'
+      : integrity?.fullyLinked
+        ? 'Server event + audit linked'
+        : integrity
+          ? `Integrity warning: ${integrity.unlinkedEventCount} unlinked event(s)`
+          : 'Authoritative verification pending';
 
   return (
     <div className="space-y-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-xs dark:border-slate-800 dark:bg-slate-900">

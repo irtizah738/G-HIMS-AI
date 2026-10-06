@@ -87,7 +87,7 @@ describe('CBE consultant blindness foundation', () => {
   test('Patient 360 keeps longitudinal truth while exposing concurrent care settings', () => {
     const { projection, timeline } = Patient360Projector.project(sources(), 300);
 
-    expect(projection.projectionVersion).toBe(2);
+    expect(projection.projectionVersion).toBe(3);
     expect(projection.careContexts.activeOpdEncounters.map((item) => item.encounterId))
       .toEqual(['enc-opd']);
     expect(projection.careContexts.activeIpdEncounter?.encounterId).toBe('enc-ipd');

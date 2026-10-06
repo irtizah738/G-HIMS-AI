@@ -2179,6 +2179,11 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       safetyOverrideReason: z.string().trim().min(10).max(4000).optional(),
     }).strict(),
   },
+  ReconcileOpdBillingCommand: {
+    1: z.object({
+      encounterId: nonEmpty.max(150),
+    }).strict(),
+  },
   AdvanceStageCommand: {
     1: z.object({
       encounterId: nonEmpty.max(150),

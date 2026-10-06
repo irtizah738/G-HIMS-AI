@@ -291,6 +291,7 @@ function collectionForEntityType(entityType: string): string {
     INVOICE_SETTLEMENT: 'invoiceSettlements',
     BILLING_SERVICE_CATALOG: 'billingServiceCatalog',
     TARIFF: 'tariffs',
+    OPD_BILLING_RECONCILIATION: 'opdBillingReconciliations',
     DISCHARGE_READINESS_REVIEW: 'dischargeReadinessReviews',
     CONSULTANT_REVIEW_CHECKPOINT: 'consultantReviewCheckpoints',
     CLINICAL_CONSULTATION_REQUEST: 'consultationRequests',

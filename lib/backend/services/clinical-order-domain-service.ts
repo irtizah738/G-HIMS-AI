@@ -679,6 +679,12 @@ export class ClinicalOrderDomainService {
         correlationId: context.correlationId,
         readTargets: [
           {
+            key: 'encounter',
+            entityType: 'ENCOUNTER',
+            entityId: payload.encounterId,
+            required: true,
+          },
+          {
             key: 'period',
             entityType: 'FINANCE_PERIOD',
             entityId: periodId,
@@ -686,6 +692,25 @@ export class ClinicalOrderDomainService {
           },
         ],
         prepare: (current) => {
+          const currentEncounter = current.encounter || {};
+          if (
+            String(currentEncounter.patientId || '') !== payload.patientId
+          ) {
+            throw new AtomicMutationRejectedError(
+              'ENCOUNTER_PATIENT_MISMATCH',
+              'Encounter patient lineage changed before diagnostic billing commit.'
+            );
+          }
+          if (
+            String(currentEncounter.billingReconciliationState || '').toUpperCase() ===
+            'CLEARED'
+          ) {
+            throw new AtomicMutationRejectedError(
+              'OPD_BILLING_ALREADY_RECONCILED',
+              'No new diagnostic billing may be created after final billing reconciliation.'
+            );
+          }
+
           const period = current.period as unknown as FinancePeriodRecord;
           if (!['OPEN', 'SOFT_CLOSE'].includes(period.status)) {
             throw new AtomicMutationRejectedError(
@@ -720,6 +745,7 @@ export class ClinicalOrderDomainService {
                   discountMinorUnits: discountMinor,
                   taxMinorUnits: taxMinor,
                   patientResponsibilityMinorUnits: patientDueMinor,
+                  invoiceId,
                   status: 'BILLED_DEFERRED',
                   createdAt: orderedAt,
                   createdBy: context.actorId,
@@ -739,6 +765,16 @@ export class ClinicalOrderDomainService {
                 entityType: 'JOURNAL_ENTRY',
                 entityId: deferredRevenueJournalId,
                 domainState: deferredJournal,
+              },
+              {
+                entityType: 'ENCOUNTER',
+                entityId: payload.encounterId,
+                domainState: {
+                  ...currentEncounter,
+                  billingMutationSequence:
+                    Number(currentEncounter.billingMutationSequence || 0) + 1,
+                  updatedAt: orderedAt,
+                },
               },
             ],
             eventPayload: {
@@ -1106,7 +1142,11 @@ export class ClinicalOrderDomainService {
         'patients',
         patientId
       ),
-      EncounterDomainService.getAuthoritativeEncounter(context.tenantId, encounterId),
+      DomainStateRepository.getById<Record<string, any>>(
+        context.tenantId,
+        'encounters',
+        encounterId
+      ),
       DomainStateRepository.queryEqual<VersionedInventoryBalance>(
         context.tenantId,
         'inventoryBalances',
@@ -1145,6 +1185,21 @@ export class ClinicalOrderDomainService {
         error: {
           code: 'ENCOUNTER_ALREADY_CLOSED',
           message: 'Medication cannot be dispensed against a closed encounter.',
+        },
+      };
+    }
+    if (
+      String(encounter.billingReconciliationState || '').toUpperCase() ===
+      'CLEARED'
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'OPD_BILLING_ALREADY_RECONCILED',
+          message:
+            'Medication cannot be dispensed after final OPD billing reconciliation.',
         },
       };
     }
@@ -1667,6 +1722,17 @@ export class ClinicalOrderDomainService {
           entityId: canonicalDispense.medicationDispenseId,
           domainState: canonicalDispense,
         },
+        {
+          entityType: 'ENCOUNTER',
+          entityId: encounterId,
+          domainState: {
+            ...encounter,
+            billingMutationSequence:
+              Number(encounter.billingMutationSequence || 0) + 1,
+            updatedAt: dispensedAt,
+          },
+          expectedServerVersion: Number(encounter._serverVersion || 0),
+        },
       ],
     });
 
@@ -1739,6 +1805,21 @@ export class ClinicalOrderDomainService {
         error: {
           code: 'ENCOUNTER_ALREADY_CLOSED',
           message: 'Medication cannot be prescribed against a closed encounter.',
+        },
+      };
+    }
+    if (
+      String(encounter.billingReconciliationState || '').toUpperCase() ===
+      'CLEARED'
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'OPD_BILLING_ALREADY_RECONCILED',
+          message:
+            'New prescriptions cannot be created after final OPD billing reconciliation.',
         },
       };
     }

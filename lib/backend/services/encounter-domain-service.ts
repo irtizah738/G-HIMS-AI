@@ -91,6 +91,12 @@ interface EncounterState {
   resourceAssignmentState: ResourceAssignmentState;
   priority: 'STAT' | 'URGENT' | 'ROUTINE' | 'EMERGENCY';
   assignedProviderId: string;
+  billingMutationSequence?: number;
+  billingReconciliationId?: string;
+  billingReconciliationState?: 'CLEARED' | string;
+  billingClosedAt?: number;
+  billingClosedBy?: string;
+  _serverVersion?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -145,7 +151,7 @@ export class EncounterDomainService {
           String(persisted.status || 'ACTIVE').toUpperCase() === 'IN_PROGRESS'
             ? 'ACTIVE'
             : String(persisted.status || 'ACTIVE').toUpperCase(),
-        currentStage: clinicalState,
+        currentStage: rawStage,
         clinicalState,
         operationalState:
           (persisted.operationalState as OperationalQueueState | undefined) || 'NOT_QUEUED',
@@ -158,6 +164,22 @@ export class EncounterDomainService {
           (persisted.resourceAssignmentState as ResourceAssignmentState | undefined) || 'NONE',
         priority: String(persisted.priority || 'ROUTINE').toUpperCase() as EncounterState['priority'],
         assignedProviderId: String(persisted.assignedProviderId || persisted.assignedDoctor || ''),
+        billingMutationSequence: Number(
+          persisted.billingMutationSequence || 0
+        ),
+        billingReconciliationId: persisted.billingReconciliationId
+          ? String(persisted.billingReconciliationId)
+          : undefined,
+        billingReconciliationState: persisted.billingReconciliationState
+          ? String(persisted.billingReconciliationState)
+          : undefined,
+        billingClosedAt: persisted.billingClosedAt
+          ? Number(persisted.billingClosedAt)
+          : undefined,
+        billingClosedBy: persisted.billingClosedBy
+          ? String(persisted.billingClosedBy)
+          : undefined,
+        _serverVersion: Number(persisted._serverVersion || 0),
         createdAt: Number(persisted.createdAt || persisted.startedAt || Date.now()),
         updatedAt: Number(persisted.updatedAt || persisted.startedAt || Date.now()),
       };
@@ -595,7 +617,7 @@ export class EncounterDomainService {
     // calling CommitEncounterDispositionCommand directly.
     if (encounter.encounterType === 'OPD') {
       const authoritativeStage = OpdWorkflowRuntimeService.resolveStage(
-        encounter.clinicalState || encounter.currentStage
+        encounter.currentStage || encounter.clinicalState
       );
       if (authoritativeStage !== 'DISCHARGE_OR_REFERRAL') {
         return {
@@ -606,6 +628,40 @@ export class EncounterDomainService {
             code: 'OPD_DISPOSITION_STAGE_NOT_READY',
             message:
               'OPD disposition requires the authoritative workflow to reach DISCHARGE_OR_REFERRAL before encounter closure.',
+          },
+        };
+      }
+    }
+
+    if (encounter.encounterType === 'OPD') {
+      const reconciliationId = String(
+        encounter.billingReconciliationId || ''
+      ).trim();
+      const reconciliation = reconciliationId
+        ? await DomainStateRepository.getById<Record<string, unknown>>(
+            context.tenantId,
+            'opdBillingReconciliations',
+            reconciliationId
+          )
+        : null;
+      if (
+        !reconciliation ||
+        String(reconciliation.status || '').toUpperCase() !== 'CLEARED' ||
+        String(reconciliation.encounterId || '') !== encounter.encounterId ||
+        String(reconciliation.patientId || '') !== encounter.patientId ||
+        String(encounter.billingReconciliationState || '').toUpperCase() !==
+          'CLEARED' ||
+        Number(reconciliation.billingMutationSequence || -1) !==
+          Number(encounter.billingMutationSequence || 0)
+      ) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'OPD_FINAL_BILLING_RECONCILIATION_REQUIRED',
+            message:
+              'OPD disposition cannot close until authoritative final billing reconciliation is CLEARED for this encounter.',
           },
         };
       }
@@ -703,6 +759,7 @@ export class EncounterDomainService {
       commandId,
       correlationId: context.correlationId,
       domainState: updatedEncounter,
+      expectedPrimaryServerVersion: Number(encounter._serverVersion || 0),
       additionalStateWrites: [
         { entityType: 'PATIENT_MPI', entityId: encounter.patientId, domainState: patientState },
       ],
@@ -732,7 +789,20 @@ export class EncounterDomainService {
     payload: AdvanceStagePayload
   ): Promise<CommandResult> {
     const auth = AuthorizationPipeline.evaluate(context, {
-      requiredRoles: ['NURSE', 'DOCTOR', 'CONSULTANT', 'SYSTEM_ADMIN'],
+      requiredRoles: [
+        'NURSE',
+        'DOCTOR',
+        'CONSULTANT',
+        'BILLING_CLERK',
+        'BILLING_ADMIN',
+        'CASHIER',
+        'BILLING_CASHIER',
+        'FINANCE_MANAGER',
+        'ACCOUNTANT',
+        'REVENUE_CYCLE',
+        'SYSTEM_ADMIN',
+        'ADMINISTRATOR',
+      ],
     });
     if (!auth.authorized) {
       return {
@@ -757,25 +827,106 @@ export class EncounterDomainService {
     }
 
     const persistedClinicalState =
-      encounter.clinicalState || normalizeClinicalEncounterState(encounter.currentStage);
+      encounter.clinicalState ||
+      normalizeClinicalEncounterState(encounter.currentStage);
     const callerCurrentState = payload.currentStage
       ? normalizeClinicalEncounterState(payload.currentStage)
       : persistedClinicalState;
-    const targetClinicalState = normalizeClinicalEncounterState(payload.targetStage);
+    const targetClinicalState =
+      normalizeClinicalEncounterState(payload.targetStage);
 
-    if (!persistedClinicalState || !callerCurrentState || !targetClinicalState) {
+    const isOpd = encounter.encounterType === 'OPD';
+    const persistedOpdStage = isOpd
+      ? OpdWorkflowRuntimeService.resolveStage(encounter.currentStage)
+      : null;
+    const callerOpdStage = isOpd
+      ? OpdWorkflowRuntimeService.resolveStage(payload.currentStage)
+      : null;
+    const targetOpdStage = isOpd
+      ? OpdWorkflowRuntimeService.resolveStage(payload.targetStage)
+      : null;
+
+    const normalizedRoles = new Set(
+      context.roles.map((role) => String(role || '').trim().toUpperCase())
+    );
+    const hasClinicalStageAuthority = [
+      'NURSE',
+      'DOCTOR',
+      'CONSULTANT',
+      'SYSTEM_ADMIN',
+      'ADMINISTRATOR',
+    ].some((role) => normalizedRoles.has(role));
+    const hasBillingStageAuthority = [
+      'BILLING_CLERK',
+      'BILLING_ADMIN',
+      'CASHIER',
+      'BILLING_CASHIER',
+      'FINANCE_MANAGER',
+      'ACCOUNTANT',
+      'REVENUE_CYCLE',
+    ].some((role) => normalizedRoles.has(role));
+
+    if (
+      !persistedClinicalState ||
+      !callerCurrentState ||
+      !targetClinicalState ||
+      (isOpd && (!persistedOpdStage || !callerOpdStage || !targetOpdStage))
+    ) {
       return {
         success: false,
         commandId,
         idempotencyKey,
         error: {
           code: 'UNKNOWN_CLINICAL_STAGE',
-          message: 'Encounter stage must map to the canonical clinical workflow contract.',
+          message:
+            'Encounter stage must map to the canonical clinical state and, for OPD, the compiled workflow DAG.',
         },
       };
     }
 
-    if (persistedClinicalState === targetClinicalState) {
+    if (
+      isOpd &&
+      persistedOpdStage !== callerOpdStage
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'STALE_OPD_WORKFLOW_STAGE',
+          message:
+            `OPD encounter is at workflow stage '${persistedOpdStage}', not caller-declared '${callerOpdStage}'.`,
+        },
+      };
+    }
+
+    if (
+      !hasClinicalStageAuthority &&
+      hasBillingStageAuthority &&
+      (
+        !isOpd ||
+        (
+          persistedOpdStage !== 'BILLING_SETTLEMENT' &&
+          targetOpdStage !== 'BILLING_SETTLEMENT'
+        )
+      )
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'BILLING_STAGE_AUTHORITY_SCOPE_VIOLATION',
+          message:
+            'Billing roles may advance only OPD workflow edges entering or leaving BILLING_SETTLEMENT.',
+        },
+      };
+    }
+
+    if (
+      persistedClinicalState === targetClinicalState &&
+      (!isOpd || persistedOpdStage === targetOpdStage)
+    ) {
       return {
         success: true,
         commandId,
@@ -815,8 +966,8 @@ export class EncounterDomainService {
     // The client never gets to decide or manually resolve the graph.
     if (encounter.encounterType === 'OPD') {
       const dagCheck = OpdWorkflowRuntimeService.validateTransition({
-        currentStage: persistedClinicalState,
-        targetStage: targetClinicalState,
+        currentStage: persistedOpdStage,
+        targetStage: targetOpdStage,
         evidenceId: payload.evidenceId,
       });
 
@@ -838,8 +989,8 @@ export class EncounterDomainService {
         tenantId: context.tenantId,
         encounterId: encounter.encounterId,
         patientId: encounter.patientId,
-        currentStage: persistedClinicalState,
-        targetStage: targetClinicalState,
+        currentStage: persistedOpdStage,
+        targetStage: targetOpdStage,
         evidenceId: payload.evidenceId,
       });
 
@@ -860,10 +1011,21 @@ export class EncounterDomainService {
 
     const transitionedAt = Date.now();
     const stageRuntimeId = `stg_${crypto.randomUUID()}`;
+    const persistedWorkflowStage =
+      isOpd && persistedOpdStage
+        ? persistedOpdStage
+        : persistedClinicalState;
+    const targetWorkflowStage =
+      isOpd && targetOpdStage
+        ? targetOpdStage
+        : targetClinicalState;
+
     const stageState = {
       encounterId: payload.encounterId,
-      previousStage: persistedClinicalState,
-      newStage: targetClinicalState,
+      previousStage: persistedWorkflowStage,
+      newStage: targetWorkflowStage,
+      previousClinicalState: persistedClinicalState,
+      newClinicalState: targetClinicalState,
       advancedBy: context.actorId,
       evidenceId: payload.evidenceId,
       sbar: payload.handoffSbar,
@@ -873,7 +1035,7 @@ export class EncounterDomainService {
 
     const updatedEncounter: EncounterState = {
       ...encounter,
-      currentStage: targetClinicalState,
+      currentStage: targetWorkflowStage,
       clinicalState: targetClinicalState,
       status: targetClinicalState === 'COMPLETED' ? 'COMPLETED' : encounter.status,
       operationalState:
@@ -890,11 +1052,14 @@ export class EncounterDomainService {
       eventType: 'STAGE_COMPLETED',
       eventPayload: {
         encounterId: payload.encounterId,
-        fromStage: persistedClinicalState,
-        toStage: targetClinicalState,
+        fromStage: persistedWorkflowStage,
+        toStage: targetWorkflowStage,
+        fromClinicalState: persistedClinicalState,
+        toClinicalState: targetClinicalState,
         evidenceId: payload.evidenceId,
       },
-      auditReason: `Transitioned encounter ${payload.encounterId} from ${persistedClinicalState} to ${targetClinicalState}`,
+      auditReason:
+        `Transitioned encounter ${payload.encounterId} from ${persistedWorkflowStage} to ${targetWorkflowStage} (canonical ${persistedClinicalState} -> ${targetClinicalState})`,
       outboxTopic: 'g-hims-clinical-events',
       idempotencyKey,
       commandId,

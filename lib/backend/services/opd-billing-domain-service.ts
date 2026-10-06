@@ -451,6 +451,15 @@ export class OpdBillingDomainService {
           }
 
           const currentEncounter = current.encounter || {};
+          if (
+            String(currentEncounter.billingReconciliationState || '').toUpperCase() ===
+            'CLEARED'
+          ) {
+            throw new AtomicMutationRejectedError(
+              'OPD_BILLING_ALREADY_RECONCILED',
+              'No new consultation billing may be created after final billing reconciliation.'
+            );
+          }
           if (String(currentEncounter.patientId || '') !== patientId) {
             throw new AtomicMutationRejectedError(
               'ENCOUNTER_PATIENT_MISMATCH',
@@ -478,6 +487,8 @@ export class OpdBillingDomainService {
           const updatedEncounter = {
             ...currentEncounter,
             consultationInvoiceId: invoiceId,
+            billingMutationSequence:
+              Number(currentEncounter.billingMutationSequence || 0) + 1,
             updatedAt: postingAt,
           };
 

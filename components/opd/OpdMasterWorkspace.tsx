@@ -73,7 +73,14 @@ function resolveOpdRole(roles: string[]): OpdRole {
   if (normalized.has('NURSE')) return 'TRIAGE_NURSE';
   if (normalized.has('PHARMACIST')) return 'PHARMACIST';
   if (normalized.has('LAB_TECH') || normalized.has('LAB_TECHNICIAN')) return 'LAB_TECH';
-  if (normalized.has('BILLING_CLERK') || normalized.has('BILLING_ADMIN') || normalized.has('CASHIER') || normalized.has('FINANCE_MANAGER')) return 'BILLING_CASHIER';
+  if (
+    normalized.has('BILLING_CLERK') ||
+    normalized.has('BILLING_ADMIN') ||
+    normalized.has('CASHIER') ||
+    normalized.has('FINANCE_MANAGER') ||
+    normalized.has('ACCOUNTANT') ||
+    normalized.has('REVENUE_CYCLE')
+  ) return 'BILLING_CASHIER';
   if (normalized.has('RECEPTIONIST') || normalized.has('REGISTRAR')) return 'RECEPTIONIST';
   return 'UNAUTHORIZED';
 }
@@ -445,8 +452,16 @@ export function OpdMasterWorkspace() {
     normalizedRoles.has('PHARMACIST') &&
     normalizedPrivileges.has('DISPENSE_MEDICATION')
   );
-  const canSettlePayment = isAdministrator || ['BILLING_CLERK','BILLING_ADMIN','CASHIER','FINANCE_MANAGER','ACCOUNTANT']
-    .some((role) => normalizedRoles.has(role));
+  const canSettlePayment =
+    isAdministrator ||
+    [
+      'BILLING_CLERK',
+      'BILLING_ADMIN',
+      'CASHIER',
+      'FINANCE_MANAGER',
+      'ACCOUNTANT',
+      'REVENUE_CYCLE',
+    ].some((role) => normalizedRoles.has(role));
   const canAccessTab = (tabId: string) =>
     (OPD_TAB_ROLES[tabId] || []).includes(activeRole);
 
@@ -463,6 +478,10 @@ export function OpdMasterWorkspace() {
   const [activeTab, setActiveTab] = useState<string>('DASHBOARD');
   const [isOnline, setIsOnline] = useState<boolean>(true);
   const [pendingSyncCount, setPendingSyncCount] = useState<number>(0);
+  const [billingReconciliationBusy, setBillingReconciliationBusy] =
+    useState<boolean>(false);
+  const [billingReconciliationError, setBillingReconciliationError] =
+    useState<string | null>(null);
 
   useEffect(() => {
     if (IS_DEMO_RUNTIME || auth.loading || !auth.activeTenant?.tenantId) return;
@@ -524,7 +543,7 @@ export function OpdMasterWorkspace() {
     );
     if (openPharmacyInvoice) return openPharmacyInvoice;
 
-    return activeEncounter.invoice;
+    return IS_DEMO_RUNTIME ? activeEncounter.invoice : undefined;
   }, [activeEncounter]);
 
   // DEMO-only visual event helper. Production audit events are server-generated.
@@ -1622,6 +1641,114 @@ export function OpdMasterWorkspace() {
       return;
     }
 
+    const pharmacyInvoice = (activeEncounter.pharmacyInvoices || []).find(
+      (invoice) => invoice.id === payment.invoiceId
+    );
+    if (pharmacyInvoice) {
+      if (payment.mode !== 'CASH') {
+        throw new Error(
+          'EXTERNAL_PAYMENT_GATEWAY_REQUIRED: only cash settlement is enabled for the controlled OPD pilot.'
+        );
+      }
+      if (
+        !Number.isSafeInteger(payment.amountMinorUnits) ||
+        payment.amountMinorUnits <= 0
+      ) {
+        throw new Error(
+          'INVALID_PAYMENT_AMOUNT: enter a positive whole minor-unit amount.'
+        );
+      }
+      if (payment.amountMinorUnits > pharmacyInvoice.balanceDueMinorUnits) {
+        throw new Error(
+          'PAYMENT_EXCEEDS_BALANCE: cash collection cannot exceed the outstanding pharmacy balance.'
+        );
+      }
+
+      const result = await executeActiveTenantCommand<{
+        receipt: { receiptId: string; journalId: string };
+        journal: { journalId: string };
+        invoice: Record<string, any>;
+      }>(
+        'RecordCashReceiptCommand',
+        {
+          receiptId: payment.id,
+          invoiceId: pharmacyInvoice.id,
+          encounterId: activeEncounter.id,
+          patientId: activeEncounter.patientId,
+          amountMinorUnits: payment.amountMinorUnits,
+          currency: pharmacyInvoice.currency || 'PKR',
+          referenceNumber: payment.referenceNumber,
+          collectedAt: payment.processedAt,
+          cashierName: payment.processedBy,
+        },
+        {
+          idempotencyKey: `opd-pharmacy-cash-receipt:${payment.id}`,
+        }
+      );
+
+      if (!result.success || !result.data) {
+        throw new Error(
+          result.error?.message || 'Pharmacy cash receipt command failed.'
+        );
+      }
+
+      const governedPayment: PaymentTransaction = {
+        ...payment,
+        invoiceId: pharmacyInvoice.id,
+        glJournalEntryId:
+          result.data.journal?.journalId ||
+          result.data.receipt?.journalId ||
+          '',
+      };
+      const nextBalance = Math.max(
+        0,
+        pharmacyInvoice.balanceDueMinorUnits - payment.amountMinorUnits
+      );
+      const isSettled = nextBalance === 0;
+
+      setEncounters((prev) =>
+        prev.map((encounter) =>
+          encounter.id === activeEncounter.id
+            ? {
+                ...encounter,
+                pharmacyInvoices: (encounter.pharmacyInvoices || []).map(
+                  (invoice) =>
+                    invoice.id === pharmacyInvoice.id
+                      ? {
+                          ...invoice,
+                          balanceDueMinorUnits: nextBalance,
+                          settlementStatus: isSettled
+                            ? 'SETTLED'
+                            : 'PARTIALLY_PAID',
+                          payments: [...invoice.payments, governedPayment],
+                          ...(isSettled ? { settledAt: Date.now() } : {}),
+                        }
+                      : invoice
+                ),
+              }
+            : encounter
+        )
+      );
+
+      recordEvent(
+        'PHARMACY_PAYMENT_CAPTURED',
+        isSettled
+          ? `Pharmacy invoice ${pharmacyInvoice.invoiceNumber} settled.`
+          : `Partial pharmacy payment captured for ${pharmacyInvoice.invoiceNumber}.`,
+        {
+          invoiceId: pharmacyInvoice.id,
+          amountMinorUnits: payment.amountMinorUnits,
+        }
+      );
+      setActiveTab('BILLING');
+      return;
+    }
+
+    if (!IS_DEMO_RUNTIME) {
+      throw new Error(
+        'LEGACY_FINAL_INVOICE_DISABLED: production OPD closes through authoritative final billing reconciliation, not a client aggregate invoice.'
+      );
+    }
     if (!activeEncounter.invoice) throw new Error('FINAL_INVOICE_REQUIRED');
     if (payment.mode !== 'CASH') {
       throw new Error(
@@ -1789,6 +1916,126 @@ export function OpdMasterWorkspace() {
       `Collected PKR ${(payment.amountMinorUnits / 100).toLocaleString()} via ${payment.mode}. General Ledger entry ${governedPayment.glJournalEntryId} posted.`
     );
     setActiveTab(isSettled ? 'DISPOSITION' : 'BILLING');
+  };
+
+  const handleFinalizeBillingReconciliation = async () => {
+    if (!activeEncounter) return;
+    if (activeBillingInvoice) {
+      throw new Error(
+        'OUTSTANDING_INVOICE_REQUIRED: settle every consultation, diagnostic and pharmacy invoice before final reconciliation.'
+      );
+    }
+
+    setBillingReconciliationBusy(true);
+    setBillingReconciliationError(null);
+    try {
+      const currentStage = String(activeEncounter.currentStage || '');
+      if (currentStage !== 'BILLING_SETTLEMENT') {
+        const billingStage = await executeActiveTenantCommand(
+          'AdvanceStageCommand',
+          {
+            encounterId: activeEncounter.id,
+            currentStage:
+              activeEncounter.currentStage || 'PHARMACY_DISPENSARY',
+            targetStage: 'BILLING_SETTLEMENT',
+          },
+          {
+            idempotencyKey: `opd-final-billing-stage:${activeEncounter.id}`,
+          }
+        );
+        if (!billingStage.success) {
+          throw new Error(
+            billingStage.error?.message ||
+              'Workflow runtime blocked entry into final billing settlement.'
+          );
+        }
+      }
+
+      const reconciliation = await executeActiveTenantCommand<{
+        reconciliation: {
+          reconciliationId: string;
+          status: 'CLEARED';
+          reconciledAt: number;
+        };
+        encounter: Record<string, any>;
+      }>(
+        'ReconcileOpdBillingCommand',
+        { encounterId: activeEncounter.id },
+        {
+          idempotencyKey: `opd-final-billing-reconcile:${activeEncounter.id}`,
+        }
+      );
+      if (
+        !reconciliation.success ||
+        !reconciliation.data?.reconciliation?.reconciliationId
+      ) {
+        throw new Error(
+          reconciliation.error?.message ||
+            'Final OPD billing reconciliation failed.'
+        );
+      }
+
+      const reconciliationId =
+        reconciliation.data.reconciliation.reconciliationId;
+      const dispositionStage = await executeActiveTenantCommand(
+        'AdvanceStageCommand',
+        {
+          encounterId: activeEncounter.id,
+          currentStage: 'BILLING_SETTLEMENT',
+          targetStage: 'DISCHARGE_OR_REFERRAL',
+          evidenceId: reconciliationId,
+        },
+        {
+          idempotencyKey: `opd-final-billing-clearance:${activeEncounter.id}`,
+        }
+      );
+      if (!dispositionStage.success) {
+        throw new Error(
+          dispositionStage.error?.message ||
+            'Workflow runtime blocked disposition after billing reconciliation.'
+        );
+      }
+
+      setEncounters((prev) =>
+        prev.map((encounter) =>
+          encounter.id === activeEncounter.id
+            ? {
+                ...encounter,
+                currentStage: 'DISPOSITION_CLOSURE',
+                billingReconciliationId: reconciliationId,
+                billingReconciliationState: 'CLEARED',
+                billingClosedAt:
+                  reconciliation.data?.reconciliation?.reconciledAt ||
+                  Date.now(),
+                stageProgress: {
+                  ...encounter.stageProgress,
+                  BILLING_SETTLEMENT: {
+                    status: 'COMPLETED',
+                    enteredAt:
+                      encounter.stageProgress?.BILLING_SETTLEMENT?.enteredAt ||
+                      Date.now(),
+                    completedAt: Date.now(),
+                    completedBy: 'Server Billing Authority',
+                  },
+                  DISPOSITION_CLOSURE: {
+                    status: 'ACTIVE',
+                    enteredAt: Date.now(),
+                  },
+                },
+              }
+            : encounter
+        )
+      );
+      setActiveTab('DISPOSITION');
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Final billing reconciliation failed.';
+      setBillingReconciliationError(message);
+    } finally {
+      setBillingReconciliationBusy(false);
+    }
   };
 
   // HANDLER: Commit Disposition through the encounter lifecycle service.
@@ -2293,18 +2540,65 @@ export function OpdMasterWorkspace() {
         />
       )}
 
-      {/* 10. Billing, Payer Split & General Ledger Settlement */}
+      {/* 10. Billing settlement + final reconciliation */}
       {activeTab === 'BILLING' &&
         canAccessTab('BILLING') &&
         activeEncounter &&
         activeBillingInvoice && (
-        <OpdBillingLedger
-          encounter={activeEncounter}
-          invoice={activeBillingInvoice}
-          canSettlePayment={canSettlePayment}
-          onSettlePayment={(payment) => handleSettlePayment(payment)}
-        />
-      )}
+          <OpdBillingLedger
+            encounter={activeEncounter}
+            invoice={activeBillingInvoice}
+            canSettlePayment={canSettlePayment}
+            onSettlePayment={(payment) => handleSettlePayment(payment)}
+          />
+        )}
+
+      {activeTab === 'BILLING' &&
+        canAccessTab('BILLING') &&
+        activeEncounter &&
+        !activeBillingInvoice && (
+          <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-start gap-3">
+              <ShieldCheck className="mt-0.5 h-5 w-5 text-teal-600" />
+              <div className="flex-1">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                  Final OPD billing reconciliation
+                </h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  No open point-of-service invoice is visible. The server must
+                  now prove every encounter charge is invoiced, every patient AR
+                  item is settled, and every diagnostic/pharmacy service is
+                  finalized before disposition can open.
+                </p>
+              </div>
+            </div>
+
+            {billingReconciliationError && (
+              <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{billingReconciliationError}</span>
+              </div>
+            )}
+
+            <button
+              type="button"
+              disabled={
+                !canSettlePayment ||
+                billingReconciliationBusy ||
+                activeEncounter.billingReconciliationState === 'CLEARED'
+              }
+              onClick={() => void handleFinalizeBillingReconciliation()}
+              className="inline-flex items-center gap-2 rounded-xl bg-teal-700 px-4 py-2 text-xs font-bold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <FileCheck className="h-4 w-4" />
+              {activeEncounter.billingReconciliationState === 'CLEARED'
+                ? 'Billing reconciled'
+                : billingReconciliationBusy
+                  ? 'Reconciling…'
+                  : 'Reconcile & unlock disposition'}
+            </button>
+          </div>
+        )}
 
       {/* 11. Disposition, Referrals & SBAR Handoff */}
       {activeTab === 'DISPOSITION' && canAccessTab('DISPOSITION') && activeEncounter && (

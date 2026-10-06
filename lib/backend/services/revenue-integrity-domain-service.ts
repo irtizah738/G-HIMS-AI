@@ -38,6 +38,7 @@ export interface RevenueIntegrityFinding {
 
 export interface EncounterCharge {
   id: string;
+  chargeId: string;
   tenantId: string;
   patientId: string;
   encounterId: string;
@@ -154,11 +155,53 @@ export class RevenueIntegrityDomainService {
       };
     }
 
+    const encounter =
+      await DomainStateRepository.getById<Record<string, unknown>>(
+        context.tenantId,
+        'encounters',
+        finding.encounterId
+      );
+    if (
+      !encounter ||
+      String(encounter.patientId || '') !== finding.patientId
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'REVENUE_FINDING_ENCOUNTER_MISMATCH',
+          message:
+            'Revenue Integrity acceptance requires the authoritative patient encounter referenced by the finding.',
+        },
+      };
+    }
+    if (
+      String(encounter.encounterType || '').toUpperCase() === 'OPD' &&
+      (
+        String(encounter.billingReconciliationState || '').toUpperCase() ===
+          'CLEARED' ||
+        String(encounter.billingReconciliationId || '').trim()
+      )
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'OPD_BILLING_ALREADY_RECONCILED',
+          message:
+            'A new Revenue Integrity charge cannot be accepted after final OPD billing reconciliation.',
+        },
+      };
+    }
+
     const now = Date.now();
     const chargeId = `chg_ri_${crypto.randomUUID()}`;
 
     const charge: EncounterCharge = {
       id: chargeId,
+      chargeId,
       tenantId: context.tenantId,
       patientId: finding.patientId,
       encounterId: finding.encounterId,
@@ -210,11 +253,26 @@ export class RevenueIntegrityDomainService {
       commandId,
       correlationId: context.correlationId,
       domainState: reconciledFinding,
+      expectedPrimaryServerVersion: Number(
+        (finding as RevenueIntegrityFinding & { _serverVersion?: number })
+          ._serverVersion || 0
+      ),
       additionalStateWrites: [
         {
           entityType: 'ENCOUNTER_CHARGE',
           entityId: chargeId,
           domainState: charge,
+        },
+        {
+          entityType: 'ENCOUNTER',
+          entityId: finding.encounterId,
+          domainState: {
+            ...encounter,
+            billingMutationSequence:
+              Number(encounter.billingMutationSequence || 0) + 1,
+            updatedAt: now,
+          },
+          expectedServerVersion: Number(encounter._serverVersion || 0),
         },
       ],
     });

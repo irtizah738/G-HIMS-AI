@@ -40,6 +40,7 @@ export type FinancialClearanceState =
   | 'PHARMACY_PAYMENT_PENDING'
   | 'PHARMACY_CLEARED'
   | 'FINAL_SETTLEMENT_PENDING'
+  | 'FINAL_BILLING_CLEARED'
   | 'SETTLED';
 
 export type ResourceAssignmentState =

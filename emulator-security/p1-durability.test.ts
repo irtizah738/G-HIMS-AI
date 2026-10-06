@@ -824,6 +824,24 @@ describe('G-HIMS P1 durable command infrastructure', () => {
     const encounterId = unique('enc');
     const patientId = unique('pat');
 
+    await db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection('encounters')
+      .doc(encounterId)
+      .set({
+        id: encounterId,
+        encounterId,
+        tenantId,
+        patientId,
+        encounterType: 'OPD',
+        status: 'ACTIVE',
+        currentStage: 'CONSULTATION',
+        billingMutationSequence: 0,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+
     await db.collection('tenants').doc(tenantId).collection('billingMismatches').doc(findingId).set({
       id: findingId,
       tenantId,
@@ -883,6 +901,14 @@ describe('G-HIMS P1 durable command infrastructure', () => {
     expect(charge.exists).toBe(true);
     expect(charge.data()?.netAmountMinorUnits).toBe(9500);
     expect(charge.data()?.status).toBe('PENDING_INVOICE');
+
+    const encounterAfterReconciliation = await db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection('encounters')
+      .doc(encounterId)
+      .get();
+    expect(encounterAfterReconciliation.data()?.billingMutationSequence).toBe(1);
 
     const replay = await CommandBus.dispatch(billingContext, {
       commandId: unique('cmd'),

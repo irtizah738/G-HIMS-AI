@@ -647,6 +647,12 @@ service cloud.firestore {
         allow read: if canReadFinance(tenantId);
         allow write: if false;
       }
+      // Final OPD billing reconciliation is an immutable server-side
+      // close-control artifact. Clients consume encounter clearance through
+      // governed APIs/read models, never raw reconciliation documents.
+      match /opdBillingReconciliations/{id} {
+        allow read, write: if false;
+      }
       match /arOpenItems/{id} {
         allow read: if canReadFinance(tenantId);
         allow write: if false;

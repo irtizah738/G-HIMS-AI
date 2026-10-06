@@ -129,15 +129,23 @@ export class OpdWorkflowRuntimeService {
     const requiresClinicalEvidence =
       sourceStage === 'TRIAGE' ||
       (sourceStage === 'CONSULTATION' && targetStage !== 'TRIAGE');
+    const requiresBillingReconciliation =
+      sourceStage === 'BILLING_SETTLEMENT' &&
+      targetStage === 'DISCHARGE_OR_REFERRAL';
 
-    if (requiresClinicalEvidence && !String(input.evidenceId || '').trim()) {
+    if (
+      (requiresClinicalEvidence || requiresBillingReconciliation) &&
+      !String(input.evidenceId || '').trim()
+    ) {
       return {
         allowed: false,
         code: 'OPD_TRANSITION_EVIDENCE_REQUIRED',
         message:
           sourceStage === 'TRIAGE'
             ? 'Triage must produce authoritative clinical evidence before consultation can begin.'
-            : 'A signed consultation evidence record is required before advancing the OPD encounter.',
+            : requiresBillingReconciliation
+              ? 'A cleared authoritative OPD billing reconciliation is required before disposition.'
+              : 'A signed consultation evidence record is required before advancing the OPD encounter.',
         sourceStage,
         targetStage,
       };
@@ -166,11 +174,73 @@ export class OpdWorkflowRuntimeService {
     const targetStage = structural.targetStage;
     const evidenceId = String(input.evidenceId || '').trim();
 
+    const requiresBillingReconciliation =
+      sourceStage === 'BILLING_SETTLEMENT' &&
+      targetStage === 'DISCHARGE_OR_REFERRAL';
     const requiresEvidence =
       sourceStage === 'TRIAGE' ||
-      (sourceStage === 'CONSULTATION' && targetStage !== 'TRIAGE');
+      (sourceStage === 'CONSULTATION' && targetStage !== 'TRIAGE') ||
+      requiresBillingReconciliation;
 
     if (!requiresEvidence) return structural;
+
+    if (requiresBillingReconciliation) {
+      const reconciliation =
+        await DomainStateRepository.getById<Record<string, unknown>>(
+          input.tenantId,
+          'opdBillingReconciliations',
+          evidenceId
+        );
+      if (!reconciliation) {
+        return {
+          allowed: false,
+          code: 'OPD_BILLING_RECONCILIATION_NOT_FOUND',
+          message:
+            'The supplied final billing reconciliation does not exist in authoritative state.',
+          sourceStage,
+          targetStage,
+        };
+      }
+      if (
+        String(reconciliation.encounterId || '') !== input.encounterId ||
+        String(reconciliation.patientId || '') !== input.patientId ||
+        String(reconciliation.status || '').toUpperCase() !== 'CLEARED'
+      ) {
+        return {
+          allowed: false,
+          code: 'OPD_BILLING_RECONCILIATION_INVALID',
+          message:
+            'Disposition requires a CLEARED billing reconciliation for this exact patient encounter.',
+          sourceStage,
+          targetStage,
+        };
+      }
+
+      const encounter =
+        await DomainStateRepository.getById<Record<string, unknown>>(
+          input.tenantId,
+          'encounters',
+          input.encounterId
+        );
+      if (
+        !encounter ||
+        String(encounter.billingReconciliationId || '') !== evidenceId ||
+        String(encounter.billingReconciliationState || '').toUpperCase() !==
+          'CLEARED' ||
+        Number(encounter.billingMutationSequence || 0) !==
+          Number(reconciliation.billingMutationSequence || -1)
+      ) {
+        return {
+          allowed: false,
+          code: 'OPD_BILLING_RECONCILIATION_STALE',
+          message:
+            'Billing state changed after reconciliation or the encounter clearance pointer is stale.',
+          sourceStage,
+          targetStage,
+        };
+      }
+      return structural;
+    }
 
     const evidence = await DomainStateRepository.getById<Record<string, unknown>>(
       input.tenantId,

@@ -88,6 +88,19 @@ describe('OPD clinical workflow runtime integration', () => {
     expect(workspace).toContain("optimisticCache: false");
   });
 
+  test('OPD persists raw DAG stage separately from canonical clinical state', async () => {
+    const encounter = await source(
+      'lib/backend/services/encounter-domain-service.ts'
+    );
+
+    expect(encounter).toContain('currentStage: rawStage');
+    expect(encounter).toContain('persistedOpdStage');
+    expect(encounter).toContain('targetOpdStage');
+    expect(encounter).toContain('currentStage: targetWorkflowStage');
+    expect(encounter).toContain('clinicalState: targetClinicalState');
+    expect(encounter).toContain("'STALE_OPD_WORKFLOW_STAGE'");
+  });
+
   test('billing stays in billing until fully settled and then advances through the DAG', async () => {
     const workspace = await source('components/opd/OpdMasterWorkspace.tsx');
 

@@ -1094,13 +1094,12 @@ export class OpdAppointmentDomainService {
       );
     }
 
-    requireActorSchedulingScope(
-      context,
-      link.facilityId,
-      link.departmentId
-    );
-
     try {
+      requireActorSchedulingScope(
+        context,
+        link.facilityId,
+        link.departmentId
+      );
       const tx = await TransactionManager.executeAtomicReadModifyMutation({
         tenantId: context.tenantId,
         actorId: context.actorId,
@@ -1291,13 +1290,12 @@ export class OpdAppointmentDomainService {
       );
     }
 
-    requireActorSchedulingScope(
-      context,
-      link.facilityId,
-      link.departmentId
-    );
-
     try {
+      requireActorSchedulingScope(
+        context,
+        link.facilityId,
+        link.departmentId
+      );
       const { startAt, endAt } = normalizeInterval(payload);
       if (startAt <= Date.now()) {
         return reject(
@@ -1678,13 +1676,12 @@ export class OpdAppointmentDomainService {
         String(legacyActiveEncounter?.status || '').toUpperCase()
       );
 
-    requireActorSchedulingScope(
-      context,
-      link.facilityId,
-      link.departmentId
-    );
-
     try {
+      requireActorSchedulingScope(
+        context,
+        link.facilityId,
+        link.departmentId
+      );
       requireOpdCheckInEligibility(patient);
       await resolveProviderAuthority({
         tenantId: context.tenantId,
@@ -1979,13 +1976,12 @@ export class OpdAppointmentDomainService {
       );
     }
 
-    requireActorSchedulingScope(
-      context,
-      link.facilityId,
-      link.departmentId
-    );
-
     try {
+      requireActorSchedulingScope(
+        context,
+        link.facilityId,
+        link.departmentId
+      );
       const tx = await TransactionManager.executeAtomicReadModifyMutation({
         tenantId: context.tenantId,
         actorId: context.actorId,
@@ -2178,13 +2174,12 @@ export class OpdAppointmentDomainService {
       );
     }
 
-    requireActorSchedulingScope(
-      context,
-      payload.facilityId,
-      payload.preferredDepartmentId
-    );
-
     try {
+      requireActorSchedulingScope(
+        context,
+        payload.facilityId,
+        payload.preferredDepartmentId
+      );
       const patient = await requireActivePatient(
         context.tenantId,
         payload.patientId
@@ -2391,13 +2386,12 @@ export class OpdAppointmentDomainService {
       );
     }
 
-    requireActorSchedulingScope(
-      context,
-      link.facilityId,
-      link.preferredDepartmentId
-    );
-
     try {
+      requireActorSchedulingScope(
+        context,
+        link.facilityId,
+        link.preferredDepartmentId
+      );
       const { startAt, endAt } = normalizeInterval(payload);
       if (startAt <= Date.now()) {
         return reject(
@@ -2675,13 +2669,12 @@ export class OpdAppointmentDomainService {
       );
     }
 
-    requireActorSchedulingScope(
-      context,
-      link.facilityId,
-      link.preferredDepartmentId
-    );
-
     try {
+      requireActorSchedulingScope(
+        context,
+        link.facilityId,
+        link.preferredDepartmentId
+      );
       const [patient, authority] = await Promise.all([
         requireActivePatient(context.tenantId, link.patientId),
         resolveProviderAuthority({
@@ -3017,13 +3010,12 @@ export class OpdAppointmentDomainService {
       link.facilityId,
       link.preferredDepartmentId
     );
-    requireActorSchedulingScope(
-      context,
-      link.facilityId,
-      link.preferredDepartmentId
-    );
-
     try {
+      requireActorSchedulingScope(
+        context,
+        link.facilityId,
+        link.preferredDepartmentId
+      );
       const tx = await TransactionManager.executeAtomicReadModifyMutation({
         tenantId: context.tenantId,
         actorId: context.actorId,

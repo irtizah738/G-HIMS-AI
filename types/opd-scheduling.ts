@@ -129,6 +129,7 @@ export interface OpdWaitlistEntryRecord {
     verifiedAt: number;
   };
   offerSlotIds?: string[];
+  offerPatientSlotIds?: string[];
   offerExpiresAt?: number;
   acceptedAppointmentId?: string;
   createdAt: number;

@@ -51,9 +51,10 @@ import {
 } from 'lucide-react';
 import { AuthClient } from '@/lib/auth/auth-client';
 import { PatientConsultantRoutingModal } from '@/components/clinical/patient-consultant-routing-modal';
+import { saveDiseaseIntakeArtifact } from '@/lib/clinical/intelligence/consultant-worklist-client';
 
 export function DiseaseCentricIntakeView() {
-  const { patients, addClinicalNote, selectedPatientId, setSelectedPatientId } = useHospital();
+  const { patients, selectedPatientId, setSelectedPatientId } = useHospital();
   const [localPatientId, setLocalPatientId] = useState<string>(selectedPatientId || '');
 
   // Synchronize with global hospital context patient
@@ -109,6 +110,11 @@ export function DiseaseCentricIntakeView() {
   const [committedSuccess, setCommittedSuccess] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
   const [showRoutingModal, setShowRoutingModal] = useState(false);
+  const [savedIntakeArtifact, setSavedIntakeArtifact] = useState<{
+    intakeArtifactId: string;
+    patient360Revision: number;
+    patient360SourceCheckpoint: string;
+  } | null>(null);
 
   // Template Customization / Studio state
   const [customQuestions, setCustomQuestions] = useState<GuidedQuestion[]>([]);
@@ -125,7 +131,14 @@ export function DiseaseCentricIntakeView() {
     setAiResult(null);
     setCommittedSuccess(false);
     setCommitError(null);
+    setSavedIntakeArtifact(null);
   }, [selectedTemplateId, currentTemplate]);
+
+  // Any clinician input change invalidates the previously finalized artifact.
+  // Routing must always reference the exact reviewed intake version.
+  useEffect(() => {
+    setSavedIntakeArtifact(null);
+  }, [guidedAnswers, specialtyHistoryAnswers, selectedTreeNodeIds]);
 
   // Real-time Risk Score & Active Signals Calculation
   const { totalRiskScore, activeRiskSignals, maxRiskSeverity } = useMemo(() => {
@@ -306,22 +319,85 @@ export function DiseaseCentricIntakeView() {
       return;
     }
 
+    const encounterId =
+      selectedPatient.activeEncounterId ||
+      selectedPatient.encounters.find((encounter) => encounter.status === 'active')?.id;
+    if (!encounterId) {
+      setCommitError('An active encounter is required before finalizing disease intake.');
+      return;
+    }
+
     setCommitError(null);
+    setSavedIntakeArtifact(null);
+
     try {
-      await addClinicalNote(selectedPatient.id, {
-        author: 'Authenticated clinician',
-        role: 'Specialist Intake',
-        category: 'Consultation',
-        content: `Disease-Centric Intake Completed: ${currentTemplate.name}\nRisk Level: ${maxRiskSeverity} (Score: ${totalRiskScore}). Protocol: ${currentTemplate.clinicalGuidelines}.\nObserved protocol signals: ${activeRiskSignals.map((signal) => signal.title).join('; ') || 'None recorded'}.\nSpecialist preparation target: ${currentTemplate.typicalSpecialists.join(', ')}.`,
+      const tenantId = await AuthClient.getActiveTenantId();
+      const patient360Response = await AuthClient.authorizedFetch(
+        `/api/clinical/patient360/${encodeURIComponent(selectedPatient.id)}?tenantId=${encodeURIComponent(tenantId)}&encounterId=${encodeURIComponent(encounterId)}`,
+        { method: 'GET', cache: 'no-store' },
+        tenantId
+      );
+      const patient360Payload = await patient360Response.json();
+      if (
+        !patient360Response.ok ||
+        !patient360Payload?.success ||
+        !patient360Payload?.projection
+      ) {
+        throw new Error(
+          patient360Payload?.error ||
+            'Patient 360 could not be loaded for clinician-reviewed intake finalization.'
+        );
+      }
+
+      const patient360Revision = Number(patient360Payload.projection.revision);
+      const patient360SourceCheckpoint = String(
+        patient360Payload.projection.sourceCheckpoint || ''
+      ).trim();
+      if (
+        !Number.isInteger(patient360Revision) ||
+        patient360Revision < 0 ||
+        !patient360SourceCheckpoint
+      ) {
+        throw new Error('Patient 360 did not return a valid review checkpoint.');
+      }
+
+      const result = await saveDiseaseIntakeArtifact(tenantId, {
+        patientId: selectedPatient.id,
+        encounterId,
+        templateId: currentTemplate.id,
+        templateName: currentTemplate.name,
+        clinicalGuidelines: currentTemplate.clinicalGuidelines,
+        guidedAnswers,
+        specialtyHistory: specialtyHistoryAnswers,
+        selectedTreeNodeIds,
+        observedRiskScore: totalRiskScore,
+        observedRiskSeverity: maxRiskSeverity,
+        observedRiskSignalIds: activeRiskSignals.map((signal) => signal.id),
+        observedRiskSignalTitles: activeRiskSignals.map((signal) => signal.title),
+        specialistTargets: currentTemplate.typicalSpecialists,
+        sourceRefs: [],
+        patient360Revision,
+        patient360SourceCheckpoint,
+        clinicianAttestation: true,
       });
 
+      const intakeArtifactId = String(result.entityId || '').trim();
+      if (!intakeArtifactId) {
+        throw new Error('Disease intake finalized without a canonical artifact identifier.');
+      }
+
+      setSavedIntakeArtifact({
+        intakeArtifactId,
+        patient360Revision,
+        patient360SourceCheckpoint,
+      });
       setCommittedSuccess(true);
       setTimeout(() => {
         setCommittedSuccess(false);
       }, 4000);
     } catch (error) {
       setCommitError(
-        error instanceof Error ? error.message : 'Intake could not be saved.'
+        error instanceof Error ? error.message : 'Intake could not be finalized.'
       );
     }
   };
@@ -596,11 +672,11 @@ export function DiseaseCentricIntakeView() {
           <button
             id="btn-route-specialist"
             onClick={() => setShowRoutingModal(true)}
-            disabled={!selectedPatient || !activeEncounterId}
+            disabled={!selectedPatient || !activeEncounterId || !savedIntakeArtifact}
             className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Send className="w-4 h-4" />
-            <span>Route to Specialist</span>
+            <span>{savedIntakeArtifact ? 'Route Finalized Intake' : 'Finalize Intake First'}</span>
           </button>
         </div>
       </div>
@@ -610,7 +686,7 @@ export function DiseaseCentricIntakeView() {
         <div className="p-3 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 rounded-xl text-xs font-semibold flex items-center justify-between animate-in fade-in">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-            <span>Reviewed disease intake saved to the longitudinal record. Specialist routing remains a separate explicit action.</span>
+            <span>Clinician-reviewed disease intake finalized as an immutable artifact and linked to Patient 360. It is now eligible for source-linked specialist routing.</span>
           </div>
         </div>
       )}
@@ -1481,6 +1557,11 @@ export function DiseaseCentricIntakeView() {
           }
           triageCategory={`${currentTemplate.specialty} / ${maxRiskSeverity}`}
           currentAttending={activeEncounter?.attendingPhysician || 'Unassigned'}
+          sourceRefs={
+            savedIntakeArtifact ? [savedIntakeArtifact.intakeArtifactId] : []
+          }
+          sourceArtifactId={savedIntakeArtifact?.intakeArtifactId}
+          sourceArtifactType={savedIntakeArtifact ? 'DISEASE_INTAKE' : undefined}
           onRoutedSuccess={() => setShowRoutingModal(false)}
         />
       )}

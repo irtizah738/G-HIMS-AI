@@ -25,7 +25,7 @@ async function assertTrendAccess(
   context: CommandContext,
   patientId: string
 ): Promise<void> {
-  const [patient, projection] = await Promise.all([
+  let [patient, projection] = await Promise.all([
     DomainStateRepository.getById<Record<string, unknown>>(
       context.tenantId,
       'patients',
@@ -36,6 +36,17 @@ async function assertTrendAccess(
       patientId
     ),
   ]);
+
+  if (!projection && patient) {
+    try {
+      projection = await Patient360ProjectionService.rebuildPatient(
+        context.tenantId,
+        patientId
+      );
+    } catch {
+      // ignore rebuild failure
+    }
+  }
 
   if (!patient) throw new Error('PATIENT_NOT_FOUND');
   if (!projection) throw new Error('PATIENT360_PROJECTION_NOT_READY');

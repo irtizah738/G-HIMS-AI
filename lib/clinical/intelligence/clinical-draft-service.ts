@@ -351,10 +351,20 @@ export class ClinicalDraftService {
     const content = contentFromSections(normalized.sections);
     if (!content) throw new Error('CI10F_AI_OUTPUT_CONTENT_REQUIRED');
 
-    const currentProjection = await Patient360ProjectionService.getProjection(
+    let currentProjection = await Patient360ProjectionService.getProjection(
       context.tenantId,
       patientId
     );
+    if (!currentProjection) {
+      try {
+        currentProjection = await Patient360ProjectionService.rebuildPatient(
+          context.tenantId,
+          patientId
+        );
+      } catch {
+        // ignore rebuild failure
+      }
+    }
     if (!currentProjection) {
       throw new Error('CI10H_CURRENT_PATIENT360_UNAVAILABLE');
     }

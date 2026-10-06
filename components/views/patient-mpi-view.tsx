@@ -780,23 +780,52 @@ export function PatientMpiView() {
                             <div className="flex items-center gap-1.5 text-blue-700 font-semibold text-[11px]">
                               <Sparkles className="w-3.5 h-3.5" /> AI Extracted Diagnoses & Billing
                             </div>
-                            {note.aiStructuredData.diagnoses && (
+                            {note.aiStructuredData.diagnoses && Array.isArray(note.aiStructuredData.diagnoses) && (
                               <div className="flex flex-wrap gap-1.5">
-                                {note.aiStructuredData.diagnoses.map((d, i) => (
-                                  <span key={i} className="px-2 py-0.5 rounded bg-blue-100/60 text-blue-800 text-[10px] font-medium">
-                                    Dx: {d}
-                                  </span>
-                                ))}
+                                {note.aiStructuredData.diagnoses.map((d: any, i: number) => {
+                                  const isObj = typeof d === 'object' && d !== null;
+                                  const code = isObj ? d.code : undefined;
+                                  const description = isObj ? (d.description || d.code || '') : String(d);
+                                  const isPrincipal = isObj ? Boolean(d.isPrincipal) : false;
+                                  const label = code && d.description && code !== d.description
+                                    ? `${code} — ${description}`
+                                    : description;
+
+                                  return (
+                                    <span
+                                      key={i}
+                                      className={`px-2 py-0.5 rounded text-[10px] font-medium inline-flex items-center gap-1 ${
+                                        isPrincipal
+                                          ? 'bg-blue-600 text-white font-semibold'
+                                          : 'bg-blue-100/60 text-blue-800'
+                                      }`}
+                                    >
+                                      <span>Dx: {label}</span>
+                                      {isPrincipal && (
+                                        <span className="text-[9px] bg-blue-700 text-blue-100 px-1 py-0.2 rounded uppercase tracking-wider font-bold">
+                                          Primary
+                                        </span>
+                                      )}
+                                    </span>
+                                  );
+                                })}
                               </div>
                             )}
 
-                            {note.aiStructuredData.billingCodes && (
+                            {note.aiStructuredData.billingCodes && Array.isArray(note.aiStructuredData.billingCodes) && (
                               <div className="flex flex-wrap gap-1.5 pt-1">
-                                {note.aiStructuredData.billingCodes.map((bc, i) => (
-                                  <span key={i} className="px-2 py-0.5 rounded bg-emerald-100/60 text-emerald-800 text-[10px] font-medium">
-                                    CPT {bc.code}: {bc.description} ({formatCurrency(bc.fee)})
-                                  </span>
-                                ))}
+                                {note.aiStructuredData.billingCodes.map((bc: any, i: number) => {
+                                  const isObj = typeof bc === 'object' && bc !== null;
+                                  const code = isObj ? bc.code : '';
+                                  const desc = isObj ? (bc.description || '') : String(bc);
+                                  const feeText = isObj && bc.fee != null ? ` (${formatCurrency(Number(bc.fee))})` : '';
+
+                                  return (
+                                    <span key={i} className="px-2 py-0.5 rounded bg-emerald-100/60 text-emerald-800 text-[10px] font-medium">
+                                      {code ? `CPT ${code}: ` : ''}{desc}{feeText}
+                                    </span>
+                                  );
+                                })}
                               </div>
                             )}
                           </div>

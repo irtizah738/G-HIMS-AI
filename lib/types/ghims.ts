@@ -67,7 +67,7 @@ export interface ClinicalNote {
   category: 'SOAP' | 'Progress' | 'Nursing' | 'Discharge' | 'Consultation';
   aiStructuredData?: {
     chiefComplaint?: string;
-    diagnoses?: string[];
+    diagnoses?: (string | { code: string; description?: string; isPrincipal?: boolean; category?: string })[];
     medicationsPrescribed?: string[];
     recommendedProcedures?: string[];
     followUpDays?: number;

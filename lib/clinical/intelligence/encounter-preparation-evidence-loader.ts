@@ -114,7 +114,7 @@ export class EncounterPreparationEvidenceLoader {
     projection: Patient360Projection,
     options: { encounterId?: string; careSetting?: ClinicalCareSetting } = {}
   ): Promise<EncounterPreparationEvidenceSources> {
-    const encounter =
+    let encounter =
       (options.encounterId
         ? projection.recentEncounters.find(
             (item) => item.encounterId === options.encounterId
@@ -136,6 +136,24 @@ export class EncounterPreparationEvidenceLoader {
                 projection.careContexts.activeOpdEncounters[0] ||
                 projection.careContexts.activeIpdEncounter ||
                 projection.careContexts.activeEmergencyEncounter);
+
+    if (!encounter?.encounterId && options.encounterId) {
+      const direct = await DomainStateRepository.getById<Record<string, unknown>>(
+        context.tenantId,
+        'encounters',
+        options.encounterId
+      );
+      if (direct && normalized(direct.patientId) === patientId) {
+        const encounterType = String(direct.encounterType || direct.type || 'UNKNOWN');
+        encounter = {
+          encounterId: options.encounterId,
+          encounterType,
+          careSetting: String(direct.careSetting || options.careSetting || encounterType) as any,
+          status: String(direct.status || 'UNKNOWN'),
+          chiefComplaint: String(direct.chiefComplaint || '') || undefined,
+        };
+      }
+    }
 
     if (!encounter?.encounterId) {
       throw new Error('CI10C_ACTIVE_ENCOUNTER_REQUIRED');

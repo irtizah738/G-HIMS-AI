@@ -302,4 +302,20 @@ describe('CI-10C encounter preparation intelligence', () => {
       expect(route.toLowerCase()).not.toContain(forbidden.toLowerCase());
     }
   });
+
+  test('CI-10C evidence creation self-heals unmaterialized Patient 360 projection before failing', async () => {
+    const evidenceService = await source(
+      'lib/clinical/intelligence/clinical-evidence-service.ts'
+    );
+    const projectionService = await source(
+      'lib/clinical/patient360/patient360-projection-service.ts'
+    );
+    const loader = await source(
+      'lib/clinical/intelligence/encounter-preparation-evidence-loader.ts'
+    );
+
+    expect(evidenceService).toContain('Patient360ProjectionService.rebuildPatient');
+    expect(projectionService).toContain('getOrRebuildProjection');
+    expect(loader).toContain('options.encounterId');
+  });
 });

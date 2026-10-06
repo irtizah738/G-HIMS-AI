@@ -86,10 +86,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const projection = await Patient360ProjectionService.getProjection(
+    let projection = await Patient360ProjectionService.getProjection(
       context.tenantId,
       patientId
     );
+    if (!projection) {
+      try {
+        projection = await Patient360ProjectionService.rebuildPatient(
+          context.tenantId,
+          patientId
+        );
+      } catch {
+        // ignore rebuild failure
+      }
+    }
     if (!projection) {
       return NextResponse.json(
         {

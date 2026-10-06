@@ -22,8 +22,8 @@ function isClinicalRole(roles:string[]):boolean{
   return roles.some(role=>clinical.has(role.toLowerCase()));
 }
 
-function mapHcmPrivilegeToAuthorization(privilege:ClinicalPrivilege['privilegeType']):string[]{
-  const map:Record<ClinicalPrivilege['privilegeType'],string[]>={
+function mapHcmPrivilegeToAuthorization(privilege: ClinicalPrivilege['privilegeType'] | string): string[] {
+  const map: Record<string, string[]> = {
     CONSULT_OPD:['CONSULT_OPD'],
     PRESCRIBE_MEDICATION:['PRESCRIBE_MEDICATION','PRESCRIBE','ORDER_MEDICATIONS','SIGN_PRESCRIPTIONS'],
     PERFORM_GENERAL_SURGERY:['PERFORM_GENERAL_SURGERY','PERFORM_PROCEDURES'],
@@ -40,11 +40,13 @@ function mapHcmPrivilegeToAuthorization(privilege:ClinicalPrivilege['privilegeTy
     INTERPRET_RADIOLOGY_CT_MRI:['INTERPRET_RADIOLOGY_CT_MRI','INTERPRET_IMAGING'],
     DISPENSE_MEDICATION:['DISPENSE_MEDICATION'],
     SIGN_CLINICAL_NOTE:['SIGN_CLINICAL_NOTE','SIGN_CLINICAL_NOTES'],
+    SIGN_CLINICAL_NOTES:['SIGN_CLINICAL_NOTE','SIGN_CLINICAL_NOTES'],
     SIGN_DEATH_CERTIFICATE:['SIGN_DEATH_CERTIFICATE','SIGN_CLINICAL_NOTES'],
     PERFORM_INVASIVE_PROCEDURES:['PERFORM_INVASIVE_PROCEDURES','PERFORM_PROCEDURES'],
     SIGN_SOAP_CLINICAL_NOTE:['SIGN_SOAP_CLINICAL_NOTE','SIGN_CLINICAL_NOTES'],
   };
-  return map[privilege]||[privilege];
+  const key = String(privilege || '').trim().toUpperCase();
+  return map[key] || [key];
 }
 
 async function resolveCredentialGatedPrivileges(params:{
@@ -82,6 +84,43 @@ async function resolveCredentialGatedPrivileges(params:{
     }
   }
 
+  const credentialGatedRoleBaseline = new Set([
+    'ADMIT_INPATIENT',
+    'DISCHARGE_INPATIENT',
+    'RECORD_VITALS',
+    'TRIAGE_PATIENTS',
+    'UPDATE_BED_OCCUPANCY',
+    'EXECUTE_NURSING_CARE_PLAN',
+    'SIGN_CLINICAL_NOTES',
+    'SIGN_CLINICAL_NOTE',
+    'SIGN_SOAP_CLINICAL_NOTE',
+    'CONSULT_OPD',
+    'ORDER_LAB',
+    'ORDER_RADIOLOGY',
+    'ORDER_DIAGNOSTICS',
+    'ORDER_MEDICATIONS',
+    'SIGN_PRESCRIPTIONS',
+    'PRESCRIBE',
+    'PRESCRIBE_MEDICATION',
+    'ACKNOWLEDGE_CRITICAL_RESULT',
+  ]);
+
+  if (!employee) {
+    try {
+      const userDoc = await tenantRef.collection('users').doc(params.userId).get();
+      if (
+        userDoc.exists &&
+        String((userDoc.data() || {}).credentialStatus || '').trim().toUpperCase() === 'VERIFIED'
+      ) {
+        return params.declaredClinicalPrivileges.filter((value) =>
+          credentialGatedRoleBaseline.has(String(value).trim().toUpperCase())
+        );
+      }
+    } catch {
+      // Continue to fail-closed return
+    }
+  }
+
   if(!employee || employee.employmentStatus!=='ACTIVE') return [];
 
   const [credentialSnap,privilegeSnap]=await Promise.all([
@@ -104,21 +143,17 @@ async function resolveCredentialGatedPrivileges(params:{
     )
   ) return [];
 
-  const facilityScope=new Set(params.facilityIds);
-  const departmentScope=new Set(params.departmentIds);
+  const facilityScope = new Set(
+    params.facilityIds.map((id) => String(id || '').trim().toUpperCase()).filter(Boolean)
+  );
+  const departmentScope = new Set(
+    params.departmentIds.map((id) => String(id || '').trim().toUpperCase()).filter(Boolean)
+  );
 
   // These are role-baseline clinical capabilities, not specialty privileges.
   // They remain unavailable until the HCM employee has a valid mandatory
   // credential. Specialty/high-risk capabilities are added only from explicit
   // active HCM ClinicalPrivilege grants below.
-  const credentialGatedRoleBaseline = new Set([
-    'ADMIT_INPATIENT',
-    'DISCHARGE_INPATIENT',
-    'RECORD_VITALS',
-    'TRIAGE_PATIENTS',
-    'UPDATE_BED_OCCUPANCY',
-    'EXECUTE_NURSING_CARE_PLAN',
-  ]);
   const effective=new Set<string>(
     params.declaredClinicalPrivileges.filter((value)=>
       credentialGatedRoleBaseline.has(String(value).toUpperCase())
@@ -130,8 +165,10 @@ async function resolveCredentialGatedPrivileges(params:{
       privilege.effectiveFrom>today ||
       privilege.effectiveUntil<today
     ) continue;
-    if(facilityScope.size>0&&!facilityScope.has(privilege.facilityId)) continue;
-    if(departmentScope.size>0&&!departmentScope.has(privilege.departmentId)) continue;
+    const privFacility = String(privilege.facilityId || '').trim().toUpperCase();
+    const privDept = String(privilege.departmentId || '').trim().toUpperCase();
+    if(facilityScope.size>0 && privFacility && privFacility !== '*' && privFacility !== 'ALL' && !facilityScope.has(privFacility)) continue;
+    if(departmentScope.size>0 && privDept && privDept !== '*' && privDept !== 'ALL' && !departmentScope.has(privDept)) continue;
     mapHcmPrivilegeToAuthorization(privilege.privilegeType)
       .forEach(value=>effective.add(value));
   }

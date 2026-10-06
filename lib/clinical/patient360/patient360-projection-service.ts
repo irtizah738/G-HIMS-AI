@@ -203,6 +203,21 @@ export class Patient360ProjectionService {
       : null;
   }
 
+  public static async getOrRebuildProjection(
+    tenantId: string,
+    patientId: string
+  ): Promise<Patient360Projection | null> {
+    const existing = await this.getProjection(tenantId, patientId);
+    if (existing) {
+      return existing;
+    }
+    try {
+      return await this.rebuildPatient(tenantId, patientId);
+    } catch {
+      return null;
+    }
+  }
+
   public static async getTimeline(
     tenantId: string,
     patientId: string,

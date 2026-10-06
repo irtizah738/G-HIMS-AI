@@ -75,7 +75,7 @@ describe('OPD-RP17 real dashboard KPIs', () => {
     const dashboard = await source('components/opd/OpdDashboardKpis.tsx');
 
     expect(dashboard).toContain(
-      'Counts are derived only from the server-authorized OPD read model visible'
+      'Counts are derived only from the authorized OPD read model visible'
     );
     expect(dashboard).toContain(
       'No tenant-wide or historical trend is inferred from'
@@ -83,6 +83,50 @@ describe('OPD-RP17 real dashboard KPIs', () => {
     expect(dashboard).toContain('Visible OPD Encounters');
     expect(dashboard).toContain('Visible Department Distribution');
     expect(dashboard).toContain('Visible Clinician Workload');
+  });
+
+  test('dashboard exposes snapshot provenance freshness and pending sync state', async () => {
+    const dashboard = await source('components/opd/OpdDashboardKpis.tsx');
+    const workspace = await source('components/opd/OpdMasterWorkspace.tsx');
+
+    expect(dashboard).toContain("snapshotSource: 'SERVER' | 'LOCAL' | 'DEMO'");
+    expect(dashboard).toContain('snapshotGeneratedAt: number');
+    expect(dashboard).toContain('snapshotVersion: string');
+    expect(dashboard).toContain('pendingSyncCount: number');
+    expect(dashboard).toContain('Cached local snapshot');
+    expect(dashboard).toContain(
+      'Pending offline mutations are not yet authoritative'
+    );
+    expect(dashboard).toContain(
+      'dashboard values come from the last authorized local snapshot'
+    );
+
+    expect(workspace).toContain('setDashboardSnapshotMeta({');
+    expect(workspace).toContain('source: snapshot.source');
+    expect(workspace).toContain('generatedAt: snapshot.generatedAt');
+    expect(workspace).toContain(
+      'snapshotVersion: snapshot.snapshotVersion'
+    );
+    expect(workspace).toContain(
+      'snapshotSource={dashboardSnapshotMeta.source}'
+    );
+    expect(workspace).toContain('pendingSyncCount={pendingSyncCount}');
+    expect(workspace).toContain('isOnline={isOnline}');
+  });
+
+  test('unknown workflow stages are surfaced as data-quality errors rather than disposition', async () => {
+    const dashboard = await source('components/opd/OpdDashboardKpis.tsx');
+
+    expect(dashboard).toContain("| 'UNKNOWN'");
+    expect(dashboard).toContain("return 'UNKNOWN'");
+    expect(dashboard).toContain('stageCounts.UNKNOWN');
+    expect(dashboard).toContain('unrecognized workflow');
+    expect(dashboard).toContain(
+      'is excluded from the workflow distribution'
+    );
+    expect(dashboard).not.toContain(
+      "if (['BILLING_SETTLEMENT', 'BILLING'].includes(stage)) return 'BILLING';\n  return 'DISPOSITION';"
+    );
   });
 
   test('workspace passes authoritative queue and enforces role-safe KPI navigation', async () => {

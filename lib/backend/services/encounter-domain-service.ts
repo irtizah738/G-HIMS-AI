@@ -129,85 +129,99 @@ export class EncounterDomainService {
     encounterId: string
   ): Promise<EncounterState | null> {
     const key = this.cacheKey(tenantId, encounterId);
-
-    if (DomainStateRepository.isAvailable()) {
-      const persisted = await DomainStateRepository.getById<Record<string, unknown>>(
+    const persisted =
+      await DomainStateRepository.getById<Record<string, unknown>>(
         tenantId,
         'encounters',
         encounterId
       );
 
-      if (!persisted) {
-        // Authoritative runtime never fabricates clinical state when Firestore
-        // cannot resolve the encounter. Test/demo fixtures must be provisioned
-        // explicitly into their isolated environments.
-        this.encounterCache.delete(key);
-        return null;
-      }
-
-      const encounterType = String(
-        persisted.encounterType || persisted.type || 'OPD'
-      ).toUpperCase() as CreateEncounterPayload['encounterType'];
-      const rawStage = String(
-        persisted.currentStage || persisted.currentStageId || 'REGISTERED'
-      );
-      const clinicalState =
-        (persisted.clinicalState as ClinicalEncounterState | undefined) ||
-        normalizeClinicalEncounterState(rawStage) ||
-        'REGISTERED';
-
-      const normalized: EncounterState = {
-        encounterId: String(persisted.encounterId || persisted.id || encounterId),
-        tenantId: String(persisted.tenantId || tenantId),
-        patientId: String(persisted.patientId || ''),
-        encounterType,
-        chiefComplaint: String(persisted.chiefComplaint || ''),
-        departmentId: String(persisted.departmentId || persisted.department || ''),
-        status:
-          String(persisted.status || 'ACTIVE').toUpperCase() === 'IN_PROGRESS'
-            ? 'ACTIVE'
-            : String(persisted.status || 'ACTIVE').toUpperCase(),
-        currentStage: rawStage,
-        clinicalState,
-        operationalState:
-          (persisted.operationalState as OperationalQueueState | undefined) || 'NOT_QUEUED',
-        financialClearanceState:
-          (persisted.financialClearanceState as FinancialClearanceState | undefined) ||
-          (encounterType === 'EMERGENCY' || encounterType === 'IPD'
-            ? 'NOT_REQUIRED'
-            : 'CONSULTATION_PAYMENT_PENDING'),
-        resourceAssignmentState:
-          (persisted.resourceAssignmentState as ResourceAssignmentState | undefined) || 'NONE',
-        priority: String(persisted.priority || 'ROUTINE').toUpperCase() as EncounterState['priority'],
-        assignedProviderId: String(persisted.assignedProviderId || persisted.assignedDoctor || ''),
-        billingMutationSequence: Number(
-          persisted.billingMutationSequence || 0
-        ),
-        billingReconciliationId: persisted.billingReconciliationId
-          ? String(persisted.billingReconciliationId)
-          : undefined,
-        billingReconciliationState: persisted.billingReconciliationState
-          ? String(persisted.billingReconciliationState)
-          : undefined,
-        billingClosedAt: persisted.billingClosedAt
-          ? Number(persisted.billingClosedAt)
-          : undefined,
-        billingClosedBy: persisted.billingClosedBy
-          ? String(persisted.billingClosedBy)
-          : undefined,
-        sourceAppointmentId: persisted.sourceAppointmentId
-          ? String(persisted.sourceAppointmentId)
-          : undefined,
-        _serverVersion: Number(persisted._serverVersion || 0),
-        createdAt: Number(persisted.createdAt || persisted.startedAt || Date.now()),
-        updatedAt: Number(persisted.updatedAt || persisted.startedAt || Date.now()),
-      };
-
-      this.encounterCache.set(key, normalized);
-      return normalized;
+    if (!persisted) {
+      // The repository owns runtime persistence in every environment. In
+      // TEST/DEMO it is backed by the isolated ephemeral transaction store;
+      // in production it is durable Firestore. Never fall back to a parallel
+      // private encounter authority when the repository cannot resolve state.
+      this.encounterCache.delete(key);
+      return null;
     }
 
-    return this.encounterCache.get(key) || null;
+    const encounterType = String(
+      persisted.encounterType || persisted.type || 'OPD'
+    ).toUpperCase() as CreateEncounterPayload['encounterType'];
+    const rawStage = String(
+      persisted.currentStage || persisted.currentStageId || 'REGISTERED'
+    );
+    const clinicalState =
+      (persisted.clinicalState as ClinicalEncounterState | undefined) ||
+      normalizeClinicalEncounterState(rawStage) ||
+      'REGISTERED';
+
+    const normalized: EncounterState = {
+      encounterId: String(
+        persisted.encounterId || persisted.id || encounterId
+      ),
+      tenantId: String(persisted.tenantId || tenantId),
+      patientId: String(persisted.patientId || ''),
+      encounterType,
+      chiefComplaint: String(persisted.chiefComplaint || ''),
+      departmentId: String(
+        persisted.departmentId || persisted.department || ''
+      ),
+      status:
+        String(persisted.status || 'ACTIVE').toUpperCase() === 'IN_PROGRESS'
+          ? 'ACTIVE'
+          : String(persisted.status || 'ACTIVE').toUpperCase(),
+      currentStage: rawStage,
+      clinicalState,
+      operationalState:
+        (persisted.operationalState as OperationalQueueState | undefined) ||
+        'NOT_QUEUED',
+      financialClearanceState:
+        (persisted.financialClearanceState as
+          | FinancialClearanceState
+          | undefined) ||
+        (encounterType === 'EMERGENCY' || encounterType === 'IPD'
+          ? 'NOT_REQUIRED'
+          : 'CONSULTATION_PAYMENT_PENDING'),
+      resourceAssignmentState:
+        (persisted.resourceAssignmentState as
+          | ResourceAssignmentState
+          | undefined) || 'NONE',
+      priority: String(
+        persisted.priority || 'ROUTINE'
+      ).toUpperCase() as EncounterState['priority'],
+      assignedProviderId: String(
+        persisted.assignedProviderId || persisted.assignedDoctor || ''
+      ),
+      billingMutationSequence: Number(
+        persisted.billingMutationSequence || 0
+      ),
+      billingReconciliationId: persisted.billingReconciliationId
+        ? String(persisted.billingReconciliationId)
+        : undefined,
+      billingReconciliationState: persisted.billingReconciliationState
+        ? String(persisted.billingReconciliationState)
+        : undefined,
+      billingClosedAt: persisted.billingClosedAt
+        ? Number(persisted.billingClosedAt)
+        : undefined,
+      billingClosedBy: persisted.billingClosedBy
+        ? String(persisted.billingClosedBy)
+        : undefined,
+      sourceAppointmentId: persisted.sourceAppointmentId
+        ? String(persisted.sourceAppointmentId)
+        : undefined,
+      _serverVersion: Number(persisted._serverVersion || 0),
+      createdAt: Number(
+        persisted.createdAt || persisted.startedAt || Date.now()
+      ),
+      updatedAt: Number(
+        persisted.updatedAt || persisted.startedAt || Date.now()
+      ),
+    };
+
+    this.encounterCache.set(key, normalized);
+    return normalized;
   }
   /**
    * Resolves the authoritative encounter snapshot using durable state when
@@ -689,7 +703,8 @@ export class EncounterDomainService {
     const sourceAppointmentId = String(
       encounter.sourceAppointmentId || ''
     ).trim();
-    const [patient, sourceAppointment] = await Promise.all([
+    const queueTokenId = `opd_${encounter.encounterId}`;
+    const [patient, sourceAppointment, queueToken] = await Promise.all([
       DomainStateRepository.getById<Record<string, unknown>>(
         context.tenantId,
         'patients',
@@ -702,6 +717,11 @@ export class EncounterDomainService {
             sourceAppointmentId
           )
         : Promise.resolve(null),
+      DomainStateRepository.getById<Record<string, unknown>>(
+        context.tenantId,
+        'opd_queue',
+        queueTokenId
+      ),
     ]);
     if (!patient) {
       return {
@@ -709,6 +729,23 @@ export class EncounterDomainService {
         commandId,
         idempotencyKey,
         error: { code: 'PATIENT_NOT_FOUND', message: 'Encounter patient does not exist.' },
+      };
+    }
+
+    if (
+      !queueToken ||
+      String(queueToken.encounterId || '') !== encounter.encounterId ||
+      String(queueToken.patientId || '') !== encounter.patientId
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'OPD_QUEUE_LINEAGE_MISSING',
+          message:
+            'OPD disposition requires the authoritative queue token for this patient encounter.',
+        },
       };
     }
 
@@ -913,6 +950,22 @@ export class EncounterDomainService {
           }
         : null;
 
+    const currentQueueStatus = String(queueToken.status || '').toLowerCase();
+    const terminalQueueStatuses = new Set([
+      'completed',
+      'no_show',
+      'transferred',
+    ]);
+    const queueState = terminalQueueStatuses.has(currentQueueStatus)
+      ? null
+      : {
+          ...queueToken,
+          status: 'completed',
+          completedAt: now,
+          completedBy: context.actorId,
+          updatedAt: now,
+        };
+
     const tx = await TransactionManager.executeAtomicMutation({
       tenantId: context.tenantId,
       actorId: context.actorId,
@@ -959,6 +1012,18 @@ export class EncounterDomainService {
                 domainState: appointmentState,
                 expectedServerVersion: Number(
                   sourceAppointment._serverVersion || 0
+                ),
+              },
+            ]
+          : []),
+        ...(queueState
+          ? [
+              {
+                entityType: 'OPD_QUEUE_TOKEN',
+                entityId: queueTokenId,
+                domainState: queueState,
+                expectedServerVersion: Number(
+                  queueToken._serverVersion || 0
                 ),
               },
             ]

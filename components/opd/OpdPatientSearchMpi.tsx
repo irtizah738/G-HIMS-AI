@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Search,
   Users,
@@ -19,6 +19,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { PatientDemographics, MpiMatchResult } from '@/types/opd-domain';
+import { lookupPatientByMpi } from '@/lib/clinical/mpi/mpi-lookup-client';
 
 interface OpdPatientSearchMpiProps {
   patients: PatientDemographics[];
@@ -40,22 +41,89 @@ export function OpdPatientSearchMpi({
   const [targetMergePatientId, setTargetMergePatientId] = useState<string>('');
   const [mergeReason, setMergeReason] = useState<string>('');
   const [simulatedBarcode, setSimulatedBarcode] = useState<string>('');
+  const [authoritativeMatchId, setAuthoritativeMatchId] = useState<string | null>(null);
+  const [lookupState, setLookupState] = useState<
+    'IDLE' | 'LOADING' | 'MATCHED' | 'NOT_FOUND' | 'OFFLINE_FALLBACK'
+  >('IDLE');
+  const [lookupError, setLookupError] = useState<string | null>(null);
 
   const normalizeLookup = (value: string) =>
     String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
-  // Patient retrieval is deterministic: institutional MRN and/or CNIC only.
-  const searchResults = useMemo(() => {
+  const localExactMatches = useMemo(() => {
     if (!searchTerm.trim()) return [];
     const q = normalizeLookup(searchTerm);
-    return patients.filter((p) => {
-      const mrnMatch = normalizeLookup(p.mrn).includes(q);
-      const cnicMatch = normalizeLookup(p.nationalId).includes(q);
+    return patients.filter((patient) => {
+      const mrnMatch = normalizeLookup(patient.mrn) === q;
+      const cnicMatch = normalizeLookup(patient.nationalId) === q;
       if (searchField === 'MRN') return mrnMatch;
       if (searchField === 'CNIC') return cnicMatch;
       return mrnMatch || cnicMatch;
     });
   }, [patients, searchTerm, searchField]);
+
+  useEffect(() => {
+    const value = searchTerm.trim();
+    if (!value) {
+      setAuthoritativeMatchId(null);
+      setLookupState('IDLE');
+      setLookupError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setLookupState('LOADING');
+    setLookupError(null);
+    const timer = window.setTimeout(() => {
+      void lookupPatientByMpi(
+        value,
+        searchField === 'ALL' ? 'AUTO' : searchField
+      )
+        .then((match) => {
+          if (cancelled) return;
+          if (!match) {
+            setAuthoritativeMatchId(null);
+            setLookupState('NOT_FOUND');
+            return;
+          }
+          setAuthoritativeMatchId(match.patientId);
+          setLookupState('MATCHED');
+        })
+        .catch((error) => {
+          if (cancelled) return;
+          setAuthoritativeMatchId(null);
+          setLookupState('OFFLINE_FALLBACK');
+          setLookupError(
+            error instanceof Error
+              ? error.message
+              : 'Authoritative MPI lookup is unavailable.'
+          );
+        });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [searchTerm, searchField]);
+
+  const searchResults = useMemo(() => {
+    if (lookupState === 'MATCHED' && authoritativeMatchId) {
+      return patients.filter((patient) => patient.id === authoritativeMatchId);
+    }
+    if (lookupState === 'OFFLINE_FALLBACK') {
+      return localExactMatches;
+    }
+    return [];
+  }, [patients, authoritativeMatchId, localExactMatches, lookupState]);
+
+  const registrationSeed = useMemo<Partial<PatientDemographics>>(
+    () =>
+      searchField === 'CNIC' && searchTerm.trim()
+        ? { nationalId: searchTerm.trim() }
+        : {},
+    [searchField, searchTerm]
+  );
 
   // Duplicate review is identity-based: exact MRN or exact CNIC.
   const mpiDuplicateMatches = useMemo((): MpiMatchResult[] => {
@@ -117,7 +185,7 @@ export function OpdPatientSearchMpi({
               Scan Barcode / QR
             </button>
             <button
-              onClick={() => onInitiateNewRegistration({ fullName: searchTerm })}
+              onClick={() => onInitiateNewRegistration(registrationSeed)}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
             >
               <PlusCircle className="w-4 h-4" />
@@ -148,6 +216,23 @@ export function OpdPatientSearchMpi({
             <option value="MRN">Institutional MRN</option>
             <option value="CNIC">National ID / CNIC</option>
           </select>
+        <div className="flex items-center justify-between text-[11px]">
+          <span className="font-semibold text-slate-500">
+            {lookupState === 'LOADING'
+              ? 'Checking authoritative MPI…'
+              : lookupState === 'MATCHED'
+                ? 'Authoritative MPI match found'
+                : lookupState === 'NOT_FOUND'
+                  ? 'No authoritative MRN/CNIC match'
+                  : lookupState === 'OFFLINE_FALLBACK'
+                    ? 'Authoritative lookup unavailable — exact local edge match only'
+                    : 'Enter an MRN or CNIC to search'}
+          </span>
+          {lookupError && (
+            <span className="max-w-md truncate text-amber-700" title={lookupError}>
+              {lookupError}
+            </span>
+          )}
         </div>
       </div>
 
@@ -221,9 +306,15 @@ export function OpdPatientSearchMpi({
         {searchResults.length === 0 ? (
           <div className="py-12 text-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl space-y-3">
             <Users className="w-8 h-8 text-slate-400 mx-auto" />
-            <p className="text-xs font-bold text-slate-500">No patient records found matching &quot;{searchTerm}&quot;</p>
+            <p className="text-xs font-bold text-slate-500">
+              {lookupState === 'LOADING'
+                ? 'Checking the authoritative MPI…'
+                : searchTerm.trim()
+                  ? `No patient record found for ${searchField === 'ALL' ? 'this MRN/CNIC' : searchField}.`
+                  : 'Enter an MRN or CNIC to search.'}
+            </p>
             <button
-              onClick={() => onInitiateNewRegistration({ fullName: searchTerm })}
+              onClick={() => onInitiateNewRegistration(registrationSeed)}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
             >
               <PlusCircle className="w-4 h-4" />

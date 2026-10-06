@@ -11,7 +11,7 @@ import {
   RefreshCw,
   ShieldCheck,
 } from 'lucide-react';
-import type { Invoice, InvoicePaymentStatus } from '@/types/billing';
+import type { InvoicePaymentStatus } from '@/types/billing';
 import { hydrateEdgeSnapshot } from '@/lib/offline/hydration';
 import {
   buildBillingInvoiceReadModel,
@@ -265,7 +265,7 @@ export default function InvoicesDirectoryPage({ params }: PageProps) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {filteredInvoices.map((invoice: Invoice) => (
+                {filteredInvoices.map((invoice) => (
                   <tr key={invoice.id}>
                     <td className="px-4 py-3">
                       <div className="font-mono font-bold text-blue-600">

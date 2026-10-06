@@ -11,8 +11,13 @@ if (!baseURL) {
 }
 
 const parsed = new URL(baseURL);
-if (!['https:', 'http:'].includes(parsed.protocol)) {
-  throw new Error('GHIMS_STAGING_BASE_URL_INVALID');
+if (
+  parsed.protocol !== 'https:' ||
+  ['localhost', '127.0.0.1', '0.0.0.0'].includes(parsed.hostname)
+) {
+  throw new Error(
+    'GHIMS_STAGING_BASE_URL_INVALID: deployed OPD qualification requires a remote HTTPS STAGING endpoint.'
+  );
 }
 
 export default defineConfig({

@@ -3,6 +3,20 @@ import type { BaseCommand } from '@/lib/backend/types';
 
 const nonEmpty = z.string().trim().min(1);
 
+const diseaseIntakeAnswerValue = z.union([
+  z.string().max(4000),
+  z.number().finite().min(-1000000).max(1000000),
+  z.boolean(),
+  z.array(z.string().max(1000)).max(100),
+  z.null(),
+]);
+
+const diseaseIntakeAnswerMap = z
+  .record(z.string().min(1).max(200), diseaseIntakeAnswerValue)
+  .refine((value) => Object.keys(value).length <= 500, {
+    message: 'Disease intake answer maps are limited to 500 fields.',
+  });
+
 const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>> = {
   // --------------------------------------------------------------------------
   // DRP-1: Clinical / identity / telehealth command perimeter.
@@ -291,8 +305,8 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       templateName: nonEmpty.max(500),
       templateVersion: z.string().trim().min(1).max(100).optional(),
       clinicalGuidelines: nonEmpty.max(2000),
-      guidedAnswers: z.record(z.string(), z.unknown()),
-      specialtyHistory: z.record(z.string(), z.unknown()),
+      guidedAnswers: diseaseIntakeAnswerMap,
+      specialtyHistory: diseaseIntakeAnswerMap,
       selectedTreeNodeIds: z.array(nonEmpty.max(200)).max(500),
       observedRiskScore: z.number().finite().nonnegative().max(100000),
       observedRiskSeverity: z.enum(['LOW','MODERATE','HIGH','CRITICAL']),

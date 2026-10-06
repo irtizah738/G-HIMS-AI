@@ -68,6 +68,11 @@ describe('Clinical identity and specialist workflow rework', () => {
     expect(route).toContain('sourceLimitedBriefSchema');
     expect(route).toContain('z.literal(true)');
     expect(route).toContain('.strict()');
+    const clientRules = await source('lib/clinical/client-clinical-rules.ts');
+    expect(clientRules).toContain('No diagnosis or treatment recommendation has been generated.');
+    expect(clientRules).not.toContain('differentialDiagnoses');
+    expect(clientRules).not.toContain('statOrders');
+    expect(clientRules).not.toContain('IV Heparin');
     expect(intake).not.toContain('id="tab-mode-customize"');
     expect(intake).not.toContain('id="tab-mode-localization"');
   });

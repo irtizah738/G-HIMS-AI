@@ -15,6 +15,8 @@ import { useAuth } from '@/lib/auth/auth-context';
 import { useHospital } from '@/lib/context/hospital-context';
 import { useRBAC } from '@/lib/auth/rbac-context';
 import {
+  acceptClinicalConsultation,
+  acceptClinicalHandoff,
   acknowledgeClinicalOpenItem,
   loadConsultantWorklist,
 } from '@/lib/clinical/intelligence/consultant-worklist-client';
@@ -93,6 +95,39 @@ export function ConsultantCommandCenter() {
         caught instanceof Error
           ? caught.message
           : 'Attention item could not be acknowledged.'
+      );
+    } finally {
+      setActingItemId(null);
+    }
+  };
+
+  const acceptCoordinationItem = async (item: ConsultantWorklistItem) => {
+    if (!tenantId || !item.encounterId || item.status !== 'OPEN') return;
+    const sourceId = item.sourceRefs[0];
+    if (!sourceId || !['CONSULTATION', 'HANDOFF'].includes(item.category)) return;
+
+    setActingItemId(item.openItemId);
+    setError(null);
+    try {
+      if (item.category === 'CONSULTATION') {
+        await acceptClinicalConsultation(tenantId, {
+          patientId: item.patientId,
+          encounterId: item.encounterId,
+          consultationId: sourceId,
+        });
+      } else {
+        await acceptClinicalHandoff(tenantId, {
+          patientId: item.patientId,
+          encounterId: item.encounterId,
+          handoffId: sourceId,
+        });
+      }
+      await load();
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : 'Clinical coordination item could not be accepted.'
       );
     } finally {
       setActingItemId(null);
@@ -257,6 +292,23 @@ export function ConsultantCommandCenter() {
                       >
                         Open Patient 360
                       </button>
+                      {item.status === 'OPEN' &&
+                        item.encounterId &&
+                        ['CONSULTATION', 'HANDOFF'].includes(item.category) &&
+                        Boolean(item.sourceRefs[0]) && (
+                          <button
+                            type="button"
+                            onClick={() => void acceptCoordinationItem(item)}
+                            disabled={actingItemId === item.openItemId}
+                            className="rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-800 disabled:opacity-50"
+                          >
+                            {actingItemId === item.openItemId
+                              ? 'Accepting…'
+                              : item.category === 'CONSULTATION'
+                                ? 'Accept consult'
+                                : 'Accept handoff'}
+                          </button>
+                        )}
                       {item.status === 'OPEN' && item.encounterId && (
                         <button
                           type="button"

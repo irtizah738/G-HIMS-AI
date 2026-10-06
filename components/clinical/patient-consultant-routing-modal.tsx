@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Stethoscope,
   UserCheck,
@@ -25,6 +25,14 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { useHospital } from '@/lib/context/hospital-context';
+import { useAuth } from '@/lib/auth/auth-context';
+import {
+  loadConsultantDirectory,
+  requestClinicalConsultation,
+} from '@/lib/clinical/intelligence/consultant-worklist-client';
+import type { EligibleConsultant } from '@/lib/clinical/intelligence/consultant-directory-service';
+
+const IS_DEMO_RUNTIME = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
 
 export interface ConsultantDoctor {
   id: string;
@@ -33,7 +41,12 @@ export interface ConsultantDoctor {
   department: string;
   subSpecialty: string;
   badge: string;
-  status: 'ON_DUTY_AVAILABLE' | 'IN_PROCEDURE' | 'ON_CALL_PAGER';
+  status:
+    | 'ON_DUTY_AVAILABLE'
+    | 'IN_PROCEDURE'
+    | 'ON_CALL_PAGER'
+    | 'OFF_DUTY'
+    | 'AVAILABILITY_UNKNOWN';
   currentQueueCount: number;
   assignedBayOrRoom: string;
   contactExtension: string;
@@ -42,7 +55,7 @@ export interface ConsultantDoctor {
   matchScore?: number;
 }
 
-export const CONSULTANT_REGISTRY: ConsultantDoctor[] = [
+export const DEMO_CONSULTANT_REGISTRY: ConsultantDoctor[] = [
   {
     id: 'doc-card-01',
     name: 'Dr. Sarah Jenkins, MD, FACC',
@@ -259,6 +272,7 @@ interface PatientConsultantRoutingModalProps {
   isOpen: boolean;
   onClose: () => void;
   patientId?: string;
+  encounterId?: string;
   patientName?: string;
   mrn?: string;
   chiefComplaint?: string;
@@ -271,6 +285,7 @@ export function PatientConsultantRoutingModal({
   isOpen,
   onClose,
   patientId,
+  encounterId,
   patientName = 'Elena Rostova',
   mrn = 'GH-2026-9812',
   chiefComplaint = 'Acute retrosternal chest pain radiating to jaw, diaphoresis',
@@ -278,13 +293,23 @@ export function PatientConsultantRoutingModal({
   currentAttending = 'Triage Officer / Emergency MO',
   onRoutedSuccess,
 }: PatientConsultantRoutingModalProps) {
-  const { patients, addClinicalNote } = useHospital();
+  const { addClinicalNote } = useHospital();
+  const auth = useAuth();
+  const tenantId = String(auth.activeTenant?.tenantId || auth.user?.tenantId || '').trim();
 
+  const [consultants, setConsultants] = useState<ConsultantDoctor[]>(() =>
+    IS_DEMO_RUNTIME ? DEMO_CONSULTANT_REGISTRY : []
+  );
+  const [directoryError, setDirectoryError] = useState<string | null>(null);
   const [selectedDepartment, setSelectedDepartment] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedDoctorId, setSelectedDoctorId] = useState<string>('doc-card-01');
+  const [selectedDoctorId, setSelectedDoctorId] = useState<string>(() =>
+    IS_DEMO_RUNTIME ? 'doc-card-01' : ''
+  );
   const [routingUrgency, setRoutingUrgency] = useState<'STAT' | 'URGENT' | 'PRIORITY' | 'ROUTINE'>('STAT');
-  const [assignedRoom, setAssignedRoom] = useState<string>('Cath Lab Suite 01 (Direct Stage)');
+  const [assignedRoom, setAssignedRoom] = useState<string>(() =>
+    IS_DEMO_RUNTIME ? 'Cath Lab Suite 01 (Direct Stage)' : ''
+  );
   const [clinicalHandoffNote, setClinicalHandoffNote] = useState<string>(
     'Patient presenting with crushing retrosternal pain. 12-lead ECG telemetry demonstrates acute anterolateral ST-elevation. Code STEMI activated. Expedited specialist bedside evaluation requested.'
   );
@@ -301,6 +326,59 @@ export function PatientConsultantRoutingModal({
 
   const [isDispatching, setIsDispatching] = useState<boolean>(false);
   const [dispatchedConfirmation, setDispatchedConfirmation] = useState<any | null>(null);
+
+  useEffect(() => {
+    if (!isOpen || IS_DEMO_RUNTIME) return;
+    if (!tenantId) {
+      setConsultants([]);
+      setDirectoryError('No active tenant context is available for consultant routing.');
+      return;
+    }
+
+    let cancelled = false;
+    setDirectoryError(null);
+    void loadConsultantDirectory(tenantId)
+      .then((directory) => {
+        if (cancelled) return;
+        const mapped: ConsultantDoctor[] = directory.map((consultant: EligibleConsultant) => ({
+          id: consultant.consultantId,
+          name: consultant.displayName,
+          title: consultant.positionTitle,
+          department: consultant.departmentName || consultant.departmentId,
+          subSpecialty:
+            [consultant.specialty, ...consultant.subSpecialties].filter(Boolean).join(' • ') ||
+            consultant.departmentName,
+          badge: consultant.credentialVerified ? 'Credential Verified' : 'Credential Required',
+          status:
+            consultant.availability === 'ON_DUTY'
+              ? 'ON_DUTY_AVAILABLE'
+              : consultant.availability === 'ON_CALL'
+                ? 'ON_CALL_PAGER'
+                : consultant.availability === 'OFF_DUTY'
+                  ? 'OFF_DUTY'
+                  : 'AVAILABILITY_UNKNOWN',
+          currentQueueCount: -1,
+          assignedBayOrRoom: consultant.departmentName || consultant.departmentId,
+          contactExtension: '',
+          qualifications: 'Verified HCM credential and active clinical privilege',
+          avgReviewTimeMinutes: 0,
+        }));
+        setConsultants(mapped);
+        setSelectedDoctorId((current) =>
+          mapped.some((item) => item.id === current) ? current : mapped[0]?.id || ''
+        );
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setConsultants([]);
+        setDirectoryError(
+          error instanceof Error ? error.message : 'Consultant directory could not be loaded.'
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, tenantId]);
 
   if (!isOpen) return null;
 
@@ -377,7 +455,7 @@ export function PatientConsultantRoutingModal({
 
   const aiMatchId = getAiRecommendedDoctorId();
 
-  const filteredDoctors = CONSULTANT_REGISTRY.filter((doc) => {
+  const filteredDoctors = consultants.filter((doc) => {
     let matchesDept = false;
     if (selectedDepartment === 'ALL') {
       matchesDept = true;
@@ -432,44 +510,79 @@ export function PatientConsultantRoutingModal({
     return matchesDept && matchesSearch;
   });
 
-  const selectedDoctor = CONSULTANT_REGISTRY.find((d) => d.id === selectedDoctorId) || CONSULTANT_REGISTRY[0];
+  const selectedDoctor = consultants.find((d) => d.id === selectedDoctorId) || consultants[0];
 
-  const handleDispatchConsultant = () => {
+  const handleDispatchConsultant = async () => {
+    if (!selectedDoctor) {
+      setDirectoryError('Select an eligible consultant before routing.');
+      return;
+    }
     setIsDispatching(true);
+    setDirectoryError(null);
 
-    setTimeout(() => {
-      const routingPayload = {
-        routedAt: new Date().toISOString(),
-        patientId,
-        patientName,
-        mrn,
-        consultant: selectedDoctor,
-        urgency: routingUrgency,
-        assignedRoom,
-        handoffNote: clinicalHandoffNote,
-        slaMinutes: routingUrgency === 'STAT' ? 10 : routingUrgency === 'URGENT' ? 30 : routingUrgency === 'PRIORITY' ? 60 : 120,
-        queuedDiagnostics: Object.entries(preOrders)
-          .filter(([_, val]) => val)
-          .map(([key]) => key),
-      };
+    const routingPayload = {
+      routedAt: new Date().toISOString(),
+      patientId,
+      patientName,
+      mrn,
+      consultant: selectedDoctor,
+      urgency: routingUrgency,
+      assignedRoom,
+      handoffNote: clinicalHandoffNote,
+      slaMinutes:
+        routingUrgency === 'STAT'
+          ? 15
+          : routingUrgency === 'URGENT' || routingUrgency === 'PRIORITY'
+            ? 240
+            : undefined,
+      queuedDiagnostics: Object.entries(preOrders)
+        .filter(([_, val]) => val)
+        .map(([key]) => key),
+    };
 
-      // Record Clinical Audit Note if patientId is present
-      if (patientId) {
-        addClinicalNote(patientId, {
-          author: 'Triage & Specialist Dispatch Engine',
-          role: 'Automated Routing Dispatcher',
-          category: 'Consultation',
-          content: `SPECIALIST CONSULTATION ROUTED:\n- Consultant: ${selectedDoctor.name} (${selectedDoctor.title})\n- Department: ${selectedDoctor.department}\n- Urgency: ${routingUrgency} (Target SLA: ${routingPayload.slaMinutes}m)\n- Destination Bay: ${assignedRoom}\n- Handoff Note: ${clinicalHandoffNote}`,
+    try {
+      if (IS_DEMO_RUNTIME) {
+        if (patientId) {
+          addClinicalNote(patientId, {
+            author: 'DEMO Specialist Routing',
+            role: 'DEMO_ONLY',
+            category: 'Consultation',
+            content: `DEMO CONSULTATION ROUTED: ${selectedDoctor.name} — ${clinicalHandoffNote}`,
+          });
+        }
+      } else {
+        if (!tenantId || !patientId || !encounterId) {
+          throw new Error(
+            'Authoritative consultant routing requires tenant, patient and encounter identity.'
+          );
+        }
+        await requestClinicalConsultation(tenantId, {
+          patientId,
+          encounterId,
+          requestedSpecialty: selectedDoctor.subSpecialty || selectedDoctor.department,
+          requestedConsultantId: selectedDoctor.id,
+          clinicalQuestion:
+            clinicalHandoffNote.trim() ||
+            `${chiefComplaint}. Specialist review requested from ${selectedDoctor.department}.`,
+          priority:
+            routingUrgency === 'STAT'
+              ? 'STAT'
+              : routingUrgency === 'URGENT' || routingUrgency === 'PRIORITY'
+                ? 'URGENT'
+                : 'ROUTINE',
+          sourceRefs: [],
         });
       }
 
       setDispatchedConfirmation(routingPayload);
+      if (onRoutedSuccess) onRoutedSuccess(selectedDoctor, routingPayload);
+    } catch (error) {
+      setDirectoryError(
+        error instanceof Error ? error.message : 'Specialist consultation request failed.'
+      );
+    } finally {
       setIsDispatching(false);
-
-      if (onRoutedSuccess) {
-        onRoutedSuccess(selectedDoctor, routingPayload);
-      }
-    }, 600);
+    }
   };
 
   return (
@@ -521,11 +634,24 @@ export function PatientConsultantRoutingModal({
               <span className="font-medium text-slate-700 max-w-xs truncate block">&ldquo;{chiefComplaint}&rdquo;</span>
             </div>
           </div>
-          <div className="flex items-center gap-1.5 bg-indigo-100 text-indigo-900 px-3 py-1 rounded-lg font-bold text-[11px]">
-            <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-            AI Auto-Match Active
-          </div>
+          {IS_DEMO_RUNTIME ? (
+            <div className="flex items-center gap-1.5 bg-indigo-100 text-indigo-900 px-3 py-1 rounded-lg font-bold text-[11px]">
+              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+              DEMO Auto-Match
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 bg-emerald-100 text-emerald-900 px-3 py-1 rounded-lg font-bold text-[11px]">
+              <ShieldAlert className="w-3.5 h-3.5 text-emerald-700" />
+              HCM Credentialed Directory
+            </div>
+          )}
         </div>
+
+        {directoryError && (
+          <div className="mx-6 mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-800">
+            {directoryError}
+          </div>
+        )}
 
         {/* Modal Content Body */}
         {dispatchedConfirmation ? (
@@ -561,10 +687,12 @@ export function PatientConsultantRoutingModal({
                   {dispatchedConfirmation.urgency} ({dispatchedConfirmation.slaMinutes}m Response SLA)
                 </span>
               </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-500 font-semibold">Pager / Extension:</span>
-                <span className="font-mono font-bold text-emerald-700">{dispatchedConfirmation.consultant.contactExtension}</span>
-              </div>
+              {dispatchedConfirmation.consultant.contactExtension && (
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 font-semibold">Pager / Extension:</span>
+                  <span className="font-mono font-bold text-emerald-700">{dispatchedConfirmation.consultant.contactExtension}</span>
+                </div>
+              )}
             </div>
 
             <div className="pt-4 flex justify-center gap-3">
@@ -645,7 +773,7 @@ export function PatientConsultantRoutingModal({
                         <div className="space-y-1 flex-1">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span className="font-extrabold text-xs text-slate-900">{doc.name}</span>
-                            {isAiMatch && (
+                            {IS_DEMO_RUNTIME && isAiMatch && (
                               <span className="px-2 py-0.2 rounded-full text-[9px] font-black bg-emerald-600 text-white animate-pulse flex items-center gap-0.5">
                                 <Sparkles className="w-2.5 h-2.5" /> 98% BEST MATCH
                               </span>
@@ -663,10 +791,12 @@ export function PatientConsultantRoutingModal({
                               <Building2 className="w-3 h-3 text-slate-400" />
                               {doc.assignedBayOrRoom}
                             </span>
-                            <span className="flex items-center gap-1 font-mono text-emerald-700 font-bold">
-                              <PhoneCall className="w-3 h-3 text-emerald-600" />
-                              {doc.contactExtension}
-                            </span>
+                            {doc.contactExtension && (
+                              <span className="flex items-center gap-1 font-mono text-emerald-700 font-bold">
+                                <PhoneCall className="w-3 h-3 text-emerald-600" />
+                                {doc.contactExtension}
+                              </span>
+                            )}
                           </div>
                         </div>
 
@@ -683,12 +813,16 @@ export function PatientConsultantRoutingModal({
                           >
                             {doc.status.replace(/_/g, ' ')}
                           </span>
-                          <span className="text-[10px] text-slate-500 block mt-1">
-                            Queue: <strong className="text-slate-900">{doc.currentQueueCount} waiting</strong>
-                          </span>
-                          <span className="text-[9px] text-slate-400 block font-mono">
-                            ~{doc.avgReviewTimeMinutes}m review SLA
-                          </span>
+                          {doc.currentQueueCount >= 0 && (
+                            <span className="text-[10px] text-slate-500 block mt-1">
+                              Queue: <strong className="text-slate-900">{doc.currentQueueCount} waiting</strong>
+                            </span>
+                          )}
+                          {doc.avgReviewTimeMinutes > 0 && (
+                            <span className="text-[9px] text-slate-400 block font-mono">
+                              ~{doc.avgReviewTimeMinutes}m demo review estimate
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -844,16 +978,16 @@ export function PatientConsultantRoutingModal({
                 </button>
                 <button
                   type="button"
-                  disabled={isDispatching}
+                  disabled={isDispatching || !selectedDoctor}
                   onClick={handleDispatchConsultant}
                   className="w-2/3 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 shadow-md transition-all cursor-pointer active:scale-95 disabled:opacity-50"
                 >
                   {isDispatching ? (
-                    <span>Routing Consultant...</span>
+                    <span>Requesting consultation...</span>
                   ) : (
                     <>
                       <Send className="w-3.5 h-3.5" />
-                      <span>Dispatch to {selectedDoctor.name.split(',')[0]}</span>
+                      <span>{selectedDoctor ? `Request consultation from ${selectedDoctor.name.split(',')[0]}` : 'Select an eligible consultant'}</span>
                     </>
                   )}
                 </button>

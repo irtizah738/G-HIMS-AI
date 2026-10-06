@@ -55,7 +55,9 @@ describe('G-HIMS clinical workflow architecture contract', () => {
       'app/api/clinical/patient360/[patientId]/route.ts'
     );
 
-    expect(route).toContain('Patient360ProjectionService.readClinicalView');
+    expect(route).toContain(
+      'Patient360ProjectionService.readOrRebuildClinicalView'
+    );
     expect(route).toContain('selectedCareContext');
     expect(route).toContain('DischargeReadinessService.getProjection');
     expect(route).toContain('ClinicalDeteriorationService.getProjection');

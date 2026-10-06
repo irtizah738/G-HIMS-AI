@@ -160,6 +160,21 @@ describe('OPD-RP13 authoritative appointments and waitlist', () => {
     expect(encounter).toContain('sourceAppointment._serverVersion');
   });
 
+  test('checked-in appointments expose deterministic consultation billing recovery', async () => {
+    const ui = await source('components/opd/OpdAppointmentsWaitlist.tsx');
+    const workspace = await source('components/opd/OpdMasterWorkspace.tsx');
+
+    expect(ui).toContain('Resume Billing');
+    expect(ui).toContain('onResumeBillingAppointment');
+    expect(workspace).toContain('handleResumeAppointmentBilling');
+    expect(workspace).toContain(
+      '`opd-consultation-invoice:${encounterId}`'
+    );
+    expect(workspace).toContain(
+      "'OPD_CONSULTATION_INVOICE_ALREADY_EXISTS'"
+    );
+  });
+
   test('check-in and no-show windows are enforced using server time', async () => {
     const service = await source(
       'lib/backend/services/opd-appointment-domain-service.ts'

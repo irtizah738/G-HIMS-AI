@@ -530,21 +530,57 @@ export class TransactionManager {
       if (!canUseEphemeralPersistence()) {
         throw new Error('TRANSACTION_STORE_UNAVAILABLE: durable Firestore transaction store is required.');
       }
-      if (params.stateWrite) await params.stateWrite();
-      if(params.domainState!==undefined){
-        this.setEphemeralState(params.tenantId,params.aggregateType,params.aggregateId,params.domainState);
+      const primaryExisting = this.getEphemeralState(
+        params.tenantId,
+        params.aggregateType,
+        params.aggregateId
+      );
+      if (
+        params.expectedPrimaryServerVersion !== undefined &&
+        Number(primaryExisting?._serverVersion || 0) !==
+          params.expectedPrimaryServerVersion
+      ) {
+        throw new Error(
+          'DOMAIN_STATE_VERSION_CONFLICT: primary state changed during command execution.'
+        );
       }
-      for(const write of params.additionalStateWrites||[]){
-        const existing=this.getEphemeralState(params.tenantId,write.entityType,write.entityId);
-        if(
-          write.expectedServerVersion!==undefined &&
-          Number(existing?._serverVersion||0)!==write.expectedServerVersion
-        ){
-          throw new Error(
-            `DOMAIN_STATE_VERSION_CONFLICT: ${write.entityType}/${write.entityId} changed during command execution.`
+
+      const validatedAdditionalWrites = (params.additionalStateWrites || []).map(
+        (write) => {
+          const existing = this.getEphemeralState(
+            params.tenantId,
+            write.entityType,
+            write.entityId
           );
+          if (
+            write.expectedServerVersion !== undefined &&
+            Number(existing?._serverVersion || 0) !==
+              write.expectedServerVersion
+          ) {
+            throw new Error(
+              `DOMAIN_STATE_VERSION_CONFLICT: ${write.entityType}/${write.entityId} changed during command execution.`
+            );
+          }
+          return { write, existing };
         }
-        this.setEphemeralState(params.tenantId,write.entityType,write.entityId,write.domainState);
+      );
+
+      if (params.stateWrite) await params.stateWrite();
+      if (params.domainState !== undefined) {
+        this.setEphemeralState(
+          params.tenantId,
+          params.aggregateType,
+          params.aggregateId,
+          params.domainState
+        );
+      }
+      for (const { write } of validatedAdditionalWrites) {
+        this.setEphemeralState(
+          params.tenantId,
+          write.entityType,
+          write.entityId,
+          write.domainState
+        );
       }
       this.inMemoryEventStore.push(event);
       this.inMemoryAuditStore.push(audit);
@@ -694,7 +730,43 @@ export class TransactionManager {
         current[target.key]=value;
       }
       const prepared = params.prepare(current);
-      if(prepared.domainState!==undefined){
+
+      const primaryExisting = this.getEphemeralState(
+        params.tenantId,
+        params.aggregateType,
+        params.aggregateId
+      );
+      if (
+        params.expectedPrimaryServerVersion !== undefined &&
+        Number(primaryExisting?._serverVersion || 0) !==
+          params.expectedPrimaryServerVersion
+      ) {
+        throw new Error(
+          'DOMAIN_STATE_VERSION_CONFLICT: primary state changed during command execution.'
+        );
+      }
+
+      const validatedAdditionalWrites = (
+        prepared.additionalStateWrites || []
+      ).map((write) => {
+        const existing = this.getEphemeralState(
+          params.tenantId,
+          write.entityType,
+          write.entityId
+        );
+        if (
+          write.expectedServerVersion !== undefined &&
+          Number(existing?._serverVersion || 0) !==
+            write.expectedServerVersion
+        ) {
+          throw new Error(
+            `DOMAIN_STATE_VERSION_CONFLICT: ${write.entityType}/${write.entityId} changed during command execution.`
+          );
+        }
+        return { write, existing };
+      });
+
+      if (prepared.domainState !== undefined) {
         this.setEphemeralState(
           params.tenantId,
           params.aggregateType,
@@ -702,17 +774,13 @@ export class TransactionManager {
           prepared.domainState
         );
       }
-      for(const write of prepared.additionalStateWrites||[]){
-        const existing=this.getEphemeralState(params.tenantId,write.entityType,write.entityId);
-        if(
-          write.expectedServerVersion!==undefined &&
-          Number(existing?._serverVersion||0)!==write.expectedServerVersion
-        ){
-          throw new Error(
-            `DOMAIN_STATE_VERSION_CONFLICT: ${write.entityType}/${write.entityId} changed during command execution.`
-          );
-        }
-        this.setEphemeralState(params.tenantId,write.entityType,write.entityId,write.domainState);
+      for (const { write } of validatedAdditionalWrites) {
+        this.setEphemeralState(
+          params.tenantId,
+          write.entityType,
+          write.entityId,
+          write.domainState
+        );
       }
       const { event, audit, outbox } = this.buildRecords({
         ...params,

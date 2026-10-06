@@ -18,7 +18,9 @@ export interface ClinicalConsultationRequest {
   requestedConsultantId?: string;
   assignedConsultantId?: string;
   clinicalQuestion: string;
-  priority: 'ROUTINE' | 'URGENT' | 'STAT';
+  priority: 'ROUTINE' | 'PRIORITY' | 'URGENT' | 'STAT';
+  responseSlaMinutes?: number;
+  responseDueAt?: number;
   status: ClinicalConsultationStatus;
   sourceRefs: string[];
   requestedBy: string;

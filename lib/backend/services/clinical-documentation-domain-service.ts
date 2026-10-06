@@ -948,9 +948,8 @@ export class ClinicalDocumentationDomainService {
       const candidate = raw as Record<string, unknown>;
       const code = String(candidate.code || '').trim();
       const description = String(candidate.description || '').trim();
-      const fee = Number(candidate.fee);
 
-      if (!code || !description || !Number.isFinite(fee) || fee <= 0) return [];
+      if (!code || !description) return [];
 
       const findingId = `ri_${evidenceId}_${index}`;
       return [{
@@ -963,8 +962,6 @@ export class ClinicalDocumentationDomainService {
         documentedItem: description,
         category: 'Procedure' as const,
         suggestedCode: code,
-        estimatedRecoverableAmountMinorUnits: Math.round(fee * 100),
-        currency: 'USD',
         status: 'PENDING_REVIEW' as const,
         evidenceSnippet: payload.content.slice(0, 240),
         createdAt: signedAt,

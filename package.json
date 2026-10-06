@@ -31,6 +31,8 @@
     "ops:bootstrap-admin": "bun scripts/ops/bootstrap-admin.ts",
     "ops:sync-users": "bun scripts/ops/sync-auth-users.ts",
     "demo:provision-identities": "bun scripts/demo/provision-demo-identities.ts",
+    "demo:clinical-intelligence": "bun scripts/demo/provision-clinical-intelligence-demo.ts",
+    "test:ci-demo": "bun test tests/ci-flagship-demo.test.ts",
     "validate:p5a": "bun run typecheck && bun run lint && bun run test:p5a && bun run test:unit && bun run test:security && bun run test:rules && bun run test:p5a:emulator && bun run build && bun run test:e2e",
     "ops:staging-smoke": "bun scripts/ops/staging-smoke.ts",
     "test:p5b": "bun test tests/p5b-staging-verification.test.ts",

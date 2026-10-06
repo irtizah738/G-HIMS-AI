@@ -12,6 +12,7 @@ describe('OPD-RP13 authoritative appointments and waitlist', () => {
     const service = await source(
       'lib/backend/services/opd-appointment-domain-service.ts'
     );
+    const workspace = await source('components/opd/OpdMasterWorkspace.tsx');
 
     expect(workspace).toContain(
       "requireOnlineOpdAuthority('appointment booking')"

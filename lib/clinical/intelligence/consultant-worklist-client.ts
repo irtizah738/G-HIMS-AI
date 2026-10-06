@@ -110,6 +110,22 @@ export function requestClinicalConsultation(
   );
 }
 
+export function acknowledgeClinicalConsultation(
+  tenantId: string,
+  input: {
+    patientId: string;
+    encounterId: string;
+    consultationId: string;
+    note?: string;
+  }
+) {
+  return executeConsultantCommand(
+    tenantId,
+    'AcknowledgeConsultationCommand',
+    input
+  );
+}
+
 export function acceptClinicalConsultation(
   tenantId: string,
   input: {
@@ -160,6 +176,11 @@ export function createClinicalHandoff(
     medicationConcerns?: string[];
     unresolvedItems?: string[];
     expectedActions?: string[];
+    sourceRefs?: string[];
+    patient360Revision: number;
+    patient360SourceCheckpoint: string;
+    sourceArtifactId?: string;
+    sourceArtifactType?: 'DISEASE_INTAKE' | 'CLINICAL_DOCUMENT' | 'CONSULTATION' | 'OTHER';
   }
 ) {
   return executeConsultantCommand(

@@ -271,7 +271,7 @@ export function OpdDashboardKpis({
           <span className="mt-1 block text-[10px] font-medium text-slate-400">
             {avgWaitMinutes === null
               ? 'No completed wait samples'
-              : `Observed avg wait: ${avgWaitMinutes.toFixed(1)} min (${completedWaitSamples.length} sample${completedWaitSamples.length === 1 ? '' : 's'})`}
+              : `Observed token→service: ${avgWaitMinutes.toFixed(1)} min (${completedWaitSamples.length} sample${completedWaitSamples.length === 1 ? '' : 's'})`}
           </span>
         </div>
 

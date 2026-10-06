@@ -65,6 +65,9 @@ interface OpdAppointmentsWaitlistProps {
     bookingChannel: 'FRONT_DESK';
   }) => Promise<void>;
   onCheckInAppointment: (appointment: AppointmentRecord) => Promise<void>;
+  onResumeBillingAppointment: (
+    appointment: AppointmentRecord
+  ) => Promise<void>;
   onCancelAppointment: (appointmentId: string, reason: string) => Promise<void>;
   onRescheduleAppointment: (input: {
     appointmentId: string;
@@ -146,6 +149,7 @@ export function OpdAppointmentsWaitlist({
   patients,
   onBookAppointment,
   onCheckInAppointment,
+  onResumeBillingAppointment,
   onCancelAppointment,
   onRescheduleAppointment,
   onMarkNoShowAppointment,
@@ -701,6 +705,21 @@ export function OpdAppointmentsWaitlist({
                             >
                               <CheckCircle2 className="w-3 h-3" />
                               Check-In
+                            </button>
+                          )}
+                          {appt.status === 'CHECKED_IN' && appt.encounterId && (
+                            <button
+                              disabled={!isOnline || busyAction !== null}
+                              onClick={() =>
+                                void runAction(
+                                  'resume-billing:' + appt.id,
+                                  () => onResumeBillingAppointment(appt)
+                                )
+                              }
+                              className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold cursor-pointer disabled:opacity-50"
+                              title="Retry the deterministic consultation invoice for this checked-in encounter"
+                            >
+                              Resume Billing
                             </button>
                           )}
                           {['CONFIRMED', 'RESCHEDULED'].includes(appt.status) && (

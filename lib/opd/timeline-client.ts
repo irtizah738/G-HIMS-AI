@@ -13,6 +13,7 @@ export interface AuthoritativeOpdTimelineResponse {
     eventCount: number;
     linkedAuditCount: number;
     unlinkedEventCount: number;
+    ambiguousAuditCount: number;
     truncated: boolean;
     fullyLinked: boolean;
   };

@@ -218,6 +218,9 @@ describe('OPD-RP15 offline workflow closure', () => {
     expect(encounter).toContain('createdAt: now');
     expect(encounter).toContain("'INTERNAL_REFERRAL_REQUIRED'");
     expect(encounter).toContain("'EXTERNAL_REFERRAL_REQUIRED'");
+    expect(encounter).toContain("'INTERNAL_REFERRAL_NOT_ALLOWED'");
+    expect(encounter).toContain("'EXTERNAL_REFERRAL_NOT_ALLOWED'");
+    expect(encounter).toContain('referralId: referralId || undefined');
 
     expect(tx).toContain("OPD_REFERRAL: 'opdReferrals'");
     expect(rules).toContain('match /opdReferrals/{referralId}');

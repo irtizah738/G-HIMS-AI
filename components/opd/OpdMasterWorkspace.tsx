@@ -1324,38 +1324,40 @@ export function OpdMasterWorkspace() {
       },
       {
         idempotencyKey: `opd-diagnostic:${activeEncounter.id}:${order.id}`,
-        offlineQueue: {
-          enabled: true,
-          collection: 'orders',
-          resourceId: order.id,
-          action: 'CREATE',
-          dependsOnMutationIds: offlineWorkflowTail.current.get(activeEncounter.id)
-            ? [offlineWorkflowTail.current.get(activeEncounter.id)!]
-            : undefined,
-          optimisticCache: true,
-          optimisticPayload: {
-            encounterId: activeEncounter.id,
-            patientId: activeEncounter.patientId,
-            orderType,
-            catalogCode: order.testCode || order.code || order.id,
-            orderName: order.testName,
-            clinicalIndication:
-              order.clinicalIndication ||
-              order.reasonForOrder ||
-              'Clinical evaluation',
-            priority:
-              requestedUrgency.includes('STAT')
-                ? 'STAT'
-                : requestedUrgency === 'URGENT'
-                  ? 'URGENT'
-                  : 'ROUTINE',
-            revenueLockStatus: 'PENDING_SERVER_REPLAY',
-            paymentStatus: 'LOCKED_PENDING_PAYMENT',
-            worklistStatus: 'OFFLINE_PENDING_SYNC',
-            status: 'ORDERED',
-            createdAt: order.orderedAt || Date.now(),
-          },
-        },
+        ...(requestedUrgency.includes('STAT')
+          ? {}
+          : {
+              offlineQueue: {
+                enabled: true,
+                collection: 'orders',
+                resourceId: order.id,
+                action: 'CREATE' as const,
+                dependsOnMutationIds: offlineWorkflowTail.current.get(
+                  activeEncounter.id
+                )
+                  ? [offlineWorkflowTail.current.get(activeEncounter.id)!]
+                  : undefined,
+                optimisticCache: true,
+                optimisticPayload: {
+                  encounterId: activeEncounter.id,
+                  patientId: activeEncounter.patientId,
+                  orderType,
+                  catalogCode: order.testCode || order.code || order.id,
+                  orderName: order.testName,
+                  clinicalIndication:
+                    order.clinicalIndication ||
+                    order.reasonForOrder ||
+                    'Clinical evaluation',
+                  priority:
+                    requestedUrgency === 'URGENT' ? 'URGENT' : 'ROUTINE',
+                  revenueLockStatus: 'PENDING_SERVER_REPLAY',
+                  paymentStatus: 'LOCKED_PENDING_PAYMENT',
+                  worklistStatus: 'OFFLINE_PENDING_SYNC',
+                  status: 'ORDERED',
+                  createdAt: order.orderedAt || Date.now(),
+                },
+              },
+            }),
       }
     );
 

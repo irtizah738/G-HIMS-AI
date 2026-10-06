@@ -777,8 +777,7 @@ export function OpdAppointmentsWaitlist({
                         </div>
                       </td>
                     </tr>
-                    );
-                  })}
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -881,7 +880,8 @@ export function OpdAppointmentsWaitlist({
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

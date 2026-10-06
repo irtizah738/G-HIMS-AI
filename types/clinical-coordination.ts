@@ -24,6 +24,10 @@ export interface ClinicalConsultationRequest {
   acknowledgementDueAt: number;
   acceptanceSlaMinutes: number;
   acceptanceDueAt: number;
+  /** @deprecated Use acknowledgementSlaMinutes. */
+  responseSlaMinutes?: number;
+  /** @deprecated Use acknowledgementDueAt. */
+  responseDueAt?: number;
   status: ClinicalConsultationStatus;
   sourceRefs: string[];
   requestedBy: string;

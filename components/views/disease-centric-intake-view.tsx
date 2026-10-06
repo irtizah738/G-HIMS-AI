@@ -343,19 +343,15 @@ export function DiseaseCentricIntakeView() {
                 Disease-Centric Clinical Intelligence
               </span>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 flex items-center gap-1.5">
-                <Globe className="w-3.5 h-3.5" />
-                {currentLocalization.flagEmoji} {currentLocalization.name.split('(')[0]}
-              </span>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-500/20 text-purple-300 border border-purple-400/30 flex items-center gap-1.5">
-                <Building2 className="w-3.5 h-3.5" />
-                {currentHospitalTier.name.split(' ')[0]} Facility
+                <ShieldCheck className="w-3.5 h-3.5" />
+                Source-limited • clinician reviewed
               </span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
               Disease-Centric Intake & Specialist Preparation Platform
             </h1>
             <p className="text-sm text-slate-300 font-normal leading-relaxed">
-              Event-driven longitudinal intake architecture with branching symptom trees, protocolized guided clinical questions, real-time hemodynamic risk signals, and instant AI specialist briefings.
+              Structured specialty intake that captures explicit findings, surfaces governed protocol signals, prepares a source-limited handoff, and routes the patient to an eligible specialist.
             </p>
           </div>
 
@@ -364,18 +360,18 @@ export function DiseaseCentricIntakeView() {
             <button
               id="btn-trigger-ai-optimize-top"
               onClick={handleRunAiOptimization}
-              disabled={aiLoading}
+              disabled={aiLoading || !selectedPatient}
               className="px-5 py-3 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold text-sm flex items-center gap-2 shadow-md hover:shadow-lg transition-all cursor-pointer active:scale-95 disabled:opacity-50"
             >
               {aiLoading ? (
                 <>
                   <RefreshCw className="w-4 h-4 animate-spin text-amber-300" />
-                  <span>Optimizing Intake Protocol...</span>
+                  <span>Preparing specialist brief...</span>
                 </>
               ) : (
                 <>
                   <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
-                  <span>AI Specialist Briefing</span>
+                  <span>Generate Specialist Brief</span>
                 </>
               )}
             </button>
@@ -464,9 +460,9 @@ export function DiseaseCentricIntakeView() {
               </span>
             </div>
             <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              <span>HR: <strong className="text-slate-800 dark:text-slate-200">{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.heartRate || 88}</strong> bpm</span>
-              <span>BP: <strong className="text-slate-800 dark:text-slate-200">{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.bloodPressure || '138/88'}</strong> mmHg</span>
-              <span>SpO2: <strong className="text-slate-800 dark:text-slate-200">{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.oxygenSaturation || 98}</strong>%</span>
+              <span>HR: <strong className="text-slate-800 dark:text-slate-200">{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.heartRate ?? '—'}</strong>{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.heartRate != null ? ' bpm' : ''}</span>
+              <span>BP: <strong className="text-slate-800 dark:text-slate-200">{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.bloodPressure || '—'}</strong></span>
+              <span>SpO2: <strong className="text-slate-800 dark:text-slate-200">{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.oxygenSaturation ?? '—'}</strong>{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.oxygenSaturation != null ? '%' : ''}</span>
             </div>
           </div>
         </div>
@@ -577,7 +573,7 @@ export function DiseaseCentricIntakeView() {
             }`}
           >
             <Sparkles className="w-4 h-4 text-amber-400" />
-            <span>AI Specialist Preparation Briefing</span>
+            <span>Source-Limited Specialist Brief</span>
             {aiResult && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />}
           </button>
 
@@ -608,15 +604,25 @@ export function DiseaseCentricIntakeView() {
           </button>
         </div>
 
-        {/* Action Button: Commit to EHR */}
+        {/* Explicit clinical actions: save first, route separately. */}
         <div className="flex items-center gap-2">
           <button
             id="btn-commit-longitudinal-ehr"
-            onClick={handleCommitToLongitudinalEhr}
-            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+            onClick={() => void handleCommitToLongitudinalEhr()}
+            disabled={!selectedPatient}
+            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <FileCheck2 className="w-4 h-4" />
-            <span>Commit to Longitudinal EHR</span>
+            <span>Save Reviewed Intake</span>
+          </button>
+          <button
+            id="btn-route-specialist"
+            onClick={() => setShowRoutingModal(true)}
+            disabled={!selectedPatient || !activeEncounterId}
+            className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Send className="w-4 h-4" />
+            <span>Route to Specialist</span>
           </button>
         </div>
       </div>
@@ -628,6 +634,13 @@ export function DiseaseCentricIntakeView() {
             <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
             <span>Successfully recorded disease intake in patient longitudinal EHR & dispatched specialist notification!</span>
           </div>
+        </div>
+      )}
+
+      {commitError && (
+        <div className="p-3 bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 rounded-xl text-xs font-semibold flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>{commitError}</span>
         </div>
       )}
 

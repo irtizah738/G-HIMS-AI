@@ -286,7 +286,7 @@ function valueMatchesScope(
   allowed: Set<string>
 ): boolean {
   const normalized = String(value || '').trim();
-  return !normalized || allowed.has(normalized);
+  return Boolean(normalized) && allowed.size > 0 && allowed.has(normalized);
 }
 
 function normalizedRoleSet(roles: string[]): Set<string> {

@@ -1,0 +1,57 @@
+name: OPD-SQ1 Staging Cross-Role E2E
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: opd-sq1-staging
+  cancel-in-progress: false
+
+jobs:
+  opd-cross-role:
+    name: Reception to discharge cross-role OPD journey
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: staging
+    env:
+      GHIMS_STAGING_BASE_URL: ${{ secrets.GHIMS_STAGING_BASE_URL }}
+      GHIMS_P7_TENANT_ID: ${{ vars.GHIMS_P7_TENANT_ID || 'p7-hospital-zero' }}
+      GHIMS_OPD_SQ1_CONFIRM_TENANT: ${{ vars.GHIMS_P7_TENANT_ID || 'p7-hospital-zero' }}
+      GHIMS_P7_BOOTSTRAP_PASSWORD: ${{ secrets.GHIMS_P7_BOOTSTRAP_PASSWORD }}
+      GHIMS_P7_RECEPTION_EMAIL: ${{ vars.GHIMS_P7_RECEPTION_EMAIL || 'p7.reception@g-hims.invalid' }}
+      GHIMS_P7_BILLING_EMAIL: ${{ vars.GHIMS_P7_BILLING_EMAIL || 'p7.billing@g-hims.invalid' }}
+      GHIMS_P7_NURSE_EMAIL: ${{ vars.GHIMS_P7_NURSE_EMAIL || 'p7.nurse@g-hims.invalid' }}
+      GHIMS_P7_DOCTOR_EMAIL: ${{ vars.GHIMS_P7_DOCTOR_EMAIL || 'p7.doctor@g-hims.invalid' }}
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: bunx playwright install --with-deps chromium
+
+      - name: Execute OPD-SQ1 deployed staging qualification
+        run: bun run test:opd-sq1:staging
+
+      - name: Upload OPD-SQ1 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opd-sq1-playwright-evidence
+          if-no-files-found: ignore
+          retention-days: 30
+          path: |
+            playwright-report/opd-staging
+            test-results/opd-staging

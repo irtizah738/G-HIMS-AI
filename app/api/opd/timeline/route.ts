@@ -344,23 +344,24 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : 'OPD timeline read failed';
-    const unauthorized =
-      /AUTH|TENANT|SESSION|DEVICE|PERMISSION|ACCESS|FORBIDDEN|DENIED/i.test(
-        message
-      );
     const storeUnavailable = message.startsWith(
       'AUTHORITATIVE_TIMELINE_STORE_UNAVAILABLE'
     );
-    const safeError = unauthorized
-      ? 'OPD_TIMELINE_ACCESS_DENIED'
-      : storeUnavailable
-        ? 'AUTHORITATIVE_TIMELINE_STORE_UNAVAILABLE'
+    const unauthorized =
+      !storeUnavailable &&
+      /AUTHENTICATION|AUTHORIZATION|TENANT|SESSION|DEVICE|PERMISSION|ACCESS|FORBIDDEN|DENIED/i.test(
+        message
+      );
+    const safeError = storeUnavailable
+      ? 'AUTHORITATIVE_TIMELINE_STORE_UNAVAILABLE'
+      : unauthorized
+        ? 'OPD_TIMELINE_ACCESS_DENIED'
         : 'OPD_TIMELINE_READ_FAILED';
 
     return NextResponse.json(
       { success: false, error: safeError },
       {
-        status: unauthorized ? 403 : 500,
+        status: storeUnavailable ? 503 : unauthorized ? 403 : 500,
         headers: { 'Cache-Control': 'no-store' },
       }
     );

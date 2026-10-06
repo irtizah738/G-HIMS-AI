@@ -161,12 +161,22 @@ describe('OPD-RP22 obsolete and demo authority removal', () => {
     expect(claims).not.toContain('edi837Payload');
   });
 
-  test('obsolete fabricated billing ERP surface is deleted rather than sanitized', () => {
-    expect(
-      existsSync(
-        path.join(process.cwd(), 'components/views/billing-erp-view.tsx')
-      )
-    ).toBe(false);
+  test('billing dashboard is a tenant-scoped non-authoritative launcher', async () => {
+    const view = await source('components/views/billing-erp-view.tsx');
+
+    expect(view).toContain('useTenant');
+    expect(view).toContain('Authoritative invoices');
+    expect(view).toContain('Financial authority remains in governed');
+    expect(view).toContain('Production tariff mutation remains fail-closed');
+    expect(view).toContain('Claims and clearinghouse workflows remain disabled');
+
+    expect(view).not.toContain('Metropolitan Memorial Health System');
+    expect(view).not.toContain('central-metro-hospital');
+    expect(view).not.toContain('Performance-Share Financial Model');
+    expect(view).not.toContain('80% clinical documentation');
+    expect(view).not.toContain('estimatedRecoverableRevenue');
+    expect(view).not.toContain('reconcileMismatch');
+    expect(view).not.toContain('dismissMismatch');
   });
 
   test('Firestore remains server-write-only for billing authority collections', async () => {

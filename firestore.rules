@@ -283,6 +283,9 @@ service cloud.firestore {
       match /opdAppointmentSlots/{slotId} {
         allow read, write: if false;
       }
+      match /opdWaitlistScopes/{scopeId} {
+        allow read, write: if false;
+      }
 
       match /diagnostic_orders/{orderId} {
         allow read: if canReadClinical(tenantId);

@@ -98,29 +98,15 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
       Math.min(500, Number(req.nextUrl.searchParams.get('timelineLimit') || 200))
     );
 
-    const { projection, timeline } =
-      await Patient360ProjectionService.readClinicalView(
-        context.tenantId,
-        normalizedPatientId,
-        timelineLimit
-      );
-
-    if (!projection) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'PATIENT360_PROJECTION_NOT_READY',
-          patientId: normalizedPatientId,
-        },
-        {
-          status: 409,
-          headers: {
-            'Cache-Control': 'no-store',
-            'X-GHIMS-Patient360-Status': 'NOT_READY',
-          },
-        }
-      );
-    }
+    const {
+      projection,
+      timeline,
+      repairedMissingProjection,
+    } = await Patient360ProjectionService.readOrRebuildClinicalView(
+      context.tenantId,
+      normalizedPatientId,
+      timelineLimit
+    );
 
     const selectedCareContext =
       requestedEncounterId
@@ -209,6 +195,9 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
           'X-GHIMS-Patient360-Projection-Version': String(
             projection.projectionVersion
           ),
+          'X-GHIMS-Patient360-Repaired': repairedMissingProjection
+            ? 'true'
+            : 'false',
         },
       }
     );

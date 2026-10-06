@@ -13,6 +13,11 @@ describe('G-HIMS CI-5 Patient 360 clinical read surface', () => {
     expect(service).toContain('getProjection(');
     expect(service).toContain('getTimeline(');
     expect(service).toContain('readClinicalView(');
+    expect(service).toContain('readOrRebuildClinicalView(');
+    expect(service).toContain('await this.rebuildPatient(tenantId, patientId)');
+    expect(service).toContain(
+      'PATIENT360_PROJECTION_REBUILD_DID_NOT_MATERIALIZE'
+    );
     expect(service).toContain("'PATIENT360_PROJECTION_SCOPE_MISMATCH'");
     expect(service).toContain("'PATIENT360_TIMELINE_SCOPE_MISMATCH'");
     expect(service).toContain("collection('patient360Projections')");
@@ -26,8 +31,11 @@ describe('G-HIMS CI-5 Patient 360 clinical read surface', () => {
     );
 
     expect(route).toContain('deriveAuthoritativeContext(req, requestedTenantId)');
-    expect(route).toContain('Patient360ProjectionService.readClinicalView');
-    expect(route).toContain("'PATIENT360_PROJECTION_NOT_READY'");
+    expect(route).toContain(
+      'Patient360ProjectionService.readOrRebuildClinicalView'
+    );
+    expect(route).not.toContain("'PATIENT360_PROJECTION_NOT_READY'");
+    expect(route).toContain("'X-GHIMS-Patient360-Repaired'");
     expect(route).toContain("'Cache-Control': 'no-store'");
     expect(route).toContain("'X-GHIMS-Patient360-Revision'");
     expect(route).not.toContain("collection('clinicalObservations')");

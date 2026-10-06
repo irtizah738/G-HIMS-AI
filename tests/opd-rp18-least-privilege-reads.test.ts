@@ -142,7 +142,7 @@ describe('OPD-RP18 least-privilege reads', () => {
       'assertPatient360PatientAccess(context, patient, accessEncounter)'
     );
     const clinicalReadIndex = route.indexOf(
-      'Patient360ProjectionService.readClinicalView'
+      'Patient360ProjectionService.readOrRebuildClinicalView'
     );
 
     expect(accessIndex).toBeGreaterThan(0);

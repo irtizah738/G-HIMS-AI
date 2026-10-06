@@ -122,6 +122,11 @@ export interface PatientDemographics {
   secondaryPhone?: string;
   email?: string;
   residentialAddress: string;
+  /**
+   * Registration-only facility selection. Server validates it against the
+   * authenticated staff facility scope and does not treat it as patient identity.
+   */
+  registrationFacilityId?: string;
   emergencyContact?: {
     name: string;
     relation: string;

@@ -481,6 +481,15 @@ export function OpdMasterWorkspace() {
     useState<OpdTimelineIntegritySummary | null>(null);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [timelineError, setTimelineError] = useState<string | null>(null);
+  const [dashboardSnapshotMeta, setDashboardSnapshotMeta] = useState<{
+    source: 'SERVER' | 'LOCAL' | 'DEMO';
+    generatedAt: number;
+    snapshotVersion: string;
+  }>(() => ({
+    source: IS_DEMO_RUNTIME ? 'DEMO' : 'LOCAL',
+    generatedAt: IS_DEMO_RUNTIME ? Date.now() : 0,
+    snapshotVersion: IS_DEMO_RUNTIME ? 'demo' : 'unhydrated',
+  }));
 
   // Active Context
   const [selectedEncounterId, setSelectedEncounterId] = useState<string>(() => IS_DEMO_RUNTIME ? 'enc-101' : '');
@@ -513,6 +522,11 @@ export function OpdMasterWorkspace() {
     const snapshot = await hydrateEdgeSnapshot(auth.activeTenant.tenantId);
     const readModel = buildOpdWorkspaceReadModel(snapshot);
 
+    setDashboardSnapshotMeta({
+      source: snapshot.source,
+      generatedAt: snapshot.generatedAt,
+      snapshotVersion: snapshot.snapshotVersion,
+    });
     setPatients(readModel.patients);
     setAppointments(readModel.appointments);
     setWaitlist(readModel.waitlist);
@@ -3041,20 +3055,23 @@ export function OpdMasterWorkspace() {
       {activeTab === 'DASHBOARD' && (
         <OpdDashboardKpis
           encounters={encounters}
+          queue={queue}
           activeRole={activeRole}
+          snapshotSource={dashboardSnapshotMeta.source}
+          snapshotGeneratedAt={dashboardSnapshotMeta.generatedAt}
+          snapshotVersion={dashboardSnapshotMeta.snapshotVersion}
+          pendingSyncCount={pendingSyncCount}
+          isOnline={isOnline}
           onSelectEncounter={(id) => {
             setSelectedEncounterId(id);
-            setActiveTab('CONSULTATION');
+            if (canAccessTab('CONSULTATION')) {
+              setActiveTab('CONSULTATION');
+            }
           }}
           onNavigateStage={(stage) => {
-            if (stage === 'REGISTRATION') setActiveTab('REGISTRATION');
-            else if (stage === 'QUEUE_ASSIGNMENT') setActiveTab('QUEUE');
-            else if (stage === 'NURSING_INTAKE') setActiveTab('TRIAGE');
-            else if (stage === 'SPECIALTY_CONSULTATION') setActiveTab('CONSULTATION');
-            else if (stage === 'DIAGNOSTIC_ORDERS') setActiveTab('DIAGNOSTICS');
-            else if (stage === 'PHARMACY_FEFO') setActiveTab('PHARMACY');
-            else if (stage === 'BILLING_SETTLEMENT') setActiveTab('BILLING');
-            else setActiveTab('AUDIT');
+            if (canAccessTab(stage)) {
+              setActiveTab(stage);
+            }
           }}
         />
       )}

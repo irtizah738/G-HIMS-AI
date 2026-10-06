@@ -192,6 +192,7 @@ export function OpdRegistrationConsent({
                 Full Legal Name *
               </label>
               <input
+                data-testid="opd-registration-full-name"
                 type="text"
                 required
                 value={fullName}
@@ -217,6 +218,7 @@ export function OpdRegistrationConsent({
                 CNIC / National ID *
               </label>
               <input
+                data-testid="opd-registration-national-id"
                 type="text"
                 required
                 value={nationalId}
@@ -232,6 +234,7 @@ export function OpdRegistrationConsent({
               </label>
               <div className="flex gap-2">
                 <input
+                  data-testid="opd-registration-dob"
                   type="date"
                   required
                   value={dob}
@@ -250,6 +253,7 @@ export function OpdRegistrationConsent({
             <div>
               <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">Gender</label>
               <select
+                data-testid="opd-registration-gender"
                 value={gender}
                 onChange={(e) => setGender(e.target.value as any)}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
@@ -295,6 +299,7 @@ export function OpdRegistrationConsent({
                 Primary Phone *
               </label>
               <input
+                data-testid="opd-registration-phone"
                 type="text"
                 required
                 value={phone}
@@ -314,6 +319,7 @@ export function OpdRegistrationConsent({
             <div>
               <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">Residential Address</label>
               <input
+                data-testid="opd-registration-address"
                 type="text"
                 required
                 value={residentialAddress}
@@ -362,6 +368,7 @@ export function OpdRegistrationConsent({
             <div>
               <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">Tariff Class</label>
               <select
+                data-testid="opd-registration-tariff"
                 value={tariffPlan}
                 onChange={(e) => setTariffPlan(e.target.value as any)}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
@@ -437,6 +444,7 @@ export function OpdRegistrationConsent({
                 </div>
                 <div className="flex gap-2">
                   <button
+                    data-testid={`opd-consent-${item.key}-grant`}
                     type="button"
                     onClick={() => item.setValue(true)}
                     className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold border ${
@@ -474,6 +482,7 @@ export function OpdRegistrationConsent({
         {/* Form Submission Actions */}
         <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-3">
           <button
+            data-testid="opd-registration-submit"
             type="submit"
             className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs transition-all cursor-pointer"
           >

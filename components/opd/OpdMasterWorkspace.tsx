@@ -626,6 +626,9 @@ export function OpdMasterWorkspace() {
         department: string;
         chiefComplaint: string;
       };
+      queuedOffline?: boolean;
+      consultationInvoicePendingSync?: boolean;
+      localConsultationInvoiceId?: string;
       queueToken: {
         id: string;
         encounterId: string;
@@ -677,22 +680,27 @@ export function OpdMasterWorkspace() {
     const tokenNum = registration.queueToken.tokenNumber;
     const newEncId = registration.encounter.id;
 
-    const consultationBilling = await executeActiveTenantCommand<{
-      invoice: Record<string, any>;
-    }>(
-      'CreateOpdConsultationInvoiceCommand',
-      { encounterId: newEncId },
-      { idempotencyKey: `opd-consultation-invoice:${newEncId}` }
-    );
-    if (!consultationBilling.success || !consultationBilling.data?.invoice) {
-      throw new Error(
-        consultationBilling.error?.message ||
-          'Authoritative consultation invoice creation failed. The patient is registered, but OPD service remains blocked until billing configuration is corrected.'
+    const offlineRegistration = registration.queuedOffline === true;
+    let consultationInvoice: OpdInvoice | undefined;
+
+    if (!offlineRegistration) {
+      const consultationBilling = await executeActiveTenantCommand<{
+        invoice: Record<string, any>;
+      }>(
+        'CreateOpdConsultationInvoiceCommand',
+        { encounterId: newEncId },
+        { idempotencyKey: `opd-consultation-invoice:${newEncId}` }
+      );
+      if (!consultationBilling.success || !consultationBilling.data?.invoice) {
+        throw new Error(
+          consultationBilling.error?.message ||
+            'Authoritative consultation invoice creation failed. The patient is registered, but OPD service remains blocked until billing configuration is corrected.'
+        );
+      }
+      consultationInvoice = adaptAuthoritativeConsultationInvoice(
+        consultationBilling.data.invoice
       );
     }
-    const consultationInvoice = adaptAuthoritativeConsultationInvoice(
-      consultationBilling.data.invoice
-    );
     const newEncounter: ComprehensiveOpdEncounter = {
       id: newEncId,
       tenantId: registration.patient.tenantId,
@@ -710,7 +718,9 @@ export function OpdMasterWorkspace() {
       currentStage: 'REGISTRATION',
       stageProgress: {
         REGISTRATION: { status: 'COMPLETED', enteredAt: Date.now(), completedAt: Date.now(), completedBy: 'Server Registration Orchestrator' },
-        BILLING_AUTHORIZATION: { status: 'ACTIVE', enteredAt: Date.now() },
+        BILLING_AUTHORIZATION: offlineRegistration
+          ? { status: 'PENDING' }
+          : { status: 'ACTIVE', enteredAt: Date.now() },
         QUEUE_ASSIGNMENT: { status: 'PENDING' },
         NURSING_INTAKE: { status: 'PENDING' },
         MO_ASSESSMENT: { status: 'PENDING' },
@@ -723,7 +733,7 @@ export function OpdMasterWorkspace() {
       },
       diagnosticOrders: [],
       prescriptions: [],
-      consultationInvoice,
+      ...(consultationInvoice ? { consultationInvoice } : {}),
       startedAt: Date.now(),
       status: 'REGISTERED',
     };
@@ -745,7 +755,12 @@ export function OpdMasterWorkspace() {
     setEncounters((prev) => [newEncounter, ...prev.filter((e) => e.id !== newEncounter.id)]);
     setQueue((prev) => [newQueueEntry, ...prev.filter((q) => q.id !== newQueueEntry.id)]);
     setSelectedEncounterId(newEncId);
-    recordEvent('PATIENT_REGISTERED', `Patient ${authoritativePatient.fullName} registered. Token ${tokenNum} issued.`);
+    recordEvent(
+      'PATIENT_REGISTERED',
+      offlineRegistration
+        ? `Patient ${authoritativePatient.fullName} captured offline. Registration and consultation billing are pending authoritative sync; token ${tokenNum} cannot enter the clinical queue until payment is cleared.`
+        : `Patient ${authoritativePatient.fullName} registered. Token ${tokenNum} issued.`
+    );
     setActiveTab('DASHBOARD');
   };
 

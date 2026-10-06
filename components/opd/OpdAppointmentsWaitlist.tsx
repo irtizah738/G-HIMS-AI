@@ -170,6 +170,7 @@ export function OpdAppointmentsWaitlist({
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [schedulingError, setSchedulingError] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [clockNow, setClockNow] = useState<number>(() => Date.now());
 
   const [selectedPatientId, setSelectedPatientId] = useState<string>('');
   const [bookingFacilityId, setBookingFacilityId] = useState<string>('');
@@ -217,6 +218,14 @@ export function OpdAppointmentsWaitlist({
     useState<WaitlistEntry | null>(null);
   const [cancelWaitlistReason, setCancelWaitlistReason] =
     useState<string>('');
+
+  useEffect(() => {
+    const intervalId = window.setInterval(
+      () => setClockNow(Date.now()),
+      30_000
+    );
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   useEffect(() => {
     if (!selectedPatientId && patients[0]?.id) {
@@ -768,7 +777,8 @@ export function OpdAppointmentsWaitlist({
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -806,7 +816,13 @@ export function OpdAppointmentsWaitlist({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {waitlist.map((w) => (
+                  {waitlist.map((w) => {
+                    const offerExpired =
+                      w.status === 'OFFERED' &&
+                      Number(w.offerExpiresAt || 0) > 0 &&
+                      Number(w.offerExpiresAt) <= clockNow;
+
+                    return (
                     <tr key={w.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
                       <td className="p-3">
                         <span
@@ -827,21 +843,21 @@ export function OpdAppointmentsWaitlist({
                       </td>
                       <td className="p-3">
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                          {w.status}
+                          {offerExpired ? 'OFFER EXPIRED' : w.status}
                         </span>
                       </td>
                       <td className="p-3 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          {w.status === 'WAITING' && (
+                          {(w.status === 'WAITING' || offerExpired) && (
                             <button
                               disabled={!isOnline || busyAction !== null}
                               onClick={() => handleOfferEarliestSlot(w)}
                               className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[10px] font-bold cursor-pointer disabled:opacity-50"
                             >
-                              Offer Earliest Slot
+                              {offerExpired ? 'Re-offer Earliest Slot' : 'Offer Earliest Slot'}
                             </button>
                           )}
-                          {w.status === 'OFFERED' && (
+                          {w.status === 'OFFERED' && !offerExpired && (
                             <button
                               disabled={!isOnline || busyAction !== null}
                               onClick={() => handleAcceptWaitlistOffer(w)}

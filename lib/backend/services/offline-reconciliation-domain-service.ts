@@ -30,6 +30,7 @@ function conflictCategory(commandType: string): ConflictCategory {
       'DischargePatientFromBedCommand',
       'MergePatientCommand',
       'AdvanceStageCommand',
+      'AdvanceDiagnosticWorklistCommand',
     ].includes(commandType)
   ) return 'SAFETY_CRITICAL';
   if (

@@ -13,6 +13,13 @@ describe('OPD-RP13 authoritative appointments and waitlist', () => {
       'lib/backend/services/opd-appointment-domain-service.ts'
     );
 
+    expect(workspace).toContain(
+      "requireOnlineOpdAuthority('appointment booking')"
+    );
+    expect(workspace).toContain(
+      "requireOnlineOpdAuthority('waitlist slot offer')"
+    );
+
     for (const command of [
       'BookOpdAppointmentCommand',
       'CancelOpdAppointmentCommand',
@@ -323,7 +330,7 @@ describe('OPD-RP13 authoritative appointments and waitlist', () => {
     expect(rules).toContain('allow write: if false');
   });
 
-  test('scheduling mutations fail closed offline until RP15 replay qualification', async () => {
+  test('RP15 keeps shared scheduling mutations reconnect-required to avoid slot conflicts', async () => {
     const workspace = await source('components/opd/OpdMasterWorkspace.tsx');
 
     for (const command of [

@@ -58,6 +58,22 @@ describe('OPD-RP13 authoritative appointments and waitlist', () => {
     expect(service).toContain('context.departmentIds');
   });
 
+  test('slot commits revalidate exact HCM provider authority transactionally', async () => {
+    const service = await source(
+      'lib/backend/services/opd-appointment-domain-service.ts'
+    );
+
+    expect(service).toContain('providerAuthorityReadTargets');
+    expect(service).toContain('assertProviderAuthoritySnapshot');
+    expect(service).toContain("entityType: 'EMPLOYEE_MASTER'");
+    expect(service).toContain("entityType: 'CLINICAL_PRIVILEGE'");
+    expect(service).toContain("entityType: 'ROSTER_SHIFT'");
+    expect(service).toContain("entityType: 'LEAVE_CALENDAR'");
+    expect(service).toContain("'OPD_PROVIDER_AUTHORITY_CHANGED'");
+    expect(service).toContain('leaveCalendarId');
+    expect(service).toContain("entry.status === 'APPROVED'");
+  });
+
   test('provider availability is derived from HCM roster privilege and leave authority', async () => {
     const service = await source(
       'lib/backend/services/opd-appointment-domain-service.ts'

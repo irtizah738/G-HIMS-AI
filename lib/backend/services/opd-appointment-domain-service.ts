@@ -14,6 +14,7 @@ import {
 import type {
   ClinicalPrivilege,
   EmployeeMaster,
+  LeaveCalendarBucket,
   LeaveRequest,
   RosterShiftEntry,
 } from '@/types/hcm-advanced';
@@ -201,6 +202,190 @@ function localDateAt(timestamp: number, timeZone: string): string {
   }).formatToParts(new Date(timestamp));
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return `${values.year}-${values.month}-${values.day}`;
+}
+
+function leaveCalendarId(employeeId: string, year: number): string {
+  return (
+    'lvc_' +
+    createHash('sha256')
+      .update(
+        `${employeeId.trim().toLowerCase()}\u0000${year}`
+      )
+      .digest('hex')
+      .slice(0, 40)
+  );
+}
+
+function appointmentLocalDates(
+  startAt: number,
+  endAt: number,
+  timeZone: string
+): string[] {
+  const startDate = localDateAt(startAt, timeZone);
+  const endDate = localDateAt(Math.max(startAt, endAt - 1), timeZone);
+  return startDate === endDate ? [startDate] : [startDate, endDate];
+}
+
+function providerAuthorityReadTargets(input: {
+  authority: ProviderAuthority;
+  startAt: number;
+  endAt: number;
+  timeZone: string;
+}) {
+  const years = [
+    ...new Set(
+      appointmentLocalDates(input.startAt, input.endAt, input.timeZone).map(
+        (date) => Number(date.slice(0, 4))
+      )
+    ),
+  ];
+
+  return [
+    {
+      key: 'providerEmployee',
+      entityType: 'EMPLOYEE_MASTER',
+      entityId: input.authority.employee.employeeId,
+      required: true,
+    },
+    {
+      key: 'providerPrivilege',
+      entityType: 'CLINICAL_PRIVILEGE',
+      entityId: input.authority.privilege.privilegeId,
+      required: true,
+    },
+    {
+      key: 'providerRoster',
+      entityType: 'ROSTER_SHIFT',
+      entityId: input.authority.roster.rosterId,
+      required: true,
+    },
+    ...years.map((year) => ({
+      key: `providerLeaveCalendar:${year}`,
+      entityType: 'LEAVE_CALENDAR',
+      entityId: leaveCalendarId(input.authority.employee.employeeId, year),
+      required: false,
+    })),
+  ];
+}
+
+function assertProviderAuthoritySnapshot(
+  current: Record<string, DomainRecord | null | undefined>,
+  input: {
+    authority: ProviderAuthority;
+    providerEmployeeId: string;
+    facilityId: string;
+    departmentId: string;
+    startAt: number;
+    endAt: number;
+    timeZone: string;
+  }
+): void {
+  const employee = current.providerEmployee as
+    | (EmployeeMaster & DomainRecord)
+    | null
+    | undefined;
+  const privilege = current.providerPrivilege as
+    | (ClinicalPrivilege & DomainRecord)
+    | null
+    | undefined;
+  const roster = current.providerRoster as
+    | (RosterShiftEntry & DomainRecord)
+    | null
+    | undefined;
+
+  if (
+    !employee ||
+    employee.employeeId !== input.providerEmployeeId ||
+    employee.employmentStatus !== 'ACTIVE' ||
+    !employee.facilityIds.includes(input.facilityId) ||
+    !employee.departmentIds.includes(input.departmentId)
+  ) {
+    throw new AtomicMutationRejectedError(
+      'OPD_PROVIDER_AUTHORITY_CHANGED',
+      'Provider employment or facility/department assignment changed before scheduling commit.'
+    );
+  }
+
+  const localDates = appointmentLocalDates(
+    input.startAt,
+    input.endAt,
+    input.timeZone
+  );
+  const privilegeFrom = String(privilege?.effectiveFrom || '').slice(0, 10);
+  const privilegeUntil = String(privilege?.effectiveUntil || '').slice(0, 10);
+  if (
+    !privilege ||
+    privilege.privilegeId !== input.authority.privilege.privilegeId ||
+    privilege.employeeId !== input.providerEmployeeId ||
+    privilege.privilegeType !== 'CONSULT_OPD' ||
+    privilege.status !== 'GRANTED' ||
+    privilege.facilityId !== input.facilityId ||
+    privilege.departmentId !== input.departmentId ||
+    localDates.some(
+      (date) =>
+        (privilegeFrom && privilegeFrom > date) ||
+        (privilegeUntil && privilegeUntil < date)
+    )
+  ) {
+    throw new AtomicMutationRejectedError(
+      'OPD_PROVIDER_AUTHORITY_CHANGED',
+      'Provider OPD privilege changed or no longer covers the scheduled interval.'
+    );
+  }
+
+  const rosterStart = Date.parse(String(roster?.startTime || ''));
+  const rosterEnd = Date.parse(String(roster?.endTime || ''));
+  if (
+    !roster ||
+    roster.rosterId !== input.authority.roster.rosterId ||
+    roster.employeeId !== input.providerEmployeeId ||
+    !['PUBLISHED', 'ACKNOWLEDGED', 'IN_PROGRESS'].includes(roster.status) ||
+    roster.facilityId !== input.facilityId ||
+    roster.departmentId !== input.departmentId ||
+    !Number.isFinite(rosterStart) ||
+    !Number.isFinite(rosterEnd) ||
+    rosterStart > input.startAt ||
+    rosterEnd < input.endAt
+  ) {
+    throw new AtomicMutationRejectedError(
+      'OPD_PROVIDER_AUTHORITY_CHANGED',
+      'Provider roster changed or no longer covers the scheduled interval.'
+    );
+  }
+
+  const years = [...new Set(localDates.map((date) => Number(date.slice(0, 4))))];
+  for (const year of years) {
+    const calendar = current[
+      `providerLeaveCalendar:${year}`
+    ] as LeaveCalendarBucket | null | undefined;
+    if (!calendar) continue;
+    if (
+      calendar.employeeId !== input.providerEmployeeId ||
+      calendar.year !== year
+    ) {
+      throw new AtomicMutationRejectedError(
+        'OPD_PROVIDER_AUTHORITY_CHANGED',
+        'Provider leave calendar lineage changed before scheduling commit.'
+      );
+    }
+    const approvedLeave = (calendar.entries || []).find(
+      (entry) =>
+        entry.status === 'APPROVED' &&
+        localDates.some(
+          (date) =>
+            date.slice(0, 4) === String(year) &&
+            entry.startDate <= date &&
+            entry.endDate >= date
+        )
+    );
+    if (approvedLeave) {
+      throw new AtomicMutationRejectedError(
+        'OPD_PROVIDER_ON_LEAVE',
+        'Provider approved leave now overlaps the scheduled appointment date.',
+        { leaveId: approvedLeave.leaveId }
+      );
+    }
+  }
 }
 
 function normalizeInterval(input: {

@@ -36,7 +36,7 @@ export function PatientSearchAndRegistrationPanel({
   isLoading = false,
 }: PatientSearchAndRegistrationPanelProps) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchFilter, setSearchFilter] = useState<'ALL' | 'CNIC' | 'MRN' | 'PHONE'>('ALL');
+  const [searchFilter, setSearchFilter] = useState<'ALL' | 'CNIC' | 'MRN'>('ALL');
 
   // Form State
   const [fullName, setFullName] = useState('');
@@ -48,32 +48,30 @@ export function PatientSearchAndRegistrationPanel({
   const [chiefComplaint, setChiefComplaint] = useState('');
   const [department, setDepartment] = useState('General Medicine');
   const [priority, setPriority] = useState<'ROUTINE' | 'URGENT' | 'EMERGENCY'>('ROUTINE');
-  const [idType, setIdType] = useState<'CNIC' | 'MRN' | 'PASSPORT' | 'PHONE'>('CNIC');
+  const [idType, setIdType] = useState<'CNIC' | 'PASSPORT' | 'PHONE'>('CNIC');
   const [idValue, setIdValue] = useState('');
   const [identifiers, setIdentifiers] = useState<PatientIdentifier[]>([]);
   const [allergiesText, setAllergiesText] = useState('');
   const [chronicConditionsText, setChronicConditionsText] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Filter existing patients
+  const normalizeLookup = (value: string) =>
+    String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+  // Patient retrieval is intentionally restricted to institutional MRN and CNIC.
   const filteredPatients = existingPatients.filter((p) => {
     if (!searchQuery.trim()) return true;
-    const q = searchQuery.toLowerCase().trim();
-    const matchName = p.fullName.toLowerCase().includes(q);
-    const matchMrn = p.mrn.toLowerCase().includes(q);
-    const matchPhone = p.contactPhone?.toLowerCase().includes(q);
-    const matchId = p.identifiers?.some((id) => id.value.toLowerCase().includes(q));
+    const q = normalizeLookup(searchQuery);
+    const matchMrn = normalizeLookup(p.mrn).includes(q);
+    const matchCnic = p.identifiers?.some(
+      (id) =>
+        id.type === 'CNIC' &&
+        normalizeLookup(id.value).includes(q)
+    );
 
-    if (searchFilter === 'CNIC') {
-      return p.identifiers?.some((id) => id.type === 'CNIC' && id.value.toLowerCase().includes(q));
-    }
-    if (searchFilter === 'MRN') {
-      return matchMrn;
-    }
-    if (searchFilter === 'PHONE') {
-      return matchPhone;
-    }
-    return matchName || matchMrn || matchPhone || matchId;
+    if (searchFilter === 'CNIC') return Boolean(matchCnic);
+    if (searchFilter === 'MRN') return matchMrn;
+    return matchMrn || Boolean(matchCnic);
   });
 
   const handleAddIdentifier = () => {
@@ -148,7 +146,7 @@ export function PatientSearchAndRegistrationPanel({
                 Master Patient Index (MPI) Lookup
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Deterministic deduplication across MRN, CNIC & Phone
+                Search the authoritative MPI using MRN and/or CNIC only
               </p>
             </div>
           </div>
@@ -166,14 +164,14 @@ export function PatientSearchAndRegistrationPanel({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by Legal Name, MRN, CNIC or Phone..."
+              placeholder="Enter MRN or CNIC number..."
               className="w-full pl-9 pr-4 py-2 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
             />
           </div>
 
           <div className="flex items-center gap-1 text-[11px]">
             <span className="text-slate-400 font-medium mr-1">Filter:</span>
-            {(['ALL', 'CNIC', 'MRN', 'PHONE'] as const).map((filter) => (
+            {(['ALL', 'CNIC', 'MRN'] as const).map((filter) => (
               <button
                 key={filter}
                 type="button"
@@ -199,7 +197,7 @@ export function PatientSearchAndRegistrationPanel({
                 No matching MPI record found
               </p>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                Register this patient in the right panel to allocate an MRN & start workflow.
+                No MRN/CNIC match exists. Register only after verifying the patient is new.
               </p>
             </div>
           ) : (
@@ -401,7 +399,7 @@ export function PatientSearchAndRegistrationPanel({
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                 <CreditCard className="w-3.5 h-3.5 text-blue-600" />
-                Deterministic National Identifiers (CNIC / Passport)
+                Government Identifiers for MPI Deduplication
               </span>
             </div>
 
@@ -415,7 +413,6 @@ export function PatientSearchAndRegistrationPanel({
                 <option value="CNIC">CNIC</option>
                 <option value="PASSPORT">Passport</option>
                 <option value="PHONE">Phone</option>
-                <option value="MRN">Ext MRN</option>
               </select>
               <input
                 id="input-id-val"

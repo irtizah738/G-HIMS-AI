@@ -123,7 +123,7 @@ export function ConsultantCommandCenter() {
   };
 
   const acceptCoordinationItem = async (item: ConsultantWorklistItem) => {
-    if (!tenantId || !item.encounterId || item.status !== 'OPEN') return;
+    if (!tenantId || !item.encounterId) return;
     const sourceId = item.sourceRefs[0];
     if (!sourceId || !['CONSULTATION', 'HANDOFF'].includes(item.category)) return;
 
@@ -348,7 +348,12 @@ export function ConsultantCommandCenter() {
                                 : 'Accept handoff'}
                           </button>
                         )}
-                      {item.status === 'OPEN' && item.encounterId && (
+                      {item.status === 'OPEN' &&
+                        item.encounterId &&
+                        !(
+                          item.category === 'CONSULTATION' &&
+                          item.slaPhase === 'ACKNOWLEDGEMENT'
+                        ) && (
                         <button
                           type="button"
                           onClick={() => void acknowledge(item)}

@@ -2323,7 +2323,6 @@ export function OpdMasterWorkspace() {
           bedId: inpatientRequest.targetBedId,
           sourceEncounterId: activeEncounter.id,
           admittingDiagnosis: inpatientRequest.clinicalIndication,
-          targetWard: inpatientRequest.targetWard,
           assignedDoctor: activeEncounter.attendingDoctorId,
           priority: 'URGENT',
         },

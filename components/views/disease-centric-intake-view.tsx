@@ -74,7 +74,9 @@ export function DiseaseCentricIntakeView() {
   };
 
   // Selected Template
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('cardiac');
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>(
+    IS_DEMO_RUNTIME ? 'cardiac' : ''
+  );
   const [activeTabMode, setActiveTabMode] = useState<'intake' | 'tree' | 'ai_optimize' | 'customize' | 'localization'>('intake');
 
   // Active Template Object
@@ -169,14 +171,35 @@ export function DiseaseCentricIntakeView() {
   const [customQuestions, setCustomQuestions] = useState<GuidedQuestion[]>([]);
   const [customWeightMultiplier, setCustomWeightMultiplier] = useState<number>(1.0);
 
-  // Reset Tree / Answers on template change
+  // Patient/template transitions must never carry clinical answers across context.
   useEffect(() => {
+    if (!selectedTemplateId) {
+      setSelectedTreeNodeIds([]);
+      setAiResult(null);
+      setCommittedSuccess(false);
+      return;
+    }
     if (currentTemplate.symptomTree) {
       setSelectedTreeNodeIds([currentTemplate.symptomTree.id]);
     }
+    if (!IS_DEMO_RUNTIME) {
+      setGuidedAnswers({});
+      setSpecialtyHistoryAnswers({});
+    }
     setAiResult(null);
+    setAiError(null);
     setCommittedSuccess(false);
   }, [selectedTemplateId, currentTemplate]);
+
+  useEffect(() => {
+    if (IS_DEMO_RUNTIME) return;
+    setGuidedAnswers({});
+    setSpecialtyHistoryAnswers({});
+    setAiResult(null);
+    setAiError(null);
+    setCommittedSuccess(false);
+    setShowRoutingModal(false);
+  }, [activePatientId]);
 
   // Real-time Risk Score & Active Signals Calculation
   const { totalRiskScore, activeRiskSignals, maxRiskSeverity } = useMemo(() => {
@@ -362,6 +385,10 @@ export function DiseaseCentricIntakeView() {
       setAiError('Select a patient before finalizing the intake note.');
       return;
     }
+    if (!selectedTemplateId) {
+      setAiError('Select an intake protocol before finalizing the intake note.');
+      return;
+    }
 
     setAiError(null);
     try {
@@ -438,68 +465,6 @@ export function DiseaseCentricIntakeView() {
         </div>
       </div>
 
-      {/* Disease Template Selector Tabs */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        {INTAKE_TEMPLATES.map((tmpl) => {
-          const isSelected = tmpl.id === selectedTemplateId;
-          const getIcon = () => {
-            switch (tmpl.id) {
-              case 'cardiac':
-                return <HeartPulse className="w-5 h-5" />;
-              case 'stroke':
-                return <Brain className="w-5 h-5" />;
-              case 'diabetic':
-                return <Flame className="w-5 h-5" />;
-              case 'ortho_trauma':
-                return <Activity className="w-5 h-5" />;
-              case 'obgyn':
-                return <Baby className="w-5 h-5" />;
-              default:
-                return <Stethoscope className="w-5 h-5" />;
-            }
-          };
-
-          return (
-            <button
-              key={tmpl.id}
-              id={`tab-intake-${tmpl.id}`}
-              onClick={() => setSelectedTemplateId(tmpl.id)}
-              className={`p-4 rounded-xl border text-left transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between ${
-                isSelected
-                  ? 'bg-white dark:bg-slate-900 border-blue-600 dark:border-blue-500 shadow-sm ring-2 ring-blue-500/20'
-                  : 'bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-850'
-              }`}
-            >
-              <div className="flex items-start justify-between gap-2 mb-2">
-                <div
-                  className={`w-9 h-9 rounded-lg flex items-center justify-center ${
-                    isSelected
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-                  }`}
-                >
-                  {getIcon()}
-                </div>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 uppercase tracking-wider">
-                  {tmpl.id.replace('_', ' ')}
-                </span>
-              </div>
-              <div>
-                <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100 leading-tight">
-                  {tmpl.name.split('&')[0]}
-                </h3>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 line-clamp-1 font-medium">
-                  {tmpl.specialty.split('&')[0]}
-                </p>
-              </div>
-              {isSelected && (
-                <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-600 dark:bg-blue-500" />
-              )}
-            </button>
-          );
-        })}
-      </div>
-
       {/* Patient Header & Quick Bar */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex flex-wrap items-center justify-between gap-4 shadow-xs">
         <div className="flex items-center gap-3">
@@ -544,6 +509,72 @@ export function DiseaseCentricIntakeView() {
         </div>
       </div>
 
+
+      {/* Disease Template Selector Tabs */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        {INTAKE_TEMPLATES.map((tmpl) => {
+          const isSelected = tmpl.id === selectedTemplateId;
+          const getIcon = () => {
+            switch (tmpl.id) {
+              case 'cardiac':
+                return <HeartPulse className="w-5 h-5" />;
+              case 'stroke':
+                return <Brain className="w-5 h-5" />;
+              case 'diabetic':
+                return <Flame className="w-5 h-5" />;
+              case 'ortho_trauma':
+                return <Activity className="w-5 h-5" />;
+              case 'obgyn':
+                return <Baby className="w-5 h-5" />;
+              default:
+                return <Stethoscope className="w-5 h-5" />;
+            }
+          };
+
+          return (
+            <button
+              key={tmpl.id}
+              id={`tab-intake-${tmpl.id}`}
+              onClick={() => setSelectedTemplateId(tmpl.id)}
+              disabled={!selectedPatient}
+              className={`p-4 rounded-xl border text-left transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 relative overflow-hidden flex flex-col justify-between ${
+                isSelected
+                  ? 'bg-white dark:bg-slate-900 border-blue-600 dark:border-blue-500 shadow-sm ring-2 ring-blue-500/20'
+                  : 'bg-white dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-850'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <div
+                  className={`w-9 h-9 rounded-lg flex items-center justify-center ${
+                    isSelected
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  {getIcon()}
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 uppercase tracking-wider">
+                  {tmpl.id.replace('_', ' ')}
+                </span>
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100 leading-tight">
+                  {tmpl.name.split('&')[0]}
+                </h3>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 line-clamp-1 font-medium">
+                  {tmpl.specialty.split('&')[0]}
+                </p>
+              </div>
+              {isSelected && (
+                <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-600 dark:bg-blue-500" />
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {selectedPatient && selectedTemplateId && (
+        <>
       {/* Real-time Dynamic Risk HUD Bar */}
       <div
         className={`p-4 rounded-xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all shadow-xs ${
@@ -593,6 +624,9 @@ export function DiseaseCentricIntakeView() {
           ))}
         </div>
       </div>
+
+      </>
+      )}
 
       {/* Main Mode Sub-Navigation */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-3">
@@ -681,7 +715,7 @@ export function DiseaseCentricIntakeView() {
           <button
             type="button"
             onClick={() => setShowRoutingModal(true)}
-            disabled={!selectedPatient || !activeEncounter?.id}
+            disabled={!selectedPatient || !selectedTemplateId || !activeEncounter?.id}
             className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-slate-400 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:cursor-not-allowed"
           >
             <Send className="w-4 h-4" />
@@ -700,10 +734,22 @@ export function DiseaseCentricIntakeView() {
         </div>
       )}
 
+      {!selectedTemplateId && (
+        <div className="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-10 text-center">
+          <Stethoscope className="mx-auto h-9 w-9 text-slate-300 dark:text-slate-600" />
+          <h2 className="mt-3 text-sm font-bold text-slate-800 dark:text-slate-100">
+            Select a disease-specific protocol
+          </h2>
+          <p className="mx-auto mt-1 max-w-xl text-xs text-slate-500 dark:text-slate-400">
+            Choose the patient first, then select the protocol that matches the presenting clinical problem. No risk score, AI briefing, specialist request, diagnostic order, or clinical note is generated automatically.
+          </p>
+        </div>
+      )}
+
       {/* ========================================================================= */}
       {/* MODE 1: GUIDED CLINICAL INTAKE & SPECIALTY HISTORIES */}
       {/* ========================================================================= */}
-      {activeTabMode === 'intake' && (
+      {selectedTemplateId && activeTabMode === 'intake' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left 2 Columns: Protocol Guided Questions */}
           <div className="lg:col-span-2 space-y-6">
@@ -1067,7 +1113,7 @@ export function DiseaseCentricIntakeView() {
       {/* ========================================================================= */}
       {/* MODE 2: INTERACTIVE SYMPTOM TREE NAVIGATOR */}
       {/* ========================================================================= */}
-      {activeTabMode === 'tree' && (
+      {selectedTemplateId && activeTabMode === 'tree' && (
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-xs space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-4">
             <div>
@@ -1211,7 +1257,7 @@ export function DiseaseCentricIntakeView() {
       {/* ========================================================================= */}
       {/* MODE 3: AI CLINICAL SPECIALIST PREPARATION BRIEFING */}
       {/* ========================================================================= */}
-      {activeTabMode === 'ai_optimize' && (
+      {selectedTemplateId && activeTabMode === 'ai_optimize' && (
         <div className="space-y-6">
           {/* AI Trigger Header Bar */}
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
@@ -1422,7 +1468,7 @@ export function DiseaseCentricIntakeView() {
       {/* ========================================================================= */}
       {/* MODE 4: CONFIGURABLE STUDIO (HOSPITAL-CUSTOMIZABLE) */}
       {/* ========================================================================= */}
-      {activeTabMode === 'customize' && (
+      {selectedTemplateId && activeTabMode === 'customize' && (
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-xs space-y-6">
           <div className="border-b border-slate-200 dark:border-slate-800 pb-4">
             <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
@@ -1498,7 +1544,7 @@ export function DiseaseCentricIntakeView() {
       {/* ========================================================================= */}
       {/* MODE 5: COUNTRY & HOSPITAL LOCALIZATION */}
       {/* ========================================================================= */}
-      {activeTabMode === 'localization' && (
+      {selectedTemplateId && activeTabMode === 'localization' && (
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-xs space-y-6">
           <div className="border-b border-slate-200 dark:border-slate-800 pb-4">
             <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">

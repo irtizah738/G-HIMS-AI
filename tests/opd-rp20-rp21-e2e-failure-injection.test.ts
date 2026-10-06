@@ -393,6 +393,121 @@ describe('OPD-RP20/RP21 E2E and failure injection qualification', () => {
     );
   });
 
+  test('ephemeral read-modify conflict also leaves every state and evidence store unchanged', async () => {
+    const tenantId = 'tenant-rp21-read-modify';
+
+    TransactionManager.seedEphemeralStateForTesting(
+      tenantId,
+      'ENCOUNTER',
+      'enc-read-modify',
+      {
+        encounterId: 'enc-read-modify',
+        tenantId,
+        status: 'ACTIVE',
+      }
+    );
+    TransactionManager.seedEphemeralStateForTesting(
+      tenantId,
+      'OPD_QUEUE_TOKEN',
+      'queue-read-modify',
+      {
+        id: 'queue-read-modify',
+        tenantId,
+        encounterId: 'enc-read-modify',
+        status: 'in_consultation',
+      }
+    );
+
+    const beforeEncounter =
+      TransactionManager.getEphemeralStateForTesting(
+        tenantId,
+        'ENCOUNTER',
+        'enc-read-modify'
+      );
+    const beforeQueue =
+      TransactionManager.getEphemeralStateForTesting(
+        tenantId,
+        'OPD_QUEUE_TOKEN',
+        'queue-read-modify'
+      );
+    const beforeEvents = await TransactionManager.getEvents(tenantId);
+    const beforeAudits = await TransactionManager.getAudits(tenantId);
+    const beforeOutbox = await TransactionManager.getPendingOutbox(tenantId);
+
+    await expect(
+      TransactionManager.executeAtomicReadModifyMutation({
+        tenantId,
+        actorId: 'doctor-rp21',
+        actorRole: 'DOCTOR',
+        aggregateType: 'ENCOUNTER',
+        aggregateId: 'enc-read-modify',
+        eventType: 'RP21_READ_MODIFY_FAILURE_INJECTION',
+        auditAction: 'RP21_READ_MODIFY_FAILURE_INJECTION',
+        auditResourceType: 'ENCOUNTER',
+        auditResourceId: 'enc-read-modify',
+        idempotencyKey: 'idem-rp21-read-modify',
+        commandId: 'cmd-rp21-read-modify',
+        readTargets: [
+          {
+            key: 'encounter',
+            entityType: 'ENCOUNTER',
+            entityId: 'enc-read-modify',
+            required: true,
+          },
+          {
+            key: 'queue',
+            entityType: 'OPD_QUEUE_TOKEN',
+            entityId: 'queue-read-modify',
+            required: true,
+          },
+        ],
+        prepare: (current) => ({
+          domainState: {
+            ...(current.encounter || {}),
+            status: 'COMPLETED',
+          },
+          additionalStateWrites: [
+            {
+              entityType: 'OPD_QUEUE_TOKEN',
+              entityId: 'queue-read-modify',
+              domainState: {
+                ...(current.queue || {}),
+                status: 'completed',
+              },
+              expectedServerVersion:
+                Number(current.queue?._serverVersion || 0) + 1,
+            },
+          ],
+          eventPayload: { encounterId: 'enc-read-modify' },
+        }),
+      })
+    ).rejects.toThrow('DOMAIN_STATE_VERSION_CONFLICT');
+
+    expect(
+      TransactionManager.getEphemeralStateForTesting(
+        tenantId,
+        'ENCOUNTER',
+        'enc-read-modify'
+      )
+    ).toEqual(beforeEncounter);
+    expect(
+      TransactionManager.getEphemeralStateForTesting(
+        tenantId,
+        'OPD_QUEUE_TOKEN',
+        'queue-read-modify'
+      )
+    ).toEqual(beforeQueue);
+    expect(await TransactionManager.getEvents(tenantId)).toEqual(
+      beforeEvents
+    );
+    expect(await TransactionManager.getAudits(tenantId)).toEqual(
+      beforeAudits
+    );
+    expect(await TransactionManager.getPendingOutbox(tenantId)).toEqual(
+      beforeOutbox
+    );
+  });
+
   test('OPD UI retains fail-closed server errors across critical workflow boundaries', async () => {
     const workspace = await source('components/opd/OpdMasterWorkspace.tsx');
 

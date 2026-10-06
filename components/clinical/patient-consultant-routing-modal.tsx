@@ -572,6 +572,7 @@ export function PatientConsultantRoutingModal({
     setIsDispatching(true);
     setDirectoryError(null);
 
+    let authoritativeConsultationId = '';
     const routingPayload = {
       routedAt: new Date().toISOString(),
       patientId,
@@ -685,6 +686,8 @@ export function PatientConsultantRoutingModal({
           });
         }
 
+        authoritativeConsultationId = consultationId;
+
         const handoffRevision = canResumePendingHandoff
           ? pendingHandoff.patient360Revision
           : patient360Revision;
@@ -733,8 +736,8 @@ export function PatientConsultantRoutingModal({
       const baseMessage =
         error instanceof Error ? error.message : 'Specialist consultation request failed.';
       setDirectoryError(
-        pendingHandoff
-          ? `Consultation ${pendingHandoff.consultationId} remains authoritative, but its clinical handoff is incomplete. Retry will resume the handoff without creating another consultation. ${baseMessage}`
+        authoritativeConsultationId
+          ? `Consultation ${authoritativeConsultationId} remains authoritative, but its clinical handoff is incomplete. Retry will resume the handoff without creating another consultation. ${baseMessage}`
           : baseMessage
       );
     } finally {

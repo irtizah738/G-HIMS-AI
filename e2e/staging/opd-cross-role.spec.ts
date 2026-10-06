@@ -224,7 +224,7 @@ test.describe.serial('OPD-SQ1 deployed cross-role staging qualification', () => 
     await doctorConsult.page.getByTestId('opd-consultation-submit').click();
 
     await expect(
-      doctorConsult.page.getByTestId('opd-tab-diagnostics')
+      doctorConsult.page.getByText('Diagnostics, LIS / RIS and Procedures')
     ).toBeVisible();
     await doctorConsult.context.close();
 

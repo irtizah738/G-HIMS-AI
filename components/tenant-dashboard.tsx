@@ -44,7 +44,6 @@ const BloodBankView = dynamic(() => import('@/components/views/blood-bank-view')
 const TelehealthView = dynamic(() => import('@/components/views/telehealth-view').then(m => m.TelehealthView), { loading: ViewSkeleton, ssr: false });
 const ClaimsPreAuthView = dynamic(() => import('@/components/views/claims-preauth-view').then(m => m.ClaimsPreAuthView), { loading: ViewSkeleton, ssr: false });
 const AllModulesDirectory = dynamic(() => import('@/components/views/all-modules-directory').then(m => m.AllModulesDirectory), { loading: ViewSkeleton, ssr: false });
-const ModuleReadinessMatrixView = dynamic(() => import('@/components/views/module-readiness-matrix-view').then(m => m.ModuleReadinessMatrixView), { loading: ViewSkeleton, ssr: false });
 const GoogleSheetsView = dynamic(() => import('@/components/views/google-sheets-view').then(m => m.GoogleSheetsView), { loading: ViewSkeleton, ssr: false });
 const DiseaseCentricIntakeView = dynamic(() => import('@/components/views/disease-centric-intake-view').then(m => m.DiseaseCentricIntakeView), { loading: ViewSkeleton, ssr: false });
 const SettingsView = dynamic(() => import('@/components/views/settings-view').then(m => m.SettingsView), { loading: ViewSkeleton, ssr: false });
@@ -228,11 +227,6 @@ export function TenantDashboard() {
             {activeTab === 'directory' && (
               <RbacModuleGate moduleId="directory" moduleName="All Modules Directory">
                 <AllModulesDirectory />
-              </RbacModuleGate>
-            )}
-            {activeTab === 'matrix' && (
-              <RbacModuleGate moduleId="matrix" moduleName="Module Readiness Matrix">
-                <ModuleReadinessMatrixView />
               </RbacModuleGate>
             )}
             {activeTab === 'disease-intake' && (

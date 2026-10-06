@@ -93,7 +93,13 @@ export async function GET(req: NextRequest) {
 
     const now = Date.now();
     const balances = balanceSnapshot.docs
-      .map((doc) => ({ id: doc.id, ...doc.data() }))
+      .map(
+        (doc) =>
+          ({
+            id: doc.id,
+            ...(doc.data() as Record<string, unknown>),
+          }) as Record<string, unknown>
+      )
       .filter((balance) => {
         const facilityId = String(balance.facilityId || '').trim();
         const expiry = new Date(String(balance.expiryDate || '')).getTime();

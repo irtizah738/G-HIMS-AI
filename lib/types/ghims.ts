@@ -162,7 +162,8 @@ export interface Encounter {
 
 export interface Patient {
   id: string;
-  mrn: string; // Medical Record Number
+  mrn: string; // Server-issued immutable institutional patient identifier
+  cnic?: string; // National identifier used for MPI lookup where available
   fullName: string;
   dateOfBirth: string;
   age: number;

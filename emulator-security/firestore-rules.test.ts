@@ -118,14 +118,16 @@ describe('Firestore P0 tenant isolation and server-authoritative writes', () => 
     await assertFails(getDoc(doc(db, 'tenants', 'tenant-a', 'patients', 'pat-a')));
   });
 
-  test('tenant A authenticated user can read tenant A patient read model', async () => {
+  test('authenticated clinician cannot bypass server ABAC with raw tenant patient reads', async () => {
     const db = testEnv.authenticatedContext('user-a', {
       tenantId: 'tenant-a',
       accessibleTenants: ['tenant-a'],
       role: 'doctor',
     }).firestore();
 
-    await assertSucceeds(getDoc(doc(db, 'tenants', 'tenant-a', 'patients', 'pat-a')));
+    await assertFails(
+      getDoc(doc(db, 'tenants', 'tenant-a', 'patients', 'pat-a'))
+    );
   });
 
   test('tenant A authenticated user cannot read tenant B patient', async () => {
@@ -258,15 +260,19 @@ describe('Firestore P0 tenant isolation and server-authoritative writes', () => 
     await assertFails(getDoc(doc(db, 'tenants', 'tenant-a', 'patients', 'pat-a')));
   });
 
-  test('clinical role can read clinical models but cannot read finance', async () => {
+  test('clinical role must use server clinical APIs and cannot read finance directly', async () => {
     const db = testEnv.authenticatedContext('user-a', {
       tenantId: 'tenant-a',
       accessibleTenants: ['tenant-a'],
       roles: ['doctor'],
     }).firestore();
 
-    await assertSucceeds(getDoc(doc(db, 'tenants', 'tenant-a', 'patients', 'pat-a')));
-    await assertFails(getDoc(doc(db, 'tenants', 'tenant-a', 'invoices', 'inv-a')));
+    await assertFails(
+      getDoc(doc(db, 'tenants', 'tenant-a', 'patients', 'pat-a'))
+    );
+    await assertFails(
+      getDoc(doc(db, 'tenants', 'tenant-a', 'invoices', 'inv-a'))
+    );
   });
 
   test('audit logs are administrator-only', async () => {

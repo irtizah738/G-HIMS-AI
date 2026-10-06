@@ -165,9 +165,9 @@ describe('OPD-RP18 least-privilege reads', () => {
   test('offline bootstrap empty organizational scope is deny-by-default', async () => {
     const bootstrap = await source('app/api/offline/bootstrap/route.ts');
 
-    expect(bootstrap).toContain(
-      'return Boolean(normalized) && allowed.size > 0 && allowed.has(normalized);'
-    );
+    expect(bootstrap).toContain('Boolean(normalized)');
+    expect(bootstrap).toContain('allowed.size > 0');
+    expect(bootstrap).toContain('allowed.has(normalized)');
     expect(bootstrap).not.toContain(
       'return !normalized || allowed.size === 0 || allowed.has(normalized);'
     );

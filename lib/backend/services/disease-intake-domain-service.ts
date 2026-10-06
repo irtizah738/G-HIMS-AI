@@ -8,6 +8,14 @@ import type {
   DiseaseIntakeArtifact,
   SaveDiseaseIntakeArtifactPayload,
 } from '@/types/disease-intake-artifact';
+import { INTAKE_TEMPLATES } from '@/lib/clinical/intake-templates-data';
+import {
+  allowedDiseaseIntakeHistoryKeys,
+  allowedDiseaseIntakeQuestionIds,
+  allowedDiseaseIntakeTreeNodeIds,
+  computeGovernedDiseaseIntakeRisk,
+  missingRequiredDiseaseIntakeQuestions,
+} from '@/lib/clinical/disease-intake/governed-risk-engine';
 
 function failure(
   commandId: string,
@@ -123,16 +131,68 @@ export class DiseaseIntakeDomainService {
     }
 
     const templateId = String(payload.templateId || '').trim();
-    const templateName = String(payload.templateName || '').trim();
-    const clinicalGuidelines = String(payload.clinicalGuidelines || '').trim();
-    if (!templateId || !templateName || !clinicalGuidelines) {
+    const template = INTAKE_TEMPLATES.find((candidate) => candidate.id === templateId);
+    if (!template) {
       return failure(
         commandId,
         idempotencyKey,
-        'DISEASE_INTAKE_INVALID',
-        'Template identity and clinical guideline provenance are required.'
+        'DISEASE_INTAKE_TEMPLATE_UNKNOWN',
+        'Disease intake template is not registered in the governed template catalog.'
       ) as CommandResult<DiseaseIntakeArtifact>;
     }
+
+    if (
+      payload.templateName !== template.name ||
+      payload.clinicalGuidelines !== template.clinicalGuidelines
+    ) {
+      return failure(
+        commandId,
+        idempotencyKey,
+        'DISEASE_INTAKE_TEMPLATE_PROVENANCE_MISMATCH',
+        'Client template metadata does not match the governed server template.'
+      ) as CommandResult<DiseaseIntakeArtifact>;
+    }
+
+    const allowedQuestions = allowedDiseaseIntakeQuestionIds(template);
+    const unknownQuestions = Object.keys(payload.guidedAnswers || {}).filter(
+      (key) => !allowedQuestions.has(key)
+    );
+    const allowedHistory = allowedDiseaseIntakeHistoryKeys(template);
+    const unknownHistory = Object.keys(payload.specialtyHistory || {}).filter(
+      (key) => !allowedHistory.has(key)
+    );
+    const allowedNodes = allowedDiseaseIntakeTreeNodeIds(template);
+    const unknownNodes = (payload.selectedTreeNodeIds || []).filter(
+      (nodeId) => !allowedNodes.has(nodeId)
+    );
+    if (unknownQuestions.length || unknownHistory.length || unknownNodes.length) {
+      return failure(
+        commandId,
+        idempotencyKey,
+        'DISEASE_INTAKE_UNGOVERNED_FIELD',
+        'Intake contains fields or symptom-tree nodes outside the governed template.'
+      ) as CommandResult<DiseaseIntakeArtifact>;
+    }
+
+    const missingRequired = missingRequiredDiseaseIntakeQuestions(
+      template,
+      payload.guidedAnswers || {}
+    );
+    if (missingRequired.length > 0) {
+      return failure(
+        commandId,
+        idempotencyKey,
+        'DISEASE_INTAKE_INCOMPLETE',
+        `Required intake questions are missing: ${missingRequired.join(', ')}.`
+      ) as CommandResult<DiseaseIntakeArtifact>;
+    }
+
+    const governedRisk = computeGovernedDiseaseIntakeRisk(
+      template,
+      payload.guidedAnswers || {},
+      payload.specialtyHistory || {},
+      payload.selectedTreeNodeIds || []
+    );
 
     const now = Date.now();
     const intakeArtifactId = `intake_${crypto.randomUUID()}`;
@@ -142,19 +202,19 @@ export class DiseaseIntakeDomainService {
       patientId: payload.patientId,
       encounterId: payload.encounterId,
       templateId,
-      templateName,
+      templateName: template.name,
       templateVersion: payload.templateVersion?.trim() || undefined,
-      clinicalGuidelines,
+      clinicalGuidelines: template.clinicalGuidelines,
       guidedAnswers: payload.guidedAnswers || {},
       specialtyHistory: payload.specialtyHistory || {},
       selectedTreeNodeIds: uniqueStrings(payload.selectedTreeNodeIds || [], 500),
       risk: {
-        score: payload.observedRiskScore,
-        severity: payload.observedRiskSeverity,
-        signalIds: uniqueStrings(payload.observedRiskSignalIds || [], 100),
-        signalTitles: uniqueStrings(payload.observedRiskSignalTitles || [], 100),
+        score: governedRisk.score,
+        severity: governedRisk.severity,
+        signalIds: governedRisk.signalIds,
+        signalTitles: governedRisk.signalTitles,
       },
-      specialistTargets: uniqueStrings(payload.specialistTargets || [], 50),
+      specialistTargets: [...template.typicalSpecialists],
       sourceRefs: uniqueStrings(payload.sourceRefs || [], 200),
       patient360Revision: payload.patient360Revision,
       patient360SourceCheckpoint: payload.patient360SourceCheckpoint,
@@ -187,7 +247,7 @@ export class DiseaseIntakeDomainService {
       auditAction: 'FINALIZE_DISEASE_INTAKE',
       auditResourceType: 'DISEASE_INTAKE_ARTIFACT',
       auditResourceId: intakeArtifactId,
-      auditReason: `Finalized clinician-reviewed ${templateName} intake for patient ${payload.patientId}.`,
+      auditReason: `Finalized clinician-reviewed ${template.name} intake for patient ${payload.patientId}.`,
       outboxTopic: 'g-hims-clinical-events',
       idempotencyKey,
       commandId,

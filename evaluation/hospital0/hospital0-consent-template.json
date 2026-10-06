@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "evidenceType": "HOSPITAL0_CONSENT",
+  "status": "PENDING_HUMAN_SIGNATURE",
+  "hospital": {
+    "legalName": "",
+    "siteName": "",
+    "country": "",
+    "pilotOwnerName": "",
+    "pilotOwnerRole": ""
+  },
+  "approvedScope": [
+    "Patient 360",
+    "Encounter Preparation",
+    "Longitudinal Summary",
+    "Trend Intelligence",
+    "Medication Reconciliation Copilot",
+    "Governed Clinical Drafting"
+  ],
+  "approvedDepartments": [
+    "General Medicine OPD"
+  ],
+  "approvedStartDate": "",
+  "approvedEndDate": "",
+  "dataGovernance": {
+    "retrospectiveUseApproved": false,
+    "livePilotUseApproved": false,
+    "deidentificationRequired": true,
+    "externalProviderUseApproved": false
+  },
+  "signatories": [],
+  "sourceDocumentReference": "",
+  "notes": "This metadata file does not replace the signed institutional approval document."
+}

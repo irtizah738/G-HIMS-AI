@@ -361,15 +361,6 @@ export class EncounterDomainService {
       correlationId: context.correlationId,
       domainState,
       additionalStateWrites: [
-        ...(referralState && referralId
-          ? [
-              {
-                entityType: 'OPD_REFERRAL',
-                entityId: referralId,
-                domainState: referralState,
-              },
-            ]
-          : []),
         {
           entityType: 'PATIENT_MPI',
           entityId: payload.patientId,
@@ -946,6 +937,15 @@ export class EncounterDomainService {
       domainState: updatedEncounter,
       expectedPrimaryServerVersion: Number(encounter._serverVersion || 0),
       additionalStateWrites: [
+        ...(referralState && referralId
+          ? [
+              {
+                entityType: 'OPD_REFERRAL',
+                entityId: referralId,
+                domainState: referralState,
+              },
+            ]
+          : []),
         {
           entityType: 'PATIENT_MPI',
           entityId: encounter.patientId,

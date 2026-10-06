@@ -116,6 +116,7 @@ export interface OpdWaitlistEntryRecord {
   priority: WaitlistPriority;
   notificationPreference: 'SMS' | 'WHATSAPP' | 'PHONE' | 'EMAIL';
   contactPhone: string;
+  contactEmail?: string;
   notes?: string;
   status: OpdWaitlistStatus;
   offeredProviderEmployeeId?: string;

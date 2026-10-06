@@ -11,6 +11,40 @@ interface RouteContext {
   params: Promise<{ orderId: string }>;
 }
 
+function presentDiagnosticOrder(
+  order: Record<string, unknown>
+): Record<string, unknown> {
+  return {
+    orderId: order.orderId || order.id,
+    patientId: order.patientId,
+    encounterId: order.encounterId,
+    orderType: order.orderType,
+    catalogCode: order.catalogCode,
+    orderName: order.orderName,
+    priority: order.priority,
+    clinicalIndication: order.clinicalIndication,
+    specimenType: order.specimenType,
+    specimenBarcode: order.specimenBarcode,
+    status: order.status,
+    worklistStatus: order.worklistStatus,
+    orderedBy: order.orderedBy,
+    orderedAt: order.orderedAt || order.createdAt,
+  };
+}
+
+function presentPatientIdentity(
+  patientId: string,
+  patient: Record<string, unknown>
+): Record<string, unknown> {
+  return {
+    patientId,
+    mrn: patient.mrn,
+    fullName: patient.fullName,
+    dateOfBirth: patient.dateOfBirth,
+    gender: patient.gender,
+  };
+}
+
 function json(
   body: Record<string, unknown>,
   status: number
@@ -112,14 +146,8 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
         {
           success: true,
           status: 'RESULT_PENDING',
-          order,
-          patient: {
-            patientId,
-            mrn: patient.mrn,
-            fullName: patient.fullName,
-            dateOfBirth: patient.dateOfBirth,
-            gender: patient.gender,
-          },
+          order: presentDiagnosticOrder(order),
+          patient: presentPatientIdentity(patientId, patient),
           report: null,
           observations: [],
         },
@@ -179,14 +207,8 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
       {
         success: true,
         status: report.status,
-        order,
-        patient: {
-          patientId,
-          mrn: patient.mrn,
-          fullName: patient.fullName,
-          dateOfBirth: patient.dateOfBirth,
-          gender: patient.gender,
-        },
+        order: presentDiagnosticOrder(order),
+        patient: presentPatientIdentity(patientId, patient),
         report,
         observations: observations.filter(Boolean),
       },

@@ -83,7 +83,10 @@ describe('OPD-RP12 final billing reconciliation', () => {
       'Number(billingEncounter.billingMutationSequence || 0) + 1'
     );
     expect(documentation).toContain(
-      'A signed note may not introduce new billing candidates after final OPD billing reconciliation.'
+      'revenueIntegrityDeferredAfterBillingClose'
+    );
+    expect(documentation).toContain(
+      'Clinical documentation must never be rejected because finance is closed.'
     );
   });
 

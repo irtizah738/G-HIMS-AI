@@ -16,6 +16,8 @@ const CLINICAL_COLLECTIONS = [
   'orders',
   'prescriptions',
   'opd_queue',
+  'opdAppointments',
+  'opdWaitlist',
   'beds',
   'surgicalCases',
   'orRoomSchedules',
@@ -160,7 +162,14 @@ function authorizedCollections(roles: string[]): string[] {
 
   // Front desk/admissions should not receive notes, prescriptions or results.
   if (['RECEPTIONIST', 'REGISTRAR', 'ADMISSION_OFFICER'].some((role) => normalized.has(role))) {
-    add('patients', 'encounters', 'opd_queue', 'beds');
+    add(
+      'patients',
+      'encounters',
+      'opd_queue',
+      'opdAppointments',
+      'opdWaitlist',
+      'beds'
+    );
   }
 
   // Ancillary roles never hydrate the complete patient identity/chart set.
@@ -341,15 +350,34 @@ function scopeOfflineCollections(
       .map((item) => String(item.id || item.encounterId || '').trim())
       .filter(Boolean)
   );
+  const scopedAppointments = (collections.opdAppointments || []).filter(
+    (appointment) =>
+      valueMatchesScope(appointment.facilityId, facilities) &&
+      valueMatchesScope(appointment.departmentId, departments)
+  );
+  const scopedWaitlist = (collections.opdWaitlist || []).filter(
+    (entry) =>
+      valueMatchesScope(entry.facilityId, facilities) &&
+      valueMatchesScope(entry.preferredDepartmentId, departments)
+  );
+
   const patientIds = new Set(
-    encounters
-      .map((item) => String(item.patientId || '').trim())
-      .filter(Boolean)
+    [
+      ...encounters.map((item) => String(item.patientId || '').trim()),
+      ...scopedAppointments.map((item) =>
+        String(item.patientId || '').trim()
+      ),
+      ...scopedWaitlist.map((item) => String(item.patientId || '').trim()),
+    ].filter(Boolean)
   );
 
   const scoped: Record<string, Array<Record<string, unknown>>> = {
     ...collections,
     encounters,
+    ...(collections.opdAppointments
+      ? { opdAppointments: scopedAppointments }
+      : {}),
+    ...(collections.opdWaitlist ? { opdWaitlist: scopedWaitlist } : {}),
   };
 
   if (collections.employees) {
@@ -524,7 +552,13 @@ function scopeOfflineCollections(
   }
 
   for (const [collection, rows] of Object.entries(collections)) {
-    if (collection === 'encounters') continue;
+    if (
+      collection === 'encounters' ||
+      collection === 'opdAppointments' ||
+      collection === 'opdWaitlist'
+    ) {
+      continue;
+    }
     if (
       billingOnlyRole &&
       [

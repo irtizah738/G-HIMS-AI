@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Users,
   Search,
@@ -483,34 +483,51 @@ export function OpdMasterWorkspace() {
   const [billingReconciliationError, setBillingReconciliationError] =
     useState<string | null>(null);
 
+  const refreshAuthoritativeWorkspace = useCallback(async () => {
+    if (IS_DEMO_RUNTIME || auth.loading || !auth.activeTenant?.tenantId) return;
+
+    const snapshot = await hydrateEdgeSnapshot(auth.activeTenant.tenantId);
+    const readModel = buildOpdWorkspaceReadModel(snapshot);
+
+    setPatients(readModel.patients);
+    setAppointments(readModel.appointments);
+    setWaitlist(readModel.waitlist);
+    setEncounters(readModel.encounters);
+    setQueue(readModel.queue);
+    setSelectedEncounterId((current) => {
+      if (
+        current &&
+        readModel.encounters.some((encounter) => encounter.id === current)
+      ) {
+        return current;
+      }
+      return readModel.encounters[0]?.id || '';
+    });
+  }, [
+    auth.activeTenant?.tenantId,
+    auth.loading,
+    auth.user?.uid,
+  ]);
+
   useEffect(() => {
     if (IS_DEMO_RUNTIME || auth.loading || !auth.activeTenant?.tenantId) return;
 
     let cancelled = false;
-    const hydrate = async () => {
-      const snapshot = await hydrateEdgeSnapshot(auth.activeTenant!.tenantId);
-      if (cancelled) return;
-
-      const readModel = buildOpdWorkspaceReadModel(snapshot);
-      setPatients(readModel.patients);
-      setEncounters(readModel.encounters);
-      setQueue(readModel.queue);
-      setSelectedEncounterId((current) => {
-        if (current && readModel.encounters.some((encounter) => encounter.id === current)) {
-          return current;
-        }
-        return readModel.encounters[0]?.id || '';
-      });
-    };
-
-    void hydrate().catch((error) => {
-      console.error('OPD authoritative hydration failed:', error);
+    void refreshAuthoritativeWorkspace().catch((error) => {
+      if (!cancelled) {
+        console.error('OPD authoritative hydration failed:', error);
+      }
     });
 
     return () => {
       cancelled = true;
     };
-  }, [auth.activeTenant?.tenantId, auth.loading, auth.user?.uid]);
+  }, [
+    auth.activeTenant?.tenantId,
+    auth.loading,
+    auth.user?.uid,
+    refreshAuthoritativeWorkspace,
+  ]);
 
   // Selected encounter object
   const activeEncounter = useMemo(() => {
@@ -722,10 +739,35 @@ export function OpdMasterWorkspace() {
     setActiveTab('DASHBOARD');
   };
 
-  // HANDLER: Check-in appointment by creating an authoritative OPD encounter
-  // and queue token for the existing patient.
+  const handleBookAppointment = async (input: {
+    patientId: string;
+    providerEmployeeId: string;
+    facilityId: string;
+    departmentId: string;
+    appointmentType: AppointmentRecord['appointmentType'];
+    scheduledStartAt: number;
+    durationMinutes: number;
+    timeZone: string;
+    chiefComplaint: string;
+    bookingChannel: string;
+  }) => {
+    const result = await executeActiveTenantCommand(
+      'BookOpdAppointmentCommand',
+      input,
+      {
+        idempotencyKey:
+          `opd-appt-book:${input.patientId}:${input.providerEmployeeId}:${input.scheduledStartAt}`,
+      }
+    );
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Appointment booking failed.');
+    }
+    await refreshAuthoritativeWorkspace();
+  };
+
   const handleCheckInAppointment = async (appt: AppointmentRecord) => {
     const result = await executeActiveTenantCommand<{
+      appointment: Record<string, any>;
       encounter: {
         encounterId: string;
         tenantId: string;
@@ -739,27 +781,16 @@ export function OpdMasterWorkspace() {
         createdAt: number;
       };
     }>(
-      'CreateOpdEncounterCommand',
-      {
-        patientId: appt.patientId,
-        chiefComplaint: appt.chiefComplaint,
-        departmentId: appt.department,
-        priority: 'ROUTINE',
-        assignedDoctor: appt.doctorId,
-      },
-      { idempotencyKey: `opd-checkin:${appt.id}` }
+      'CheckInOpdAppointmentCommand',
+      { appointmentId: appt.id },
+      { idempotencyKey: `opd-appt-checkin:${appt.id}` }
     );
 
-    if (!result.success || !result.data) {
+    if (!result.success || !result.data?.encounter?.encounterId) {
       throw new Error(result.error?.message || 'Appointment check-in failed.');
     }
 
-    const patient = patients.find((candidate) => candidate.id === appt.patientId);
-    if (!patient) throw new Error('PATIENT_NOT_FOUND_IN_ACTIVE_READ_MODEL');
-
-    const tokenNum = result.data.queueToken.tokenNumber;
     const newEncId = result.data.encounter.encounterId;
-
     const consultationBilling = await executeActiveTenantCommand<{
       invoice: Record<string, any>;
     }>(
@@ -767,74 +798,181 @@ export function OpdMasterWorkspace() {
       { encounterId: newEncId },
       { idempotencyKey: `opd-consultation-invoice:${newEncId}` }
     );
+
+    await refreshAuthoritativeWorkspace();
+    setSelectedEncounterId(newEncId);
+    setActiveTab('BILLING');
+
     if (!consultationBilling.success || !consultationBilling.data?.invoice) {
       throw new Error(
         consultationBilling.error?.message ||
-          'Authoritative consultation invoice creation failed for appointment check-in.'
+          'Appointment is checked in, but consultation invoice creation failed. Retry billing creation before clinical queue release.'
       );
     }
-    const consultationInvoice = adaptAuthoritativeConsultationInvoice(
-      consultationBilling.data.invoice
-    );
-    const newEncounter: ComprehensiveOpdEncounter = {
-      id: newEncId,
-      tenantId: result.data.encounter.tenantId,
-      patientId: patient.id,
-      mrn: patient.mrn,
-      patientName: patient.fullName,
-      gender: patient.gender,
-      age: patient.age,
-      tariffPlan: patient.tariffPlan,
-      insuranceDetails: patient.insuranceDetails,
-      knownAllergies: patient.knownAllergies,
-      tokenNumber: tokenNum,
-      encounterType: 'OPD_SPECIALIST',
-      department: appt.department,
-      attendingDoctorId: appt.doctorId,
-      attendingDoctorName: appt.doctorName,
-      currentStage: 'REGISTRATION',
-      stageProgress: {
-        REGISTRATION: { status: 'COMPLETED', enteredAt: Date.now(), completedAt: Date.now(), completedBy: 'Authoritative OPD Encounter Service' },
-        BILLING_AUTHORIZATION: { status: 'ACTIVE', enteredAt: Date.now() },
-        QUEUE_ASSIGNMENT: { status: 'PENDING' },
-        NURSING_INTAKE: { status: 'PENDING' },
-        MO_ASSESSMENT: { status: 'PENDING' },
-        SPECIALTY_CONSULTATION: { status: 'PENDING' },
-        DIAGNOSTIC_ORDERS: { status: 'PENDING' },
-        PHARMACY_FEFO: { status: 'PENDING' },
-        BILLING_SETTLEMENT: { status: 'PENDING' },
-        DISPOSITION_CLOSURE: { status: 'PENDING' },
-        TIMELINE_AUDIT: { status: 'PENDING' },
-      },
-      diagnosticOrders: [],
-      prescriptions: [],
-      consultationInvoice,
-      startedAt: Date.now(),
-      status: 'IN_QUEUE',
-    };
+  };
 
-    const newQueueEntry: QueueEntry = {
-      id: result.data.queueToken.id,
-      encounterId: result.data.queueToken.encounterId,
-      tokenNumber: tokenNum,
-      patientName: patient.fullName,
-      mrn: patient.mrn,
-      department: result.data.queueToken.department,
-      assignedDoctorName: appt.doctorName,
-      assignedRoomOrBay: 'UNASSIGNED',
-      triagePriority: String(result.data.queueToken.priority || 'routine').toUpperCase(),
-      status: 'PAYMENT_PENDING',
-      issuedAt: result.data.queueToken.createdAt || Date.now(),
-    };
+  const handleResumeAppointmentBilling = async (
+    appt: AppointmentRecord
+  ) => {
+    const encounterId = String(appt.encounterId || '').trim();
+    if (!encounterId) {
+      throw new Error(
+        'APPOINTMENT_ENCOUNTER_LINK_REQUIRED: checked-in appointment is missing its authoritative encounter linkage.'
+      );
+    }
 
-    setAppointments((prev) =>
-      prev.map((a) => (a.id === appt.id ? { ...a, status: 'CHECKED_IN' as const } : a))
+    const consultationBilling = await executeActiveTenantCommand<{
+      invoice: Record<string, any>;
+    }>(
+      'CreateOpdConsultationInvoiceCommand',
+      { encounterId },
+      { idempotencyKey: `opd-consultation-invoice:${encounterId}` }
     );
-    setEncounters((prev) => [newEncounter, ...prev.filter((e) => e.id !== newEncounter.id)]);
-    setQueue((prev) => [newQueueEntry, ...prev.filter((q) => q.id !== newQueueEntry.id)]);
-    setSelectedEncounterId(newEncId);
-    recordEvent('APPOINTMENT_CHECKED_IN', `Appointment ${appt.scheduledTimeSlot} checked in for ${appt.patientName}.`);
-    setActiveTab('DASHBOARD');
+
+    if (
+      !consultationBilling.success &&
+      consultationBilling.error?.code !==
+        'OPD_CONSULTATION_INVOICE_ALREADY_EXISTS'
+    ) {
+      throw new Error(
+        consultationBilling.error?.message ||
+          'Consultation invoice recovery failed.'
+      );
+    }
+
+    await refreshAuthoritativeWorkspace();
+    setSelectedEncounterId(encounterId);
+    setActiveTab('BILLING');
+  };
+
+  const handleCancelAppointment = async (
+    appointmentId: string,
+    reason: string
+  ) => {
+    const result = await executeActiveTenantCommand(
+      'CancelOpdAppointmentCommand',
+      { appointmentId, reason },
+      { idempotencyKey: `opd-appt-cancel:${appointmentId}` }
+    );
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Appointment cancellation failed.');
+    }
+    await refreshAuthoritativeWorkspace();
+  };
+
+  const handleRescheduleAppointment = async (input: {
+    appointmentId: string;
+    scheduledStartAt: number;
+    durationMinutes: number;
+    timeZone: string;
+    reason: string;
+  }) => {
+    const result = await executeActiveTenantCommand(
+      'RescheduleOpdAppointmentCommand',
+      input,
+      {
+        idempotencyKey:
+          `opd-appt-reschedule:${input.appointmentId}:${input.scheduledStartAt}`,
+      }
+    );
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Appointment reschedule failed.');
+    }
+    await refreshAuthoritativeWorkspace();
+  };
+
+  const handleMarkAppointmentNoShow = async (
+    appointmentId: string,
+    reason: string
+  ) => {
+    const result = await executeActiveTenantCommand(
+      'MarkOpdAppointmentNoShowCommand',
+      { appointmentId, reason },
+      { idempotencyKey: `opd-appt-noshow:${appointmentId}` }
+    );
+    if (!result.success) {
+      throw new Error(result.error?.message || 'No-show update failed.');
+    }
+    await refreshAuthoritativeWorkspace();
+  };
+
+  const handleAddWaitlistEntry = async (input: {
+    patientId: string;
+    facilityId: string;
+    preferredDepartmentId: string;
+    preferredProviderEmployeeId?: string;
+    priority: 'LOW' | 'NORMAL' | 'URGENT' | 'CRITICAL';
+    notificationPreference: 'SMS' | 'WHATSAPP' | 'PHONE' | 'EMAIL';
+    notes?: string;
+  }) => {
+    const result = await executeActiveTenantCommand(
+      'AddOpdWaitlistEntryCommand',
+      input,
+      {
+        idempotencyKey:
+          `opd-waitlist-add:${input.patientId}:${input.facilityId}:${input.preferredDepartmentId}`,
+      }
+    );
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Waitlist creation failed.');
+    }
+    await refreshAuthoritativeWorkspace();
+  };
+
+  const handleOfferWaitlistSlot = async (input: {
+    waitlistId: string;
+    providerEmployeeId: string;
+    scheduledStartAt: number;
+    durationMinutes: number;
+    timeZone: string;
+    offerTtlMinutes?: number;
+  }) => {
+    const result = await executeActiveTenantCommand(
+      'OfferOpdWaitlistSlotCommand',
+      input,
+      {
+        idempotencyKey:
+          `opd-waitlist-offer:${input.waitlistId}:${input.providerEmployeeId}:${input.scheduledStartAt}`,
+      }
+    );
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Waitlist slot offer failed.');
+    }
+    await refreshAuthoritativeWorkspace();
+  };
+
+  const handleAcceptWaitlistSlot = async (input: {
+    waitlistId: string;
+    appointmentType: AppointmentRecord['appointmentType'];
+    chiefComplaint: string;
+    bookingChannel?: string;
+  }) => {
+    const result = await executeActiveTenantCommand(
+      'AcceptOpdWaitlistOfferCommand',
+      input,
+      {
+        idempotencyKey: `opd-waitlist-accept:${input.waitlistId}`,
+      }
+    );
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Waitlist acceptance failed.');
+    }
+    await refreshAuthoritativeWorkspace();
+  };
+
+  const handleCancelWaitlistEntry = async (
+    waitlistId: string,
+    reason: string
+  ) => {
+    const result = await executeActiveTenantCommand(
+      'CancelOpdWaitlistEntryCommand',
+      { waitlistId, reason },
+      { idempotencyKey: `opd-waitlist-cancel:${waitlistId}` }
+    );
+    if (!result.success) {
+      throw new Error(result.error?.message || 'Waitlist cancellation failed.');
+    }
+    await refreshAuthoritativeWorkspace();
   };
 
   // HANDLER: Save Triage Vitals through authoritative encounter evidence.
@@ -2317,43 +2455,23 @@ export function OpdMasterWorkspace() {
       {/* 4. Appointments & Waitlist */}
       {activeTab === 'APPOINTMENTS' && (
         <OpdAppointmentsWaitlist
+          tenantId={auth.activeTenant?.tenantId || ''}
+          facilityIds={auth.user?.facilityIds || []}
+          departmentIds={auth.user?.departmentIds || []}
+          isOnline={!auth.isOffline}
           appointments={appointments}
           waitlist={waitlist}
           patients={patients}
-          onBookAppointment={(newAppt) => {
-            setAppointments((prev) => [newAppt, ...prev]);
-            recordEvent('APPOINTMENT_BOOKED', `Booked appointment for ${newAppt.patientName} with ${newAppt.doctorName} at ${newAppt.scheduledTimeSlot}.`);
-          }}
-          onCheckInAppointment={(appt) => handleCheckInAppointment(appt)}
-          onCancelAppointment={(id, reason) => {
-            setAppointments((prev) =>
-              prev.map((a) => (a.id === id ? { ...a, status: 'CANCELLED' as const } : a))
-            );
-            recordEvent('APPOINTMENT_CANCELLED', `Appointment cancelled. Reason: ${reason}`);
-          }}
-          onRescheduleAppointment={(id, newDate, newTime, reason) => {
-            setAppointments((prev) =>
-              prev.map((a) =>
-                a.id === id
-                  ? { ...a, scheduledDate: newDate, scheduledTimeSlot: newTime, status: 'RESCHEDULED' as const }
-                  : a
-              )
-            );
-            recordEvent('APPOINTMENT_RESCHEDULED', `Rescheduled to ${newDate} ${newTime}. Reason: ${reason}`);
-          }}
-          onAddToWaitlist={(entry) => setWaitlist((prev) => [entry, ...prev])}
-          onOfferWaitlistSlot={(id) => {
-            setWaitlist((prev) =>
-              prev.map((w) => (w.id === id ? { ...w, status: 'OFFERED' as const } : w))
-            );
-          }}
-          onAcceptWaitlistSlot={(id) => {
-            const entry = waitlist.find((w) => w.id === id);
-            if (entry) {
-              setWaitlist((prev) => prev.filter((w) => w.id !== id));
-              alert(`Waitlist entry for ${entry.patientName} converted to scheduled appointment slot.`);
-            }
-          }}
+          onBookAppointment={handleBookAppointment}
+          onCheckInAppointment={handleCheckInAppointment}
+          onResumeBillingAppointment={handleResumeAppointmentBilling}
+          onCancelAppointment={handleCancelAppointment}
+          onRescheduleAppointment={handleRescheduleAppointment}
+          onMarkNoShowAppointment={handleMarkAppointmentNoShow}
+          onAddToWaitlist={handleAddWaitlistEntry}
+          onOfferWaitlistSlot={handleOfferWaitlistSlot}
+          onAcceptWaitlistSlot={handleAcceptWaitlistSlot}
+          onCancelWaitlist={handleCancelWaitlistEntry}
         />
       )}
 

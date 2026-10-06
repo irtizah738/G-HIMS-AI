@@ -1,9 +1,11 @@
 import type { EdgeSnapshot } from '@/lib/offline/hydration';
 import type {
+  AppointmentRecord,
   ComprehensiveOpdEncounter,
   OpdInvoice,
   PatientDemographics,
   QueueEntry,
+  WaitlistEntry,
 } from '@/types/opd-domain';
 
 function asRecord(value: unknown): Record<string, any> {
@@ -39,6 +41,36 @@ function normalizeTariff(value: unknown): PatientDemographics['tariffPlan'] {
     return tariff;
   }
   return 'UNASSIGNED';
+}
+
+function schedulingParts(
+  timestamp: number,
+  timeZone: string
+): { date: string; time: string } {
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(new Date(timestamp));
+    const values = Object.fromEntries(
+      parts.map((part) => [part.type, part.value])
+    );
+    return {
+      date: `${values.year}-${values.month}-${values.day}`,
+      time: `${values.hour}:${values.minute}`,
+    };
+  } catch {
+    const fallback = new Date(timestamp);
+    return {
+      date: fallback.toISOString().slice(0, 10),
+      time: fallback.toISOString().slice(11, 16),
+    };
+  }
 }
 
 function normalizeBloodGroup(value: unknown): PatientDemographics['bloodGroup'] {
@@ -204,6 +236,8 @@ function mapQueueStatus(value: unknown): QueueEntry['status'] {
 
 export interface OpdWorkspaceReadModel {
   patients: PatientDemographics[];
+  appointments: AppointmentRecord[];
+  waitlist: WaitlistEntry[];
   encounters: ComprehensiveOpdEncounter[];
   queue: QueueEntry[];
 }
@@ -214,6 +248,8 @@ export function buildOpdWorkspaceReadModel(
   const rawPatients = snapshot.collections.patients || [];
   const rawEncounters = snapshot.collections.encounters || [];
   const rawQueue = snapshot.collections.opd_queue || [];
+  const rawAppointments = snapshot.collections.opdAppointments || [];
+  const rawWaitlist = snapshot.collections.opdWaitlist || [];
   const rawInvoices = snapshot.collections.invoices || [];
   const rawOrders = snapshot.collections.orders || [];
   const rawPrescriptions = snapshot.collections.prescriptions || [];
@@ -296,6 +332,148 @@ export function buildOpdWorkspaceReadModel(
       );
     }
   }
+
+  const appointments: AppointmentRecord[] = rawAppointments
+    .map((row) => {
+      const appointment = asRecord(row);
+      const startAt = Number(appointment.scheduledStartAt || 0);
+      const timeZone = String(appointment.timeZone || 'UTC');
+      const display = schedulingParts(startAt, timeZone);
+      return {
+        id: String(appointment.appointmentId || appointment.id || ''),
+        patientId: String(appointment.patientId || ''),
+        patientName: String(appointment.patientName || ''),
+        mrn: String(appointment.mrn || ''),
+        doctorId: String(appointment.providerEmployeeId || ''),
+        doctorName: String(appointment.providerName || ''),
+        department: String(
+          appointment.departmentName || appointment.departmentId || ''
+        ),
+        facilityId: appointment.facilityId
+          ? String(appointment.facilityId)
+          : undefined,
+        departmentId: appointment.departmentId
+          ? String(appointment.departmentId)
+          : undefined,
+        appointmentType: String(
+          appointment.appointmentType || 'NEW_CONSULTATION'
+        ) as AppointmentRecord['appointmentType'],
+        scheduledDate: display.date,
+        scheduledTimeSlot: display.time,
+        scheduledStartAt: startAt || undefined,
+        scheduledEndAt: Number(appointment.scheduledEndAt || 0) || undefined,
+        timeZone,
+        durationMinutes: Number(appointment.durationMinutes || 20),
+        status: String(
+          appointment.status || 'CONFIRMED'
+        ) as AppointmentRecord['status'],
+        chiefComplaint: String(appointment.chiefComplaint || ''),
+        cancellationReason: appointment.cancellationReason
+          ? String(appointment.cancellationReason)
+          : undefined,
+        cancelledBy: appointment.cancelledBy
+          ? String(appointment.cancelledBy)
+          : undefined,
+        cancelledAt: Number(appointment.cancelledAt || 0) || undefined,
+        rescheduleHistory: Array.isArray(appointment.rescheduleHistory)
+          ? appointment.rescheduleHistory.map((entry: any) => {
+              const from = schedulingParts(
+                Number(entry.fromStartAt || 0),
+                timeZone
+              );
+              return {
+                fromDate: from.date,
+                fromTime: from.time,
+                reason: String(entry.reason || ''),
+                changedAt: Number(entry.changedAt || 0),
+              };
+            })
+          : [],
+        sourceWaitlistId: appointment.sourceWaitlistId
+          ? String(appointment.sourceWaitlistId)
+          : undefined,
+        encounterId: appointment.encounterId
+          ? String(appointment.encounterId)
+          : undefined,
+        queueTokenId: appointment.queueTokenId
+          ? String(appointment.queueTokenId)
+          : undefined,
+        bookingChannel: String(
+          appointment.bookingChannel || 'FRONT_DESK'
+        ),
+        createdAt: Number(appointment.createdAt || 0),
+      };
+    })
+    .sort(
+      (left, right) =>
+        Number(left.scheduledStartAt || 0) -
+        Number(right.scheduledStartAt || 0)
+    );
+
+  const waitlist: WaitlistEntry[] = rawWaitlist
+    .map((row) => {
+      const entry = asRecord(row);
+      return {
+        id: String(entry.waitlistId || entry.id || ''),
+        patientId: String(entry.patientId || ''),
+        patientName: String(entry.patientName || ''),
+        mrn: String(entry.mrn || ''),
+        preferredDoctorId: entry.preferredProviderEmployeeId
+          ? String(entry.preferredProviderEmployeeId)
+          : undefined,
+        facilityId: entry.facilityId
+          ? String(entry.facilityId)
+          : undefined,
+        preferredDepartmentId: entry.preferredDepartmentId
+          ? String(entry.preferredDepartmentId)
+          : undefined,
+        preferredDepartment: String(
+          entry.preferredDepartmentName ||
+            entry.preferredDepartmentId ||
+            ''
+        ),
+        priority: String(
+          entry.priority || 'NORMAL'
+        ) as WaitlistEntry['priority'],
+        notificationPreference: String(
+          entry.notificationPreference || 'PHONE'
+        ) as WaitlistEntry['notificationPreference'],
+        contactPhone: String(entry.contactPhone || ''),
+        contactEmail: entry.contactEmail
+          ? String(entry.contactEmail)
+          : undefined,
+        status: String(entry.status || 'WAITING') as WaitlistEntry['status'],
+        requestedDate: schedulingParts(
+          Number(entry.createdAt || 0),
+          'UTC'
+        ).date,
+        offeredProviderEmployeeId: entry.offeredProviderEmployeeId
+          ? String(entry.offeredProviderEmployeeId)
+          : undefined,
+        offeredProviderName: entry.offeredProviderName
+          ? String(entry.offeredProviderName)
+          : undefined,
+        offeredStartAt: Number(entry.offeredStartAt || 0) || undefined,
+        offeredEndAt: Number(entry.offeredEndAt || 0) || undefined,
+        offeredTimeZone: entry.offeredTimeZone
+          ? String(entry.offeredTimeZone)
+          : undefined,
+        offerExpiresAt: Number(entry.offerExpiresAt || 0) || undefined,
+        acceptedAppointmentId: entry.acceptedAppointmentId
+          ? String(entry.acceptedAppointmentId)
+          : undefined,
+        notes: entry.notes ? String(entry.notes) : undefined,
+        createdAt: Number(entry.createdAt || 0),
+      };
+    })
+    .sort((left, right) => {
+      const priority = { URGENT: 0, NORMAL: 1, LOW: 2, CRITICAL: -1 };
+      return (
+        (priority[left.priority] ?? 9) -
+          (priority[right.priority] ?? 9) ||
+        left.createdAt - right.createdAt
+      );
+    });
 
   const encounters: ComprehensiveOpdEncounter[] = rawEncounters
     .filter((row) => {
@@ -423,5 +601,5 @@ export function buildOpdWorkspaceReadModel(
     };
   });
 
-  return { patients, encounters, queue };
+  return { patients, appointments, waitlist, encounters, queue };
 }

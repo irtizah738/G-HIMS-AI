@@ -45,7 +45,7 @@ describe('G-HIMS Clinical Intelligence Patient 360 foundation', () => {
   test('OPD clinical mutations use authoritative registration and CommandBus paths', async () => {
     const opd = await source('components/opd/OpdMasterWorkspace.tsx');
     for (const command of [
-      'CreateOpdEncounterCommand',
+      'CheckInOpdAppointmentCommand',
       'UpdateOpdQueueStatusCommand',
       'RecordVitalsCommand',
       'AdvanceStageCommand',
@@ -56,7 +56,12 @@ describe('G-HIMS Clinical Intelligence Patient 360 foundation', () => {
       'CommitEncounterDispositionCommand',
       'RecordCashReceiptCommand',
     ]) expect(opd).toContain(command);
+    expect(opd).not.toContain("'CreateOpdEncounterCommand'");
     expect(opd).toContain('registerActiveTenantPatient');
+
+    const bus = await source('lib/backend/commands/command-bus.ts');
+    expect(bus).toContain("'CreateOpdEncounterCommand'");
+    expect(bus).toContain("'CheckInOpdAppointmentCommand'");
   });
 
   test('care transitions treat inpatient hospitalization as encounter lifecycle plus resource assignment', async () => {

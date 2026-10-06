@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Calendar,
   Clock,
@@ -25,135 +25,546 @@ import {
   WaitlistPriority,
   PatientDemographics,
 } from '@/types/opd-domain';
+import { auth as firebaseAuth } from '@/lib/firebase/client';
+
+
+type AvailabilitySlot = {
+  startAt: number;
+  endAt: number;
+  rosterId: string;
+  privilegeId: string;
+};
+
+type AvailabilityProvider = {
+  providerEmployeeId: string;
+  providerName: string;
+  departmentId: string;
+  departmentName: string;
+  facilityId: string;
+  slots: AvailabilitySlot[];
+};
 
 interface OpdAppointmentsWaitlistProps {
+  tenantId: string;
+  facilityIds: string[];
+  departmentIds: string[];
+  isOnline: boolean;
   appointments: AppointmentRecord[];
   waitlist: WaitlistEntry[];
   patients: PatientDemographics[];
-  onBookAppointment: (newAppt: AppointmentRecord) => void;
-  onCheckInAppointment: (appointment: AppointmentRecord) => void;
-  onCancelAppointment: (appointmentId: string, reason: string) => void;
-  onRescheduleAppointment: (appointmentId: string, newDate: string, newTime: string, reason: string) => void;
-  onAddToWaitlist: (entry: WaitlistEntry) => void;
-  onOfferWaitlistSlot: (waitlistId: string) => void;
-  onAcceptWaitlistSlot: (waitlistId: string) => void;
+  onBookAppointment: (input: {
+    patientId: string;
+    providerEmployeeId: string;
+    facilityId: string;
+    departmentId: string;
+    appointmentType: AppointmentType;
+    scheduledStartAt: number;
+    durationMinutes: number;
+    timeZone: string;
+    chiefComplaint: string;
+    bookingChannel: 'FRONT_DESK';
+  }) => Promise<void>;
+  onCheckInAppointment: (appointment: AppointmentRecord) => Promise<void>;
+  onResumeBillingAppointment: (
+    appointment: AppointmentRecord
+  ) => Promise<void>;
+  onCancelAppointment: (appointmentId: string, reason: string) => Promise<void>;
+  onRescheduleAppointment: (input: {
+    appointmentId: string;
+    scheduledStartAt: number;
+    durationMinutes: number;
+    timeZone: string;
+    reason: string;
+  }) => Promise<void>;
+  onMarkNoShowAppointment: (
+    appointmentId: string,
+    reason: string
+  ) => Promise<void>;
+  onAddToWaitlist: (input: {
+    patientId: string;
+    facilityId: string;
+    preferredDepartmentId: string;
+    preferredProviderEmployeeId?: string;
+    priority: 'LOW' | 'NORMAL' | 'URGENT' | 'CRITICAL';
+    notificationPreference: 'SMS' | 'WHATSAPP' | 'PHONE' | 'EMAIL';
+    notes?: string;
+  }) => Promise<void>;
+  onOfferWaitlistSlot: (input: {
+    waitlistId: string;
+    providerEmployeeId: string;
+    scheduledStartAt: number;
+    durationMinutes: number;
+    timeZone: string;
+    offerTtlMinutes?: number;
+  }) => Promise<void>;
+  onAcceptWaitlistSlot: (input: {
+    waitlistId: string;
+    appointmentType: AppointmentType;
+    chiefComplaint: string;
+    bookingChannel?: string;
+  }) => Promise<void>;
+  onCancelWaitlist: (waitlistId: string, reason: string) => Promise<void>;
 }
 
-const DOCTOR_SCHEDULES = [
-  { id: 'doc-01', name: 'Dr. Sarah Jenkins', dept: 'Cardiology', room: 'Consultation Room 104', maxPerSession: 15 },
-  { id: 'doc-02', name: 'Dr. Marcus Vance', dept: 'General Medicine', room: 'Consultation Room 101', maxPerSession: 20 },
-  { id: 'doc-03', name: 'Dr. Emily Chen', dept: 'Pediatrics', room: 'Pediatric Clinic 202', maxPerSession: 18 },
-  { id: 'doc-04', name: 'Dr. Tariq Al-Mansoor', dept: 'Orthopedics', room: 'Ortho Suite 305', maxPerSession: 12 },
-  { id: 'doc-05', name: 'Dr. Zainab Qureshi', dept: 'Obstetrics & Gynecology', room: 'Women Health Bay 108', maxPerSession: 16 },
-];
+const DEFAULT_DURATION_MINUTES = 20;
+const AVAILABILITY_LOOKAHEAD_DAYS = 14;
+
+function browserTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
+function formatDate(timestamp: number, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(timestamp));
+  const values = Object.fromEntries(
+    parts.map((part) => [part.type, part.value])
+  );
+  return values.year + '-' + values.month + '-' + values.day;
+}
+
+function formatTime(timestamp: number, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(new Date(timestamp));
+}
 
 export function OpdAppointmentsWaitlist({
+  tenantId,
+  facilityIds,
+  departmentIds,
+  isOnline,
   appointments,
   waitlist,
   patients,
   onBookAppointment,
   onCheckInAppointment,
+  onResumeBillingAppointment,
   onCancelAppointment,
   onRescheduleAppointment,
+  onMarkNoShowAppointment,
   onAddToWaitlist,
   onOfferWaitlistSlot,
   onAcceptWaitlistSlot,
+  onCancelWaitlist,
 }: OpdAppointmentsWaitlistProps) {
-  const [activeTab, setActiveTab] = useState<'APPOINTMENTS' | 'WAITLIST' | 'BOOK_NEW'>('APPOINTMENTS');
-  const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const timeZone = useMemo(() => browserTimeZone(), []);
+  const today = useMemo(
+    () => formatDate(Date.now(), timeZone),
+    [timeZone]
+  );
+  const [activeTab, setActiveTab] = useState<
+    'APPOINTMENTS' | 'WAITLIST' | 'BOOK_NEW'
+  >('APPOINTMENTS');
+  const [selectedDate, setSelectedDate] = useState<string>(today);
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
+  const [schedulingError, setSchedulingError] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [clockNow, setClockNow] = useState<number>(() => Date.now());
 
-  // Booking Form State
-  const [selectedPatientId, setSelectedPatientId] = useState<string>(patients[0]?.id || '');
-  const [selectedDoctorId, setSelectedDoctorId] = useState<string>(DOCTOR_SCHEDULES[0].id);
-  const [bookingType, setBookingType] = useState<AppointmentType>('NEW_CONSULTATION');
-  const [bookingDate, setBookingDate] = useState<string>(new Date().toISOString().slice(0, 10));
-  const [bookingTime, setBookingTime] = useState<string>('09:30');
-  const [bookingComplaint, setBookingComplaint] = useState<string>('Exertional dyspnea and follow-up review');
+  const [selectedPatientId, setSelectedPatientId] = useState<string>('');
+  const [bookingFacilityId, setBookingFacilityId] = useState<string>('');
+  const [bookingDepartmentId, setBookingDepartmentId] =
+    useState<string>('');
+  const [selectedDoctorId, setSelectedDoctorId] = useState<string>('');
+  const [bookingType, setBookingType] =
+    useState<AppointmentType>('NEW_CONSULTATION');
+  const [bookingDate, setBookingDate] = useState<string>(today);
+  const [bookingDurationMinutes, setBookingDurationMinutes] =
+    useState<number>(DEFAULT_DURATION_MINUTES);
+  const [bookingStartAt, setBookingStartAt] = useState<number | null>(null);
+  const [bookingComplaint, setBookingComplaint] = useState<string>('');
+  const [availability, setAvailability] = useState<AvailabilityProvider[]>([]);
 
-  // Cancel / Reschedule Modals
-  const [cancelModalAppt, setCancelModalAppt] = useState<AppointmentRecord | null>(null);
-  const [cancelReason, setCancelReason] = useState<string>('Patient requested cancellation due to personal conflict');
-  const [rescheduleModalAppt, setRescheduleModalAppt] = useState<AppointmentRecord | null>(null);
-  const [newRescheduleDate, setNewRescheduleDate] = useState<string>(new Date().toISOString().slice(0, 10));
-  const [newRescheduleTime, setNewRescheduleTime] = useState<string>('11:00');
-  const [rescheduleReason, setRescheduleReason] = useState<string>('Clinician rescheduled due to emergency OT case');
+  const [cancelModalAppt, setCancelModalAppt] =
+    useState<AppointmentRecord | null>(null);
+  const [cancelReason, setCancelReason] = useState<string>('');
+  const [rescheduleModalAppt, setRescheduleModalAppt] =
+    useState<AppointmentRecord | null>(null);
+  const [newRescheduleDate, setNewRescheduleDate] =
+    useState<string>(today);
+  const [newRescheduleStartAt, setNewRescheduleStartAt] =
+    useState<number | null>(null);
+  const [rescheduleDurationMinutes, setRescheduleDurationMinutes] =
+    useState<number>(DEFAULT_DURATION_MINUTES);
+  const [rescheduleReason, setRescheduleReason] = useState<string>('');
+  const [rescheduleAvailability, setRescheduleAvailability] =
+    useState<AvailabilityProvider[]>([]);
+  const [noShowModalAppt, setNoShowModalAppt] =
+    useState<AppointmentRecord | null>(null);
+  const [noShowReason, setNoShowReason] = useState<string>('');
 
-  // Waitlist Add State
-  const [waitlistPatientId, setWaitlistPatientId] = useState<string>(patients[0]?.id || '');
-  const [waitlistPriority, setWaitlistPriority] = useState<WaitlistPriority>('NORMAL');
-  const [waitlistDept, setWaitlistDept] = useState<string>('Cardiology');
-  const [waitlistChannel, setWaitlistChannel] = useState<'SMS' | 'WHATSAPP' | 'PHONE' | 'EMAIL'>('SMS');
+  const [waitlistPatientId, setWaitlistPatientId] = useState<string>('');
+  const [waitlistPriority, setWaitlistPriority] =
+    useState<WaitlistPriority>('NORMAL');
+  const [waitlistFacilityId, setWaitlistFacilityId] =
+    useState<string>('');
+  const [waitlistDept, setWaitlistDept] = useState<string>('');
+  const [waitlistChannel, setWaitlistChannel] = useState<
+    'SMS' | 'WHATSAPP' | 'PHONE' | 'EMAIL'
+  >('PHONE');
+  const [waitlistNotes, setWaitlistNotes] = useState<string>('');
+  const [cancelWaitlistEntry, setCancelWaitlistEntry] =
+    useState<WaitlistEntry | null>(null);
+  const [cancelWaitlistReason, setCancelWaitlistReason] =
+    useState<string>('');
 
-  const filteredAppointments = appointments.filter((a) => {
-    const matchesDate = !selectedDate || a.scheduledDate === selectedDate;
-    const matchesStatus = statusFilter === 'ALL' || a.status === statusFilter;
+  useEffect(() => {
+    const intervalId = window.setInterval(
+      () => setClockNow(Date.now()),
+      30_000
+    );
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedPatientId && patients[0]?.id) {
+      setSelectedPatientId(patients[0].id);
+    }
+    if (!waitlistPatientId && patients[0]?.id) {
+      setWaitlistPatientId(patients[0].id);
+    }
+    if (!bookingFacilityId && facilityIds[0]) {
+      setBookingFacilityId(facilityIds[0]);
+    }
+    if (!waitlistFacilityId && facilityIds[0]) {
+      setWaitlistFacilityId(facilityIds[0]);
+    }
+    if (!bookingDepartmentId && departmentIds[0]) {
+      setBookingDepartmentId(departmentIds[0]);
+    }
+    if (!waitlistDept && departmentIds[0]) {
+      setWaitlistDept(departmentIds[0]);
+    }
+  }, [
+    patients,
+    facilityIds,
+    departmentIds,
+    selectedPatientId,
+    waitlistPatientId,
+    bookingFacilityId,
+    waitlistFacilityId,
+    bookingDepartmentId,
+    waitlistDept,
+  ]);
+
+  const loadAvailability = useCallback(
+    async (
+      facilityId: string,
+      departmentId: string,
+      date: string,
+      durationMinutes: number
+    ): Promise<AvailabilityProvider[]> => {
+      if (!isOnline) {
+        throw new Error(
+          'Scheduling is online-only until OPD-RP15 offline replay qualification.'
+        );
+      }
+      if (!tenantId || !facilityId || !departmentId || !date) return [];
+      const user = firebaseAuth.currentUser;
+      if (!user) throw new Error('AUTHENTICATED_USER_REQUIRED');
+      const idToken = await user.getIdToken(false);
+      const query = new URLSearchParams({
+        tenantId,
+        facilityId,
+        departmentId,
+        date,
+        timeZone,
+        durationMinutes: String(durationMinutes),
+      });
+      const response = await fetch(
+        '/api/opd/availability?' + query.toString(),
+        {
+          method: 'GET',
+          cache: 'no-store',
+          credentials: 'same-origin',
+          headers: {
+            Authorization: 'Bearer ' + idToken,
+            'x-ghims-tenant-id': tenantId,
+          },
+        }
+      );
+      const payload = await response.json();
+      if (!response.ok || !payload?.success) {
+        throw new Error(
+          payload?.error?.message ||
+            'Unable to load authoritative provider availability.'
+        );
+      }
+      return Array.isArray(payload.providers) ? payload.providers : [];
+    },
+    [isOnline, tenantId, timeZone]
+  );
+
+  useEffect(() => {
+    if (
+      activeTab !== 'BOOK_NEW' ||
+      !bookingFacilityId ||
+      !bookingDepartmentId
+    ) {
+      return;
+    }
+    let cancelled = false;
+    setSchedulingError(null);
+    void loadAvailability(
+      bookingFacilityId,
+      bookingDepartmentId,
+      bookingDate,
+      bookingDurationMinutes
+    )
+      .then((providers) => {
+        if (cancelled) return;
+        setAvailability(providers);
+        setSelectedDoctorId(providers[0]?.providerEmployeeId || '');
+        setBookingStartAt(providers[0]?.slots[0]?.startAt || null);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setAvailability([]);
+          setSelectedDoctorId('');
+          setBookingStartAt(null);
+          setSchedulingError(
+            error instanceof Error
+              ? error.message
+              : 'Provider availability failed.'
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeTab,
+    bookingFacilityId,
+    bookingDepartmentId,
+    bookingDate,
+    bookingDurationMinutes,
+    loadAvailability,
+  ]);
+
+  useEffect(() => {
+    const provider = availability.find(
+      (candidate) => candidate.providerEmployeeId === selectedDoctorId
+    );
+    if (
+      provider &&
+      !provider.slots.some((slot) => slot.startAt === bookingStartAt)
+    ) {
+      setBookingStartAt(provider.slots[0]?.startAt || null);
+    }
+  }, [availability, selectedDoctorId, bookingStartAt]);
+
+  useEffect(() => {
+    if (!rescheduleModalAppt) return;
+    const facilityId =
+      rescheduleModalAppt.facilityId || facilityIds[0] || '';
+    const departmentId =
+      rescheduleModalAppt.departmentId || departmentIds[0] || '';
+    let cancelled = false;
+    setSchedulingError(null);
+    void loadAvailability(
+      facilityId,
+      departmentId,
+      newRescheduleDate,
+      rescheduleDurationMinutes
+    )
+      .then((providers) => {
+        if (cancelled) return;
+        const sameProvider = providers.filter(
+          (provider) =>
+            provider.providerEmployeeId === rescheduleModalAppt.doctorId
+        );
+        setRescheduleAvailability(sameProvider);
+        setNewRescheduleStartAt(sameProvider[0]?.slots[0]?.startAt || null);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setRescheduleAvailability([]);
+          setNewRescheduleStartAt(null);
+          setSchedulingError(
+            error instanceof Error
+              ? error.message
+              : 'Reschedule availability failed.'
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    rescheduleModalAppt,
+    newRescheduleDate,
+    rescheduleDurationMinutes,
+    facilityIds,
+    departmentIds,
+    loadAvailability,
+  ]);
+
+  const filteredAppointments = appointments.filter((appointment) => {
+    const matchesDate =
+      !selectedDate || appointment.scheduledDate === selectedDate;
+    const matchesStatus =
+      statusFilter === 'ALL' || appointment.status === statusFilter;
     return matchesDate && matchesStatus;
   });
 
-  const handleCreateBooking = (e: React.FormEvent) => {
-    e.preventDefault();
-    const pat = patients.find((p) => p.id === selectedPatientId) || patients[0];
-    const doc = DOCTOR_SCHEDULES.find((d) => d.id === selectedDoctorId) || DOCTOR_SCHEDULES[0];
+  const runAction = async (key: string, action: () => Promise<void>) => {
+    setBusyAction(key);
+    setSchedulingError(null);
+    try {
+      await action();
+    } catch (error) {
+      setSchedulingError(
+        error instanceof Error ? error.message : 'Scheduling action failed.'
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  };
 
-    // Conflict Guard: check if doctor has slot clash
-    const conflict = appointments.find(
-      (a) =>
-        a.doctorId === doc.id &&
-        a.scheduledDate === bookingDate &&
-        a.scheduledTimeSlot === bookingTime &&
-        a.status !== 'CANCELLED'
-    );
-
-    if (conflict) {
-      alert(`Booking Conflict: ${doc.name} already has appointment with ${conflict.patientName} at ${bookingTime}. Please choose another time slot.`);
+  const handleCreateBooking = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (
+      !selectedPatientId ||
+      !bookingFacilityId ||
+      !bookingDepartmentId ||
+      !selectedDoctorId ||
+      !bookingStartAt ||
+      !bookingComplaint.trim()
+    ) {
+      setSchedulingError(
+        'Patient, facility, department, provider, slot and visit reason are required.'
+      );
       return;
     }
 
-    const newAppt: AppointmentRecord = {
-      id: `appt-${Date.now()}`,
-      patientId: pat.id,
-      patientName: pat.fullName,
-      mrn: pat.mrn,
-      doctorId: doc.id,
-      doctorName: doc.name,
-      department: doc.dept,
-      appointmentType: bookingType,
-      scheduledDate: bookingDate,
-      scheduledTimeSlot: bookingTime,
-      durationMinutes: 20,
-      status: 'CONFIRMED',
-      chiefComplaint: bookingComplaint,
-      bookingChannel: 'FRONT_DESK',
-      createdAt: Date.now(),
-    };
-
-    onBookAppointment(newAppt);
-    setActiveTab('APPOINTMENTS');
+    void runAction('book', async () => {
+      await onBookAppointment({
+        patientId: selectedPatientId,
+        providerEmployeeId: selectedDoctorId,
+        facilityId: bookingFacilityId,
+        departmentId: bookingDepartmentId,
+        appointmentType: bookingType,
+        scheduledStartAt: bookingStartAt,
+        durationMinutes: bookingDurationMinutes,
+        timeZone,
+        chiefComplaint: bookingComplaint.trim(),
+        bookingChannel: 'FRONT_DESK',
+      });
+      setBookingComplaint('');
+      setActiveTab('APPOINTMENTS');
+    });
   };
 
-  const handleAddWaitlistSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const pat = patients.find((p) => p.id === waitlistPatientId) || patients[0];
-
-    const newWaitlistEntry: WaitlistEntry = {
-      id: `wl-${Date.now()}`,
-      patientId: pat.id,
-      patientName: pat.fullName,
-      mrn: pat.mrn,
-      preferredDepartment: waitlistDept,
-      priority: waitlistPriority,
-      notificationPreference: waitlistChannel,
-      contactPhone: pat.phone,
-      status: 'WAITING',
-      requestedDate: new Date().toISOString().slice(0, 10),
-      notes: 'Priority waitlist requested for nearest slot opening',
-      createdAt: Date.now(),
-    };
-
-    onAddToWaitlist(newWaitlistEntry);
-    setActiveTab('WAITLIST');
+  const handleAddWaitlistSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (
+      !waitlistPatientId ||
+      !waitlistFacilityId ||
+      !waitlistDept ||
+      !waitlistNotes.trim()
+    ) {
+      setSchedulingError(
+        'Patient, facility, department and visit reason are required for the waitlist.'
+      );
+      return;
+    }
+    void runAction('waitlist-add', async () => {
+      await onAddToWaitlist({
+        patientId: waitlistPatientId,
+        facilityId: waitlistFacilityId,
+        preferredDepartmentId: waitlistDept,
+        priority: waitlistPriority,
+        notificationPreference: waitlistChannel,
+        notes: waitlistNotes.trim(),
+      });
+      setWaitlistNotes('');
+      setActiveTab('WAITLIST');
+    });
   };
+
+  const handleOfferEarliestSlot = (entry: WaitlistEntry) => {
+    void runAction('waitlist-offer:' + entry.id, async () => {
+      const facilityId = entry.facilityId || facilityIds[0] || '';
+      const departmentId =
+        entry.preferredDepartmentId || departmentIds[0] || '';
+      if (!facilityId || !departmentId) {
+        throw new Error('WAITLIST_SCOPE_REQUIRED');
+      }
+
+      for (let offset = 0; offset < AVAILABILITY_LOOKAHEAD_DAYS; offset += 1) {
+        const target = new Date(Date.now() + offset * 86400000);
+        const targetDate = formatDate(target.getTime(), timeZone);
+        const providers = await loadAvailability(
+          facilityId,
+          departmentId,
+          targetDate,
+          DEFAULT_DURATION_MINUTES
+        );
+        const scoped = entry.preferredDoctorId
+          ? providers.filter(
+              (provider) =>
+                provider.providerEmployeeId === entry.preferredDoctorId
+            )
+          : providers;
+        const provider = scoped.find((candidate) => candidate.slots.length > 0);
+        const slot = provider?.slots[0];
+        if (provider && slot) {
+          await onOfferWaitlistSlot({
+            waitlistId: entry.id,
+            providerEmployeeId: provider.providerEmployeeId,
+            scheduledStartAt: slot.startAt,
+            durationMinutes: DEFAULT_DURATION_MINUTES,
+            timeZone,
+            offerTtlMinutes: 30,
+          });
+          return;
+        }
+      }
+      throw new Error(
+        'NO_WAITLIST_SLOT_AVAILABLE: no governed slot was found in the next 14 days.'
+      );
+    });
+  };
+
+  const handleAcceptWaitlistOffer = (entry: WaitlistEntry) => {
+    if (!entry.notes?.trim()) {
+      setSchedulingError(
+        'WAITLIST_VISIT_REASON_REQUIRED: add a documented visit reason before accepting the offer.'
+      );
+      return;
+    }
+    void runAction('waitlist-accept:' + entry.id, async () => {
+      await onAcceptWaitlistSlot({
+        waitlistId: entry.id,
+        appointmentType: 'NEW_CONSULTATION',
+        chiefComplaint: entry.notes!.trim(),
+        bookingChannel: 'CALL_CENTER',
+      });
+    });
+  };
+
+  const noShowEligible = (appointment: AppointmentRecord) =>
+    ['CONFIRMED', 'RESCHEDULED'].includes(appointment.status) &&
+    Boolean(appointment.scheduledEndAt) &&
+    Date.now() >= Number(appointment.scheduledEndAt) + 15 * 60 * 1000;
+  const appointmentMutableBeforeStart = (
+    appointment: AppointmentRecord
+  ) =>
+    ['CONFIRMED', 'RESCHEDULED'].includes(appointment.status) &&
+    Boolean(appointment.scheduledStartAt) &&
+    clockNow < Number(appointment.scheduledStartAt);
+
 
   return (
     <div className="space-y-6">
@@ -217,6 +628,19 @@ export function OpdAppointmentsWaitlist({
           </div>
         )}
       </div>
+
+      {!isOnline && (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+          Scheduling mutations are disabled offline until OPD-RP15 qualifies slot-lock replay and conflict recovery.
+        </div>
+      )}
+      {schedulingError && (
+        <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          {schedulingError}
+        </div>
+      )}
 
       {/* VIEW 1: SCHEDULED APPOINTMENTS */}
       {activeTab === 'APPOINTMENTS' && (
@@ -283,36 +707,79 @@ export function OpdAppointmentsWaitlist({
                       </td>
                       <td className="p-3 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          {appt.status !== 'CHECKED_IN' && appt.status !== 'CANCELLED' && (
+                          {['CONFIRMED', 'RESCHEDULED'].includes(appt.status) && (
                             <button
-                              onClick={() => onCheckInAppointment(appt)}
-                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold cursor-pointer flex items-center gap-1"
-                              title="Check-in patient and issue live queue token"
+                              disabled={!isOnline || busyAction !== null}
+                              onClick={() =>
+                                void runAction(
+                                  'checkin:' + appt.id,
+                                  () => onCheckInAppointment(appt)
+                                )
+                              }
+                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold cursor-pointer flex items-center gap-1 disabled:opacity-50"
+                              title="Authoritative check-in creates encounter and payment-pending queue token"
                             >
                               <CheckCircle2 className="w-3 h-3" />
                               Check-In
                             </button>
                           )}
-                          {appt.status !== 'CANCELLED' && (
+                          {appt.status === 'CHECKED_IN' && appt.encounterId && (
+                            <button
+                              disabled={!isOnline || busyAction !== null}
+                              onClick={() =>
+                                void runAction(
+                                  'resume-billing:' + appt.id,
+                                  () => onResumeBillingAppointment(appt)
+                                )
+                              }
+                              className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold cursor-pointer disabled:opacity-50"
+                              title="Retry the deterministic consultation invoice for this checked-in encounter"
+                            >
+                              Resume Billing
+                            </button>
+                          )}
+                          {appointmentMutableBeforeStart(appt) && (
                             <>
                               <button
+                                disabled={!isOnline || busyAction !== null}
                                 onClick={() => {
                                   setRescheduleModalAppt(appt);
                                   setNewRescheduleDate(appt.scheduledDate);
+                                  setRescheduleDurationMinutes(
+                                    appt.durationMinutes || DEFAULT_DURATION_MINUTES
+                                  );
+                                  setRescheduleReason('');
                                 }}
-                                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-[10px] font-bold cursor-pointer"
-                                title="Reschedule appointment"
+                                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-[10px] font-bold cursor-pointer disabled:opacity-50"
+                                title="Reschedule against authoritative provider availability"
                               >
                                 Reschedule
                               </button>
                               <button
-                                onClick={() => setCancelModalAppt(appt)}
-                                className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-700 dark:bg-red-950/80 dark:text-red-300 rounded-lg text-[10px] font-bold cursor-pointer"
+                                disabled={!isOnline || busyAction !== null}
+                                onClick={() => {
+                                  setCancelReason('');
+                                  setCancelModalAppt(appt);
+                                }}
+                                className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-700 dark:bg-red-950/80 dark:text-red-300 rounded-lg text-[10px] font-bold cursor-pointer disabled:opacity-50"
                                 title="Cancel appointment"
                               >
                                 Cancel
                               </button>
                             </>
+                          )}
+                          {noShowEligible(appt) && (
+                            <button
+                              disabled={!isOnline || busyAction !== null}
+                              onClick={() => {
+                                setNoShowReason('');
+                                setNoShowModalAppt(appt);
+                              }}
+                              className="px-2 py-1 bg-amber-100 text-amber-800 rounded-lg text-[10px] font-bold disabled:opacity-50"
+                              title="No-show is allowed only after the scheduled interval plus grace period"
+                            >
+                              No-Show
+                            </button>
                           )}
                         </div>
                       </td>
@@ -336,7 +803,7 @@ export function OpdAppointmentsWaitlist({
                   Priority Outpatient Waitlist ({waitlist.length})
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Patients waiting for clinic cancellations or slot openings. Automated notification sent upon offer.
+                  Patients waiting for clinic cancellations or slot openings. Slot offers are server-held and notification delivery depends on the configured messaging channel.
                 </p>
               </div>
             </div>
@@ -355,7 +822,13 @@ export function OpdAppointmentsWaitlist({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {waitlist.map((w) => (
+                  {waitlist.map((w) => {
+                    const offerExpired =
+                      w.status === 'OFFERED' &&
+                      Number(w.offerExpiresAt || 0) > 0 &&
+                      Number(w.offerExpiresAt) <= clockNow;
+
+                    return (
                     <tr key={w.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
                       <td className="p-3">
                         <span
@@ -372,33 +845,53 @@ export function OpdAppointmentsWaitlist({
                       <td className="p-3 font-mono text-slate-500">{w.mrn}</td>
                       <td className="p-3 font-semibold">{w.preferredDepartment}</td>
                       <td className="p-3 text-slate-600 dark:text-slate-400">
-                        {w.contactPhone} ({w.notificationPreference})
+                        {w.notificationPreference === 'EMAIL'
+                          ? w.contactEmail || 'No email on file'
+                          : w.contactPhone || 'No phone on file'}{' '}
+                        ({w.notificationPreference})
                       </td>
                       <td className="p-3">
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                          {w.status}
+                          {offerExpired ? 'OFFER EXPIRED' : w.status}
                         </span>
                       </td>
                       <td className="p-3 text-right">
-                        {w.status === 'WAITING' && (
-                          <button
-                            onClick={() => onOfferWaitlistSlot(w.id)}
-                            className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[10px] font-bold cursor-pointer"
-                          >
-                            Offer Slot
-                          </button>
-                        )}
-                        {w.status === 'OFFERED' && (
-                          <button
-                            onClick={() => onAcceptWaitlistSlot(w.id)}
-                            className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold cursor-pointer"
-                          >
-                            Accept & Convert to Appt
-                          </button>
-                        )}
+                        <div className="flex items-center justify-end gap-1.5">
+                          {(w.status === 'WAITING' || offerExpired) && (
+                            <button
+                              disabled={!isOnline || busyAction !== null}
+                              onClick={() => handleOfferEarliestSlot(w)}
+                              className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[10px] font-bold cursor-pointer disabled:opacity-50"
+                            >
+                              {offerExpired ? 'Re-offer Earliest Slot' : 'Offer Earliest Slot'}
+                            </button>
+                          )}
+                          {w.status === 'OFFERED' && !offerExpired && (
+                            <button
+                              disabled={!isOnline || busyAction !== null}
+                              onClick={() => handleAcceptWaitlistOffer(w)}
+                              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold cursor-pointer disabled:opacity-50"
+                            >
+                              Accept Offer
+                            </button>
+                          )}
+                          {['WAITING', 'OFFERED'].includes(w.status) && (
+                            <button
+                              disabled={!isOnline || busyAction !== null}
+                              onClick={() => {
+                                setCancelWaitlistReason('');
+                                setCancelWaitlistEntry(w);
+                              }}
+                              className="px-3 py-1 bg-red-50 text-red-700 rounded-lg text-[10px] font-bold disabled:opacity-50"
+                            >
+                              Cancel
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -411,7 +904,7 @@ export function OpdAppointmentsWaitlist({
               Add Patient to Clinic Waitlist
             </h3>
 
-            <form onSubmit={handleAddWaitlistSubmit} className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <form onSubmit={handleAddWaitlistSubmit} className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-xs font-semibold mb-1">Select Patient</label>
                 <select
@@ -428,39 +921,87 @@ export function OpdAppointmentsWaitlist({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold mb-1">Target Specialty</label>
+                <label className="block text-xs font-semibold mb-1">Facility</label>
+                <select
+                  value={waitlistFacilityId}
+                  onChange={(e) => setWaitlistFacilityId(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                >
+                  <option value="">Select facility</option>
+                  {facilityIds.map((facilityId) => (
+                    <option key={facilityId} value={facilityId}>
+                      {facilityId}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold mb-1">Target Department</label>
                 <select
                   value={waitlistDept}
                   onChange={(e) => setWaitlistDept(e.target.value)}
                   className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                 >
-                  <option value="Cardiology">Cardiology</option>
-                  <option value="General Medicine">General Medicine</option>
-                  <option value="Pediatrics">Pediatrics</option>
-                  <option value="Orthopedics">Orthopedics</option>
-                  <option value="Obstetrics & Gynecology">Obstetrics & Gynecology</option>
+                  <option value="">Select department</option>
+                  {departmentIds.map((departmentId) => (
+                    <option key={departmentId} value={departmentId}>
+                      {departmentId}
+                    </option>
+                  ))}
                 </select>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold mb-1">Clinical Priority</label>
+                <label className="block text-xs font-semibold mb-1">Priority</label>
                 <select
                   value={waitlistPriority}
-                  onChange={(e) => setWaitlistPriority(e.target.value as any)}
+                  onChange={(e) =>
+                    setWaitlistPriority(e.target.value as WaitlistPriority)
+                  }
                   className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                 >
-                  <option value="NORMAL">Normal Priority</option>
-                  <option value="URGENT">Urgent (Within 48h)</option>
-                  <option value="CRITICAL">Critical Fast-Track</option>
+                  <option value="LOW">Low</option>
+                  <option value="NORMAL">Normal</option>
+                  <option value="URGENT">Urgent</option>
                 </select>
               </div>
 
-              <div className="flex items-end">
+              <div>
+                <label className="block text-xs font-semibold mb-1">Notification Channel</label>
+                <select
+                  value={waitlistChannel}
+                  onChange={(e) =>
+                    setWaitlistChannel(e.target.value as typeof waitlistChannel)
+                  }
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                >
+                  <option value="PHONE">Phone</option>
+                  <option value="SMS">SMS</option>
+                  <option value="WHATSAPP">WhatsApp</option>
+                  <option value="EMAIL">Email</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold mb-1">Visit Reason</label>
+                <input
+                  value={waitlistNotes}
+                  onChange={(e) => setWaitlistNotes(e.target.value)}
+                  placeholder="Required before an offered slot can become an appointment"
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+
+              <div className="sm:col-span-3 flex justify-end">
                 <button
                   type="submit"
-                  className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold cursor-pointer"
+                  disabled={!isOnline || busyAction !== null}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold cursor-pointer disabled:opacity-50"
                 >
-                  Enlist on Waitlist
+                  {busyAction === 'waitlist-add'
+                    ? 'Adding…'
+                    : 'Enlist on Waitlist'}
                 </button>
               </div>
             </form>
@@ -502,16 +1043,56 @@ export function OpdAppointmentsWaitlist({
 
               <div>
                 <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
-                  Attending Clinician & Room
+                  Facility
+                </label>
+                <select
+                  value={bookingFacilityId}
+                  onChange={(e) => setBookingFacilityId(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-semibold"
+                >
+                  <option value="">Select facility</option>
+                  {facilityIds.map((facilityId) => (
+                    <option key={facilityId} value={facilityId}>
+                      {facilityId}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                  Department
+                </label>
+                <select
+                  value={bookingDepartmentId}
+                  onChange={(e) => setBookingDepartmentId(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-semibold"
+                >
+                  <option value="">Select department</option>
+                  {departmentIds.map((departmentId) => (
+                    <option key={departmentId} value={departmentId}>
+                      {departmentId}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                  Attending Clinician
                 </label>
                 <select
                   value={selectedDoctorId}
                   onChange={(e) => setSelectedDoctorId(e.target.value)}
                   className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-semibold"
                 >
-                  {DOCTOR_SCHEDULES.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name} — {d.dept} ({d.room})
+                  <option value="">Select provider</option>
+                  {availability.map((provider) => (
+                    <option
+                      key={provider.providerEmployeeId}
+                      value={provider.providerEmployeeId}
+                    >
+                      {provider.providerName} — {provider.departmentName}
                     </option>
                   ))}
                 </select>
@@ -544,6 +1125,7 @@ export function OpdAppointmentsWaitlist({
                 <input
                   type="date"
                   required
+                  min={today}
                   value={bookingDate}
                   onChange={(e) => setBookingDate(e.target.value)}
                   className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
@@ -552,23 +1134,44 @@ export function OpdAppointmentsWaitlist({
 
               <div>
                 <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
-                  Time Slot
+                  Duration
                 </label>
                 <select
-                  value={bookingTime}
-                  onChange={(e) => setBookingTime(e.target.value)}
+                  value={bookingDurationMinutes}
+                  onChange={(e) =>
+                    setBookingDurationMinutes(Number(e.target.value))
+                  }
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                >
+                  {[10, 15, 20, 30, 45, 60].map((minutes) => (
+                    <option key={minutes} value={minutes}>
+                      {minutes} minutes
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                  Available Slot
+                </label>
+                <select
+                  value={bookingStartAt || ''}
+                  onChange={(e) =>
+                    setBookingStartAt(Number(e.target.value) || null)
+                  }
                   className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono font-bold"
                 >
-                  <option value="08:30">08:30 AM (Session A)</option>
-                  <option value="09:00">09:00 AM (Session A)</option>
-                  <option value="09:30">09:30 AM (Session A)</option>
-                  <option value="10:00">10:00 AM (Session A)</option>
-                  <option value="10:30">10:30 AM (Session A)</option>
-                  <option value="11:00">11:00 AM (Session A)</option>
-                  <option value="14:00">02:00 PM (Session B)</option>
-                  <option value="14:30">02:30 PM (Session B)</option>
-                  <option value="15:00">03:00 PM (Session B)</option>
-                  <option value="15:30">03:30 PM (Session B)</option>
+                  <option value="">Select slot</option>
+                  {(availability.find(
+                    (provider) =>
+                      provider.providerEmployeeId === selectedDoctorId
+                  )?.slots || []).map((slot) => (
+                    <option key={slot.startAt} value={slot.startAt}>
+                      {formatTime(slot.startAt, timeZone)}–
+                      {formatTime(slot.endAt, timeZone)}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -589,7 +1192,13 @@ export function OpdAppointmentsWaitlist({
             <div className="flex justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
               <button
                 type="submit"
-                className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 cursor-pointer shadow-xs"
+                disabled={
+                  !isOnline ||
+                  busyAction !== null ||
+                  !selectedDoctorId ||
+                  !bookingStartAt
+                }
+                className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
               >
                 <CheckCircle2 className="w-4 h-4" />
                 Confirm Appointment Slot
@@ -629,11 +1238,20 @@ export function OpdAppointmentsWaitlist({
                 Back
               </button>
               <button
-                onClick={() => {
-                  onCancelAppointment(cancelModalAppt.id, cancelReason);
-                  setCancelModalAppt(null);
-                }}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold"
+                disabled={!cancelReason.trim() || busyAction !== null}
+                onClick={() =>
+                  void runAction(
+                    'cancel:' + cancelModalAppt.id,
+                    async () => {
+                      await onCancelAppointment(
+                        cancelModalAppt.id,
+                        cancelReason.trim()
+                      );
+                      setCancelModalAppt(null);
+                    }
+                  )
+                }
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold disabled:opacity-50"
               >
                 Confirm Cancellation
               </button>
@@ -656,25 +1274,49 @@ export function OpdAppointmentsWaitlist({
                 <label className="block text-xs font-semibold mb-1">New Date</label>
                 <input
                   type="date"
+                  min={today}
                   value={newRescheduleDate}
                   onChange={(e) => setNewRescheduleDate(e.target.value)}
                   className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold mb-1">New Time Slot</label>
+                <label className="block text-xs font-semibold mb-1">Duration</label>
                 <select
-                  value={newRescheduleTime}
-                  onChange={(e) => setNewRescheduleTime(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
+                  value={rescheduleDurationMinutes}
+                  onChange={(e) =>
+                    setRescheduleDurationMinutes(Number(e.target.value))
+                  }
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                 >
-                  <option value="09:00">09:00 AM</option>
-                  <option value="10:00">10:00 AM</option>
-                  <option value="11:30">11:30 AM</option>
-                  <option value="14:00">02:00 PM</option>
-                  <option value="15:30">03:30 PM</option>
+                  {[10, 15, 20, 30, 45, 60].map((minutes) => (
+                    <option key={minutes} value={minutes}>
+                      {minutes} minutes
+                    </option>
+                  ))}
                 </select>
               </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold mb-1">
+                Authoritative Available Slot
+              </label>
+              <select
+                value={newRescheduleStartAt || ''}
+                onChange={(e) =>
+                  setNewRescheduleStartAt(Number(e.target.value) || null)
+                }
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
+              >
+                <option value="">Select slot</option>
+                {(rescheduleAvailability[0]?.slots || []).map((slot) => (
+                  <option key={slot.startAt} value={slot.startAt}>
+                    {formatTime(slot.startAt, timeZone)}–
+                    {formatTime(slot.endAt, timeZone)}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div>
@@ -695,18 +1337,120 @@ export function OpdAppointmentsWaitlist({
                 Back
               </button>
               <button
-                onClick={() => {
-                  onRescheduleAppointment(
-                    rescheduleModalAppt.id,
-                    newRescheduleDate,
-                    newRescheduleTime,
-                    rescheduleReason
-                  );
-                  setRescheduleModalAppt(null);
-                }}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold"
+                disabled={
+                  !newRescheduleStartAt ||
+                  !rescheduleReason.trim() ||
+                  busyAction !== null
+                }
+                onClick={() =>
+                  void runAction(
+                    'reschedule:' + rescheduleModalAppt.id,
+                    async () => {
+                      await onRescheduleAppointment({
+                        appointmentId: rescheduleModalAppt.id,
+                        scheduledStartAt: newRescheduleStartAt!,
+                        durationMinutes: rescheduleDurationMinutes,
+                        timeZone,
+                        reason: rescheduleReason.trim(),
+                      });
+                      setRescheduleModalAppt(null);
+                    }
+                  )
+                }
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold disabled:opacity-50"
               >
                 Commit Reschedule
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {noShowModalAppt && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-xl space-y-4">
+            <h3 className="text-base font-bold flex items-center gap-2">
+              <Clock className="w-5 h-5 text-amber-600" />
+              Confirm Appointment No-Show
+            </h3>
+            <p className="text-xs text-slate-500">
+              No-show can be recorded only after the scheduled interval and server grace period.
+            </p>
+            <textarea
+              rows={3}
+              value={noShowReason}
+              onChange={(e) => setNoShowReason(e.target.value)}
+              placeholder="Document no-show verification or reason"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setNoShowModalAppt(null)}
+                className="px-4 py-2 rounded-xl text-xs font-bold border"
+              >
+                Back
+              </button>
+              <button
+                disabled={!noShowReason.trim() || busyAction !== null}
+                onClick={() =>
+                  void runAction(
+                    'noshow:' + noShowModalAppt.id,
+                    async () => {
+                      await onMarkNoShowAppointment(
+                        noShowModalAppt.id,
+                        noShowReason.trim()
+                      );
+                      setNoShowModalAppt(null);
+                    }
+                  )
+                }
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white disabled:opacity-50"
+              >
+                Confirm No-Show
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {cancelWaitlistEntry && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-xl space-y-4">
+            <h3 className="text-base font-bold flex items-center gap-2">
+              <XCircle className="w-5 h-5 text-red-600" />
+              Cancel Waitlist Entry
+            </h3>
+            <textarea
+              rows={3}
+              value={cancelWaitlistReason}
+              onChange={(e) => setCancelWaitlistReason(e.target.value)}
+              placeholder="Cancellation reason"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setCancelWaitlistEntry(null)}
+                className="px-4 py-2 rounded-xl text-xs font-bold border"
+              >
+                Back
+              </button>
+              <button
+                disabled={!cancelWaitlistReason.trim() || busyAction !== null}
+                onClick={() =>
+                  void runAction(
+                    'waitlist-cancel:' + cancelWaitlistEntry.id,
+                    async () => {
+                      await onCancelWaitlist(
+                        cancelWaitlistEntry.id,
+                        cancelWaitlistReason.trim()
+                      );
+                      setCancelWaitlistEntry(null);
+                    }
+                  )
+                }
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 text-white disabled:opacity-50"
+              >
+                Cancel Entry
               </button>
             </div>
           </div>

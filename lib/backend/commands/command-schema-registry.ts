@@ -34,11 +34,26 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       warningSignsRedFlags: z.string().trim().max(8000).optional(),
       followUpScheduledDate: z.string().trim().max(50).optional(),
       followUpDepartment: z.string().trim().max(250).optional(),
+      internalReferral: z.object({
+        targetDepartment: nonEmpty.max(250),
+        targetDoctor: z.string().trim().min(1).max(250).optional(),
+        priority: z.enum(['ROUTINE','URGENT','STAT']),
+        clinicalReason: nonEmpty.max(4000),
+      }).strict().optional(),
+      externalReferral: z.object({
+        receivingHospitalName: nonEmpty.max(500),
+        receivingDoctorName: z.string().trim().min(1).max(250).optional(),
+        sbarHandover: z.object({
+          situation: nonEmpty.max(4000),
+          background: nonEmpty.max(4000),
+          assessment: nonEmpty.max(4000),
+          recommendation: nonEmpty.max(4000),
+        }).strict(),
+      }).strict().optional(),
       inpatientAdmissionRequest: z.object({
         targetWard: nonEmpty.max(200),
         targetBedId: z.string().trim().min(1).max(150).optional(),
         clinicalIndication: nonEmpty.max(4000),
-        admittingService: z.string().trim().max(250).optional(),
       }).strict().optional(),
     }).strict(),
   },

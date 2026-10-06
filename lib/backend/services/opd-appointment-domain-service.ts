@@ -1118,6 +1118,12 @@ export class OpdAppointmentDomainService {
             entityId: appointmentId,
             required: false,
           },
+          ...providerAuthorityReadTargets({
+            authority,
+            startAt,
+            endAt,
+            timeZone: payload.timeZone,
+          }),
           ...slotIds.map((slotId) => ({
             key: `slot:${slotId}`,
             entityType: 'OPD_APPOINTMENT_SLOT',
@@ -1132,6 +1138,15 @@ export class OpdAppointmentDomainService {
           })),
         ],
         prepare: (current) => {
+          assertProviderAuthoritySnapshot(current, {
+            authority,
+            providerEmployeeId: payload.providerEmployeeId,
+            facilityId: payload.facilityId,
+            departmentId: payload.departmentId,
+            startAt,
+            endAt,
+            timeZone: payload.timeZone,
+          });
           if (current.appointment) {
             throw new AtomicMutationRejectedError(
               'APPOINTMENT_IDENTITY_ALREADY_EXISTS',
@@ -1539,6 +1554,12 @@ export class OpdAppointmentDomainService {
             entityId: payload.appointmentId,
             required: true,
           },
+          ...providerAuthorityReadTargets({
+            authority,
+            startAt,
+            endAt,
+            timeZone: payload.timeZone,
+          }),
           ...allSlotIds.map((slotId) => ({
             key: `slot:${slotId}`,
             entityType: 'OPD_APPOINTMENT_SLOT',
@@ -1554,6 +1575,15 @@ export class OpdAppointmentDomainService {
         ],
         prepare: (current) => {
           const appointment = current.appointment as unknown as OpdAppointmentRecord;
+          assertProviderAuthoritySnapshot(current, {
+            authority,
+            providerEmployeeId: appointment.providerEmployeeId,
+            facilityId: appointment.facilityId,
+            departmentId: appointment.departmentId,
+            startAt,
+            endAt,
+            timeZone: payload.timeZone,
+          });
           if (!['CONFIRMED', 'RESCHEDULED'].includes(appointment.status)) {
             throw new AtomicMutationRejectedError(
               'APPOINTMENT_NOT_RESCHEDULABLE',
@@ -1868,7 +1898,22 @@ export class OpdAppointmentDomainService {
         link.departmentId
       );
       requireOpdCheckInEligibility(patient);
-      await resolveProviderAuthority({
+    } catch (error) {
+      if (error instanceof AtomicMutationRejectedError) {
+        return reject(
+          commandId,
+          idempotencyKey,
+          error.code,
+          error.message,
+          error.details
+        );
+      }
+      throw error;
+    }
+
+    let authority: ProviderAuthority;
+    try {
+      authority = await resolveProviderAuthority({
         tenantId: context.tenantId,
         providerEmployeeId: link.providerEmployeeId,
         facilityId: link.facilityId,
@@ -1925,6 +1970,12 @@ export class OpdAppointmentDomainService {
             entityId: link.patientId,
             required: true,
           },
+          ...providerAuthorityReadTargets({
+            authority,
+            startAt: link.scheduledStartAt,
+            endAt: link.scheduledEndAt,
+            timeZone: link.timeZone,
+          }),
           {
             key: 'encounter',
             entityType: 'ENCOUNTER',
@@ -1941,6 +1992,15 @@ export class OpdAppointmentDomainService {
         prepare: (current) => {
           const appointment = current.appointment as unknown as OpdAppointmentRecord;
           const currentPatient = current.patient || {};
+          assertProviderAuthoritySnapshot(current, {
+            authority,
+            providerEmployeeId: appointment.providerEmployeeId,
+            facilityId: appointment.facilityId,
+            departmentId: appointment.departmentId,
+            startAt: appointment.scheduledStartAt,
+            endAt: appointment.scheduledEndAt,
+            timeZone: appointment.timeZone,
+          });
 
           if (!['CONFIRMED', 'RESCHEDULED'].includes(appointment.status)) {
             throw new AtomicMutationRejectedError(
@@ -2647,6 +2707,12 @@ export class OpdAppointmentDomainService {
             entityId: payload.waitlistId,
             required: true,
           },
+          ...providerAuthorityReadTargets({
+            authority,
+            startAt,
+            endAt,
+            timeZone: payload.timeZone,
+          }),
           ...allSlotIds.map((slotId) => ({
             key: `slot:${slotId}`,
             entityType: 'OPD_APPOINTMENT_SLOT',
@@ -2656,6 +2722,15 @@ export class OpdAppointmentDomainService {
         ],
         prepare: (current) => {
           const entry = current.waitlist as unknown as OpdWaitlistEntryRecord;
+          assertProviderAuthoritySnapshot(current, {
+            authority,
+            providerEmployeeId: payload.providerEmployeeId,
+            facilityId: entry.facilityId,
+            departmentId: entry.preferredDepartmentId,
+            startAt,
+            endAt,
+            timeZone: payload.timeZone,
+          });
           const offerExpired =
             entry.status === 'OFFERED' &&
             Number(entry.offerExpiresAt || 0) <= now;
@@ -2926,6 +3001,12 @@ export class OpdAppointmentDomainService {
             entityId: scopeId,
             required: false,
           },
+          ...providerAuthorityReadTargets({
+            authority,
+            startAt: link.offeredStartAt,
+            endAt: link.offeredEndAt,
+            timeZone: link.offeredTimeZone,
+          }),
           ...link.offerSlotIds.map((slotId) => ({
             key: `slot:${slotId}`,
             entityType: 'OPD_APPOINTMENT_SLOT',
@@ -2941,6 +3022,15 @@ export class OpdAppointmentDomainService {
         ],
         prepare: (current) => {
           const entry = current.waitlist as unknown as OpdWaitlistEntryRecord;
+          assertProviderAuthoritySnapshot(current, {
+            authority,
+            providerEmployeeId: String(entry.offeredProviderEmployeeId || ''),
+            facilityId: entry.facilityId,
+            departmentId: entry.preferredDepartmentId,
+            startAt: Number(entry.offeredStartAt || 0),
+            endAt: Number(entry.offeredEndAt || 0),
+            timeZone: String(entry.offeredTimeZone || ''),
+          });
           if (
             entry.status !== 'OFFERED' ||
             Number(entry.offerExpiresAt || 0) <= now ||

@@ -439,6 +439,10 @@ const SEED_EVENTS: OpdTimelineEvent[] = [
 
 export function OpdMasterWorkspace() {
   const auth = useAuth();
+  const searchParams = useSearchParams();
+  const requestedEncounterId = String(
+    searchParams.get('opdEncounterId') || ''
+  ).trim();
   const activeRole = useMemo(() => resolveOpdRole(auth.roles), [auth.roles]);
   const normalizedRoles = useMemo(
     () => new Set(auth.roles.map((role) => String(role).trim().toUpperCase())),
@@ -670,6 +674,14 @@ export function OpdMasterWorkspace() {
   ]);
 
   // Selected encounter object
+  useEffect(() => {
+    if (!requestedEncounterId) return;
+    if (!encounters.some((encounter) => encounter.id === requestedEncounterId)) {
+      return;
+    }
+    setSelectedEncounterId(requestedEncounterId);
+  }, [encounters, requestedEncounterId]);
+
   const activeEncounter = useMemo(() => {
     return encounters.find((e) => e.id === selectedEncounterId) || encounters[0];
   }, [encounters, selectedEncounterId]);
@@ -3002,6 +3014,7 @@ export function OpdMasterWorkspace() {
             return (
               <button
                 key={tab.id}
+                data-testid={`opd-tab-${tab.id.toLowerCase()}`}
                 onClick={() => setActiveTab(tab.id)}
                 className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shrink-0 transition-all cursor-pointer ${
                   isActive
@@ -3019,7 +3032,12 @@ export function OpdMasterWorkspace() {
 
       {/* Active Patient Quick Banner (if patient is selected) */}
       {activeEncounter && activeTab !== 'DASHBOARD' && activeTab !== 'SEARCH_MPI' && (
-        <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-xs">
+        <div
+          data-testid="opd-active-patient-banner"
+          data-encounter-id={activeEncounter.id}
+          data-patient-id={activeEncounter.patientId}
+          className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-xs"
+        >
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 flex items-center justify-center font-black text-blue-600 text-sm">
               {activeEncounter.patientName.charAt(0)}
@@ -3362,6 +3380,7 @@ export function OpdMasterWorkspace() {
             )}
 
             <button
+              data-testid="opd-final-reconcile"
               type="button"
               disabled={
                 !canSettlePayment ||

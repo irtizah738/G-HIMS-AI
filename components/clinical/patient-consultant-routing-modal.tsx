@@ -328,6 +328,15 @@ export function PatientConsultantRoutingModal({
 
   const [isDispatching, setIsDispatching] = useState<boolean>(false);
   const [dispatchedConfirmation, setDispatchedConfirmation] = useState<any | null>(null);
+  const [pendingHandoff, setPendingHandoff] = useState<{
+    consultationId: string;
+    consultantId: string;
+    patientId: string;
+    encounterId: string;
+    sourceArtifactId?: string;
+    patient360Revision: number;
+    patient360SourceCheckpoint: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -348,7 +357,8 @@ export function PatientConsultantRoutingModal({
       ct_scan: false,
     });
     setDispatchedConfirmation(null);
-  }, [isOpen, patientId, encounterId, chiefComplaint]);
+    setPendingHandoff(null);
+  }, [isOpen, patientId, encounterId, chiefComplaint, sourceArtifactId]);
 
   useEffect(() => {
     if (!isOpen || IS_DEMO_RUNTIME) return;
@@ -631,27 +641,56 @@ export function PatientConsultantRoutingModal({
           );
         }
 
-        const consultation = await requestClinicalConsultation(tenantId, {
-          patientId,
-          encounterId,
-          requestedSpecialty: selectedDoctor.subSpecialty || selectedDoctor.department,
-          requestedConsultantId: selectedDoctor.id,
-          clinicalQuestion:
-            clinicalHandoffNote.trim() ||
-            `${chiefComplaint}. Specialist review requested from ${selectedDoctor.department}.`,
-          priority: routingUrgency,
-          sourceRefs,
-        });
-        const consultationId = String(
-          consultation.entityId ||
-            (consultation.data as Record<string, unknown> | undefined)?.consultationId ||
-            ''
-        ).trim();
+        const canResumePendingHandoff =
+          pendingHandoff?.patientId === patientId &&
+          pendingHandoff.encounterId === encounterId &&
+          pendingHandoff.consultantId === selectedDoctor.id &&
+          pendingHandoff.sourceArtifactId === sourceArtifactId;
+
+        let consultationId = canResumePendingHandoff
+          ? pendingHandoff.consultationId
+          : '';
+
         if (!consultationId) {
-          throw new Error(
-            'Consultation was created without a canonical consultation identifier.'
-          );
+          const consultation = await requestClinicalConsultation(tenantId, {
+            patientId,
+            encounterId,
+            requestedSpecialty: selectedDoctor.subSpecialty || selectedDoctor.department,
+            requestedConsultantId: selectedDoctor.id,
+            clinicalQuestion:
+              clinicalHandoffNote.trim() ||
+              `${chiefComplaint}. Specialist review requested from ${selectedDoctor.department}.`,
+            priority: routingUrgency,
+            sourceRefs,
+          });
+          consultationId = String(
+            consultation.entityId ||
+              (consultation.data as Record<string, unknown> | undefined)?.consultationId ||
+              ''
+          ).trim();
+          if (!consultationId) {
+            throw new Error(
+              'Consultation was created without a canonical consultation identifier.'
+            );
+          }
+
+          setPendingHandoff({
+            consultationId,
+            consultantId: selectedDoctor.id,
+            patientId,
+            encounterId,
+            sourceArtifactId,
+            patient360Revision,
+            patient360SourceCheckpoint,
+          });
         }
+
+        const handoffRevision = canResumePendingHandoff
+          ? pendingHandoff.patient360Revision
+          : patient360Revision;
+        const handoffCheckpoint = canResumePendingHandoff
+          ? pendingHandoff.patient360SourceCheckpoint
+          : patient360SourceCheckpoint;
 
         await createClinicalHandoff(tenantId, {
           patientId,
@@ -670,11 +709,13 @@ export function PatientConsultantRoutingModal({
           sourceRefs: Array.from(
             new Set([consultationId, ...sourceRefs].filter(Boolean))
           ),
-          patient360Revision,
-          patient360SourceCheckpoint,
+          patient360Revision: handoffRevision,
+          patient360SourceCheckpoint: handoffCheckpoint,
           sourceArtifactId,
           sourceArtifactType,
         });
+
+        setPendingHandoff(null);
 
         Object.assign(routingPayload, {
           consultationId,
@@ -689,8 +730,12 @@ export function PatientConsultantRoutingModal({
       setDispatchedConfirmation(routingPayload);
       if (onRoutedSuccess) onRoutedSuccess(selectedDoctor, routingPayload);
     } catch (error) {
+      const baseMessage =
+        error instanceof Error ? error.message : 'Specialist consultation request failed.';
       setDirectoryError(
-        error instanceof Error ? error.message : 'Specialist consultation request failed.'
+        pendingHandoff
+          ? `Consultation ${pendingHandoff.consultationId} remains authoritative, but its clinical handoff is incomplete. Retry will resume the handoff without creating another consultation. ${baseMessage}`
+          : baseMessage
       );
     } finally {
       setIsDispatching(false);

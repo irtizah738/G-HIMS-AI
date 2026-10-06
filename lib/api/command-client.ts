@@ -18,6 +18,7 @@ export interface OfflineQueuePolicy {
   optimisticCache?: boolean;
   baseEntityVersion?: number;
   dependsOnMutationIds?: string[];
+  optimisticPayload?: Record<string, any>;
 }
 
 export interface ExecuteCommandInput<TPayload extends Record<string, unknown> = Record<string, unknown>> {
@@ -51,6 +52,7 @@ async function queueGovernedOfflineCommand<TData>(
     baseEntityVersion: input.offlineQueue.baseEntityVersion,
     dependsOnMutationIds: input.offlineQueue.dependsOnMutationIds,
     optimisticCache: input.offlineQueue.optimisticCache,
+    optimisticPayload: input.offlineQueue.optimisticPayload,
     mutationId: commandId,
   });
 

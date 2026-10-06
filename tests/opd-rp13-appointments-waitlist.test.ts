@@ -61,6 +61,25 @@ describe('OPD-RP13 authoritative appointments and waitlist', () => {
     );
   });
 
+  test('scheduling write authority excludes ordinary clinical roles', async () => {
+    const service = await source(
+      'lib/backend/services/opd-appointment-domain-service.ts'
+    );
+    const start = service.indexOf('function schedulingAuthorization');
+    const end = service.indexOf(
+      'function requireActorSchedulingScope',
+      start
+    );
+    const block = service.slice(start, end);
+
+    expect(block).toContain("'RECEPTIONIST'");
+    expect(block).toContain("'REGISTRAR'");
+    expect(block).toContain("'CALL_CENTER'");
+    expect(block).not.toContain("'NURSE'");
+    expect(block).not.toContain("'DOCTOR'");
+    expect(block).not.toContain("'CONSULTANT'");
+  });
+
   test('non-admin scheduling is fail-closed to actor facility and department scope', async () => {
     const service = await source(
       'lib/backend/services/opd-appointment-domain-service.ts'

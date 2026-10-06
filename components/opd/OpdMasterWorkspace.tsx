@@ -3041,20 +3041,18 @@ export function OpdMasterWorkspace() {
       {activeTab === 'DASHBOARD' && (
         <OpdDashboardKpis
           encounters={encounters}
+          queue={queue}
           activeRole={activeRole}
           onSelectEncounter={(id) => {
             setSelectedEncounterId(id);
-            setActiveTab('CONSULTATION');
+            if (canAccessTab('CONSULTATION')) {
+              setActiveTab('CONSULTATION');
+            }
           }}
           onNavigateStage={(stage) => {
-            if (stage === 'REGISTRATION') setActiveTab('REGISTRATION');
-            else if (stage === 'QUEUE_ASSIGNMENT') setActiveTab('QUEUE');
-            else if (stage === 'NURSING_INTAKE') setActiveTab('TRIAGE');
-            else if (stage === 'SPECIALTY_CONSULTATION') setActiveTab('CONSULTATION');
-            else if (stage === 'DIAGNOSTIC_ORDERS') setActiveTab('DIAGNOSTICS');
-            else if (stage === 'PHARMACY_FEFO') setActiveTab('PHARMACY');
-            else if (stage === 'BILLING_SETTLEMENT') setActiveTab('BILLING');
-            else setActiveTab('AUDIT');
+            if (canAccessTab(stage)) {
+              setActiveTab(stage);
+            }
           }}
         />
       )}

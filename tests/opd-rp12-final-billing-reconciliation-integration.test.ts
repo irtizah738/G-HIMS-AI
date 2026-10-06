@@ -303,6 +303,7 @@ describe('OPD-RP12 executable final billing reconciliation', () => {
         billingPurpose: 'OPD_DIAGNOSTIC',
         sourceOrderId: orderId,
         currency: 'PKR',
+        totalTax: 5,
         totalPatientDue: 50,
         totalPaid: 50,
         balanceDue: 0,
@@ -377,7 +378,6 @@ describe('OPD-RP12 executable final billing reconciliation', () => {
         revenueRecognizedAt: 2,
         deferredRevenueJournalId: deferredJournalId,
         recognitionJournalId,
-        netRevenueMinorUnits: 4_500,
       }
     );
     TransactionManager.seedEphemeralStateForTesting(

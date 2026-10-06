@@ -6,6 +6,8 @@ import {
   type DocumentReference,
   type QueryDocumentSnapshot,
 } from 'firebase-admin/firestore';
+import { OPD_EDGE_COLLECTIONS } from '@/lib/opd/edge-surface';
+import { loadOpdScopedEdgeCollections } from '@/lib/opd/opd-edge-bootstrap';
 
 export const dynamic = 'force-dynamic';
 
@@ -793,6 +795,12 @@ export async function GET(req: NextRequest) {
       ''
     ).trim().toLowerCase();
 
+    const surface = String(
+      req.nextUrl.searchParams.get('surface') || ''
+    )
+      .trim()
+      .toUpperCase();
+
     const { context } = await deriveAuthoritativeContext(req, requestedTenantId);
     const db = getAdminFirestore();
     if (!db) {
@@ -803,21 +811,40 @@ export async function GET(req: NextRequest) {
     }
 
     const tenantRef = db.collection('tenants').doc(context.tenantId);
-    const collections = authorizedCollections(context.roles);
+    const authorized = authorizedCollections(context.roles);
+    const collections =
+      surface === 'OPD'
+        ? authorized.filter((collection) =>
+            (OPD_EDGE_COLLECTIONS as readonly string[]).includes(collection)
+          )
+        : authorized;
     const generatedAt = Date.now();
 
-    const entries = await Promise.all(
-      collections.map(async (collection) => [
-        collection,
-        await readCollectionSnapshot(tenantRef, collection),
-      ] as const)
-    );
+    const rawCollections =
+      surface === 'OPD'
+        ? await loadOpdScopedEdgeCollections(
+            tenantRef,
+            context,
+            collections,
+            generatedAt
+          )
+        : Object.fromEntries(
+            await Promise.all(
+              collections.map(async (collection) => [
+                collection,
+                await readCollectionSnapshot(tenantRef, collection),
+              ] as const)
+            )
+          );
+
     const scopedCollections = scopeOfflineCollections(
       context,
-      Object.fromEntries(entries)
+      rawCollections
     );
 
-    const snapshotVersion = `${context.tenantId}:${generatedAt}`;
+    const snapshotVersion = `${context.tenantId}:${
+      surface === 'OPD' ? 'opd:' : ''
+    }${generatedAt}`;
 
     return NextResponse.json(
       {
@@ -825,6 +852,7 @@ export async function GET(req: NextRequest) {
         tenantId: context.tenantId,
         generatedAt,
         snapshotVersion,
+        surface: surface === 'OPD' ? 'OPD' : 'GENERIC',
         collections: scopedCollections,
       },
       {

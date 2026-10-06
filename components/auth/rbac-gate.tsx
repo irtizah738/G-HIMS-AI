@@ -63,7 +63,7 @@ export function RbacModuleGate({
   };
 
   const getSuggestedRoleForModule = (mod: string): RoleId => {
-    if (['command', 'matrix', 'settings', 'audit'].includes(mod)) return 'administrator';
+    if (['command', 'settings', 'audit'].includes(mod)) return 'administrator';
     if (['surgery', 'disease-intake', 'workflow-runtime', 'telehealth', 'ancillary', 'bloodbank', 'interop'].includes(mod)) return 'doctor';
     if (['beds', 'emergency'].includes(mod)) return 'nurse';
     if (['billing', 'claims', 'scm-pos', 'erp-coa'].includes(mod)) return 'billing_clerk';

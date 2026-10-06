@@ -1346,6 +1346,12 @@ export class OpdAppointmentDomainService {
           }
 
           const now = Date.now();
+          if (now >= appointment.scheduledStartAt) {
+            throw new AtomicMutationRejectedError(
+              'APPOINTMENT_ALREADY_STARTED',
+              'An appointment cannot be cancelled after its authoritative scheduled start. Use check-in or no-show handling.'
+            );
+          }
           const updated: OpdAppointmentRecord = {
             ...appointment,
             status: 'CANCELLED',
@@ -1588,6 +1594,12 @@ export class OpdAppointmentDomainService {
             throw new AtomicMutationRejectedError(
               'APPOINTMENT_NOT_RESCHEDULABLE',
               `Appointment in status ${appointment.status} cannot be rescheduled.`
+            );
+          }
+          if (Date.now() >= appointment.scheduledStartAt) {
+            throw new AtomicMutationRejectedError(
+              'APPOINTMENT_ALREADY_STARTED',
+              'An appointment cannot be rescheduled after its authoritative scheduled start. Use check-in or no-show handling.'
             );
           }
 

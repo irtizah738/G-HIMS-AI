@@ -12,7 +12,6 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import type { Invoice, InvoicePaymentStatus } from '@/types/billing';
-import { formatCurrency } from '@/lib/utils';
 import { hydrateEdgeSnapshot } from '@/lib/offline/hydration';
 import {
   buildBillingInvoiceReadModel,
@@ -21,6 +20,13 @@ import {
 
 interface PageProps {
   params: Promise<{ tenantId: string }>;
+}
+
+function formatAuthoritativeMoney(value: number, currency: string) {
+  return `${currency} ${Number(value || 0).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 function statusBadge(status: InvoicePaymentStatus) {
@@ -110,10 +116,18 @@ export default function InvoicesDirectoryPage({ params }: PageProps) {
     });
   }, [invoices, search, statusFilter]);
 
-  const outstanding = invoices.reduce(
-    (sum, invoice) => sum + Number(invoice.balanceDue || 0),
-    0
-  );
+  const outstandingByCurrency = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const invoice of invoices) {
+      totals.set(
+        invoice.currency,
+        (totals.get(invoice.currency) || 0) + Number(invoice.balanceDue || 0)
+      );
+    }
+    return [...totals.entries()].sort(([left], [right]) =>
+      left.localeCompare(right)
+    );
+  }, [invoices]);
 
   return (
     <div className="space-y-6 pb-12">
@@ -156,8 +170,16 @@ export default function InvoicesDirectoryPage({ params }: PageProps) {
             <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
               Outstanding patient balance
             </div>
-            <div className="mt-1 text-xl font-black">
-              {formatCurrency(outstanding)}
+            <div className="mt-1 space-y-0.5 text-sm font-black">
+              {outstandingByCurrency.length > 0 ? (
+                outstandingByCurrency.map(([currency, amount]) => (
+                  <div key={currency}>
+                    {formatAuthoritativeMoney(amount, currency)}
+                  </div>
+                ))
+              ) : (
+                <div>—</div>
+              )}
             </div>
           </div>
           <div className="rounded-xl bg-slate-50 p-4 dark:bg-slate-800/60">
@@ -260,10 +282,16 @@ export default function InvoicesDirectoryPage({ params }: PageProps) {
                       {invoice.encounterId}
                     </td>
                     <td className="px-4 py-3 text-right font-semibold">
-                      {formatCurrency(invoice.totalPatientDue)}
+                      {formatAuthoritativeMoney(
+                        invoice.totalPatientDue,
+                        invoice.currency
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right font-black text-rose-600">
-                      {formatCurrency(invoice.balanceDue)}
+                      {formatAuthoritativeMoney(
+                        invoice.balanceDue,
+                        invoice.currency
+                      )}
                     </td>
                     <td className="px-4 py-3 text-center">
                       {statusBadge(invoice.paymentStatus)}

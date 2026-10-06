@@ -580,31 +580,6 @@ export function DiseaseCentricIntakeView() {
             {aiResult && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />}
           </button>
 
-          <button
-            id="tab-mode-customize"
-            onClick={() => setActiveTabMode('customize')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
-              activeTabMode === 'customize'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
-            }`}
-          >
-            <Sliders className="w-4 h-4" />
-            <span>Configurable Studio</span>
-          </button>
-
-          <button
-            id="tab-mode-localization"
-            onClick={() => setActiveTabMode('localization')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
-              activeTabMode === 'localization'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
-            }`}
-          >
-            <Globe className="w-4 h-4" />
-            <span>Country & Hospital Localization</span>
-          </button>
         </div>
 
         {/* Explicit clinical actions: save first, route separately. */}

@@ -303,6 +303,7 @@ describe('OPD-RP12 executable final billing reconciliation', () => {
         billingPurpose: 'OPD_DIAGNOSTIC',
         sourceOrderId: orderId,
         currency: 'PKR',
+        totalTax: 5,
         totalPatientDue: 50,
         totalPaid: 50,
         balanceDue: 0,

@@ -54,14 +54,16 @@ export function OpdPatientSearchMpi({
 
     return patients.filter((p) => {
       if (searchField === 'MRN') return normalizeMrn(p.mrn) === normalizedMrn;
-      if (searchField === 'CNIC') return normalizeCnic(p.nationalId) === normalizedCnic;
+      if (searchField === 'CNIC') {
+        return Boolean(normalizedCnic) && normalizeCnic(p.nationalId) === normalizedCnic;
+      }
       if (searchField === 'PHONE') return p.phone.toLowerCase().includes(qLower);
       if (searchField === 'NAME') return p.fullName.toLowerCase().includes(qLower);
 
       return (
         p.fullName.toLowerCase().includes(qLower) ||
         normalizeMrn(p.mrn) === normalizedMrn ||
-        normalizeCnic(p.nationalId) === normalizedCnic ||
+        (Boolean(normalizedCnic) && normalizeCnic(p.nationalId) === normalizedCnic) ||
         p.phone.toLowerCase().includes(qLower) ||
         (p.preferredName && p.preferredName.toLowerCase().includes(qLower))
       );
@@ -78,7 +80,11 @@ export function OpdPatientSearchMpi({
       const matchReasons: string[] = [];
 
       // CNIC exact match (100% deterministic)
-      if (normalizeCnic(candidate.nationalId) === normalizeCnic(q)) {
+      const normalizedSearchCnic = normalizeCnic(q);
+      if (
+        normalizedSearchCnic &&
+        normalizeCnic(candidate.nationalId) === normalizedSearchCnic
+      ) {
         score = 100;
         matchReasons.push('Exact CNIC / National ID Match');
       }

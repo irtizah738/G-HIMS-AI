@@ -148,6 +148,7 @@ export interface OfflineMutationItem {
   entityId?: string;
   schemaVersion: number;
   baseEntityVersion?: number;
+  dependsOnMutationIds?: string[];
   vectorClock?: Record<string, number>;
   baseVectorClock?: Record<string, number>;
 }

@@ -138,6 +138,10 @@ describe('OPD-RP22 obsolete and demo authority removal', () => {
     expect(page).not.toContain("setInvoice((prev)");
     expect(page).not.toContain("paymentMethod === 'card'");
     expect(page).not.toContain('POS Copay Collection Terminal');
+    expect(page).not.toContain('InvoicePosTerminalPage');
+    expect(page).not.toContain('billing-pos-cash:');
+    expect(page).toContain('InvoiceCashCollectionPage');
+    expect(page).toContain('billing-cash-receipt:');
     expect(page).not.toContain("CASH-${new Date().toISOString()");
     expect(page).toContain("referenceNumber.trim()");
   });

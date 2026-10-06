@@ -22,6 +22,11 @@ interface OpdDashboardKpisProps {
   encounters: ComprehensiveOpdEncounter[];
   queue: QueueEntry[];
   activeRole: OpdRole;
+  snapshotSource: 'SERVER' | 'LOCAL' | 'DEMO';
+  snapshotGeneratedAt: number;
+  snapshotVersion: string;
+  pendingSyncCount: number;
+  isOnline: boolean;
   onSelectEncounter: (encounterId: string) => void;
   onNavigateStage: (stage: OpdWorkflowStage) => void;
 }
@@ -34,7 +39,8 @@ type CanonicalDashboardStage =
   | 'DIAGNOSTICS'
   | 'PHARMACY'
   | 'BILLING'
-  | 'DISPOSITION';
+  | 'DISPOSITION'
+  | 'UNKNOWN';
 
 function normalizeDashboardStage(value: unknown): CanonicalDashboardStage {
   const stage = String(value || '').trim().toUpperCase();
@@ -57,7 +63,17 @@ function normalizeDashboardStage(value: unknown): CanonicalDashboardStage {
     return 'PHARMACY';
   }
   if (['BILLING_SETTLEMENT', 'BILLING'].includes(stage)) return 'BILLING';
-  return 'DISPOSITION';
+  if (
+    [
+      'DISPOSITION',
+      'DISCHARGE_OR_REFERRAL',
+      'DISPOSITION_CLOSURE',
+      'TIMELINE_AUDIT',
+    ].includes(stage)
+  ) {
+    return 'DISPOSITION';
+  }
+  return 'UNKNOWN';
 }
 
 function averageMinutes(samples: number[]): number | null {
@@ -73,6 +89,11 @@ export function OpdDashboardKpis({
   encounters,
   queue,
   activeRole,
+  snapshotSource,
+  snapshotGeneratedAt,
+  snapshotVersion,
+  pendingSyncCount,
+  isOnline,
   onSelectEncounter,
   onNavigateStage,
 }: OpdDashboardKpisProps) {
@@ -85,6 +106,7 @@ export function OpdDashboardKpis({
     PHARMACY: 0,
     BILLING: 0,
     DISPOSITION: 0,
+    UNKNOWN: 0,
   };
 
   for (const encounter of encounters) {
@@ -175,6 +197,19 @@ export function OpdDashboardKpis({
       ? 'Authorized administrative OPD snapshot'
       : `Authorized ${activeRole.replace(/_/g, ' ').toLowerCase()} OPD snapshot`;
 
+  const snapshotTimestamp =
+    snapshotGeneratedAt > 0
+      ? new Date(snapshotGeneratedAt).toLocaleString()
+      : 'Not yet hydrated';
+  const snapshotProvenanceLabel =
+    snapshotSource === 'SERVER'
+      ? 'Server snapshot'
+      : snapshotSource === 'LOCAL'
+        ? 'Cached local snapshot'
+        : 'Demo snapshot';
+  const hasFreshnessWarning =
+    snapshotSource === 'LOCAL' || !isOnline || pendingSyncCount > 0;
+
   const funnel: Array<{
     label: string;
     count: number;
@@ -234,12 +269,38 @@ export function OpdDashboardKpis({
   return (
     <div className="space-y-6">
       <div className="rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3 text-xs text-blue-900 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-200">
-        <p className="font-semibold">{scopeLabel}</p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="font-semibold">{scopeLabel}</p>
+          <span className="rounded-full border border-blue-200 bg-white/70 px-2 py-0.5 text-[10px] font-semibold text-blue-800 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
+            {snapshotProvenanceLabel}
+          </span>
+        </div>
         <p className="mt-0.5 text-[11px] opacity-80">
-          Counts are derived only from the server-authorized OPD read model visible
-          to this session. No tenant-wide or historical trend is inferred from
+          Counts are derived only from the authorized OPD read model visible to
+          this session. No tenant-wide or historical trend is inferred from
           hidden data.
         </p>
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] opacity-80">
+          <span>Generated: {snapshotTimestamp}</span>
+          <span>Version: {snapshotVersion || 'unknown'}</span>
+          <span>Pending sync: {pendingSyncCount}</span>
+        </div>
+        {hasFreshnessWarning && (
+          <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-[10px] font-semibold text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+            {!isOnline
+              ? 'Offline: dashboard values come from the last authorized local snapshot.'
+              : snapshotSource === 'LOCAL'
+                ? 'Server refresh was unavailable; dashboard values come from the last authorized local snapshot.'
+                : 'Pending offline mutations are not yet authoritative and may not be reflected in these KPIs.'}
+          </div>
+        )}
+        {stageCounts.UNKNOWN > 0 && (
+          <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50/80 px-3 py-2 text-[10px] font-semibold text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200">
+            Data-quality warning: {stageCounts.UNKNOWN} visible encounter
+            {stageCounts.UNKNOWN === 1 ? '' : 's'} has an unrecognized workflow
+            stage and is excluded from the workflow distribution.
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">

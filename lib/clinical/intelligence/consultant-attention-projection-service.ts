@@ -8,6 +8,10 @@ import { ClinicalDeteriorationService } from '@/lib/clinical/intelligence/clinic
 import { DischargeReadinessService } from '@/lib/clinical/intelligence/discharge-readiness-service';
 import type { MedicationSafetyProjection } from '@/types/medication-safety';
 import { normalizeCareSetting } from '@/lib/clinical/patient360/care-context';
+import {
+  getConsultationSla,
+  getConsultationSlaState,
+} from '@/lib/clinical/coordination/consultation-sla';
 import type { CommandContext } from '@/lib/backend/types';
 import type { ClinicalOpenItemProjection } from '@/types/consultant-visibility';
 import type {

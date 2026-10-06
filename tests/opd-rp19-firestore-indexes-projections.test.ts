@@ -50,6 +50,10 @@ describe('OPD-RP19 Firestore indexes and projections', () => {
     expect(loader).toContain(".where('facilityId', 'in', facilityGroup)");
     expect(loader).toContain(".where('departmentId', '==', departmentId)");
     expect(loader).toContain("'OPD_EDGE_FACILITY_SCOPE_REQUIRED'");
+    expect(loader).toContain("'OPD_EDGE_DEPARTMENT_SCOPE_REQUIRED'");
+    expect(loader).toContain('requiresDepartmentEncounterScope');
+    expect(loader).toContain("'LAB_TECHNICIAN'");
+    expect(loader).toContain("'BILLING_CASHIER'");
     expect(loader).toContain('OPD_ACTIVE_ENCOUNTER_MAX');
     expect(loader).toContain('OPD_RELATED_MAX');
     expect(loader).toContain("readByFieldValues(\n        tenantRef,\n        collection,\n        'encounterId'");

@@ -576,6 +576,11 @@ export function buildOpdWorkspaceReadModel(
             encounter.clinicalState ||
             'REGISTERED'
         ),
+        offlineStagePendingSync:
+          encounter.offlineStagePendingSync === true,
+        offlinePendingTargetStage: encounter.offlinePendingTargetStage
+          ? String(encounter.offlinePendingTargetStage)
+          : undefined,
         department: encounter.department
           ? String(encounter.department)
           : encounter.departmentId

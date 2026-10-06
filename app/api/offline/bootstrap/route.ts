@@ -391,10 +391,10 @@ function scopeOfflineCollections(
         ? employee.departmentIds.map((value) => String(value || '').trim()).filter(Boolean)
         : [String(employee.primaryDepartmentId || '').trim()].filter(Boolean);
       const facilityMatch =
-        facilities.size === 0 ||
+        facilities.size > 0 &&
         employeeFacilities.some((facilityId) => facilities.has(facilityId));
       const departmentMatch =
-        departments.size === 0 ||
+        departments.size > 0 &&
         employeeDepartments.some((departmentId) => departments.has(departmentId));
       return facilityMatch && departmentMatch;
     });

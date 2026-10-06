@@ -112,7 +112,13 @@ export async function GET(req: NextRequest) {
       });
 
     const medications = itemSnapshot.docs
-      .map((doc) => ({ id: doc.id, ...doc.data() }))
+      .map(
+        (doc) =>
+          ({
+            id: doc.id,
+            ...(doc.data() as Record<string, unknown>),
+          }) as Record<string, unknown>
+      )
       .filter(
         (item) => item.itemType === 'MEDICATION' && item.isActive !== false
       )

@@ -189,6 +189,7 @@ function authorizedCollections(roles: string[]): string[] {
       'BILLING_CLERK',
       'BILLING_ADMIN',
       'CASHIER',
+      'BILLING_CASHIER',
       'FINANCE_MANAGER',
       'FINANCE',
       'REVENUE_CYCLE',
@@ -245,6 +246,7 @@ function isBillingRole(roles: string[]): boolean {
     'BILLING_CLERK',
     'BILLING_ADMIN',
     'CASHIER',
+    'BILLING_CASHIER',
     'FINANCE_MANAGER',
     'FINANCE',
     'REVENUE_CYCLE',
@@ -273,6 +275,64 @@ function valueMatchesScope(
 ): boolean {
   const normalized = String(value || '').trim();
   return !normalized || allowed.has(normalized);
+}
+
+function normalizedRoleSet(roles: string[]): Set<string> {
+  return new Set(
+    roles.map((role) => String(role || '').trim().toUpperCase()).filter(Boolean)
+  );
+}
+
+function minimizePatientRows(
+  roles: string[],
+  rows: Array<Record<string, unknown>>
+): Array<Record<string, unknown>> {
+  const normalized = normalizedRoleSet(roles);
+  const frontDesk = ['RECEPTIONIST', 'REGISTRAR', 'ADMISSION_OFFICER'].some(
+    (role) => normalized.has(role)
+  );
+  const cashier = [
+    'BILLING_CLERK',
+    'BILLING_ADMIN',
+    'CASHIER',
+    'BILLING_CASHIER',
+    'REVENUE_CYCLE',
+  ].some((role) => normalized.has(role));
+
+  if (!frontDesk && !cashier) return rows;
+
+  return rows.map((row) => {
+    const base: Record<string, unknown> = {
+      id: row.id,
+      patientId: row.patientId,
+      mrn: row.mrn,
+      fullName: row.fullName,
+      dateOfBirth: row.dateOfBirth,
+      gender: row.gender,
+      status: row.status,
+      facilityId: row.facilityId,
+      departmentId: row.departmentId,
+      activeEncounterId: row.activeEncounterId,
+      currentEncounterId: row.currentEncounterId,
+    };
+
+    if (frontDesk) {
+      return {
+        ...base,
+        phoneNumber: row.phoneNumber,
+        email: row.email,
+        residentialAddress: row.residentialAddress,
+        emergencyContact: row.emergencyContact,
+        tariffPlan: row.tariffPlan,
+        consentSummary: row.consentSummary,
+      };
+    }
+
+    return {
+      ...base,
+      tariffPlan: row.tariffPlan,
+    };
+  });
 }
 
 function scopeOfflineCollections(
@@ -576,7 +636,17 @@ function scopeOfflineCollections(
       continue;
     }
 
-    if (collection === 'patients' || collection === 'patient360Projections') {
+    if (collection === 'patients') {
+      scoped[collection] = minimizePatientRows(
+        context.roles,
+        rows.filter((row) =>
+          patientIds.has(String(row.id || row.patientId || '').trim())
+        )
+      );
+      continue;
+    }
+
+    if (collection === 'patient360Projections') {
       scoped[collection] = rows.filter((row) =>
         patientIds.has(String(row.id || row.patientId || '').trim())
       );
@@ -683,14 +753,19 @@ export async function GET(req: NextRequest) {
       }
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unable to hydrate offline read models';
-    const unauthorized = /AUTH|TENANT|SESSION|ACCOUNT/i.test(message);
+    const message =
+      error instanceof Error ? error.message : 'Unable to hydrate offline read models';
+    const unauthorized =
+      /AUTH|TENANT|SESSION|ACCOUNT|DEVICE|PERMISSION|ACCESS|SCOPE|FORBIDDEN|DENIED/i.test(
+        message
+      );
     return NextResponse.json(
       {
         success: false,
         error: {
-          code: unauthorized ? 'EDGE_BOOTSTRAP_UNAUTHORIZED' : 'EDGE_BOOTSTRAP_FAILED',
-          message,
+          code: unauthorized
+            ? 'EDGE_BOOTSTRAP_UNAUTHORIZED'
+            : 'EDGE_BOOTSTRAP_FAILED',
         },
       },
       {

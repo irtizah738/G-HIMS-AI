@@ -132,14 +132,12 @@ describe('OPD-RP22 obsolete and demo authority removal', () => {
     expect(claims).not.toContain('edi837Payload');
   });
 
-  test('legacy billing view no longer carries fabricated default financial facts', async () => {
-    const view = await source('components/views/billing-erp-view.tsx');
-
-    expect(view).not.toContain("globalPatientId || 'p-1001'");
-    expect(view).not.toContain('totalReconciledVal + 1480');
-    expect(view).not.toContain(
-      '/central-metro-hospital/billing/invoices/inv-enc-8092-441'
-    );
+  test('obsolete fabricated billing ERP surface is deleted rather than sanitized', () => {
+    expect(
+      existsSync(
+        path.join(process.cwd(), 'components/views/billing-erp-view.tsx')
+      )
+    ).toBe(false);
   });
 
   test('Firestore remains server-write-only for billing authority collections', async () => {

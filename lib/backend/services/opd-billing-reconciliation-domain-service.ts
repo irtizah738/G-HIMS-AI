@@ -750,7 +750,8 @@ export class OpdBillingReconciliationDomainService {
         const recognitionJournalId = String(
           order?.recognitionJournalId || ''
         ).trim();
-        const recognitionMinor = Number(order?.netRevenueMinorUnits || 0);
+        const taxMinor = majorToMinor(invoice.totalTax || 0);
+        const recognitionMinor = expectedBillingMinor - taxMinor;
         const billingJournal = group.find(
           (journal) => String(journal.journalId || '') === billingJournalId
         );
@@ -774,6 +775,7 @@ export class OpdBillingReconciliationDomainService {
           );
         }
         if (
+          taxMinor < 0 ||
           !Number.isSafeInteger(recognitionMinor) ||
           recognitionMinor <= 0 ||
           !validateBalancedJournal(

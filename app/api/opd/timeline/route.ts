@@ -157,18 +157,22 @@ async function readLinkedAudits(
 
   const byEventId = new Map<string, AuditRecord>();
   const ambiguousEventIds = new Set<string>();
+  const seenAuditIds = new Set<string>();
   for (const snapshot of snapshots) {
     for (const doc of snapshot.docs) {
       const audit = doc.data() as AuditRecord;
+      const auditId = String(audit.auditId || doc.id).trim();
       const eventId = String(audit.eventId || '').trim();
-      if (!eventId) continue;
+      if (!auditId || !eventId || seenAuditIds.has(auditId)) continue;
+      seenAuditIds.add(auditId);
+
       if (byEventId.has(eventId)) {
         ambiguousEventIds.add(eventId);
         continue;
       }
       byEventId.set(eventId, {
         ...audit,
-        auditId: String(audit.auditId || doc.id),
+        auditId,
       });
     }
   }

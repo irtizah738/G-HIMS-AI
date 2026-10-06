@@ -91,8 +91,12 @@ export function DiseaseCentricIntakeView() {
   }, [patients, activePatientId]);
 
   // Localization and Facility Configuration
-  const [selectedLocalizationId, setSelectedLocalizationId] = useState<string>('us_aha_nih');
-  const [selectedTierId, setSelectedTierId] = useState<string>('tier_quaternary');
+  const [selectedLocalizationId, setSelectedLocalizationId] = useState<string>(
+    IS_DEMO_RUNTIME ? 'us_aha_nih' : ''
+  );
+  const [selectedTierId, setSelectedTierId] = useState<string>(
+    IS_DEMO_RUNTIME ? 'tier_quaternary' : ''
+  );
 
   const currentLocalization = useMemo(() => {
     return LOCALIZATION_CONFIGS.find((l) => l.id === selectedLocalizationId) || LOCALIZATION_CONFIGS[0];
@@ -193,6 +197,7 @@ export function DiseaseCentricIntakeView() {
 
   useEffect(() => {
     if (IS_DEMO_RUNTIME) return;
+    setSelectedTemplateId('');
     setGuidedAnswers({});
     setSpecialtyHistoryAnswers({});
     setAiResult(null);
@@ -279,6 +284,14 @@ export function DiseaseCentricIntakeView() {
       if (!selectedPatient) {
         throw new Error('Select a patient before requesting clinical intelligence.');
       }
+      if (!selectedTemplateId) {
+        throw new Error('Select a disease-specific intake protocol before requesting clinical intelligence.');
+      }
+      if (!selectedLocalizationId || !selectedTierId) {
+        throw new Error(
+          'Configure the applicable clinical guideline locale and facility capability before requesting clinical intelligence.'
+        );
+      }
 
       const tenantId = await AuthClient.getActiveTenantId();
       const activeBranchLabels = selectedTreeNodeIds.map((id) => id.replace(/_/g, ' ').toUpperCase());
@@ -317,8 +330,12 @@ export function DiseaseCentricIntakeView() {
               }
             : {}),
         },
-        localization: currentLocalization.name,
-        facilityTier: currentHospitalTier.name,
+        localization: selectedLocalizationId
+          ? currentLocalization.name
+          : 'UNCONFIGURED',
+        facilityTier: selectedTierId
+          ? currentHospitalTier.name
+          : 'UNCONFIGURED',
       };
 
       const controller = new AbortController();
@@ -396,7 +413,7 @@ export function DiseaseCentricIntakeView() {
         author: 'Clinical Intake Workflow',
         role: 'Clinician-entered intake',
         category: 'SOAP',
-        content: `Disease-Centric Intake Completed: ${currentTemplate.name}\nRisk Level: ${maxRiskSeverity} (Score: ${totalRiskScore}). Protocol: ${currentLocalization.name}.\nSpecialist preparation is available for clinician review; no consultation or diagnostic order was auto-dispatched.`,
+        content: `Disease-Centric Intake Completed: ${currentTemplate.name}\nRisk Level: ${maxRiskSeverity} (Score: ${totalRiskScore}). Guideline context: ${selectedLocalizationId ? currentLocalization.name : 'not configured'}. Facility capability: ${selectedTierId ? currentHospitalTier.name : 'not configured'}.\nSpecialist preparation is available for clinician review; no consultation or diagnostic order was auto-dispatched.`,
       });
 
       setCommittedSuccess(true);
@@ -426,11 +443,15 @@ export function DiseaseCentricIntakeView() {
               </span>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 flex items-center gap-1.5">
                 <Globe className="w-3.5 h-3.5" />
-                {currentLocalization.flagEmoji} {currentLocalization.name.split('(')[0]}
+                {selectedLocalizationId
+                  ? `${currentLocalization.flagEmoji} ${currentLocalization.name.split('(')[0]}`
+                  : 'Guideline locale not configured'}
               </span>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-500/20 text-purple-300 border border-purple-400/30 flex items-center gap-1.5">
                 <Building2 className="w-3.5 h-3.5" />
-                {currentHospitalTier.name.split(' ')[0]} Facility
+                {selectedTierId
+                  ? `${currentHospitalTier.name.split(' ')[0]} Facility`
+                  : 'Facility capability not configured'}
               </span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
@@ -446,7 +467,13 @@ export function DiseaseCentricIntakeView() {
             <button
               id="btn-trigger-ai-optimize-top"
               onClick={handleRunAiOptimization}
-              disabled={aiLoading || !selectedPatient}
+              disabled={
+                aiLoading ||
+                !selectedPatient ||
+                !selectedTemplateId ||
+                !selectedLocalizationId ||
+                !selectedTierId
+              }
               className="px-5 py-3 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold text-sm flex items-center gap-2 shadow-md hover:shadow-lg transition-all cursor-pointer active:scale-95 disabled:opacity-50"
             >
               {aiLoading ? (
@@ -633,8 +660,9 @@ export function DiseaseCentricIntakeView() {
         <div className="flex items-center gap-2 overflow-x-auto">
           <button
             id="tab-mode-intake"
+            disabled={!selectedTemplateId}
             onClick={() => setActiveTabMode('intake')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${
               activeTabMode === 'intake'
                 ? 'bg-blue-600 text-white shadow-xs'
                 : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
@@ -646,8 +674,9 @@ export function DiseaseCentricIntakeView() {
 
           <button
             id="tab-mode-tree"
+            disabled={!selectedTemplateId}
             onClick={() => setActiveTabMode('tree')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${
               activeTabMode === 'tree'
                 ? 'bg-blue-600 text-white shadow-xs'
                 : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
@@ -659,8 +688,9 @@ export function DiseaseCentricIntakeView() {
 
           <button
             id="tab-mode-ai"
+            disabled={!selectedTemplateId}
             onClick={() => setActiveTabMode('ai_optimize')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${
               activeTabMode === 'ai_optimize'
                 ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-xs'
                 : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
@@ -706,7 +736,7 @@ export function DiseaseCentricIntakeView() {
           <button
             id="btn-commit-longitudinal-ehr"
             onClick={() => void handleCommitToLongitudinalEhr()}
-            disabled={!selectedPatient}
+            disabled={!selectedPatient || !selectedTemplateId}
             className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-400 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:cursor-not-allowed"
           >
             <FileCheck2 className="w-4 h-4" />
@@ -1137,7 +1167,7 @@ export function DiseaseCentricIntakeView() {
             {/* Level 0: Root Node */}
             <div
               onClick={() => handleTreeNodeToggle(currentTemplate.symptomTree.id)}
-              className={`p-4 rounded-xl border transition-all cursor-pointer ${
+              className={`p-4 rounded-xl border transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${
                 selectedTreeNodeIds.includes(currentTemplate.symptomTree.id)
                   ? 'bg-blue-50 dark:bg-blue-950/60 border-blue-500 ring-2 ring-blue-500/20'
                   : 'bg-slate-50 dark:bg-slate-850 border-slate-200 dark:border-slate-800'
@@ -1219,7 +1249,7 @@ export function DiseaseCentricIntakeView() {
                             <div
                               key={subChild.id}
                               onClick={() => handleTreeNodeToggle(subChild.id)}
-                              className={`p-3 rounded-xl border text-xs transition-all cursor-pointer ${
+                              className={`p-3 rounded-xl border text-xs transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${
                                 isSubSelected
                                   ? subChild.isRedFlag
                                     ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-400 text-rose-900 dark:text-rose-100 font-bold ring-1 ring-rose-500'

@@ -9,12 +9,10 @@ import {
 } from '@/lib/clinical/intake-templates-data';
 import {
   DiseaseIntakeTemplate,
-  SymptomTreeNode,
   GuidedQuestion,
   LocalizationConfig,
   HospitalTierConfig,
   AiOptimizationResult,
-  RiskSeverity,
 } from '@/lib/types/disease-intake';
 import {
   HeartPulse,

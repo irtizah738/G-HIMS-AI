@@ -519,7 +519,9 @@ export function OpdMasterWorkspace() {
   const refreshAuthoritativeWorkspace = useCallback(async () => {
     if (IS_DEMO_RUNTIME || auth.loading || !auth.activeTenant?.tenantId) return;
 
-    const snapshot = await hydrateEdgeSnapshot(auth.activeTenant.tenantId);
+    const snapshot = await hydrateEdgeSnapshot(auth.activeTenant.tenantId, {
+        surface: 'OPD',
+      });
     const readModel = buildOpdWorkspaceReadModel(snapshot);
 
     setDashboardSnapshotMeta({

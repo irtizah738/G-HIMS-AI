@@ -870,23 +870,25 @@ export class ConsultantAttentionProjectionService {
         .filter(Boolean)
     );
 
+    const tenantRef = db.collection('tenants').doc(context.tenantId);
+    const WORKLIST_MAX = 5000;
     let rawItems: ClinicalOpenItemProjection[] = [];
+
     if (roles.has('SYSTEM_ADMIN')) {
-      const [open, acknowledged] = await Promise.all([
-        DomainStateRepository.queryAllEqual<ClinicalOpenItemProjection>(
-          context.tenantId,
-          'clinicalOpenItems',
-          'status',
-          'OPEN'
-        ),
-        DomainStateRepository.queryAllEqual<ClinicalOpenItemProjection>(
-          context.tenantId,
-          'clinicalOpenItems',
-          'status',
-          'ACKNOWLEDGED'
-        ),
-      ]);
-      rawItems = [...open, ...acknowledged];
+      const snapshot = await tenantRef
+        .collection('clinicalOpenItems')
+        .where('status', 'in', ['OPEN', 'ACKNOWLEDGED'])
+        .orderBy('updatedAt', 'desc')
+        .limit(WORKLIST_MAX + 1)
+        .get();
+      if (snapshot.size > WORKLIST_MAX) {
+        throw new Error(
+          `CONSULTANT_WORKLIST_LIMIT_EXCEEDED:${WORKLIST_MAX}`
+        );
+      }
+      rawItems = snapshot.docs.map(
+        (document) => document.data() as ClinicalOpenItemProjection
+      );
     } else {
       const ownershipKeys = Array.from(
         new Set([
@@ -895,21 +897,30 @@ export class ConsultantAttentionProjectionService {
           ...Array.from(roles),
         ])
       ).filter(Boolean);
-
-      const ownershipRows = await Promise.all(
-        ownershipKeys.map((ownerId) =>
-          DomainStateRepository.queryAllEqual<ClinicalOpenItemProjection>(
-            context.tenantId,
-            'clinicalOpenItems',
-            'ownerId',
-            ownerId
-          )
-        )
-      );
       const byId = new Map<string, ClinicalOpenItemProjection>();
-      for (const entry of ownershipRows.flat()) {
-        if (entry.status !== 'OPEN' && entry.status !== 'ACKNOWLEDGED') continue;
-        byId.set(entry.openItemId, entry);
+
+      for (const ownerId of ownershipKeys) {
+        const snapshot = await tenantRef
+          .collection('clinicalOpenItems')
+          .where('ownerId', '==', ownerId)
+          .where('status', 'in', ['OPEN', 'ACKNOWLEDGED'])
+          .orderBy('updatedAt', 'desc')
+          .limit(WORKLIST_MAX + 1)
+          .get();
+        if (snapshot.size > WORKLIST_MAX) {
+          throw new Error(
+            `CONSULTANT_WORKLIST_OWNER_LIMIT_EXCEEDED:${ownerId}:${WORKLIST_MAX}`
+          );
+        }
+        for (const document of snapshot.docs) {
+          const entry = document.data() as ClinicalOpenItemProjection;
+          byId.set(entry.openItemId, entry);
+        }
+        if (byId.size > WORKLIST_MAX) {
+          throw new Error(
+            `CONSULTANT_WORKLIST_LIMIT_EXCEEDED:${WORKLIST_MAX}`
+          );
+        }
       }
       rawItems = [...byId.values()];
     }

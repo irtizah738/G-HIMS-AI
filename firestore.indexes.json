@@ -1,6 +1,270 @@
 {
   "indexes": [
     {
+      "collectionGroup": "opdWaitlist",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "facilityId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "preferredDepartmentId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "opdAppointments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "facilityId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "departmentId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "scheduledEndAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "encounters",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "facilityId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "departmentId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "encounterType",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "consultantReviewCheckpoints",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "consultantId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "patientId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "reviewedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "clinicalOpenItems",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "ownerId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "clinicalOpenItems",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "opdAppointmentSlots",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "providerEmployeeId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bucketStartAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "rosterAssignments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "facilityId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "departmentId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "date",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "startTime",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "opdWaitlist",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "facilityId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "opdWaitlist",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "opdAppointments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "facilityId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "scheduledEndAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "opdAppointments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "scheduledEndAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "encounters",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "facilityId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "encounterType",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "encounters",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "encounterType",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "patient360Timeline",
       "queryScope": "COLLECTION",
       "fields": [
@@ -511,5 +775,61 @@
       ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    {
+      "collectionGroup": "patient360Projections",
+      "fieldPath": "careContexts",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "patient360Projections",
+      "fieldPath": "recentEncounters",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "patient360Projections",
+      "fieldPath": "activeProblems",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "patient360Projections",
+      "fieldPath": "resolvedProblems",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "patient360Projections",
+      "fieldPath": "allergies",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "patient360Projections",
+      "fieldPath": "currentMedications",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "patient360Projections",
+      "fieldPath": "latestVitals",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "patient360Projections",
+      "fieldPath": "recentResults",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "patient360Projections",
+      "fieldPath": "recentDocuments",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "patient360Projections",
+      "fieldPath": "dataQuality",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "patient360Projections",
+      "fieldPath": "counts",
+      "indexes": []
+    }
+  ]
 }

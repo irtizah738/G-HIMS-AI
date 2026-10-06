@@ -21,18 +21,36 @@ export class ConsultantBlindnessMetricsService {
     const items = worklist.items;
     const now = Date.now();
 
-    const checkpoints = await db
-      .collection('tenants')
-      .doc(context.tenantId)
-      .collection('consultantReviewCheckpoints')
-      .where('consultantId', '==', context.actorId)
-      .limit(500)
-      .get();
+    const worklistPatientIds = Array.from(
+      new Set(
+        items
+          .map((item) => String(item.patientId || '').trim())
+          .filter(Boolean)
+      )
+    );
+    const checkpointRows: Array<Record<string, unknown>> = [];
+    for (let offset = 0; offset < worklistPatientIds.length; offset += 30) {
+      const patientChunk = worklistPatientIds.slice(offset, offset + 30);
+      const snapshot = await db
+        .collection('tenants')
+        .doc(context.tenantId)
+        .collection('consultantReviewCheckpoints')
+        .where('consultantId', '==', context.actorId)
+        .where('patientId', 'in', patientChunk)
+        .orderBy('reviewedAt', 'desc')
+        .limit(5001)
+        .get();
+      if (snapshot.size > 5000) {
+        throw new Error(
+          'CONSULTANT_REVIEW_CHECKPOINT_SCOPE_LIMIT_EXCEEDED:5000'
+        );
+      }
+      checkpointRows.push(...snapshot.docs.map((doc) => doc.data()));
+    }
 
     const reviewedPatientIds = new Set<string>();
     let lastReviewAt = 0;
-    for (const doc of checkpoints.docs) {
-      const row = doc.data();
+    for (const row of checkpointRows) {
       const patientId = String(row.patientId || '').trim();
       if (patientId) reviewedPatientIds.add(patientId);
       lastReviewAt = Math.max(lastReviewAt, Number(row.reviewedAt || 0));

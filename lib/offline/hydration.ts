@@ -8,6 +8,9 @@ import {
   replaceSecureTenantEdgeSnapshot,
 } from '@/lib/offline/secure-store';
 import { enforceEdgeStorageBudget } from '@/lib/offline/storage-manager';
+import { OPD_EDGE_COLLECTIONS } from '@/lib/opd/edge-surface';
+
+export type EdgeHydrationSurface = 'OPD' | 'GENERIC';
 
 export interface EdgeSnapshot {
   tenantId: string;
@@ -17,7 +20,10 @@ export interface EdgeSnapshot {
   source: 'LOCAL' | 'SERVER';
 }
 
-export async function loadLocalEdgeSnapshot(tenantId: string): Promise<EdgeSnapshot> {
+export async function loadLocalEdgeSnapshot(
+  tenantId: string,
+  surface: EdgeHydrationSurface = 'GENERIC'
+): Promise<EdgeSnapshot> {
   const cached = await getCachedAuthSession();
   const actorId = cached?.user?.uid || '';
   if (!actorId) {
@@ -30,7 +36,7 @@ export async function loadLocalEdgeSnapshot(tenantId: string): Promise<EdgeSnaps
     };
   }
 
-  const collectionsToLoad = [
+  const genericCollectionsToLoad = [
     'patients',
     'encounters',
     'encounterEvidence',
@@ -109,6 +115,10 @@ export async function loadLocalEdgeSnapshot(tenantId: string): Promise<EdgeSnaps
     'financeTaxSummarySnapshots',
     'financeIntelligenceSnapshots',
   ];
+  const collectionsToLoad =
+    surface === 'OPD'
+      ? [...OPD_EDGE_COLLECTIONS]
+      : genericCollectionsToLoad;
 
   const entries = await Promise.all(
     collectionsToLoad.map(async (collection) => [
@@ -127,13 +137,17 @@ export async function loadLocalEdgeSnapshot(tenantId: string): Promise<EdgeSnaps
   };
 }
 
-export async function hydrateEdgeSnapshot(tenantId: string): Promise<EdgeSnapshot> {
+export async function hydrateEdgeSnapshot(
+  tenantId: string,
+  options: { surface?: EdgeHydrationSurface } = {}
+): Promise<EdgeSnapshot> {
+  const surface = options.surface || 'GENERIC';
   const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
   const currentUser = auth.currentUser;
   const cached = await getCachedAuthSession();
 
   if (!normalizedTenantId || !currentUser || !cached) {
-    return loadLocalEdgeSnapshot(normalizedTenantId);
+    return loadLocalEdgeSnapshot(normalizedTenantId, surface);
   }
 
   if (cached.user.tenantId.trim().toLowerCase() !== normalizedTenantId) {
@@ -148,7 +162,9 @@ export async function hydrateEdgeSnapshot(tenantId: string): Promise<EdgeSnapsho
 
     try {
       response = await fetch(
-        `/api/offline/bootstrap?tenantId=${encodeURIComponent(normalizedTenantId)}`,
+        `/api/offline/bootstrap?tenantId=${encodeURIComponent(
+          normalizedTenantId
+        )}&surface=${encodeURIComponent(surface)}`,
         {
           method: 'GET',
           cache: 'no-store',
@@ -172,7 +188,7 @@ export async function hydrateEdgeSnapshot(tenantId: string): Promise<EdgeSnapsho
       if ([401, 403].includes(response.status)) {
         throw new Error('EDGE_HYDRATION_AUTHORIZATION_FAILED');
       }
-      return loadLocalEdgeSnapshot(normalizedTenantId);
+      return loadLocalEdgeSnapshot(normalizedTenantId, surface);
     }
 
     const payload = await response.json();
@@ -202,6 +218,6 @@ export async function hydrateEdgeSnapshot(tenantId: string): Promise<EdgeSnapsho
   } catch (error) {
     const message = error instanceof Error ? error.message : '';
     if (message.includes('AUTHORIZATION') || message.includes('TENANT_MISMATCH')) throw error;
-    return loadLocalEdgeSnapshot(normalizedTenantId);
+    return loadLocalEdgeSnapshot(normalizedTenantId, surface);
   }
 }

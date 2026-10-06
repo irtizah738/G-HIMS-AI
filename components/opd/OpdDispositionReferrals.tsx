@@ -15,9 +15,6 @@ import {
   Printer,
   Sparkles,
 } from 'lucide-react';
-const IS_DEMO_RUNTIME =
-  process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
-
 import {
   ComprehensiveOpdEncounter,
   EncounterDisposition,
@@ -25,6 +22,9 @@ import {
   InternalReferral,
   ExternalReferral,
 } from '@/types/opd-domain';
+
+const IS_DEMO_RUNTIME =
+  process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
 
 interface OpdDispositionReferralsProps {
   encounter: ComprehensiveOpdEncounter;
@@ -380,6 +380,7 @@ export function OpdDispositionReferrals({
                 <label className="block text-[11px] font-semibold mb-1">Admission Clinical Indication</label>
                 <input
                   type="text"
+                  required={dispositionType === 'INPATIENT_ADMISSION_RECOMMENDED'}
                   value={admissionReason}
                   onChange={(e) => setAdmissionReason(e.target.value)}
                   className="w-full px-3 py-1.5 text-xs rounded-lg border border-amber-200 dark:border-amber-700 bg-white dark:bg-slate-900"
@@ -397,6 +398,7 @@ export function OpdDispositionReferrals({
             </label>
             <textarea
               rows={3}
+              required
               value={dischargeInstructions}
               onChange={(e) => setDischargeInstructions(e.target.value)}
               className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
@@ -409,6 +411,7 @@ export function OpdDispositionReferrals({
             </label>
             <textarea
               rows={3}
+              required
               value={warningSigns}
               onChange={(e) => setWarningSigns(e.target.value)}
               className="w-full px-3.5 py-2 text-xs rounded-xl border border-red-200 dark:border-red-800/60 bg-red-50/40 dark:bg-red-950/20 text-red-900 dark:text-red-200"

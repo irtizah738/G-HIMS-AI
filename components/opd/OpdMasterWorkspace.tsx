@@ -545,6 +545,31 @@ export function OpdMasterWorkspace() {
     refreshAuthoritativeWorkspace,
   ]);
 
+  useEffect(() => {
+    if (IS_DEMO_RUNTIME || !auth.activeTenant?.tenantId) return;
+
+    const handleSyncComplete = (event: Event) => {
+      const detail = (event as CustomEvent<{ tenantId?: string }>).detail;
+      if (
+        detail?.tenantId &&
+        detail.tenantId !== auth.activeTenant?.tenantId
+      ) {
+        return;
+      }
+      void refreshAuthoritativeWorkspace().catch((error) => {
+        console.error('OPD post-sync hydration failed:', error);
+      });
+    };
+
+    window.addEventListener('ghims:edge-sync-complete', handleSyncComplete);
+    return () => {
+      window.removeEventListener(
+        'ghims:edge-sync-complete',
+        handleSyncComplete
+      );
+    };
+  }, [auth.activeTenant?.tenantId, refreshAuthoritativeWorkspace]);
+
   // Selected encounter object
   const activeEncounter = useMemo(() => {
     return encounters.find((e) => e.id === selectedEncounterId) || encounters[0];
@@ -1226,6 +1251,13 @@ export function OpdMasterWorkspace() {
   // The client supplies clinical intent and a catalog identity only. Price,
   // specimen identity, invoice, AR and GL state are all server-owned.
   const handleAddDiagnosticOrder = async (order: DiagnosticOrderItem) => {
+    const requestedUrgency = String(order.urgency || '').toUpperCase();
+    if (!isOnline && requestedUrgency.includes('STAT')) {
+      throw new Error(
+        'STAT_DIAGNOSTIC_REQUIRES_ONLINE_AUTHORITY: emergency diagnostic payment override and immediate worklist dispatch require live server authority.'
+      );
+    }
+
     const category = String(order.type || order.category || '').toUpperCase();
     const orderType =
       category === 'RADIOLOGY'
@@ -1717,6 +1749,35 @@ export function OpdMasterWorkspace() {
         }
       );
 
+      if (result.queuedOffline) {
+        const pendingPayment: PaymentTransaction = {
+          ...payment,
+          invoiceId: consultationInvoice.id,
+          status: 'PENDING',
+          glJournalEntryId: '',
+        };
+        setEncounters((prev) =>
+          prev.map((encounter) =>
+            encounter.id === activeEncounter.id
+              ? {
+                  ...encounter,
+                  consultationInvoice: {
+                    ...consultationInvoice,
+                    payments: [
+                      ...consultationInvoice.payments.filter(
+                        (existing) => existing.id !== pendingPayment.id
+                      ),
+                      pendingPayment,
+                    ],
+                  },
+                }
+              : encounter
+          )
+        );
+        setActiveTab('BILLING');
+        return;
+      }
+
       if (!result.success || !result.data) {
         throw new Error(result.error?.message || 'Consultation cash receipt command failed.');
       }
@@ -1834,8 +1895,50 @@ export function OpdMasterWorkspace() {
         },
         {
           idempotencyKey: `opd-diagnostic-cash-receipt:${payment.id}`,
+          offlineQueue: {
+            enabled: true,
+            collection: 'cashReceipts',
+            resourceId: payment.id,
+            action: 'CREATE',
+            optimisticCache: false,
+          },
         }
       );
+
+      if (result.queuedOffline) {
+        const pendingPayment: PaymentTransaction = {
+          ...payment,
+          invoiceId: diagnosticInvoice.id,
+          status: 'PENDING',
+          glJournalEntryId: '',
+        };
+        setEncounters((prev) =>
+          prev.map((encounter) =>
+            encounter.id === activeEncounter.id
+              ? {
+                  ...encounter,
+                  diagnosticInvoices: (encounter.diagnosticInvoices || []).map(
+                    (invoice) =>
+                      invoice.id === diagnosticInvoice.id
+                        ? {
+                            ...invoice,
+                            payments: [
+                              ...invoice.payments.filter(
+                                (existing) =>
+                                  existing.id !== pendingPayment.id
+                              ),
+                              pendingPayment,
+                            ],
+                          }
+                        : invoice
+                  ),
+                }
+              : encounter
+          )
+        );
+        setActiveTab('BILLING');
+        return;
+      }
 
       if (!result.success || !result.data) {
         throw new Error(
@@ -1963,8 +2066,50 @@ export function OpdMasterWorkspace() {
         },
         {
           idempotencyKey: `opd-pharmacy-cash-receipt:${payment.id}`,
+          offlineQueue: {
+            enabled: true,
+            collection: 'cashReceipts',
+            resourceId: payment.id,
+            action: 'CREATE',
+            optimisticCache: false,
+          },
         }
       );
+
+      if (result.queuedOffline) {
+        const pendingPayment: PaymentTransaction = {
+          ...payment,
+          invoiceId: pharmacyInvoice.id,
+          status: 'PENDING',
+          glJournalEntryId: '',
+        };
+        setEncounters((prev) =>
+          prev.map((encounter) =>
+            encounter.id === activeEncounter.id
+              ? {
+                  ...encounter,
+                  pharmacyInvoices: (encounter.pharmacyInvoices || []).map(
+                    (invoice) =>
+                      invoice.id === pharmacyInvoice.id
+                        ? {
+                            ...invoice,
+                            payments: [
+                              ...invoice.payments.filter(
+                                (existing) =>
+                                  existing.id !== pendingPayment.id
+                              ),
+                              pendingPayment,
+                            ],
+                          }
+                        : invoice
+                  ),
+                }
+              : encounter
+          )
+        );
+        setActiveTab('BILLING');
+        return;
+      }
 
       if (!result.success || !result.data) {
         throw new Error(
@@ -2068,8 +2213,51 @@ export function OpdMasterWorkspace() {
         },
         {
           idempotencyKey: `opd-ri-cash-receipt:${payment.id}`,
+          offlineQueue: {
+            enabled: true,
+            collection: 'cashReceipts',
+            resourceId: payment.id,
+            action: 'CREATE',
+            optimisticCache: false,
+          },
         }
       );
+
+      if (result.queuedOffline) {
+        const pendingPayment: PaymentTransaction = {
+          ...payment,
+          invoiceId: supplementalInvoice.id,
+          status: 'PENDING',
+          glJournalEntryId: '',
+        };
+        setEncounters((prev) =>
+          prev.map((encounter) =>
+            encounter.id === activeEncounter.id
+              ? {
+                  ...encounter,
+                  supplementalInvoices: (
+                    encounter.supplementalInvoices || []
+                  ).map((invoice) =>
+                    invoice.id === supplementalInvoice.id
+                      ? {
+                          ...invoice,
+                          payments: [
+                            ...invoice.payments.filter(
+                              (existing) =>
+                                existing.id !== pendingPayment.id
+                            ),
+                            pendingPayment,
+                          ],
+                        }
+                      : invoice
+                  ),
+                }
+              : encounter
+          )
+        );
+        setActiveTab('BILLING');
+        return;
+      }
 
       if (!result.success || !result.data) {
         throw new Error(

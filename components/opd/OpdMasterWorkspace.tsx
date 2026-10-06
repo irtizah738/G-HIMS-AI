@@ -2293,27 +2293,13 @@ export function OpdMasterWorkspace() {
     }
   };
 
-  // HANDLER: Commit Disposition through the encounter lifecycle service.
+  // HANDLER: Commit disposition. OPD -> IPD admission is one atomic care
+  // transition; it must never first write an intermediate "bed requested"
+  // disposition that can survive a failed admission.
   const handleCommitDisposition = async (disposition: EncounterDisposition) => {
-    const dispositionResult = await executeActiveTenantCommand(
-      'CommitEncounterDispositionCommand',
-      {
-        encounterId: activeEncounter.id,
-        dispositionType: disposition.type,
-        patientInstructions: disposition.patientInstructions,
-        warningSignsRedFlags: disposition.warningSignsRedFlags,
-        followUpScheduledDate: disposition.followUpScheduledDate,
-        followUpDepartment: disposition.followUpDepartment,
-        inpatientAdmissionRequest: disposition.inpatientAdmissionRequest,
-      },
-      { idempotencyKey: `opd-disposition:${activeEncounter.id}` }
-    );
-    if (!dispositionResult.success) {
-      throw new Error(dispositionResult.error?.message || 'Encounter disposition failed.');
-    }
-
     const inpatientRequest = disposition.inpatientAdmissionRequest;
-    const directAdmission = disposition.type === 'INPATIENT_ADMISSION_RECOMMENDED';
+    const directAdmission =
+      disposition.type === 'INPATIENT_ADMISSION_RECOMMENDED';
 
     if (directAdmission) {
       if (!inpatientRequest?.targetBedId) {
@@ -2324,7 +2310,12 @@ export function OpdMasterWorkspace() {
 
       const admissionResult = await executeActiveTenantCommand<{
         encounter: { encounterId: string };
-        sourceEncounter?: { encounterId: string; status: string } | null;
+        sourceEncounter?: {
+          encounterId: string;
+          status: string;
+          linkedEncounterId?: string;
+        } | null;
+        sourceAppointment?: Record<string, any> | null;
       }>(
         'AdmitPatientToInpatientCareCommand',
         {
@@ -2336,15 +2327,18 @@ export function OpdMasterWorkspace() {
           assignedDoctor: activeEncounter.attendingDoctorId,
           priority: 'URGENT',
         },
-        { idempotencyKey: `opd-ipd-admission:${activeEncounter.id}` }
+        {
+          idempotencyKey: `opd-ipd-admission:${activeEncounter.id}`,
+        }
       );
       if (!admissionResult.success) {
         throw new Error(
           admissionResult.error?.message ||
-            'OPD disposition was recorded, but inpatient admission could not be completed.'
+            'Atomic OPD-to-IPD transition failed; the OPD encounter remains unchanged.'
         );
       }
 
+      const transitionedAt = Date.now();
       setEncounters((prev) =>
         prev.map((encounter) =>
           encounter.id === activeEncounter.id
@@ -2353,20 +2347,22 @@ export function OpdMasterWorkspace() {
                 disposition,
                 currentStage: 'TIMELINE_AUDIT',
                 status: 'TRANSFERRED_TO_INPATIENT',
-                completedAt: Date.now(),
+                completedAt: transitionedAt,
                 stageProgress: {
                   ...encounter.stageProgress,
                   DISPOSITION_CLOSURE: {
                     status: 'COMPLETED',
-                    enteredAt: Date.now() - 300000,
-                    completedAt: Date.now(),
-                    completedBy: disposition.completedBy,
+                    enteredAt:
+                      encounter.stageProgress?.DISPOSITION_CLOSURE?.enteredAt ||
+                      transitionedAt,
+                    completedAt: transitionedAt,
+                    completedBy: 'Server Care Transition Authority',
                   },
                   TIMELINE_AUDIT: {
                     status: 'COMPLETED',
-                    enteredAt: Date.now(),
-                    completedAt: Date.now(),
-                    completedBy: 'Server Care Transition Pipeline',
+                    enteredAt: transitionedAt,
+                    completedAt: transitionedAt,
+                    completedBy: 'Server Care Transition Authority',
                   },
                 },
               }
@@ -2375,11 +2371,34 @@ export function OpdMasterWorkspace() {
       );
       recordEvent(
         'INPATIENT_ADMISSION_REQUESTED',
-        `OPD encounter transferred to inpatient encounter ${admissionResult.data?.encounter?.encounterId || ''}.`,
-        disposition
+        `OPD encounter atomically transferred to inpatient encounter ${admissionResult.data?.encounter?.encounterId || ''}.`,
+        {
+          sourceEncounterId: activeEncounter.id,
+          inpatientEncounterId:
+            admissionResult.data?.encounter?.encounterId || '',
+          targetBedId: inpatientRequest.targetBedId,
+        }
       );
       setActiveTab('AUDIT');
       return;
+    }
+
+    const dispositionResult = await executeActiveTenantCommand(
+      'CommitEncounterDispositionCommand',
+      {
+        encounterId: activeEncounter.id,
+        dispositionType: disposition.type,
+        patientInstructions: disposition.patientInstructions,
+        warningSignsRedFlags: disposition.warningSignsRedFlags,
+        followUpScheduledDate: disposition.followUpScheduledDate,
+        followUpDepartment: disposition.followUpDepartment,
+      },
+      { idempotencyKey: `opd-disposition:${activeEncounter.id}` }
+    );
+    if (!dispositionResult.success) {
+      throw new Error(
+        dispositionResult.error?.message || 'Encounter disposition failed.'
+      );
     }
 
     setEncounters((prev) =>
@@ -2395,9 +2414,11 @@ export function OpdMasterWorkspace() {
                 ...encounter.stageProgress,
                 DISPOSITION_CLOSURE: {
                   status: 'COMPLETED',
-                  enteredAt: Date.now() - 300000,
+                  enteredAt:
+                    encounter.stageProgress?.DISPOSITION_CLOSURE?.enteredAt ||
+                    Date.now(),
                   completedAt: Date.now(),
-                  completedBy: disposition.completedBy,
+                  completedBy: 'Server Encounter Authority',
                 },
                 TIMELINE_AUDIT: {
                   status: 'COMPLETED',
@@ -2411,28 +2432,12 @@ export function OpdMasterWorkspace() {
       )
     );
     recordEvent(
-      'ENCOUNTER_CLOSED',
-      `Encounter disposition committed: ${disposition.type}.`,
+      'DISPOSITION_COMMITTED',
+      `Disposition committed: ${disposition.type}`,
       disposition
     );
     setActiveTab('AUDIT');
   };
-
-  // Navigation Items
-  const navTabs = [
-    { id: 'DASHBOARD', label: 'Overview', icon: LayoutDashboard },
-    { id: 'SEARCH_MPI', label: 'MPI Search', icon: Search },
-    { id: 'REGISTRATION', label: 'Registration', icon: PlusCircle },
-    { id: 'APPOINTMENTS', label: 'Appointments', icon: Calendar },
-    { id: 'QUEUE', label: 'Live Queue', icon: Clock },
-    { id: 'TRIAGE', label: 'Triage / NEWS2', icon: Activity },
-    { id: 'CONSULTATION', label: 'Consultation', icon: Stethoscope },
-    { id: 'DIAGNOSTICS', label: 'Lab & PACS', icon: FlaskConical },
-    { id: 'PHARMACY', label: 'Pharmacy FEFO', icon: Pill },
-    { id: 'BILLING', label: 'Billing / GL', icon: DollarSign },
-    { id: 'DISPOSITION', label: 'Disposition', icon: FileCheck },
-    { id: 'AUDIT', label: 'Audit Trail', icon: ShieldCheck },
-  ].filter((tab) => canAccessTab(tab.id));
 
   return (
     <div className="space-y-6">

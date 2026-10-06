@@ -4,7 +4,10 @@ import type {
   ClinicalCondition,
   ClinicalDocument,
   ClinicalObservation,
+  DiagnosticOrder,
   DiagnosticReport,
+  ClinicalProcedure,
+  CarePlan,
   MedicationOrder,
   KnownStatus,
 } from '@/types/clinical-canonical';
@@ -90,6 +93,41 @@ export interface Patient360ObservationSummary {
   interpretation?: string;
 }
 
+export interface Patient360DiagnosticOrderSummary {
+  diagnosticOrderId: string;
+  display: string;
+  code?: string;
+  system?: string;
+  orderType: DiagnosticOrder['orderType'];
+  priority: DiagnosticOrder['priority'];
+  status: DiagnosticOrder['status'];
+  orderedBy: string;
+  orderedAt: number;
+}
+
+export interface Patient360ProcedureSummary {
+  procedureId: string;
+  display: string;
+  code?: string;
+  system?: string;
+  status: ClinicalProcedure['status'];
+  performedAt?: number;
+  performerIds: string[];
+  outcome?: string;
+}
+
+export interface Patient360CarePlanSummary {
+  carePlanId: string;
+  title: string;
+  status: CarePlan['status'];
+  description?: string;
+  addressesConditionIds: string[];
+  activityCount: number;
+  openActivityCount: number;
+  authoredBy: string;
+  authoredAt: number;
+}
+
 export interface Patient360ResultSummary {
   diagnosticReportId: string;
   orderId?: string;
@@ -139,7 +177,10 @@ export interface Patient360Projection {
   allergies: Patient360AllergySummary[];
   currentMedications: Patient360MedicationSummary[];
   latestVitals: Patient360ObservationSummary[];
+  recentDiagnosticOrders: Patient360DiagnosticOrderSummary[];
   recentResults: Patient360ResultSummary[];
+  recentProcedures: Patient360ProcedureSummary[];
+  activeCarePlans: Patient360CarePlanSummary[];
   recentDocuments: Patient360DocumentSummary[];
   dataQuality: Patient360DataQuality;
   counts: {
@@ -148,7 +189,10 @@ export interface Patient360Projection {
     allergies: number;
     medicationOrders: number;
     observations: number;
+    diagnosticOrders: number;
     diagnosticReports: number;
+    procedures: number;
+    carePlans: number;
     documents: number;
   };
   /** Projection schema version. Increment only for a read-model contract change. */

@@ -124,7 +124,10 @@ async function readLinkedAudits(
   tenantId: string,
   eventIds: string[],
   encounterId: string
-): Promise<Map<string, AuditRecord>> {
+): Promise<{
+  audits: Map<string, AuditRecord>;
+  ambiguousEventIds: Set<string>;
+}> {
   const db = getAdminFirestore();
   if (!db) {
     throw new Error(
@@ -153,26 +156,33 @@ async function readLinkedAudits(
   ]);
 
   const byEventId = new Map<string, AuditRecord>();
+  const ambiguousEventIds = new Set<string>();
   for (const snapshot of snapshots) {
     for (const doc of snapshot.docs) {
       const audit = doc.data() as AuditRecord;
       const eventId = String(audit.eventId || '').trim();
-      if (!eventId || byEventId.has(eventId)) continue;
+      if (!eventId) continue;
+      if (byEventId.has(eventId)) {
+        ambiguousEventIds.add(eventId);
+        continue;
+      }
       byEventId.set(eventId, {
         ...audit,
         auditId: String(audit.auditId || doc.id),
       });
     }
   }
-  return byEventId;
+  return { audits: byEventId, ambiguousEventIds };
 }
 
 function adaptTimelineEvent(
   event: DomainEventEnvelope,
   audit: AuditRecord | undefined,
-  encounterId: string
+  encounterId: string,
+  ambiguousAudit = false
 ): OpdTimelineEvent {
   const linked =
+    !ambiguousAudit &&
     Boolean(audit) &&
     String(audit?.eventId || '') === event.eventId &&
     String(audit?.commandId || '') === String(event.commandId || '') &&
@@ -283,18 +293,24 @@ export async function GET(req: NextRequest) {
       context.tenantId,
       encounterId
     );
-    const audits = await readLinkedAudits(
+    const auditRead = await readLinkedAudits(
       context.tenantId,
       eventRead.events.map((event) => event.eventId),
       encounterId
     );
     const timeline = eventRead.events.map((event) =>
-      adaptTimelineEvent(event, audits.get(event.eventId), encounterId)
+      adaptTimelineEvent(
+        event,
+        auditRead.audits.get(event.eventId),
+        encounterId,
+        auditRead.ambiguousEventIds.has(event.eventId)
+      )
     );
 
     const unlinkedEventCount = timeline.filter(
       (event) => event.integrityState !== 'EVENT_AUDIT_LINKED'
     ).length;
+    const ambiguousAuditCount = auditRead.ambiguousEventIds.size;
 
     return NextResponse.json(
       {
@@ -308,9 +324,12 @@ export async function GET(req: NextRequest) {
           eventCount: timeline.length,
           linkedAuditCount: timeline.length - unlinkedEventCount,
           unlinkedEventCount,
+          ambiguousAuditCount,
           truncated: eventRead.truncated,
           fullyLinked:
-            unlinkedEventCount === 0 && !eventRead.truncated,
+            unlinkedEventCount === 0 &&
+            ambiguousAuditCount === 0 &&
+            !eventRead.truncated,
         },
       },
       {

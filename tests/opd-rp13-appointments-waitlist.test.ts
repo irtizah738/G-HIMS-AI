@@ -122,6 +122,15 @@ describe('OPD-RP13 authoritative appointments and waitlist', () => {
     expect(service).toContain("status: 'HELD'");
   });
 
+  test('expired waitlist offers are recoverable from the front desk UI', async () => {
+    const ui = await source('components/opd/OpdAppointmentsWaitlist.tsx');
+
+    expect(ui).toContain('offerExpired');
+    expect(ui).toContain('OFFER EXPIRED');
+    expect(ui).toContain('Re-offer Earliest Slot');
+    expect(ui).toContain("w.status === 'OFFERED' && !offerExpired");
+  });
+
   test('critical patients cannot be parked on an OPD waitlist', async () => {
     const service = await source(
       'lib/backend/services/opd-appointment-domain-service.ts'

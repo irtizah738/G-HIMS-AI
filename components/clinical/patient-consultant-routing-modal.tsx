@@ -27,9 +27,11 @@ import {
 import { useHospital } from '@/lib/context/hospital-context';
 import { useAuth } from '@/lib/auth/auth-context';
 import {
+  createClinicalHandoff,
   loadConsultantDirectory,
   requestClinicalConsultation,
 } from '@/lib/clinical/intelligence/consultant-worklist-client';
+import { AuthClient } from '@/lib/auth/auth-client';
 import type { EligibleConsultant } from '@/lib/clinical/intelligence/consultant-directory-service';
 
 const IS_DEMO_RUNTIME = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
@@ -278,6 +280,9 @@ interface PatientConsultantRoutingModalProps {
   chiefComplaint?: string;
   triageCategory?: string;
   currentAttending?: string;
+  sourceRefs?: string[];
+  sourceArtifactId?: string;
+  sourceArtifactType?: 'DISEASE_INTAKE' | 'CLINICAL_DOCUMENT' | 'CONSULTATION' | 'OTHER';
   onRoutedSuccess?: (consultant: ConsultantDoctor, routingDetails: any) => void;
 }
 
@@ -291,6 +296,9 @@ export function PatientConsultantRoutingModal({
   chiefComplaint = 'Acute retrosternal chest pain radiating to jaw, diaphoresis',
   triageCategory = 'Cardiology / Acute Coronary Syndrome',
   currentAttending = 'Triage Officer / Emergency MO',
+  sourceRefs = [],
+  sourceArtifactId,
+  sourceArtifactType,
   onRoutedSuccess,
 }: PatientConsultantRoutingModalProps) {
   const { addClinicalNote } = useHospital();
@@ -592,7 +600,38 @@ export function PatientConsultantRoutingModal({
             'Authoritative consultant routing requires tenant, patient and encounter identity.'
           );
         }
-        await requestClinicalConsultation(tenantId, {
+        const patient360Response = await AuthClient.authorizedFetch(
+          `/api/clinical/patient360/${encodeURIComponent(patientId)}?tenantId=${encodeURIComponent(tenantId)}&encounterId=${encodeURIComponent(encounterId)}`,
+          { method: 'GET', cache: 'no-store' },
+          tenantId
+        );
+        const patient360Payload = await patient360Response.json();
+        if (
+          !patient360Response.ok ||
+          !patient360Payload?.success ||
+          !patient360Payload?.projection
+        ) {
+          throw new Error(
+            patient360Payload?.error ||
+              'Patient 360 evidence could not be loaded for specialist routing.'
+          );
+        }
+
+        const patient360Revision = Number(patient360Payload.projection.revision);
+        const patient360SourceCheckpoint = String(
+          patient360Payload.projection.sourceCheckpoint || ''
+        ).trim();
+        if (
+          !Number.isInteger(patient360Revision) ||
+          patient360Revision < 0 ||
+          !patient360SourceCheckpoint
+        ) {
+          throw new Error(
+            'Patient 360 did not provide a valid evidence checkpoint for routing.'
+          );
+        }
+
+        const consultation = await requestClinicalConsultation(tenantId, {
           patientId,
           encounterId,
           requestedSpecialty: selectedDoctor.subSpecialty || selectedDoctor.department,
@@ -600,13 +639,50 @@ export function PatientConsultantRoutingModal({
           clinicalQuestion:
             clinicalHandoffNote.trim() ||
             `${chiefComplaint}. Specialist review requested from ${selectedDoctor.department}.`,
-          priority:
-            routingUrgency === 'STAT'
-              ? 'STAT'
-              : routingUrgency === 'URGENT' || routingUrgency === 'PRIORITY'
-                ? 'URGENT'
-                : 'ROUTINE',
-          sourceRefs: [],
+          priority: routingUrgency,
+          sourceRefs,
+        });
+        const consultationId = String(
+          consultation.entityId ||
+            (consultation.data as Record<string, unknown> | undefined)?.consultationId ||
+            ''
+        ).trim();
+        if (!consultationId) {
+          throw new Error(
+            'Consultation was created without a canonical consultation identifier.'
+          );
+        }
+
+        await createClinicalHandoff(tenantId, {
+          patientId,
+          encounterId,
+          toClinicianId: selectedDoctor.id,
+          currentProblemSummary:
+            clinicalHandoffNote.trim() ||
+            `${chiefComplaint}. Specialist review requested from ${selectedDoctor.department}.`,
+          activeRisks: [triageCategory].filter(Boolean),
+          pendingConsultations: [consultationId],
+          expectedActions: [
+            'Acknowledge the consultation request.',
+            'Accept clinical responsibility for specialist review.',
+            'Review the linked Patient 360 evidence before completing the consultation.',
+          ],
+          sourceRefs: Array.from(
+            new Set([consultationId, ...sourceRefs].filter(Boolean))
+          ),
+          patient360Revision,
+          patient360SourceCheckpoint,
+          sourceArtifactId,
+          sourceArtifactType,
+        });
+
+        Object.assign(routingPayload, {
+          consultationId,
+          patient360Revision,
+          patient360SourceCheckpoint,
+          sourceRefs: Array.from(
+            new Set([consultationId, ...sourceRefs].filter(Boolean))
+          ),
         });
       }
 

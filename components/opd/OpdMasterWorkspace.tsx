@@ -824,6 +824,10 @@ export function OpdMasterWorkspace() {
       insuranceDetails: newPatient.insuranceDetails,
       consentDecisions: newPatient.registrationConsentDecisions,
       encounterType: 'OPD',
+      ...(newPatient.registrationFacilityId
+        ? { facilityId: newPatient.registrationFacilityId }
+        : {}),
+      departmentId: 'General Medicine',
       department: 'General Medicine',
       priority: 'ROUTINE',
       chiefComplaint: 'New outpatient registration',
@@ -3127,6 +3131,7 @@ export function OpdMasterWorkspace() {
       {/* 3. Patient Registration & Informed Consent */}
       {activeTab === 'REGISTRATION' && (
         <OpdRegistrationConsent
+          authorizedFacilityIds={auth.user?.facilityIds || []}
           onRegisterSuccess={(newPatient) => handleRegisterSuccess(newPatient)}
           onCancel={() => setActiveTab('DASHBOARD')}
         />

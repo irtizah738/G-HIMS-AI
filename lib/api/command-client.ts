@@ -214,6 +214,8 @@ export interface RegistrationRequest {
     method: 'DIGITAL_ATTESTATION';
   }>;
   encounterType?: string;
+  facilityId?: string;
+  departmentId?: string;
   department?: string;
   priority?: string;
   chiefComplaint?: string;

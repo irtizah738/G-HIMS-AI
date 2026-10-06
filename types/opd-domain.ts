@@ -69,6 +69,7 @@ export interface WaitlistEntry {
   priority: WaitlistPriority;
   notificationPreference: 'SMS' | 'WHATSAPP' | 'PHONE' | 'EMAIL';
   contactPhone: string;
+  contactEmail?: string;
   status: WaitlistStatus;
   requestedDate: string;
   offeredProviderEmployeeId?: string;

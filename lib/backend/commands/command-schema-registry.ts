@@ -233,6 +233,14 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       sourceRefs: z.array(nonEmpty.max(250)).max(100).optional(),
     }).strict(),
   },
+  AcknowledgeConsultationCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      encounterId: nonEmpty.max(150),
+      consultationId: nonEmpty.max(150),
+      note: z.string().trim().max(4000).optional(),
+    }).strict(),
+  },
   AcceptConsultationCommand: {
     1: z.object({
       patientId: nonEmpty.max(150),
@@ -266,6 +274,35 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       medicationConcerns: z.array(nonEmpty.max(2000)).max(100).optional(),
       unresolvedItems: z.array(nonEmpty.max(2000)).max(200).optional(),
       expectedActions: z.array(nonEmpty.max(2000)).max(100).optional(),
+      sourceRefs: z.array(nonEmpty.max(250)).max(200).optional(),
+      patient360Revision: z.number().int().nonnegative(),
+      patient360SourceCheckpoint: nonEmpty.max(500),
+      sourceArtifactId: z.string().trim().min(1).max(200).optional(),
+      sourceArtifactType: z.enum([
+        'DISEASE_INTAKE','CLINICAL_DOCUMENT','CONSULTATION','OTHER'
+      ]).optional(),
+    }).strict(),
+  },
+  SaveDiseaseIntakeArtifactCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      encounterId: nonEmpty.max(150),
+      templateId: nonEmpty.max(150),
+      templateName: nonEmpty.max(500),
+      templateVersion: z.string().trim().min(1).max(100).optional(),
+      clinicalGuidelines: nonEmpty.max(2000),
+      guidedAnswers: z.record(z.string(), z.unknown()),
+      specialtyHistory: z.record(z.string(), z.unknown()),
+      selectedTreeNodeIds: z.array(nonEmpty.max(200)).max(500),
+      observedRiskScore: z.number().finite().nonnegative().max(100000),
+      observedRiskSeverity: z.enum(['LOW','MODERATE','HIGH','CRITICAL']),
+      observedRiskSignalIds: z.array(nonEmpty.max(200)).max(100),
+      observedRiskSignalTitles: z.array(nonEmpty.max(1000)).max(100),
+      specialistTargets: z.array(nonEmpty.max(250)).max(50),
+      sourceRefs: z.array(nonEmpty.max(250)).max(200).optional(),
+      patient360Revision: z.number().int().nonnegative(),
+      patient360SourceCheckpoint: nonEmpty.max(500),
+      clinicianAttestation: z.literal(true),
     }).strict(),
   },
   AcceptClinicalHandoffCommand: {

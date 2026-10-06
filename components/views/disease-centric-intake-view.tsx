@@ -354,7 +354,7 @@ export function DiseaseCentricIntakeView() {
               Disease-Centric Intake & Specialist Preparation Platform
             </h1>
             <p className="text-sm text-slate-300 font-normal leading-relaxed">
-              Structured specialty intake that captures explicit findings, surfaces governed protocol signals, prepares a source-limited handoff, and routes the patient to an eligible specialist.
+              Structured specialty intake that captures explicit findings, surfaces governed protocol signals, prepares a source-limited handoff, and lets the clinician explicitly route the case to an eligible specialist.
             </p>
           </div>
 
@@ -610,7 +610,7 @@ export function DiseaseCentricIntakeView() {
         <div className="p-3 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 rounded-xl text-xs font-semibold flex items-center justify-between animate-in fade-in">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-            <span>Successfully recorded disease intake in patient longitudinal EHR & dispatched specialist notification!</span>
+            <span>Reviewed disease intake saved to the longitudinal record. Specialist routing remains a separate explicit action.</span>
           </div>
         </div>
       )}
@@ -966,7 +966,7 @@ export function DiseaseCentricIntakeView() {
             <div className="bg-slate-50 dark:bg-slate-850 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 space-y-3">
               <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
                 <Workflow className="w-3.5 h-3.5 text-blue-600" />
-                Target Specialist Dispatch Routing
+                Suggested Specialist Destination
               </h4>
               <div className="flex flex-wrap gap-1.5">
                 {currentTemplate.typicalSpecialists.map((spec) => (
@@ -1145,7 +1145,7 @@ export function DiseaseCentricIntakeView() {
                 </h2>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Generates SBAR, Differential Diagnosis probability matrix, STAT diagnostic orders, and pre-specialist readiness checklists.
+                Generates a source-limited specialist brief from the reviewed intake, including SBAR context, observed protocol signals, missing information, and handoff preparation. It does not diagnose, prescribe, or place orders.
               </p>
             </div>
 

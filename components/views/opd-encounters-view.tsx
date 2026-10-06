@@ -349,6 +349,7 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
                           e.stopPropagation();
                           setRoutingPatientData({
                             patientId: token.patientId,
+                            encounterId: token.encounterId,
                             patientName: token.patientName,
                             mrn: token.mrn,
                             chiefComplaint: token.chiefComplaint,
@@ -423,6 +424,7 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
                     if (selectedToken) {
                       setRoutingPatientData({
                         patientId: selectedToken.patientId,
+                        encounterId: selectedToken.encounterId,
                         patientName: selectedToken.patientName,
                         mrn: selectedToken.mrn,
                         chiefComplaint: selectedToken.chiefComplaint,
@@ -579,6 +581,7 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
           isOpen={isRoutingModalOpen}
           onClose={() => setIsRoutingModalOpen(false)}
           patientId={routingPatientData.patientId}
+          encounterId={routingPatientData.encounterId}
           patientName={routingPatientData.patientName}
           mrn={routingPatientData.mrn}
           chiefComplaint={routingPatientData.chiefComplaint}

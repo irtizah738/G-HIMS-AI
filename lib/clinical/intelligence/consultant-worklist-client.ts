@@ -2,6 +2,7 @@
 
 import { AuthClient } from '@/lib/auth/auth-client';
 import type { ConsultantWorklist } from '@/types/clinical-coordination';
+import type { EligibleConsultant } from '@/lib/clinical/intelligence/consultant-directory-service';
 
 export async function loadConsultantWorklist(
   tenantId: string
@@ -25,6 +26,28 @@ export async function loadConsultantWorklist(
   }
 
   return payload.worklist as ConsultantWorklist;
+}
+
+export async function loadConsultantDirectory(
+  tenantId: string,
+  options: { departmentId?: string; specialty?: string } = {}
+): Promise<EligibleConsultant[]> {
+  const params = new URLSearchParams({ tenantId });
+  if (options.departmentId) params.set('departmentId', options.departmentId);
+  if (options.specialty) params.set('specialty', options.specialty);
+
+  const response = await AuthClient.authorizedFetch(
+    `/api/clinical/consultant/directory?${params.toString()}`,
+    { method: 'GET', cache: 'no-store' },
+    tenantId
+  );
+  const payload = await response.json();
+  if (!response.ok || !payload?.success || !Array.isArray(payload.consultants)) {
+    throw new Error(
+      payload?.error || 'Consultant directory could not be loaded.'
+    );
+  }
+  return payload.consultants as EligibleConsultant[];
 }
 
 async function executeConsultantCommand(

@@ -439,6 +439,9 @@ export function buildOpdWorkspaceReadModel(
           entry.notificationPreference || 'PHONE'
         ) as WaitlistEntry['notificationPreference'],
         contactPhone: String(entry.contactPhone || ''),
+        contactEmail: entry.contactEmail
+          ? String(entry.contactEmail)
+          : undefined,
         status: String(entry.status || 'WAITING') as WaitlistEntry['status'],
         requestedDate: schedulingParts(
           Number(entry.createdAt || 0),

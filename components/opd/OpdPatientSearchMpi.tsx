@@ -216,6 +216,8 @@ export function OpdPatientSearchMpi({
             <option value="MRN">Institutional MRN</option>
             <option value="CNIC">National ID / CNIC</option>
           </select>
+        </div>
+
         <div className="flex items-center justify-between text-[11px]">
           <span className="font-semibold text-slate-500">
             {lookupState === 'LOADING'

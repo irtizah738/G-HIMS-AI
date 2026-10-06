@@ -410,10 +410,7 @@ export function ConsultantCommandCenter() {
                         )}
                       {item.status === 'OPEN' &&
                         item.encounterId &&
-                        !(
-                          item.category === 'CONSULTATION' &&
-                          item.slaPhase === 'ACKNOWLEDGEMENT'
-                        ) && (
+                        !['CONSULTATION', 'HANDOFF'].includes(item.category) && (
                         <button
                           type="button"
                           onClick={() => void acknowledge(item)}

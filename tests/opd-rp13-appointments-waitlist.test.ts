@@ -46,6 +46,21 @@ describe('OPD-RP13 authoritative appointments and waitlist', () => {
     expect(service).toContain('expectedServerVersion');
   });
 
+  test('concurrent reschedules reject stale appointment slot snapshots', async () => {
+    const service = await source(
+      'lib/backend/services/opd-appointment-domain-service.ts'
+    );
+
+    expect(service).toContain(
+      "'APPOINTMENT_RESCHEDULE_CONCURRENCY_RETRY_REQUIRED'"
+    );
+    expect(service).toContain('appointment._serverVersion');
+    expect(service).toContain('link._serverVersion');
+    expect(service).toContain(
+      'Appointment schedule changed after reschedule preflight.'
+    );
+  });
+
   test('non-admin scheduling is fail-closed to actor facility and department scope', async () => {
     const service = await source(
       'lib/backend/services/opd-appointment-domain-service.ts'

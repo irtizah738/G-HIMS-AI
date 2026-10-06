@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
+import { normalizeCnic, normalizeMrn } from '@/lib/clinical/mpi/patient-mpi';
 import {
   Search,
   Users,

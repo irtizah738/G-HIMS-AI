@@ -491,10 +491,10 @@ function requireActorSchedulingScope(
       .map((value) => String(value || '').trim())
       .filter(Boolean)
   );
-  if (departmentIds.size > 0 && !departmentIds.has(departmentId)) {
+  if (departmentIds.size === 0 || !departmentIds.has(departmentId)) {
     throw new AtomicMutationRejectedError(
       'DEPARTMENT_SCOPE_MISMATCH',
-      'Actor department assignments do not include the requested scheduling department.',
+      'Actor requires an authoritative department assignment for the requested scheduling department.',
       { departmentId }
     );
   }

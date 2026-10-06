@@ -13,7 +13,7 @@ const MAX_EVENTS_PER_QUERY = 250;
 const MAX_TIMELINE_EVENTS = 300;
 const AUDIT_IN_CHUNK = 10;
 const REDACTED_KEY =
-  /(password|token|authorization|secret|credential|private|raw|content|noteBody|noteContent)/i;
+  /(password|token|authorization|secret|credential|private|raw|content|noteBody|noteContent|invoice|receipt|journal|amount|price|balance|payment|payer|tariff|coverage|copay|charge)/i;
 
 function boundedScalar(value: unknown): unknown {
   if (typeof value === 'string') return value.slice(0, 1000);

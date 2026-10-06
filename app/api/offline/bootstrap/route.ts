@@ -173,13 +173,27 @@ function authorizedCollections(roles: string[]): string[] {
   }
 
   // Ancillary roles never hydrate the complete patient identity/chart set.
-  if (['LAB_TECHNICIAN', 'LAB_TECH'].some((role) => normalized.has(role))) {
+  if (
+    ['LAB_TECHNICIAN', 'LAB_TECH', 'PATHOLOGIST'].some((role) =>
+      normalized.has(role)
+    )
+  ) {
+    add('encounters', 'orders');
+  }
+
+  if (
+    ['RADIOLOGY_TECH', 'RADIOLOGY_TECHNICIAN', 'RADIOLOGIST'].some((role) =>
+      normalized.has(role)
+    )
+  ) {
     add('encounters', 'orders');
   }
 
   if (normalized.has('PHARMACIST')) {
+    // RP15 makes physical dispensing reconnect-required. Pharmacists need the
+    // scoped encounter/prescription working set offline, not the tenant-wide
+    // SCM inventory graph.
     add('encounters', 'prescriptions');
-    add(...SCM_COLLECTIONS);
   }
 
   if (
@@ -187,6 +201,7 @@ function authorizedCollections(roles: string[]): string[] {
       'BILLING_CLERK',
       'BILLING_ADMIN',
       'CASHIER',
+      'BILLING_CASHIER',
       'FINANCE_MANAGER',
       'FINANCE',
       'REVENUE_CYCLE',
@@ -243,6 +258,7 @@ function isBillingRole(roles: string[]): boolean {
     'BILLING_CLERK',
     'BILLING_ADMIN',
     'CASHIER',
+    'BILLING_CASHIER',
     'FINANCE_MANAGER',
     'FINANCE',
     'REVENUE_CYCLE',
@@ -270,7 +286,65 @@ function valueMatchesScope(
   allowed: Set<string>
 ): boolean {
   const normalized = String(value || '').trim();
-  return !normalized || allowed.size === 0 || allowed.has(normalized);
+  return Boolean(normalized) && allowed.size > 0 && allowed.has(normalized);
+}
+
+function normalizedRoleSet(roles: string[]): Set<string> {
+  return new Set(
+    roles.map((role) => String(role || '').trim().toUpperCase()).filter(Boolean)
+  );
+}
+
+function minimizePatientRows(
+  roles: string[],
+  rows: Array<Record<string, unknown>>
+): Array<Record<string, unknown>> {
+  const normalized = normalizedRoleSet(roles);
+  const frontDesk = ['RECEPTIONIST', 'REGISTRAR', 'ADMISSION_OFFICER'].some(
+    (role) => normalized.has(role)
+  );
+  const cashier = [
+    'BILLING_CLERK',
+    'BILLING_ADMIN',
+    'CASHIER',
+    'BILLING_CASHIER',
+    'REVENUE_CYCLE',
+  ].some((role) => normalized.has(role));
+
+  if (!frontDesk && !cashier) return rows;
+
+  return rows.map((row) => {
+    const base: Record<string, unknown> = {
+      id: row.id,
+      patientId: row.patientId,
+      mrn: row.mrn,
+      fullName: row.fullName,
+      dateOfBirth: row.dateOfBirth,
+      gender: row.gender,
+      status: row.status,
+      facilityId: row.facilityId,
+      departmentId: row.departmentId,
+      activeEncounterId: row.activeEncounterId,
+      currentEncounterId: row.currentEncounterId,
+    };
+
+    if (frontDesk) {
+      return {
+        ...base,
+        phoneNumber: row.phoneNumber,
+        email: row.email,
+        residentialAddress: row.residentialAddress,
+        emergencyContact: row.emergencyContact,
+        tariffPlan: row.tariffPlan,
+        consentSummary: row.consentSummary,
+      };
+    }
+
+    return {
+      ...base,
+      tariffPlan: row.tariffPlan,
+    };
+  });
 }
 
 function scopeOfflineCollections(
@@ -295,6 +369,63 @@ function scopeOfflineCollections(
       .map((value) => String(value || '').trim())
       .filter(Boolean)
   );
+  const normalizedRoles = normalizedRoleSet(context.roles);
+  const labRole = ['LAB_TECHNICIAN', 'LAB_TECH', 'PATHOLOGIST'].some(
+    (role) => normalizedRoles.has(role)
+  );
+  const radiologyRole = [
+    'RADIOLOGY_TECH',
+    'RADIOLOGY_TECHNICIAN',
+    'RADIOLOGIST',
+  ].some((role) => normalizedRoles.has(role));
+  const pharmacistRole = normalizedRoles.has('PHARMACIST');
+  const ancillaryRole = labRole || radiologyRole || pharmacistRole;
+
+  const rawEncounterById = new Map(
+    (collections.encounters || [])
+      .map((encounter) => [
+        String(encounter.id || encounter.encounterId || '').trim(),
+        encounter,
+      ] as const)
+      .filter(([encounterId]) => Boolean(encounterId))
+  );
+
+  const resolveRelatedFacility = (
+    row: Record<string, unknown>
+  ): string => {
+    const explicit = String(row.facilityId || '').trim();
+    if (explicit) return explicit;
+    const encounterId = String(row.encounterId || '').trim();
+    const encounter = encounterId ? rawEncounterById.get(encounterId) : null;
+    return String(encounter?.facilityId || '').trim();
+  };
+
+  const ancillaryOrderIds = new Set<string>();
+  const ancillaryEncounterIds = new Set<string>();
+  if (labRole || radiologyRole) {
+    for (const order of collections.orders || []) {
+      const orderType = String(order.orderType || '').trim().toUpperCase();
+      if (labRole && orderType !== 'LAB') continue;
+      if (radiologyRole && orderType !== 'RADIOLOGY') continue;
+      if (!valueMatchesScope(resolveRelatedFacility(order), facilities)) {
+        continue;
+      }
+
+      const orderId = String(order.id || order.orderId || '').trim();
+      const encounterId = String(order.encounterId || '').trim();
+      if (orderId) ancillaryOrderIds.add(orderId);
+      if (encounterId) ancillaryEncounterIds.add(encounterId);
+    }
+  }
+  if (pharmacistRole) {
+    for (const prescription of collections.prescriptions || []) {
+      const facilityId = resolveRelatedFacility(prescription);
+      if (!valueMatchesScope(facilityId, facilities)) continue;
+      const encounterId = String(prescription.encounterId || '').trim();
+      if (encounterId) ancillaryEncounterIds.add(encounterId);
+    }
+  }
+
   const billingRole = isBillingRole(context.roles);
   const billingOnlyRole = billingRole && !isFullFinanceRole(context.roles);
   const billingEncounterIds = new Set(
@@ -311,6 +442,14 @@ function scopeOfflineCollections(
       if (!encounterId || !billingEncounterIds.has(encounterId)) return false;
       if (!valueMatchesScope(encounter.facilityId, facilities)) return false;
       return true;
+    }
+
+    if (ancillaryRole) {
+      return (
+        Boolean(encounterId) &&
+        ancillaryEncounterIds.has(encounterId) &&
+        valueMatchesScope(encounter.facilityId, facilities)
+      );
     }
 
     if (!valueMatchesScope(encounter.facilityId, facilities)) return false;
@@ -389,10 +528,10 @@ function scopeOfflineCollections(
         ? employee.departmentIds.map((value) => String(value || '').trim()).filter(Boolean)
         : [String(employee.primaryDepartmentId || '').trim()].filter(Boolean);
       const facilityMatch =
-        facilities.size === 0 ||
+        facilities.size > 0 &&
         employeeFacilities.some((facilityId) => facilities.has(facilityId));
       const departmentMatch =
-        departments.size === 0 ||
+        departments.size > 0 &&
         employeeDepartments.some((departmentId) => departments.has(departmentId));
       return facilityMatch && departmentMatch;
     });
@@ -574,7 +713,17 @@ function scopeOfflineCollections(
       continue;
     }
 
-    if (collection === 'patients' || collection === 'patient360Projections') {
+    if (collection === 'patients') {
+      scoped[collection] = minimizePatientRows(
+        context.roles,
+        rows.filter((row) =>
+          patientIds.has(String(row.id || row.patientId || '').trim())
+        )
+      );
+      continue;
+    }
+
+    if (collection === 'patient360Projections') {
       scoped[collection] = rows.filter((row) =>
         patientIds.has(String(row.id || row.patientId || '').trim())
       );
@@ -617,6 +766,12 @@ function scopeOfflineCollections(
 
     if (byEncounterOrPatient.has(collection)) {
       scoped[collection] = rows.filter((row) => {
+        if (collection === 'orders' && (labRole || radiologyRole)) {
+          return ancillaryOrderIds.has(
+            String(row.id || row.orderId || '').trim()
+          );
+        }
+
         const encounterId = String(row.encounterId || row.id || '').trim();
         const patientId = String(row.patientId || '').trim();
         return (
@@ -681,14 +836,19 @@ export async function GET(req: NextRequest) {
       }
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unable to hydrate offline read models';
-    const unauthorized = /AUTH|TENANT|SESSION|ACCOUNT/i.test(message);
+    const message =
+      error instanceof Error ? error.message : 'Unable to hydrate offline read models';
+    const unauthorized =
+      /AUTH|TENANT|SESSION|ACCOUNT|DEVICE|PERMISSION|ACCESS|SCOPE|FORBIDDEN|DENIED/i.test(
+        message
+      );
     return NextResponse.json(
       {
         success: false,
         error: {
-          code: unauthorized ? 'EDGE_BOOTSTRAP_UNAUTHORIZED' : 'EDGE_BOOTSTRAP_FAILED',
-          message,
+          code: unauthorized
+            ? 'EDGE_BOOTSTRAP_UNAUTHORIZED'
+            : 'EDGE_BOOTSTRAP_FAILED',
         },
       },
       {

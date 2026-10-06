@@ -58,7 +58,7 @@ interface FormularyDrug {
   defaultRoute: string;
   defaultFreq: string;
   defaultDays: number;
-  stock: number;
+  stock?: number;
   nextFefoBatch?: {
     batchNumber: string;
     expiryDate: string;
@@ -131,7 +131,10 @@ export function OpdPharmacyPrescriptions({
           defaultRoute: 'Oral',
           defaultFreq: 'As directed',
           defaultDays: 1,
-          stock: Number(item.totalAvailable || 0),
+          stock:
+            item.totalAvailable === undefined
+              ? undefined
+              : Number(item.totalAvailable || 0),
           nextFefoBatch: item.nextFefoBatch || null,
         }));
 
@@ -441,7 +444,10 @@ export function OpdPharmacyPrescriptions({
               >
                 {formulary.map((drug) => (
                   <option key={drug.code} value={drug.code}>
-                    {drug.drugName} {drug.strength} ({drug.formulation}) — Available: {drug.stock} units
+                    {drug.drugName} {drug.strength} ({drug.formulation}) —{' '}
+                    {drug.stock === undefined
+                      ? 'In stock'
+                      : `Available: ${drug.stock} units`}
                   </option>
                 ))}
               </select>

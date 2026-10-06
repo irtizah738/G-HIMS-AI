@@ -147,7 +147,11 @@ describe('G-HIMS CI-3 diagnostics pipeline', () => {
     expect(route).toContain('deriveAuthoritativeContext(req)');
     expect(route).toContain("'diagnosticReports'");
     expect(route).toContain("'clinicalObservations'");
-    expect(route).toContain("'DIAGNOSTIC_REPORT_PATIENT_MISMATCH'");
+    expect(route).toContain("'DIAGNOSTIC_ORDER_LINEAGE_MISMATCH'");
+    expect(route).toContain(
+      'assertDiagnosticResultReadAccess(context, order, encounter, patient)'
+    );
+    expect(route).toContain('presentDiagnosticOrder(order)');
     expect(route).toContain("'DIAGNOSTIC_REPORT_EVIDENCE_INCOMPLETE'");
   });
 

@@ -1,35 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { TimelineProjector } from '@/lib/clinical/projections/timeline';
-import { createClinicalEventEnvelope } from '@/lib/clinical/events/envelope';
-import { ClinicalEventEnvelope } from '@/types/clinical-workflow';
 
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const { patientId, patientMrn, patientName, encounterId, encounterType, events = [] } = body;
-
-    if (!patientId || !encounterId) {
-      return NextResponse.json(
-        { success: false, error: 'patientId and encounterId are required.' },
-        { status: 400 }
-      );
+/**
+ * Retired legacy client-supplied timeline projection endpoint.
+ *
+ * Production timeline authority is /api/opd/timeline, which derives tenant,
+ * patient, encounter, event and audit lineage from authenticated server state.
+ * This endpoint deliberately fails closed so callers cannot submit fabricated
+ * patient/event metadata and receive a projection that appears authoritative.
+ */
+export async function POST(_req: NextRequest) {
+  return NextResponse.json(
+    {
+      success: false,
+      error: 'LEGACY_CLINICAL_TIMELINE_RETIRED',
+      replacement: '/api/opd/timeline',
+    },
+    {
+      status: 410,
+      headers: { 'Cache-Control': 'no-store' },
     }
-
-    const projection = TimelineProjector.project({
-      patientId,
-      patientMrn: patientMrn || 'MRN-PENDING',
-      patientName: patientName || 'Patient',
-      encounterId,
-      encounterType: encounterType || 'OPD_GENERAL',
-      events: events as ClinicalEventEnvelope[],
-    });
-
-    return NextResponse.json({
-      success: true,
-      projection,
-    });
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return NextResponse.json({ success: false, error: msg }, { status: 500 });
-  }
+  );
 }

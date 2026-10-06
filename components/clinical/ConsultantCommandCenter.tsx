@@ -17,6 +17,7 @@ import { useRBAC } from '@/lib/auth/rbac-context';
 import {
   acceptClinicalConsultation,
   acceptClinicalHandoff,
+  acknowledgeClinicalConsultation,
   acknowledgeClinicalOpenItem,
   loadConsultantWorklist,
 } from '@/lib/clinical/intelligence/consultant-worklist-client';
@@ -96,6 +97,26 @@ export function ConsultantCommandCenter() {
           ? caught.message
           : 'Attention item could not be acknowledged.'
       );
+    } finally {
+      setActingItemId(null);
+    }
+  };
+
+  const acknowledgeConsultation = async (item: ConsultantWorklistItem) => {
+    if (!tenantId || !item.encounterId || item.category !== 'CONSULTATION' || item.slaPhase !== 'ACKNOWLEDGEMENT') return;
+    const consultationId = item.sourceRefs[0];
+    if (!consultationId) return;
+    setActingItemId(item.openItemId);
+    setError(null);
+    try {
+      await acknowledgeClinicalConsultation(tenantId, {
+        patientId: item.patientId,
+        encounterId: item.encounterId,
+        consultationId,
+      });
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Consultation could not be acknowledged.');
     } finally {
       setActingItemId(null);
     }
@@ -260,6 +281,11 @@ export function ConsultantCommandCenter() {
                         <span className="text-[10px] text-slate-400">
                           {item.careSetting}
                         </span>
+                        {item.slaPhase && item.slaPhase !== 'COMPLETE' && (
+                          <span className="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700">
+                            {item.slaPhase === 'ACKNOWLEDGEMENT' ? 'Awaiting acknowledgement' : 'Awaiting acceptance'}
+                          </span>
+                        )}
                         {isOverdue && (
                           <span className="rounded-full bg-rose-50 px-2 py-1 text-[10px] font-bold text-rose-700">
                             SLA overdue
@@ -292,9 +318,22 @@ export function ConsultantCommandCenter() {
                       >
                         Open Patient 360
                       </button>
-                      {item.status === 'OPEN' &&
-                        item.encounterId &&
-                        ['CONSULTATION', 'HANDOFF'].includes(item.category) &&
+                      {item.encounterId &&
+                        item.category === 'CONSULTATION' &&
+                        item.slaPhase === 'ACKNOWLEDGEMENT' &&
+                        Boolean(item.sourceRefs[0]) && (
+                          <button
+                            type="button"
+                            onClick={() => void acknowledgeConsultation(item)}
+                            disabled={actingItemId === item.openItemId}
+                            className="rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-800 disabled:opacity-50"
+                          >
+                            {actingItemId === item.openItemId ? 'Acknowledging…' : 'Acknowledge consult'}
+                          </button>
+                        )}
+                      {item.encounterId &&
+                        ((item.category === 'CONSULTATION' && item.slaPhase === 'ACCEPTANCE') ||
+                          item.category === 'HANDOFF') &&
                         Boolean(item.sourceRefs[0]) && (
                           <button
                             type="button"

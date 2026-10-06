@@ -170,6 +170,23 @@ describe('OPD-RP13 authoritative appointments and waitlist', () => {
     expect(service).toContain("status: 'HELD'");
   });
 
+  test('waitlist notification preference requires a reachable authoritative endpoint', async () => {
+    const service = await source(
+      'lib/backend/services/opd-appointment-domain-service.ts'
+    );
+    const model = await source('lib/opd/workspace-read-model.ts');
+
+    expect(service).toContain("'WAITLIST_CONTACT_CHANNEL_UNAVAILABLE'");
+    expect(service).toContain(
+      'Selected waitlist notification channel requires an authoritative patient phone number.'
+    );
+    expect(service).toContain(
+      'Email waitlist notification requires an authoritative patient email address.'
+    );
+    expect(service).toContain('contactEmail: authoritativeEmail');
+    expect(model).toContain('contactEmail: entry.contactEmail');
+  });
+
   test('expired waitlist offers are recoverable from the front desk UI', async () => {
     const ui = await source('components/opd/OpdAppointmentsWaitlist.tsx');
 

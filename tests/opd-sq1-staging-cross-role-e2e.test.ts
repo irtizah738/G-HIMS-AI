@@ -88,6 +88,9 @@ describe('OPD-SQ1 deployed cross-role staging qualification contract', () => {
     const spec = await source('e2e/staging/opd-cross-role.spec.ts');
 
     expect(config).toContain('GHIMS_STAGING_BASE_URL_REQUIRED');
+    expect(config).toContain("parsed.protocol !== 'https:'");
+    expect(config).toContain("'localhost'");
+    expect(config).toContain("'127.0.0.1'");
     expect(config).not.toContain('webServer:');
 
     expect(spec).toContain("request.get('/api/health/ready')");

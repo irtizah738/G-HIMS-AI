@@ -407,6 +407,9 @@ service cloud.firestore {
       match /consultationRequests/{consultationId} {
         allow read, write: if false;
       }
+      match /diseaseIntakeArtifacts/{intakeArtifactId} {
+        allow read, write: if false;
+      }
       match /clinicalHandoffs/{handoffId} {
         allow read, write: if false;
       }

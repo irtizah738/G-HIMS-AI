@@ -321,6 +321,111 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       assignedRoomOrBay: z.string().trim().min(1).max(200).optional(),
     }).strict(),
   },
+  BookOpdAppointmentCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      providerEmployeeId: nonEmpty.max(150),
+      facilityId: nonEmpty.max(150),
+      departmentId: nonEmpty.max(150),
+      appointmentType: z.enum([
+        'NEW_CONSULTATION',
+        'FOLLOW_UP',
+        'ROUTINE_REVIEW',
+        'OUTPATIENT_PROCEDURE',
+        'EXECUTIVE_HEALTH_CHECK',
+        'SPECIALIST_CONSULTATION',
+        'TELECONSULTATION',
+        'POST_DISCHARGE_REVIEW',
+      ]),
+      scheduledStartAt: z.number().int().safe().positive(),
+      durationMinutes: z.number().int().min(10).max(120),
+      timeZone: nonEmpty.max(100),
+      chiefComplaint: nonEmpty.max(4000),
+      bookingChannel: z.enum([
+        'FRONT_DESK',
+        'PATIENT_PORTAL',
+        'CALL_CENTER',
+        'PHYSICIAN_REFERRAL',
+        'ONLINE_PORTAL',
+      ]),
+    }).strict(),
+  },
+  CancelOpdAppointmentCommand: {
+    1: z.object({
+      appointmentId: nonEmpty.max(150),
+      reason: nonEmpty.max(4000),
+    }).strict(),
+  },
+  RescheduleOpdAppointmentCommand: {
+    1: z.object({
+      appointmentId: nonEmpty.max(150),
+      scheduledStartAt: z.number().int().safe().positive(),
+      durationMinutes: z.number().int().min(10).max(120),
+      timeZone: nonEmpty.max(100),
+      reason: nonEmpty.max(4000),
+    }).strict(),
+  },
+  CheckInOpdAppointmentCommand: {
+    1: z.object({
+      appointmentId: nonEmpty.max(150),
+    }).strict(),
+  },
+  MarkOpdAppointmentNoShowCommand: {
+    1: z.object({
+      appointmentId: nonEmpty.max(150),
+      reason: nonEmpty.max(4000),
+    }).strict(),
+  },
+  AddOpdWaitlistEntryCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      facilityId: nonEmpty.max(150),
+      preferredDepartmentId: nonEmpty.max(150),
+      preferredProviderEmployeeId: z.string().trim().min(1).max(150).optional(),
+      priority: z.enum(['LOW', 'NORMAL', 'URGENT', 'CRITICAL']),
+      notificationPreference: z.enum(['SMS', 'WHATSAPP', 'PHONE', 'EMAIL']),
+      notes: z.string().trim().max(4000).optional(),
+    }).strict(),
+  },
+  OfferOpdWaitlistSlotCommand: {
+    1: z.object({
+      waitlistId: nonEmpty.max(150),
+      providerEmployeeId: nonEmpty.max(150),
+      scheduledStartAt: z.number().int().safe().positive(),
+      durationMinutes: z.number().int().min(10).max(120),
+      timeZone: nonEmpty.max(100),
+      offerTtlMinutes: z.number().int().min(5).max(120).optional(),
+    }).strict(),
+  },
+  AcceptOpdWaitlistOfferCommand: {
+    1: z.object({
+      waitlistId: nonEmpty.max(150),
+      appointmentType: z.enum([
+        'NEW_CONSULTATION',
+        'FOLLOW_UP',
+        'ROUTINE_REVIEW',
+        'OUTPATIENT_PROCEDURE',
+        'EXECUTIVE_HEALTH_CHECK',
+        'SPECIALIST_CONSULTATION',
+        'TELECONSULTATION',
+        'POST_DISCHARGE_REVIEW',
+      ]),
+      chiefComplaint: nonEmpty.max(4000),
+      bookingChannel: z.enum([
+        'FRONT_DESK',
+        'PATIENT_PORTAL',
+        'CALL_CENTER',
+        'PHYSICIAN_REFERRAL',
+        'ONLINE_PORTAL',
+      ]).optional(),
+    }).strict(),
+  },
+  CancelOpdWaitlistEntryCommand: {
+    1: z.object({
+      waitlistId: nonEmpty.max(150),
+      reason: nonEmpty.max(4000),
+    }).strict(),
+  },
   CreateOpdConsultationInvoiceCommand: {
     1: z.object({
       encounterId: nonEmpty.max(150),

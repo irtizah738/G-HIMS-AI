@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import {
   Users,
   Search,
@@ -55,6 +55,7 @@ import { OpdPatientTimelineAudit } from './OpdPatientTimelineAudit';
 import { OpdOfflineSyncManager } from './OpdOfflineSyncManager';
 import { executeActiveTenantCommand, registerActiveTenantPatient } from '@/lib/api/command-client';
 import { useAuth } from '@/lib/auth/auth-context';
+import { useOfflineStatus } from '@/hooks/useOfflineStatus';
 import { hydrateEdgeSnapshot } from '@/lib/offline/hydration';
 import {
   adaptAuthoritativeConsultationInvoice,
@@ -476,12 +477,27 @@ export function OpdMasterWorkspace() {
   // Active Context
   const [selectedEncounterId, setSelectedEncounterId] = useState<string>(() => IS_DEMO_RUNTIME ? 'enc-101' : '');
   const [activeTab, setActiveTab] = useState<string>('DASHBOARD');
-  const [isOnline, setIsOnline] = useState<boolean>(true);
-  const [pendingSyncCount, setPendingSyncCount] = useState<number>(0);
+  const {
+    isOnline,
+    isSyncing,
+    pendingSyncCount,
+    conflictsCount,
+    lastError: syncError,
+    offlineSimulationActive,
+    triggerSync,
+    setOfflineSimulation,
+  } = useOfflineStatus(auth.activeTenant?.tenantId);
   const [billingReconciliationBusy, setBillingReconciliationBusy] =
     useState<boolean>(false);
   const [billingReconciliationError, setBillingReconciliationError] =
     useState<string | null>(null);
+  const offlineWorkflowTail = useRef<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    if (isOnline && pendingSyncCount === 0) {
+      offlineWorkflowTail.current.clear();
+    }
+  }, [isOnline, pendingSyncCount]);
 
   const refreshAuthoritativeWorkspace = useCallback(async () => {
     if (IS_DEMO_RUNTIME || auth.loading || !auth.activeTenant?.tenantId) return;
@@ -529,6 +545,31 @@ export function OpdMasterWorkspace() {
     refreshAuthoritativeWorkspace,
   ]);
 
+  useEffect(() => {
+    if (IS_DEMO_RUNTIME || !auth.activeTenant?.tenantId) return;
+
+    const handleSyncComplete = (event: Event) => {
+      const detail = (event as CustomEvent<{ tenantId?: string }>).detail;
+      if (
+        detail?.tenantId &&
+        detail.tenantId !== auth.activeTenant?.tenantId
+      ) {
+        return;
+      }
+      void refreshAuthoritativeWorkspace().catch((error) => {
+        console.error('OPD post-sync hydration failed:', error);
+      });
+    };
+
+    window.addEventListener('ghims:edge-sync-complete', handleSyncComplete);
+    return () => {
+      window.removeEventListener(
+        'ghims:edge-sync-complete',
+        handleSyncComplete
+      );
+    };
+  }, [auth.activeTenant?.tenantId, refreshAuthoritativeWorkspace]);
+
   // Selected encounter object
   const activeEncounter = useMemo(() => {
     return encounters.find((e) => e.id === selectedEncounterId) || encounters[0];
@@ -573,6 +614,17 @@ export function OpdMasterWorkspace() {
     return IS_DEMO_RUNTIME ? activeEncounter.invoice : undefined;
   }, [activeEncounter]);
 
+  const requireOnlineOpdAuthority = useCallback(
+    (operation: string) => {
+      if (!isOnline) {
+        throw new Error(
+          `OPD_ONLINE_AUTHORITY_REQUIRED: ${operation} requires live server authority and cannot be committed from an offline replica.`
+        );
+      }
+    },
+    [isOnline]
+  );
+
   // DEMO-only visual event helper. Production audit events are server-generated.
   const recordEvent = (eventType: any, description: string, payload?: any) => {
     if (!IS_DEMO_RUNTIME) return;
@@ -597,9 +649,6 @@ export function OpdMasterWorkspace() {
       hash: 'DEMO-NON-AUTHORITATIVE',
     };
     setEvents((prev) => [newEvt, ...prev]);
-    if (!isOnline) {
-      setPendingSyncCount((c) => c + 1);
-    }
   };
 
   // HANDLER: Register new patient and start encounter through the
@@ -626,6 +675,9 @@ export function OpdMasterWorkspace() {
         department: string;
         chiefComplaint: string;
       };
+      queuedOffline?: boolean;
+      consultationInvoicePendingSync?: boolean;
+      localConsultationInvoiceId?: string;
       queueToken: {
         id: string;
         encounterId: string;
@@ -677,22 +729,27 @@ export function OpdMasterWorkspace() {
     const tokenNum = registration.queueToken.tokenNumber;
     const newEncId = registration.encounter.id;
 
-    const consultationBilling = await executeActiveTenantCommand<{
-      invoice: Record<string, any>;
-    }>(
-      'CreateOpdConsultationInvoiceCommand',
-      { encounterId: newEncId },
-      { idempotencyKey: `opd-consultation-invoice:${newEncId}` }
-    );
-    if (!consultationBilling.success || !consultationBilling.data?.invoice) {
-      throw new Error(
-        consultationBilling.error?.message ||
-          'Authoritative consultation invoice creation failed. The patient is registered, but OPD service remains blocked until billing configuration is corrected.'
+    const offlineRegistration = registration.queuedOffline === true;
+    let consultationInvoice: OpdInvoice | undefined;
+
+    if (!offlineRegistration) {
+      const consultationBilling = await executeActiveTenantCommand<{
+        invoice: Record<string, any>;
+      }>(
+        'CreateOpdConsultationInvoiceCommand',
+        { encounterId: newEncId },
+        { idempotencyKey: `opd-consultation-invoice:${newEncId}` }
+      );
+      if (!consultationBilling.success || !consultationBilling.data?.invoice) {
+        throw new Error(
+          consultationBilling.error?.message ||
+            'Authoritative consultation invoice creation failed. The patient is registered, but OPD service remains blocked until billing configuration is corrected.'
+        );
+      }
+      consultationInvoice = adaptAuthoritativeConsultationInvoice(
+        consultationBilling.data.invoice
       );
     }
-    const consultationInvoice = adaptAuthoritativeConsultationInvoice(
-      consultationBilling.data.invoice
-    );
     const newEncounter: ComprehensiveOpdEncounter = {
       id: newEncId,
       tenantId: registration.patient.tenantId,
@@ -710,7 +767,9 @@ export function OpdMasterWorkspace() {
       currentStage: 'REGISTRATION',
       stageProgress: {
         REGISTRATION: { status: 'COMPLETED', enteredAt: Date.now(), completedAt: Date.now(), completedBy: 'Server Registration Orchestrator' },
-        BILLING_AUTHORIZATION: { status: 'ACTIVE', enteredAt: Date.now() },
+        BILLING_AUTHORIZATION: offlineRegistration
+          ? { status: 'PENDING' }
+          : { status: 'ACTIVE', enteredAt: Date.now() },
         QUEUE_ASSIGNMENT: { status: 'PENDING' },
         NURSING_INTAKE: { status: 'PENDING' },
         MO_ASSESSMENT: { status: 'PENDING' },
@@ -723,7 +782,7 @@ export function OpdMasterWorkspace() {
       },
       diagnosticOrders: [],
       prescriptions: [],
-      consultationInvoice,
+      ...(consultationInvoice ? { consultationInvoice } : {}),
       startedAt: Date.now(),
       status: 'REGISTERED',
     };
@@ -745,7 +804,12 @@ export function OpdMasterWorkspace() {
     setEncounters((prev) => [newEncounter, ...prev.filter((e) => e.id !== newEncounter.id)]);
     setQueue((prev) => [newQueueEntry, ...prev.filter((q) => q.id !== newQueueEntry.id)]);
     setSelectedEncounterId(newEncId);
-    recordEvent('PATIENT_REGISTERED', `Patient ${authoritativePatient.fullName} registered. Token ${tokenNum} issued.`);
+    recordEvent(
+      'PATIENT_REGISTERED',
+      offlineRegistration
+        ? `Patient ${authoritativePatient.fullName} captured offline. Registration and consultation billing are pending authoritative sync; token ${tokenNum} cannot enter the clinical queue until payment is cleared.`
+        : `Patient ${authoritativePatient.fullName} registered. Token ${tokenNum} issued.`
+    );
     setActiveTab('DASHBOARD');
   };
 
@@ -761,6 +825,7 @@ export function OpdMasterWorkspace() {
     chiefComplaint: string;
     bookingChannel: string;
   }) => {
+    requireOnlineOpdAuthority('appointment booking');
     const result = await executeActiveTenantCommand(
       'BookOpdAppointmentCommand',
       input,
@@ -776,6 +841,7 @@ export function OpdMasterWorkspace() {
   };
 
   const handleCheckInAppointment = async (appt: AppointmentRecord) => {
+    requireOnlineOpdAuthority('appointment check-in');
     const result = await executeActiveTenantCommand<{
       appointment: Record<string, any>;
       encounter: {
@@ -824,6 +890,7 @@ export function OpdMasterWorkspace() {
   const handleResumeAppointmentBilling = async (
     appt: AppointmentRecord
   ) => {
+    requireOnlineOpdAuthority('appointment billing recovery');
     const encounterId = String(appt.encounterId || '').trim();
     if (!encounterId) {
       throw new Error(
@@ -859,6 +926,7 @@ export function OpdMasterWorkspace() {
     appointmentId: string,
     reason: string
   ) => {
+    requireOnlineOpdAuthority('appointment cancellation');
     const result = await executeActiveTenantCommand(
       'CancelOpdAppointmentCommand',
       { appointmentId, reason },
@@ -877,6 +945,7 @@ export function OpdMasterWorkspace() {
     timeZone: string;
     reason: string;
   }) => {
+    requireOnlineOpdAuthority('appointment rescheduling');
     const result = await executeActiveTenantCommand(
       'RescheduleOpdAppointmentCommand',
       input,
@@ -895,6 +964,7 @@ export function OpdMasterWorkspace() {
     appointmentId: string,
     reason: string
   ) => {
+    requireOnlineOpdAuthority('appointment no-show mutation');
     const result = await executeActiveTenantCommand(
       'MarkOpdAppointmentNoShowCommand',
       { appointmentId, reason },
@@ -915,6 +985,7 @@ export function OpdMasterWorkspace() {
     notificationPreference: 'SMS' | 'WHATSAPP' | 'PHONE' | 'EMAIL';
     notes?: string;
   }) => {
+    requireOnlineOpdAuthority('waitlist creation');
     const result = await executeActiveTenantCommand(
       'AddOpdWaitlistEntryCommand',
       input,
@@ -937,6 +1008,7 @@ export function OpdMasterWorkspace() {
     timeZone: string;
     offerTtlMinutes?: number;
   }) => {
+    requireOnlineOpdAuthority('waitlist slot offer');
     const result = await executeActiveTenantCommand(
       'OfferOpdWaitlistSlotCommand',
       input,
@@ -957,6 +1029,7 @@ export function OpdMasterWorkspace() {
     chiefComplaint: string;
     bookingChannel?: string;
   }) => {
+    requireOnlineOpdAuthority('waitlist acceptance');
     const result = await executeActiveTenantCommand(
       'AcceptOpdWaitlistOfferCommand',
       input,
@@ -974,6 +1047,7 @@ export function OpdMasterWorkspace() {
     waitlistId: string,
     reason: string
   ) => {
+    requireOnlineOpdAuthority('waitlist cancellation');
     const result = await executeActiveTenantCommand(
       'CancelOpdWaitlistEntryCommand',
       { waitlistId, reason },
@@ -1024,6 +1098,9 @@ export function OpdMasterWorkspace() {
           collection: 'encounterEvidence',
           resourceId: localEvidenceId,
           action: 'CREATE',
+          dependsOnMutationIds: offlineWorkflowTail.current.get(activeEncounter.id)
+            ? [offlineWorkflowTail.current.get(activeEncounter.id)!]
+            : undefined,
           optimisticCache: true,
         },
       }
@@ -1047,7 +1124,15 @@ export function OpdMasterWorkspace() {
           collection: 'encounters',
           resourceId: activeEncounter.id,
           action: 'UPDATE',
-          optimisticCache: false,
+          dependsOnMutationIds: vitalsResult.queuedOffline
+            ? [vitalsResult.commandId]
+            : undefined,
+          optimisticCache: true,
+          optimisticPayload: {
+            currentStage: 'CONSULTATION',
+            offlineStagePendingSync: true,
+            offlinePendingTargetStage: 'CONSULTATION',
+          },
         },
       }
     );
@@ -1056,6 +1141,9 @@ export function OpdMasterWorkspace() {
         transition.error?.message ||
           'Clinical workflow runtime blocked transition from triage to consultation.'
       );
+    }
+    if (transition.queuedOffline) {
+      offlineWorkflowTail.current.set(activeEncounter.id, transition.commandId);
     }
 
     setEncounters((prev) =>
@@ -1117,6 +1205,9 @@ export function OpdMasterWorkspace() {
           collection: 'encounterEvidence',
           resourceId: localEvidenceId,
           action: 'CREATE',
+          dependsOnMutationIds: offlineWorkflowTail.current.get(activeEncounter.id)
+            ? [offlineWorkflowTail.current.get(activeEncounter.id)!]
+            : undefined,
           optimisticCache: true,
         },
       }
@@ -1140,7 +1231,15 @@ export function OpdMasterWorkspace() {
           collection: 'encounters',
           resourceId: activeEncounter.id,
           action: 'UPDATE',
-          optimisticCache: false,
+          dependsOnMutationIds: noteResult.queuedOffline
+            ? [noteResult.commandId]
+            : undefined,
+          optimisticCache: true,
+          optimisticPayload: {
+            currentStage: 'DIAGNOSTICS',
+            offlineStagePendingSync: true,
+            offlinePendingTargetStage: 'DIAGNOSTICS',
+          },
         },
       }
     );
@@ -1149,6 +1248,9 @@ export function OpdMasterWorkspace() {
         transition.error?.message ||
           'Clinical workflow runtime blocked transition from consultation to diagnostics.'
       );
+    }
+    if (transition.queuedOffline) {
+      offlineWorkflowTail.current.set(activeEncounter.id, transition.commandId);
     }
 
     setEncounters((prev) =>
@@ -1180,6 +1282,13 @@ export function OpdMasterWorkspace() {
   // The client supplies clinical intent and a catalog identity only. Price,
   // specimen identity, invoice, AR and GL state are all server-owned.
   const handleAddDiagnosticOrder = async (order: DiagnosticOrderItem) => {
+    const requestedUrgency = String(order.urgency || '').toUpperCase();
+    if (!isOnline && requestedUrgency.includes('STAT')) {
+      throw new Error(
+        'STAT_DIAGNOSTIC_REQUIRES_ONLINE_AUTHORITY: emergency diagnostic payment override and immediate worklist dispatch require live server authority.'
+      );
+    }
+
     const category = String(order.type || order.category || '').toUpperCase();
     const orderType =
       category === 'RADIOLOGY'
@@ -1214,12 +1323,85 @@ export function OpdMasterWorkspace() {
           : {}),
       },
       {
-        // RP15 will re-enable diagnostic offline ordering only after financial
-        // replay/remap is qualified. Until then, fail closed on transport loss
-        // rather than creating an invisible queued charge that a retry can duplicate.
         idempotencyKey: `opd-diagnostic:${activeEncounter.id}:${order.id}`,
+        ...(requestedUrgency.includes('STAT')
+          ? {}
+          : {
+              offlineQueue: {
+                enabled: true,
+                collection: 'orders',
+                resourceId: order.id,
+                action: 'CREATE' as const,
+                dependsOnMutationIds: offlineWorkflowTail.current.get(
+                  activeEncounter.id
+                )
+                  ? [offlineWorkflowTail.current.get(activeEncounter.id)!]
+                  : undefined,
+                optimisticCache: true,
+                optimisticPayload: {
+                  encounterId: activeEncounter.id,
+                  patientId: activeEncounter.patientId,
+                  orderType,
+                  catalogCode: order.testCode || order.code || order.id,
+                  orderName: order.testName,
+                  clinicalIndication:
+                    order.clinicalIndication ||
+                    order.reasonForOrder ||
+                    'Clinical evaluation',
+                  priority:
+                    requestedUrgency === 'URGENT' ? 'URGENT' : 'ROUTINE',
+                  revenueLockStatus: 'PENDING_SERVER_REPLAY',
+                  paymentStatus: 'LOCKED_PENDING_PAYMENT',
+                  worklistStatus: 'OFFLINE_PENDING_SYNC',
+                  status: 'ORDERED',
+                  createdAt: order.orderedAt || Date.now(),
+                },
+              },
+            }),
       }
     );
+
+    if (orderResult.queuedOffline) {
+      const pendingOrder: DiagnosticOrderItem = {
+        ...order,
+        id: order.id,
+        encounterId: activeEncounter.id,
+        patientId: activeEncounter.patientId,
+        revenueLockStatus: 'PENDING_SERVER_REPLAY',
+        paymentStatus: 'LOCKED_PENDING_PAYMENT',
+        worklistStatus: 'OFFLINE_PENDING_SYNC',
+        orderedBy: 'PENDING_SERVER_SYNC',
+        orderedAt: order.orderedAt || Date.now(),
+        status: 'ORDERED',
+      };
+
+      setEncounters((prev) =>
+        prev.map((encounter) =>
+          encounter.id === activeEncounter.id
+            ? {
+                ...encounter,
+                diagnosticOrders: [
+                  ...encounter.diagnosticOrders.filter(
+                    (existing) => existing.id !== pendingOrder.id
+                  ),
+                  pendingOrder,
+                ],
+              }
+            : encounter
+        )
+      );
+      offlineWorkflowTail.current.set(
+        activeEncounter.id,
+        orderResult.commandId
+      );
+      recordEvent(
+        'DIAGNOSTIC_ORDERED',
+        `Diagnostic intent ${pendingOrder.testName} captured offline. Pricing, invoice creation, payment gate and worklist release remain pending authoritative server replay.`,
+        pendingOrder
+      );
+      return;
+    }
+
     if (!orderResult.success || !orderResult.data?.order || !orderResult.data?.invoice) {
       throw new Error(orderResult.error?.message || 'Diagnostic order failed.');
     }
@@ -1314,8 +1496,52 @@ export function OpdMasterWorkspace() {
       { orderId, targetStatus },
       {
         idempotencyKey: `opd-diagnostic-work:${orderId}:${targetStatus}`,
+        offlineQueue: {
+          enabled: true,
+          collection: 'orders',
+          resourceId: orderId,
+          action: 'UPDATE',
+          optimisticCache: true,
+          optimisticPayload: {
+            worklistStatus: `${targetStatus}_PENDING_SYNC`,
+            status:
+              targetStatus === 'SPECIMEN_COLLECTED'
+                ? 'COLLECTED'
+                : 'PROCESSING',
+          },
+        },
       }
     );
+
+    if (result.queuedOffline) {
+      setEncounters((prev) =>
+        prev.map((encounter) =>
+          encounter.id === activeEncounter.id
+            ? {
+                ...encounter,
+                diagnosticOrders: encounter.diagnosticOrders.map((existing) =>
+                  existing.id === orderId
+                    ? {
+                        ...existing,
+                        worklistStatus: `${targetStatus}_PENDING_SYNC`,
+                        status:
+                          targetStatus === 'SPECIMEN_COLLECTED'
+                            ? 'COLLECTED'
+                            : 'PROCESSING',
+                      }
+                    : existing
+                ),
+              }
+            : encounter
+        )
+      );
+      recordEvent(
+        'DIAGNOSTIC_STATUS_UPDATED',
+        `Diagnostic worklist action ${targetStatus} captured offline for ${orderId}; server replay may still require conflict review.`
+      );
+      return;
+    }
+
     if (!result.success || !result.data) {
       throw new Error(
         result.error?.message || 'Diagnostic worklist transition failed.'
@@ -1367,6 +1593,7 @@ export function OpdMasterWorkspace() {
       safetyOverrideReason?: string;
     }
   ) => {
+    requireOnlineOpdAuthority('medication prescribing safety evaluation');
     try {
       const result = await executeActiveTenantCommand<Record<string, any>>(
         'PrescribeMedicationCommand',
@@ -1454,6 +1681,7 @@ export function OpdMasterWorkspace() {
   // HANDLER: Dispense Prescription through the pharmacy domain.
   // CI-0D will extend this command to atomic inventory/consumption charging.
   const handleDispensePrescription = async (rxId: string) => {
+    requireOnlineOpdAuthority('physical FEFO pharmacy dispensing');
     const prescription = activeEncounter.prescriptions.find((rx) => rx.id === rxId);
     if (!prescription) throw new Error('PRESCRIPTION_NOT_FOUND');
 
@@ -1580,10 +1808,39 @@ export function OpdMasterWorkspace() {
             collection: 'cashReceipts',
             resourceId: payment.id,
             action: 'CREATE',
-            optimisticCache: false,
+            optimisticCache: true,
           },
         }
       );
+
+      if (result.queuedOffline) {
+        const pendingPayment: PaymentTransaction = {
+          ...payment,
+          invoiceId: consultationInvoice.id,
+          status: 'PENDING',
+          glJournalEntryId: '',
+        };
+        setEncounters((prev) =>
+          prev.map((encounter) =>
+            encounter.id === activeEncounter.id
+              ? {
+                  ...encounter,
+                  consultationInvoice: {
+                    ...consultationInvoice,
+                    payments: [
+                      ...consultationInvoice.payments.filter(
+                        (existing) => existing.id !== pendingPayment.id
+                      ),
+                      pendingPayment,
+                    ],
+                  },
+                }
+              : encounter
+          )
+        );
+        setActiveTab('BILLING');
+        return;
+      }
 
       if (!result.success || !result.data) {
         throw new Error(result.error?.message || 'Consultation cash receipt command failed.');
@@ -1702,8 +1959,50 @@ export function OpdMasterWorkspace() {
         },
         {
           idempotencyKey: `opd-diagnostic-cash-receipt:${payment.id}`,
+          offlineQueue: {
+            enabled: true,
+            collection: 'cashReceipts',
+            resourceId: payment.id,
+            action: 'CREATE',
+            optimisticCache: true,
+          },
         }
       );
+
+      if (result.queuedOffline) {
+        const pendingPayment: PaymentTransaction = {
+          ...payment,
+          invoiceId: diagnosticInvoice.id,
+          status: 'PENDING',
+          glJournalEntryId: '',
+        };
+        setEncounters((prev) =>
+          prev.map((encounter) =>
+            encounter.id === activeEncounter.id
+              ? {
+                  ...encounter,
+                  diagnosticInvoices: (encounter.diagnosticInvoices || []).map(
+                    (invoice) =>
+                      invoice.id === diagnosticInvoice.id
+                        ? {
+                            ...invoice,
+                            payments: [
+                              ...invoice.payments.filter(
+                                (existing) =>
+                                  existing.id !== pendingPayment.id
+                              ),
+                              pendingPayment,
+                            ],
+                          }
+                        : invoice
+                  ),
+                }
+              : encounter
+          )
+        );
+        setActiveTab('BILLING');
+        return;
+      }
 
       if (!result.success || !result.data) {
         throw new Error(
@@ -1831,8 +2130,50 @@ export function OpdMasterWorkspace() {
         },
         {
           idempotencyKey: `opd-pharmacy-cash-receipt:${payment.id}`,
+          offlineQueue: {
+            enabled: true,
+            collection: 'cashReceipts',
+            resourceId: payment.id,
+            action: 'CREATE',
+            optimisticCache: true,
+          },
         }
       );
+
+      if (result.queuedOffline) {
+        const pendingPayment: PaymentTransaction = {
+          ...payment,
+          invoiceId: pharmacyInvoice.id,
+          status: 'PENDING',
+          glJournalEntryId: '',
+        };
+        setEncounters((prev) =>
+          prev.map((encounter) =>
+            encounter.id === activeEncounter.id
+              ? {
+                  ...encounter,
+                  pharmacyInvoices: (encounter.pharmacyInvoices || []).map(
+                    (invoice) =>
+                      invoice.id === pharmacyInvoice.id
+                        ? {
+                            ...invoice,
+                            payments: [
+                              ...invoice.payments.filter(
+                                (existing) =>
+                                  existing.id !== pendingPayment.id
+                              ),
+                              pendingPayment,
+                            ],
+                          }
+                        : invoice
+                  ),
+                }
+              : encounter
+          )
+        );
+        setActiveTab('BILLING');
+        return;
+      }
 
       if (!result.success || !result.data) {
         throw new Error(
@@ -1936,8 +2277,51 @@ export function OpdMasterWorkspace() {
         },
         {
           idempotencyKey: `opd-ri-cash-receipt:${payment.id}`,
+          offlineQueue: {
+            enabled: true,
+            collection: 'cashReceipts',
+            resourceId: payment.id,
+            action: 'CREATE',
+            optimisticCache: true,
+          },
         }
       );
+
+      if (result.queuedOffline) {
+        const pendingPayment: PaymentTransaction = {
+          ...payment,
+          invoiceId: supplementalInvoice.id,
+          status: 'PENDING',
+          glJournalEntryId: '',
+        };
+        setEncounters((prev) =>
+          prev.map((encounter) =>
+            encounter.id === activeEncounter.id
+              ? {
+                  ...encounter,
+                  supplementalInvoices: (
+                    encounter.supplementalInvoices || []
+                  ).map((invoice) =>
+                    invoice.id === supplementalInvoice.id
+                      ? {
+                          ...invoice,
+                          payments: [
+                            ...invoice.payments.filter(
+                              (existing) =>
+                                existing.id !== pendingPayment.id
+                            ),
+                            pendingPayment,
+                          ],
+                        }
+                      : invoice
+                  ),
+                }
+              : encounter
+          )
+        );
+        setActiveTab('BILLING');
+        return;
+      }
 
       if (!result.success || !result.data) {
         throw new Error(
@@ -2174,6 +2558,7 @@ export function OpdMasterWorkspace() {
   };
 
   const handleFinalizeBillingReconciliation = async () => {
+    requireOnlineOpdAuthority('final billing reconciliation');
     if (!activeEncounter) return;
     if (activeBillingInvoice) {
       throw new Error(
@@ -2297,6 +2682,7 @@ export function OpdMasterWorkspace() {
   // transition; it must never first write an intermediate "bed requested"
   // disposition that can survive a failed admission.
   const handleCommitDisposition = async (disposition: EncounterDisposition) => {
+    requireOnlineOpdAuthority('final disposition and care transition');
     const inpatientRequest = disposition.inpatientAdmissionRequest;
     const directAdmission =
       disposition.type === 'INPATIENT_ADMISSION_RECOMMENDED';
@@ -2390,6 +2776,29 @@ export function OpdMasterWorkspace() {
         warningSignsRedFlags: disposition.warningSignsRedFlags,
         followUpScheduledDate: disposition.followUpScheduledDate,
         followUpDepartment: disposition.followUpDepartment,
+        internalReferral: disposition.internalReferral
+          ? {
+              targetDepartment: disposition.internalReferral.targetDepartment,
+              ...(disposition.internalReferral.targetDoctor
+                ? { targetDoctor: disposition.internalReferral.targetDoctor }
+                : {}),
+              priority: disposition.internalReferral.priority,
+              clinicalReason: disposition.internalReferral.clinicalReason,
+            }
+          : undefined,
+        externalReferral: disposition.externalReferral
+          ? {
+              receivingHospitalName:
+                disposition.externalReferral.receivingHospitalName,
+              ...(disposition.externalReferral.receivingDoctorName
+                ? {
+                    receivingDoctorName:
+                      disposition.externalReferral.receivingDoctorName,
+                  }
+                : {}),
+              sbarHandover: disposition.externalReferral.sbarHandover,
+            }
+          : undefined,
       },
       { idempotencyKey: `opd-disposition:${activeEncounter.id}` }
     );
@@ -2458,15 +2867,25 @@ export function OpdMasterWorkspace() {
       {/* Offline Sync Status & Role Switcher Bar */}
       <OpdOfflineSyncManager
         isOnline={isOnline}
+        isSyncing={isSyncing}
         pendingSyncCount={pendingSyncCount}
+        conflictsCount={conflictsCount}
+        lastError={syncError}
         activeRole={activeRole}
         allowPersonaSwitch={false}
+        allowOfflineSimulation={IS_DEMO_RUNTIME}
+        offlineSimulationActive={offlineSimulationActive}
         onRoleChange={() => undefined}
-        onTriggerManualSync={() => {
-          setPendingSyncCount(0);
-          alert('Offline IndexedDB outbox batch synced to Firestore with zero conflict exceptions.');
+        onTriggerManualSync={async () => {
+          const result = await triggerSync(auth.activeTenant?.tenantId);
+          if (result.syncedCount > 0) {
+            await refreshAuthoritativeWorkspace();
+          }
         }}
-        onToggleOnlineStatus={() => setIsOnline(!isOnline)}
+        onToggleOfflineSimulation={async () => {
+          if (!IS_DEMO_RUNTIME) return;
+          await setOfflineSimulation(!offlineSimulationActive);
+        }}
       />
 
       {activeRole === 'UNAUTHORIZED' && (
@@ -2616,6 +3035,7 @@ export function OpdMasterWorkspace() {
         <OpdQueueEngine
           queue={queue}
           onCallToken={async (token, room) => {
+            requireOnlineOpdAuthority('shared OPD queue call');
             const item = queue.find((q) => q.tokenNumber === token);
             if (!item) return;
             const result = await executeActiveTenantCommand(
@@ -2630,6 +3050,7 @@ export function OpdMasterWorkspace() {
             recordEvent('QUEUE_CALLED', `Token ${token} called to ${room}.`);
           }}
           onStartService={async (tokenId) => {
+            requireOnlineOpdAuthority('OPD queue service start');
             const item = queue.find((q) => q.id === tokenId);
             if (!item) return;
 
@@ -2683,6 +3104,7 @@ export function OpdMasterWorkspace() {
             setActiveTab('TRIAGE');
           }}
           onCompleteService={async (tokenId) => {
+            requireOnlineOpdAuthority('OPD queue completion');
             const result = await executeActiveTenantCommand(
               'UpdateOpdQueueStatusCommand',
               { tokenId, targetStatus: 'completed' },
@@ -2694,6 +3116,7 @@ export function OpdMasterWorkspace() {
             );
           }}
           onSkipToken={async (tokenId) => {
+            requireOnlineOpdAuthority('OPD queue no-show update');
             const result = await executeActiveTenantCommand(
               'UpdateOpdQueueStatusCommand',
               { tokenId, targetStatus: 'no_show' },
@@ -2705,6 +3128,7 @@ export function OpdMasterWorkspace() {
             );
           }}
           onTransferQueue={async (tokenId, targetDept, targetDoc, targetRoom) => {
+            requireOnlineOpdAuthority('OPD queue transfer');
             const result = await executeActiveTenantCommand(
               'UpdateOpdQueueStatusCommand',
               {
@@ -2787,6 +3211,7 @@ export function OpdMasterWorkspace() {
           prescriptions={activeEncounter.prescriptions}
           canPrescribe={canPrescribe}
           canDispense={canDispense}
+          onlineAuthorityAvailable={isOnline}
           onAddPrescription={(item, safety) =>
             handleAddPrescription(item, safety)
           }

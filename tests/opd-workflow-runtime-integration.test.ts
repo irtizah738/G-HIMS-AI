@@ -85,7 +85,9 @@ describe('OPD clinical workflow runtime integration', () => {
     expect(workspace).toContain('evidenceId: vitalsResult.entityId || localEvidenceId');
     expect(workspace).toContain('evidenceId: noteResult.entityId || localEvidenceId');
     expect(workspace).toContain("collection: 'encounters'");
-    expect(workspace).toContain("optimisticCache: false");
+    expect(workspace).toContain('offlineStagePendingSync');
+    expect(workspace).toContain("offlinePendingTargetStage: 'CONSULTATION'");
+    expect(workspace).toContain("offlinePendingTargetStage: 'DIAGNOSTICS'");
   });
 
   test('OPD persists raw DAG stage separately from canonical clinical state', async () => {

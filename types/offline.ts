@@ -24,6 +24,7 @@ export interface SyncMutation {
   idempotencyKey?: string;
   schemaVersion?: number;
   baseEntityVersion?: number;
+  dependsOnMutationIds?: string[];
   payload: Record<string, any>;
   /** AES-GCM envelope used for IndexedDB persistence. Public DB helpers decrypt transparently. */
   encryptedPayload?: EncryptedEdgePayload;

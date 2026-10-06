@@ -27,6 +27,7 @@ interface OpdPharmacyPrescriptionsProps {
   prescriptions: PharmacyPrescriptionItem[];
   canPrescribe?: boolean;
   canDispense?: boolean;
+  onlineAuthorityAvailable?: boolean;
   onAddPrescription: (
     item: PharmacyPrescriptionItem,
     safety?: {
@@ -74,6 +75,7 @@ export function OpdPharmacyPrescriptions({
   prescriptions,
   canPrescribe = false,
   canDispense = false,
+  onlineAuthorityAvailable = true,
   onAddPrescription,
   onDispensePrescription,
 }: OpdPharmacyPrescriptionsProps) {
@@ -181,6 +183,13 @@ export function OpdPharmacyPrescriptions({
 
     setPendingSafetyReview(null);
     setSafetyOverrideReason('');
+
+    if (!onlineAuthorityAvailable) {
+      setPrescriptionError(
+        'Medication prescribing requires live server authority for current CI-9 medication-safety evaluation. Reconnect before prescribing.'
+      );
+      return;
+    }
 
     if (!selectedDrug) {
       alert('No authoritative formulary medication is available.');
@@ -407,6 +416,12 @@ export function OpdPharmacyPrescriptions({
             {formularyError}
           </div>
         )}
+        {!onlineAuthorityAvailable && (
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-200">
+            Cached medication and prescription history remain readable offline, but new prescribing and physical dispensing require reconnection because medication-safety and FEFO inventory authority are server-owned.
+          </div>
+        )}
+
         {!IS_DEMO_RUNTIME && formulary.length === 0 && !formularyError && (
           <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 dark:bg-slate-800 text-xs text-slate-500">
             No active stocked medications are available from the authoritative formulary.
@@ -503,7 +518,7 @@ export function OpdPharmacyPrescriptions({
             </div>
             <button
               type="submit"
-              disabled={!selectedDrug || isSubmitting}
+              disabled={!selectedDrug || isSubmitting || !onlineAuthorityAvailable}
               className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
             >
               <Plus className="w-4 h-4" />
@@ -577,7 +592,9 @@ export function OpdPharmacyPrescriptions({
                       </span>
                     </td>
                     <td className="p-3 text-right">
-                      {rx.status !== 'DISPENSED' && canDispense ? (
+                      {rx.status !== 'DISPENSED' &&
+                      canDispense &&
+                      onlineAuthorityAvailable ? (
                         <button
                           onClick={() => setDispenseModalItem(rx)}
                           className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold cursor-pointer"
@@ -599,7 +616,7 @@ export function OpdPharmacyPrescriptions({
       </div>
 
       {/* Dispensing Modal */}
-      {dispenseModalItem && canDispense && (
+      {dispenseModalItem && canDispense && onlineAuthorityAvailable && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-xl space-y-4">
             <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">

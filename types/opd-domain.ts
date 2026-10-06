@@ -478,16 +478,16 @@ export type OpdDispositionType =
   | string;
 
 export interface InternalReferral {
-  id: string;
+  id?: string;
   targetDepartment: string;
   targetDoctor?: string;
   priority: 'ROUTINE' | 'URGENT' | 'STAT' | string;
   clinicalReason: string;
-  targetQueueGenerated?: boolean;
+  status?: 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED' | string;
 }
 
 export interface ExternalReferral {
-  id: string;
+  id?: string;
   receivingHospitalName: string;
   receivingDoctorName?: string;
   sbarHandover: {
@@ -496,7 +496,7 @@ export interface ExternalReferral {
     assessment: string;
     recommendation: string;
   };
-  transportMode: 'PATIENT_OWN_TRANSPORT' | 'BASIC_AMBULANCE' | 'ALS_MOBILE_ICU' | string;
+  status?: 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED' | string;
 }
 
 export interface EncounterDisposition {
@@ -513,7 +513,7 @@ export interface EncounterDisposition {
     clinicalIndication: string;
     admittingService?: string;
   };
-  completedAt: number;
+  completedAt?: number;
   completedBy?: string;
 }
 
@@ -763,6 +763,8 @@ export interface ComprehensiveOpdEncounter {
   chiefComplaint?: string;
   encounterType: 'OPD' | 'EMERGENCY' | 'TELEHEALTH' | 'DAY_CARE' | 'OPD_SPECIALIST' | string;
   currentStage: ExtendedOpdStageId | string;
+  offlineStagePendingSync?: boolean;
+  offlinePendingTargetStage?: string;
   department?: SpecialtyDepartment | string;
   attendingDoctorId?: string;
   attendingDoctorName?: string;

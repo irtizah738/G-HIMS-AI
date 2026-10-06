@@ -30,6 +30,7 @@ function conflictCategory(commandType: string): ConflictCategory {
       'DischargePatientFromBedCommand',
       'MergePatientCommand',
       'AdvanceStageCommand',
+      'AdvanceDiagnosticWorklistCommand',
     ].includes(commandType)
   ) return 'SAFETY_CRITICAL';
   if (
@@ -38,6 +39,7 @@ function conflictCategory(commandType: string): ConflictCategory {
       'RecordVitalsCommand',
       'SignClinicalNoteCommand',
       'PlaceDiagnosticOrderCommand',
+      'CreateOpdConsultationInvoiceCommand',
       'CreateEncounterCommand',
       'CreateTelehealthSessionCommand',
     ].includes(commandType)
@@ -65,6 +67,7 @@ function rewriteMappedReferences(
 function entityTypeForCommand(commandType: string): string {
   const map: Record<string, string> = {
     PlaceDiagnosticOrderCommand: 'DIAGNOSTIC_ORDER',
+    CreateOpdConsultationInvoiceCommand: 'INVOICE',
     PrescribeMedicationCommand: 'PRESCRIPTION',
     RecordVitalsCommand: 'ENCOUNTER_EVIDENCE',
     SignClinicalNoteCommand: 'ENCOUNTER_EVIDENCE',
@@ -123,11 +126,22 @@ async function processOfflineRegistration(
     actorId: context.actorId,
     actorRole: context.roles[0] || 'AUTHENTICATED_USER',
     actorName: context.actorId,
+    source: 'offline',
     bloodGroup: payload.bloodGroup ? String(payload.bloodGroup) : undefined,
     allergies: Array.isArray(payload.allergies) ? payload.allergies.map(String) : [],
     chronicConditions: Array.isArray(payload.chronicConditions)
       ? payload.chronicConditions.map(String)
       : [],
+    tariffPlan: payload.tariffPlan
+      ? String(payload.tariffPlan) as any
+      : undefined,
+    insuranceDetails:
+      payload.insuranceDetails && typeof payload.insuranceDetails === 'object'
+        ? payload.insuranceDetails as any
+        : undefined,
+    consentDecisions: Array.isArray(payload.consentDecisions)
+      ? payload.consentDecisions as any
+      : undefined,
   });
 
   const mappings = [
@@ -167,6 +181,74 @@ async function processOfflineRegistration(
   };
 }
 
+function orderMutationsByDependencies(
+  mutations: OfflineMutationItem[]
+): {
+  ordered: OfflineMutationItem[];
+  cyclicMutationIds: string[];
+} {
+  const byId = new Map(
+    mutations.map((mutation) => [mutation.mutationId, mutation])
+  );
+  const indegree = new Map<string, number>();
+  const children = new Map<string, string[]>();
+
+  for (const mutation of mutations) {
+    indegree.set(mutation.mutationId, 0);
+    children.set(mutation.mutationId, []);
+  }
+
+  for (const mutation of mutations) {
+    for (const dependencyId of mutation.dependsOnMutationIds || []) {
+      if (!byId.has(dependencyId)) continue;
+      indegree.set(
+        mutation.mutationId,
+        (indegree.get(mutation.mutationId) || 0) + 1
+      );
+      children.get(dependencyId)!.push(mutation.mutationId);
+    }
+  }
+
+  const priority = (mutation: OfflineMutationItem) =>
+    mutation.commandType === 'RegisterPatientAndEncounterCommand' ? 0 : 1;
+  const ready = mutations
+    .filter((mutation) => (indegree.get(mutation.mutationId) || 0) === 0)
+    .sort(
+      (left, right) =>
+        priority(left) - priority(right) ||
+        left.occurredAt - right.occurredAt ||
+        left.mutationId.localeCompare(right.mutationId)
+    );
+
+  const ordered: OfflineMutationItem[] = [];
+  while (ready.length > 0) {
+    const mutation = ready.shift()!;
+    ordered.push(mutation);
+
+    for (const childId of children.get(mutation.mutationId) || []) {
+      const next = (indegree.get(childId) || 0) - 1;
+      indegree.set(childId, next);
+      if (next === 0) {
+        ready.push(byId.get(childId)!);
+        ready.sort(
+          (left, right) =>
+            priority(left) - priority(right) ||
+            left.occurredAt - right.occurredAt ||
+            left.mutationId.localeCompare(right.mutationId)
+        );
+      }
+    }
+  }
+
+  const acceptedOrder = new Set(ordered.map((mutation) => mutation.mutationId));
+  return {
+    ordered,
+    cyclicMutationIds: mutations
+      .filter((mutation) => !acceptedOrder.has(mutation.mutationId))
+      .map((mutation) => mutation.mutationId),
+  };
+}
+
 export class OfflineReconciliationDomainService {
   public static async processSyncBatch(
     context: CommandContext,
@@ -182,19 +264,51 @@ export class OfflineReconciliationDomainService {
     // commands against one entity without falsely conflicting with the version
     // increment produced by its own immediately preceding command.
     const acceptedEntityClocks = new Map<string, Record<string, number>>();
+    const acceptedMutationIds = new Set<string>();
+    const batchMutationIds = new Set(
+      batch.mutations.map((mutation) => mutation.mutationId)
+    );
 
-    // Registration must establish canonical patient/encounter IDs before dependent
-    // offline commands are replayed.
-    const ordered = [...batch.mutations].sort((a, b) => {
-      const ar = a.commandType === 'RegisterPatientAndEncounterCommand' ? 0 : 1;
-      const br = b.commandType === 'RegisterPatientAndEncounterCommand' ? 0 : 1;
-      return ar - br || a.occurredAt - b.occurredAt;
-    });
+    // Dependencies are authoritative replay order. Timestamp is only a stable
+    // tie-breaker among independent mutations; it never overrides causality.
+    const { ordered, cyclicMutationIds } =
+      orderMutationsByDependencies(batch.mutations);
+
+    for (const mutationId of cyclicMutationIds) {
+      const mutation = batch.mutations.find(
+        (candidate) => candidate.mutationId === mutationId
+      )!;
+      conflicted += 1;
+      results.push({
+        mutationId,
+        status: 'requires_review',
+        conflictCategory: conflictCategory(mutation.commandType),
+        reason:
+          'OFFLINE_DEPENDENCY_CYCLE: queued commands contain a causal dependency cycle and require server review.',
+      });
+    }
 
     for (const mutation of ordered) {
       const category = conflictCategory(mutation.commandType);
 
       try {
+        const unresolvedDependencies = (mutation.dependsOnMutationIds || [])
+          .filter(
+            (dependencyId) =>
+              batchMutationIds.has(dependencyId) &&
+              !acceptedMutationIds.has(dependencyId)
+          );
+        if (unresolvedDependencies.length > 0) {
+          conflicted += 1;
+          results.push({
+            mutationId: mutation.mutationId,
+            status: 'requires_review',
+            conflictCategory: category,
+            reason:
+              `OFFLINE_DEPENDENCY_NOT_ACCEPTED: prerequisite mutation(s) ${unresolvedDependencies.join(', ')} did not complete before this command.`,
+          });
+          continue;
+        }
         if (!mutation.commandType || !mutation.idempotencyKey) {
           rejected += 1;
           results.push({
@@ -217,6 +331,7 @@ export class OfflineReconciliationDomainService {
 
           if (registration.result.status === 'accepted') {
             accepted += 1;
+            acceptedMutationIds.add(mutation.mutationId);
             for (const mapping of registration.mappings) {
               canonicalMappings.set(mapping.localId, mapping.canonicalId);
             }
@@ -333,6 +448,7 @@ export class OfflineReconciliationDomainService {
           }
 
           accepted += 1;
+          acceptedMutationIds.add(mutation.mutationId);
           results.push({
             mutationId: mutation.mutationId,
             status: 'accepted',
@@ -348,6 +464,7 @@ export class OfflineReconciliationDomainService {
 
         const code = result.error?.code || 'OFFLINE_COMMAND_REJECTED';
         if (
+          category === 'FINANCIAL_CONFLICT' ||
           code === 'IDEMPOTENCY_IN_PROGRESS' ||
           code.includes('CONFLICT') ||
           code.includes('STATE_') ||

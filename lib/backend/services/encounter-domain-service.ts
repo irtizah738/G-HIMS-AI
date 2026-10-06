@@ -54,11 +54,26 @@ export interface CommitEncounterDispositionPayload {
   warningSignsRedFlags?: string;
   followUpScheduledDate?: string;
   followUpDepartment?: string;
+  internalReferral?: {
+    targetDepartment: string;
+    targetDoctor?: string;
+    priority: 'ROUTINE' | 'URGENT' | 'STAT';
+    clinicalReason: string;
+  };
+  externalReferral?: {
+    receivingHospitalName: string;
+    receivingDoctorName?: string;
+    sbarHandover: {
+      situation: string;
+      background: string;
+      assessment: string;
+      recommendation: string;
+    };
+  };
   inpatientAdmissionRequest?: {
     targetWard: string;
     targetBedId?: string;
     clinicalIndication: string;
-    admittingService?: string;
   };
 }
 
@@ -719,6 +734,107 @@ export class EncounterDomainService {
     }
 
     const now = Date.now();
+    const referralId =
+      payload.dispositionType === 'INTERNAL_REFERRAL' ||
+      payload.dispositionType === 'EXTERNAL_REFERRAL'
+        ? `opd_ref_${encounter.encounterId}`
+        : null;
+
+    if (
+      payload.dispositionType === 'INTERNAL_REFERRAL' &&
+      !payload.internalReferral
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INTERNAL_REFERRAL_REQUIRED',
+          message:
+            'Internal referral disposition requires governed referral intent.',
+        },
+      };
+    }
+    if (
+      payload.dispositionType === 'EXTERNAL_REFERRAL' &&
+      !payload.externalReferral
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'EXTERNAL_REFERRAL_REQUIRED',
+          message:
+            'External referral disposition requires receiving institution and SBAR handoff.',
+        },
+      };
+    }
+    if (
+      payload.dispositionType !== 'INTERNAL_REFERRAL' &&
+      payload.internalReferral
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'INTERNAL_REFERRAL_NOT_ALLOWED',
+          message:
+            'Internal referral details are only valid for INTERNAL_REFERRAL disposition.',
+        },
+      };
+    }
+    if (
+      payload.dispositionType !== 'EXTERNAL_REFERRAL' &&
+      payload.externalReferral
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'EXTERNAL_REFERRAL_NOT_ALLOWED',
+          message:
+            'External referral details are only valid for EXTERNAL_REFERRAL disposition.',
+        },
+      };
+    }
+
+    const referralState =
+      referralId && payload.dispositionType === 'INTERNAL_REFERRAL'
+        ? {
+            referralId,
+            tenantId: context.tenantId,
+            encounterId: encounter.encounterId,
+            patientId: encounter.patientId,
+            referralType: 'INTERNAL',
+            targetDepartment: payload.internalReferral!.targetDepartment,
+            targetDoctor: payload.internalReferral!.targetDoctor,
+            priority: payload.internalReferral!.priority,
+            clinicalReason: payload.internalReferral!.clinicalReason,
+            status: 'PENDING',
+            createdAt: now,
+            createdBy: context.actorId,
+          }
+        : referralId && payload.dispositionType === 'EXTERNAL_REFERRAL'
+          ? {
+              referralId,
+              tenantId: context.tenantId,
+              encounterId: encounter.encounterId,
+              patientId: encounter.patientId,
+              referralType: 'EXTERNAL',
+              receivingHospitalName:
+                payload.externalReferral!.receivingHospitalName,
+              receivingDoctorName:
+                payload.externalReferral!.receivingDoctorName,
+              sbarHandover: payload.externalReferral!.sbarHandover,
+              status: 'PENDING',
+              createdAt: now,
+              createdBy: context.actorId,
+            }
+          : null;
+
     const inpatientPending =
       payload.dispositionType === 'INPATIENT_ADMISSION_RECOMMENDED';
 
@@ -760,6 +876,13 @@ export class EncounterDomainService {
         warningSignsRedFlags: payload.warningSignsRedFlags,
         followUpScheduledDate: payload.followUpScheduledDate,
         followUpDepartment: payload.followUpDepartment,
+        referralId: referralId || undefined,
+        referralType:
+          payload.dispositionType === 'INTERNAL_REFERRAL'
+            ? 'INTERNAL'
+            : payload.dispositionType === 'EXTERNAL_REFERRAL'
+              ? 'EXTERNAL'
+              : undefined,
         inpatientAdmissionRequest: payload.inpatientAdmissionRequest,
       },
       completedAt: now,
@@ -814,6 +937,15 @@ export class EncounterDomainService {
       domainState: updatedEncounter,
       expectedPrimaryServerVersion: Number(encounter._serverVersion || 0),
       additionalStateWrites: [
+        ...(referralState && referralId
+          ? [
+              {
+                entityType: 'OPD_REFERRAL',
+                entityId: referralId,
+                domainState: referralState,
+              },
+            ]
+          : []),
         {
           entityType: 'PATIENT_MPI',
           entityId: encounter.patientId,

@@ -22,6 +22,7 @@ export interface SecureMutationInput {
   idempotencyKey: string;
   schemaVersion: number;
   baseEntityVersion?: number;
+  dependsOnMutationIds?: string[];
   baseVectorClock?: VectorClock;
   payload: Record<string, unknown>;
   vectorClock: VectorClock;
@@ -42,6 +43,7 @@ export async function putSecureMutation(input: SecureMutationInput): Promise<Syn
     idempotencyKey: input.idempotencyKey,
     schemaVersion: input.schemaVersion,
     baseEntityVersion: input.baseEntityVersion,
+    dependsOnMutationIds: input.dependsOnMutationIds,
     baseVectorClock: input.baseVectorClock,
     // PHI is not persisted in plaintext. The public read path restores payload in memory.
     payload: {},

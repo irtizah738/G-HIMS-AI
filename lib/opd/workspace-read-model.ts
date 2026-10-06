@@ -256,6 +256,7 @@ export function buildOpdWorkspaceReadModel(
   const rawAppointments = snapshot.collections.opdAppointments || [];
   const rawWaitlist = snapshot.collections.opdWaitlist || [];
   const rawInvoices = snapshot.collections.invoices || [];
+  const rawCashReceipts = snapshot.collections.cashReceipts || [];
   const rawOrders = snapshot.collections.orders || [];
   const rawPrescriptions = snapshot.collections.prescriptions || [];
 
@@ -307,6 +308,53 @@ export function buildOpdWorkspaceReadModel(
   });
 
   const patientById = new Map(patients.map((patient) => [patient.id, patient]));
+  const paymentsByInvoiceId = new Map<
+    string,
+    OpdInvoice['payments']
+  >();
+  for (const row of rawCashReceipts) {
+    const receipt = asRecord(row);
+    const nestedReceipt = asRecord(receipt.receipt);
+    const source = Object.keys(nestedReceipt).length > 0 ? nestedReceipt : receipt;
+    const invoiceId = String(source.invoiceId || '').trim();
+    const receiptId = String(source.receiptId || source.id || receipt.id || '').trim();
+    const amountMinorUnits = Number(source.amountMinorUnits || 0);
+    if (
+      !invoiceId ||
+      !receiptId ||
+      !Number.isSafeInteger(amountMinorUnits) ||
+      amountMinorUnits <= 0
+    ) {
+      continue;
+    }
+
+    const journalId = String(source.journalId || '').trim();
+    const status =
+      String(source.status || '').toUpperCase() === 'CAPTURED' && journalId
+        ? 'CAPTURED'
+        : 'PENDING';
+    const payment: OpdInvoice['payments'][number] = {
+      id: receiptId,
+      invoiceId,
+      amountMinorUnits,
+      mode: 'CASH',
+      referenceNumber: String(source.referenceNumber || ''),
+      status,
+      processedAt: Number(
+        source.collectedAt || source.recordedAt || source.processedAt || 0
+      ),
+      processedBy: String(
+        source.cashierName || source.collectedBy || ''
+      ),
+      glJournalEntryId: journalId,
+    };
+    const current = paymentsByInvoiceId.get(invoiceId) || [];
+    if (!current.some((existing) => existing.id === payment.id)) {
+      current.push(payment);
+      paymentsByInvoiceId.set(invoiceId, current);
+    }
+  }
+
   const consultationInvoiceByEncounter = new Map<string, OpdInvoice>();
   const diagnosticInvoicesByEncounter = new Map<string, OpdInvoice[]>();
   const pharmacyInvoicesByEncounter = new Map<string, OpdInvoice[]>();
@@ -319,27 +367,31 @@ export function buildOpdWorkspaceReadModel(
     if (!encounterId) continue;
     const purpose = String(invoice.billingPurpose || '').toUpperCase();
     if (purpose === 'OPD_CONSULTATION') {
-      consultationInvoiceByEncounter.set(
-        encounterId,
-        adaptAuthoritativeConsultationInvoice(invoice)
-      );
+      const adapted = adaptAuthoritativeConsultationInvoice(invoice);
+      adapted.payments = paymentsByInvoiceId.get(adapted.id) || [];
+      consultationInvoiceByEncounter.set(encounterId, adapted);
     } else if (purpose === 'OPD_DIAGNOSTIC') {
       const current = diagnosticInvoicesByEncounter.get(encounterId) || [];
-      current.push(adaptAuthoritativeOpdInvoice(invoice));
+      const adapted = adaptAuthoritativeOpdInvoice(invoice);
+      adapted.payments = paymentsByInvoiceId.get(adapted.id) || [];
+      current.push(adapted);
       diagnosticInvoicesByEncounter.set(encounterId, current);
     } else if (purpose === 'OPD_PHARMACY') {
       const current = pharmacyInvoicesByEncounter.get(encounterId) || [];
-      current.push(adaptAuthoritativeOpdInvoice(invoice));
+      const adapted = adaptAuthoritativeOpdInvoice(invoice);
+      adapted.payments = paymentsByInvoiceId.get(adapted.id) || [];
+      current.push(adapted);
       pharmacyInvoicesByEncounter.set(encounterId, current);
     } else if (purpose === 'OPD_REVENUE_INTEGRITY') {
       const current = supplementalInvoicesByEncounter.get(encounterId) || [];
-      current.push(adaptAuthoritativeOpdInvoice(invoice));
+      const adapted = adaptAuthoritativeOpdInvoice(invoice);
+      adapted.payments = paymentsByInvoiceId.get(adapted.id) || [];
+      current.push(adapted);
       supplementalInvoicesByEncounter.set(encounterId, current);
     } else if (purpose === 'FINAL_ENCOUNTER') {
-      finalInvoiceByEncounter.set(
-        encounterId,
-        adaptAuthoritativeOpdInvoice(invoice)
-      );
+      const adapted = adaptAuthoritativeOpdInvoice(invoice);
+      adapted.payments = paymentsByInvoiceId.get(adapted.id) || [];
+      finalInvoiceByEncounter.set(encounterId, adapted);
     }
   }
 
@@ -524,6 +576,11 @@ export function buildOpdWorkspaceReadModel(
             encounter.clinicalState ||
             'REGISTERED'
         ),
+        offlineStagePendingSync:
+          encounter.offlineStagePendingSync === true,
+        offlinePendingTargetStage: encounter.offlinePendingTargetStage
+          ? String(encounter.offlinePendingTargetStage)
+          : undefined,
         department: encounter.department
           ? String(encounter.department)
           : encounter.departmentId

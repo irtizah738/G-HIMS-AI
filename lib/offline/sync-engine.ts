@@ -14,6 +14,7 @@ import {
   remapEdgeEntityIds,
   resolveMappedReferences,
   putSecureEdgeEntities,
+  listSecureEdgeEntities,
   recordSecureConflict,
 } from '@/lib/offline/secure-store';
 import { withEdgeSyncLeadership } from '@/lib/offline/sync-leader';
@@ -60,7 +61,9 @@ export interface QueueMutationParams {
   idempotencyKey?: string;
   schemaVersion?: number;
   baseEntityVersion?: number;
+  dependsOnMutationIds?: string[];
   optimisticCache?: boolean;
+  optimisticPayload?: Record<string, any>;
   mutationId?: string;
 }
 
@@ -362,6 +365,7 @@ class ClinicalSyncEngine {
       idempotencyKey: params.idempotencyKey || `offline_${crypto.randomUUID()}`,
       schemaVersion: params.schemaVersion || 1,
       baseEntityVersion: params.baseEntityVersion ?? entityMetadata?.serverVersion,
+      dependsOnMutationIds: params.dependsOnMutationIds,
       baseVectorClock,
       payload: params.payload,
       vectorClock,
@@ -369,11 +373,41 @@ class ClinicalSyncEngine {
     });
 
     if (params.optimisticCache !== false && params.action !== 'DELETE') {
+      const optimisticPatch = params.optimisticPayload || params.payload;
+      let optimisticEntity: Record<string, unknown> = {
+        id: params.resourceId,
+        ...optimisticPatch,
+      };
+
+      if (params.action === 'UPDATE') {
+        const existingRows = await listSecureEdgeEntities<Record<string, unknown>>(
+          params.tenantId,
+          cached.user.uid,
+          params.collection
+        );
+        const existing = existingRows.find((row) => {
+          const rowId = String(
+            (row as any).id ||
+              (row as any).orderId ||
+              (row as any).encounterId ||
+              (row as any).receiptId ||
+              ''
+          ).trim();
+          return rowId === params.resourceId;
+        });
+        if (existing) {
+          optimisticEntity = {
+            ...existing,
+            ...optimisticEntity,
+          };
+        }
+      }
+
       await putSecureEdgeEntities(
         params.tenantId,
         cached.user.uid,
         params.collection,
-        [{ id: params.resourceId, ...params.payload }]
+        [optimisticEntity]
       );
     }
 
@@ -518,6 +552,7 @@ class ClinicalSyncEngine {
                   ),
                   schemaVersion: mutation.schemaVersion || 1,
                   baseEntityVersion: mutation.baseEntityVersion,
+                  dependsOnMutationIds: mutation.dependsOnMutationIds,
                   vectorClock: mutation.vectorClock,
                   baseVectorClock: mutation.baseVectorClock,
                 }))),

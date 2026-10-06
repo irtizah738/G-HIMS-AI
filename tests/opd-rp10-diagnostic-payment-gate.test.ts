@@ -113,7 +113,10 @@ describe('OPD-RP10 diagnostic payment gate', () => {
     expect(workspace).toContain("'RecordCashReceiptCommand'");
     expect(workspace).toContain('consultationInvoice.balanceDueMinorUnits');
     expect(workspace).toContain('activeEncounter.invoice.balanceDueMinorUnits');
-    expect(workspace).not.toContain("offlineQueue: {\n          enabled: true,\n          collection: 'orders'");
+    expect(workspace).toContain("collection: 'orders'");
+    expect(workspace).toContain("'PENDING_SERVER_REPLAY'");
+    expect(workspace).toContain("'OFFLINE_PENDING_SYNC'");
+    expect(workspace).toContain('STAT_DIAGNOSTIC_REQUIRES_ONLINE_AUTHORITY:');
   });
 
   test('hydration reconstructs diagnostic order and invoice authority for role handoffs', async () => {

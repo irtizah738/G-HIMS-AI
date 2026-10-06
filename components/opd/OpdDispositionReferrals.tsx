@@ -68,7 +68,6 @@ export function OpdDispositionReferrals({
   const [internalTargetDept, setInternalTargetDept] = useState<string>(
     IS_DEMO_RUNTIME ? 'Cardiology' : ''
   );
-  const [internalTargetDoc, setInternalTargetDoc] = useState<string>('');
   const [internalPriority, setInternalPriority] =
     useState<'ROUTINE' | 'URGENT' | 'STAT'>('ROUTINE');
   const [internalReason, setInternalReason] = useState<string>('');
@@ -95,19 +94,15 @@ export function OpdDispositionReferrals({
     let internalRef: InternalReferral | undefined;
     if (dispositionType === 'INTERNAL_REFERRAL') {
       internalRef = {
-        id: `ref-int-${Date.now()}`,
         targetDepartment: internalTargetDept,
-        targetDoctor: internalTargetDoc,
         priority: internalPriority,
         clinicalReason: internalReason,
-        targetQueueGenerated: true,
       };
     }
 
     let externalRef: ExternalReferral | undefined;
     if (dispositionType === 'EXTERNAL_REFERRAL') {
       externalRef = {
-        id: `ref-ext-${Date.now()}`,
         receivingHospitalName: extHospital,
         receivingDoctorName: extPhysician,
         sbarHandover: {
@@ -116,7 +111,6 @@ export function OpdDispositionReferrals({
           assessment: sbarAssessment,
           recommendation: sbarRecommendation,
         },
-        transportMode: 'PATIENT_OWN_TRANSPORT',
       };
     }
 
@@ -133,10 +127,8 @@ export function OpdDispositionReferrals({
           ? {
               targetBedId: admissionBedId.trim() || undefined,
               clinicalIndication: admissionReason,
-              admittingService: 'Cardiology Services',
             }
           : undefined,
-      completedAt: Date.now(),
     };
 
     setSubmitting(true);
@@ -243,21 +235,19 @@ export function OpdDispositionReferrals({
           <div className="p-4 rounded-xl bg-indigo-50/50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 space-y-3">
             <h3 className="text-xs font-bold uppercase text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5">
               <ArrowRightLeft className="w-4 h-4" />
-              Internal Specialty Referral & Automated Queue Ingress
+              Internal Specialty Referral
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-[11px] font-semibold mb-1">Target Department</label>
-                <select
+                <input
+                  type="text"
+                  required={dispositionType === 'INTERNAL_REFERRAL'}
                   value={internalTargetDept}
                   onChange={(e) => setInternalTargetDept(e.target.value)}
                   className="w-full px-3 py-1.5 text-xs rounded-lg border border-indigo-200 dark:border-indigo-700 bg-white dark:bg-slate-900"
-                >
-                  <option value="Cardiology">Cardiology</option>
-                  <option value="Orthopedics">Orthopedics</option>
-                  <option value="Neurology">Neurology</option>
-                  <option value="Ophthalmology">Ophthalmology</option>
-                </select>
+                  placeholder="Receiving specialty / department"
+                />
               </div>
               <div>
                 <label className="block text-[11px] font-semibold mb-1">Priority</label>

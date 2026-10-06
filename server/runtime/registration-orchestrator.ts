@@ -65,6 +65,7 @@ export interface RegisterPatientEncounterParams {
   actorId: string;
   actorRole: string;
   actorName: string;
+  source?: DomainEventEnvelope['source'];
   bloodGroup?: string;
   allergies?: string[];
   chronicConditions?: string[];
@@ -309,7 +310,7 @@ export async function registerPatientAndEncounter(
     correlationId,
     commandId: params.commandId,
     idempotencyKey: params.idempotencyKey,
-    source: 'web',
+    source: params.source || 'web',
     schemaVersion: 1,
   };
 

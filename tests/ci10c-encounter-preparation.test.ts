@@ -314,7 +314,7 @@ describe('CI-10C encounter preparation intelligence', () => {
       'lib/clinical/intelligence/encounter-preparation-evidence-loader.ts'
     );
 
-    expect(evidenceService).toContain('Patient360ProjectionService.rebuildPatient');
+    expect(evidenceService).toContain('Patient360ProjectionService.readOrRebuildClinicalView');
     expect(projectionService).toContain('getOrRebuildProjection');
     expect(loader).toContain('options.encounterId');
   });

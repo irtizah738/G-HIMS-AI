@@ -280,6 +280,10 @@ service cloud.firestore {
         allow read: if canReadOpdScheduling(tenantId);
         allow write: if false;
       }
+      match /opdReferrals/{referralId} {
+        allow read: if canReadClinical(tenantId);
+        allow write: if false;
+      }
       match /opdAppointmentSlots/{slotId} {
         allow read, write: if false;
       }

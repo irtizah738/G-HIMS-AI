@@ -105,12 +105,24 @@ export interface OrchestrationResult {
   };
 }
 
-function generateMRN(now = new Date()): string {
+function normalizeIdentityValue(value: string): string {
+  return String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function mpiLookupKey(type: 'CNIC' | 'MRN', value: string): string {
+  return `${type}_${normalizeIdentityValue(value)}`;
+}
+
+function generateMRN(patientId: string, now = new Date()): string {
   const yyyy = now.getFullYear();
   const mm = String(now.getMonth() + 1).padStart(2, '0');
   const dd = String(now.getDate()).padStart(2, '0');
-  const suffix = crypto.randomInt(1000, 10000);
-  return `MRN-${yyyy}${mm}${dd}-${suffix}`;
+  const stableSuffix = patientId
+    .replace(/^pat_/, '')
+    .replace(/-/g, '')
+    .slice(0, 10)
+    .toUpperCase();
+  return `MRN-${yyyy}${mm}${dd}-${stableSuffix}`;
 }
 
 function generateTokenNumber(): string {
@@ -149,6 +161,12 @@ export async function registerPatientAndEncounter(
   if (!db) throw new Error('TRANSACTION_STORE_UNAVAILABLE: Firebase Admin Firestore is required.');
 
   const tenantId = params.tenantId.trim().toLowerCase();
+  if (params.identifiers?.some((identifier) => identifier.type === 'MRN')) {
+    throw new Error(
+      'PATIENT_MRN_SERVER_OWNED: institutional MRN is generated once by G-HIMS and cannot be supplied by the client.'
+    );
+  }
+
   const requestPayload = registrationPayload(params);
   const requestHash = IdempotencyService.computeHash(REGISTRATION_COMMAND_TYPE, requestPayload);
 
@@ -173,7 +191,7 @@ export async function registerPatientAndEncounter(
   const now = Date.now();
   const patientId = params.patientId || `pat_${crypto.randomUUID()}`;
   const encounterId = `enc_${crypto.randomUUID()}`;
-  const mrn = generateMRN();
+  const mrn = generateMRN(patientId);
   const tokenNumber = generateTokenNumber();
   const correlationId = `corr_${crypto.randomUUID()}`;
   const canonicalEventId = `evt_${crypto.randomUUID()}`;
@@ -223,7 +241,14 @@ export async function registerPatientAndEncounter(
     fullName: params.fullName,
     gender: params.gender,
     dateOfBirth: params.dateOfBirth,
-    identifiers: params.identifiers || [],
+    identifiers: [
+      ...(params.identifiers || []),
+      {
+        type: 'MRN',
+        value: mrn,
+        issuer: 'G-HIMS',
+      },
+    ],
     contactPhone: params.contactPhone,
     address: params.address,
     bloodGroup: params.bloodGroup || 'Unknown',
@@ -450,15 +475,28 @@ export async function registerPatientAndEncounter(
       .collection('idempotency')
       .doc(IdempotencyService.getDocumentId(params.idempotencyKey));
 
-    const primaryId = params.identifiers?.find((identifier) => identifier.type === 'CNIC') || params.identifiers?.[0];
-    const mpiKey = primaryId?.value
-      ? `${primaryId.type}_${primaryId.value}`.replace(/[^a-zA-Z0-9_]/g, '_')
-      : null;
-    const mpiRef = mpiKey ? db.doc(mpiRegistryDocPath(tenantId, mpiKey)) : null;
+    const cnic = params.identifiers?.find(
+      (identifier) => identifier.type === 'CNIC' && identifier.value.trim()
+    );
+    const identityRegistryEntries = [
+      ...(cnic
+        ? [{ type: 'CNIC' as const, value: cnic.value }]
+        : []),
+      { type: 'MRN' as const, value: mrn },
+    ].map((identifier) => {
+      const mpiKey = mpiLookupKey(identifier.type, identifier.value);
+      return {
+        ...identifier,
+        mpiKey,
+        ref: db.doc(mpiRegistryDocPath(tenantId, mpiKey)),
+      };
+    });
 
     // Firestore requires transaction reads before writes.
     const idempotencySnapshot = await transaction.get(idempotencyRef);
-    const mpiSnapshot = mpiRef ? await transaction.get(mpiRef) : null;
+    const mpiSnapshots = await Promise.all(
+      identityRegistryEntries.map((entry) => transaction.get(entry.ref))
+    );
 
     if (!idempotencySnapshot.exists) {
       throw new Error('IDEMPOTENCY_RESERVATION_MISSING');
@@ -480,8 +518,13 @@ export async function registerPatientAndEncounter(
       throw new Error('IDEMPOTENCY_RESERVATION_INVALID');
     }
 
-    if (mpiSnapshot?.exists) {
-      throw new Error('MPI_IDENTITY_CONFLICT: primary patient identifier already exists.');
+    const conflictingIdentity = identityRegistryEntries.find(
+      (_, index) => mpiSnapshots[index]?.exists
+    );
+    if (conflictingIdentity) {
+      throw new Error(
+        `MPI_IDENTITY_CONFLICT:${conflictingIdentity.type}: patient identifier already exists.`
+      );
     }
 
     transaction.create(patientRef, sanitizeForFirestore(patientRecord));
@@ -497,15 +540,20 @@ export async function registerPatientAndEncounter(
       transaction.create(item.ref, sanitizeForFirestore(item.record));
     }
 
-    if (mpiRef && mpiKey) {
-      transaction.create(mpiRef, sanitizeForFirestore({
-        mpiKey,
-        patientId,
-        mrn,
-        fullName: params.fullName,
-        dateOfBirth: params.dateOfBirth,
-        createdAt: new Date(now).toISOString(),
-      }));
+    for (const identity of identityRegistryEntries) {
+      transaction.create(
+        identity.ref,
+        sanitizeForFirestore({
+          mpiKey: identity.mpiKey,
+          identifierType: identity.type,
+          identifierValue: identity.value,
+          patientId,
+          mrn,
+          fullName: params.fullName,
+          dateOfBirth: params.dateOfBirth,
+          createdAt: new Date(now).toISOString(),
+        })
+      );
     }
 
     transaction.set(idempotencyRef, sanitizeForFirestore({

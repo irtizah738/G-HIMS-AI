@@ -329,6 +329,9 @@ export function DiseaseCentricIntakeView() {
   const activeEncounterId =
     selectedPatient?.activeEncounterId ||
     selectedPatient?.encounters.find((encounter) => encounter.status === 'active')?.id;
+  const activeEncounter = selectedPatient?.encounters.find(
+    (encounter) => encounter.id === activeEncounterId
+  );
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
@@ -1487,6 +1490,24 @@ export function DiseaseCentricIntakeView() {
             </div>
           </div>
         </div>
+      )}
+
+      {selectedPatient && (
+        <PatientConsultantRoutingModal
+          isOpen={showRoutingModal}
+          onClose={() => setShowRoutingModal(false)}
+          patientId={selectedPatient.id}
+          encounterId={activeEncounterId}
+          patientName={selectedPatient.fullName}
+          mrn={selectedPatient.mrn}
+          chiefComplaint={
+            activeEncounter?.chiefComplaint ||
+            `${currentTemplate.name} specialist review requested`
+          }
+          triageCategory={`${currentTemplate.specialty} / ${maxRiskSeverity}`}
+          currentAttending={activeEncounter?.attendingPhysician || 'Unassigned'}
+          onRoutedSuccess={() => setShowRoutingModal(false)}
+        />
       )}
     </div>
   );

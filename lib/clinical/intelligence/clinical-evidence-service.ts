@@ -507,14 +507,14 @@ export class ClinicalEvidenceService {
     purpose: ClinicalIntelligencePurpose,
     options: { encounterId?: string; careSetting?: ClinicalCareSetting } = {}
   ): Promise<ClinicalEvidenceSnapshot> {
-    const [projection, events] = await Promise.all([
-      Patient360ProjectionService.getProjection(context.tenantId, patientId),
+    const [{ projection }, events] = await Promise.all([
+      Patient360ProjectionService.readOrRebuildClinicalView(
+        context.tenantId,
+        patientId
+      ),
       Patient360ProjectionService.loadPatientEvents(context.tenantId, patientId),
     ]);
 
-    if (!projection) {
-      throw new Error('CI10_PATIENT360_PROJECTION_NOT_READY');
-    }
     if (
       projection.tenantId !== context.tenantId ||
       projection.patientId !== patientId

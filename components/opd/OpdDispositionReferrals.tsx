@@ -131,7 +131,6 @@ export function OpdDispositionReferrals({
               clinicalIndication: admissionReason,
             }
           : undefined,
-      completedAt: Date.now(),
     };
 
     setSubmitting(true);

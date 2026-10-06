@@ -11,6 +11,7 @@ import type {
   DiagnosticReport,
   MedicationOrder,
 } from '@/types/clinical-canonical';
+import type { DiseaseIntakeArtifact } from '@/types/disease-intake-artifact';
 import type { DomainEventEnvelope } from '@/lib/backend/types';
 import type {
   Patient360Projection,
@@ -396,6 +397,7 @@ export class Patient360ProjectionService {
       observations,
       diagnosticReports,
       documents,
+      diseaseIntakeArtifacts,
       events,
       knowledgeStatus,
     ] = await Promise.all([
@@ -434,6 +436,11 @@ export class Patient360ProjectionService {
         patientId,
         1000
       ),
+      queryByPatient<DiseaseIntakeArtifact>(
+        tenantRef.collection('diseaseIntakeArtifacts'),
+        patientId,
+        1000
+      ),
       this.loadPatientEvents(tenantId, patientId),
       PatientClinicalKnowledgeDomainService.getAggregate(tenantId, patientId),
     ]);
@@ -452,6 +459,7 @@ export class Patient360ProjectionService {
       observations,
       diagnosticReports,
       documents,
+      diseaseIntakeArtifacts,
       events,
       knowledgeStatus,
     };

@@ -306,23 +306,10 @@ export function PatientConsultantRoutingModal({
   const [selectedDoctorId, setSelectedDoctorId] = useState<string>(() =>
     IS_DEMO_RUNTIME ? 'doc-card-01' : ''
   );
-  const [routingUrgency, setRoutingUrgency] = useState<'STAT' | 'URGENT' | 'PRIORITY' | 'ROUTINE'>('STAT');
-  const [assignedRoom, setAssignedRoom] = useState<string>(() =>
-    IS_DEMO_RUNTIME ? 'Cath Lab Suite 01 (Direct Stage)' : ''
-  );
-  const [clinicalHandoffNote, setClinicalHandoffNote] = useState<string>(
-    'Patient presenting with crushing retrosternal pain. 12-lead ECG telemetry demonstrates acute anterolateral ST-elevation. Code STEMI activated. Expedited specialist bedside evaluation requested.'
-  );
-
-  // Pre-Consult Diagnostics to auto-queue
-  const [preOrders, setPreOrders] = useState<{ [key: string]: boolean }>({
-    ecg12: true,
-    troponin: true,
-    cbc_cmp: true,
-    portable_cxr: true,
-    blood_gas: false,
-    ct_scan: false,
-  });
+  const [routingUrgency, setRoutingUrgency] =
+    useState<'STAT' | 'URGENT' | 'PRIORITY' | 'ROUTINE'>('ROUTINE');
+  const [assignedRoom, setAssignedRoom] = useState<string>('');
+  const [clinicalHandoffNote, setClinicalHandoffNote] = useState<string>('');
 
   const [isDispatching, setIsDispatching] = useState<boolean>(false);
   const [dispatchedConfirmation, setDispatchedConfirmation] = useState<any | null>(null);
@@ -365,7 +352,7 @@ export function PatientConsultantRoutingModal({
         }));
         setConsultants(mapped);
         setSelectedDoctorId((current) =>
-          mapped.some((item) => item.id === current) ? current : mapped[0]?.id || ''
+          mapped.some((item) => item.id === current) ? current : ''
         );
       })
       .catch((error) => {
@@ -455,62 +442,32 @@ export function PatientConsultantRoutingModal({
 
   const aiMatchId = getAiRecommendedDoctorId();
 
-  const filteredDoctors = consultants.filter((doc) => {
-    let matchesDept = false;
-    if (selectedDepartment === 'ALL') {
-      matchesDept = true;
-    } else if (selectedDepartment === 'OB/GYN') {
-      matchesDept =
-        doc.department.toLowerCase().includes('ob/gyn') ||
-        doc.department.toLowerCase().includes('obstetric') ||
-        doc.department.toLowerCase().includes('gynec') ||
-        doc.department.toLowerCase().includes('women') ||
-        doc.title.toLowerCase().includes('obstetric') ||
-        doc.title.toLowerCase().includes('gynec') ||
-        doc.subSpecialty.toLowerCase().includes('pregnancy') ||
-        doc.subSpecialty.toLowerCase().includes('labor');
-    } else if (selectedDepartment === 'Endo') {
-      matchesDept =
-        doc.department.toLowerCase().includes('endo') ||
-        doc.subSpecialty.toLowerCase().includes('endo') ||
-        doc.title.toLowerCase().includes('endo');
-    } else if (selectedDepartment === 'Ortho') {
-      matchesDept =
-        doc.department.toLowerCase().includes('ortho') ||
-        doc.subSpecialty.toLowerCase().includes('ortho') ||
-        doc.title.toLowerCase().includes('ortho');
-    } else if (selectedDepartment === 'Neuro') {
-      matchesDept =
-        doc.department.toLowerCase().includes('neuro') ||
-        doc.subSpecialty.toLowerCase().includes('neuro') ||
-        doc.title.toLowerCase().includes('neuro');
-    } else if (selectedDepartment === 'Gastro') {
-      matchesDept =
-        doc.department.toLowerCase().includes('gastro') ||
-        doc.subSpecialty.toLowerCase().includes('gastro') ||
-        doc.title.toLowerCase().includes('gastro');
-    } else if (selectedDepartment === 'Cardiovascular') {
-      matchesDept =
-        doc.department.toLowerCase().includes('cardio') ||
-        doc.subSpecialty.toLowerCase().includes('heart') ||
-        doc.title.toLowerCase().includes('cardio');
-    } else {
-      matchesDept =
-        doc.department.toLowerCase().includes(selectedDepartment.toLowerCase()) ||
-        doc.subSpecialty.toLowerCase().includes(selectedDepartment.toLowerCase()) ||
-        doc.title.toLowerCase().includes(selectedDepartment.toLowerCase());
-    }
+  const departmentOptions = [
+    'ALL',
+    ...Array.from(
+      new Set(
+        consultants
+          .map((doctor) => doctor.department.trim())
+          .filter(Boolean)
+      )
+    ).sort(),
+  ];
 
-    const q = searchQuery.toLowerCase();
+  const filteredDoctors = consultants.filter((doc) => {
+    const matchesDept =
+      selectedDepartment === 'ALL' || doc.department === selectedDepartment;
+    const q = searchQuery.trim().toLowerCase();
     const matchesSearch =
+      !q ||
       doc.name.toLowerCase().includes(q) ||
       doc.subSpecialty.toLowerCase().includes(q) ||
       doc.department.toLowerCase().includes(q) ||
-      doc.title.toLowerCase().includes(q);
+      doc.title.toLowerCase().includes(q) ||
+      doc.qualifications.toLowerCase().includes(q);
     return matchesDept && matchesSearch;
   });
 
-  const selectedDoctor = consultants.find((d) => d.id === selectedDoctorId) || consultants[0];
+  const selectedDoctor = consultants.find((d) => d.id === selectedDoctorId);
 
   const handleDispatchConsultant = async () => {
     if (!selectedDoctor) {
@@ -531,13 +488,12 @@ export function PatientConsultantRoutingModal({
       handoffNote: clinicalHandoffNote,
       slaMinutes:
         routingUrgency === 'STAT'
-          ? 15
-          : routingUrgency === 'URGENT' || routingUrgency === 'PRIORITY'
-            ? 240
-            : undefined,
-      queuedDiagnostics: Object.entries(preOrders)
-        .filter(([_, val]) => val)
-        .map(([key]) => key),
+          ? 10
+          : routingUrgency === 'URGENT'
+            ? 30
+            : routingUrgency === 'PRIORITY'
+              ? 60
+              : undefined,
     };
 
     try {
@@ -598,11 +554,11 @@ export function PatientConsultantRoutingModal({
               <div className="flex items-center gap-2">
                 <h2 className="text-base font-extrabold tracking-tight">Patient Specialist Routing Engine</h2>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-blue-500/30 text-blue-300 border border-blue-400/30">
-                  G-HIMS INTELLIGENT DISPATCH
+                  CLINICAL CONSULTATION ROUTING
                 </span>
               </div>
               <p className="text-xs text-slate-300">
-                Match patient clinical trajectory to active attending sub-specialists with real-time SLA pacing
+                Route a governed consultation to an HCM-credentialed clinician with explicit urgency and handoff context
               </p>
             </div>
           </div>
@@ -720,22 +676,18 @@ export function PatientConsultantRoutingModal({
                   Select Attending Consultant
                 </h3>
 
-                {/* Filter Department Pills */}
-                <div className="flex items-center gap-1 overflow-x-auto text-[11px] pb-1">
-                  {['ALL', 'Cardiovascular', 'Neuro', 'Ortho', 'Endo', 'OB/GYN', 'Oncology', 'Pediatrics', 'Gastro', 'Radiology', 'Anesthesia', 'Critical Care'].map((dept) => (
-                    <button
-                      key={dept}
-                      onClick={() => setSelectedDepartment(dept)}
-                      className={`px-2.5 py-1 rounded-lg font-bold transition-all whitespace-nowrap cursor-pointer ${
-                        selectedDepartment === dept
-                          ? 'bg-blue-600 text-white shadow-xs'
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      }`}
-                    >
-                      {dept}
-                    </button>
+                <select
+                  value={selectedDepartment}
+                  onChange={(event) => setSelectedDepartment(event.target.value)}
+                  className="min-w-52 px-3 py-2 text-[11px] font-bold rounded-lg border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  aria-label="Filter consultants by department"
+                >
+                  {departmentOptions.map((department) => (
+                    <option key={department} value={department}>
+                      {department === 'ALL' ? 'All departments' : department}
+                    </option>
                   ))}
-                </div>
+                </select>
               </div>
 
               {/* Search Bar */}
@@ -752,6 +704,27 @@ export function PatientConsultantRoutingModal({
 
               {/* Doctors Roster List */}
               <div className="space-y-2.5 max-h-[340px] overflow-y-auto pr-1">
+                {filteredDoctors.length === 0 && (
+                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-center">
+                    <UserCheck className="mx-auto h-7 w-7 text-slate-300" />
+                    <p className="mt-2 text-xs font-bold text-slate-700">
+                      No eligible consultants match this filter.
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      Check the HCM roster, credentials and active clinical privileges, or clear the department/search filter.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedDepartment('ALL');
+                        setSearchQuery('');
+                      }}
+                      className="mt-3 text-[11px] font-bold text-blue-600 hover:underline"
+                    >
+                      Clear filters
+                    </button>
+                  </div>
+                )}
                 {filteredDoctors.map((doc) => {
                   const isAiMatch = doc.id === aiMatchId;
                   const isSelected = doc.id === selectedDoctorId;
@@ -894,75 +867,29 @@ export function PatientConsultantRoutingModal({
                   </div>
                 </div>
 
-                {/* Staging Destination Room */}
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                    Destination Suite / Staging Bay
-                  </label>
-                  <input
-                    type="text"
-                    value={assignedRoom}
-                    onChange={(e) => setAssignedRoom(e.target.value)}
-                    className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-300 bg-white font-medium focus:ring-2 focus:ring-blue-500/20"
-                  />
-                </div>
-
-                {/* Pre-Consult Diagnostics Checklist */}
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                    Pre-Arrival Stat Diagnostics (Auto-Dispatched)
-                  </label>
-                  <div className="grid grid-cols-2 gap-1.5 text-[11px] bg-white p-2 rounded-lg border border-slate-200">
-                    <label className="flex items-center gap-1.5 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={preOrders.ecg12}
-                        onChange={(e) => setPreOrders({ ...preOrders, ecg12: e.target.checked })}
-                        className="rounded text-blue-600"
-                      />
-                      <span>12-Lead ECG (Stat)</span>
-                    </label>
-                    <label className="flex items-center gap-1.5 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={preOrders.troponin}
-                        onChange={(e) => setPreOrders({ ...preOrders, troponin: e.target.checked })}
-                        className="rounded text-blue-600"
-                      />
-                      <span>HS-Troponin I</span>
-                    </label>
-                    <label className="flex items-center gap-1.5 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={preOrders.cbc_cmp}
-                        onChange={(e) => setPreOrders({ ...preOrders, cbc_cmp: e.target.checked })}
-                        className="rounded text-blue-600"
-                      />
-                      <span>CBC + CMP Panel</span>
-                    </label>
-                    <label className="flex items-center gap-1.5 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={preOrders.portable_cxr}
-                        onChange={(e) => setPreOrders({ ...preOrders, portable_cxr: e.target.checked })}
-                        className="rounded text-blue-600"
-                      />
-                      <span>Portable Chest X-Ray</span>
-                    </label>
-                  </div>
+                <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    Selected consultant location
+                  </span>
+                  <span className="mt-1 block text-xs font-semibold text-slate-800">
+                    {selectedDoctor?.assignedBayOrRoom || 'Select a consultant to view location'}
+                  </span>
+                  <p className="mt-1 text-[10px] text-slate-500">
+                    Routing creates a consultation request only. Diagnostic orders must be placed through the governed ordering workflow.
+                  </p>
                 </div>
 
                 {/* Clinical Handoff SBAR Summary */}
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                    SBAR Clinical Handoff Summary
+                    Clinical question / handoff context
                   </label>
                   <textarea
                     rows={3}
                     value={clinicalHandoffNote}
                     onChange={(e) => setClinicalHandoffNote(e.target.value)}
                     className="w-full p-2 text-xs rounded-lg border border-slate-300 bg-white focus:ring-2 focus:ring-blue-500/20"
-                    placeholder="Brief handoff narrative for specialist review..."
+                    placeholder={`Why is specialist review needed? Current complaint: ${chiefComplaint || 'not documented'}`}
                   />
                 </div>
               </div>
@@ -978,7 +905,7 @@ export function PatientConsultantRoutingModal({
                 </button>
                 <button
                   type="button"
-                  disabled={isDispatching || !selectedDoctor}
+                  disabled={isDispatching || !selectedDoctor || !clinicalHandoffNote.trim()}
                   onClick={handleDispatchConsultant}
                   className="w-2/3 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 shadow-md transition-all cursor-pointer active:scale-95 disabled:opacity-50"
                 >
@@ -987,7 +914,13 @@ export function PatientConsultantRoutingModal({
                   ) : (
                     <>
                       <Send className="w-3.5 h-3.5" />
-                      <span>{selectedDoctor ? `Request consultation from ${selectedDoctor.name.split(',')[0]}` : 'Select an eligible consultant'}</span>
+                      <span>
+                        {!selectedDoctor
+                          ? 'Select an eligible consultant'
+                          : !clinicalHandoffNote.trim()
+                            ? 'Add the clinical question'
+                            : `Request consultation from ${selectedDoctor.name.split(',')[0]}`}
+                      </span>
                     </>
                   )}
                 </button>

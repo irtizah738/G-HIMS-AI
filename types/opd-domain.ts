@@ -763,6 +763,8 @@ export interface ComprehensiveOpdEncounter {
   chiefComplaint?: string;
   encounterType: 'OPD' | 'EMERGENCY' | 'TELEHEALTH' | 'DAY_CARE' | 'OPD_SPECIALIST' | string;
   currentStage: ExtendedOpdStageId | string;
+  offlineStagePendingSync?: boolean;
+  offlinePendingTargetStage?: string;
   department?: SpecialtyDepartment | string;
   attendingDoctorId?: string;
   attendingDoctorName?: string;

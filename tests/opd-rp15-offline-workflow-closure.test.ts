@@ -214,6 +214,16 @@ describe('OPD-RP15 offline workflow closure', () => {
     );
 
     expect(encounter).toContain("entityType: 'OPD_REFERRAL'");
+    const createEncounterBlock = encounter.slice(
+      encounter.indexOf('public static async createEncounter'),
+      encounter.indexOf('public static async createOpdEncounter')
+    );
+    expect(createEncounterBlock).not.toContain('referralState && referralId');
+    const dispositionBlock = encounter.slice(
+      encounter.indexOf('public static async commitDisposition'),
+      encounter.indexOf('public static async advanceStage')
+    );
+    expect(dispositionBlock).toContain('referralState && referralId');
     expect(encounter).toContain("status: 'PENDING'");
     expect(encounter).toContain('createdBy: context.actorId');
     expect(encounter).toContain('createdAt: now');

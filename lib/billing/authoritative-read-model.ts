@@ -182,16 +182,21 @@ export function adaptAuthoritativeInvoice(
     return minor === null ? Number.NaN : sum + minor;
   }, 0);
 
+  if (
+    patientDueMinor === null ||
+    paidMinor === null ||
+    balanceMinor === null ||
+    !Number.isSafeInteger(itemPatientMinor)
+  ) {
+    return null;
+  }
+
   const paymentEquationValid =
     paymentStatus === 'waived'
       ? balanceMinor === 0 && paidMinor <= patientDueMinor
       : paidMinor + balanceMinor === patientDueMinor;
 
   if (
-    patientDueMinor === null ||
-    paidMinor === null ||
-    balanceMinor === null ||
-    !Number.isSafeInteger(itemPatientMinor) ||
     !paymentEquationValid ||
     itemPatientMinor !== patientDueMinor
   ) {

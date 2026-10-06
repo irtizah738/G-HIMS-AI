@@ -62,6 +62,26 @@ service cloud.firestore {
       ]);
     }
 
+    function canReadOpdScheduling(tenantId) {
+      return hasAnyRole(tenantId, [
+        'administrator',
+        'receptionist',
+        'registrar',
+        'call_center',
+        'doctor',
+        'consultant',
+        'nurse',
+        'SYSTEM_ADMIN',
+        'ADMINISTRATOR',
+        'RECEPTIONIST',
+        'REGISTRAR',
+        'CALL_CENTER',
+        'DOCTOR',
+        'CONSULTANT',
+        'NURSE'
+      ]);
+    }
+
     function canReadFinance(tenantId) {
       return hasAnyRole(tenantId, [
         'administrator',
@@ -247,6 +267,21 @@ service cloud.firestore {
       match /opd_queue/{tokenId} {
         allow read: if canReadClinical(tenantId);
         allow write: if false;
+      }
+
+      // OPD scheduling read models are client-readable only to scheduling/
+      // clinical roles. Slot locks are concurrency-control internals and never
+      // exposed directly; all scheduling mutations execute through commands.
+      match /opdAppointments/{appointmentId} {
+        allow read: if canReadOpdScheduling(tenantId);
+        allow write: if false;
+      }
+      match /opdWaitlist/{waitlistId} {
+        allow read: if canReadOpdScheduling(tenantId);
+        allow write: if false;
+      }
+      match /opdAppointmentSlots/{slotId} {
+        allow read, write: if false;
       }
 
       match /diagnostic_orders/{orderId} {

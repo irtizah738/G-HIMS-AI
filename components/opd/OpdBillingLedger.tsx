@@ -252,6 +252,7 @@ export function OpdBillingLedger({
                 Amount to Collect ({currency})
               </label>
               <input
+                data-testid="opd-billing-amount"
                 type="number"
                 min={0.01}
                 max={balanceDue}
@@ -288,6 +289,7 @@ export function OpdBillingLedger({
             </div>
 
             <button
+              data-testid="opd-billing-collect"
               type="submit"
               disabled={!canSettlePayment || Boolean(pendingOfflineReceipt)}
               className="w-full py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"

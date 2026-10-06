@@ -81,7 +81,7 @@ export async function GET(req: NextRequest) {
     };
     const message =
       candidate?.message || 'Unable to resolve OPD provider availability.';
-    const unauthorized = /AUTH|ROLE|TENANT|SESSION|ACCOUNT/i.test(
+    const unauthorized = /AUTH|ROLE|TENANT|SESSION|ACCOUNT|SCOPE/i.test(
       `${candidate?.code || ''} ${message}`
     );
 

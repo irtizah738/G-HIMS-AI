@@ -131,13 +131,15 @@ export function PatientMpiView() {
     return pairs;
   }, [scopedPatients]);
 
+  const normalizeLookup = (value: string) =>
+    String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
   const filteredPatients = scopedPatients.filter((p) => {
-    const q = searchFilter.toLowerCase();
+    if (!searchFilter.trim()) return true;
+    const q = normalizeLookup(searchFilter);
     return (
-      p.fullName.toLowerCase().includes(q) ||
-      p.mrn.toLowerCase().includes(q) ||
-      p.contactNumber.includes(q) ||
-      p.bloodGroup.toLowerCase().includes(q)
+      normalizeLookup(p.mrn).includes(q) ||
+      normalizeLookup(p.cnic || '').includes(q)
     );
   });
 
@@ -452,7 +454,7 @@ export function PatientMpiView() {
             <input
               id="input-mpi-search"
               type="text"
-              placeholder="Search by Name, MRN, or Phone..."
+              placeholder="Search by institutional MRN or CNIC..."
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
               className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500"

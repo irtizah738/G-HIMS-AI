@@ -5,6 +5,8 @@ import {
   getConsultationSla,
   getConsultationSlaState,
 } from '@/lib/clinical/coordination/consultation-sla';
+import { INTAKE_TEMPLATES } from '@/lib/clinical/intake-templates-data';
+import { computeGovernedDiseaseIntakeRisk } from '@/lib/clinical/disease-intake/governed-risk-engine';
 
 const source = (file: string) =>
   readFile(path.join(process.cwd(), file), 'utf8');
@@ -118,4 +120,56 @@ describe('Wave 1 clinical coordination closure', () => {
     expect(intake).toContain("'DISEASE_INTAKE'");
     expect(intake).toContain('Finalize Intake First');
   });
+  test('disease intake risk is recomputed from the governed server template', async () => {
+    const cardiac = INTAKE_TEMPLATES.find((template) => template.id === 'cardiac');
+    expect(cardiac).toBeDefined();
+
+    const risk = computeGovernedDiseaseIntakeRisk(
+      cardiac!,
+      {
+        chest_pain_severity: 8,
+        symptom_onset_duration: 'under_2h',
+        ecg_telemetry_findings: 'stemi_elevation',
+      },
+      {},
+      ['cardiac_root', 'cardiac_crushing']
+    );
+
+    expect(risk.severity).toBe('CRITICAL');
+    expect(risk.signalIds).toContain('signal_code_stemi');
+
+    const service = await source(
+      'lib/backend/services/disease-intake-domain-service.ts'
+    );
+    expect(service).toContain('computeGovernedDiseaseIntakeRisk');
+    expect(service).toContain('DISEASE_INTAKE_UNGOVERNED_FIELD');
+    expect(service).toContain('DISEASE_INTAKE_INCOMPLETE');
+    expect(service).toContain('DISEASE_INTAKE_TEMPLATE_PROVENANCE_MISMATCH');
+    expect(service).not.toContain('score: payload.observedRiskScore');
+  });
+
+  test('partial specialist routing resumes the missing handoff without duplicating the consultation', async () => {
+    const routing = await source(
+      'components/clinical/patient-consultant-routing-modal.tsx'
+    );
+    const center = await source(
+      'components/clinical/ConsultantCommandCenter.tsx'
+    );
+
+    expect(routing).toContain('pendingHandoff');
+    expect(routing).toContain('canResumePendingHandoff');
+    expect(routing).toContain('remains authoritative, but its clinical handoff is incomplete');
+    expect(center).toContain('acknowledgeClinicalConsultation');
+    expect(center).toContain("item.slaPhase === 'ACKNOWLEDGEMENT'");
+    expect(center).toContain("item.slaPhase === 'ACCEPTANCE'");
+  });
+
+  test('disease intake aggregate is server-only in Firestore', async () => {
+    const rules = await source('firestore.rules');
+    const marker = 'match /diseaseIntakeArtifacts/{intakeArtifactId}';
+    const index = rules.indexOf(marker);
+    expect(index).toBeGreaterThan(-1);
+    expect(rules.slice(index, index + 160)).toContain('allow read, write: if false');
+  });
+
 });

@@ -23,9 +23,14 @@ import {
   ExternalReferral,
 } from '@/types/opd-domain';
 
+const IS_DEMO_RUNTIME =
+  process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
+
 interface OpdDispositionReferralsProps {
   encounter: ComprehensiveOpdEncounter;
-  onCommitDisposition: (disposition: EncounterDisposition) => void;
+  onCommitDisposition: (
+    disposition: EncounterDisposition
+  ) => Promise<void> | void;
 }
 
 export function OpdDispositionReferrals({
@@ -34,42 +39,58 @@ export function OpdDispositionReferrals({
 }: OpdDispositionReferralsProps) {
   const [dispositionType, setDispositionType] = useState<OpdDispositionType>('DISCHARGED_HOME');
   const [dischargeInstructions, setDischargeInstructions] = useState<string>(
-    '1. Continue prescribed medications as directed. 2. Maintain low-sodium diet (<2g/day). 3. Restrict heavy physical exertion. 4. Daily morning weight monitoring.'
+    IS_DEMO_RUNTIME
+      ? 'Continue prescribed medications as directed and follow the documented care plan.'
+      : ''
   );
   const [warningSigns, setWarningSigns] = useState<string>(
-    'Seek immediate Emergency Room care if you experience: Sudden acute chest pressure radiating to left arm/jaw, severe shortness of breath at rest, fainting (syncope), or blue discoloration of lips.'
+    IS_DEMO_RUNTIME
+      ? 'Seek urgent care for new severe symptoms or clinical deterioration.'
+      : ''
   );
 
   // Follow-up
   const [followUpDate, setFollowUpDate] = useState<string>(
-    new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().slice(0, 10)
+    IS_DEMO_RUNTIME
+      ? new Date(Date.now() + 7 * 24 * 3600 * 1000)
+          .toISOString()
+          .slice(0, 10)
+      : ''
   );
-  const [followUpDept, setFollowUpDept] = useState<string>(encounter.department || 'Cardiology');
-  const [followUpReason, setFollowUpReason] = useState<string>('Clinical review of therapy response & repeat serum RFT/BNP');
+  const [followUpDept, setFollowUpDept] = useState<string>(
+    encounter.department || ''
+  );
+  const [followUpReason, setFollowUpReason] = useState<string>(
+    IS_DEMO_RUNTIME ? 'Clinical review' : ''
+  );
 
   // Internal Referral
-  const [internalTargetDept, setInternalTargetDept] = useState<string>('Cardiology');
-  const [internalTargetDoc, setInternalTargetDoc] = useState<string>('Dr. Sarah Jenkins');
-  const [internalPriority, setInternalPriority] = useState<'ROUTINE' | 'URGENT' | 'STAT'>('URGENT');
-  const [internalReason, setInternalReason] = useState<string>('Detailed Transthoracic Echocardiogram and 24h Holter assessment');
+  const [internalTargetDept, setInternalTargetDept] = useState<string>(
+    IS_DEMO_RUNTIME ? 'Cardiology' : ''
+  );
+  const [internalTargetDoc, setInternalTargetDoc] = useState<string>('');
+  const [internalPriority, setInternalPriority] =
+    useState<'ROUTINE' | 'URGENT' | 'STAT'>('ROUTINE');
+  const [internalReason, setInternalReason] = useState<string>('');
 
   // External Referral / SBAR
-  const [extHospital, setExtHospital] = useState<string>('Armed Forces Institute of Cardiology (AFIC / NIHD)');
-  const [extPhysician, setExtPhysician] = useState<string>('Consultant Electrophysiologist');
-  const [sbarSituation, setSbarSituation] = useState<string>('36yo female with NYHA Class II Heart Failure for advanced cardiac imaging.');
-  const [sbarBackground, setSbarBackground] = useState<string>('Essential hypertension for 4 years. On ARB therapy. Baseline ECG completed.');
-  const [sbarAssessment, setSbarAssessment] = useState<string>('Decompensated heart failure responsive to initial loop diuretic.');
-  const [sbarRecommendation, setSbarRecommendation] = useState<string>('Evaluate for cardiac MRI / Coronary Angiography.');
+  const [extHospital, setExtHospital] = useState<string>('');
+  const [extPhysician, setExtPhysician] = useState<string>('');
+  const [sbarSituation, setSbarSituation] = useState<string>('');
+  const [sbarBackground, setSbarBackground] = useState<string>('');
+  const [sbarAssessment, setSbarAssessment] = useState<string>('');
+  const [sbarRecommendation, setSbarRecommendation] = useState<string>('');
 
   // Inpatient Admission
-  const [admissionWard, setAdmissionWard] = useState<string>('General Medical Inpatient Ward (Ward 4B)');
   const [admissionBedId, setAdmissionBedId] = useState<string>('');
-  const [admissionReason, setAdmissionReason] = useState<string>('IV Inotropic titration & close hemodynamic monitoring');
+  const [admissionReason, setAdmissionReason] = useState<string>('');
 
-  const [signingDoctor, setSigningDoctor] = useState<string>('Dr. Sarah Jenkins (Cardiology Specialist)');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
 
     let internalRef: InternalReferral | undefined;
     if (dispositionType === 'INTERNAL_REFERRAL') {
@@ -110,17 +131,26 @@ export function OpdDispositionReferrals({
       inpatientAdmissionRequest:
         dispositionType === 'INPATIENT_ADMISSION_RECOMMENDED'
           ? {
-              targetWard: admissionWard,
               targetBedId: admissionBedId.trim() || undefined,
               clinicalIndication: admissionReason,
               admittingService: 'Cardiology Services',
             }
           : undefined,
       completedAt: Date.now(),
-      completedBy: signingDoctor,
     };
 
-    onCommitDisposition(disposition);
+    setSubmitting(true);
+    try {
+      await onCommitDisposition(disposition);
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : 'Encounter disposition could not be committed.'
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -187,16 +217,13 @@ export function OpdDispositionReferrals({
               </div>
               <div>
                 <label className="block text-[11px] font-semibold mb-1">Department / Clinic</label>
-                <select
+                <input
+                  type="text"
                   value={followUpDept}
                   onChange={(e) => setFollowUpDept(e.target.value)}
                   className="w-full px-3 py-1.5 text-xs rounded-lg border border-blue-200 dark:border-blue-700 bg-white dark:bg-slate-900"
-                >
-                  <option value="Cardiology">Cardiology</option>
-                  <option value="General Medicine">General Medicine</option>
-                  <option value="Pediatrics">Pediatrics</option>
-                  <option value="Orthopedics">Orthopedics</option>
-                </select>
+                  placeholder="Receiving clinic / department"
+                />
               </div>
               <div>
                 <label className="block text-[11px] font-semibold mb-1">Visit Goal / Reason</label>
@@ -335,15 +362,6 @@ export function OpdDispositionReferrals({
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-[11px] font-semibold mb-1">Target Inpatient Ward</label>
-                <input
-                  type="text"
-                  value={admissionWard}
-                  onChange={(e) => setAdmissionWard(e.target.value)}
-                  className="w-full px-3 py-1.5 text-xs rounded-lg border border-amber-200 dark:border-amber-700 bg-white dark:bg-slate-900"
-                />
-              </div>
-              <div>
                 <label className="block text-[11px] font-semibold mb-1">Target Bed ID *</label>
                 <input
                   type="text"
@@ -361,6 +379,7 @@ export function OpdDispositionReferrals({
                 <label className="block text-[11px] font-semibold mb-1">Admission Clinical Indication</label>
                 <input
                   type="text"
+                  required={dispositionType === 'INPATIENT_ADMISSION_RECOMMENDED'}
                   value={admissionReason}
                   onChange={(e) => setAdmissionReason(e.target.value)}
                   className="w-full px-3 py-1.5 text-xs rounded-lg border border-amber-200 dark:border-amber-700 bg-white dark:bg-slate-900"
@@ -378,6 +397,7 @@ export function OpdDispositionReferrals({
             </label>
             <textarea
               rows={3}
+              required
               value={dischargeInstructions}
               onChange={(e) => setDischargeInstructions(e.target.value)}
               className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
@@ -390,6 +410,7 @@ export function OpdDispositionReferrals({
             </label>
             <textarea
               rows={3}
+              required
               value={warningSigns}
               onChange={(e) => setWarningSigns(e.target.value)}
               className="w-full px-3.5 py-2 text-xs rounded-xl border border-red-200 dark:border-red-800/60 bg-red-50/40 dark:bg-red-950/20 text-red-900 dark:text-red-200"
@@ -397,27 +418,22 @@ export function OpdDispositionReferrals({
           </div>
         </div>
 
-        {/* Doctor Digital Signature */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-100 dark:border-slate-800">
-          <div>
-            <label className="block text-xs font-semibold mb-1">Attending Physician Electronic Signature</label>
-            <input
-              type="text"
-              value={signingDoctor}
-              onChange={(e) => setSigningDoctor(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-semibold"
-            />
+        {submitError && (
+          <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{submitError}</span>
           </div>
+        )}
 
-          <div className="flex items-end justify-end">
-            <button
-              type="submit"
-              className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs cursor-pointer transition-all"
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              Finalize Clinical Closure & Seal Encounter
-            </button>
-          </div>
+        <div className="flex justify-end border-t border-slate-100 pt-3 dark:border-slate-800">
+          <button
+            type="submit"
+            disabled={submitting}
+            className="flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-2.5 text-xs font-bold text-white shadow-xs transition-all hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <CheckCircle2 className="h-4 w-4" />
+            {submitting ? 'Committing…' : 'Commit Disposition'}
+          </button>
         </div>
       </form>
     </div>

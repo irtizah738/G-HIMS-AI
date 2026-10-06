@@ -508,13 +508,13 @@ export interface EncounterDisposition {
   internalReferral?: InternalReferral;
   externalReferral?: ExternalReferral;
   inpatientAdmissionRequest?: {
-    targetWard: string;
+    targetWard?: string;
     targetBedId?: string;
     clinicalIndication: string;
     admittingService?: string;
   };
   completedAt: number;
-  completedBy: string;
+  completedBy?: string;
 }
 
 export interface DiagnosticOrderItem {

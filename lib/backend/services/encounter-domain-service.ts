@@ -719,7 +719,22 @@ export class EncounterDomainService {
     }
 
     const now = Date.now();
-    const inpatientPending = payload.dispositionType === 'INPATIENT_ADMISSION_RECOMMENDED';
+    const inpatientPending =
+      payload.dispositionType === 'INPATIENT_ADMISSION_RECOMMENDED';
+
+    if (inpatientPending) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'CARE_TRANSITION_COMMAND_REQUIRED',
+          message:
+            'OPD inpatient admission must use AdmitPatientToInpatientCareCommand so source OPD closure, IPD creation, patient census, bed occupancy, appointment completion and handoff commit atomically.',
+        },
+      };
+    }
+
     if (inpatientPending && !payload.inpatientAdmissionRequest?.targetWard) {
       return {
         success: false,
@@ -734,11 +749,11 @@ export class EncounterDomainService {
 
     const updatedEncounter: EncounterState & Record<string, unknown> = {
       ...encounter,
-      currentStage: inpatientPending ? 'DISPOSITION' : 'COMPLETED',
-      clinicalState: inpatientPending ? 'DISPOSITION' : 'COMPLETED',
-      operationalState: inpatientPending ? encounter.operationalState : 'COMPLETED',
-      resourceAssignmentState: inpatientPending ? 'BED_REQUESTED' : 'RELEASED',
-      status: inpatientPending ? 'ACTIVE' : 'COMPLETED',
+      currentStage: 'COMPLETED',
+      clinicalState: 'COMPLETED',
+      operationalState: 'COMPLETED',
+      resourceAssignmentState: 'RELEASED',
+      status: 'COMPLETED',
       disposition: payload.dispositionType,
       dispositionData: {
         patientInstructions: payload.patientInstructions,
@@ -747,24 +762,17 @@ export class EncounterDomainService {
         followUpDepartment: payload.followUpDepartment,
         inpatientAdmissionRequest: payload.inpatientAdmissionRequest,
       },
-      ...(inpatientPending ? {} : { completedAt: now }),
+      completedAt: now,
       updatedAt: now,
     };
 
     const encounterCareSetting = normalizeCareSetting(encounter.encounterType);
-    const nextCareContexts = inpatientPending
-      ? activateCareContext(
-          patient.activeCareContexts as any,
-          encounterCareSetting,
-          encounter.encounterId,
-          now
-        )
-      : closeCareContext(
-          patient.activeCareContexts as any,
-          encounterCareSetting,
-          encounter.encounterId,
-          now
-        );
+    const nextCareContexts = closeCareContext(
+      patient.activeCareContexts as any,
+      encounterCareSetting,
+      encounter.encounterId,
+      now
+    );
     const patientState = {
       ...patient,
       activeCareContexts: nextCareContexts,
@@ -788,9 +796,7 @@ export class EncounterDomainService {
       actorRole: context.roles[0] || 'DOCTOR',
       aggregateType: 'ENCOUNTER',
       aggregateId: encounter.encounterId,
-      eventType: inpatientPending
-        ? 'INPATIENT_ADMISSION_REQUESTED'
-        : 'ENCOUNTER_DISPOSITION_COMMITTED',
+      eventType: 'ENCOUNTER_DISPOSITION_COMMITTED',
       eventPayload: {
         encounterId: encounter.encounterId,
         patientId: encounter.patientId,

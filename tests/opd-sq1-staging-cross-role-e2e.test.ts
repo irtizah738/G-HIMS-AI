@@ -138,6 +138,12 @@ describe('OPD-SQ1 deployed cross-role staging qualification contract', () => {
     expect(workflow).toContain('environment: staging');
     expect(workflow).toContain('secrets.GHIMS_STAGING_BASE_URL');
     expect(workflow).toContain('secrets.GHIMS_P7_BOOTSTRAP_PASSWORD');
+    expect(workflow).toContain(
+      'GHIMS_OPD_SQ1_CONFIRM_TENANT: ${{ vars.GHIMS_OPD_SQ1_CONFIRM_TENANT }}'
+    );
+    expect(workflow).not.toContain(
+      'GHIMS_OPD_SQ1_CONFIRM_TENANT: ${{ vars.GHIMS_P7_TENANT_ID'
+    );
     expect(workflow).toContain('playwright-report/opd-staging');
     expect(workflow).toContain('test-results/opd-staging');
     expect(workflow).not.toContain('pull_request:');

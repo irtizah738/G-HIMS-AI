@@ -2683,8 +2683,16 @@ export class OpdAppointmentDomainService {
         startAt,
         endAt
       );
+      const newPatientSlotIds: string[] = [];
+      for (let cursor = startAt; cursor < endAt; cursor += SLOT_BUCKET_MS) {
+        newPatientSlotIds.push(patientSlotId(link.patientId, cursor));
+      }
       const priorSlotIds = link.offerSlotIds || [];
+      const priorPatientSlotIds = link.offerPatientSlotIds || [];
       const allSlotIds = [...new Set([...priorSlotIds, ...newSlotIds])];
+      const allPatientSlotIds = [
+        ...new Set([...priorPatientSlotIds, ...newPatientSlotIds]),
+      ];
 
       const tx = await TransactionManager.executeAtomicReadModifyMutation({
         tenantId: context.tenantId,
@@ -2715,6 +2723,12 @@ export class OpdAppointmentDomainService {
           }),
           ...allSlotIds.map((slotId) => ({
             key: `slot:${slotId}`,
+            entityType: 'OPD_APPOINTMENT_SLOT',
+            entityId: slotId,
+            required: false,
+          })),
+          ...allPatientSlotIds.map((slotId) => ({
+            key: `patientSlot:${slotId}`,
             entityType: 'OPD_APPOINTMENT_SLOT',
             entityId: slotId,
             required: false,
@@ -2755,6 +2769,20 @@ export class OpdAppointmentDomainService {
               );
             }
           }
+          for (const slotId of newPatientSlotIds) {
+            const lock = current[`patientSlot:${slotId}`] || null;
+            if (
+              !isSlotClaimable(lock, now, {
+                waitlistId: entry.waitlistId,
+              })
+            ) {
+              throw new AtomicMutationRejectedError(
+                'OPD_PATIENT_APPOINTMENT_CONFLICT',
+                'Waitlist offer overlaps another appointment or active patient hold.',
+                { slotId }
+              );
+            }
+          }
 
           const updated: OpdWaitlistEntryRecord = {
             ...entry,
@@ -2770,6 +2798,7 @@ export class OpdAppointmentDomainService {
               verifiedAt: now,
             },
             offerSlotIds: newSlotIds,
+            offerPatientSlotIds: newPatientSlotIds,
             offerExpiresAt: holdExpiresAt,
             updatedAt: now,
           };
@@ -2833,9 +2862,70 @@ export class OpdAppointmentDomainService {
             };
           });
 
+          const newPatientSet = new Set(newPatientSlotIds);
+          const patientWrites = allPatientSlotIds.map((slotId) => {
+            const previous = current[`patientSlot:${slotId}`] || null;
+            if (newPatientSet.has(slotId)) {
+              const index = newPatientSlotIds.indexOf(slotId);
+              return {
+                entityType: 'OPD_APPOINTMENT_SLOT',
+                entityId: slotId,
+                domainState: buildSlotLock({
+                  slotId,
+                  tenantId: context.tenantId,
+                  lockScope: 'PATIENT',
+                  subjectId: entry.patientId,
+                  patientId: entry.patientId,
+                  facilityId: entry.facilityId,
+                  departmentId: entry.preferredDepartmentId,
+                  startAt: startAt + index * SLOT_BUCKET_MS,
+                  status: 'HELD',
+                  waitlistId: entry.waitlistId,
+                  holdExpiresAt,
+                  actorId: context.actorId,
+                  previous,
+                  now,
+                }),
+                expectedServerVersion: Number(
+                  previous?._serverVersion || 0
+                ),
+              };
+            }
+
+            if (
+              String(previous?.waitlistId || '') !== entry.waitlistId
+            ) {
+              throw new AtomicMutationRejectedError(
+                'WAITLIST_PATIENT_SLOT_LINEAGE_MISMATCH',
+                'Previous patient waitlist hold ownership changed before re-offer.'
+              );
+            }
+            return {
+              entityType: 'OPD_APPOINTMENT_SLOT',
+              entityId: slotId,
+              domainState: buildSlotLock({
+                slotId,
+                tenantId: context.tenantId,
+                lockScope: 'PATIENT',
+                subjectId: entry.patientId,
+                patientId: entry.patientId,
+                facilityId: entry.facilityId,
+                departmentId: entry.preferredDepartmentId,
+                startAt:
+                  Number(entry.offeredStartAt || 0) +
+                  priorPatientSlotIds.indexOf(slotId) * SLOT_BUCKET_MS,
+                status: 'RELEASED',
+                actorId: context.actorId,
+                previous,
+                now,
+              }),
+              expectedServerVersion: Number(previous?._serverVersion || 0),
+            };
+          });
+
           return {
             domainState: updated,
-            additionalStateWrites: writes,
+            additionalStateWrites: [...writes, ...patientWrites],
             eventPayload: {
               waitlistId: entry.waitlistId,
               patientId: entry.patientId,
@@ -2911,7 +3001,8 @@ export class OpdAppointmentDomainService {
       !link.offeredStartAt ||
       !link.offeredEndAt ||
       !link.offeredTimeZone ||
-      !link.offerSlotIds?.length
+      !link.offerSlotIds?.length ||
+      !link.offerPatientSlotIds?.length
     ) {
       return reject(
         commandId,
@@ -3013,11 +3104,11 @@ export class OpdAppointmentDomainService {
             entityId: slotId,
             required: true,
           })),
-          ...patientSlotIds.map((slotId) => ({
+          ...(link.offerPatientSlotIds || []).map((slotId) => ({
             key: `patientSlot:${slotId}`,
             entityType: 'OPD_APPOINTMENT_SLOT',
             entityId: slotId,
-            required: false,
+            required: true,
           })),
         ],
         prepare: (current) => {
@@ -3075,12 +3166,28 @@ export class OpdAppointmentDomainService {
               );
             }
           }
-          for (const slotId of patientSlotIds) {
+          const offeredPatientSlotIds = entry.offerPatientSlotIds || [];
+          if (
+            offeredPatientSlotIds.length !== patientSlotIds.length ||
+            offeredPatientSlotIds.some(
+              (slotId, index) => slotId !== patientSlotIds[index]
+            )
+          ) {
+            throw new AtomicMutationRejectedError(
+              'WAITLIST_PATIENT_HOLD_SET_CHANGED',
+              'Waitlist patient hold set changed before acceptance.'
+            );
+          }
+          for (const slotId of offeredPatientSlotIds) {
             const lock = current[`patientSlot:${slotId}`] || null;
-            if (!isSlotClaimable(lock, now)) {
+            if (
+              String(lock?.status || '').toUpperCase() !== 'HELD' ||
+              String(lock?.waitlistId || '') !== entry.waitlistId ||
+              Number(lock?.holdExpiresAt || 0) <= now
+            ) {
               throw new AtomicMutationRejectedError(
-                'OPD_PATIENT_APPOINTMENT_CONFLICT',
-                'Patient already has an overlapping appointment and cannot accept this waitlist offer.',
+                'WAITLIST_PATIENT_SLOT_HOLD_LOST',
+                'Patient-side waitlist hold expired or was reclaimed before acceptance.',
                 { slotId }
               );
             }
@@ -3280,6 +3387,7 @@ export class OpdAppointmentDomainService {
     }
 
     const slotIds = link.offerSlotIds || [];
+    const patientSlotIds = link.offerPatientSlotIds || [];
     const scopeId = waitlistScopeId(
       link.patientId,
       link.facilityId,
@@ -3320,6 +3428,12 @@ export class OpdAppointmentDomainService {
           },
           ...slotIds.map((slotId) => ({
             key: `slot:${slotId}`,
+            entityType: 'OPD_APPOINTMENT_SLOT',
+            entityId: slotId,
+            required: false,
+          })),
+          ...patientSlotIds.map((slotId) => ({
+            key: `patientSlot:${slotId}`,
             entityType: 'OPD_APPOINTMENT_SLOT',
             entityId: slotId,
             required: false,
@@ -3384,6 +3498,47 @@ export class OpdAppointmentDomainService {
             expectedServerVersion: number;
           }>;
 
+          const patientWrites = (entry.offerPatientSlotIds || [])
+            .map((slotId, index) => {
+              const previous = current[`patientSlot:${slotId}`] || null;
+              if (
+                previous &&
+                String(previous.waitlistId || '') === entry.waitlistId &&
+                String(previous.status || '').toUpperCase() === 'HELD'
+              ) {
+                return {
+                  entityType: 'OPD_APPOINTMENT_SLOT',
+                  entityId: slotId,
+                  domainState: buildSlotLock({
+                    slotId,
+                    tenantId: context.tenantId,
+                    lockScope: 'PATIENT',
+                    subjectId: entry.patientId,
+                    patientId: entry.patientId,
+                    facilityId: entry.facilityId,
+                    departmentId: entry.preferredDepartmentId,
+                    startAt:
+                      Number(entry.offeredStartAt || 0) +
+                      index * SLOT_BUCKET_MS,
+                    status: 'RELEASED',
+                    actorId: context.actorId,
+                    previous,
+                    now,
+                  }),
+                  expectedServerVersion: Number(
+                    previous?._serverVersion || 0
+                  ),
+                };
+              }
+              return null;
+            })
+            .filter(Boolean) as Array<{
+              entityType: string;
+              entityId: string;
+              domainState: unknown;
+              expectedServerVersion: number;
+            }>;
+
           const currentScope = current.scope || null;
           if (
             currentScope &&
@@ -3400,6 +3555,7 @@ export class OpdAppointmentDomainService {
             domainState: updated,
             additionalStateWrites: [
               ...writes,
+              ...patientWrites,
               {
                 entityType: 'OPD_WAITLIST_SCOPE',
                 entityId: scopeId,

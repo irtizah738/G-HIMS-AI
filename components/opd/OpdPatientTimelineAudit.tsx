@@ -2,114 +2,288 @@
 
 import React, { useState } from 'react';
 import {
-  Clock,
-  ShieldCheck,
-  CheckCircle2,
-  FileText,
   Activity,
-  Pill,
-  DollarSign,
-  UserCheck,
-  Layers,
+  AlertTriangle,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Clock,
+  DollarSign,
+  FileText,
+  Pill,
+  ShieldCheck,
+  UserCheck,
 } from 'lucide-react';
-import { OpdTimelineEvent, ComprehensiveOpdEncounter } from '@/types/opd-domain';
+import type {
+  ComprehensiveOpdEncounter,
+  OpdTimelineEvent,
+} from '@/types/opd-domain';
+
+export interface OpdTimelineIntegritySummary {
+  mode: 'SERVER_APPEND_ONLY';
+  eventCount: number;
+  linkedAuditCount: number;
+  unlinkedEventCount: number;
+  fullyLinked: boolean;
+}
 
 interface OpdPatientTimelineAuditProps {
   encounter: ComprehensiveOpdEncounter;
   events: OpdTimelineEvent[];
+  loading?: boolean;
+  error?: string | null;
+  integrity?: OpdTimelineIntegritySummary | null;
+  demo?: boolean;
+}
+
+function eventIcon(type: string) {
+  if (type.includes('REGISTERED') || type.includes('CHECKED_IN')) {
+    return <UserCheck className="h-4 w-4 text-blue-600" />;
+  }
+  if (type.includes('VITAL') || type.includes('TRIAGE')) {
+    return <Activity className="h-4 w-4 text-rose-600" />;
+  }
+  if (
+    type.includes('CONSULTATION') ||
+    type.includes('NOTE') ||
+    type.includes('DOCUMENT')
+  ) {
+    return <FileText className="h-4 w-4 text-indigo-600" />;
+  }
+  if (
+    type.includes('DIAGNOSTIC') ||
+    type.includes('LAB') ||
+    type.includes('RADIOLOGY')
+  ) {
+    return <Activity className="h-4 w-4 text-purple-600" />;
+  }
+  if (
+    type.includes('PRESCRIPTION') ||
+    type.includes('MEDICATION') ||
+    type.includes('DISPENSE')
+  ) {
+    return <Pill className="h-4 w-4 text-emerald-600" />;
+  }
+  if (
+    type.includes('PAYMENT') ||
+    type.includes('BILLING') ||
+    type.includes('INVOICE') ||
+    type.includes('RECEIPT')
+  ) {
+    return <DollarSign className="h-4 w-4 text-teal-600" />;
+  }
+  return <Clock className="h-4 w-4 text-slate-500" />;
+}
+
+function actorLabel(event: OpdTimelineEvent): string {
+  const identity = String(event.actorName || event.actor || '').trim();
+  if (!identity) return event.actorRole || 'Unknown actor';
+  return event.actorRole
+    ? `${identity} (${event.actorRole})`
+    : identity;
 }
 
 export function OpdPatientTimelineAudit({
   encounter,
   events,
+  loading = false,
+  error = null,
+  integrity = null,
+  demo = false,
 }: OpdPatientTimelineAuditProps) {
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
 
-  const getEventIcon = (type: string) => {
-    if (type.includes('REGISTERED') || type.includes('CHECKED_IN')) return <UserCheck className="w-4 h-4 text-blue-600" />;
-    if (type.includes('VITALS') || type.includes('TRIAGE')) return <Activity className="w-4 h-4 text-rose-600" />;
-    if (type.includes('CONSULTATION')) return <FileText className="w-4 h-4 text-indigo-600" />;
-    if (type.includes('DIAGNOSTIC')) return <Activity className="w-4 h-4 text-purple-600" />;
-    if (type.includes('PRESCRIPTION') || type.includes('DISPENSED')) return <Pill className="w-4 h-4 text-emerald-600" />;
-    if (type.includes('PAYMENT') || type.includes('BILLING')) return <DollarSign className="w-4 h-4 text-teal-600" />;
-    return <Clock className="w-4 h-4 text-slate-500" />;
-  };
+  const sortedEvents = [...events].sort(
+    (left, right) =>
+      Number(right.timestamp || 0) - Number(left.timestamp || 0) ||
+      right.id.localeCompare(left.id)
+  );
+
+  const integrityLabel = demo
+    ? 'DEMO — non-authoritative'
+    : integrity?.fullyLinked
+      ? 'Server event + audit linked'
+      : integrity
+        ? `Integrity warning: ${integrity.unlinkedEventCount} unlinked event(s)`
+        : 'Authoritative verification pending';
 
   return (
-    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xs space-y-6">
-      <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+    <div className="space-y-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex flex-col gap-3 border-b border-slate-100 pb-4 dark:border-slate-800 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-            <ShieldCheck className="w-5 h-5 text-blue-600" />
-            Immutable Audit Trail & Longitudinal Event Stream
+          <h2 className="flex items-center gap-2 text-base font-bold text-slate-900 dark:text-slate-100">
+            <ShieldCheck className="h-5 w-5 text-blue-600" />
+            Authoritative Encounter Timeline & Audit Provenance
           </h2>
-          <p className="text-xs text-slate-500">
-            Event-sourced ledger tracking all state mutations with actor signatures, UTC timestamps, and cryptographic proof.
+          <p className="mt-1 max-w-3xl text-xs text-slate-500">
+            Governed domain events are read from the server append-only event
+            store and cross-linked to their audit records. This surface does not
+            claim a cryptographic signature unless cryptographic proof is
+            actually present in authoritative data.
+          </p>
+          <p className="mt-1 text-[11px] text-slate-400">
+            Encounter {encounter.id} · Patient {encounter.patientId}
           </p>
         </div>
-        <span className="text-xs font-mono text-emerald-600 font-bold bg-emerald-50 dark:bg-emerald-950/60 px-3 py-1 rounded-full border border-emerald-200 dark:border-emerald-800">
-          Cryptographically Verified
+
+        <span
+          className={
+            demo
+              ? 'rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-800'
+              : integrity?.fullyLinked
+                ? 'rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700'
+                : 'rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700'
+          }
+        >
+          {integrityLabel}
         </span>
       </div>
 
-      <div className="relative pl-6 space-y-6 before:absolute before:left-2.5 before:top-3 before:bottom-3 before:w-0.5 before:bg-slate-200 dark:before:bg-slate-800">
-        {events.map((evt, idx) => {
-          const isExpanded = expandedEventId === evt.id;
-          return (
-            <div key={evt.id} className="relative group">
-              {/* Timeline Marker */}
-              <div className="absolute -left-6 top-1 w-5 h-5 rounded-full bg-white dark:bg-slate-900 border-2 border-blue-500 flex items-center justify-center shadow-xs">
-                <div className="w-1.5 h-1.5 rounded-full bg-blue-600" />
-              </div>
+      {error && (
+        <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            <p className="font-bold">Authoritative timeline unavailable</p>
+            <p className="mt-0.5">{error}</p>
+          </div>
+        </div>
+      )}
 
-              {/* Event Card */}
-              <div className="p-4 rounded-xl bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    {getEventIcon(evt.eventType)}
-                    <span className="font-bold text-xs text-slate-900 dark:text-slate-100">
-                      {evt.eventType.replace(/_/g, ' ')}
+      {loading && (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-800/50">
+          Loading server event and audit provenance…
+        </div>
+      )}
+
+      {!loading && !error && sortedEvents.length === 0 && (
+        <div className="rounded-xl border-2 border-dashed border-slate-200 p-8 text-center text-xs text-slate-500 dark:border-slate-700">
+          No authoritative encounter events are available for this timeline.
+        </div>
+      )}
+
+      {sortedEvents.length > 0 && (
+        <div className="relative space-y-6 pl-6 before:absolute before:bottom-3 before:left-2.5 before:top-3 before:w-0.5 before:bg-slate-200 dark:before:bg-slate-800">
+          {sortedEvents.map((event) => {
+            const expanded = expandedEventId === event.id;
+            const linked =
+              event.integrityState === 'EVENT_AUDIT_LINKED' ||
+              event.integrityState === 'DEMO_NON_AUTHORITATIVE';
+
+            return (
+              <div key={event.id} className="relative">
+                <div className="absolute -left-6 top-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-blue-500 bg-white shadow-xs dark:bg-slate-900">
+                  <div className="h-1.5 w-1.5 rounded-full bg-blue-600" />
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700/60 dark:bg-slate-800/40">
+                  <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
+                    <div className="flex items-center gap-2">
+                      {eventIcon(event.eventType)}
+                      <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                        {event.eventType.replace(/_/g, ' ')}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      <span className="font-mono">
+                        {new Date(event.timestamp).toLocaleString()}
+                      </span>
+                      <span className="mx-2">·</span>
+                      <span>{actorLabel(event)}</span>
+                    </div>
+                  </div>
+
+                  <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                    {event.description}
+                  </p>
+
+                  <div className="mt-3 grid gap-2 text-[10px] text-slate-500 sm:grid-cols-2 xl:grid-cols-4">
+                    <div>
+                      <span className="font-semibold">Event ID:</span>{' '}
+                      <span className="font-mono">{event.id}</span>
+                    </div>
+                    <div>
+                      <span className="font-semibold">Audit ID:</span>{' '}
+                      <span className="font-mono">
+                        {event.auditId || 'UNLINKED'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="font-semibold">Command:</span>{' '}
+                      <span className="font-mono">
+                        {event.commandId || '—'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="font-semibold">Correlation:</span>{' '}
+                      <span className="font-mono">
+                        {event.correlationId || '—'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/60 pt-2 text-[10px] dark:border-slate-700/60">
+                    <span
+                      className={
+                        linked
+                          ? 'inline-flex items-center gap-1 font-semibold text-emerald-700'
+                          : 'inline-flex items-center gap-1 font-semibold text-rose-700'
+                      }
+                    >
+                      {linked ? (
+                        <CheckCircle2 className="h-3 w-3" />
+                      ) : (
+                        <AlertTriangle className="h-3 w-3" />
+                      )}
+                      {demo
+                        ? 'DEMO_NON_AUTHORITATIVE'
+                        : event.integrityState || 'EVENT_ONLY'}
                     </span>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedEventId(expanded ? null : event.id)
+                      }
+                      className="flex cursor-pointer items-center gap-1 font-bold text-blue-600 hover:underline dark:text-blue-400"
+                    >
+                      {expanded ? (
+                        <>
+                          Hide provenance <ChevronUp className="h-3 w-3" />
+                        </>
+                      ) : (
+                        <>
+                          Inspect provenance <ChevronDown className="h-3 w-3" />
+                        </>
+                      )}
+                    </button>
                   </div>
-                  <div className="flex items-center gap-3 text-[11px] text-slate-400 font-mono">
-                    <span>{new Date(evt.timestamp).toLocaleTimeString()}</span>
-                    <span>{evt.actorName} ({evt.actorRole})</span>
-                  </div>
+
+                  {expanded && (
+                    <div className="mt-3 space-y-2 rounded-lg bg-slate-950 p-3 text-[10px] text-slate-200">
+                      <div className="grid gap-1 font-mono sm:grid-cols-2">
+                        <span>aggregate: {event.aggregateType || '—'} / {event.aggregateId || '—'}</span>
+                        <span>audit action: {event.auditAction || '—'}</span>
+                        <span>resource: {event.resourceType || '—'} / {event.resourceId || '—'}</span>
+                        <span>recordedAt: {event.recordedAt ? new Date(event.recordedAt).toISOString() : '—'}</span>
+                      </div>
+                      <pre className="overflow-x-auto whitespace-pre-wrap break-words border-t border-slate-800 pt-2 font-mono">
+                        {JSON.stringify(
+                          {
+                            payload: event.payload ?? null,
+                            auditMetadata: event.metadata ?? null,
+                          },
+                          null,
+                          2
+                        )}
+                      </pre>
+                    </div>
+                  )}
                 </div>
-
-                <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">{evt.description}</p>
-
-                {/* Cryptographic Hash Badge */}
-                <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-200/60 dark:border-slate-700/60 text-[10px] text-slate-400 font-mono">
-                  <span className="truncate max-w-xs">{evt.hash}</span>
-                  <button
-                    onClick={() => setExpandedEventId(isExpanded ? null : evt.id)}
-                    className="text-blue-600 dark:text-blue-400 font-bold flex items-center gap-1 hover:underline cursor-pointer"
-                  >
-                    {isExpanded ? (
-                      <>
-                        Hide Raw Payload <ChevronUp className="w-3 h-3" />
-                      </>
-                    ) : (
-                      <>
-                        Inspect Event Payload <ChevronDown className="w-3 h-3" />
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                {isExpanded && (
-                  <pre className="mt-2 p-3 rounded-lg bg-slate-900 text-slate-200 text-[10px] font-mono overflow-x-auto">
-                    {JSON.stringify(evt.payload, null, 2)}
-                  </pre>
-                )}
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

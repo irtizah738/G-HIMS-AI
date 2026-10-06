@@ -774,6 +774,7 @@ export interface ComprehensiveOpdEncounter {
   consultationInvoice?: OpdInvoice;
   diagnosticInvoices?: OpdInvoice[];
   pharmacyInvoices?: OpdInvoice[];
+  supplementalInvoices?: OpdInvoice[];
   billingMutationSequence?: number;
   billingReconciliationId?: string;
   billingReconciliationState?: 'CLEARED' | string;
@@ -842,9 +843,11 @@ export interface OpdInvoice {
     | 'OPD_CONSULTATION'
     | 'OPD_DIAGNOSTIC'
     | 'OPD_PHARMACY'
+    | 'OPD_REVENUE_INTEGRITY'
     | 'FINAL_ENCOUNTER';
   sourceOrderId?: string;
   sourcePrescriptionId?: string;
+  sourceFindingId?: string;
   totalAmountMinorUnits: number;
   payerCoverageAmountMinorUnits: number;
   patientCopayAmountMinorUnits: number;

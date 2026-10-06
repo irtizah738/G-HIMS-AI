@@ -197,6 +197,7 @@ export interface StaffMember {
 
 export interface OpdQueueToken {
   id: string;
+  encounterId?: string;
   tokenNumber: string;
   patientId: string;
   patientName: string;

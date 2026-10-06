@@ -66,7 +66,6 @@ export const ROLE_DEFINITIONS: Record<RoleId, RoleDefinition> = {
     accessibleModules: [
       'command',
       'directory',
-      'matrix',
       'reporting',
       'rbac',
       'workflow-runtime',

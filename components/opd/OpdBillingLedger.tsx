@@ -46,11 +46,22 @@ export function OpdBillingLedger({
   const payerPortion = invoice.payerCoverageAmountMinorUnits / 100;
   const copayDue = invoice.patientCopayAmountMinorUnits / 100;
   const balanceDue = invoice.balanceDueMinorUnits / 100;
+  const pendingOfflineReceipt = invoice.payments.find(
+    (payment) =>
+      payment.status === 'PENDING' &&
+      !String(payment.glJournalEntryId || '').trim()
+  );
 
   const handleSettle = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSettlePayment) {
       alert('The authenticated user is not authorized to collect or settle patient payments.');
+      return;
+    }
+    if (pendingOfflineReceipt) {
+      alert(
+        'A locally captured cash receipt is pending authoritative server posting. Sync or resolve that receipt before collecting another payment against this invoice.'
+      );
       return;
     }
 
@@ -111,6 +122,11 @@ export function OpdBillingLedger({
           </div>
 
           <div className="flex items-center gap-2">
+            {pendingOfflineReceipt && (
+              <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-black uppercase text-blue-800 dark:bg-blue-950 dark:text-blue-300">
+                CASH CAPTURED — POSTING PENDING
+              </span>
+            )}
             <span
               className={`px-3 py-1 rounded-full text-xs font-black uppercase ${
                 invoice.settlementStatus === 'SETTLED'
@@ -273,7 +289,7 @@ export function OpdBillingLedger({
 
             <button
               type="submit"
-              disabled={!canSettlePayment}
+              disabled={!canSettlePayment || Boolean(pendingOfflineReceipt)}
               className="w-full py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <CheckCircle2 className="w-4 h-4" />
@@ -291,7 +307,12 @@ export function OpdBillingLedger({
                     <span>{p.mode.replace(/_/g, ' ')}</span>
                     <span className="text-teal-600 font-mono">{currency} {(p.amountMinorUnits / 100).toLocaleString()}</span>
                   </div>
-                  <p className="text-[10px] text-slate-400 font-mono mt-0.5">Ref: {p.referenceNumber} • JE: {p.glJournalEntryId}</p>
+                  <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                    Ref: {p.referenceNumber} •{' '}
+                    {p.status === 'PENDING' && !p.glJournalEntryId
+                      ? 'Server posting pending'
+                      : `JE: ${p.glJournalEntryId}`}
+                  </p>
                 </div>
               ))}
             </div>

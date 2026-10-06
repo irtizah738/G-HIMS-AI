@@ -193,6 +193,8 @@ describe('OPD-RP15 offline workflow closure', () => {
     expect(ui).not.toContain('targetQueueGenerated: true');
     expect(ui).not.toContain("transportMode: 'PATIENT_OWN_TRANSPORT'");
     expect(ui).not.toContain("admittingService: 'Cardiology Services'");
+    expect(ui).not.toContain('<option value="Orthopedics">Orthopedics</option>');
+    expect(ui).toContain('placeholder="Receiving specialty / department"');
     expect(ui).not.toContain('ref-int-${Date.now()}');
     expect(ui).not.toContain('ref-ext-${Date.now()}');
     expect(ui).not.toContain('completedAt: Date.now()');

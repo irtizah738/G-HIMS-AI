@@ -184,6 +184,7 @@ describe('OPD-RP14 atomic OPD to IPD transition', () => {
     expect(ui).not.toContain('General Medical Inpatient Ward (Ward 4B)');
     expect(ui).not.toContain('IV Inotropic titration');
     expect(ui).not.toContain('value={admissionWard}');
+    expect(ui).not.toContain('SERVER_AUTHENTICATED_ACTOR');
     expect(workspace).not.toContain(
       'targetWard: inpatientRequest.targetWard'
     );

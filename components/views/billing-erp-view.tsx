@@ -28,7 +28,7 @@ import { BillingAuditMismatch } from '@/lib/types/ghims';
 export function BillingErpView() {
   const { mismatches, reconcileMismatch, dismissMismatch, patients, stats, selectedPatientId: globalPatientId, setSelectedPatientId: setGlobalPatientId } = useHospital();
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
-  const [localPatientId, setLocalPatientId] = useState<string>(globalPatientId || 'p-1001');
+  const [localPatientId, setLocalPatientId] = useState<string>(globalPatientId || '');
 
   useEffect(() => {
     if (globalPatientId) {
@@ -86,7 +86,7 @@ export function BillingErpView() {
             </div>
             <div className="bg-emerald-950/80 border border-emerald-700/60 px-4 py-2.5 rounded-xl text-right">
               <span className="text-[10px] text-emerald-300 uppercase tracking-wider block">Total Recovered</span>
-              <span className="text-lg font-black text-emerald-400">+{formatCurrency(totalReconciledVal + 1480)}</span>
+              <span className="text-lg font-black text-emerald-400">{formatCurrency(totalReconciledVal)}</span>
             </div>
           </div>
         </div>
@@ -128,7 +128,7 @@ export function BillingErpView() {
 
           <div className="flex items-center gap-2">
             <Link
-              href="/central-metro-hospital/billing/invoices/inv-enc-8092-441"
+              href="/central-metro-hospital/billing/invoices"
               className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 border border-amber-400/30 flex items-center gap-1.5 transition-colors"
             >
               <Receipt className="w-3.5 h-3.5" />

@@ -1,4 +1,5 @@
 import { getAdminFirestore } from '@/server/firebase/admin';
+import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import type { CommandContext } from '@/lib/backend/types';
 import { ConsultantAttentionProjectionService } from '@/lib/clinical/intelligence/consultant-attention-projection-service';
 import type { ConsultantBlindnessMetrics } from '@/types/consultant-blindness-metrics';

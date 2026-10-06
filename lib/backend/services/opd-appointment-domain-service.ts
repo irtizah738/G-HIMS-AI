@@ -3138,7 +3138,7 @@ export class OpdAppointmentDomainService {
         link.facilityId,
         link.preferredDepartmentId
       );
-      const [patient, authority] = await Promise.all([
+      const [, authority] = await Promise.all([
         requireActivePatient(context.tenantId, link.patientId),
         resolveProviderAuthority({
           tenantId: context.tenantId,

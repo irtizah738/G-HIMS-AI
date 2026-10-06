@@ -64,6 +64,10 @@ describe('Clinical identity and specialist workflow rework', () => {
     expect(intake).not.toContain("ecg_telemetry_findings: 'stemi_elevation'");
     expect(intake).not.toContain('Differential Diagnosis Probability Matrix');
     expect(intake).not.toContain('Recommended STAT Diagnostic & Intervention Orders');
+    const route = await source('app/api/clinical/intake-optimize/route.ts');
+    expect(route).toContain('sourceLimitedBriefSchema');
+    expect(route).toContain('z.literal(true)');
+    expect(route).toContain('.strict()');
     expect(intake).not.toContain('id="tab-mode-customize"');
     expect(intake).not.toContain('id="tab-mode-localization"');
   });

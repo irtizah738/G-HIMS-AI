@@ -211,9 +211,20 @@ export function adaptEdgeSnapshot(snapshot: EdgeSnapshot): HospitalEdgeModels {
     .map((raw) => {
       const id = asString((raw as any).id || (raw as any).patientId);
       const dob = asString((raw as any).dateOfBirth);
+      const identifiers = Array.isArray((raw as any).identifiers)
+        ? (raw as any).identifiers
+        : [];
+      const cnic = asString(
+        identifiers.find(
+          (identifier: any) =>
+            String(identifier?.type || '').toUpperCase() === 'CNIC'
+        )?.value
+      );
+
       return {
         id,
         mrn: asString((raw as any).mrn),
+        cnic: cnic || undefined,
         fullName: asString((raw as any).fullName),
         dateOfBirth: dob,
         age: asNumber((raw as any).age, calculateAge(dob)),

@@ -177,6 +177,14 @@ function authorizedCollections(roles: string[]): string[] {
     add('encounters', 'orders');
   }
 
+  if (
+    ['RADIOLOGY_TECH', 'RADIOLOGY_TECHNICIAN', 'RADIOLOGIST'].some((role) =>
+      normalized.has(role)
+    )
+  ) {
+    add('encounters', 'orders');
+  }
+
   if (normalized.has('PHARMACIST')) {
     // RP15 makes physical dispensing reconnect-required. Pharmacists need the
     // scoped encounter/prescription working set offline, not the tenant-wide
@@ -357,6 +365,42 @@ function scopeOfflineCollections(
       .map((value) => String(value || '').trim())
       .filter(Boolean)
   );
+  const normalizedRoles = normalizedRoleSet(context.roles);
+  const labRole = ['LAB_TECHNICIAN', 'LAB_TECH'].some((role) =>
+    normalizedRoles.has(role)
+  );
+  const radiologyRole = [
+    'RADIOLOGY_TECH',
+    'RADIOLOGY_TECHNICIAN',
+    'RADIOLOGIST',
+  ].some((role) => normalizedRoles.has(role));
+  const pharmacistRole = normalizedRoles.has('PHARMACIST');
+  const ancillaryRole = labRole || radiologyRole || pharmacistRole;
+
+  const ancillaryOrderIds = new Set<string>();
+  const ancillaryEncounterIds = new Set<string>();
+  if (labRole || radiologyRole) {
+    for (const order of collections.orders || []) {
+      const orderType = String(order.orderType || '').trim().toUpperCase();
+      if (labRole && orderType !== 'LAB') continue;
+      if (radiologyRole && orderType !== 'RADIOLOGY') continue;
+      if (!valueMatchesScope(order.facilityId, facilities)) continue;
+
+      const orderId = String(order.id || order.orderId || '').trim();
+      const encounterId = String(order.encounterId || '').trim();
+      if (orderId) ancillaryOrderIds.add(orderId);
+      if (encounterId) ancillaryEncounterIds.add(encounterId);
+    }
+  }
+  if (pharmacistRole) {
+    for (const prescription of collections.prescriptions || []) {
+      const facilityId = String(prescription.facilityId || '').trim();
+      if (facilityId && !valueMatchesScope(facilityId, facilities)) continue;
+      const encounterId = String(prescription.encounterId || '').trim();
+      if (encounterId) ancillaryEncounterIds.add(encounterId);
+    }
+  }
+
   const billingRole = isBillingRole(context.roles);
   const billingOnlyRole = billingRole && !isFullFinanceRole(context.roles);
   const billingEncounterIds = new Set(
@@ -373,6 +417,14 @@ function scopeOfflineCollections(
       if (!encounterId || !billingEncounterIds.has(encounterId)) return false;
       if (!valueMatchesScope(encounter.facilityId, facilities)) return false;
       return true;
+    }
+
+    if (ancillaryRole) {
+      return (
+        Boolean(encounterId) &&
+        ancillaryEncounterIds.has(encounterId) &&
+        valueMatchesScope(encounter.facilityId, facilities)
+      );
     }
 
     if (!valueMatchesScope(encounter.facilityId, facilities)) return false;
@@ -689,6 +741,12 @@ function scopeOfflineCollections(
 
     if (byEncounterOrPatient.has(collection)) {
       scoped[collection] = rows.filter((row) => {
+        if (collection === 'orders' && (labRole || radiologyRole)) {
+          return ancillaryOrderIds.has(
+            String(row.id || row.orderId || '').trim()
+          );
+        }
+
         const encounterId = String(row.encounterId || row.id || '').trim();
         const patientId = String(row.patientId || '').trim();
         return (

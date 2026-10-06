@@ -437,7 +437,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       bedId: nonEmpty.max(150),
       sourceEncounterId: z.string().trim().min(1).max(150).optional(),
       admittingDiagnosis: nonEmpty.max(4000),
-      targetWard: nonEmpty.max(250),
+      targetWard: z.string().trim().min(1).max(250).optional(),
       assignedDoctor: z.string().trim().min(1).max(250).optional(),
       assignedNurse: z.string().trim().min(1).max(250).optional(),
       priority: z.enum(['STAT','URGENT','ROUTINE']).optional(),

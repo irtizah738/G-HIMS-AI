@@ -1,0 +1,43 @@
+{
+  "protocolVersion": "ci-clinical-evaluation-v1",
+  "datasetId": "REPLACE_WITH_DATASET_ID",
+  "cohortType": "RETROSPECTIVE_DEIDENTIFIED",
+  "caseCount": 0,
+  "reviewerCount": 0,
+  "counts": {
+    "supportedClaims": 0,
+    "totalFactualClaims": 0,
+    "relevantFactsCaptured": 0,
+    "relevantFactsExpected": 0,
+    "criticalFactsCaptured": 0,
+    "criticalFactsExpected": 0,
+    "correctSourceLinks": 0,
+    "totalSourceLinks": 0,
+    "temporallyCorrectClaims": 0,
+    "temporalClaims": 0,
+    "medicationDiscrepanciesDetected": 0,
+    "medicationDiscrepanciesExpected": 0,
+    "criticalSafetyIssuesDetected": 0,
+    "criticalSafetyIssuesExpected": 0,
+    "harmfulRecommendations": 0,
+    "generatedRecommendations": 0,
+    "unknownStatesCorrectlyRepresented": 0,
+    "unknownStatesExpected": 0,
+    "draftsWithMajorCorrection": 0,
+    "totalDraftsReviewed": 0,
+    "draftsAcceptedWithMinorOrNoEdit": 0,
+    "usefulRatingsAtOrAbove4": 0,
+    "totalUsefulnessRatings": 0
+  },
+  "timing": {
+    "baselineChartReviewSeconds": [],
+    "assistedChartReviewSeconds": [],
+    "baselineDraftSeconds": [],
+    "assistedDraftSeconds": []
+  },
+  "agreement": {
+    "adjudicatedItems": 0,
+    "observedAgreement": 0,
+    "expectedChanceAgreement": 0
+  }
+}

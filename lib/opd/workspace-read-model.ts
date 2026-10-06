@@ -92,6 +92,8 @@ export function adaptAuthoritativeOpdInvoice(
       ? 'OPD_DIAGNOSTIC'
       : purpose === 'OPD_PHARMACY'
         ? 'OPD_PHARMACY'
+      : purpose === 'OPD_REVENUE_INTEGRITY'
+        ? 'OPD_REVENUE_INTEGRITY'
       : purpose === 'FINAL_ENCOUNTER'
         ? 'FINAL_ENCOUNTER'
         : 'OPD_CONSULTATION';
@@ -108,6 +110,9 @@ export function adaptAuthoritativeOpdInvoice(
     sourceOrderId: raw.sourceOrderId ? String(raw.sourceOrderId) : undefined,
     sourcePrescriptionId: raw.sourcePrescriptionId
       ? String(raw.sourcePrescriptionId)
+      : undefined,
+    sourceFindingId: raw.sourceFindingId
+      ? String(raw.sourceFindingId)
       : undefined,
     totalAmountMinorUnits: Math.round(Number(raw.totalGross || 0) * 100),
     payerCoverageAmountMinorUnits: Math.round(Number(raw.totalCoverage || 0) * 100),
@@ -305,6 +310,7 @@ export function buildOpdWorkspaceReadModel(
   const consultationInvoiceByEncounter = new Map<string, OpdInvoice>();
   const diagnosticInvoicesByEncounter = new Map<string, OpdInvoice[]>();
   const pharmacyInvoicesByEncounter = new Map<string, OpdInvoice[]>();
+  const supplementalInvoicesByEncounter = new Map<string, OpdInvoice[]>();
   const finalInvoiceByEncounter = new Map<string, OpdInvoice>();
 
   for (const row of rawInvoices) {
@@ -325,6 +331,10 @@ export function buildOpdWorkspaceReadModel(
       const current = pharmacyInvoicesByEncounter.get(encounterId) || [];
       current.push(adaptAuthoritativeOpdInvoice(invoice));
       pharmacyInvoicesByEncounter.set(encounterId, current);
+    } else if (purpose === 'OPD_REVENUE_INTEGRITY') {
+      const current = supplementalInvoicesByEncounter.get(encounterId) || [];
+      current.push(adaptAuthoritativeOpdInvoice(invoice));
+      supplementalInvoicesByEncounter.set(encounterId, current);
     } else if (purpose === 'FINAL_ENCOUNTER') {
       finalInvoiceByEncounter.set(
         encounterId,
@@ -490,6 +500,9 @@ export function buildOpdWorkspaceReadModel(
         .sort((left, right) => left.issuedAt - right.issuedAt);
       const pharmacyInvoices = (pharmacyInvoicesByEncounter.get(id) || [])
         .sort((left, right) => left.issuedAt - right.issuedAt);
+      const supplementalInvoices = (
+        supplementalInvoicesByEncounter.get(id) || []
+      ).sort((left, right) => left.issuedAt - right.issuedAt);
       const financialState = String(encounter.financialClearanceState || '').toUpperCase();
 
       return {
@@ -548,6 +561,7 @@ export function buildOpdWorkspaceReadModel(
         consultationInvoice,
         diagnosticInvoices,
         pharmacyInvoices,
+        supplementalInvoices,
         billingMutationSequence: Number(
           encounter.billingMutationSequence || 0
         ),

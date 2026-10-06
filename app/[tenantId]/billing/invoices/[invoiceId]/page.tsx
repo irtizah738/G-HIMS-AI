@@ -139,9 +139,9 @@ export default function InvoicePosTerminalPage({ params }: PageProps) {
           patientId: invoice.patientId,
           amountMinorUnits,
           currency: invoice.currency,
-          referenceNumber:
-            referenceNumber.trim() ||
-            `CASH-${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}`,
+          ...(referenceNumber.trim()
+            ? { referenceNumber: referenceNumber.trim() }
+            : {}),
           collectedAt: Date.now(),
         },
         {

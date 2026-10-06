@@ -16,6 +16,7 @@ const SUPPORTED_PURPOSES = new Set([
   'OPD_CONSULTATION',
   'OPD_DIAGNOSTIC',
   'OPD_PHARMACY',
+  'OPD_REVENUE_INTEGRITY',
 ]);
 
 function reject(
@@ -468,6 +469,9 @@ export class OpdBillingReconciliationDomainService {
     const chargeById = new Map(
       charges.map((charge) => [String(charge.chargeId || ''), charge])
     );
+    const revenueFindingById = new Map(
+      revenueFindings.map((finding) => [String(finding.id || ''), finding])
+    );
 
     for (const invoice of invoices) {
       const invoiceId = String(invoice.id || '').trim();
@@ -687,6 +691,23 @@ export class OpdBillingReconciliationDomainService {
           );
         }
         prescriptionIds.push(prescriptionId);
+      }
+      if (purpose === 'OPD_REVENUE_INTEGRITY') {
+        const findingId = String(invoice.sourceFindingId || '').trim();
+        const finding = revenueFindingById.get(findingId);
+        if (
+          !findingId ||
+          !finding ||
+          String(finding.status || '').toUpperCase() !== 'RECONCILED' ||
+          String(finding.invoiceId || '') !== String(invoice.id || '')
+        ) {
+          return reject(
+            commandId,
+            idempotencyKey,
+            'OPD_REVENUE_INTEGRITY_INVOICE_INVALID',
+            `Revenue Integrity invoice ${invoice.id} is not backed by the reconciled authoritative finding.`
+          );
+        }
       }
     }
 

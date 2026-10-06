@@ -68,17 +68,38 @@ export function assertPatient360PatientAccess(
     return;
   }
 
+  const careTeamActorIds = [
+    encounter?.assignedDoctorId,
+    encounter?.attendingDoctorId,
+    encounter?.assignedNurseId,
+    encounter?.clinicianId,
+    encounter?.providerId,
+    encounter?.assignedProviderId,
+  ]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+
+  if (
+    careTeamActorIds.length > 0 &&
+    careTeamActorIds.includes(context.actorId)
+  ) {
+    return;
+  }
+
   const requiredFacility = String(
     encounter?.facilityId || patient.facilityId || ''
   ).trim();
   const requiredDepartment = String(
     encounter?.departmentId ||
+      encounter?.department ||
       patient.departmentId ||
       ''
   ).trim();
 
   const facilities = new Set(
-    (context.facilityIds || []).map((value) => String(value).trim()).filter(Boolean)
+    (context.facilityIds || [])
+      .map((value) => String(value).trim())
+      .filter(Boolean)
   );
   const departments = new Set(
     (context.departmentIds || (context.departmentId ? [context.departmentId] : []))
@@ -86,15 +107,18 @@ export function assertPatient360PatientAccess(
       .filter(Boolean)
   );
 
-  if (requiredFacility && facilities.size > 0 && !facilities.has(requiredFacility)) {
+  if (!requiredFacility || !requiredDepartment) {
+    deny(
+      context,
+      'patient encounter is missing server-verifiable facility/department scope'
+    );
+  }
+
+  if (facilities.size === 0 || !facilities.has(requiredFacility)) {
     deny(context, 'patient facility is outside the actor scope');
   }
 
-  if (
-    requiredDepartment &&
-    departments.size > 0 &&
-    !departments.has(requiredDepartment)
-  ) {
+  if (departments.size === 0 || !departments.has(requiredDepartment)) {
     deny(context, 'patient department is outside the actor scope');
   }
 }

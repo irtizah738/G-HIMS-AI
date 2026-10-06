@@ -278,6 +278,46 @@ function schedulingAuthorization(context: CommandContext) {
   });
 }
 
+function requireActorSchedulingScope(
+  context: CommandContext,
+  facilityId: string,
+  departmentId: string
+): void {
+  const roles = new Set(
+    context.roles.map((role) => String(role || '').trim().toUpperCase())
+  );
+  if (roles.has('SYSTEM_ADMIN') || roles.has('ADMINISTRATOR')) return;
+
+  const facilityIds = new Set(
+    (context.facilityIds || [])
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+  );
+  if (!facilityIds.has(facilityId)) {
+    throw new AtomicMutationRejectedError(
+      'FACILITY_SCOPE_MISMATCH',
+      'Actor is not assigned to the requested scheduling facility.',
+      { facilityId }
+    );
+  }
+
+  const departmentIds = new Set(
+    [
+      ...(context.departmentIds || []),
+      ...(context.departmentId ? [context.departmentId] : []),
+    ]
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+  );
+  if (departmentIds.size > 0 && !departmentIds.has(departmentId)) {
+    throw new AtomicMutationRejectedError(
+      'DEPARTMENT_SCOPE_MISMATCH',
+      'Actor department assignments do not include the requested scheduling department.',
+      { departmentId }
+    );
+  }
+}
+
 function isSlotClaimable(
   current: DomainRecord | null | undefined,
   now: number,
@@ -555,6 +595,11 @@ export class OpdAppointmentDomainService {
         auth.reason || 'OPD scheduling read authority required.'
       );
     }
+    requireActorSchedulingScope(
+      context,
+      input.facilityId,
+      input.departmentId
+    );
 
     assertTimeZone(input.timeZone);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
@@ -790,6 +835,11 @@ export class OpdAppointmentDomainService {
     }
 
     try {
+      requireActorSchedulingScope(
+        context,
+        payload.facilityId,
+        payload.departmentId
+      );
       const { startAt, endAt } = normalizeInterval(payload);
       if (startAt <= Date.now()) {
         return reject(
@@ -1044,6 +1094,12 @@ export class OpdAppointmentDomainService {
       );
     }
 
+    requireActorSchedulingScope(
+      context,
+      link.facilityId,
+      link.departmentId
+    );
+
     try {
       const tx = await TransactionManager.executeAtomicReadModifyMutation({
         tenantId: context.tenantId,
@@ -1234,6 +1290,12 @@ export class OpdAppointmentDomainService {
         'Appointment does not exist.'
       );
     }
+
+    requireActorSchedulingScope(
+      context,
+      link.facilityId,
+      link.departmentId
+    );
 
     try {
       const { startAt, endAt } = normalizeInterval(payload);
@@ -1616,6 +1678,12 @@ export class OpdAppointmentDomainService {
         String(legacyActiveEncounter?.status || '').toUpperCase()
       );
 
+    requireActorSchedulingScope(
+      context,
+      link.facilityId,
+      link.departmentId
+    );
+
     try {
       requireOpdCheckInEligibility(patient);
       await resolveProviderAuthority({
@@ -1911,6 +1979,12 @@ export class OpdAppointmentDomainService {
       );
     }
 
+    requireActorSchedulingScope(
+      context,
+      link.facilityId,
+      link.departmentId
+    );
+
     try {
       const tx = await TransactionManager.executeAtomicReadModifyMutation({
         tenantId: context.tenantId,
@@ -2103,6 +2177,12 @@ export class OpdAppointmentDomainService {
         'Critical patients must be directed to immediate clinical triage/emergency assessment, not an OPD waitlist.'
       );
     }
+
+    requireActorSchedulingScope(
+      context,
+      payload.facilityId,
+      payload.preferredDepartmentId
+    );
 
     try {
       const patient = await requireActivePatient(
@@ -2310,6 +2390,12 @@ export class OpdAppointmentDomainService {
         'Waitlist entry does not exist.'
       );
     }
+
+    requireActorSchedulingScope(
+      context,
+      link.facilityId,
+      link.preferredDepartmentId
+    );
 
     try {
       const { startAt, endAt } = normalizeInterval(payload);
@@ -2588,6 +2674,12 @@ export class OpdAppointmentDomainService {
         'Waitlist slot offer has expired.'
       );
     }
+
+    requireActorSchedulingScope(
+      context,
+      link.facilityId,
+      link.preferredDepartmentId
+    );
 
     try {
       const [patient, authority] = await Promise.all([
@@ -2925,6 +3017,12 @@ export class OpdAppointmentDomainService {
       link.facilityId,
       link.preferredDepartmentId
     );
+    requireActorSchedulingScope(
+      context,
+      link.facilityId,
+      link.preferredDepartmentId
+    );
+
     try {
       const tx = await TransactionManager.executeAtomicReadModifyMutation({
         tenantId: context.tenantId,

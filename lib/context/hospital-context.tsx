@@ -1423,9 +1423,14 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       contactPhone: patientData.contactNumber,
       address: patientData.address,
       bloodGroup: patientData.bloodGroup,
-      identifiers: patientData.contactNumber
-        ? [{ type: 'PHONE', value: patientData.contactNumber, issuer: 'Patient Registration' }]
-        : [],
+      identifiers: [
+        ...(patientData.cnic
+          ? [{ type: 'CNIC' as const, value: patientData.cnic, issuer: 'Government Authority' }]
+          : []),
+        ...(patientData.contactNumber
+          ? [{ type: 'PHONE' as const, value: patientData.contactNumber, issuer: 'Patient Registration' }]
+          : []),
+      ],
       allergies: patientData.allergies,
       chronicConditions: patientData.chronicConditions,
       encounterType: 'OPD',

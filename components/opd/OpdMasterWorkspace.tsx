@@ -1229,12 +1229,54 @@ export function OpdMasterWorkspace() {
           : {}),
       },
       {
-        // RP15 will re-enable diagnostic offline ordering only after financial
-        // replay/remap is qualified. Until then, fail closed on transport loss
-        // rather than creating an invisible queued charge that a retry can duplicate.
         idempotencyKey: `opd-diagnostic:${activeEncounter.id}:${order.id}`,
+        offlineQueue: {
+          enabled: true,
+          collection: 'orders',
+          resourceId: order.id,
+          action: 'CREATE',
+          optimisticCache: false,
+        },
       }
     );
+
+    if (orderResult.queuedOffline) {
+      const pendingOrder: DiagnosticOrderItem = {
+        ...order,
+        id: order.id,
+        encounterId: activeEncounter.id,
+        patientId: activeEncounter.patientId,
+        revenueLockStatus: 'PENDING_SERVER_REPLAY',
+        paymentStatus: 'LOCKED_PENDING_PAYMENT',
+        worklistStatus: 'OFFLINE_PENDING_SYNC',
+        orderedBy: 'PENDING_SERVER_SYNC',
+        orderedAt: order.orderedAt || Date.now(),
+        status: 'ORDERED',
+      };
+
+      setEncounters((prev) =>
+        prev.map((encounter) =>
+          encounter.id === activeEncounter.id
+            ? {
+                ...encounter,
+                diagnosticOrders: [
+                  ...encounter.diagnosticOrders.filter(
+                    (existing) => existing.id !== pendingOrder.id
+                  ),
+                  pendingOrder,
+                ],
+              }
+            : encounter
+        )
+      );
+      recordEvent(
+        'DIAGNOSTIC_ORDERED',
+        `Diagnostic intent ${pendingOrder.testName} captured offline. Pricing, invoice creation, payment gate and worklist release remain pending authoritative server replay.`,
+        pendingOrder
+      );
+      return;
+    }
+
     if (!orderResult.success || !orderResult.data?.order || !orderResult.data?.invoice) {
       throw new Error(orderResult.error?.message || 'Diagnostic order failed.');
     }
@@ -1329,8 +1371,45 @@ export function OpdMasterWorkspace() {
       { orderId, targetStatus },
       {
         idempotencyKey: `opd-diagnostic-work:${orderId}:${targetStatus}`,
+        offlineQueue: {
+          enabled: true,
+          collection: 'orders',
+          resourceId: orderId,
+          action: 'UPDATE',
+          optimisticCache: false,
+        },
       }
     );
+
+    if (result.queuedOffline) {
+      setEncounters((prev) =>
+        prev.map((encounter) =>
+          encounter.id === activeEncounter.id
+            ? {
+                ...encounter,
+                diagnosticOrders: encounter.diagnosticOrders.map((existing) =>
+                  existing.id === orderId
+                    ? {
+                        ...existing,
+                        worklistStatus: `${targetStatus}_PENDING_SYNC`,
+                        status:
+                          targetStatus === 'SPECIMEN_COLLECTED'
+                            ? 'COLLECTED'
+                            : 'PROCESSING',
+                      }
+                    : existing
+                ),
+              }
+            : encounter
+        )
+      );
+      recordEvent(
+        'DIAGNOSTIC_STATUS_UPDATED',
+        `Diagnostic worklist action ${targetStatus} captured offline for ${orderId}; server replay may still require conflict review.`
+      );
+      return;
+    }
+
     if (!result.success || !result.data) {
       throw new Error(
         result.error?.message || 'Diagnostic worklist transition failed.'

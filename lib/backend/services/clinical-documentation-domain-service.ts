@@ -943,7 +943,7 @@ export class ClinicalDocumentationDomainService {
     // Only explicitly clinician-accepted structured billing codes are considered.
     const structured = payload.acceptedStructuredData || {};
     const billingCodes = Array.isArray(structured.billingCodes) ? structured.billingCodes : [];
-    const revenueIntegrityFindings: RevenueIntegrityFinding[] = billingCodes.flatMap((raw, index) => {
+    let revenueIntegrityFindings: RevenueIntegrityFinding[] = billingCodes.flatMap((raw, index) => {
       if (!raw || typeof raw !== 'object') return [];
       const candidate = raw as Record<string, unknown>;
       const code = String(candidate.code || '').trim();
@@ -995,21 +995,17 @@ export class ClinicalDocumentationDomainService {
       };
     }
 
-    if (
+    const revenueIntegrityDeferredAfterBillingClose =
       revenueIntegrityFindings.length > 0 &&
       String(billingEncounter?.billingReconciliationState || '').toUpperCase() ===
-        'CLEARED'
-    ) {
-      return {
-        success: false,
-        commandId,
-        idempotencyKey,
-        error: {
-          code: 'OPD_BILLING_ALREADY_RECONCILED',
-          message:
-            'A signed note may not introduce new billing candidates after final OPD billing reconciliation.',
-        },
-      };
+        'CLEARED';
+
+    if (revenueIntegrityDeferredAfterBillingClose) {
+      // Clinical documentation must never be rejected because finance is closed.
+      // The signed structured billing codes remain preserved in the clinical
+      // document for later governed amendment/revenue-review workflows, but no
+      // new billable candidate is introduced into the closed OPD encounter.
+      revenueIntegrityFindings = [];
     }
 
     const tx = await TransactionManager.executeAtomicMutation({
@@ -1026,6 +1022,7 @@ export class ClinicalDocumentationDomainService {
         category: payload.category,
         sourceDraftId: payload.sourceDraftId,
         revenueIntegrityFindingIds: revenueIntegrityFindings.map((finding) => finding.id),
+        revenueIntegrityDeferredAfterBillingClose,
         canonicalConditionIds: canonicalConditions.map((condition) => condition.conditionId),
         structuredDiagnoses: normalizedDiagnoses.diagnoses.map((diagnosis) => ({
           code: diagnosis.code,
@@ -1094,6 +1091,7 @@ export class ClinicalDocumentationDomainService {
         canonicalConditionIds: canonicalConditions.map((condition) => condition.conditionId),
         canonicalConditions,
         revenueIntegrityFindings,
+        revenueIntegrityDeferredAfterBillingClose,
       },
     };
   }

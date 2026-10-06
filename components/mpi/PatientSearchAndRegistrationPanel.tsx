@@ -56,25 +56,36 @@ export function PatientSearchAndRegistrationPanel({
   const [chronicConditionsText, setChronicConditionsText] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Filter existing patients
+  // Filter existing patients. MRN and CNIC are exact identity lookups;
+  // name/phone remain broader convenience searches.
   const filteredPatients = existingPatients.filter((p) => {
     if (!searchQuery.trim()) return true;
-    const q = searchQuery.toLowerCase().trim();
-    const matchName = p.fullName.toLowerCase().includes(q);
-    const matchMrn = p.mrn.toLowerCase().includes(q);
-    const matchPhone = p.contactPhone?.toLowerCase().includes(q);
-    const matchId = p.identifiers?.some((id) => id.value.toLowerCase().includes(q));
 
-    if (searchFilter === 'CNIC') {
-      return p.identifiers?.some((id) => id.type === 'CNIC' && id.value.toLowerCase().includes(q));
-    }
-    if (searchFilter === 'MRN') {
-      return matchMrn;
-    }
-    if (searchFilter === 'PHONE') {
-      return matchPhone;
-    }
-    return matchName || matchMrn || matchCnic || matchPhone || matchId;
+    const q = searchQuery.trim();
+    const qLower = q.toLowerCase();
+    const normalizedMrn = normalizeMrn(q);
+    const normalizedCnic = normalizeCnic(q);
+    const matchName = p.fullName.toLowerCase().includes(qLower);
+    const matchMrn = normalizeMrn(p.mrn) === normalizedMrn;
+    const matchPhone = p.contactPhone?.toLowerCase().includes(qLower);
+    const matchCnic =
+      Boolean(normalizedCnic) &&
+      Boolean(
+        p.identifiers?.some(
+          (id) =>
+            id.type === 'CNIC' &&
+            normalizeCnic(id.value) === normalizedCnic
+        )
+      );
+    const matchId = p.identifiers?.some((id) =>
+      id.value.toLowerCase().includes(qLower)
+    );
+
+    if (searchFilter === 'CNIC') return matchCnic;
+    if (searchFilter === 'MRN') return Boolean(normalizedMrn) && matchMrn;
+    if (searchFilter === 'PHONE') return Boolean(matchPhone);
+
+    return matchName || matchMrn || matchCnic || Boolean(matchPhone) || Boolean(matchId);
   });
 
   const handleAddIdentifier = () => {

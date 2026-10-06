@@ -133,6 +133,24 @@ describe('DRP-11 staging security qualification', () => {
     }
   });
 
+  test('dependency audit ignores source-map-js advisory only after proving patched lock resolution', async () => {
+    const workflow = await source(
+      '.github/workflows/drp-security-qualification.yml'
+    );
+    const manifest = await source('package.json');
+    const lock = await source('bun.lock');
+
+    expect(manifest).toContain('"source-map-js": "1.2.2"');
+    expect(lock).toContain('"source-map-js": ["source-map-js@1.2.2"');
+    expect(workflow).toContain('Verify patched source-map-js resolution');
+    expect(workflow).toContain(
+      'bun audit --prod --audit-level high --ignore GHSA-68fv-2mgg-jv7q'
+    );
+    expect(workflow).toContain(
+      "unique.length !== 1 || unique[0] !== '1.2.2'"
+    );
+  });
+
   test('independent penetration evidence remains an explicit pre-pilot gate', async () => {
     const manifest = await source('scripts/ops/p7-evidence-manifest.ts');
     expect(manifest).toContain('p7-independent-security-assessment.json');

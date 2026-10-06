@@ -7,6 +7,7 @@ import { OutboxDispatcher } from '@/lib/backend/outbox/dispatcher';
 import { ProjectionWorkers } from '@/lib/backend/projections/projection-workers';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { registerPatientAndEncounter } from '@/server/runtime/registration-orchestrator';
+import { financePeriodId } from '@/lib/finance/finance-engine';
 
 function unique(prefix: string): string {
   return `${prefix}_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
@@ -802,7 +803,8 @@ describe('G-HIMS P1 durable command infrastructure', () => {
     expect(findings.size).toBe(1);
     const finding = findings.docs[0].data();
     expect(finding.status).toBe('PENDING_REVIEW');
-    expect(finding.estimatedRecoverableAmountMinorUnits).toBe(9500);
+    expect(finding.estimatedRecoverableAmountMinorUnits).toBeUndefined();
+    expect(finding.currency).toBeUndefined();
 
     const charges = await db
       .collection('tenants')
@@ -841,6 +843,98 @@ describe('G-HIMS P1 durable command infrastructure', () => {
         createdAt: Date.now(),
         updatedAt: Date.now(),
       });
+
+    const tenantRef = db.collection('tenants').doc(tenantId);
+    const postingAt = Date.now();
+    const postingDate = new Date(postingAt);
+    const periodId = financePeriodId(
+      postingDate.getUTCFullYear(),
+      postingDate.getUTCMonth() + 1
+    );
+
+    await Promise.all([
+      tenantRef.collection('patients').doc(patientId).set({
+        id: patientId,
+        patientId,
+        tenantId,
+        mrn: unique('mrn'),
+        fullName: 'Revenue Integrity Billing Patient',
+        tariffPlan: 'OUT_OF_POCKET',
+        status: 'ACTIVE',
+        createdAt: postingAt,
+        updatedAt: postingAt,
+      }),
+      tenantRef.collection('tariffs').doc('tariff-standard-cash').set({
+        id: 'tariff-standard-cash',
+        tenantId,
+        name: 'Standard Cash',
+        planName: 'cash',
+        defaultDiscountPercent: 0,
+        copayPercent: 100,
+        priceOverrides: {},
+        status: 'active',
+        createdAt: new Date(postingAt).toISOString(),
+        updatedAt: new Date(postingAt).toISOString(),
+      }),
+      tenantRef.collection('billingServiceCatalog').doc('CPT-99214').set({
+        id: 'CPT-99214',
+        serviceCode: 'CPT-99214',
+        description: 'Established patient follow-up',
+        orderType: 'PROCEDURE',
+        category: 'procedure',
+        status: 'ACTIVE',
+        currency: 'PKR',
+        unitPriceMinorUnits: 9500,
+        taxRateBasisPoints: 0,
+        revenueAccountCode: '4000',
+        deferredRevenueAccountCode: '2050',
+      }),
+      tenantRef.collection('accounts').doc('acct-1110').set({
+        accountId: 'acct-1110',
+        tenantId,
+        accountCode: '1110',
+        accountName: 'Accounts Receivable',
+        category: 'asset',
+        subCategory: 'receivables',
+        normalBalance: 'debit',
+        currency: 'PKR',
+        allowManualPosting: false,
+        isActive: true,
+        isSystemLocked: true,
+        createdAt: new Date(postingAt).toISOString(),
+        createdBy: 'test',
+      }),
+      tenantRef.collection('accounts').doc('acct-4000').set({
+        accountId: 'acct-4000',
+        tenantId,
+        accountCode: '4000',
+        accountName: 'OPD Procedure Revenue',
+        category: 'revenue',
+        subCategory: 'patient-services',
+        normalBalance: 'credit',
+        currency: 'PKR',
+        allowManualPosting: false,
+        isActive: true,
+        isSystemLocked: true,
+        createdAt: new Date(postingAt).toISOString(),
+        createdBy: 'test',
+      }),
+      tenantRef.collection('accountingPeriods').doc(periodId).set({
+        periodId,
+        tenantId,
+        fiscalYear: postingDate.getUTCFullYear(),
+        postingPeriod: postingDate.getUTCMonth() + 1,
+        periodKey: `${postingDate.getUTCFullYear()}-${String(
+          postingDate.getUTCMonth() + 1
+        ).padStart(2, '0')}`,
+        periodName: 'P1 durability period',
+        startAt: postingAt - 86400000,
+        endAt: postingAt + 86400000,
+        status: 'OPEN',
+        createdAt: new Date(postingAt).toISOString(),
+        createdBy: 'test',
+      }),
+    ]);
 
     await db.collection('tenants').doc(tenantId).collection('billingMismatches').doc(findingId).set({
       id: findingId,
@@ -900,7 +994,31 @@ describe('G-HIMS P1 durable command infrastructure', () => {
 
     expect(charge.exists).toBe(true);
     expect(charge.data()?.netAmountMinorUnits).toBe(9500);
-    expect(charge.data()?.status).toBe('PENDING_INVOICE');
+    expect(charge.data()?.status).toBe('BILLED');
+    expect(charge.data()?.currency).toBe('PKR');
+
+    const invoiceId = updatedFinding.data()?.invoiceId;
+    expect(typeof invoiceId).toBe('string');
+
+    const [invoice, arOpenItem, journal] = await Promise.all([
+      tenantRef.collection('invoices').doc(invoiceId).get(),
+      tenantRef
+        .collection('arOpenItems')
+        .doc(`ar_patient_${invoiceId}`)
+        .get(),
+      tenantRef
+        .collection('journalEntries')
+        .doc(`je_ri_${findingId}`)
+        .get(),
+    ]);
+
+    expect(invoice.exists).toBe(true);
+    expect(invoice.data()?.billingPurpose).toBe('OPD_REVENUE_INTEGRITY');
+    expect(invoice.data()?.totalPatientDue).toBe(95);
+    expect(arOpenItem.data()?.outstandingMinorUnits).toBe(9500);
+    expect(arOpenItem.data()?.status).toBe('OPEN');
+    expect(journal.data()?.status).toBe('POSTED');
+    expect(journal.data()?.totalAmountMinorUnits).toBe(9500);
 
     const encounterAfterReconciliation = await db
       .collection('tenants')

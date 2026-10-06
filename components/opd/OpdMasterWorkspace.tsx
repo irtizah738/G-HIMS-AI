@@ -560,6 +560,16 @@ export function OpdMasterWorkspace() {
     );
     if (openPharmacyInvoice) return openPharmacyInvoice;
 
+    const openSupplementalInvoice = (
+      activeEncounter.supplementalInvoices || []
+    ).find(
+      (invoice) =>
+        invoice.billingPurpose === 'OPD_REVENUE_INTEGRITY' &&
+        invoice.settlementStatus !== 'SETTLED' &&
+        invoice.settlementStatus !== 'VOIDED'
+    );
+    if (openSupplementalInvoice) return openSupplementalInvoice;
+
     return IS_DEMO_RUNTIME ? activeEncounter.invoice : undefined;
   }, [activeEncounter]);
 
@@ -1882,6 +1892,113 @@ export function OpdMasterWorkspace() {
       return;
     }
 
+    const supplementalInvoice = (
+      activeEncounter.supplementalInvoices || []
+    ).find((invoice) => invoice.id === payment.invoiceId);
+    if (supplementalInvoice) {
+      if (payment.mode !== 'CASH') {
+        throw new Error(
+          'EXTERNAL_PAYMENT_GATEWAY_REQUIRED: only cash settlement is enabled for the controlled OPD pilot.'
+        );
+      }
+      if (
+        !Number.isSafeInteger(payment.amountMinorUnits) ||
+        payment.amountMinorUnits <= 0
+      ) {
+        throw new Error(
+          'INVALID_PAYMENT_AMOUNT: enter a positive whole minor-unit amount.'
+        );
+      }
+      if (
+        payment.amountMinorUnits > supplementalInvoice.balanceDueMinorUnits
+      ) {
+        throw new Error(
+          'PAYMENT_EXCEEDS_BALANCE: cash collection cannot exceed the outstanding supplemental balance.'
+        );
+      }
+
+      const result = await executeActiveTenantCommand<{
+        receipt: { receiptId: string; journalId: string };
+        journal: { journalId: string };
+        invoice: Record<string, any>;
+      }>(
+        'RecordCashReceiptCommand',
+        {
+          receiptId: payment.id,
+          invoiceId: supplementalInvoice.id,
+          encounterId: activeEncounter.id,
+          patientId: activeEncounter.patientId,
+          amountMinorUnits: payment.amountMinorUnits,
+          currency: supplementalInvoice.currency || 'PKR',
+          referenceNumber: payment.referenceNumber,
+          collectedAt: payment.processedAt,
+          cashierName: payment.processedBy,
+        },
+        {
+          idempotencyKey: `opd-ri-cash-receipt:${payment.id}`,
+        }
+      );
+
+      if (!result.success || !result.data) {
+        throw new Error(
+          result.error?.message ||
+            'Revenue Integrity cash receipt command failed.'
+        );
+      }
+
+      const governedPayment: PaymentTransaction = {
+        ...payment,
+        invoiceId: supplementalInvoice.id,
+        glJournalEntryId:
+          result.data.journal?.journalId ||
+          result.data.receipt?.journalId ||
+          '',
+      };
+      const nextBalance = Math.max(
+        0,
+        supplementalInvoice.balanceDueMinorUnits - payment.amountMinorUnits
+      );
+      const isSettled = nextBalance === 0;
+
+      setEncounters((prev) =>
+        prev.map((encounter) =>
+          encounter.id === activeEncounter.id
+            ? {
+                ...encounter,
+                supplementalInvoices: (
+                  encounter.supplementalInvoices || []
+                ).map((invoice) =>
+                  invoice.id === supplementalInvoice.id
+                    ? {
+                        ...invoice,
+                        balanceDueMinorUnits: nextBalance,
+                        settlementStatus: isSettled
+                          ? 'SETTLED'
+                          : 'PARTIALLY_PAID',
+                        payments: [...invoice.payments, governedPayment],
+                        ...(isSettled ? { settledAt: Date.now() } : {}),
+                      }
+                    : invoice
+                ),
+              }
+            : encounter
+        )
+      );
+
+      recordEvent(
+        'REVENUE_INTEGRITY_PAYMENT_CAPTURED',
+        isSettled
+          ? `Revenue Integrity invoice ${supplementalInvoice.invoiceNumber} settled.`
+          : `Partial payment captured for ${supplementalInvoice.invoiceNumber}.`,
+        {
+          invoiceId: supplementalInvoice.id,
+          amountMinorUnits: payment.amountMinorUnits,
+        }
+      );
+      setActiveTab('BILLING');
+      return;
+    }
+
     if (!IS_DEMO_RUNTIME) {
       throw new Error(
         'LEGACY_FINAL_INVOICE_DISABLED: production OPD closes through authoritative final billing reconciliation, not a client aggregate invoice.'
@@ -2060,7 +2177,7 @@ export function OpdMasterWorkspace() {
     if (!activeEncounter) return;
     if (activeBillingInvoice) {
       throw new Error(
-        'OUTSTANDING_INVOICE_REQUIRED: settle every consultation, diagnostic and pharmacy invoice before final reconciliation.'
+        'OUTSTANDING_INVOICE_REQUIRED: settle every consultation, diagnostic, pharmacy, and Revenue Integrity invoice before final reconciliation.'
       );
     }
 

@@ -126,8 +126,16 @@ describe('G-HIMS P1 durability boundary regression guards', () => {
     expect(documentation).toContain("entityType: 'REVENUE_INTEGRITY_FINDING'");
     expect(documentation).toContain('revenueIntegrityFindingIds');
     expect(revenue).toContain('ReconcileRevenueIntegrityFindingPayload');
-    expect(revenue).toContain("status: 'PENDING_INVOICE'");
-    expect(revenue).toContain('estimatedRecoverableAmountMinorUnits');
+    expect(revenue).toContain("status: 'BILLED'");
+    expect(revenue).toContain("'billingServiceCatalog'");
+    expect(revenue).toContain("billingPurpose: 'OPD_REVENUE_INTEGRITY'");
+    expect(revenue).toContain("entityType: 'INVOICE'");
+    expect(revenue).toContain("entityType: 'AR_OPEN_ITEM'");
+    expect(revenue).toContain("entityType: 'JOURNAL_ENTRY'");
+    expect(documentation).not.toContain(
+      'estimatedRecoverableAmountMinorUnits: Math.round(fee * 100)'
+    );
+    expect(documentation).not.toContain("currency: 'USD'");
     expect(context).toContain("'ReconcileRevenueIntegrityFindingCommand'");
     expect(context).toContain("'DismissRevenueIntegrityFindingCommand'");
     expect(tx).toContain("REVENUE_INTEGRITY_FINDING: 'billingMismatches'");

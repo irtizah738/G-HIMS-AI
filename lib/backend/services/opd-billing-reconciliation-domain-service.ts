@@ -16,6 +16,7 @@ const SUPPORTED_PURPOSES = new Set([
   'OPD_CONSULTATION',
   'OPD_DIAGNOSTIC',
   'OPD_PHARMACY',
+  'OPD_REVENUE_INTEGRITY',
 ]);
 
 function reject(
@@ -468,6 +469,9 @@ export class OpdBillingReconciliationDomainService {
     const chargeById = new Map(
       charges.map((charge) => [String(charge.chargeId || ''), charge])
     );
+    const revenueFindingById = new Map(
+      revenueFindings.map((finding) => [String(finding.id || ''), finding])
+    );
 
     for (const invoice of invoices) {
       const invoiceId = String(invoice.id || '').trim();
@@ -566,7 +570,9 @@ export class OpdBillingReconciliationDomainService {
       }
       if (findingStatus === 'RECONCILED') {
         const chargeId = String(finding.chargeId || '').trim();
+        const invoiceId = String(finding.invoiceId || '').trim();
         const charge = chargeById.get(chargeId);
+        const invoice = invoiceById.get(invoiceId);
         if (
           !chargeId ||
           !charge ||
@@ -577,6 +583,19 @@ export class OpdBillingReconciliationDomainService {
             idempotencyKey,
             'OPD_REVENUE_INTEGRITY_CHARGE_MISSING',
             `Reconciled Revenue Integrity finding ${findingId} does not resolve to its authoritative encounter charge.`
+          );
+        }
+        if (
+          !invoiceId ||
+          !invoice ||
+          String(invoice.sourceFindingId || '') !== findingId ||
+          String(charge.invoiceId || '') !== invoiceId
+        ) {
+          return reject(
+            commandId,
+            idempotencyKey,
+            'OPD_REVENUE_INTEGRITY_INVOICE_REQUIRED',
+            `Reconciled Revenue Integrity finding ${findingId} does not resolve to its authoritative supplemental invoice.`
           );
         }
       } else if (findingStatus !== 'DISMISSED') {
@@ -688,6 +707,23 @@ export class OpdBillingReconciliationDomainService {
         }
         prescriptionIds.push(prescriptionId);
       }
+      if (purpose === 'OPD_REVENUE_INTEGRITY') {
+        const findingId = String(invoice.sourceFindingId || '').trim();
+        const finding = revenueFindingById.get(findingId);
+        if (
+          !findingId ||
+          !finding ||
+          String(finding.status || '').toUpperCase() !== 'RECONCILED' ||
+          String(finding.invoiceId || '') !== String(invoice.id || '')
+        ) {
+          return reject(
+            commandId,
+            idempotencyKey,
+            'OPD_REVENUE_INTEGRITY_INVOICE_INVALID',
+            `Revenue Integrity invoice ${invoice.id} is not backed by the reconciled authoritative finding.`
+          );
+        }
+      }
     }
 
     const journalGroups = await Promise.all(
@@ -750,7 +786,8 @@ export class OpdBillingReconciliationDomainService {
         const recognitionJournalId = String(
           order?.recognitionJournalId || ''
         ).trim();
-        const recognitionMinor = Number(order?.netRevenueMinorUnits || 0);
+        const taxMinor = majorToMinor(invoice.totalTax || 0);
+        const recognitionMinor = expectedBillingMinor - taxMinor;
         const billingJournal = group.find(
           (journal) => String(journal.journalId || '') === billingJournalId
         );
@@ -774,6 +811,7 @@ export class OpdBillingReconciliationDomainService {
           );
         }
         if (
+          taxMinor < 0 ||
           !Number.isSafeInteger(recognitionMinor) ||
           recognitionMinor <= 0 ||
           !validateBalancedJournal(

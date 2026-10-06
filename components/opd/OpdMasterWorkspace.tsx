@@ -1322,7 +1322,29 @@ export function OpdMasterWorkspace() {
           dependsOnMutationIds: offlineWorkflowTail.current.get(activeEncounter.id)
             ? [offlineWorkflowTail.current.get(activeEncounter.id)!]
             : undefined,
-          optimisticCache: false,
+          optimisticCache: true,
+          optimisticPayload: {
+            encounterId: activeEncounter.id,
+            patientId: activeEncounter.patientId,
+            orderType,
+            catalogCode: order.testCode || order.code || order.id,
+            orderName: order.testName,
+            clinicalIndication:
+              order.clinicalIndication ||
+              order.reasonForOrder ||
+              'Clinical evaluation',
+            priority:
+              requestedUrgency.includes('STAT')
+                ? 'STAT'
+                : requestedUrgency === 'URGENT'
+                  ? 'URGENT'
+                  : 'ROUTINE',
+            revenueLockStatus: 'PENDING_SERVER_REPLAY',
+            paymentStatus: 'LOCKED_PENDING_PAYMENT',
+            worklistStatus: 'OFFLINE_PENDING_SYNC',
+            status: 'ORDERED',
+            createdAt: order.orderedAt || Date.now(),
+          },
         },
       }
     );
@@ -1467,7 +1489,14 @@ export function OpdMasterWorkspace() {
           collection: 'orders',
           resourceId: orderId,
           action: 'UPDATE',
-          optimisticCache: false,
+          optimisticCache: true,
+          optimisticPayload: {
+            worklistStatus: `${targetStatus}_PENDING_SYNC`,
+            status:
+              targetStatus === 'SPECIMEN_COLLECTED'
+                ? 'COLLECTED'
+                : 'PROCESSING',
+          },
         },
       }
     );

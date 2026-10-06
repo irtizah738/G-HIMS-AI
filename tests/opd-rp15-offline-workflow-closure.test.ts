@@ -128,6 +128,7 @@ describe('OPD-RP15 offline workflow closure', () => {
     expect(billing).toContain('pendingOfflineReceipt');
     expect(readModel).toContain('rawCashReceipts');
     expect(readModel).toContain("status =");
+    expect(readModel).not.toContain("'Authenticated Cashier'");
     expect(reconcile).toContain("category === 'FINANCIAL_CONFLICT'");
   });
 

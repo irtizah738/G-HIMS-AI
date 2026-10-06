@@ -99,7 +99,7 @@ export function requestClinicalConsultation(
     requestedSpecialty: string;
     requestedConsultantId?: string;
     clinicalQuestion: string;
-    priority?: 'ROUTINE' | 'URGENT' | 'STAT';
+    priority?: 'ROUTINE' | 'PRIORITY' | 'URGENT' | 'STAT';
     sourceRefs?: string[];
   }
 ) {

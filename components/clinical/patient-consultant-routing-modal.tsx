@@ -278,6 +278,7 @@ interface PatientConsultantRoutingModalProps {
   chiefComplaint?: string;
   triageCategory?: string;
   currentAttending?: string;
+  initialClinicalQuestion?: string;
   onRoutedSuccess?: (consultant: ConsultantDoctor, routingDetails: any) => void;
 }
 
@@ -291,6 +292,7 @@ export function PatientConsultantRoutingModal({
   chiefComplaint = 'Acute retrosternal chest pain radiating to jaw, diaphoresis',
   triageCategory = 'Cardiology / Acute Coronary Syndrome',
   currentAttending = 'Triage Officer / Emergency MO',
+  initialClinicalQuestion = '',
   onRoutedSuccess,
 }: PatientConsultantRoutingModalProps) {
   const { addClinicalNote } = useHospital();
@@ -309,10 +311,19 @@ export function PatientConsultantRoutingModal({
   const [routingUrgency, setRoutingUrgency] =
     useState<'STAT' | 'URGENT' | 'PRIORITY' | 'ROUTINE'>('ROUTINE');
   const [assignedRoom, setAssignedRoom] = useState<string>('');
-  const [clinicalHandoffNote, setClinicalHandoffNote] = useState<string>('');
+  const [clinicalHandoffNote, setClinicalHandoffNote] =
+    useState<string>(initialClinicalQuestion);
 
   const [isDispatching, setIsDispatching] = useState<boolean>(false);
   const [dispatchedConfirmation, setDispatchedConfirmation] = useState<any | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setClinicalHandoffNote(initialClinicalQuestion);
+      setDispatchedConfirmation(null);
+      setDirectoryError(null);
+    }
+  }, [isOpen, initialClinicalQuestion]);
 
   useEffect(() => {
     if (!isOpen || IS_DEMO_RUNTIME) return;

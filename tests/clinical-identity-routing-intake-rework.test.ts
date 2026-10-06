@@ -40,6 +40,8 @@ describe('Clinical identity and specialist workflow rework', () => {
     expect(routing).toContain("? 30");
     expect(routing).toContain("routingUrgency === 'PRIORITY'");
     expect(routing).toContain("? 60");
+    expect(routing).toContain('priority: routingUrgency');
+    expect(routing).toContain('acknowledgement target');
     expect(routing).toContain('Handoff Preparation Checklist');
     expect(routing).toContain('does not place a diagnostic order');
     expect(routing).not.toContain('Code STEMI activated');
@@ -64,6 +66,8 @@ describe('Clinical identity and specialist workflow rework', () => {
     expect(intake).not.toContain("ecg_telemetry_findings: 'stemi_elevation'");
     expect(intake).not.toContain('Differential Diagnosis Probability Matrix');
     expect(intake).not.toContain('Recommended STAT Diagnostic & Intervention Orders');
+    expect(intake).not.toContain('Differential Diagnosis probability matrix, STAT diagnostic orders');
+    expect(intake).toContain('Specialist routing remains a separate explicit action.');
     const route = await source('app/api/clinical/intake-optimize/route.ts');
     expect(route).toContain('sourceLimitedBriefSchema');
     expect(route).toContain('z.literal(true)');
@@ -90,5 +94,11 @@ describe('Clinical identity and specialist workflow rework', () => {
     expect(plan).toContain('does **not** remove clinical safety, RBAC, credential');
     expect(plan).toContain('BUILDING');
     expect(plan).toContain('PRODUCTION_QUALIFIED');
+
+    const registry = await source('components/views/all-modules-directory.tsx');
+    expect(registry).toContain('52 / 52 Registered');
+    expect(registry).toContain('Registry presence does not imply production readiness');
+    expect(registry).not.toContain('52 / 52 Active');
+    expect(registry).not.toContain('All Suites Green');
   });
 });

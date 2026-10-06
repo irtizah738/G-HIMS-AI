@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import {
   Users,
   Search,
@@ -491,6 +491,13 @@ export function OpdMasterWorkspace() {
     useState<boolean>(false);
   const [billingReconciliationError, setBillingReconciliationError] =
     useState<string | null>(null);
+  const offlineWorkflowTail = useRef<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    if (isOnline && pendingSyncCount === 0) {
+      offlineWorkflowTail.current.clear();
+    }
+  }, [isOnline, pendingSyncCount]);
 
   const refreshAuthoritativeWorkspace = useCallback(async () => {
     if (IS_DEMO_RUNTIME || auth.loading || !auth.activeTenant?.tenantId) return;
@@ -1045,6 +1052,9 @@ export function OpdMasterWorkspace() {
           collection: 'encounterEvidence',
           resourceId: localEvidenceId,
           action: 'CREATE',
+          dependsOnMutationIds: offlineWorkflowTail.current.get(activeEncounter.id)
+            ? [offlineWorkflowTail.current.get(activeEncounter.id)!]
+            : undefined,
           optimisticCache: true,
         },
       }
@@ -1068,6 +1078,9 @@ export function OpdMasterWorkspace() {
           collection: 'encounters',
           resourceId: activeEncounter.id,
           action: 'UPDATE',
+          dependsOnMutationIds: vitalsResult.queuedOffline
+            ? [vitalsResult.commandId]
+            : undefined,
           optimisticCache: false,
         },
       }
@@ -1077,6 +1090,9 @@ export function OpdMasterWorkspace() {
         transition.error?.message ||
           'Clinical workflow runtime blocked transition from triage to consultation.'
       );
+    }
+    if (transition.queuedOffline) {
+      offlineWorkflowTail.current.set(activeEncounter.id, transition.commandId);
     }
 
     setEncounters((prev) =>
@@ -1138,6 +1154,9 @@ export function OpdMasterWorkspace() {
           collection: 'encounterEvidence',
           resourceId: localEvidenceId,
           action: 'CREATE',
+          dependsOnMutationIds: offlineWorkflowTail.current.get(activeEncounter.id)
+            ? [offlineWorkflowTail.current.get(activeEncounter.id)!]
+            : undefined,
           optimisticCache: true,
         },
       }
@@ -1161,6 +1180,9 @@ export function OpdMasterWorkspace() {
           collection: 'encounters',
           resourceId: activeEncounter.id,
           action: 'UPDATE',
+          dependsOnMutationIds: noteResult.queuedOffline
+            ? [noteResult.commandId]
+            : undefined,
           optimisticCache: false,
         },
       }
@@ -1170,6 +1192,9 @@ export function OpdMasterWorkspace() {
         transition.error?.message ||
           'Clinical workflow runtime blocked transition from consultation to diagnostics.'
       );
+    }
+    if (transition.queuedOffline) {
+      offlineWorkflowTail.current.set(activeEncounter.id, transition.commandId);
     }
 
     setEncounters((prev) =>
@@ -1241,6 +1266,9 @@ export function OpdMasterWorkspace() {
           collection: 'orders',
           resourceId: order.id,
           action: 'CREATE',
+          dependsOnMutationIds: offlineWorkflowTail.current.get(activeEncounter.id)
+            ? [offlineWorkflowTail.current.get(activeEncounter.id)!]
+            : undefined,
           optimisticCache: false,
         },
       }
@@ -1274,6 +1302,10 @@ export function OpdMasterWorkspace() {
               }
             : encounter
         )
+      );
+      offlineWorkflowTail.current.set(
+        activeEncounter.id,
+        orderResult.commandId
       );
       recordEvent(
         'DIAGNOSTIC_ORDERED',

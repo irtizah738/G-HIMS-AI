@@ -845,7 +845,10 @@ export function OpdAppointmentsWaitlist({
                       <td className="p-3 font-mono text-slate-500">{w.mrn}</td>
                       <td className="p-3 font-semibold">{w.preferredDepartment}</td>
                       <td className="p-3 text-slate-600 dark:text-slate-400">
-                        {w.contactPhone} ({w.notificationPreference})
+                        {w.notificationPreference === 'EMAIL'
+                          ? w.contactEmail || 'No email on file'
+                          : w.contactPhone || 'No phone on file'}{' '}
+                        ({w.notificationPreference})
                       </td>
                       <td className="p-3">
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">

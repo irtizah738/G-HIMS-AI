@@ -283,6 +283,7 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
                 Heart Rate (bpm)
               </label>
               <input
+                data-testid="opd-triage-heart-rate"
                 type="number"
                 value={inputValue(hr)}
                 onChange={(e) => setHr(parseNumericInput(e.target.value))}
@@ -294,6 +295,7 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
                 Systolic BP (mmHg)
               </label>
               <input
+                data-testid="opd-triage-systolic"
                 type="number"
                 value={inputValue(sysBp)}
                 onChange={(e) => setSysBp(parseNumericInput(e.target.value))}
@@ -305,6 +307,7 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
                 Diastolic BP (mmHg)
               </label>
               <input
+                data-testid="opd-triage-diastolic"
                 type="number"
                 value={inputValue(diaBp)}
                 onChange={(e) => setDiaBp(parseNumericInput(e.target.value))}
@@ -316,6 +319,7 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
                 Resp Rate (breaths/min)
               </label>
               <input
+                data-testid="opd-triage-respiratory-rate"
                 type="number"
                 value={inputValue(rr)}
                 onChange={(e) => setRr(parseNumericInput(e.target.value))}
@@ -327,6 +331,7 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
                 Temperature (°C)
               </label>
               <input
+                data-testid="opd-triage-temperature"
                 type="number"
                 step="0.1"
                 value={inputValue(temp)}
@@ -339,6 +344,7 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
                 SpO2 Saturation (%)
               </label>
               <input
+                data-testid="opd-triage-spo2"
                 type="number"
                 value={inputValue(spo2)}
                 onChange={(e) => setSpo2(parseNumericInput(e.target.value))}
@@ -353,6 +359,7 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
                 NEWS2 SpO₂ Scale
               </label>
               <select
+                data-testid="opd-triage-spo2-scale"
                 value={spO2Scale}
                 onChange={(e) =>
                   setSpO2Scale(e.target.value === '' ? '' : (Number(e.target.value) as 1 | 2))
@@ -369,6 +376,7 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
                 Oxygen Status
               </label>
               <select
+                data-testid="opd-triage-oxygen-status"
                 value={onO2 === null ? '' : onO2 ? 'SUPPLEMENTAL' : 'ROOM_AIR'}
                 onChange={(e) =>
                   setOnO2(
@@ -418,6 +426,7 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
                 Eye Opening (1 - 4)
               </label>
               <select
+                data-testid="opd-triage-gcs-eye"
                 value={inputValue(gcsEye)}
                 onChange={(e) => setGcsEye(parseNumericInput(e.target.value))}
                 className="w-full px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
@@ -435,6 +444,7 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
                 Verbal Response (1 - 5)
               </label>
               <select
+                data-testid="opd-triage-gcs-verbal"
                 value={inputValue(gcsVerbal)}
                 onChange={(e) => setGcsVerbal(parseNumericInput(e.target.value))}
                 className="w-full px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
@@ -453,6 +463,7 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
                 Motor Response (1 - 6)
               </label>
               <select
+                data-testid="opd-triage-gcs-motor"
                 value={inputValue(gcsMotor)}
                 onChange={(e) => setGcsMotor(parseNumericInput(e.target.value))}
                 className="w-full px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
@@ -478,6 +489,7 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
             <div>
               <label className="block text-xs font-semibold mb-1">Height (cm)</label>
               <input
+                data-testid="opd-triage-height"
                 type="number"
                 value={inputValue(heightCm)}
                 onChange={(e) => setHeightCm(parseNumericInput(e.target.value))}
@@ -487,6 +499,7 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
             <div>
               <label className="block text-xs font-semibold mb-1">Weight (kg)</label>
               <input
+                data-testid="opd-triage-weight"
                 type="number"
                 step="0.1"
                 value={inputValue(weightKg)}
@@ -566,6 +579,7 @@ export function OpdTriageVitals({ encounter, onSaveVitals }: OpdTriageVitalsProp
 
         <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-end">
           <button
+            data-testid="opd-triage-submit"
             onClick={handleSave}
             className="px-6 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs cursor-pointer"
           >

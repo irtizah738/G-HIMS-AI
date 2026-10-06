@@ -23,6 +23,10 @@ describe('Clinical identity and specialist workflow rework', () => {
     expect(route).toContain("resolveIdentifier(tenantId, 'CNIC', cnic)");
     expect(route).toContain('Provide MRN or CNIC for exact MPI lookup.');
     expect(route).toContain('MPI_IDENTIFIER_MISMATCH');
+    expect(route).toContain('assertMpiLookupAccess(context)');
+    expect(route).toContain('MPI_LOOKUP_ACCESS_DENIED');
+    expect(route).toContain("patientId: patient.id");
+    expect(route).not.toContain('patient,\n    });');
   });
 
   test('routing workflow has explicit selection, correct SLA and no fake diagnostic dispatch', async () => {
@@ -30,8 +34,11 @@ describe('Clinical identity and specialist workflow rework', () => {
     const mpiView = await source('components/views/patient-mpi-view.tsx');
 
     expect(routing).toContain("useState<'STAT' | 'URGENT' | 'PRIORITY' | 'ROUTINE'>('ROUTINE')");
+    expect(routing).toContain("routingUrgency === 'STAT'");
     expect(routing).toContain("? 10");
+    expect(routing).toContain("routingUrgency === 'URGENT'");
     expect(routing).toContain("? 30");
+    expect(routing).toContain("routingUrgency === 'PRIORITY'");
     expect(routing).toContain("? 60");
     expect(routing).toContain('Handoff Preparation Checklist');
     expect(routing).toContain('does not place a diagnostic order');

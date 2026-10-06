@@ -173,6 +173,7 @@ function collectionForEntityType(entityType: string): string {
     OPD_APPOINTMENT_SLOT: 'opdAppointmentSlots',
     OPD_WAITLIST_ENTRY: 'opdWaitlist',
     OPD_WAITLIST_SCOPE: 'opdWaitlistScopes',
+    OPD_REFERRAL: 'opdReferrals',
     DIAGNOSTIC_ORDER: 'orders',
     PRESCRIPTION: 'prescriptions',
     INPATIENT_ORDER: 'inpatientOrders',

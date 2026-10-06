@@ -110,16 +110,6 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         },
       },
       {
-        id: 'matrix',
-        title: 'Module Readiness & Audit Matrix',
-        category: 'Executive & Strategy',
-        icon: ShieldCheck,
-        action: () => {
-          setActiveTab('matrix');
-          onClose();
-        },
-      },
-      {
         id: 'directory',
         title: 'All 52 Domains Directory & Architecture Launchpad (52 Enterprise Subsystems)',
         category: 'Executive & Strategy',

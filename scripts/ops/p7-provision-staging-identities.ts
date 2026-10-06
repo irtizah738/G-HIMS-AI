@@ -66,7 +66,10 @@ const personas: Array<{
     email: process.env.GHIMS_P7_NURSE_EMAIL || 'p7.nurse@g-hims.invalid',
     displayName: 'P7 Staging Nurse',
     role: 'nurse',
-    department: 'OPD Nursing',
+    // The qualification nurse is scoped to the same clinical department as
+    // the synthetic General Medicine OPD encounter. This exercises the real
+    // department-bound hydration contract rather than an admin bypass.
+    department: 'General Medicine',
   },
   {
     key: 'doctor',

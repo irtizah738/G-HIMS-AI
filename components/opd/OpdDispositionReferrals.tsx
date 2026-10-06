@@ -137,7 +137,6 @@ export function OpdDispositionReferrals({
             }
           : undefined,
       completedAt: Date.now(),
-      completedBy: 'SERVER_AUTHENTICATED_ACTOR',
     };
 
     setSubmitting(true);

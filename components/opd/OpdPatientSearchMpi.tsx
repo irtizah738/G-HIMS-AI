@@ -34,68 +34,54 @@ export function OpdPatientSearchMpi({
   onInitiateMergeRequest,
 }: OpdPatientSearchMpiProps) {
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [searchField, setSearchField] = useState<'ALL' | 'MRN' | 'CNIC' | 'PHONE' | 'NAME' | 'APPT'>('ALL');
+  const [searchField, setSearchField] = useState<'ALL' | 'MRN' | 'CNIC'>('ALL');
   const [selectedForReview, setSelectedForReview] = useState<PatientDemographics | null>(null);
   const [mergeModalOpen, setMergeModalOpen] = useState<boolean>(false);
   const [targetMergePatientId, setTargetMergePatientId] = useState<string>('');
   const [mergeReason, setMergeReason] = useState<string>('');
   const [simulatedBarcode, setSimulatedBarcode] = useState<string>('');
 
-  // Filtered patients based on search
+  const normalizeLookup = (value: string) =>
+    String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+  // Patient retrieval is deterministic: institutional MRN and/or CNIC only.
   const searchResults = useMemo(() => {
-    if (!searchTerm.trim()) {
-      return patients;
-    }
-    const q = searchTerm.toLowerCase().trim();
+    if (!searchTerm.trim()) return [];
+    const q = normalizeLookup(searchTerm);
     return patients.filter((p) => {
-      if (searchField === 'MRN') return p.mrn.toLowerCase().includes(q);
-      if (searchField === 'CNIC') return p.nationalId.toLowerCase().includes(q);
-      if (searchField === 'PHONE') return p.phone.toLowerCase().includes(q);
-      if (searchField === 'NAME') return p.fullName.toLowerCase().includes(q);
-      return (
-        p.fullName.toLowerCase().includes(q) ||
-        p.mrn.toLowerCase().includes(q) ||
-        p.nationalId.toLowerCase().includes(q) ||
-        p.phone.toLowerCase().includes(q) ||
-        (p.preferredName && p.preferredName.toLowerCase().includes(q))
-      );
+      const mrnMatch = normalizeLookup(p.mrn).includes(q);
+      const cnicMatch = normalizeLookup(p.nationalId).includes(q);
+      if (searchField === 'MRN') return mrnMatch;
+      if (searchField === 'CNIC') return cnicMatch;
+      return mrnMatch || cnicMatch;
     });
   }, [patients, searchTerm, searchField]);
 
-  // Real-time MPI Duplicate Detection Engine for current search or prospective new patient
+  // Duplicate review is identity-based: exact MRN or exact CNIC.
   const mpiDuplicateMatches = useMemo((): MpiMatchResult[] => {
     if (!searchTerm.trim() || searchTerm.length < 3) return [];
-    const q = searchTerm.toLowerCase().trim();
+    const q = normalizeLookup(searchTerm);
 
     return patients.map((candidate) => {
-      let score = 0;
       const matchReasons: string[] = [];
+      let score = 0;
 
-      // CNIC exact match (100% deterministic)
-      if (candidate.nationalId.toLowerCase() === q) {
+      if (normalizeLookup(candidate.mrn) === q) {
+        score = 100;
+        matchReasons.push('Exact Institutional MRN Match');
+      }
+      if (normalizeLookup(candidate.nationalId) === q) {
         score = 100;
         matchReasons.push('Exact CNIC / National ID Match');
-      }
-
-      // Phone match (90%)
-      if (candidate.phone.toLowerCase().includes(q) || q.includes(candidate.phone.toLowerCase())) {
-        score = Math.max(score, 90);
-        matchReasons.push('Contact Phone Number Collision');
-      }
-
-      // Full Name match (75%)
-      if (candidate.fullName.toLowerCase().includes(q)) {
-        score = Math.max(score, 75);
-        matchReasons.push('Phonetic Name Alignment');
       }
 
       return {
         candidatePatient: candidate,
         matchScore: score,
         matchReasons,
-        isDefiniteDuplicate: score >= 90,
+        isDefiniteDuplicate: score === 100,
       };
-    }).filter((r) => r.matchScore >= 60);
+    }).filter((result) => result.matchScore === 100);
   }, [patients, searchTerm]);
 
   const handleSimulateScan = () => {
@@ -114,10 +100,10 @@ export function OpdPatientSearchMpi({
           <div>
             <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
               <Search className="w-5 h-5 text-blue-600" />
-              Master Patient Index (MPI) Multi-Criteria Search
+              Master Patient Index (MPI) Identity Lookup
             </h2>
             <p className="text-xs text-slate-500">
-              Query tenant MPI by MRN, National ID / CNIC, Phone, Name, Barcode or Appointment token before initiating registration.
+              Retrieve patient records using the institutional MRN and/or CNIC before initiating registration.
             </p>
           </div>
 
@@ -146,7 +132,7 @@ export function OpdPatientSearchMpi({
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Search by Patient Full Name, MRN (e.g. MRN-20260901-8842), National ID/CNIC, Phone..."
+              placeholder="Enter MRN or CNIC number..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-medium"
@@ -158,11 +144,9 @@ export function OpdPatientSearchMpi({
             onChange={(e) => setSearchField(e.target.value as any)}
             className="px-3 py-2.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-semibold"
           >
-            <option value="ALL">All Fields (Smart Search)</option>
+            <option value="ALL">MRN or CNIC</option>
             <option value="MRN">Institutional MRN</option>
             <option value="CNIC">National ID / CNIC</option>
-            <option value="PHONE">Primary Contact Phone</option>
-            <option value="NAME">Legal / Preferred Name</option>
           </select>
         </div>
       </div>

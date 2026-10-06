@@ -73,6 +73,16 @@ describe('OPD-SQ1 deployed cross-role staging qualification contract', () => {
     expect(workspace).toContain('data-encounter-id={activeEncounter.id}');
   });
 
+  test('generic Playwright CI excludes the deployed staging qualification suite', async () => {
+    const genericConfig = await source('playwright.config.ts');
+    const stagingConfig = await source('playwright.opd-staging.config.ts');
+
+    expect(genericConfig).toContain("testIgnore: ['staging/**']");
+    expect(stagingConfig).toContain("testDir: './e2e/staging'");
+    expect(stagingConfig).toContain("testMatch: /opd-cross-role\\.spec\\.ts/");
+    expect(stagingConfig).toContain('GHIMS_STAGING_BASE_URL_REQUIRED');
+  });
+
   test('staging Playwright suite is real-auth, real-server and STAGING-only', async () => {
     const config = await source('playwright.opd-staging.config.ts');
     const spec = await source('e2e/staging/opd-cross-role.spec.ts');

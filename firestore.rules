@@ -219,13 +219,13 @@ service cloud.firestore {
       }
 
       // Clinical read models. Mutations must go through authenticated server commands.
+      // Patient identity/chart state is exposed only through server APIs and
+      // scoped encrypted hydration, where patient/care-team ABAC can be enforced.
       match /patients/{patientId} {
-        allow read: if canReadClinical(tenantId);
-        allow write: if false;
+        allow read, write: if false;
 
         match /timeline/{eventId} {
-          allow read: if canReadClinical(tenantId);
-          allow write: if false;
+          allow read, write: if false;
         }
       }
 
@@ -250,39 +250,32 @@ service cloud.firestore {
       }
 
       match /mpi_registry/{mpiKey} {
-        allow read: if canReadClinical(tenantId);
-        allow write: if false;
+        allow read, write: if false;
       }
 
       match /encounters/{encounterId} {
-        allow read: if canReadClinical(tenantId);
-        allow write: if false;
+        allow read, write: if false;
 
         match /{nested=**} {
-          allow read: if canReadClinical(tenantId);
-          allow write: if false;
+          allow read, write: if false;
         }
       }
 
       match /opd_queue/{tokenId} {
-        allow read: if canReadClinical(tenantId);
-        allow write: if false;
+        allow read, write: if false;
       }
 
       // OPD scheduling read models are client-readable only to scheduling/
       // clinical roles. Slot locks are concurrency-control internals and never
       // exposed directly; all scheduling mutations execute through commands.
       match /opdAppointments/{appointmentId} {
-        allow read: if canReadOpdScheduling(tenantId);
-        allow write: if false;
+        allow read, write: if false;
       }
       match /opdWaitlist/{waitlistId} {
-        allow read: if canReadOpdScheduling(tenantId);
-        allow write: if false;
+        allow read, write: if false;
       }
       match /opdReferrals/{referralId} {
-        allow read: if canReadClinical(tenantId);
-        allow write: if false;
+        allow read, write: if false;
       }
       match /opdAppointmentSlots/{slotId} {
         allow read, write: if false;
@@ -292,43 +285,35 @@ service cloud.firestore {
       }
 
       match /diagnostic_orders/{orderId} {
-        allow read: if canReadClinical(tenantId);
-        allow write: if false;
+        allow read, write: if false;
       }
 
       match /orders/{orderId} {
-        allow read: if canReadClinical(tenantId);
-        allow write: if false;
+        allow read, write: if false;
       }
 
       match /prescriptions/{prescriptionId} {
-        allow read: if canReadClinical(tenantId);
-        allow write: if false;
+        allow read, write: if false;
       }
 
       match /labResults/{resultId} {
-        allow read: if canReadClinical(tenantId);
-        allow write: if false;
+        allow read, write: if false;
       }
 
       match /radiologyResults/{resultId} {
-        allow read: if canReadClinical(tenantId);
-        allow write: if false;
+        allow read, write: if false;
       }
 
       match /clinicalQueues/{queueId} {
-        allow read: if canReadClinical(tenantId);
-        allow write: if false;
+        allow read, write: if false;
       }
 
       match /timelineProjections/{projectionId} {
-        allow read: if canReadClinical(tenantId);
-        allow write: if false;
+        allow read, write: if false;
       }
 
       match /generalLedgerProjections/{projectionId} {
-        allow read: if canReadClinical(tenantId);
-        allow write: if false;
+        allow read, write: if false;
       }
 
       // Patient 360 contains assembled PHI and must only be read through the

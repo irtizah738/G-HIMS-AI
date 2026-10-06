@@ -148,6 +148,12 @@ async function readActiveOpdEncounters(
   context: OpdEdgeScopeContext
 ): Promise<Row[]> {
   const facilities = [...normalizedSet(context.facilityIds || [])];
+  const departments = [
+    ...normalizedSet(
+      context.departmentIds ||
+        (context.departmentId ? [context.departmentId] : [])
+    ),
+  ];
   const admin = isAdmin(context.roles);
   const rows = new Map<string, Row>();
 
@@ -155,7 +161,7 @@ async function readActiveOpdEncounters(
     throw new Error('OPD_EDGE_FACILITY_SCOPE_REQUIRED');
   }
 
-  if (admin) {
+  if (admin && facilities.length === 0) {
     const snapshot = await tenantRef
       .collection('encounters')
       .where('encounterType', '==', 'OPD')
@@ -169,11 +175,33 @@ async function readActiveOpdEncounters(
       OPD_ACTIVE_ENCOUNTER_MAX,
       'encounters'
     );
-  } else {
-    for (const group of chunks(facilities, IN_CHUNK)) {
+    return [...rows.values()];
+  }
+
+  for (const facilityGroup of chunks(facilities, IN_CHUNK)) {
+    if (departments.length === 0) {
       const snapshot = await tenantRef
         .collection('encounters')
-        .where('facilityId', 'in', group)
+        .where('facilityId', 'in', facilityGroup)
+        .where('encounterType', '==', 'OPD')
+        .where('status', '==', 'ACTIVE')
+        .orderBy('updatedAt', 'desc')
+        .limit(OPD_ACTIVE_ENCOUNTER_MAX + 1)
+        .get();
+      addRows(
+        rows,
+        snapshot.docs,
+        OPD_ACTIVE_ENCOUNTER_MAX,
+        'encounters'
+      );
+      continue;
+    }
+
+    for (const departmentId of departments) {
+      const snapshot = await tenantRef
+        .collection('encounters')
+        .where('facilityId', 'in', facilityGroup)
+        .where('departmentId', '==', departmentId)
         .where('encounterType', '==', 'OPD')
         .where('status', '==', 'ACTIVE')
         .orderBy('updatedAt', 'desc')
@@ -197,6 +225,12 @@ async function readActiveAppointments(
   now: number
 ): Promise<Row[]> {
   const facilities = [...normalizedSet(context.facilityIds || [])];
+  const departments = [
+    ...normalizedSet(
+      context.departmentIds ||
+        (context.departmentId ? [context.departmentId] : [])
+    ),
+  ];
   const admin = isAdmin(context.roles);
   const rows = new Map<string, Row>();
   const cutoff = now - APPOINTMENT_LOOKBACK_MS;
@@ -206,7 +240,7 @@ async function readActiveAppointments(
   }
 
   for (const status of ACTIVE_APPOINTMENT_STATUSES) {
-    if (admin) {
+    if (admin && facilities.length === 0) {
       const snapshot = await tenantRef
         .collection('opdAppointments')
         .where('status', '==', status)
@@ -223,21 +257,42 @@ async function readActiveAppointments(
       continue;
     }
 
-    for (const group of chunks(facilities, IN_CHUNK)) {
-      const snapshot = await tenantRef
-        .collection('opdAppointments')
-        .where('facilityId', 'in', group)
-        .where('status', '==', status)
-        .where('scheduledEndAt', '>=', cutoff)
-        .orderBy('scheduledEndAt', 'asc')
-        .limit(OPD_SCHEDULING_MAX + 1)
-        .get();
-      addRows(
-        rows,
-        snapshot.docs,
-        OPD_SCHEDULING_MAX,
-        'opdAppointments'
-      );
+    for (const facilityGroup of chunks(facilities, IN_CHUNK)) {
+      if (departments.length === 0) {
+        const snapshot = await tenantRef
+          .collection('opdAppointments')
+          .where('facilityId', 'in', facilityGroup)
+          .where('status', '==', status)
+          .where('scheduledEndAt', '>=', cutoff)
+          .orderBy('scheduledEndAt', 'asc')
+          .limit(OPD_SCHEDULING_MAX + 1)
+          .get();
+        addRows(
+          rows,
+          snapshot.docs,
+          OPD_SCHEDULING_MAX,
+          'opdAppointments'
+        );
+        continue;
+      }
+
+      for (const departmentId of departments) {
+        const snapshot = await tenantRef
+          .collection('opdAppointments')
+          .where('facilityId', 'in', facilityGroup)
+          .where('departmentId', '==', departmentId)
+          .where('status', '==', status)
+          .where('scheduledEndAt', '>=', cutoff)
+          .orderBy('scheduledEndAt', 'asc')
+          .limit(OPD_SCHEDULING_MAX + 1)
+          .get();
+        addRows(
+          rows,
+          snapshot.docs,
+          OPD_SCHEDULING_MAX,
+          'opdAppointments'
+        );
+      }
     }
   }
 
@@ -249,6 +304,12 @@ async function readActiveWaitlist(
   context: OpdEdgeScopeContext
 ): Promise<Row[]> {
   const facilities = [...normalizedSet(context.facilityIds || [])];
+  const departments = [
+    ...normalizedSet(
+      context.departmentIds ||
+        (context.departmentId ? [context.departmentId] : [])
+    ),
+  ];
   const admin = isAdmin(context.roles);
   const rows = new Map<string, Row>();
 
@@ -257,7 +318,7 @@ async function readActiveWaitlist(
   }
 
   for (const status of ACTIVE_WAITLIST_STATUSES) {
-    if (admin) {
+    if (admin && facilities.length === 0) {
       const snapshot = await tenantRef
         .collection('opdWaitlist')
         .where('status', '==', status)
@@ -268,15 +329,30 @@ async function readActiveWaitlist(
       continue;
     }
 
-    for (const group of chunks(facilities, IN_CHUNK)) {
-      const snapshot = await tenantRef
-        .collection('opdWaitlist')
-        .where('facilityId', 'in', group)
-        .where('status', '==', status)
-        .orderBy('updatedAt', 'desc')
-        .limit(OPD_SCHEDULING_MAX + 1)
-        .get();
-      addRows(rows, snapshot.docs, OPD_SCHEDULING_MAX, 'opdWaitlist');
+    for (const facilityGroup of chunks(facilities, IN_CHUNK)) {
+      if (departments.length === 0) {
+        const snapshot = await tenantRef
+          .collection('opdWaitlist')
+          .where('facilityId', 'in', facilityGroup)
+          .where('status', '==', status)
+          .orderBy('updatedAt', 'desc')
+          .limit(OPD_SCHEDULING_MAX + 1)
+          .get();
+        addRows(rows, snapshot.docs, OPD_SCHEDULING_MAX, 'opdWaitlist');
+        continue;
+      }
+
+      for (const departmentId of departments) {
+        const snapshot = await tenantRef
+          .collection('opdWaitlist')
+          .where('facilityId', 'in', facilityGroup)
+          .where('preferredDepartmentId', '==', departmentId)
+          .where('status', '==', status)
+          .orderBy('updatedAt', 'desc')
+          .limit(OPD_SCHEDULING_MAX + 1)
+          .get();
+        addRows(rows, snapshot.docs, OPD_SCHEDULING_MAX, 'opdWaitlist');
+      }
     }
   }
 
@@ -288,9 +364,9 @@ async function readScopedBeds(
   context: OpdEdgeScopeContext
 ): Promise<Row[]> {
   const facilities = [...normalizedSet(context.facilityIds || [])];
-  if (isAdmin(context.roles)) {
+  if (isAdmin(context.roles) && facilities.length === 0) {
     return runBoundedQuery(
-      tenantRef.collection('beds').orderBy('updatedAt', 'desc'),
+      tenantRef.collection('beds'),
       'beds',
       OPD_RELATED_MAX
     );

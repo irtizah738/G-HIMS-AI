@@ -60,6 +60,8 @@ describe('OPD-RP16 real timeline and audit', () => {
     expect(route).toContain(
       "String(audit?.correlationId || '')"
     );
+    expect(route).toContain('ambiguousEventIds.add(eventId)');
+    expect(route).toContain('ambiguousAuditCount');
   });
 
   test('timeline payload sanitization redacts secrets and bounds nested content', async () => {
@@ -99,6 +101,7 @@ describe('OPD-RP16 real timeline and audit', () => {
     expect(view).toContain(
       'timeline truncated by server safety limit'
     );
+    expect(view).toContain('duplicate audit linkage');
 
     expect(workspace).toContain("hash: 'DEMO-NON-AUTHORITATIVE'");
     expect(workspace).toContain('IS_DEMO_RUNTIME ? SEED_EVENTS : []');

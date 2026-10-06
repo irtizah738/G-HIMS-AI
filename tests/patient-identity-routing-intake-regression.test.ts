@@ -34,6 +34,23 @@ describe('Patient identity, specialist routing and intake workflow closure', () 
     expect(patientIndex).toContain('Search by institutional MRN or CNIC');
   });
 
+  test('authoritative MPI lookup resolves only MRN/CNIC registry keys and has an offline exact-match fallback', async () => {
+    const route = await source('app/api/clinical/mpi/lookup/route.ts');
+    const client = await source('lib/clinical/mpi/mpi-lookup-client.ts');
+    const opdSearch = await source('components/opd/OpdPatientSearchMpi.tsx');
+    const backfill = await source('scripts/ops/backfill-mpi-identities.ts');
+
+    expect(route).toContain("mpiRegistryKey('MRN', value)");
+    expect(route).toContain("mpiRegistryKey('CNIC', value)");
+    expect(route).toContain('legacyCnicRegistryKey(value)');
+    expect(route).toContain('MPI_REGISTRY_INTEGRITY_FAILURE');
+    expect(client).toContain('/api/clinical/mpi/lookup');
+    expect(opdSearch).toContain('OFFLINE_FALLBACK');
+    expect(opdSearch).toContain('lookupPatientByMpi');
+    expect(backfill).toContain('GHIMS_MPI_BACKFILL_CONFIRM_TENANT');
+    expect(backfill).toContain('MPI_BACKFILL_REGISTRY_CONFLICT');
+  });
+
   test('specialist routing has no fabricated STEMI handoff or automatic diagnostic ordering', async () => {
     const routing = await source('components/clinical/patient-consultant-routing-modal.tsx');
 

@@ -37,6 +37,8 @@
     "ops:ci:evaluate": "bun scripts/ops/clinical-intelligence-evaluate.ts",
     "ops:ci:synthetic-validation": "bun scripts/ops/ci-synthetic-validation.ts",
     "test:ci-validation": "bun test tests/clinical-intelligence-validation-program.test.ts",
+    "test:hospital0-ci": "bun test tests/hospital0-clinical-intelligence-evidence.test.ts",
+    "ops:hospital0:evidence": "bun scripts/ops/hospital0-evidence-manifest.ts",
     "validate:p5a": "bun run typecheck && bun run lint && bun run test:p5a && bun run test:unit && bun run test:security && bun run test:rules && bun run test:p5a:emulator && bun run build && bun run test:e2e",
     "ops:staging-smoke": "bun scripts/ops/staging-smoke.ts",
     "test:p5b": "bun test tests/p5b-staging-verification.test.ts",

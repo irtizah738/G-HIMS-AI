@@ -115,6 +115,18 @@ describe('OPD-RP13 authoritative appointments and waitlist', () => {
     expect(workspace).toContain("'CheckInOpdAppointmentCommand'");
   });
 
+  test('linked appointment completes atomically with OPD disposition', async () => {
+    const encounter = await source(
+      'lib/backend/services/encounter-domain-service.ts'
+    );
+
+    expect(encounter).toContain('sourceAppointmentId');
+    expect(encounter).toContain("'OPD_APPOINTMENT_LINEAGE_MISMATCH'");
+    expect(encounter).toContain("status: 'COMPLETED'");
+    expect(encounter).toContain("entityType: 'OPD_APPOINTMENT'");
+    expect(encounter).toContain('sourceAppointment._serverVersion');
+  });
+
   test('check-in and no-show windows are enforced using server time', async () => {
     const service = await source(
       'lib/backend/services/opd-appointment-domain-service.ts'

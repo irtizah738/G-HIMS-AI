@@ -96,6 +96,7 @@ interface EncounterState {
   billingReconciliationState?: 'CLEARED' | string;
   billingClosedAt?: number;
   billingClosedBy?: string;
+  sourceAppointmentId?: string;
   _serverVersion?: number;
   createdAt: number;
   updatedAt: number;
@@ -178,6 +179,9 @@ export class EncounterDomainService {
           : undefined,
         billingClosedBy: persisted.billingClosedBy
           ? String(persisted.billingClosedBy)
+          : undefined,
+        sourceAppointmentId: persisted.sourceAppointmentId
+          ? String(persisted.sourceAppointmentId)
           : undefined,
         _serverVersion: Number(persisted._serverVersion || 0),
         createdAt: Number(persisted.createdAt || persisted.startedAt || Date.now()),
@@ -667,17 +671,50 @@ export class EncounterDomainService {
       }
     }
 
-    const patient = await DomainStateRepository.getById<Record<string, unknown>>(
-      context.tenantId,
-      'patients',
-      encounter.patientId
-    );
+    const sourceAppointmentId = String(
+      encounter.sourceAppointmentId || ''
+    ).trim();
+    const [patient, sourceAppointment] = await Promise.all([
+      DomainStateRepository.getById<Record<string, unknown>>(
+        context.tenantId,
+        'patients',
+        encounter.patientId
+      ),
+      sourceAppointmentId
+        ? DomainStateRepository.getById<Record<string, unknown>>(
+            context.tenantId,
+            'opdAppointments',
+            sourceAppointmentId
+          )
+        : Promise.resolve(null),
+    ]);
     if (!patient) {
       return {
         success: false,
         commandId,
         idempotencyKey,
         error: { code: 'PATIENT_NOT_FOUND', message: 'Encounter patient does not exist.' },
+      };
+    }
+
+    if (
+      sourceAppointmentId &&
+      (
+        !sourceAppointment ||
+        String(sourceAppointment.encounterId || '') !== encounter.encounterId ||
+        String(sourceAppointment.patientId || '') !== encounter.patientId ||
+        String(sourceAppointment.status || '') !== 'CHECKED_IN'
+      )
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'OPD_APPOINTMENT_LINEAGE_MISMATCH',
+          message:
+            'Encounter cannot close because its source appointment linkage is missing, stale, or no longer CHECKED_IN.',
+        },
       };
     }
 
@@ -734,6 +771,16 @@ export class EncounterDomainService {
       activeEncounterId: compatibilityEncounterId(nextCareContexts),
       updatedAt: now,
     };
+    const appointmentState =
+      sourceAppointmentId && sourceAppointment
+        ? {
+            ...sourceAppointment,
+            status: 'COMPLETED',
+            completedAt: now,
+            completedBy: context.actorId,
+            updatedAt: now,
+          }
+        : null;
 
     const tx = await TransactionManager.executeAtomicMutation({
       tenantId: context.tenantId,
@@ -761,7 +808,23 @@ export class EncounterDomainService {
       domainState: updatedEncounter,
       expectedPrimaryServerVersion: Number(encounter._serverVersion || 0),
       additionalStateWrites: [
-        { entityType: 'PATIENT_MPI', entityId: encounter.patientId, domainState: patientState },
+        {
+          entityType: 'PATIENT_MPI',
+          entityId: encounter.patientId,
+          domainState: patientState,
+        },
+        ...(sourceAppointmentId && appointmentState && sourceAppointment
+          ? [
+              {
+                entityType: 'OPD_APPOINTMENT',
+                entityId: sourceAppointmentId,
+                domainState: appointmentState,
+                expectedServerVersion: Number(
+                  sourceAppointment._serverVersion || 0
+                ),
+              },
+            ]
+          : []),
       ],
     });
 

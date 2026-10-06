@@ -31,6 +31,13 @@ interface OpdDashboardKpisProps {
   onNavigateStage: (stage: OpdWorkflowStage) => void;
 }
 
+const TERMINAL_ENCOUNTER_STATUSES = new Set([
+  'COMPLETED',
+  'DISCHARGED',
+  'TRANSFERRED',
+  'CANCELLED',
+]);
+
 type CanonicalDashboardStage =
   | 'REGISTRATION'
   | 'QUEUE'
@@ -98,6 +105,14 @@ export function OpdDashboardKpis({
   onSelectEncounter,
   onNavigateStage,
 }: OpdDashboardKpisProps) {
+  const activeEncounters = encounters.filter(
+    (encounter) =>
+      !TERMINAL_ENCOUNTER_STATUSES.has(
+        String(encounter.status || '').toUpperCase()
+      )
+  );
+  const closedEncounterCount = encounters.length - activeEncounters.length;
+
   const stageCounts: Record<CanonicalDashboardStage, number> = {
     REGISTRATION: 0,
     QUEUE: 0,
@@ -110,14 +125,9 @@ export function OpdDashboardKpis({
     UNKNOWN: 0,
   };
 
-  for (const encounter of encounters) {
+  for (const encounter of activeEncounters) {
     stageCounts[normalizeDashboardStage(encounter.currentStage)] += 1;
   }
-
-  const completedCount = encounters.filter(
-    (encounter) =>
-      String(encounter.status || '').toUpperCase() === 'COMPLETED'
-  ).length;
 
   const activeQueue = queue.filter((token) =>
     ['WAITING', 'CALLED', 'IN_SERVICE'].includes(
@@ -153,7 +163,7 @@ export function OpdDashboardKpis({
       highRiskEncounterIds.add(token.encounterId);
     }
   }
-  for (const encounter of encounters) {
+  for (const encounter of activeEncounters) {
     const news2Risk = String(
       encounter.vitalsAssessment?.news2Risk || ''
     ).toUpperCase();
@@ -167,7 +177,7 @@ export function OpdDashboardKpis({
   }
 
   const deptMap = new Map<string, number>();
-  for (const encounter of encounters) {
+  for (const encounter of activeEncounters) {
     const department = String(encounter.department || '').trim() || 'UNASSIGNED';
     deptMap.set(department, (deptMap.get(department) || 0) + 1);
   }
@@ -187,7 +197,11 @@ export function OpdDashboardKpis({
       active: 0,
     };
     current.total += 1;
-    if (String(encounter.status || '').toUpperCase() !== 'COMPLETED') {
+    if (
+      !TERMINAL_ENCOUNTER_STATUSES.has(
+        String(encounter.status || '').toUpperCase()
+      )
+    ) {
       current.active += 1;
     }
     clinicianMap.set(key, current);
@@ -370,15 +384,15 @@ export function OpdDashboardKpis({
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold text-slate-500">
-              Completed
+              Visible Closed Encounters
             </span>
             <CheckCircle2 className="h-4 w-4 text-emerald-600" />
           </div>
           <p className="mt-1 text-2xl font-black text-emerald-600">
-            {completedCount}
+            {closedEncounterCount}
           </p>
           <span className="mt-1 block text-[10px] font-medium text-slate-400">
-            Authoritative encounter status
+            Not a time-window throughput KPI
           </span>
         </div>
 
@@ -404,7 +418,7 @@ export function OpdDashboardKpis({
         <h3 className="mb-4 flex items-center justify-between text-xs font-bold uppercase tracking-wider text-slate-500">
           <span>Authoritative Workflow Distribution</span>
           <span className="text-[11px] font-normal text-slate-400">
-            {encounters.length} visible encounter{encounters.length === 1 ? '' : 's'}
+            {activeEncounters.length} active encounter{activeEncounters.length === 1 ? '' : 's'}
           </span>
         </h3>
         <div className="grid grid-cols-2 gap-2 text-center text-xs sm:grid-cols-4 lg:grid-cols-8">
@@ -434,7 +448,7 @@ export function OpdDashboardKpis({
           </h3>
           {deptMap.size === 0 ? (
             <p className="text-xs text-slate-400">
-              No department-scoped encounters are visible.
+              No active department-scoped encounters are visible.
             </p>
           ) : (
             <div className="space-y-2.5">
@@ -442,7 +456,7 @@ export function OpdDashboardKpis({
                 .sort((left, right) => right[1] - left[1])
                 .map(([department, count]) => {
                   const percentage = Math.round(
-                    (count / Math.max(encounters.length, 1)) * 100
+                    (count / Math.max(activeEncounters.length, 1)) * 100
                   );
                   return (
                     <div key={department} className="space-y-1">
@@ -509,7 +523,7 @@ export function OpdDashboardKpis({
                         {clinician.active} active
                       </span>
                       <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-                        {clinician.total} total
+                        {clinician.total} visible
                       </span>
                     </div>
                   </button>

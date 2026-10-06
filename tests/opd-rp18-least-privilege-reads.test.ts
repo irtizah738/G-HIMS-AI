@@ -192,4 +192,40 @@ describe('OPD-RP18 least-privilege reads', () => {
       'Actor requires an authoritative department assignment'
     );
   });
+  test('direct Firestore OPD PHI reads are server-only', async () => {
+    const rules = await source('firestore.rules');
+
+    for (const collection of [
+      'patients',
+      'encounters',
+      'opd_queue',
+      'opdAppointments',
+      'opdWaitlist',
+      'opdReferrals',
+      'orders',
+      'prescriptions',
+      'labResults',
+      'radiologyResults',
+    ]) {
+      const matchIndex = rules.indexOf(`match /${collection}/{`);
+      expect(matchIndex).toBeGreaterThan(0);
+      const block = rules.slice(matchIndex, matchIndex + 220);
+      expect(block).toContain('allow read, write: if false;');
+    }
+  });
+
+  test('ancillary offline hydration is modality and facility scoped', async () => {
+    const bootstrap = await source('app/api/offline/bootstrap/route.ts');
+
+    expect(bootstrap).toContain("'PATHOLOGIST'");
+    expect(bootstrap).toContain("'RADIOLOGY_TECHNICIAN'");
+    expect(bootstrap).toContain('ancillaryOrderIds');
+    expect(bootstrap).toContain('ancillaryEncounterIds');
+    expect(bootstrap).toContain('resolveRelatedFacility');
+    expect(bootstrap).toContain(
+      "collection === 'orders' && (labRole || radiologyRole)"
+    );
+  });
+
+
 });

@@ -300,6 +300,7 @@ function collectionForEntityType(entityType: string): string {
     DISCHARGE_READINESS_REVIEW: 'dischargeReadinessReviews',
     CONSULTANT_REVIEW_CHECKPOINT: 'consultantReviewCheckpoints',
     CLINICAL_CONSULTATION_REQUEST: 'consultationRequests',
+    DISEASE_INTAKE_ARTIFACT: 'diseaseIntakeArtifacts',
     CLINICAL_HANDOFF: 'clinicalHandoffs',
     CLINICAL_OPEN_ITEM: 'clinicalOpenItems',
     CLINICAL_ESCALATION: 'clinicalEscalations',

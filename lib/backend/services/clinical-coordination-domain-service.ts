@@ -377,12 +377,28 @@ export class ClinicalCoordinationDomainService {
     }
 
     const now = Date.now();
+    const legacyPolicy = getConsultationSla(current.priority);
+    const acknowledgementDueAt =
+      current.acknowledgementDueAt ||
+      current.responseDueAt ||
+      current.requestedAt + legacyPolicy.acknowledgementMinutes * 60_000;
+    const acceptanceDueAt =
+      current.acceptanceDueAt ||
+      current.requestedAt + legacyPolicy.acceptanceMinutes * 60_000;
     const next: ClinicalConsultationRequest = {
       ...current,
+      acknowledgementSlaMinutes:
+        current.acknowledgementSlaMinutes ||
+        current.responseSlaMinutes ||
+        legacyPolicy.acknowledgementMinutes,
+      acknowledgementDueAt,
+      acceptanceSlaMinutes:
+        current.acceptanceSlaMinutes || legacyPolicy.acceptanceMinutes,
+      acceptanceDueAt,
       assignedConsultantId: current.assignedConsultantId || context.actorId,
       acknowledgedBy: context.actorId,
       acknowledgedAt: now,
-      acknowledgementSlaBreached: now > current.acknowledgementDueAt,
+      acknowledgementSlaBreached: now > acknowledgementDueAt,
       status: 'ACKNOWLEDGED',
       updatedAt: now,
     };
@@ -400,7 +416,7 @@ export class ClinicalCoordinationDomainService {
         encounterId: current.encounterId,
         acknowledgedBy: context.actorId,
         acknowledgedAt: now,
-        acknowledgementDueAt: current.acknowledgementDueAt,
+        acknowledgementDueAt,
         acknowledgementSlaBreached: next.acknowledgementSlaBreached,
         note: String(payload.note || '').trim() || undefined,
       },
@@ -474,17 +490,33 @@ export class ClinicalCoordinationDomainService {
     }
 
     const now = Date.now();
+    const legacyPolicy = getConsultationSla(current.priority);
+    const acknowledgementDueAt =
+      current.acknowledgementDueAt ||
+      current.responseDueAt ||
+      current.requestedAt + legacyPolicy.acknowledgementMinutes * 60_000;
+    const acceptanceDueAt =
+      current.acceptanceDueAt ||
+      current.requestedAt + legacyPolicy.acceptanceMinutes * 60_000;
     const next: ClinicalConsultationRequest = {
       ...current,
+      acknowledgementSlaMinutes:
+        current.acknowledgementSlaMinutes ||
+        current.responseSlaMinutes ||
+        legacyPolicy.acknowledgementMinutes,
+      acknowledgementDueAt,
+      acceptanceSlaMinutes:
+        current.acceptanceSlaMinutes || legacyPolicy.acceptanceMinutes,
+      acceptanceDueAt,
       assignedConsultantId: context.actorId,
       acknowledgedBy: current.acknowledgedBy || context.actorId,
       acknowledgedAt: current.acknowledgedAt || now,
       acknowledgementSlaBreached:
         current.acknowledgementSlaBreached ??
-        (now > current.acknowledgementDueAt),
+        (now > acknowledgementDueAt),
       acceptedBy: context.actorId,
       acceptedAt: now,
-      acceptanceSlaBreached: now > current.acceptanceDueAt,
+      acceptanceSlaBreached: now > acceptanceDueAt,
       status: 'ACCEPTED',
       updatedAt: now,
     };
@@ -502,7 +534,7 @@ export class ClinicalCoordinationDomainService {
         encounterId: current.encounterId,
         assignedConsultantId: context.actorId,
         acceptedAt: now,
-        acceptanceDueAt: current.acceptanceDueAt,
+        acceptanceDueAt,
         acceptanceSlaBreached: next.acceptanceSlaBreached,
       },
       auditAction: 'ACCEPT_CLINICAL_CONSULTATION',

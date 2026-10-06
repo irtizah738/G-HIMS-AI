@@ -174,6 +174,24 @@ describe('OPD-RP14 atomic OPD to IPD transition', () => {
     );
   });
 
+  test('production disposition UI does not prepopulate synthetic clinical facts or client ward authority', async () => {
+    const ui = await source('components/opd/OpdDispositionReferrals.tsx');
+    const workspace = await source('components/opd/OpdMasterWorkspace.tsx');
+
+    expect(ui).toContain('IS_DEMO_RUNTIME');
+    expect(ui).not.toContain('Armed Forces Institute of Cardiology');
+    expect(ui).not.toContain('Dr. Sarah Jenkins');
+    expect(ui).not.toContain('General Medical Inpatient Ward (Ward 4B)');
+    expect(ui).not.toContain('IV Inotropic titration');
+    expect(ui).not.toContain('value={admissionWard}');
+    expect(workspace).not.toContain(
+      'targetWard: inpatientRequest.targetWard'
+    );
+    expect(workspace).not.toContain(
+      'assignedDoctor: activeEncounter.attendingDoctorId'
+    );
+  });
+
   test('legacy disposition command cannot create a non-atomic inpatient pending state', async () => {
     const encounterService = await source(
       'lib/backend/services/encounter-domain-service.ts'
@@ -207,6 +225,9 @@ describe('OPD-RP14 atomic OPD to IPD transition', () => {
     );
     expect(service).toContain("'TARGET_BED_WARD_IDENTITY_REQUIRED'");
     expect(service).toContain('authoritativeTargetWard');
+    expect(service).toContain(
+      "String(sourceEncounter?.assignedProviderId || '').trim()"
+    );
   });
 
   test('one command atomically closes OPD, completes appointment, occupies bed and activates IPD', async () => {

@@ -227,6 +227,14 @@ describe('OPD-RP13 authoritative appointments and waitlist', () => {
     );
   });
 
+  test('front desk hides cancel and reschedule once the appointment has started', async () => {
+    const ui = await source('components/opd/OpdAppointmentsWaitlist.tsx');
+
+    expect(ui).toContain('appointmentMutableBeforeStart');
+    expect(ui).toContain('clockNow < Number(appointment.scheduledStartAt)');
+    expect(ui).toContain('{appointmentMutableBeforeStart(appt) && (');
+  });
+
   test('check-in and no-show windows are enforced using server time', async () => {
     const service = await source(
       'lib/backend/services/opd-appointment-domain-service.ts'

@@ -162,6 +162,9 @@ describe('Wave 1 clinical coordination closure', () => {
     expect(center).toContain('acknowledgeClinicalConsultation');
     expect(center).toContain("item.slaPhase === 'ACKNOWLEDGEMENT'");
     expect(center).toContain("item.slaPhase === 'ACCEPTANCE'");
+    expect(center).toContain('completeClinicalConsultation');
+    expect(center).toContain('Complete consult');
+    expect(center).toContain('Commit consultation completion');
   });
 
   test('disease intake aggregate is server-only in Firestore', async () => {

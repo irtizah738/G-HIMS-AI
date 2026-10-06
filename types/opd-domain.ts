@@ -63,12 +63,21 @@ export interface WaitlistEntry {
   patientName: string;
   mrn: string;
   preferredDoctorId?: string;
+  facilityId?: string;
+  preferredDepartmentId?: string;
   preferredDepartment: string;
   priority: WaitlistPriority;
   notificationPreference: 'SMS' | 'WHATSAPP' | 'PHONE' | 'EMAIL';
   contactPhone: string;
   status: WaitlistStatus;
   requestedDate: string;
+  offeredProviderEmployeeId?: string;
+  offeredProviderName?: string;
+  offeredStartAt?: number;
+  offeredEndAt?: number;
+  offeredTimeZone?: string;
+  offerExpiresAt?: number;
+  acceptedAppointmentId?: string;
   notes?: string;
   createdAt: number;
 }
@@ -155,6 +164,11 @@ export interface AppointmentRecord {
   appointmentType: AppointmentType;
   scheduledDate: string; // YYYY-MM-DD
   scheduledTimeSlot: string; // HH:MM
+  scheduledStartAt?: number;
+  scheduledEndAt?: number;
+  timeZone?: string;
+  facilityId?: string;
+  departmentId?: string;
   durationMinutes: number;
   status: AppointmentStatus;
   chiefComplaint: string;
@@ -162,6 +176,9 @@ export interface AppointmentRecord {
   cancelledBy?: string;
   cancelledAt?: number;
   rescheduleHistory?: { fromDate: string; fromTime: string; reason: string; changedAt: number }[];
+  sourceWaitlistId?: string;
+  encounterId?: string;
+  queueTokenId?: string;
   bookingChannel: 'FRONT_DESK' | 'PATIENT_PORTAL' | 'CALL_CENTER' | 'PHYSICIAN_REFERRAL' | 'ONLINE_PORTAL' | string;
   createdAt: number;
 }

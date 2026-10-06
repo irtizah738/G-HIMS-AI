@@ -92,6 +92,24 @@ describe('OPD-RP22 obsolete and demo authority removal', () => {
     expect(model.invoices[0]?.currency).toBe('PKR');
     expect(model.invoices[0]?.billingPurpose).toBe('OPD_CONSULTATION');
     expect(model.rejectedRows).toBe(3);
+
+    const waivedSnapshot: EdgeSnapshot = {
+      ...snapshot,
+      collections: {
+        invoices: [
+          {
+            ...validInvoice,
+            id: 'waived-rp22',
+            paymentStatus: 'waived',
+            totalPaid: 0,
+            balanceDue: 0,
+          },
+        ],
+      },
+    };
+    const waivedModel = buildBillingInvoiceReadModel(waivedSnapshot);
+    expect(waivedModel.invoices).toHaveLength(1);
+    expect(waivedModel.invoices[0]?.paymentStatus).toBe('waived');
   });
 
   test('invoice directory has no synthetic initial financial records', async () => {

@@ -15,6 +15,10 @@ describe('OPD-RP16 real timeline and audit', () => {
     expect(route).toContain("'patients'");
     expect(route).toContain("'ENCOUNTER_PATIENT_MISMATCH'");
     expect(route).toContain("'Cache-Control': 'no-store'");
+    expect(route).toContain('truncated: eventRead.truncated');
+    expect(route).toContain(
+      'unlinkedEventCount === 0 && !eventRead.truncated'
+    );
   });
 
   test('production timeline requires durable server event and audit stores with no local fallback', async () => {
@@ -90,6 +94,9 @@ describe('OPD-RP16 real timeline and audit', () => {
     );
     expect(view).toContain('EVENT_AUDIT_LINKED');
     expect(view).toContain('EVENT_ONLY');
+    expect(view).toContain(
+      'timeline truncated by server safety limit'
+    );
 
     expect(workspace).toContain("hash: 'DEMO-NON-AUTHORITATIVE'");
     expect(workspace).toContain('IS_DEMO_RUNTIME ? SEED_EVENTS : []');

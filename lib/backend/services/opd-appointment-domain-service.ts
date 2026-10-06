@@ -2558,6 +2558,13 @@ export class OpdAppointmentDomainService {
         contactPhone: String(
           patient.contactPhone || patient.phone || ''
         ),
+        ...(String(patient.email || patient.contactEmail || '').trim()
+          ? {
+              contactEmail: String(
+                patient.email || patient.contactEmail || ''
+              ).trim(),
+            }
+          : {}),
         ...(payload.notes?.trim() ? { notes: payload.notes.trim() } : {}),
         status: 'WAITING',
         createdAt: now,
@@ -2641,16 +2648,48 @@ export class OpdAppointmentDomainService {
             now,
           });
 
+          const authoritativePhone = String(
+            currentPatient.contactPhone ||
+              currentPatient.phone ||
+              entry.contactPhone ||
+              ''
+          ).trim();
+          const authoritativeEmail = String(
+            currentPatient.email ||
+              currentPatient.contactEmail ||
+              entry.contactEmail ||
+              ''
+          ).trim();
+
+          if (
+            ['SMS', 'WHATSAPP', 'PHONE'].includes(
+              payload.notificationPreference
+            ) &&
+            !authoritativePhone
+          ) {
+            throw new AtomicMutationRejectedError(
+              'WAITLIST_CONTACT_CHANNEL_UNAVAILABLE',
+              'Selected waitlist notification channel requires an authoritative patient phone number.'
+            );
+          }
+          if (
+            payload.notificationPreference === 'EMAIL' &&
+            !authoritativeEmail
+          ) {
+            throw new AtomicMutationRejectedError(
+              'WAITLIST_CONTACT_CHANNEL_UNAVAILABLE',
+              'Email waitlist notification requires an authoritative patient email address.'
+            );
+          }
+
           const committedEntry: OpdWaitlistEntryRecord = {
             ...entry,
             patientName: String(currentPatient.fullName || entry.patientName),
             mrn: String(currentPatient.mrn || entry.mrn),
-            contactPhone: String(
-              currentPatient.contactPhone ||
-                currentPatient.phone ||
-                entry.contactPhone ||
-                ''
-            ),
+            contactPhone: authoritativePhone,
+            ...(authoritativeEmail
+              ? { contactEmail: authoritativeEmail }
+              : {}),
           };
 
           return {

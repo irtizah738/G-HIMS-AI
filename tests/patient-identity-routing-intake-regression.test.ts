@@ -14,7 +14,7 @@ describe('Patient identity, specialist routing and intake workflow closure', () 
     expect(orchestrator).toContain("issuer: 'G-HIMS'");
     expect(orchestrator).toContain("type: 'CNIC' as const");
     expect(orchestrator).toContain("type: 'MRN' as const");
-    expect(orchestrator).toContain('mpiLookupKey');
+    expect(orchestrator).toContain('mpiRegistryKey');
     expect(orchestrator).not.toContain('Math.random()');
   });
 

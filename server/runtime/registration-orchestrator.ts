@@ -19,6 +19,10 @@ import { OutboxEventRecord } from '@/types/clinical-event';
 import type { AuditRecord, DomainEventEnvelope, OutboxRecord } from '@/lib/backend/types';
 import { OPD_WORKFLOW_DEFINITION } from '@/lib/workflow/opd-definition';
 import { compileWorkflow } from '@/lib/workflow/compiler';
+import {
+  mpiRegistryKey,
+  legacyCnicRegistryKey,
+} from '@/lib/clinical/mpi/mpi-identity';
 
 const REGISTRATION_COMMAND_TYPE = 'RegisterPatientAndEncounterCommand';
 
@@ -103,21 +107,6 @@ export interface OrchestrationResult {
     arrivalTime: string;
     createdAt: number;
   };
-}
-
-function normalizeIdentityValue(value: string): string {
-  return String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-}
-
-function mpiLookupKey(type: 'CNIC' | 'MRN', value: string): string {
-  return `${type}_${normalizeIdentityValue(value)}`;
-}
-
-function legacyMpiLookupKey(type: 'CNIC', value: string): string {
-  return `${type}_${String(value || '').trim()}`.replace(
-    /[^a-zA-Z0-9_]/g,
-    '_'
-  );
 }
 
 function generateMRN(patientId: string, now = new Date()): string {
@@ -499,7 +488,7 @@ export async function registerPatientAndEncounter(
         : []),
       { type: 'MRN' as const, value: mrn },
     ].map((identifier) => {
-      const mpiKey = mpiLookupKey(identifier.type, identifier.value);
+      const mpiKey = mpiRegistryKey(identifier.type, identifier.value);
       return {
         ...identifier,
         mpiKey,
@@ -510,7 +499,7 @@ export async function registerPatientAndEncounter(
       ? db.doc(
           mpiRegistryDocPath(
             tenantId,
-            legacyMpiLookupKey('CNIC', cnic.value)
+            legacyCnicRegistryKey(cnic.value)
           )
         )
       : null;

@@ -60,14 +60,14 @@ describe('Clinical identity and specialist workflow rework', () => {
     expect(intake).toContain('Missing or Unverified Information');
     expect(intake).toContain('does not diagnose, prescribe, place orders, or automatically dispatch');
     expect(intake).toContain('Save Reviewed Intake');
-    expect(intake).toContain('Route to Specialist');
+    expect(intake).toContain('Route Finalized Intake');
 
     expect(intake).not.toContain("'p-1001'");
     expect(intake).not.toContain("ecg_telemetry_findings: 'stemi_elevation'");
     expect(intake).not.toContain('Differential Diagnosis Probability Matrix');
     expect(intake).not.toContain('Recommended STAT Diagnostic & Intervention Orders');
     expect(intake).not.toContain('Differential Diagnosis probability matrix, STAT diagnostic orders');
-    expect(intake).toContain('Specialist routing remains a separate explicit action.');
+    expect(intake).toContain('immutable artifact and linked to Patient 360');
     const route = await source('app/api/clinical/intake-optimize/route.ts');
     expect(route).toContain('sourceLimitedBriefSchema');
     expect(route).toContain('z.literal(true)');

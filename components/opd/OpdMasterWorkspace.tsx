@@ -1127,7 +1127,12 @@ export function OpdMasterWorkspace() {
           dependsOnMutationIds: vitalsResult.queuedOffline
             ? [vitalsResult.commandId]
             : undefined,
-          optimisticCache: false,
+          optimisticCache: true,
+          optimisticPayload: {
+            currentStage: 'CONSULTATION',
+            offlineStagePendingSync: true,
+            offlinePendingTargetStage: 'CONSULTATION',
+          },
         },
       }
     );
@@ -1229,7 +1234,12 @@ export function OpdMasterWorkspace() {
           dependsOnMutationIds: noteResult.queuedOffline
             ? [noteResult.commandId]
             : undefined,
-          optimisticCache: false,
+          optimisticCache: true,
+          optimisticPayload: {
+            currentStage: 'DIAGNOSTICS',
+            offlineStagePendingSync: true,
+            offlinePendingTargetStage: 'DIAGNOSTICS',
+          },
         },
       }
     );

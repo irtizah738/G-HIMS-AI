@@ -19,7 +19,7 @@ jobs:
     env:
       GHIMS_STAGING_BASE_URL: ${{ secrets.GHIMS_STAGING_BASE_URL }}
       GHIMS_P7_TENANT_ID: ${{ vars.GHIMS_P7_TENANT_ID || 'p7-hospital-zero' }}
-      GHIMS_OPD_SQ1_CONFIRM_TENANT: ${{ vars.GHIMS_P7_TENANT_ID || 'p7-hospital-zero' }}
+      GHIMS_OPD_SQ1_CONFIRM_TENANT: ${{ vars.GHIMS_OPD_SQ1_CONFIRM_TENANT }}
       GHIMS_P7_BOOTSTRAP_PASSWORD: ${{ secrets.GHIMS_P7_BOOTSTRAP_PASSWORD }}
       GHIMS_P7_RECEPTION_EMAIL: ${{ vars.GHIMS_P7_RECEPTION_EMAIL || 'p7.reception@g-hims.invalid' }}
       GHIMS_P7_BILLING_EMAIL: ${{ vars.GHIMS_P7_BILLING_EMAIL || 'p7.billing@g-hims.invalid' }}

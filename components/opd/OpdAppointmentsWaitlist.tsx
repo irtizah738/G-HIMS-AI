@@ -558,6 +558,13 @@ export function OpdAppointmentsWaitlist({
     ['CONFIRMED', 'RESCHEDULED'].includes(appointment.status) &&
     Boolean(appointment.scheduledEndAt) &&
     Date.now() >= Number(appointment.scheduledEndAt) + 15 * 60 * 1000;
+  const appointmentMutableBeforeStart = (
+    appointment: AppointmentRecord
+  ) =>
+    ['CONFIRMED', 'RESCHEDULED'].includes(appointment.status) &&
+    Boolean(appointment.scheduledStartAt) &&
+    clockNow < Number(appointment.scheduledStartAt);
+
 
   return (
     <div className="space-y-6">
@@ -731,7 +738,7 @@ export function OpdAppointmentsWaitlist({
                               Resume Billing
                             </button>
                           )}
-                          {['CONFIRMED', 'RESCHEDULED'].includes(appt.status) && (
+                          {appointmentMutableBeforeStart(appt) && (
                             <>
                               <button
                                 disabled={!isOnline || busyAction !== null}

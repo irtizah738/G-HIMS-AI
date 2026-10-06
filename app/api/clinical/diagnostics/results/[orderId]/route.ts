@@ -186,7 +186,7 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
           (
             observation!.tenantId !== context.tenantId ||
             observation!.patientId !== patientId ||
-            (observation!.encounterId &&
+            (Boolean(observation!.encounterId) &&
               observation!.encounterId !== encounterId)
           )
       )

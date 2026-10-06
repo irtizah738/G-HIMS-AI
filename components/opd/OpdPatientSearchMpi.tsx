@@ -46,18 +46,24 @@ export function OpdPatientSearchMpi({
     if (!searchTerm.trim()) {
       return patients;
     }
+
     const q = searchTerm.trim();
+    const qLower = q.toLowerCase();
+    const normalizedMrn = normalizeMrn(q);
+    const normalizedCnic = normalizeCnic(q);
+
     return patients.filter((p) => {
-      if (searchField === 'MRN') return p.mrn.toLowerCase().includes(q);
-      if (searchField === 'CNIC') return p.nationalId.toLowerCase().includes(q);
+      if (searchField === 'MRN') return normalizeMrn(p.mrn) === normalizedMrn;
+      if (searchField === 'CNIC') return normalizeCnic(p.nationalId) === normalizedCnic;
       if (searchField === 'PHONE') return p.phone.toLowerCase().includes(qLower);
       if (searchField === 'NAME') return p.fullName.toLowerCase().includes(qLower);
+
       return (
         p.fullName.toLowerCase().includes(qLower) ||
         normalizeMrn(p.mrn) === normalizedMrn ||
         normalizeCnic(p.nationalId) === normalizedCnic ||
         p.phone.toLowerCase().includes(qLower) ||
-        (p.preferredName && p.preferredName.toLowerCase().includes(q))
+        (p.preferredName && p.preferredName.toLowerCase().includes(qLower))
       );
     });
   }, [patients, searchTerm, searchField]);

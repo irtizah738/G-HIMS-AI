@@ -7,8 +7,13 @@ import type {
   InvoicePaymentStatus,
 } from '@/types/billing';
 
+export interface AuthoritativeBillingInvoice extends Invoice {
+  currency: string;
+  billingPurpose?: string;
+}
+
 export interface BillingInvoiceReadModel {
-  invoices: Invoice[];
+  invoices: AuthoritativeBillingInvoice[];
   rejectedRows: number;
   snapshotVersion: string;
   generatedAt: number;
@@ -109,7 +114,7 @@ function adaptChargeItem(rawValue: unknown): ChargeItem | null {
 export function adaptAuthoritativeInvoice(
   rawValue: unknown,
   expectedTenantId: string
-): Invoice | null {
+): AuthoritativeBillingInvoice | null {
   if (!rawValue || typeof rawValue !== 'object' || Array.isArray(rawValue)) {
     return null;
   }
@@ -127,6 +132,8 @@ export function adaptAuthoritativeInvoice(
   const paymentMethod = String(raw.paymentMethod || 'cash')
     .trim()
     .toLowerCase();
+  const currency = String(raw.currency || '').trim().toUpperCase();
+  const billingPurpose = String(raw.billingPurpose || '').trim().toUpperCase();
 
   const totals = {
     totalGross: finiteNonNegative(raw.totalGross),
@@ -154,6 +161,7 @@ export function adaptAuthoritativeInvoice(
     !tariffId ||
     !PAYMENT_STATUSES.has(paymentStatus as InvoicePaymentStatus) ||
     !PAYMENT_METHODS.has(paymentMethod as InvoicePaymentMethod) ||
+    currency.length !== 3 ||
     Object.values(totals).some((value) => value === null) ||
     !Array.isArray(raw.items) ||
     items.length !== raw.items.length
@@ -184,6 +192,8 @@ export function adaptAuthoritativeInvoice(
     balanceDue: totals.balanceDue!,
     paymentStatus: paymentStatus as InvoicePaymentStatus,
     paymentMethod: paymentMethod as InvoicePaymentMethod,
+    currency,
+    ...(billingPurpose ? { billingPurpose } : {}),
     items,
     createdAt: String(raw.createdAt || ''),
     updatedAt: String(raw.updatedAt || raw.createdAt || ''),
@@ -196,7 +206,9 @@ export function buildBillingInvoiceReadModel(
   const rawInvoices = snapshot.collections.invoices || [];
   const invoices = rawInvoices
     .map((row) => adaptAuthoritativeInvoice(row, snapshot.tenantId))
-    .filter((invoice): invoice is Invoice => !!invoice)
+    .filter(
+      (invoice): invoice is AuthoritativeBillingInvoice => !!invoice
+    )
     .sort((left, right) => {
       const rightTime = Date.parse(right.updatedAt || right.createdAt) || 0;
       const leftTime = Date.parse(left.updatedAt || left.createdAt) || 0;

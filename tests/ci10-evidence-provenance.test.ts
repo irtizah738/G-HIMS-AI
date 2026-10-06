@@ -305,6 +305,16 @@ describe('CI-10A evidence and provenance fabric', () => {
     expect(validation.errors).toContain('AUTONOMOUS_CLINICAL_ACTIONS_NOT_ALLOWED');
   });
 
+  test('authoritative evidence snapshots self-heal missing Patient 360 projections server-side', async () => {
+    const service = await source(
+      'lib/clinical/intelligence/clinical-evidence-service.ts'
+    );
+
+    expect(service).toContain('Patient360ProjectionService.readOrRebuildClinicalView');
+    expect(service).not.toContain('CI10_PATIENT360_PROJECTION_NOT_READY');
+    expect(service).not.toContain('Patient360ProjectionService.getProjection(context.tenantId, patientId)');
+  });
+
   test('provider gateway and API are evidence scoped and provider neutral', async () => {
     const gateway = await source(
       'lib/clinical/intelligence/clinical-intelligence-gateway.ts'

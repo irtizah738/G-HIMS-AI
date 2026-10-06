@@ -229,7 +229,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       requestedSpecialty: nonEmpty.max(250),
       requestedConsultantId: z.string().trim().min(1).max(150).optional(),
       clinicalQuestion: nonEmpty.max(8000),
-      priority: z.enum(['ROUTINE','URGENT','STAT']).optional(),
+      priority: z.enum(['ROUTINE','PRIORITY','URGENT','STAT']).optional(),
       sourceRefs: z.array(nonEmpty.max(250)).max(100).optional(),
     }).strict(),
   },

@@ -16,7 +16,7 @@ describe('G-HIMS CI-5 Patient 360 clinical read surface', () => {
     expect(service).toContain('readOrRebuildClinicalView(');
     expect(service).toContain('await this.rebuildPatient(tenantId, patientId)');
     expect(service).toContain(
-      "'PATIENT360_PROJECTION_REBUILD_DID_NOT_MATERIALIZE'"
+      'PATIENT360_PROJECTION_REBUILD_DID_NOT_MATERIALIZE'
     );
     expect(service).toContain("'PATIENT360_PROJECTION_SCOPE_MISMATCH'");
     expect(service).toContain("'PATIENT360_TIMELINE_SCOPE_MISMATCH'");

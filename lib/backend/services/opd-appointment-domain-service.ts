@@ -727,6 +727,34 @@ async function requireActivePatient(
   return patient;
 }
 
+function assertActivePatientSnapshot(
+  patient: DomainRecord | null | undefined,
+  patientId: string
+): DomainRecord {
+  if (!patient) {
+    throw new AtomicMutationRejectedError(
+      'PATIENT_IDENTITY_CHANGED',
+      'Patient identity disappeared before the scheduling transaction committed.'
+    );
+  }
+  const currentPatientId = String(
+    patient.id || patient.patientId || patientId
+  ).trim();
+  if (
+    currentPatientId !== patientId ||
+    ['MERGED', 'DECEASED', 'INACTIVE'].includes(
+      String(patient.status || '').toUpperCase()
+    )
+  ) {
+    throw new AtomicMutationRejectedError(
+      'PATIENT_IDENTITY_CHANGED',
+      'Patient identity changed or is no longer active before scheduling commit.'
+    );
+  }
+  return patient;
+}
+
+
 function requireOpdCheckInEligibility(patient: DomainRecord): void {
   const consent = (
     patient.consentSummary as
@@ -1118,6 +1146,12 @@ export class OpdAppointmentDomainService {
             entityId: appointmentId,
             required: false,
           },
+          {
+            key: 'patient',
+            entityType: 'PATIENT_MPI',
+            entityId: payload.patientId,
+            required: true,
+          },
           ...providerAuthorityReadTargets({
             authority,
             startAt,
@@ -1138,6 +1172,10 @@ export class OpdAppointmentDomainService {
           })),
         ],
         prepare: (current) => {
+          const currentPatient = assertActivePatientSnapshot(
+            current.patient,
+            payload.patientId
+          );
           assertProviderAuthoritySnapshot(current, {
             authority,
             providerEmployeeId: payload.providerEmployeeId,
@@ -1220,8 +1258,14 @@ export class OpdAppointmentDomainService {
             };
           });
 
+          const committedAppointment: OpdAppointmentRecord = {
+            ...appointment,
+            patientName: String(currentPatient.fullName || appointment.patientName),
+            mrn: String(currentPatient.mrn || appointment.mrn),
+          };
+
           return {
-            domainState: appointment,
+            domainState: committedAppointment,
             additionalStateWrites: [...providerWrites, ...patientWrites],
             eventPayload: {
               appointmentId,
@@ -1237,7 +1281,7 @@ export class OpdAppointmentDomainService {
             },
             auditReason:
               `Booked OPD appointment ${appointmentId} for ${appointment.patientName} with ${appointment.providerName}.`,
-            resultData: { appointment },
+            resultData: { appointment: committedAppointment },
           };
         },
       });
@@ -2547,6 +2591,12 @@ export class OpdAppointmentDomainService {
             required: false,
           },
           {
+            key: 'patient',
+            entityType: 'PATIENT_MPI',
+            entityId: payload.patientId,
+            required: true,
+          },
+          {
             key: 'scope',
             entityType: 'OPD_WAITLIST_SCOPE',
             entityId: scopeId,
@@ -2554,6 +2604,10 @@ export class OpdAppointmentDomainService {
           },
         ],
         prepare: (current) => {
+          const currentPatient = assertActivePatientSnapshot(
+            current.patient,
+            payload.patientId
+          );
           if (current.waitlist) {
             throw new AtomicMutationRejectedError(
               'WAITLIST_IDENTITY_ALREADY_EXISTS',
@@ -2590,8 +2644,20 @@ export class OpdAppointmentDomainService {
             now,
           });
 
+          const committedEntry: OpdWaitlistEntryRecord = {
+            ...entry,
+            patientName: String(currentPatient.fullName || entry.patientName),
+            mrn: String(currentPatient.mrn || entry.mrn),
+            contactPhone: String(
+              currentPatient.contactPhone ||
+                currentPatient.phone ||
+                entry.contactPhone ||
+                ''
+            ),
+          };
+
           return {
-            domainState: entry,
+            domainState: committedEntry,
             additionalStateWrites: [
               {
                 entityType: 'OPD_WAITLIST_SCOPE',
@@ -2611,7 +2677,7 @@ export class OpdAppointmentDomainService {
             },
             auditReason:
               `Added patient ${entry.patientId} to OPD waitlist ${waitlistId}.`,
-            resultData: { waitlist: entry },
+            resultData: { waitlist: committedEntry },
           };
         },
       });
@@ -2754,6 +2820,12 @@ export class OpdAppointmentDomainService {
             entityId: payload.waitlistId,
             required: true,
           },
+          {
+            key: 'patient',
+            entityType: 'PATIENT_MPI',
+            entityId: link.patientId,
+            required: true,
+          },
           ...providerAuthorityReadTargets({
             authority,
             startAt,
@@ -2775,6 +2847,7 @@ export class OpdAppointmentDomainService {
         ],
         prepare: (current) => {
           const entry = current.waitlist as unknown as OpdWaitlistEntryRecord;
+          assertActivePatientSnapshot(current.patient, entry.patientId);
           assertProviderAuthoritySnapshot(current, {
             authority,
             providerEmployeeId: payload.providerEmployeeId,
@@ -3120,6 +3193,12 @@ export class OpdAppointmentDomainService {
             required: true,
           },
           {
+            key: 'patient',
+            entityType: 'PATIENT_MPI',
+            entityId: link.patientId,
+            required: true,
+          },
+          {
             key: 'appointment',
             entityType: 'OPD_APPOINTMENT',
             entityId: appointmentId,
@@ -3152,6 +3231,10 @@ export class OpdAppointmentDomainService {
         ],
         prepare: (current) => {
           const entry = current.waitlist as unknown as OpdWaitlistEntryRecord;
+          const currentPatient = assertActivePatientSnapshot(
+            current.patient,
+            entry.patientId
+          );
           assertProviderAuthoritySnapshot(current, {
             authority,
             providerEmployeeId: String(entry.offeredProviderEmployeeId || ''),
@@ -3236,8 +3319,10 @@ export class OpdAppointmentDomainService {
             appointmentId,
             tenantId: context.tenantId,
             patientId: entry.patientId,
-            patientName: String(patient.fullName || entry.patientName),
-            mrn: String(patient.mrn || entry.mrn),
+            patientName: String(
+              currentPatient.fullName || entry.patientName
+            ),
+            mrn: String(currentPatient.mrn || entry.mrn),
             providerEmployeeId: entry.offeredProviderEmployeeId!,
             providerName: authority.providerName,
             facilityId: entry.facilityId,

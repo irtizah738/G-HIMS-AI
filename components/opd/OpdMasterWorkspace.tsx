@@ -2026,7 +2026,9 @@ export function OpdMasterWorkspace() {
         );
       }
 
-      setActiveTab(isSettled ? 'QUEUE' : 'BILLING');
+      setActiveTab(
+        isSettled && canAccessTab('QUEUE') ? 'QUEUE' : 'BILLING'
+      );
       return;
     }
 
@@ -2777,7 +2779,9 @@ export function OpdMasterWorkspace() {
             : encounter
         )
       );
-      setActiveTab('DISPOSITION');
+      setActiveTab(
+        canAccessTab('DISPOSITION') ? 'DISPOSITION' : 'BILLING'
+      );
     } catch (error) {
       const message =
         error instanceof Error
@@ -3151,7 +3155,7 @@ export function OpdMasterWorkspace() {
       )}
 
       {/* 5. Live Queue Engine & Calling */}
-      {activeTab === 'QUEUE' && (
+      {activeTab === 'QUEUE' && canAccessTab('QUEUE') && (
         <OpdQueueEngine
           queue={queue}
           onCallToken={async (token, room) => {

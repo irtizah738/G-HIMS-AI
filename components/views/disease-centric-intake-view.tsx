@@ -50,10 +50,11 @@ import {
   Download,
 } from 'lucide-react';
 import { AuthClient } from '@/lib/auth/auth-client';
+import { PatientConsultantRoutingModal } from '@/components/clinical/patient-consultant-routing-modal';
 
 export function DiseaseCentricIntakeView() {
   const { patients, addClinicalNote, selectedPatientId, setSelectedPatientId } = useHospital();
-  const [localPatientId, setLocalPatientId] = useState<string>(selectedPatientId || 'p-1001');
+  const [localPatientId, setLocalPatientId] = useState<string>(selectedPatientId || '');
 
   // Synchronize with global hospital context patient
   useEffect(() => {
@@ -79,7 +80,7 @@ export function DiseaseCentricIntakeView() {
 
   // Selected Patient
   const selectedPatient = useMemo(() => {
-    return patients.find((p) => p.id === activePatientId) || patients[0];
+    return patients.find((p) => p.id === activePatientId);
   }, [patients, activePatientId]);
 
   // Localization and Facility Configuration
@@ -95,77 +96,58 @@ export function DiseaseCentricIntakeView() {
   }, [selectedTierId]);
 
   // Intake State: Tree branch navigation, answers, specialty history
-  const [selectedTreeNodeIds, setSelectedTreeNodeIds] = useState<string[]>(['cardiac_root', 'cardiac_crushing', 'cardiac_radiating_arm_jaw']);
-  const [guidedAnswers, setGuidedAnswers] = useState<Record<string, any>>({
-    chest_pain_severity: 8,
-    symptom_onset_duration: 'under_2h',
-    ecg_telemetry_findings: 'stemi_elevation',
-    associated_hemodynamic_signs: ['levine_sign'],
-    last_known_well_window: 'under_3h',
-    be_fast_screening: ['face', 'arm', 'speech'],
-    rapid_blood_glucose: 118,
-    estimated_nihss: 14,
-    point_of_care_glucose: 480,
-    blood_beta_hydroxybutyrate: 'severe_over_3_0',
-    serum_potassium_level: 'normal_3_3_to_5_3',
-    mental_status_hydration: 'somnolent_moderate',
-    mechanism_of_injury: 'high_speed_mvc',
-    gustilo_classification: 'type_3a',
-    distal_neurovascular_status: 'warm_palpable_pulses',
-    compartment_cardinal_signs: ['pain_disproportionate', 'passive_stretch'],
-    gestational_age_weeks: '34_to_36w',
-    obstetric_blood_pressure: 'severe_over_160_110',
-    fetal_heart_rate_category: 'category_2_indeterminate',
-    gravida_para_history: 'G3 P2 L2',
-  });
-
-  const [specialtyHistoryAnswers, setSpecialtyHistoryAnswers] = useState<Record<string, any>>({
-    prior_pci_cabg: 'PCI with Drug-Eluting Stents (< 12 months)',
-    baseline_ef: 'Preserved (> 50%)',
-    antiplatelet_regimen: ['Aspirin 81mg Daily', 'Ticagrelor (Brilinta) 90mg BID'],
-    known_cad_risk_factors: ['Type 2 Diabetes Mellitus', 'Hypertension'],
-    pre_morbid_mrs: '0 - No symptoms at all',
-    current_anticoagulant: 'None',
-    atrial_fibrillation_history: 'None',
-    diabetes_type: 'Type 1 Diabetes Mellitus (T1DM)',
-    insulin_modality: 'Multiple Daily Injections (MDI - Basal/Bolus)',
-    sglt2_inhibitor_use: 'No',
-    baseline_renal_creatinine: 'Normal (eGFR > 90 mL/min)',
-    tetanus_immunization_status: 'Up to date (< 5 years ago)',
-    anticoagulation_bleeding_risk: 'None',
-    pre_existing_ortho_hardware: 'None',
-    rh_factor_antibody: 'O-Positive (Rh+)',
-    prior_cesarean_scar: 'None (Prior Vaginal Deliveries Only / Nulliparous)',
-    prior_preeclampsia_gdm: ['Prior Preeclampsia / Eclampsia'],
-  });
+  const [selectedTreeNodeIds, setSelectedTreeNodeIds] = useState<string[]>([
+    INTAKE_TEMPLATES[0]?.symptomTree?.id || 'cardiac_root',
+  ]);
+  const [guidedAnswers, setGuidedAnswers] = useState<Record<string, any>>({});
+  const [specialtyHistoryAnswers, setSpecialtyHistoryAnswers] = useState<Record<string, any>>({});
 
   // AI Optimization State
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState<AiOptimizationResult | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
   const [committedSuccess, setCommittedSuccess] = useState(false);
+  const [commitError, setCommitError] = useState<string | null>(null);
+  const [showRoutingModal, setShowRoutingModal] = useState(false);
 
   // Template Customization / Studio state
   const [customQuestions, setCustomQuestions] = useState<GuidedQuestion[]>([]);
   const [customWeightMultiplier, setCustomWeightMultiplier] = useState<number>(1.0);
-  const [autoDispatchOnCritical, setAutoDispatchOnCritical] = useState<boolean>(true);
+  const [autoDispatchOnCritical, setAutoDispatchOnCritical] = useState<boolean>(false);
 
   // Reset Tree / Answers on template change
   useEffect(() => {
     if (currentTemplate.symptomTree) {
       setSelectedTreeNodeIds([currentTemplate.symptomTree.id]);
     }
+    setGuidedAnswers({});
+    setSpecialtyHistoryAnswers({});
     setAiResult(null);
     setCommittedSuccess(false);
+    setCommitError(null);
   }, [selectedTemplateId, currentTemplate]);
 
   // Real-time Risk Score & Active Signals Calculation
   const { totalRiskScore, activeRiskSignals, maxRiskSeverity } = useMemo(() => {
     let score = 0;
 
-    // 1. Tree node weights
+    // 1. Tree node weights. The template's governed risk weight is authoritative;
+    // merely selecting the root does not manufacture clinical risk.
+    const findNode = (
+      node: SymptomTreeNode,
+      nodeId: string
+    ): SymptomTreeNode | undefined => {
+      if (node.id === nodeId) return node;
+      for (const child of node.children || []) {
+        const found = findNode(child, nodeId);
+        if (found) return found;
+      }
+      return undefined;
+    };
     selectedTreeNodeIds.forEach((nodeId) => {
-      score += 3;
+      if (nodeId === currentTemplate.symptomTree.id) return;
+      const node = findNode(currentTemplate.symptomTree, nodeId);
+      if (node) score += Math.max(0, node.riskWeight || 0);
     });
 
     // 2. Guided answers risk points
@@ -317,22 +299,36 @@ export function DiseaseCentricIntakeView() {
     }
   };
 
-  // Commit Intake & Dispatch to Longitudinal EHR
-  const handleCommitToLongitudinalEhr = () => {
-    if (!selectedPatient) return;
+  // Save the clinician-reviewed intake through the authoritative note command.
+  const handleCommitToLongitudinalEhr = async () => {
+    if (!selectedPatient) {
+      setCommitError('Select a patient before saving the intake.');
+      return;
+    }
 
-    addClinicalNote(selectedPatient.id, {
-      author: 'Clinical Triage Specialist & G-HIMS Copilot',
-      role: 'Specialist Triage',
-      category: 'SOAP',
-      content: `Disease-Centric Intake Completed: ${currentTemplate.name}\nRisk Level: ${maxRiskSeverity} (Score: ${totalRiskScore}). Protocol: ${currentLocalization.name}.\nSBAR & Specialist Briefing prepared for ${currentTemplate.typicalSpecialists.join(', ')}.`,
-    });
+    setCommitError(null);
+    try {
+      await addClinicalNote(selectedPatient.id, {
+        author: 'Authenticated clinician',
+        role: 'Specialist Intake',
+        category: 'Consultation',
+        content: `Disease-Centric Intake Completed: ${currentTemplate.name}\nRisk Level: ${maxRiskSeverity} (Score: ${totalRiskScore}). Protocol: ${currentTemplate.clinicalGuidelines}.\nObserved protocol signals: ${activeRiskSignals.map((signal) => signal.title).join('; ') || 'None recorded'}.\nSpecialist preparation target: ${currentTemplate.typicalSpecialists.join(', ')}.`,
+      });
 
-    setCommittedSuccess(true);
-    setTimeout(() => {
-      setCommittedSuccess(false);
-    }, 4000);
+      setCommittedSuccess(true);
+      setTimeout(() => {
+        setCommittedSuccess(false);
+      }, 4000);
+    } catch (error) {
+      setCommitError(
+        error instanceof Error ? error.message : 'Intake could not be saved.'
+      );
+    }
   };
+
+  const activeEncounterId =
+    selectedPatient?.activeEncounterId ||
+    selectedPatient?.encounters.find((encounter) => encounter.status === 'active')?.id;
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">

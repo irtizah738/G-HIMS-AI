@@ -614,6 +614,17 @@ export function OpdMasterWorkspace() {
     return IS_DEMO_RUNTIME ? activeEncounter.invoice : undefined;
   }, [activeEncounter]);
 
+  const requireOnlineOpdAuthority = useCallback(
+    (operation: string) => {
+      if (!isOnline) {
+        throw new Error(
+          `OPD_ONLINE_AUTHORITY_REQUIRED: ${operation} requires live server authority and cannot be committed from an offline replica.`
+        );
+      }
+    },
+    [isOnline]
+  );
+
   // DEMO-only visual event helper. Production audit events are server-generated.
   const recordEvent = (eventType: any, description: string, payload?: any) => {
     if (!IS_DEMO_RUNTIME) return;
@@ -814,6 +825,7 @@ export function OpdMasterWorkspace() {
     chiefComplaint: string;
     bookingChannel: string;
   }) => {
+    requireOnlineOpdAuthority('appointment booking');
     const result = await executeActiveTenantCommand(
       'BookOpdAppointmentCommand',
       input,
@@ -829,6 +841,7 @@ export function OpdMasterWorkspace() {
   };
 
   const handleCheckInAppointment = async (appt: AppointmentRecord) => {
+    requireOnlineOpdAuthority('appointment check-in');
     const result = await executeActiveTenantCommand<{
       appointment: Record<string, any>;
       encounter: {
@@ -877,6 +890,7 @@ export function OpdMasterWorkspace() {
   const handleResumeAppointmentBilling = async (
     appt: AppointmentRecord
   ) => {
+    requireOnlineOpdAuthority('appointment billing recovery');
     const encounterId = String(appt.encounterId || '').trim();
     if (!encounterId) {
       throw new Error(
@@ -912,6 +926,7 @@ export function OpdMasterWorkspace() {
     appointmentId: string,
     reason: string
   ) => {
+    requireOnlineOpdAuthority('appointment cancellation');
     const result = await executeActiveTenantCommand(
       'CancelOpdAppointmentCommand',
       { appointmentId, reason },
@@ -930,6 +945,7 @@ export function OpdMasterWorkspace() {
     timeZone: string;
     reason: string;
   }) => {
+    requireOnlineOpdAuthority('appointment rescheduling');
     const result = await executeActiveTenantCommand(
       'RescheduleOpdAppointmentCommand',
       input,
@@ -948,6 +964,7 @@ export function OpdMasterWorkspace() {
     appointmentId: string,
     reason: string
   ) => {
+    requireOnlineOpdAuthority('appointment no-show mutation');
     const result = await executeActiveTenantCommand(
       'MarkOpdAppointmentNoShowCommand',
       { appointmentId, reason },
@@ -968,6 +985,7 @@ export function OpdMasterWorkspace() {
     notificationPreference: 'SMS' | 'WHATSAPP' | 'PHONE' | 'EMAIL';
     notes?: string;
   }) => {
+    requireOnlineOpdAuthority('waitlist creation');
     const result = await executeActiveTenantCommand(
       'AddOpdWaitlistEntryCommand',
       input,
@@ -990,6 +1008,7 @@ export function OpdMasterWorkspace() {
     timeZone: string;
     offerTtlMinutes?: number;
   }) => {
+    requireOnlineOpdAuthority('waitlist slot offer');
     const result = await executeActiveTenantCommand(
       'OfferOpdWaitlistSlotCommand',
       input,
@@ -1010,6 +1029,7 @@ export function OpdMasterWorkspace() {
     chiefComplaint: string;
     bookingChannel?: string;
   }) => {
+    requireOnlineOpdAuthority('waitlist acceptance');
     const result = await executeActiveTenantCommand(
       'AcceptOpdWaitlistOfferCommand',
       input,
@@ -1027,6 +1047,7 @@ export function OpdMasterWorkspace() {
     waitlistId: string,
     reason: string
   ) => {
+    requireOnlineOpdAuthority('waitlist cancellation');
     const result = await executeActiveTenantCommand(
       'CancelOpdWaitlistEntryCommand',
       { waitlistId, reason },
@@ -1531,6 +1552,7 @@ export function OpdMasterWorkspace() {
       safetyOverrideReason?: string;
     }
   ) => {
+    requireOnlineOpdAuthority('medication prescribing safety evaluation');
     try {
       const result = await executeActiveTenantCommand<Record<string, any>>(
         'PrescribeMedicationCommand',
@@ -1618,6 +1640,7 @@ export function OpdMasterWorkspace() {
   // HANDLER: Dispense Prescription through the pharmacy domain.
   // CI-0D will extend this command to atomic inventory/consumption charging.
   const handleDispensePrescription = async (rxId: string) => {
+    requireOnlineOpdAuthority('physical FEFO pharmacy dispensing');
     const prescription = activeEncounter.prescriptions.find((rx) => rx.id === rxId);
     if (!prescription) throw new Error('PRESCRIPTION_NOT_FOUND');
 
@@ -2494,6 +2517,7 @@ export function OpdMasterWorkspace() {
   };
 
   const handleFinalizeBillingReconciliation = async () => {
+    requireOnlineOpdAuthority('final billing reconciliation');
     if (!activeEncounter) return;
     if (activeBillingInvoice) {
       throw new Error(
@@ -2617,6 +2641,7 @@ export function OpdMasterWorkspace() {
   // transition; it must never first write an intermediate "bed requested"
   // disposition that can survive a failed admission.
   const handleCommitDisposition = async (disposition: EncounterDisposition) => {
+    requireOnlineOpdAuthority('final disposition and care transition');
     const inpatientRequest = disposition.inpatientAdmissionRequest;
     const directAdmission =
       disposition.type === 'INPATIENT_ADMISSION_RECOMMENDED';
@@ -2946,6 +2971,7 @@ export function OpdMasterWorkspace() {
         <OpdQueueEngine
           queue={queue}
           onCallToken={async (token, room) => {
+            requireOnlineOpdAuthority('shared OPD queue call');
             const item = queue.find((q) => q.tokenNumber === token);
             if (!item) return;
             const result = await executeActiveTenantCommand(
@@ -2960,6 +2986,7 @@ export function OpdMasterWorkspace() {
             recordEvent('QUEUE_CALLED', `Token ${token} called to ${room}.`);
           }}
           onStartService={async (tokenId) => {
+            requireOnlineOpdAuthority('OPD queue service start');
             const item = queue.find((q) => q.id === tokenId);
             if (!item) return;
 
@@ -3013,6 +3040,7 @@ export function OpdMasterWorkspace() {
             setActiveTab('TRIAGE');
           }}
           onCompleteService={async (tokenId) => {
+            requireOnlineOpdAuthority('OPD queue completion');
             const result = await executeActiveTenantCommand(
               'UpdateOpdQueueStatusCommand',
               { tokenId, targetStatus: 'completed' },
@@ -3024,6 +3052,7 @@ export function OpdMasterWorkspace() {
             );
           }}
           onSkipToken={async (tokenId) => {
+            requireOnlineOpdAuthority('OPD queue no-show update');
             const result = await executeActiveTenantCommand(
               'UpdateOpdQueueStatusCommand',
               { tokenId, targetStatus: 'no_show' },
@@ -3035,6 +3064,7 @@ export function OpdMasterWorkspace() {
             );
           }}
           onTransferQueue={async (tokenId, targetDept, targetDoc, targetRoom) => {
+            requireOnlineOpdAuthority('OPD queue transfer');
             const result = await executeActiveTenantCommand(
               'UpdateOpdQueueStatusCommand',
               {
@@ -3117,6 +3147,7 @@ export function OpdMasterWorkspace() {
           prescriptions={activeEncounter.prescriptions}
           canPrescribe={canPrescribe}
           canDispense={canDispense}
+          onlineAuthorityAvailable={isOnline}
           onAddPrescription={(item, safety) =>
             handleAddPrescription(item, safety)
           }

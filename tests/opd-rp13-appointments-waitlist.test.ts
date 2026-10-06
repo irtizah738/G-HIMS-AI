@@ -1,0 +1,177 @@
+import { describe, expect, test } from 'bun:test';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+
+const source = (file: string) =>
+  readFile(path.join(process.cwd(), file), 'utf8');
+
+describe('OPD-RP13 authoritative appointments and waitlist', () => {
+  test('scheduling mutations are command-backed and server authoritative', async () => {
+    const schema = await source('lib/backend/commands/command-schema-registry.ts');
+    const bus = await source('lib/backend/commands/command-bus.ts');
+    const service = await source(
+      'lib/backend/services/opd-appointment-domain-service.ts'
+    );
+
+    for (const command of [
+      'BookOpdAppointmentCommand',
+      'CancelOpdAppointmentCommand',
+      'RescheduleOpdAppointmentCommand',
+      'CheckInOpdAppointmentCommand',
+      'MarkOpdAppointmentNoShowCommand',
+      'AddOpdWaitlistEntryCommand',
+      'OfferOpdWaitlistSlotCommand',
+      'AcceptOpdWaitlistOfferCommand',
+      'CancelOpdWaitlistEntryCommand',
+    ]) {
+      expect(schema).toContain(command);
+      expect(bus).toContain(command);
+    }
+
+    expect(service).toContain("aggregateType: 'OPD_APPOINTMENT'");
+    expect(service).toContain("aggregateType: 'OPD_WAITLIST_ENTRY'");
+    expect(service).toContain("outboxTopic: 'g-hims-opd-scheduling-events'");
+  });
+
+  test('booking owns provider and patient overlap locks atomically', async () => {
+    const service = await source(
+      'lib/backend/services/opd-appointment-domain-service.ts'
+    );
+
+    expect(service).toContain('providerSlotId');
+    expect(service).toContain('patientSlotId');
+    expect(service).toContain("'OPD_APPOINTMENT_SLOT_CONFLICT'");
+    expect(service).toContain("'OPD_PATIENT_APPOINTMENT_CONFLICT'");
+    expect(service).toContain("entityType: 'OPD_APPOINTMENT_SLOT'");
+    expect(service).toContain('expectedServerVersion');
+  });
+
+  test('provider availability is derived from HCM roster privilege and leave authority', async () => {
+    const service = await source(
+      'lib/backend/services/opd-appointment-domain-service.ts'
+    );
+    const route = await source('app/api/opd/availability/route.ts');
+
+    expect(service).toContain("'clinicalPrivileges'");
+    expect(service).toContain("'rosterAssignments'");
+    expect(service).toContain("'leaveRequests'");
+    expect(service).toContain("'CONSULT_OPD'");
+    expect(service).toContain("'OPD_PROVIDER_NOT_ROSTERED'");
+    expect(service).toContain("'OPD_PROVIDER_ON_LEAVE'");
+    expect(route).toContain('OpdAppointmentDomainService.listAvailability');
+  });
+
+  test('waitlist prevents duplicate active scope and converts offers atomically', async () => {
+    const service = await source(
+      'lib/backend/services/opd-appointment-domain-service.ts'
+    );
+    const tx = await source('lib/backend/transactions/transaction-manager.ts');
+    const scheduling = await source('types/opd-scheduling.ts');
+
+    expect(tx).toContain("OPD_WAITLIST_SCOPE: 'opdWaitlistScopes'");
+    expect(scheduling).toContain('OpdWaitlistScopeLock');
+    expect(service).toContain('waitlistScopeId');
+    expect(service).toContain("'ACTIVE_WAITLIST_ALREADY_EXISTS'");
+    expect(service).toContain("'WAITLIST_SCOPE_LINEAGE_MISMATCH'");
+    expect(service).toContain("status: 'RELEASED'");
+    expect(service).toContain("'WAITLIST_SLOT_HOLD_LOST'");
+  });
+
+  test('critical patients cannot be parked on an OPD waitlist', async () => {
+    const service = await source(
+      'lib/backend/services/opd-appointment-domain-service.ts'
+    );
+
+    expect(service).toContain("'CRITICAL_PATIENT_CANNOT_WAITLIST'");
+    expect(service).toContain(
+      'Critical patients must be directed to immediate clinical triage/emergency assessment'
+    );
+  });
+
+  test('appointment check-in atomically creates encounter queue and care pointer', async () => {
+    const service = await source(
+      'lib/backend/services/opd-appointment-domain-service.ts'
+    );
+    const workspace = await source('components/opd/OpdMasterWorkspace.tsx');
+
+    expect(service).toContain("'OPD_APPOINTMENT_CHECKED_IN'");
+    expect(service).toContain("entityType: 'PATIENT_MPI'");
+    expect(service).toContain("entityType: 'ENCOUNTER'");
+    expect(service).toContain("entityType: 'OPD_QUEUE_TOKEN'");
+    expect(service).toContain("financialClearanceState: 'CONSULTATION_PAYMENT_PENDING'");
+    expect(service).toContain('sourceAppointmentId');
+    expect(workspace).toContain("'CheckInOpdAppointmentCommand'");
+  });
+
+  test('check-in and no-show windows are enforced using server time', async () => {
+    const service = await source(
+      'lib/backend/services/opd-appointment-domain-service.ts'
+    );
+
+    expect(service).toContain('CHECKIN_EARLY_WINDOW_MS');
+    expect(service).toContain('CHECKIN_LATE_WINDOW_MS');
+    expect(service).toContain("'APPOINTMENT_CHECKIN_WINDOW_CHANGED'");
+    expect(service).toContain('NO_SHOW_GRACE_MS');
+    expect(service).toContain("'APPOINTMENT_NO_SHOW_TOO_EARLY'");
+  });
+
+  test('production UI has no hardcoded doctor schedules or browser conflict authority', async () => {
+    const ui = await source('components/opd/OpdAppointmentsWaitlist.tsx');
+    const workspace = await source('components/opd/OpdMasterWorkspace.tsx');
+
+    expect(ui).not.toContain('DOCTOR_SCHEDULES');
+    expect(ui).not.toContain('Booking Conflict:');
+    expect(ui).not.toContain('Exertional dyspnea and follow-up review');
+    expect(ui).toContain('/api/opd/availability');
+    expect(workspace).toContain("'BookOpdAppointmentCommand'");
+    expect(workspace).toContain("'CancelOpdAppointmentCommand'");
+    expect(workspace).toContain("'RescheduleOpdAppointmentCommand'");
+    expect(workspace).toContain("'MarkOpdAppointmentNoShowCommand'");
+  });
+
+  test('appointments and waitlist hydrate from authoritative edge state', async () => {
+    const bootstrap = await source('app/api/offline/bootstrap/route.ts');
+    const hydration = await source('lib/offline/hydration.ts');
+    const model = await source('lib/opd/workspace-read-model.ts');
+    const workspace = await source('components/opd/OpdMasterWorkspace.tsx');
+
+    expect(bootstrap).toContain("'opdAppointments'");
+    expect(bootstrap).toContain("'opdWaitlist'");
+    expect(hydration).toContain("'opdAppointments'");
+    expect(hydration).toContain("'opdWaitlist'");
+    expect(model).toContain('appointments: AppointmentRecord[]');
+    expect(model).toContain('waitlist: WaitlistEntry[]');
+    expect(workspace).toContain('setAppointments(readModel.appointments)');
+    expect(workspace).toContain('setWaitlist(readModel.waitlist)');
+  });
+
+  test('scheduling collections are client read-only and slot/scope locks remain server-only', async () => {
+    const rules = await source('firestore.rules');
+
+    expect(rules).toContain('match /opdAppointments/{appointmentId}');
+    expect(rules).toContain('match /opdWaitlist/{waitlistId}');
+    expect(rules).toContain('match /opdAppointmentSlots/{slotId}');
+    expect(rules).toContain('allow write: if false');
+  });
+
+  test('scheduling mutations fail closed offline until RP15 replay qualification', async () => {
+    const workspace = await source('components/opd/OpdMasterWorkspace.tsx');
+
+    for (const command of [
+      "'BookOpdAppointmentCommand'",
+      "'CancelOpdAppointmentCommand'",
+      "'RescheduleOpdAppointmentCommand'",
+      "'CheckInOpdAppointmentCommand'",
+      "'MarkOpdAppointmentNoShowCommand'",
+      "'AddOpdWaitlistEntryCommand'",
+      "'OfferOpdWaitlistSlotCommand'",
+      "'AcceptOpdWaitlistOfferCommand'",
+      "'CancelOpdWaitlistEntryCommand'",
+    ]) {
+      const start = workspace.indexOf(command);
+      expect(start).toBeGreaterThan(-1);
+      const block = workspace.slice(start, start + 1800);
+      expect(block).not.toContain('offlineQueue');
+    }
+  });
+});

@@ -749,6 +749,17 @@ export interface OpdTimelineEvent {
   hash?: string;
   payload?: any;
   metadata?: Record<string, any>;
+  auditId?: string;
+  commandId?: string;
+  correlationId?: string;
+  aggregateType?: string;
+  aggregateId?: string;
+  resourceType?: string;
+  resourceId?: string;
+  auditAction?: string;
+  integrityState?: 'EVENT_AUDIT_LINKED' | 'EVENT_ONLY' | 'DEMO_NON_AUTHORITATIVE';
+  integrityMode?: 'SERVER_APPEND_ONLY' | 'DEMO_NON_AUTHORITATIVE';
+  recordedAt?: number;
 }
 
 export interface ComprehensiveOpdEncounter {

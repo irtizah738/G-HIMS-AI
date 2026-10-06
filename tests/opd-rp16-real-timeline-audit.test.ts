@@ -60,6 +60,7 @@ describe('OPD-RP16 real timeline and audit', () => {
     expect(route).toContain(
       "String(audit?.correlationId || '')"
     );
+    expect(route).toContain('seenAuditIds.has(auditId)');
     expect(route).toContain('ambiguousEventIds.add(eventId)');
     expect(route).toContain('ambiguousAuditCount');
   });

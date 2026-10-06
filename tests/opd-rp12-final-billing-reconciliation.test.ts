@@ -112,6 +112,32 @@ describe('OPD-RP12 final billing reconciliation', () => {
     );
   });
 
+  test('Revenue Integrity acceptance is server-priced and immediately invoice-backed', async () => {
+    const revenue = await source(
+      'lib/backend/services/revenue-integrity-domain-service.ts'
+    );
+    const documentation = await source(
+      'lib/backend/services/clinical-documentation-domain-service.ts'
+    );
+    const workspace = await source('components/opd/OpdMasterWorkspace.tsx');
+
+    expect(revenue).toContain("'billingServiceCatalog'");
+    expect(revenue).toContain("'REVENUE_INTEGRITY_CATALOG_NOT_CONFIGURED'");
+    expect(revenue).toContain("billingPurpose: 'OPD_REVENUE_INTEGRITY'");
+    expect(revenue).toContain("entityType: 'INVOICE'");
+    expect(revenue).toContain("entityType: 'AR_OPEN_ITEM'");
+    expect(revenue).toContain("entityType: 'JOURNAL_ENTRY'");
+    expect(revenue).not.toContain(
+      'unitAmountMinorUnits: finding.estimatedRecoverableAmountMinorUnits'
+    );
+    expect(documentation).not.toContain(
+      'estimatedRecoverableAmountMinorUnits: Math.round(fee * 100)'
+    );
+    expect(documentation).not.toContain("currency: 'USD'");
+    expect(workspace).toContain('openSupplementalInvoice');
+    expect(workspace).toContain('opd-ri-cash-receipt:');
+  });
+
   test('Revenue Integrity charge acceptance participates in the OPD billing sequence', async () => {
     const revenue = await source(
       'lib/backend/services/revenue-integrity-domain-service.ts'

@@ -1028,7 +1028,7 @@ export function AllModulesDirectory() {
                   All 52 Enterprise Domains of G-HIMS OS
                 </h1>
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                  52 / 52 Active
+                  52 Domains Registered
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
@@ -1088,7 +1088,7 @@ export function AllModulesDirectory() {
           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Domains</div>
           <div className="text-xl font-black text-slate-900 dark:text-slate-100 mt-0.5">52 Domains</div>
           <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold mt-0.5 flex items-center gap-1">
-            <Check className="w-3 h-3" /> 100% Registered
+            <Check className="w-3 h-3" /> Architecture Registry
           </div>
         </div>
         <div className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs">
@@ -1106,10 +1106,10 @@ export function AllModulesDirectory() {
           </div>
         </div>
         <div className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs">
-          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Automated Verification</div>
-          <div className="text-xl font-black text-slate-900 dark:text-slate-100 mt-0.5">52 Tests Pass</div>
+          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Qualification Evidence</div>
+          <div className="text-xl font-black text-slate-900 dark:text-slate-100 mt-0.5">CI + Staging Gates</div>
           <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold mt-0.5 flex items-center gap-1">
-            <CheckCircle2 className="w-3 h-3" /> All Suites Green
+            <CheckCircle2 className="w-3 h-3" /> Evidence-driven readiness
           </div>
         </div>
       </div>

@@ -142,6 +142,26 @@ describe('OPD-RP22 obsolete and demo authority removal', () => {
     );
   });
 
+  test('Firestore remains server-write-only for billing authority collections', async () => {
+    const rules = await source('firestore.rules');
+
+    expect(rules).toContain('match /invoices/{id}');
+    expect(rules).toContain('match /claims/{id}');
+    expect(rules).toContain('match /encounterCharges/{id}');
+    expect(rules).toContain('match /arOpenItems/{id}');
+
+    const invoiceBlock = rules.slice(
+      rules.indexOf('match /invoices/{id}'),
+      rules.indexOf('match /claims/{id}')
+    );
+    expect(invoiceBlock).toContain('allow write: if false');
+
+    const claimsStart = rules.indexOf('match /claims/{id}');
+    expect(rules.slice(claimsStart, claimsStart + 180)).toContain(
+      'allow write: if false'
+    );
+  });
+
   test('remaining OPD sample state is DEMO-gated and production initializes empty', async () => {
     const workspace = await source('components/opd/OpdMasterWorkspace.tsx');
 

@@ -2155,7 +2155,9 @@ export class OpdAppointmentDomainService {
           : {}),
         priority: payload.priority,
         notificationPreference: payload.notificationPreference,
-        contactPhone: String(patient.phone || ''),
+        contactPhone: String(
+          patient.contactPhone || patient.phone || ''
+        ),
         ...(payload.notes?.trim() ? { notes: payload.notes.trim() } : {}),
         status: 'WAITING',
         createdAt: now,

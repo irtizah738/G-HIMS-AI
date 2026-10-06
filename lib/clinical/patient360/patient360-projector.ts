@@ -49,10 +49,10 @@ export interface Patient360ProjectionSources {
   allergies: ClinicalAllergy[];
   medicationOrders: MedicationOrder[];
   observations: ClinicalObservation[];
-  diagnosticOrders: DiagnosticOrder[];
+  diagnosticOrders?: DiagnosticOrder[];
   diagnosticReports: DiagnosticReport[];
-  procedures: ClinicalProcedure[];
-  carePlans: CarePlan[];
+  procedures?: ClinicalProcedure[];
+  carePlans?: CarePlan[];
   documents: ClinicalDocument[];
   events: Patient360SourceEvent[];
   knowledgeStatus?: PatientClinicalKnowledgeStatus;
@@ -338,10 +338,10 @@ export class Patient360Projector {
     const allergies = samePatient(sources.allergies);
     const medicationOrders = samePatient(sources.medicationOrders);
     const observations = samePatient(sources.observations);
-    const diagnosticOrders = samePatient(sources.diagnosticOrders);
+    const diagnosticOrders = samePatient(sources.diagnosticOrders || []);
     const diagnosticReports = samePatient(sources.diagnosticReports);
-    const procedures = samePatient(sources.procedures);
-    const carePlans = samePatient(sources.carePlans);
+    const procedures = samePatient(sources.procedures || []);
+    const carePlans = samePatient(sources.carePlans || []);
     const documents = samePatient(sources.documents);
 
     const careContexts = buildPatient360CareContexts(encounters);

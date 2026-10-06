@@ -513,7 +513,7 @@ export interface EncounterDisposition {
     clinicalIndication: string;
     admittingService?: string;
   };
-  completedAt: number;
+  completedAt?: number;
   completedBy?: string;
 }
 

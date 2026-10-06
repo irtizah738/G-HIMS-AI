@@ -9,6 +9,7 @@ import { ClinicalOrderDomainService } from '../services/clinical-order-domain-se
 import { ClinicalDocumentationDomainService } from '../services/clinical-documentation-domain-service';
 import { ClinicalDraftDomainService } from '../services/clinical-draft-domain-service';
 import { OpdQueueDomainService } from '../services/opd-queue-domain-service';
+import { OpdAppointmentDomainService } from '../services/opd-appointment-domain-service';
 import { OpdBillingDomainService } from '../services/opd-billing-domain-service';
 import { OpdBillingReconciliationDomainService } from '../services/opd-billing-reconciliation-domain-service';
 import { FinanceGlDomainService } from '../services/finance-gl-domain-service';
@@ -192,6 +193,87 @@ export class CommandBus {
         // --- Clinical Domain ---
         case 'CreateEncounterCommand':
           result = await EncounterDomainService.createEncounter(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'BookOpdAppointmentCommand':
+          result = await OpdAppointmentDomainService.book(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'CancelOpdAppointmentCommand':
+          result = await OpdAppointmentDomainService.cancel(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'RescheduleOpdAppointmentCommand':
+          result = await OpdAppointmentDomainService.reschedule(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'CheckInOpdAppointmentCommand':
+          result = await OpdAppointmentDomainService.checkIn(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'MarkOpdAppointmentNoShowCommand':
+          result = await OpdAppointmentDomainService.markNoShow(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'AddOpdWaitlistEntryCommand':
+          result = await OpdAppointmentDomainService.addWaitlist(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'OfferOpdWaitlistSlotCommand':
+          result = await OpdAppointmentDomainService.offerWaitlistSlot(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'AcceptOpdWaitlistOfferCommand':
+          result = await OpdAppointmentDomainService.acceptWaitlistOffer(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
+        case 'CancelOpdWaitlistEntryCommand':
+          result = await OpdAppointmentDomainService.cancelWaitlist(
             context,
             command.commandId,
             command.idempotencyKey,

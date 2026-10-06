@@ -20,7 +20,7 @@ export interface RequestConsultationPayload extends ScopedClinicalPayload {
   requestedSpecialty: string;
   requestedConsultantId?: string;
   clinicalQuestion: string;
-  priority?: 'ROUTINE' | 'URGENT' | 'STAT';
+  priority?: 'ROUTINE' | 'PRIORITY' | 'URGENT' | 'STAT';
   sourceRefs?: string[];
 }
 
@@ -241,6 +241,12 @@ export class ClinicalCoordinationDomainService {
     }
 
     const now = Date.now();
+    const priority = payload.priority || 'ROUTINE';
+    const responseSlaMinutes =
+      priority === 'STAT' ? 10 :
+      priority === 'URGENT' ? 30 :
+      priority === 'PRIORITY' ? 60 :
+      undefined;
     const consultationId = `consult_${crypto.randomUUID()}`;
     const consultation: ClinicalConsultationRequest = {
       consultationId,
@@ -254,7 +260,11 @@ export class ClinicalCoordinationDomainService {
       requestedConsultantId: payload.requestedConsultantId?.trim() || undefined,
       assignedConsultantId: payload.requestedConsultantId?.trim() || undefined,
       clinicalQuestion,
-      priority: payload.priority || 'ROUTINE',
+      priority,
+      ...(responseSlaMinutes ? {
+        responseSlaMinutes,
+        responseDueAt: now + responseSlaMinutes * 60_000,
+      } : {}),
       status: payload.requestedConsultantId ? 'ASSIGNED' : 'REQUESTED',
       sourceRefs: Array.from(new Set(payload.sourceRefs || [])).slice(0, 100),
       requestedBy: context.actorId,
@@ -277,6 +287,8 @@ export class ClinicalCoordinationDomainService {
         requestedSpecialty,
         requestedConsultantId: consultation.requestedConsultantId,
         priority: consultation.priority,
+        responseSlaMinutes: consultation.responseSlaMinutes,
+        responseDueAt: consultation.responseDueAt,
         clinicalQuestion,
       },
       auditAction: 'REQUEST_CLINICAL_CONSULTATION',

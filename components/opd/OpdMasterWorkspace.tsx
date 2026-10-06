@@ -51,7 +51,10 @@ import { OpdDiagnosticOrdersPacs } from './OpdDiagnosticOrdersPacs';
 import { OpdPharmacyPrescriptions } from './OpdPharmacyPrescriptions';
 import { OpdBillingLedger } from './OpdBillingLedger';
 import { OpdDispositionReferrals } from './OpdDispositionReferrals';
-import { OpdPatientTimelineAudit } from './OpdPatientTimelineAudit';
+import {
+  OpdPatientTimelineAudit,
+  type OpdTimelineIntegritySummary,
+} from './OpdPatientTimelineAudit';
 import { OpdOfflineSyncManager } from './OpdOfflineSyncManager';
 import { executeActiveTenantCommand, registerActiveTenantPatient } from '@/lib/api/command-client';
 import { useAuth } from '@/lib/auth/auth-context';
@@ -62,6 +65,7 @@ import {
   adaptAuthoritativeOpdInvoice,
   buildOpdWorkspaceReadModel,
 } from '@/lib/opd/workspace-read-model';
+import { fetchAuthoritativeOpdTimeline } from '@/lib/opd/timeline-client';
 
 const IS_DEMO_RUNTIME = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
 
@@ -473,6 +477,10 @@ export function OpdMasterWorkspace() {
   const [encounters, setEncounters] = useState<ComprehensiveOpdEncounter[]>(() => IS_DEMO_RUNTIME ? SEED_ENCOUNTERS : []);
   const [queue, setQueue] = useState<QueueEntry[]>(() => IS_DEMO_RUNTIME ? SEED_QUEUE : []);
   const [events, setEvents] = useState<OpdTimelineEvent[]>(() => IS_DEMO_RUNTIME ? SEED_EVENTS : []);
+  const [timelineIntegrity, setTimelineIntegrity] =
+    useState<OpdTimelineIntegritySummary | null>(null);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  const [timelineError, setTimelineError] = useState<string | null>(null);
 
   // Active Context
   const [selectedEncounterId, setSelectedEncounterId] = useState<string>(() => IS_DEMO_RUNTIME ? 'enc-101' : '');
@@ -525,6 +533,56 @@ export function OpdMasterWorkspace() {
     auth.user?.uid,
   ]);
 
+  const refreshAuthoritativeTimeline = useCallback(
+    async (requestedEncounterId?: string) => {
+      if (IS_DEMO_RUNTIME) return;
+
+      const tenantId = auth.activeTenant?.tenantId;
+      const encounterId = String(
+        requestedEncounterId || selectedEncounterId || ''
+      ).trim();
+      if (!tenantId || !encounterId) {
+        setEvents([]);
+        setTimelineIntegrity(null);
+        setTimelineError(null);
+        return;
+      }
+
+      if (!isOnline) {
+        setEvents([]);
+        setTimelineIntegrity(null);
+        setTimelineError(
+          'OPD_TIMELINE_ONLINE_REQUIRED: authoritative event and audit provenance is unavailable while offline.'
+        );
+        return;
+      }
+
+      setTimelineLoading(true);
+      setTimelineError(null);
+      setEvents([]);
+      setTimelineIntegrity(null);
+      try {
+        const result = await fetchAuthoritativeOpdTimeline(
+          tenantId,
+          encounterId
+        );
+        setEvents(result.timeline);
+        setTimelineIntegrity(result.integrity);
+      } catch (error) {
+        setEvents([]);
+        setTimelineIntegrity(null);
+        setTimelineError(
+          error instanceof Error
+            ? error.message
+            : 'Authoritative OPD timeline could not be loaded.'
+        );
+      } finally {
+        setTimelineLoading(false);
+      }
+    },
+    [auth.activeTenant?.tenantId, isOnline, selectedEncounterId]
+  );
+
   useEffect(() => {
     if (IS_DEMO_RUNTIME || auth.loading || !auth.activeTenant?.tenantId) return;
 
@@ -559,6 +617,9 @@ export function OpdMasterWorkspace() {
       void refreshAuthoritativeWorkspace().catch((error) => {
         console.error('OPD post-sync hydration failed:', error);
       });
+      if (activeTab === 'AUDIT' && selectedEncounterId) {
+        void refreshAuthoritativeTimeline(selectedEncounterId);
+      }
     };
 
     window.addEventListener('ghims:edge-sync-complete', handleSyncComplete);
@@ -568,7 +629,29 @@ export function OpdMasterWorkspace() {
         handleSyncComplete
       );
     };
-  }, [auth.activeTenant?.tenantId, refreshAuthoritativeWorkspace]);
+  }, [
+    activeTab,
+    auth.activeTenant?.tenantId,
+    refreshAuthoritativeTimeline,
+    refreshAuthoritativeWorkspace,
+    selectedEncounterId,
+  ]);
+
+  useEffect(() => {
+    if (
+      IS_DEMO_RUNTIME ||
+      activeTab !== 'AUDIT' ||
+      !selectedEncounterId
+    ) {
+      return;
+    }
+
+    void refreshAuthoritativeTimeline(selectedEncounterId);
+  }, [
+    activeTab,
+    refreshAuthoritativeTimeline,
+    selectedEncounterId,
+  ]);
 
   // Selected encounter object
   const activeEncounter = useMemo(() => {
@@ -3291,7 +3374,15 @@ export function OpdMasterWorkspace() {
       {activeTab === 'AUDIT' && activeEncounter && (
         <OpdPatientTimelineAudit
           encounter={activeEncounter}
-          events={events.filter((evt) => evt.encounterId === activeEncounter.id || evt.encounterId === 'enc-general')}
+          events={events.filter(
+            (event) =>
+              event.encounterId === activeEncounter.id ||
+              (IS_DEMO_RUNTIME && event.encounterId === 'enc-general')
+          )}
+          loading={timelineLoading}
+          error={timelineError}
+          integrity={timelineIntegrity}
+          demo={IS_DEMO_RUNTIME}
         />
       )}
 

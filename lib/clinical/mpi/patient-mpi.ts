@@ -41,6 +41,33 @@ export function calculateSoundex(name: string): string {
 }
 
 /**
+ * Canonical external patient identifier normalization.
+ *
+ * MRN is the immutable institution-issued patient identifier. CNIC is a
+ * deterministic national identifier when present. Both can be used alone to
+ * resolve the authoritative MPI record; neither replaces the internal opaque
+ * patient UUID used by clinical event references.
+ */
+export function normalizeMrn(value: string): string {
+  return String(value || '').trim().toUpperCase().replace(/\s+/g, '');
+}
+
+export function normalizeCnic(value: string): string {
+  return String(value || '').replace(/\D/g, '');
+}
+
+export function buildMpiRegistryKey(
+  type: 'MRN' | 'CNIC',
+  value: string
+): string {
+  const normalized = type === 'MRN' ? normalizeMrn(value) : normalizeCnic(value);
+  if (!normalized) {
+    throw new Error(`MPI_${type}_VALUE_REQUIRED`);
+  }
+  return `${type}_${normalized}`.replace(/[^a-zA-Z0-9_]/g, '_');
+}
+
+/**
  * Normalizes phone numbers to pure numeric digits.
  */
 export function normalizePhoneNumber(phone: string): string {
@@ -62,7 +89,7 @@ export function generateDeterministicMatchKeys(params: {
   const normLast = (params.lastName || '').trim().toLowerCase();
   const normDob = (params.dateOfBirth || '').trim();
   const normPhone = normalizePhoneNumber(params.phone);
-  const normNatId = (params.nationalId || '').trim().toUpperCase();
+  const normNatId = normalizeCnic(params.nationalId || '');
 
   const dobNameHash = `dob_name_${normDob}_${normLast}_${normFirst}`;
   const nationalIdHash = normNatId ? `natid_${normNatId}` : undefined;
@@ -153,7 +180,7 @@ export function evaluateMpiMatch(
   if (
     incoming.nationalId &&
     candidate.nationalId &&
-    incoming.nationalId.trim().toUpperCase() === candidate.nationalId.trim().toUpperCase()
+    normalizeCnic(incoming.nationalId) === normalizeCnic(candidate.nationalId)
   ) {
     score += 50;
     matchedFields.push('nationalId (Exact)');
@@ -193,7 +220,9 @@ export function evaluateMpiMatch(
 
   const finalScore = Math.min(100, score);
   const isDeterministicExact =
-    (incoming.nationalId && candidate.nationalId && incoming.nationalId === candidate.nationalId) ||
+    (incoming.nationalId &&
+      candidate.nationalId &&
+      normalizeCnic(incoming.nationalId) === normalizeCnic(candidate.nationalId)) ||
     (candidate.dateOfBirth === incoming.dateOfBirth && firstSim === 1.0 && lastSim === 1.0);
 
   let confidence: 'EXACT' | 'HIGH' | 'MEDIUM' | 'LOW' = 'LOW';

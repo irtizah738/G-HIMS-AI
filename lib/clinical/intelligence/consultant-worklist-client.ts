@@ -253,3 +253,34 @@ export function acknowledgeClinicalEscalation(
     input
   );
 }
+
+
+export function saveDiseaseIntakeArtifact(
+  tenantId: string,
+  input: {
+    patientId: string;
+    encounterId: string;
+    templateId: string;
+    templateName: string;
+    templateVersion?: string;
+    clinicalGuidelines: string;
+    guidedAnswers: Record<string, unknown>;
+    specialtyHistory: Record<string, unknown>;
+    selectedTreeNodeIds: string[];
+    observedRiskScore: number;
+    observedRiskSeverity: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL';
+    observedRiskSignalIds: string[];
+    observedRiskSignalTitles: string[];
+    specialistTargets: string[];
+    sourceRefs?: string[];
+    patient360Revision: number;
+    patient360SourceCheckpoint: string;
+    clinicianAttestation: true;
+  }
+) {
+  return executeConsultantCommand(
+    tenantId,
+    'SaveDiseaseIntakeArtifactCommand',
+    input
+  );
+}

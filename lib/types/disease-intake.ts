@@ -127,18 +127,9 @@ export interface AiOptimizationResult {
     assessment: string;
     recommendation: string;
   };
-  differentialDiagnoses: {
-    condition: string;
-    probability: 'High' | 'Moderate' | 'Low';
-    justification: string;
-    icdCode: string;
-  }[];
-  statOrders: {
-    name: string;
-    type: 'lab' | 'imaging' | 'medication' | 'consult';
-    urgency: 'STAT' | 'Urgent' | 'Routine';
-    cptCode?: string;
-  }[];
-  criticalRiskMitigations: string[];
-  specialistReadinessChecklist: string[];
+  observedRiskSignals: string[];
+  missingOrUnverifiedInformation: string[];
+  sourceLimited: true;
+  status?: 'DRAFT_REQUIRES_CLINICIAN_REVIEW';
+  model?: string;
 }

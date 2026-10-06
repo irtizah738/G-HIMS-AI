@@ -2776,6 +2776,29 @@ export function OpdMasterWorkspace() {
         warningSignsRedFlags: disposition.warningSignsRedFlags,
         followUpScheduledDate: disposition.followUpScheduledDate,
         followUpDepartment: disposition.followUpDepartment,
+        internalReferral: disposition.internalReferral
+          ? {
+              targetDepartment: disposition.internalReferral.targetDepartment,
+              ...(disposition.internalReferral.targetDoctor
+                ? { targetDoctor: disposition.internalReferral.targetDoctor }
+                : {}),
+              priority: disposition.internalReferral.priority,
+              clinicalReason: disposition.internalReferral.clinicalReason,
+            }
+          : undefined,
+        externalReferral: disposition.externalReferral
+          ? {
+              receivingHospitalName:
+                disposition.externalReferral.receivingHospitalName,
+              ...(disposition.externalReferral.receivingDoctorName
+                ? {
+                    receivingDoctorName:
+                      disposition.externalReferral.receivingDoctorName,
+                  }
+                : {}),
+              sbarHandover: disposition.externalReferral.sbarHandover,
+            }
+          : undefined,
       },
       { idempotencyKey: `opd-disposition:${activeEncounter.id}` }
     );

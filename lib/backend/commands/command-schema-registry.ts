@@ -1764,7 +1764,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       patientId: nonEmpty,
       amountMinorUnits: z.number().int().safe().positive(),
       currency: z.string().trim().length(3).optional(),
-      referenceNumber: nonEmpty,
+      referenceNumber: z.string().trim().min(1).max(200).optional(),
       collectedAt: z.number().finite().positive(),
       cashierName: z.string().trim().max(200).optional(),
     }).strict(),

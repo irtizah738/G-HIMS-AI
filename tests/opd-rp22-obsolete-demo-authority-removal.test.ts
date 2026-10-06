@@ -75,6 +75,12 @@ describe('OPD-RP22 obsolete and demo authority removal', () => {
           validInvoice,
           { ...validInvoice, id: 'cross-tenant', tenantId: 'other-tenant' },
           { ...validInvoice, id: 'malformed', currency: '' },
+          {
+            ...validInvoice,
+            id: 'monetary-mismatch',
+            totalPaid: 25,
+            balanceDue: 100,
+          },
         ],
       },
     };
@@ -85,7 +91,7 @@ describe('OPD-RP22 obsolete and demo authority removal', () => {
     expect(model.invoices[0]?.id).toBe('inv-rp22');
     expect(model.invoices[0]?.currency).toBe('PKR');
     expect(model.invoices[0]?.billingPurpose).toBe('OPD_CONSULTATION');
-    expect(model.rejectedRows).toBe(2);
+    expect(model.rejectedRows).toBe(3);
   });
 
   test('invoice directory has no synthetic initial financial records', async () => {
@@ -97,6 +103,9 @@ describe('OPD-RP22 obsolete and demo authority removal', () => {
     expect(page).not.toContain("Robert Martinez");
     expect(page).not.toContain('useState<Invoice[]>([');
     expect(page).not.toContain('Create New Invoice');
+    expect(page).toContain('outstandingByCurrency');
+    expect(page).toContain('formatAuthoritativeMoney');
+    expect(page).not.toContain('formatCurrency(invoice.balanceDue)');
   });
 
   test('invoice detail mutates only through governed cash receipt authority', async () => {

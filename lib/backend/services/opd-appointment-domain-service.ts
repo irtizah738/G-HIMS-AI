@@ -6,6 +6,7 @@ import {
 } from '@/lib/backend/transactions/transaction-manager';
 import type { CommandContext, CommandResult } from '@/lib/backend/types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
+import { getAdminFirestore } from '@/server/firebase/admin';
 import {
   activateCareContext,
   compatibilityEncounterId,
@@ -831,18 +832,31 @@ export class OpdAppointmentDomainService {
       );
     }
 
-    const rosters = await DomainStateRepository.queryAllEqual<RosterShiftEntry>(
-      context.tenantId,
-      'rosterAssignments',
-      'departmentId',
-      input.departmentId,
-      { pageSize: 200, maxRows: 2000 }
-    );
-    const relevantRosters = rosters.filter(
-      (roster) =>
-        roster.facilityId === input.facilityId &&
-        roster.date === input.date &&
-        ['PUBLISHED', 'ACKNOWLEDGED', 'IN_PROGRESS'].includes(roster.status)
+    const db = getAdminFirestore();
+    if (!db) {
+      throw new AtomicMutationRejectedError(
+        'OPD_AVAILABILITY_STORE_UNAVAILABLE',
+        'Authoritative Firestore is required for OPD availability.'
+      );
+    }
+    const tenantRef = db.collection('tenants').doc(context.tenantId);
+    const rosterSnapshot = await tenantRef
+      .collection('rosterAssignments')
+      .where('facilityId', '==', input.facilityId)
+      .where('departmentId', '==', input.departmentId)
+      .where('date', '==', input.date)
+      .where('status', 'in', ['PUBLISHED', 'ACKNOWLEDGED', 'IN_PROGRESS'])
+      .orderBy('startTime', 'asc')
+      .limit(101)
+      .get();
+    if (rosterSnapshot.size > 100) {
+      throw new AtomicMutationRejectedError(
+        'OPD_AVAILABILITY_PROVIDER_LIMIT_EXCEEDED',
+        'Provider roster exceeds the bounded availability projection limit.'
+      );
+    }
+    const relevantRosters = rosterSnapshot.docs.map(
+      (document) => document.data() as RosterShiftEntry
     );
 
     const providers: Array<{
@@ -890,13 +904,25 @@ export class OpdAppointmentDomainService {
           roster.employeeId,
           { pageSize: 100, maxRows: 500 }
         ),
-        DomainStateRepository.queryAllEqual<OpdAppointmentSlotLock>(
-          context.tenantId,
-          'opdAppointmentSlots',
-          'providerEmployeeId',
-          roster.employeeId,
-          { pageSize: 200, maxRows: 5000 }
-        ),
+        tenantRef
+          .collection('opdAppointmentSlots')
+          .where('providerEmployeeId', '==', roster.employeeId)
+          .where('bucketStartAt', '>=', rosterStart)
+          .where('bucketStartAt', '<', rosterEnd)
+          .orderBy('bucketStartAt', 'asc')
+          .limit(1001)
+          .get()
+          .then((snapshot) => {
+            if (snapshot.size > 1000) {
+              throw new AtomicMutationRejectedError(
+                'OPD_AVAILABILITY_SLOT_LIMIT_EXCEEDED',
+                'Provider slot-lock projection exceeds the bounded daily availability limit.'
+              );
+            }
+            return snapshot.docs.map(
+              (document) => document.data() as OpdAppointmentSlotLock
+            );
+          }),
       ]);
 
       if (

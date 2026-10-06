@@ -344,7 +344,7 @@ export function buildOpdWorkspaceReadModel(
         source.collectedAt || source.recordedAt || source.processedAt || 0
       ),
       processedBy: String(
-        source.cashierName || source.collectedBy || 'Authenticated Cashier'
+        source.cashierName || source.collectedBy || ''
       ),
       glJournalEntryId: journalId,
     };

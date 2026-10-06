@@ -53,6 +53,27 @@ function isAdmin(roles: string[]): boolean {
   );
 }
 
+function requiresDepartmentEncounterScope(roles: string[]): boolean {
+  const rolesSet = roleSet(roles);
+  const facilityWideOperationalRoles = [
+    'LAB_TECHNICIAN',
+    'LAB_TECH',
+    'PATHOLOGIST',
+    'RADIOLOGY_TECH',
+    'RADIOLOGY_TECHNICIAN',
+    'RADIOLOGIST',
+    'PHARMACIST',
+    'BILLING_CLERK',
+    'BILLING_ADMIN',
+    'CASHIER',
+    'BILLING_CASHIER',
+    'FINANCE_MANAGER',
+    'FINANCE',
+    'REVENUE_CYCLE',
+  ];
+  return !facilityWideOperationalRoles.some((role) => rolesSet.has(role));
+}
+
 function chunks<T>(values: readonly T[], size: number): T[][] {
   const output: T[][] = [];
   for (let index = 0; index < values.length; index += size) {
@@ -148,12 +169,14 @@ async function readActiveOpdEncounters(
   context: OpdEdgeScopeContext
 ): Promise<Row[]> {
   const facilities = [...normalizedSet(context.facilityIds || [])];
-  const departments = [
-    ...normalizedSet(
-      context.departmentIds ||
-        (context.departmentId ? [context.departmentId] : [])
-    ),
-  ];
+  const departments = requiresDepartmentEncounterScope(context.roles)
+    ? [
+        ...normalizedSet(
+          context.departmentIds ||
+            (context.departmentId ? [context.departmentId] : [])
+        ),
+      ]
+    : [];
   const admin = isAdmin(context.roles);
   const rows = new Map<string, Row>();
 

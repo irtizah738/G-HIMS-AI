@@ -105,13 +105,15 @@ let alreadyValid = 0;
 if (apply) {
   for (let offset = 0; offset < entries.length; offset += 100) {
     const chunk = entries.slice(offset, offset + 100);
-    await db.runTransaction(async (transaction) => {
+    const chunkResult = await db.runTransaction(async (transaction) => {
       const refs = chunk.map((entry) =>
         db.doc(mpiRegistryDocPath(tenantId, entry.mpiKey))
       );
       const snapshots = await Promise.all(
         refs.map((ref) => transaction.get(ref))
       );
+      let chunkCreated = 0;
+      let chunkAlreadyValid = 0;
 
       for (let index = 0; index < chunk.length; index += 1) {
         const entry = chunk[index];
@@ -125,7 +127,7 @@ if (apply) {
               `MPI_BACKFILL_REGISTRY_CONFLICT:${entry.mpiKey} existing=${currentPatientId} expected=${entry.patientId}`
             );
           }
-          alreadyValid += 1;
+          chunkAlreadyValid += 1;
           continue;
         }
 
@@ -134,9 +136,16 @@ if (apply) {
           backfilledAt: new Date().toISOString(),
           backfillSource: 'G-HIMS_MPI_IDENTITY_BACKFILL_V1',
         });
-        created += 1;
+        chunkCreated += 1;
       }
+
+      return {
+        created: chunkCreated,
+        alreadyValid: chunkAlreadyValid,
+      };
     });
+    created += chunkResult.created;
+    alreadyValid += chunkResult.alreadyValid;
   }
 }
 

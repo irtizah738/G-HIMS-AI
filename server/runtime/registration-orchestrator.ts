@@ -113,6 +113,13 @@ function mpiLookupKey(type: 'CNIC' | 'MRN', value: string): string {
   return `${type}_${normalizeIdentityValue(value)}`;
 }
 
+function legacyMpiLookupKey(type: 'CNIC', value: string): string {
+  return `${type}_${String(value || '').trim()}`.replace(
+    /[^a-zA-Z0-9_]/g,
+    '_'
+  );
+}
+
 function generateMRN(patientId: string, now = new Date()): string {
   const yyyy = now.getFullYear();
   const mm = String(now.getMonth() + 1).padStart(2, '0');
@@ -120,7 +127,7 @@ function generateMRN(patientId: string, now = new Date()): string {
   const stableSuffix = patientId
     .replace(/^pat_/, '')
     .replace(/-/g, '')
-    .slice(0, 10)
+    .slice(0, 16)
     .toUpperCase();
   return `MRN-${yyyy}${mm}${dd}-${stableSuffix}`;
 }
@@ -164,6 +171,14 @@ export async function registerPatientAndEncounter(
   if (params.identifiers?.some((identifier) => identifier.type === 'MRN')) {
     throw new Error(
       'PATIENT_MRN_SERVER_OWNED: institutional MRN is generated once by G-HIMS and cannot be supplied by the client.'
+    );
+  }
+  const suppliedCnics = (params.identifiers || []).filter(
+    (identifier) => identifier.type === 'CNIC' && identifier.value.trim()
+  );
+  if (suppliedCnics.length > 1) {
+    throw new Error(
+      'MPI_CNIC_CARDINALITY_INVALID: registration accepts at most one authoritative CNIC.'
     );
   }
 
@@ -491,12 +506,25 @@ export async function registerPatientAndEncounter(
         ref: db.doc(mpiRegistryDocPath(tenantId, mpiKey)),
       };
     });
+    const legacyCnicRef = cnic
+      ? db.doc(
+          mpiRegistryDocPath(
+            tenantId,
+            legacyMpiLookupKey('CNIC', cnic.value)
+          )
+        )
+      : null;
 
-    // Firestore requires transaction reads before writes.
+    // Firestore requires transaction reads before writes. Read both the new
+    // normalized CNIC key and the legacy punctuation-preserving key so this
+    // migration cannot re-register an existing patient under a duplicate CNIC.
     const idempotencySnapshot = await transaction.get(idempotencyRef);
     const mpiSnapshots = await Promise.all(
       identityRegistryEntries.map((entry) => transaction.get(entry.ref))
     );
+    const legacyCnicSnapshot = legacyCnicRef
+      ? await transaction.get(legacyCnicRef)
+      : null;
 
     if (!idempotencySnapshot.exists) {
       throw new Error('IDEMPOTENCY_RESERVATION_MISSING');
@@ -521,9 +549,11 @@ export async function registerPatientAndEncounter(
     const conflictingIdentity = identityRegistryEntries.find(
       (_, index) => mpiSnapshots[index]?.exists
     );
-    if (conflictingIdentity) {
+    if (conflictingIdentity || legacyCnicSnapshot?.exists) {
       throw new Error(
-        `MPI_IDENTITY_CONFLICT:${conflictingIdentity.type}: patient identifier already exists.`
+        `MPI_IDENTITY_CONFLICT:${
+          conflictingIdentity?.type || 'CNIC'
+        }: patient identifier already exists.`
       );
     }
 

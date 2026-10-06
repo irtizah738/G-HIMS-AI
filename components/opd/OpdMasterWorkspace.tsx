@@ -811,6 +811,40 @@ export function OpdMasterWorkspace() {
     }
   };
 
+  const handleResumeAppointmentBilling = async (
+    appt: AppointmentRecord
+  ) => {
+    const encounterId = String(appt.encounterId || '').trim();
+    if (!encounterId) {
+      throw new Error(
+        'APPOINTMENT_ENCOUNTER_LINK_REQUIRED: checked-in appointment is missing its authoritative encounter linkage.'
+      );
+    }
+
+    const consultationBilling = await executeActiveTenantCommand<{
+      invoice: Record<string, any>;
+    }>(
+      'CreateOpdConsultationInvoiceCommand',
+      { encounterId },
+      { idempotencyKey: `opd-consultation-invoice:${encounterId}` }
+    );
+
+    if (
+      !consultationBilling.success &&
+      consultationBilling.error?.code !==
+        'OPD_CONSULTATION_INVOICE_ALREADY_EXISTS'
+    ) {
+      throw new Error(
+        consultationBilling.error?.message ||
+          'Consultation invoice recovery failed.'
+      );
+    }
+
+    await refreshAuthoritativeWorkspace();
+    setSelectedEncounterId(encounterId);
+    setActiveTab('BILLING');
+  };
+
   const handleCancelAppointment = async (
     appointmentId: string,
     reason: string
@@ -2430,6 +2464,7 @@ export function OpdMasterWorkspace() {
           patients={patients}
           onBookAppointment={handleBookAppointment}
           onCheckInAppointment={handleCheckInAppointment}
+          onResumeBillingAppointment={handleResumeAppointmentBilling}
           onCancelAppointment={handleCancelAppointment}
           onRescheduleAppointment={handleRescheduleAppointment}
           onMarkNoShowAppointment={handleMarkAppointmentNoShow}

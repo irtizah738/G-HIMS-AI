@@ -174,6 +174,22 @@ describe('OPD-RP14 atomic OPD to IPD transition', () => {
     );
   });
 
+  test('legacy disposition command cannot create a non-atomic inpatient pending state', async () => {
+    const encounterService = await source(
+      'lib/backend/services/encounter-domain-service.ts'
+    );
+
+    expect(encounterService).toContain(
+      "code: 'CARE_TRANSITION_COMMAND_REQUIRED'"
+    );
+    expect(encounterService).toContain(
+      'OPD inpatient admission must use AdmitPatientToInpatientCareCommand'
+    );
+    expect(encounterService).not.toContain(
+      "resourceAssignmentState: inpatientPending ? 'BED_REQUESTED' : 'RELEASED'"
+    );
+  });
+
   test('OPD-source admission requires final billing, disposition stage, appointment lineage and authoritative bed ward', async () => {
     const service = await source(
       'lib/backend/services/care-transition-domain-service.ts'

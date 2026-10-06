@@ -98,6 +98,12 @@ async function readEncounterEvents(
   }
 
   return [...byId.values()]
+    .filter(
+      (event) =>
+        String(event.tenantId || '') === tenantId &&
+        (String(event.aggregateId || '') === encounterId ||
+          String(event.payload?.encounterId || '') === encounterId)
+    )
     .sort(
       (left, right) =>
         Number(left.recordedAt || left.occurredAt || 0) -
@@ -163,7 +169,11 @@ function adaptTimelineEvent(
     Boolean(audit) &&
     String(audit?.eventId || '') === event.eventId &&
     String(audit?.commandId || '') === String(event.commandId || '') &&
-    String(audit?.tenantId || '') === String(event.tenantId || '');
+    String(audit?.tenantId || '') === String(event.tenantId || '') &&
+    String(audit?.actorId || '') === String(event.actorId || '') &&
+    String(audit?.actorRole || '') === String(event.actorRole || '') &&
+    String(audit?.correlationId || '') ===
+      String(event.correlationId || '');
 
   return {
     id: event.eventId,

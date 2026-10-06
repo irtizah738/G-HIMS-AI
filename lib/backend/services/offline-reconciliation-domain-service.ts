@@ -195,6 +195,10 @@ export class OfflineReconciliationDomainService {
     // commands against one entity without falsely conflicting with the version
     // increment produced by its own immediately preceding command.
     const acceptedEntityClocks = new Map<string, Record<string, number>>();
+    const acceptedMutationIds = new Set<string>();
+    const batchMutationIds = new Set(
+      batch.mutations.map((mutation) => mutation.mutationId)
+    );
 
     // Registration must establish canonical patient/encounter IDs before dependent
     // offline commands are replayed.
@@ -208,6 +212,23 @@ export class OfflineReconciliationDomainService {
       const category = conflictCategory(mutation.commandType);
 
       try {
+        const unresolvedDependencies = (mutation.dependsOnMutationIds || [])
+          .filter(
+            (dependencyId) =>
+              batchMutationIds.has(dependencyId) &&
+              !acceptedMutationIds.has(dependencyId)
+          );
+        if (unresolvedDependencies.length > 0) {
+          conflicted += 1;
+          results.push({
+            mutationId: mutation.mutationId,
+            status: 'requires_review',
+            conflictCategory: category,
+            reason:
+              `OFFLINE_DEPENDENCY_NOT_ACCEPTED: prerequisite mutation(s) ${unresolvedDependencies.join(', ')} did not complete before this command.`,
+          });
+          continue;
+        }
         if (!mutation.commandType || !mutation.idempotencyKey) {
           rejected += 1;
           results.push({
@@ -230,6 +251,7 @@ export class OfflineReconciliationDomainService {
 
           if (registration.result.status === 'accepted') {
             accepted += 1;
+            acceptedMutationIds.add(mutation.mutationId);
             for (const mapping of registration.mappings) {
               canonicalMappings.set(mapping.localId, mapping.canonicalId);
             }
@@ -346,6 +368,7 @@ export class OfflineReconciliationDomainService {
           }
 
           accepted += 1;
+          acceptedMutationIds.add(mutation.mutationId);
           results.push({
             mutationId: mutation.mutationId,
             status: 'accepted',

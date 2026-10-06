@@ -13,6 +13,7 @@ import {
 import { sanitizeForFirestore } from '@/lib/firestore/sanitize';
 import { PatientMPI, PatientIdentifier } from '@/types/mpi';
 import { activateCareContext, compatibilityEncounterId, normalizeCareSetting } from '@/lib/clinical/patient360/care-context';
+import { buildMpiRegistryKey, normalizeCnic, normalizeMrn } from '@/lib/clinical/mpi/patient-mpi';
 import { EncounterRuntime, WorkflowSnapshot, EncounterType } from '@/types/encounter-runtime';
 import { PatientTimelineProjection } from '@/types/patient-timeline';
 import { OutboxEventRecord } from '@/types/clinical-event';
@@ -109,7 +110,7 @@ function generateMRN(now = new Date()): string {
   const yyyy = now.getFullYear();
   const mm = String(now.getMonth() + 1).padStart(2, '0');
   const dd = String(now.getDate()).padStart(2, '0');
-  const suffix = crypto.randomInt(1000, 10000);
+  const suffix = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
   return `MRN-${yyyy}${mm}${dd}-${suffix}`;
 }
 
@@ -173,7 +174,24 @@ export async function registerPatientAndEncounter(
   const now = Date.now();
   const patientId = params.patientId || `pat_${crypto.randomUUID()}`;
   const encounterId = `enc_${crypto.randomUUID()}`;
-  const mrn = generateMRN();
+  const mrn = normalizeMrn(generateMRN());
+  const suppliedIdentifiers = (params.identifiers || []).filter(
+    (identifier) => identifier.type !== 'MRN'
+  );
+  const canonicalIdentifiers: PatientIdentifier[] = [
+    {
+      type: 'MRN',
+      value: mrn,
+      issuer: tenantId,
+    },
+    ...suppliedIdentifiers.map((identifier) => ({
+      ...identifier,
+      value:
+        identifier.type === 'CNIC'
+          ? normalizeCnic(identifier.value)
+          : String(identifier.value || '').trim(),
+    })),
+  ];
   const tokenNumber = generateTokenNumber();
   const correlationId = `corr_${crypto.randomUUID()}`;
   const canonicalEventId = `evt_${crypto.randomUUID()}`;
@@ -223,7 +241,7 @@ export async function registerPatientAndEncounter(
     fullName: params.fullName,
     gender: params.gender,
     dateOfBirth: params.dateOfBirth,
-    identifiers: params.identifiers || [],
+    identifiers: canonicalIdentifiers,
     contactPhone: params.contactPhone,
     address: params.address,
     bloodGroup: params.bloodGroup || 'Unknown',
@@ -450,15 +468,33 @@ export async function registerPatientAndEncounter(
       .collection('idempotency')
       .doc(IdempotencyService.getDocumentId(params.idempotencyKey));
 
-    const primaryId = params.identifiers?.find((identifier) => identifier.type === 'CNIC') || params.identifiers?.[0];
-    const mpiKey = primaryId?.value
-      ? `${primaryId.type}_${primaryId.value}`.replace(/[^a-zA-Z0-9_]/g, '_')
-      : null;
-    const mpiRef = mpiKey ? db.doc(mpiRegistryDocPath(tenantId, mpiKey)) : null;
+    const uniqueRegistryEntries = Array.from(
+      new Map(
+        canonicalIdentifiers
+          .filter(
+            (identifier): identifier is PatientIdentifier & { type: 'MRN' | 'CNIC' } =>
+              identifier.type === 'MRN' || identifier.type === 'CNIC'
+          )
+          .map((identifier) => {
+            const mpiKey = buildMpiRegistryKey(identifier.type, identifier.value);
+            return [
+              mpiKey,
+              {
+                mpiKey,
+                identifierType: identifier.type,
+                identifierValue: identifier.value,
+                ref: db.doc(mpiRegistryDocPath(tenantId, mpiKey)),
+              },
+            ] as const;
+          })
+      ).values()
+    );
 
     // Firestore requires transaction reads before writes.
     const idempotencySnapshot = await transaction.get(idempotencyRef);
-    const mpiSnapshot = mpiRef ? await transaction.get(mpiRef) : null;
+    const mpiSnapshots = await Promise.all(
+      uniqueRegistryEntries.map((entry) => transaction.get(entry.ref))
+    );
 
     if (!idempotencySnapshot.exists) {
       throw new Error('IDEMPOTENCY_RESERVATION_MISSING');
@@ -480,8 +516,14 @@ export async function registerPatientAndEncounter(
       throw new Error('IDEMPOTENCY_RESERVATION_INVALID');
     }
 
-    if (mpiSnapshot?.exists) {
-      throw new Error('MPI_IDENTITY_CONFLICT: primary patient identifier already exists.');
+    const conflictingRegistry = mpiSnapshots
+      .map((snapshot, index) => ({ snapshot, entry: uniqueRegistryEntries[index] }))
+      .find(({ snapshot }) => snapshot.exists);
+
+    if (conflictingRegistry) {
+      throw new Error(
+        `MPI_IDENTITY_CONFLICT: ${conflictingRegistry.entry.identifierType} already belongs to another patient.`
+      );
     }
 
     transaction.create(patientRef, sanitizeForFirestore(patientRecord));
@@ -497,15 +539,20 @@ export async function registerPatientAndEncounter(
       transaction.create(item.ref, sanitizeForFirestore(item.record));
     }
 
-    if (mpiRef && mpiKey) {
-      transaction.create(mpiRef, sanitizeForFirestore({
-        mpiKey,
-        patientId,
-        mrn,
-        fullName: params.fullName,
-        dateOfBirth: params.dateOfBirth,
-        createdAt: new Date(now).toISOString(),
-      }));
+    for (const registry of uniqueRegistryEntries) {
+      transaction.create(
+        registry.ref,
+        sanitizeForFirestore({
+          mpiKey: registry.mpiKey,
+          identifierType: registry.identifierType,
+          identifierValue: registry.identifierValue,
+          patientId,
+          mrn,
+          fullName: params.fullName,
+          dateOfBirth: params.dateOfBirth,
+          createdAt: new Date(now).toISOString(),
+        })
+      );
     }
 
     transaction.set(idempotencyRef, sanitizeForFirestore({

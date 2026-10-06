@@ -175,4 +175,51 @@ describe('OPD-RP15 offline workflow closure', () => {
       'Cached medication and prescription history remain readable offline'
     );
   });
+
+  test('referrals are governed server records without fabricated queue or transport metadata', async () => {
+    const ui = await source('components/opd/OpdDispositionReferrals.tsx');
+    const workspace = await source('components/opd/OpdMasterWorkspace.tsx');
+    const encounter = await source(
+      'lib/backend/services/encounter-domain-service.ts'
+    );
+    const schema = await source(
+      'lib/backend/commands/command-schema-registry.ts'
+    );
+    const tx = await source(
+      'lib/backend/transactions/transaction-manager.ts'
+    );
+    const rules = await source('firestore.rules');
+
+    expect(ui).not.toContain('targetQueueGenerated: true');
+    expect(ui).not.toContain("transportMode: 'PATIENT_OWN_TRANSPORT'");
+    expect(ui).not.toContain("admittingService: 'Cardiology Services'");
+    expect(ui).not.toContain('ref-int-${Date.now()}');
+    expect(ui).not.toContain('ref-ext-${Date.now()}');
+    expect(ui).not.toContain('completedAt: Date.now()');
+
+    expect(workspace).toContain(
+      'internalReferral: disposition.internalReferral'
+    );
+    expect(workspace).toContain(
+      'externalReferral: disposition.externalReferral'
+    );
+
+    expect(schema).toContain('internalReferral: z.object({');
+    expect(schema).toContain('externalReferral: z.object({');
+    expect(schema).not.toContain(
+      'admittingService: z.string().trim().max(250).optional()'
+    );
+
+    expect(encounter).toContain("entityType: 'OPD_REFERRAL'");
+    expect(encounter).toContain("status: 'PENDING'");
+    expect(encounter).toContain('createdBy: context.actorId');
+    expect(encounter).toContain('createdAt: now');
+    expect(encounter).toContain("'INTERNAL_REFERRAL_REQUIRED'");
+    expect(encounter).toContain("'EXTERNAL_REFERRAL_REQUIRED'");
+
+    expect(tx).toContain("OPD_REFERRAL: 'opdReferrals'");
+    expect(rules).toContain('match /opdReferrals/{referralId}');
+    expect(rules).toContain('allow write: if false');
+  });
+
 });

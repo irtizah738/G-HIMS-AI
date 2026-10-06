@@ -254,10 +254,37 @@ async function queueOfflineRegistration<TData>(
     mutationId: commandId,
   });
 
+  const localConsultationInvoiceId =
+    (request.encounterType || 'OPD') === 'EMERGENCY'
+      ? null
+      : `local-invoice-${crypto.randomUUID()}`;
+
+  if (localConsultationInvoiceId) {
+    await syncEngine.queueMutation({
+      tenantId: cached.user.tenantId,
+      collection: 'invoices',
+      action: 'CREATE',
+      resourceId: localConsultationInvoiceId,
+      commandType: 'CreateOpdConsultationInvoiceCommand',
+      payload: { encounterId: localEncounterId },
+      idempotencyKey: `opd-consultation-invoice:${localEncounterId}`,
+      schemaVersion: 1,
+      optimisticCache: false,
+      mutationId: `cmd_${crypto.randomUUID()}`,
+    });
+  }
+
   await putLocalEntityMappings(cached.user.tenantId, [
     { localId: localPatientId, entityType: 'PATIENT_MPI', sourceMutationId: commandId },
     { localId: localEncounterId, entityType: 'ENCOUNTER', sourceMutationId: commandId },
     { localId: localQueueTokenId, entityType: 'OPD_QUEUE_TOKEN', sourceMutationId: commandId },
+    ...(localConsultationInvoiceId
+      ? [{
+          localId: localConsultationInvoiceId,
+          entityType: 'INVOICE',
+          sourceMutationId: commandId,
+        }]
+      : []),
   ]);
 
   const patient = {
@@ -271,6 +298,9 @@ async function queueOfflineRegistration<TData>(
     contactPhone: request.contactPhone,
     address: request.address,
     bloodGroup: request.bloodGroup || 'Unknown',
+    tariffPlan: request.tariffPlan || 'UNASSIGNED',
+    insuranceDetails: request.insuranceDetails,
+    consentCaptureState: 'PENDING_SERVER_SYNC',
     allergies: request.allergies || [],
     chronicConditions: request.chronicConditions || [],
     createdAt: now,
@@ -288,6 +318,13 @@ async function queueOfflineRegistration<TData>(
     type: request.encounterType || 'OPD',
     status: 'IN_PROGRESS',
     currentStageId: 'REGISTRATION',
+    currentStage: 'REGISTERED',
+    clinicalState: 'REGISTERED',
+    operationalState: 'QUEUED',
+    financialClearanceState:
+      (request.encounterType || 'OPD') === 'EMERGENCY'
+        ? 'NOT_REQUIRED'
+        : 'CONSULTATION_PAYMENT_PENDING',
     workflowSnapshotId: `local-workflow-${localEncounterId}`,
     startedAt: now,
     department: request.department || 'General OPD',
@@ -306,7 +343,7 @@ async function queueOfflineRegistration<TData>(
     tokenNumber: encounter.tokenNumber,
     department: encounter.department,
     priority: String(encounter.priority).toLowerCase(),
-    status: 'waiting',
+    status: 'payment_pending',
     arrivalTime: new Date(now).toISOString(),
     createdAt: now,
   };
@@ -328,6 +365,8 @@ async function queueOfflineRegistration<TData>(
       status: 'ACTIVE',
     },
     queuedOffline: true,
+    consultationInvoicePendingSync: Boolean(localConsultationInvoiceId),
+    localConsultationInvoiceId: localConsultationInvoiceId || undefined,
   } as TData;
 }
 

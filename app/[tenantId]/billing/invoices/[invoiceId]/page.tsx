@@ -37,6 +37,9 @@ export default function InvoicePosTerminalPage({ params }: PageProps) {
 
   const [invoice, setInvoice] =
     useState<AuthoritativeBillingInvoice | null>(null);
+  const [snapshotSource, setSnapshotSource] = useState<
+    'SERVER' | 'LOCAL' | null
+  >(null);
   const [loading, setLoading] = useState(true);
   const [collecting, setCollecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,6 +50,7 @@ export default function InvoicePosTerminalPage({ params }: PageProps) {
   const refresh = useCallback(async () => {
     if (!tenantId || !invoiceId) {
       setInvoice(null);
+      setSnapshotSource(null);
       setError('BILLING_INVOICE_ROUTE_INVALID');
       setLoading(false);
       return;
@@ -57,6 +61,7 @@ export default function InvoicePosTerminalPage({ params }: PageProps) {
     try {
       const snapshot = await hydrateEdgeSnapshot(tenantId);
       const model = buildBillingInvoiceReadModel(snapshot);
+      setSnapshotSource(model.source);
       const nextInvoice =
         model.invoices.find((candidate) => candidate.id === invoiceId) || null;
       if (!nextInvoice) {
@@ -100,6 +105,12 @@ export default function InvoicePosTerminalPage({ params }: PageProps) {
 
   const collectCash = async () => {
     if (!invoice) return;
+    if (snapshotSource !== 'SERVER') {
+      setError(
+        'BILLING_SERVER_SNAPSHOT_REQUIRED: cash collection is disabled while the financial read model is offline or cached.'
+      );
+      return;
+    }
     if (invoice.paymentStatus === 'paid' || balanceMinorUnits <= 0) {
       setError('INVOICE_ALREADY_SETTLED');
       return;
@@ -228,7 +239,7 @@ export default function InvoicePosTerminalPage({ params }: PageProps) {
                 </div>
                 <div className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase text-slate-700 dark:bg-slate-800 dark:text-slate-200">
                   <ShieldCheck className="h-3 w-3 text-emerald-600" />
-                  {invoice.billingPurpose || 'SERVER INVOICE'}
+                  {invoice.billingPurpose || 'SERVER INVOICE'} · {snapshotSource || 'UNKNOWN'}
                 </div>
               </div>
 
@@ -314,6 +325,12 @@ export default function InvoicePosTerminalPage({ params }: PageProps) {
                 wallet, insurance and ad-hoc charge mutations remain disabled
                 until their own server authorities are qualified.
               </p>
+              {snapshotSource !== 'SERVER' && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] font-semibold text-amber-800">
+                  Cached billing data is view-only. Reconnect and refresh a
+                  server snapshot before collecting money.
+                </div>
+              )}
 
               {invoice.balanceDue > 0 ? (
                 <>
@@ -348,7 +365,11 @@ export default function InvoicePosTerminalPage({ params }: PageProps) {
                   <button
                     type="button"
                     onClick={() => void collectCash()}
-                    disabled={collecting || amountMinorUnits <= 0}
+                    disabled={
+                      collecting ||
+                      amountMinorUnits <= 0 ||
+                      snapshotSource !== 'SERVER'
+                    }
                     className="w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-black text-white hover:bg-emerald-700 disabled:opacity-50"
                   >
                     {collecting

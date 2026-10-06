@@ -570,7 +570,9 @@ export class OpdBillingReconciliationDomainService {
       }
       if (findingStatus === 'RECONCILED') {
         const chargeId = String(finding.chargeId || '').trim();
+        const invoiceId = String(finding.invoiceId || '').trim();
         const charge = chargeById.get(chargeId);
+        const invoice = invoiceById.get(invoiceId);
         if (
           !chargeId ||
           !charge ||
@@ -581,6 +583,19 @@ export class OpdBillingReconciliationDomainService {
             idempotencyKey,
             'OPD_REVENUE_INTEGRITY_CHARGE_MISSING',
             `Reconciled Revenue Integrity finding ${findingId} does not resolve to its authoritative encounter charge.`
+          );
+        }
+        if (
+          !invoiceId ||
+          !invoice ||
+          String(invoice.sourceFindingId || '') !== findingId ||
+          String(charge.invoiceId || '') !== invoiceId
+        ) {
+          return reject(
+            commandId,
+            idempotencyKey,
+            'OPD_REVENUE_INTEGRITY_INVOICE_REQUIRED',
+            `Reconciled Revenue Integrity finding ${findingId} does not resolve to its authoritative supplemental invoice.`
           );
         }
       } else if (findingStatus !== 'DISMISSED') {

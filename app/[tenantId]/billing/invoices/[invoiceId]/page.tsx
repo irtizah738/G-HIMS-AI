@@ -30,7 +30,7 @@ function money(value: number, currency: string) {
   return `${currency} ${formatCurrency(value).replace(/^[^\d-]*/, '')}`;
 }
 
-export default function InvoicePosTerminalPage({ params }: PageProps) {
+export default function InvoiceCashCollectionPage({ params }: PageProps) {
   const resolved = use(params);
   const tenantId = String(resolved.tenantId || '').trim().toLowerCase();
   const invoiceId = String(resolved.invoiceId || '').trim();
@@ -145,7 +145,7 @@ export default function InvoicePosTerminalPage({ params }: PageProps) {
           collectedAt: Date.now(),
         },
         {
-          idempotencyKey: `billing-pos-cash:${receiptId}`,
+          idempotencyKey: `billing-cash-receipt:${receiptId}`,
         }
       );
 

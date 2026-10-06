@@ -386,6 +386,7 @@ export function OpdDispositionReferrals({
               Patient Care & Discharge Instructions
             </label>
             <textarea
+              data-testid="opd-disposition-instructions"
               rows={3}
               required
               value={dischargeInstructions}
@@ -399,6 +400,7 @@ export function OpdDispositionReferrals({
               Mandatory Red-Flag Warning Signs (Emergency Triggers)
             </label>
             <textarea
+              data-testid="opd-disposition-warning-signs"
               rows={3}
               required
               value={warningSigns}
@@ -417,6 +419,7 @@ export function OpdDispositionReferrals({
 
         <div className="flex justify-end border-t border-slate-100 pt-3 dark:border-slate-800">
           <button
+            data-testid="opd-disposition-submit"
             type="submit"
             disabled={submitting}
             className="flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-2.5 text-xs font-bold text-white shadow-xs transition-all hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"

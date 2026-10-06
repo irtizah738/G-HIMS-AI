@@ -52,6 +52,7 @@ import {
 import { AuthClient } from '@/lib/auth/auth-client';
 import { PatientConsultantRoutingModal } from '@/components/clinical/patient-consultant-routing-modal';
 import { saveDiseaseIntakeArtifact } from '@/lib/clinical/intelligence/consultant-worklist-client';
+import { computeGovernedDiseaseIntakeRisk } from '@/lib/clinical/disease-intake/governed-risk-engine';
 
 export function DiseaseCentricIntakeView() {
   const { patients, selectedPatientId, setSelectedPatientId } = useHospital();
@@ -140,76 +141,28 @@ export function DiseaseCentricIntakeView() {
     setSavedIntakeArtifact(null);
   }, [guidedAnswers, specialtyHistoryAnswers, selectedTreeNodeIds]);
 
-  // Real-time Risk Score & Active Signals Calculation
+  // Real-time display uses the exact governed calculator used by the server.
   const { totalRiskScore, activeRiskSignals, maxRiskSeverity } = useMemo(() => {
-    let score = 0;
-
-    // 1. Tree node weights. The template's governed risk weight is authoritative;
-    // merely selecting the root does not manufacture clinical risk.
-    const findNode = (
-      node: SymptomTreeNode,
-      nodeId: string
-    ): SymptomTreeNode | undefined => {
-      if (node.id === nodeId) return node;
-      for (const child of node.children || []) {
-        const found = findNode(child, nodeId);
-        if (found) return found;
-      }
-      return undefined;
-    };
-    selectedTreeNodeIds.forEach((nodeId) => {
-      if (nodeId === currentTemplate.symptomTree.id) return;
-      const node = findNode(currentTemplate.symptomTree, nodeId);
-      if (node) score += Math.max(0, node.riskWeight || 0);
-    });
-
-    // 2. Guided answers risk points
-    currentTemplate.guidedQuestions.forEach((q) => {
-      const val = guidedAnswers[q.id];
-      if (q.type === 'scale' || q.type === 'number') {
-        if (typeof val === 'number') {
-          score += Math.min(val, 10);
-        }
-      } else if (q.options && val) {
-        if (Array.isArray(val)) {
-          val.forEach((v) => {
-            const opt = q.options?.find((o) => o.value === v);
-            if (opt) score += opt.riskScore || 0;
-          });
-        } else {
-          const opt = q.options?.find((o) => o.value === val);
-          if (opt) score += opt.riskScore || 0;
-        }
-      }
-    });
-
-    // Apply custom multiplier
-    score = Math.round(score * customWeightMultiplier);
-
-    // 3. Evaluate Rule Signals
-    const activeSignals = currentTemplate.riskSignals.filter((signal) => {
-      try {
-        return signal.conditionChecker(guidedAnswers, specialtyHistoryAnswers, selectedTreeNodeIds);
-      } catch (e) {
-        return false;
-      }
-    });
-
-    let maxSeverity: RiskSeverity = 'LOW';
-    if (activeSignals.some((s) => s.severity === 'CRITICAL') || score >= 25) {
-      maxSeverity = 'CRITICAL';
-    } else if (activeSignals.some((s) => s.severity === 'HIGH') || score >= 16) {
-      maxSeverity = 'HIGH';
-    } else if (activeSignals.some((s) => s.severity === 'MODERATE') || score >= 8) {
-      maxSeverity = 'MODERATE';
-    }
-
+    const governed = computeGovernedDiseaseIntakeRisk(
+      currentTemplate,
+      guidedAnswers,
+      specialtyHistoryAnswers,
+      selectedTreeNodeIds
+    );
+    const signalIds = new Set(governed.signalIds);
     return {
-      totalRiskScore: score,
-      activeRiskSignals: activeSignals,
-      maxRiskSeverity: maxSeverity,
+      totalRiskScore: governed.score,
+      activeRiskSignals: currentTemplate.riskSignals.filter((signal) =>
+        signalIds.has(signal.id)
+      ),
+      maxRiskSeverity: governed.severity,
     };
-  }, [currentTemplate, guidedAnswers, specialtyHistoryAnswers, selectedTreeNodeIds, customWeightMultiplier]);
+  }, [
+    currentTemplate,
+    guidedAnswers,
+    specialtyHistoryAnswers,
+    selectedTreeNodeIds,
+  ]);
 
   // Handle Symptom Tree node toggle
   const handleTreeNodeToggle = (nodeId: string) => {

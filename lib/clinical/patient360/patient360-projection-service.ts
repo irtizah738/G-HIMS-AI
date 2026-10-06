@@ -8,7 +8,10 @@ import type {
   ClinicalCondition,
   ClinicalDocument,
   ClinicalObservation,
+  DiagnosticOrder,
   DiagnosticReport,
+  ClinicalProcedure,
+  CarePlan,
   MedicationOrder,
 } from '@/types/clinical-canonical';
 import type { DomainEventEnvelope } from '@/lib/backend/types';
@@ -394,7 +397,10 @@ export class Patient360ProjectionService {
       allergies,
       medicationOrders,
       observations,
+      diagnosticOrders,
       diagnosticReports,
+      procedures,
+      carePlans,
       documents,
       events,
       knowledgeStatus,
@@ -424,8 +430,23 @@ export class Patient360ProjectionService {
         patientId,
         3000
       ),
+      queryByPatient<DiagnosticOrder>(
+        tenantRef.collection('canonicalDiagnosticOrders'),
+        patientId,
+        1000
+      ),
       queryByPatient<DiagnosticReport>(
         tenantRef.collection('diagnosticReports'),
+        patientId,
+        1000
+      ),
+      queryByPatient<ClinicalProcedure>(
+        tenantRef.collection('clinicalProcedures'),
+        patientId,
+        1000
+      ),
+      queryByPatient<CarePlan>(
+        tenantRef.collection('carePlans'),
         patientId,
         1000
       ),
@@ -450,7 +471,10 @@ export class Patient360ProjectionService {
       allergies,
       medicationOrders,
       observations,
+      diagnosticOrders,
       diagnosticReports,
+      procedures,
+      carePlans,
       documents,
       events,
       knowledgeStatus,

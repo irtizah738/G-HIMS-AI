@@ -164,7 +164,9 @@ describe('OPD-RP22 obsolete and demo authority removal', () => {
   test('billing dashboard is a tenant-scoped non-authoritative launcher', async () => {
     const view = await source('components/views/billing-erp-view.tsx');
 
-    expect(view).toContain('useTenant');
+    expect(view).toContain('useAuth');
+    expect(view).toContain("activeTenant?.tenantId || user?.tenantId || ''");
+    expect(view).not.toContain('useTenant');
     expect(view).toContain('Authoritative invoices');
     expect(view).toContain('Financial authority remains in governed');
     expect(view).toContain('Production tariff mutation remains fail-closed');

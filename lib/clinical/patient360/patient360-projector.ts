@@ -8,6 +8,7 @@ import type {
   MedicationOrder,
   PatientClinicalKnowledgeStatus,
 } from '@/types/clinical-canonical';
+import type { DiseaseIntakeArtifact } from '@/types/disease-intake-artifact';
 import {
   buildPatient360CareContexts,
   normalizeCareSetting,

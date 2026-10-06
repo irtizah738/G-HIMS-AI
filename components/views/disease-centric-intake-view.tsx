@@ -1163,7 +1163,7 @@ export function DiseaseCentricIntakeView() {
               <div className="flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-amber-500" />
                 <h2 className="text-base font-bold text-slate-900 dark:text-slate-100">
-                  Gemini Clinical Intelligence & Specialist Briefing Engine
+                  Source-Limited Specialist Preparation Brief
                 </h2>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
@@ -1252,101 +1252,59 @@ export function DiseaseCentricIntakeView() {
                 </div>
               </div>
 
-              {/* Differential Diagnoses & STAT Orders */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Differential Diagnosis Table */}
-                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-4">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-3">
                   <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-                    <Activity className="w-4 h-4 text-blue-600" />
-                    Differential Diagnosis Probability Matrix
+                    <ShieldAlert className="w-4 h-4 text-amber-600" />
+                    Observed Protocol Risk Signals
                   </h3>
-
-                  <div className="space-y-3">
-                    {aiResult.differentialDiagnoses?.map((diff, i) => (
-                      <div
-                        key={i}
-                        className="p-3 rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 space-y-1"
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-xs text-slate-900 dark:text-slate-100">
-                            {diff.condition}
-                          </span>
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
-                              {diff.icdCode}
-                            </span>
-                            <span
-                              className={`text-[10px] font-extrabold px-2 py-0.5 rounded ${
-                                diff.probability === 'High'
-                                  ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
-                                  : 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
-                              }`}
-                            >
-                              {diff.probability} Probability
-                            </span>
-                          </div>
+                  {aiResult.observedRiskSignals?.length ? (
+                    <div className="space-y-2">
+                      {aiResult.observedRiskSignals.map((item, i) => (
+                        <div
+                          key={i}
+                          className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-100"
+                        >
+                          {item}
                         </div>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                          {diff.justification}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      No additional source-limited risk signal was returned.
+                    </p>
+                  )}
                 </div>
 
-                {/* Recommended STAT Orders */}
-                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-4">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-3">
                   <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    Recommended STAT Diagnostic & Intervention Orders
+                    <AlertTriangle className="w-4 h-4 text-rose-600" />
+                    Missing or Unverified Information
                   </h3>
-
-                  <div className="space-y-2.5">
-                    {aiResult.statOrders?.map((order, i) => (
-                      <div
-                        key={i}
-                        className="p-3 rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 text-xs"
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <span
-                            className={`text-[10px] font-extrabold px-2 py-0.5 rounded ${
-                              order.urgency === 'STAT'
-                                ? 'bg-rose-600 text-white'
-                                : 'bg-blue-600 text-white'
-                            }`}
-                          >
-                            {order.urgency}
-                          </span>
-                          <span className="font-bold text-slate-900 dark:text-slate-100">
-                            {order.name}
-                          </span>
+                  {aiResult.missingOrUnverifiedInformation?.length ? (
+                    <div className="space-y-2">
+                      {aiResult.missingOrUnverifiedInformation.map((item, i) => (
+                        <div
+                          key={i}
+                          className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs text-rose-900 dark:text-rose-100"
+                        >
+                          {item}
                         </div>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-800 uppercase text-slate-600 dark:text-slate-300 shrink-0">
-                          {order.type}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      No missing-information item was returned by the source-limited brief.
+                    </p>
+                  )}
                 </div>
               </div>
 
-              {/* Pre-Specialist Arrival Checklist */}
-              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-3">
-                <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-blue-600" />
-                  Pre-Specialist Arrival Readiness Checklist
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {aiResult.specialistReadinessChecklist?.map((item, i) => (
-                    <div
-                      key={i}
-                      className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 text-xs font-medium text-slate-800 dark:text-slate-200 flex items-start gap-2"
-                    >
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0" />
-                      <span>{item}</span>
-                    </div>
-                  ))}
-                </div>
+              <div className="p-4 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-xs text-blue-900 dark:text-blue-100 flex items-start gap-2">
+                <ShieldCheck className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>
+                  Draft for clinician review only. This view does not diagnose, prescribe, place orders, or automatically dispatch a specialist.
+                </span>
               </div>
             </div>
           ) : (

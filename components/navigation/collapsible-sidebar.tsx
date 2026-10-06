@@ -181,12 +181,6 @@ export function CollapsibleSidebar({
           shortName: 'RBAC Matrix',
           icon: Shield,
         },
-        {
-          id: 'matrix',
-          name: 'Architecture & Audit Matrix',
-          shortName: 'Matrix',
-          icon: ShieldCheck,
-        },
       ],
     },
     {

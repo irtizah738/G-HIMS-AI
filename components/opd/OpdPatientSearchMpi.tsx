@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
+import { normalizeCnic, normalizeMrn } from '@/lib/clinical/mpi/patient-mpi';
 import {
   Search,
   Users,
@@ -46,18 +47,26 @@ export function OpdPatientSearchMpi({
     if (!searchTerm.trim()) {
       return patients;
     }
-    const q = searchTerm.toLowerCase().trim();
+
+    const q = searchTerm.trim();
+    const qLower = q.toLowerCase();
+    const normalizedMrn = normalizeMrn(q);
+    const normalizedCnic = normalizeCnic(q);
+
     return patients.filter((p) => {
-      if (searchField === 'MRN') return p.mrn.toLowerCase().includes(q);
-      if (searchField === 'CNIC') return p.nationalId.toLowerCase().includes(q);
-      if (searchField === 'PHONE') return p.phone.toLowerCase().includes(q);
-      if (searchField === 'NAME') return p.fullName.toLowerCase().includes(q);
+      if (searchField === 'MRN') return normalizeMrn(p.mrn) === normalizedMrn;
+      if (searchField === 'CNIC') {
+        return Boolean(normalizedCnic) && normalizeCnic(p.nationalId) === normalizedCnic;
+      }
+      if (searchField === 'PHONE') return p.phone.toLowerCase().includes(qLower);
+      if (searchField === 'NAME') return p.fullName.toLowerCase().includes(qLower);
+
       return (
-        p.fullName.toLowerCase().includes(q) ||
-        p.mrn.toLowerCase().includes(q) ||
-        p.nationalId.toLowerCase().includes(q) ||
-        p.phone.toLowerCase().includes(q) ||
-        (p.preferredName && p.preferredName.toLowerCase().includes(q))
+        p.fullName.toLowerCase().includes(qLower) ||
+        normalizeMrn(p.mrn) === normalizedMrn ||
+        (Boolean(normalizedCnic) && normalizeCnic(p.nationalId) === normalizedCnic) ||
+        p.phone.toLowerCase().includes(qLower) ||
+        (p.preferredName && p.preferredName.toLowerCase().includes(qLower))
       );
     });
   }, [patients, searchTerm, searchField]);
@@ -72,7 +81,11 @@ export function OpdPatientSearchMpi({
       const matchReasons: string[] = [];
 
       // CNIC exact match (100% deterministic)
-      if (candidate.nationalId.toLowerCase() === q) {
+      const normalizedSearchCnic = normalizeCnic(q);
+      if (
+        normalizedSearchCnic &&
+        normalizeCnic(candidate.nationalId) === normalizedSearchCnic
+      ) {
         score = 100;
         matchReasons.push('Exact CNIC / National ID Match');
       }

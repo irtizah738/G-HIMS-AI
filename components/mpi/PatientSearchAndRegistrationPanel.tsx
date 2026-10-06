@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { PatientMPI, PatientIdentifier, Gender } from '@/types/mpi';
+import { normalizeCnic, normalizeMrn } from '@/lib/clinical/mpi/patient-mpi';
 import type { RegistrationRequest } from '@/lib/api/command-client';
 import {
   Search,
@@ -48,32 +49,43 @@ export function PatientSearchAndRegistrationPanel({
   const [chiefComplaint, setChiefComplaint] = useState('');
   const [department, setDepartment] = useState('General Medicine');
   const [priority, setPriority] = useState<'ROUTINE' | 'URGENT' | 'EMERGENCY'>('ROUTINE');
-  const [idType, setIdType] = useState<'CNIC' | 'MRN' | 'PASSPORT' | 'PHONE'>('CNIC');
+  const [idType, setIdType] = useState<'CNIC' | 'PASSPORT' | 'PHONE'>('CNIC');
   const [idValue, setIdValue] = useState('');
   const [identifiers, setIdentifiers] = useState<PatientIdentifier[]>([]);
   const [allergiesText, setAllergiesText] = useState('');
   const [chronicConditionsText, setChronicConditionsText] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Filter existing patients
+  // Filter existing patients. MRN and CNIC are exact identity lookups;
+  // name/phone remain broader convenience searches.
   const filteredPatients = existingPatients.filter((p) => {
     if (!searchQuery.trim()) return true;
-    const q = searchQuery.toLowerCase().trim();
-    const matchName = p.fullName.toLowerCase().includes(q);
-    const matchMrn = p.mrn.toLowerCase().includes(q);
-    const matchPhone = p.contactPhone?.toLowerCase().includes(q);
-    const matchId = p.identifiers?.some((id) => id.value.toLowerCase().includes(q));
 
-    if (searchFilter === 'CNIC') {
-      return p.identifiers?.some((id) => id.type === 'CNIC' && id.value.toLowerCase().includes(q));
-    }
-    if (searchFilter === 'MRN') {
-      return matchMrn;
-    }
-    if (searchFilter === 'PHONE') {
-      return matchPhone;
-    }
-    return matchName || matchMrn || matchPhone || matchId;
+    const q = searchQuery.trim();
+    const qLower = q.toLowerCase();
+    const normalizedMrn = normalizeMrn(q);
+    const normalizedCnic = normalizeCnic(q);
+    const matchName = p.fullName.toLowerCase().includes(qLower);
+    const matchMrn = normalizeMrn(p.mrn) === normalizedMrn;
+    const matchPhone = p.contactPhone?.toLowerCase().includes(qLower);
+    const matchCnic =
+      Boolean(normalizedCnic) &&
+      Boolean(
+        p.identifiers?.some(
+          (id) =>
+            id.type === 'CNIC' &&
+            normalizeCnic(id.value) === normalizedCnic
+        )
+      );
+    const matchId = p.identifiers?.some((id) =>
+      id.value.toLowerCase().includes(qLower)
+    );
+
+    if (searchFilter === 'CNIC') return matchCnic;
+    if (searchFilter === 'MRN') return Boolean(normalizedMrn) && matchMrn;
+    if (searchFilter === 'PHONE') return Boolean(matchPhone);
+
+    return matchName || matchMrn || matchCnic || Boolean(matchPhone) || Boolean(matchId);
   });
 
   const handleAddIdentifier = () => {
@@ -148,7 +160,7 @@ export function PatientSearchAndRegistrationPanel({
                 Master Patient Index (MPI) Lookup
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Deterministic deduplication across MRN, CNIC & Phone
+                One institutional MRN per patient • exact MRN/CNIC identity lookup
               </p>
             </div>
           </div>
@@ -415,7 +427,6 @@ export function PatientSearchAndRegistrationPanel({
                 <option value="CNIC">CNIC</option>
                 <option value="PASSPORT">Passport</option>
                 <option value="PHONE">Phone</option>
-                <option value="MRN">Ext MRN</option>
               </select>
               <input
                 id="input-id-val"

@@ -1,7 +1,10 @@
 /**
- * G-HIMS Universal Clinical Intelligence & Rules Engine
- * Provides instant, high-fidelity evidence-based clinical intake packages,
- * SBAR briefings, differentials, STAT order sets, and specialist checklists.
+ * G-HIMS client-side clinical intake organizer.
+ *
+ * This module is deliberately non-diagnostic. It exists only for deterministic
+ * organization of facts already supplied by the user/workflow when a UI needs
+ * a local preview. It must never synthesize diagnoses, medications, orders,
+ * probabilities, billing codes, or treatment plans.
  */
 
 import type { AiOptimizationResult } from '@/lib/types/disease-intake';
@@ -9,365 +12,101 @@ import type { AiOptimizationResult } from '@/lib/types/disease-intake';
 export interface ClinicalOptimizationParams {
   templateId?: string;
   diseaseName?: string;
-  guidedAnswers?: any;
-  activeBranch?: any;
-  specialtyHistory?: any;
-  riskSignals?: any;
-  patientContext?: any;
+  guidedAnswers?: Record<string, unknown>;
+  activeBranch?: { label?: string; nodeIds?: string[] };
+  specialtyHistory?: Record<string, unknown>;
+  riskSignals?: {
+    score?: number;
+    overallRisk?: string;
+    primaryAlert?: string;
+    flags?: string[];
+  };
+  patientContext?: {
+    id?: string;
+    name?: string;
+    age?: number;
+    gender?: string;
+    mrn?: string;
+    vitals?: {
+      heartRate?: number;
+      bp?: string;
+      spO2?: number;
+      temp?: string;
+    };
+  };
   localization?: string;
   facilityTier?: string;
   reason?: string;
 }
 
-export interface DifferentialDiagnosis {
-  condition: string;
-  probability: 'High' | 'Moderate' | 'Low';
-  justification: string;
-  icdCode: string;
-}
-
-export interface StatOrder {
-  name: string;
-  type: 'lab' | 'imaging' | 'medication' | 'consult';
-  urgency: 'STAT' | 'Urgent' | 'Routine';
-  cptCode?: string;
-}
-
 export type ClinicalOptimizationResult = AiOptimizationResult;
 
-export function generateClinicalIntakePackage(params: ClinicalOptimizationParams): ClinicalOptimizationResult {
-  const {
-    templateId = 'general',
-    diseaseName = 'Acute Clinical Presentation',
-    guidedAnswers = {},
-    activeBranch = {},
-    specialtyHistory = {},
-    riskSignals = {},
-    patientContext = {},
-    localization = 'US (AHA / ACC / NIH)',
-    facilityTier = 'Level 1 Academic Medical Center',
-  } = params;
+function nonEmptyRecord(value: Record<string, unknown> | undefined): boolean {
+  return Boolean(value && Object.keys(value).length > 0);
+}
 
-  const patientName = patientContext?.name || 'Patient';
-  const age = patientContext?.age || '54';
-  const gender = patientContext?.gender || 'M';
-  const riskLevel = riskSignals?.overallRisk || 'ELEVATED';
-  const primaryAlert = riskSignals?.primaryAlert || 'Urgent Protocol Flag Active';
-  const branchLabel = activeBranch?.label || 'Clinical Intake Pathway';
-  const hr = patientContext?.vitals?.heartRate || 88;
-  const bp = patientContext?.vitals?.bp || '138/86';
-  const spO2 = patientContext?.vitals?.spO2 || 98;
+function compact(values: Array<string | undefined>): string[] {
+  return values.map((value) => String(value || '').trim()).filter(Boolean);
+}
 
-  let differentialDiagnoses: DifferentialDiagnosis[] = [];
-  let statOrders: StatOrder[] = [];
-  let criticalRiskMitigations: string[] = [];
-  let specialistReadinessChecklist: string[] = [];
+/**
+ * Build a source-limited preview from supplied facts only.
+ *
+ * The authoritative AI route applies the same safety boundary server-side and
+ * validates model output with a strict schema. This helper never creates new
+ * clinical assertions.
+ */
+export function generateClinicalIntakePackage(
+  params: ClinicalOptimizationParams
+): ClinicalOptimizationResult {
+  const diseaseName = String(params.diseaseName || '').trim();
+  const patient = params.patientContext || {};
+  const riskFlags = Array.isArray(params.riskSignals?.flags)
+    ? params.riskSignals!.flags!.map((flag) => String(flag).trim()).filter(Boolean)
+    : [];
 
-  if (templateId === 'cardiac' || templateId.includes('cardio')) {
-    differentialDiagnoses = [
-      {
-        condition: 'Acute Coronary Syndrome (NSTEMI / High-Risk Unstable Angina)',
-        probability: 'High',
-        justification: `Acute ischemic chest presentation with hemodynamic stress (BP ${bp}, HR ${hr} bpm). Requires immediate serial biomarker tracking.`,
-        icdCode: 'I21.9',
-      },
-      {
-        condition: 'Stanford Type A/B Aortic Dissection',
-        probability: 'Moderate',
-        justification: 'Critical differential rule-out required per ACC/AHA guidelines before high-dose anticoagulation.',
-        icdCode: 'I71.0',
-      },
-      {
-        condition: 'Acute Decompensated Heart Failure / Non-Ischemic Cardiomyopathy',
-        probability: 'Low',
-        justification: 'Secondary consideration based on cardiac preload and specialty cardiovascular history.',
-        icdCode: 'I50.9',
-      },
-    ];
+  const missingOrUnverifiedInformation = compact([
+    patient.id ? undefined : 'Patient identity has not been selected.',
+    patient.mrn ? undefined : 'Institutional MRN is not available in the supplied context.',
+    patient.vitals ? undefined : 'Current vitals are not present in the supplied context.',
+    nonEmptyRecord(params.guidedAnswers)
+      ? undefined
+      : 'Guided intake responses have not been recorded.',
+    nonEmptyRecord(params.specialtyHistory)
+      ? undefined
+      : 'Specialty history has not been recorded.',
+  ]);
 
-    statOrders = [
-      {
-        name: 'STAT 12-Lead ECG & High-Sensitivity Troponin I (0h, 1h, 3h Protocol)',
-        type: 'lab',
-        urgency: 'STAT',
-        cptCode: '80053',
-      },
-      {
-        name: 'STAT Bedside Transthoracic Echocardiogram (TTE) for Wall Motion & EF Assessment',
-        type: 'imaging',
-        urgency: 'STAT',
-        cptCode: '93306',
-      },
-      {
-        name: 'Dual Antiplatelet Therapy (DAPT: ASA 325mg + Ticagrelor 180mg) & IV Heparin Protocol',
-        type: 'medication',
-        urgency: 'STAT',
-        cptCode: '99291',
-      },
-      {
-        name: 'Urgent Interventional Cardiology Specialist Bedside & Cath Lab Alert',
-        type: 'consult',
-        urgency: 'STAT',
-        cptCode: '99254',
-      },
-    ];
+  const patientLabel = patient.name
+    ? patient.mrn
+      ? `${patient.name} (${patient.mrn})`
+      : patient.name
+    : 'Selected patient';
 
-    criticalRiskMitigations = [
-      'Screen for active gastrointestinal or intracranial bleeding before full-dose anticoagulation/thrombolysis',
-      'Maintain continuous 12-lead ST-segment telemetry and automated defibrillator readiness',
-      `Align door-to-balloon/device time with ${localization} strict ≤90 min performance metric`,
-    ];
-
-    specialistReadinessChecklist = [
-      'Two large-bore peripheral IV access lines established (18G antecubital preferred)',
-      'Baseline CBC, Comprehensive Metabolic Panel, Coagulation (PT/INR/aPTT), and hs-cTn drawn',
-      'Cardiac catheterization laboratory team notified with real-time intake telemetry stream',
-      'Informed consent and advance directive status confirmed in G-HIMS EHR',
-    ];
-  } else if (templateId === 'stroke' || templateId.includes('neuro')) {
-    differentialDiagnoses = [
-      {
-        condition: 'Acute Ischemic Stroke with Impending Large Vessel Occlusion (LVO)',
-        probability: 'High',
-        justification: `Focal neurological deficits corresponding to ${branchLabel}. Time-sensitive thrombectomy/thrombolytic candidate.`,
-        icdCode: 'I63.9',
-      },
-      {
-        condition: 'Acute Intracranial Hemorrhage (ICH / Subarachnoid Hemorrhage)',
-        probability: 'Moderate',
-        justification: 'Mandatory non-contrast cranial imaging rule-out before any reperfusion intervention.',
-        icdCode: 'I61.9',
-      },
-      {
-        condition: "Complicated Migraine or Seizure Post-Ictal Todd's Paresis (Stroke Mimic)",
-        probability: 'Low',
-        justification: 'Secondary differential consideration once vascular occlusions are excluded.',
-        icdCode: 'G40.909',
-      },
-    ];
-
-    statOrders = [
-      {
-        name: 'STAT Non-Contrast Brain CT + CT Angiography (CTA) Head & Neck',
-        type: 'imaging',
-        urgency: 'STAT',
-        cptCode: '70450',
-      },
-      {
-        name: 'STAT Point-of-Care Blood Glucose, CBC, Platelet Count, and INR/aPTT',
-        type: 'lab',
-        urgency: 'STAT',
-        cptCode: '80048',
-      },
-      {
-        name: 'Tenecteplase (TNK-tPA) Reperfusion Preparedness & Strict Blood Pressure Protocol (Target <185/110)',
-        type: 'medication',
-        urgency: 'STAT',
-        cptCode: '99291',
-      },
-      {
-        name: 'Comprehensive Stroke Team & Neurointerventionalist Stat Bedside Page',
-        type: 'consult',
-        urgency: 'STAT',
-        cptCode: '99254',
-      },
-    ];
-
-    criticalRiskMitigations = [
-      'Strictly verify last known well (LKW) time and anticoagulation intake history prior to thrombolysis',
-      'Maintain continuous non-invasive blood pressure monitoring every 15 minutes during acute triage',
-      `Execute target door-to-needle time ≤45 min per ${localization} stroke clinical guidelines`,
-    ];
-
-    specialistReadinessChecklist = [
-      'Accurate last-known-normal timestamp recorded and verified with family/bystander',
-      'CT scanner cleared and reserved for immediate door-to-imaging transport',
-      'NIHSS score assessed and documented into G-HIMS EHR',
-      'Neuro-interventional suite on standby for potential mechanical thrombectomy',
-    ];
-  } else if (templateId === 'diabetic' || templateId.includes('endo') || templateId.includes('dka')) {
-    differentialDiagnoses = [
-      {
-        condition: 'Diabetic Ketoacidosis (DKA) with Severe High Anion-Gap Metabolic Acidosis',
-        probability: 'High',
-        justification: `Clinical presentation and guided markers indicate acute insulinopenia with metabolic derangement.`,
-        icdCode: 'E11.10',
-      },
-      {
-        condition: 'Hyperosmolar Hyperglycemic State (HHS)',
-        probability: 'Moderate',
-        justification: 'Profound dehydration and hyperosmolarity without predominant ketoacidosis overlap.',
-        icdCode: 'E11.00',
-      },
-      {
-        condition: 'Severe Sepsis-Induced Secondary Metabolic Decompensation',
-        probability: 'Moderate',
-        justification: 'Infectious precipitant triggering acute glycemic crisis requires concurrent investigation.',
-        icdCode: 'A41.9',
-      },
-    ];
-
-    statOrders = [
-      {
-        name: 'STAT Venous Blood Gas (VBG), Serum Ketones (Beta-Hydroxybutyrate), BMP, & Lactate',
-        type: 'lab',
-        urgency: 'STAT',
-        cptCode: '82803',
-      },
-      {
-        name: 'STAT 0.9% Normal Saline IV Resuscitation (1000 mL/hr initial bolus protocol)',
-        type: 'medication',
-        urgency: 'STAT',
-        cptCode: '96360',
-      },
-      {
-        name: 'Continuous IV Regular Insulin Infusion (0.1 units/kg/hr after serum K+ confirmed ≥3.5 mEq/L)',
-        type: 'medication',
-        urgency: 'STAT',
-        cptCode: '99291',
-      },
-      {
-        name: 'STAT Urine Analysis, Blood Cultures x 2, & CXR (Infection Screen)',
-        type: 'lab',
-        urgency: 'STAT',
-        cptCode: '87040',
-      },
-    ];
-
-    criticalRiskMitigations = [
-      'CRITICAL: Never initiate insulin infusion until serum Potassium is verified >3.3 mEq/L to prevent fatal arrhythmia',
-      'Monitor serum glucose and electrolytes hourly; add 5% dextrose once blood glucose reaches 200-250 mg/dL',
-      'Strict intake/output fluid balance documentation via urinary catheterization if indicated',
-    ];
-
-    specialistReadinessChecklist = [
-      'Two large-bore IV sites secured for dual fluid and insulin titration',
-      'Point-of-care fingerstick blood glucose and urine ketone dipstick recorded',
-      'Endocrinology / Medical ICU consult paging activated with calculated anion gap',
-      'Baseline ECG obtained to screen for hyperkalemic peaked T-waves',
-    ];
-  } else if (templateId === 'ortho_trauma' || templateId.includes('trauma') || templateId.includes('ortho')) {
-    differentialDiagnoses = [
-      {
-        condition: 'High-Energy Skeletal Trauma with Impending Acute Compartment Syndrome',
-        probability: 'High',
-        justification: `Severe traumatic mechanism with clinical indicators of severe neurovascular and soft-tissue jeopardy.`,
-        icdCode: 'S82.90XA',
-      },
-      {
-        condition: 'Major Vascular Laceration / Traumatic Acute Limb Ischemia',
-        probability: 'High',
-        justification: 'Distal perfusion compromise requires emergency orthopedic vascular exclusion.',
-        icdCode: 'I77.79',
-      },
-      {
-        condition: 'Open Fracture with Contamination (Gustilo-Anderson Grade II/III)',
-        probability: 'Moderate',
-        justification: 'High risk for osteomyelitis and necrotizing deep infection requiring urgent surgical debridement.',
-        icdCode: 'S82.91XA',
-      },
-    ];
-
-    statOrders = [
-      {
-        name: 'STAT Complete Orthopedic Trauma X-Ray Series (Joint Above & Below) + CTA Extremity',
-        type: 'imaging',
-        urgency: 'STAT',
-        cptCode: '73590',
-      },
-      {
-        name: 'STAT IV Cefazolin (2g) + Gentamicin (Open Fracture Antibiotic Protocol)',
-        type: 'medication',
-        urgency: 'STAT',
-        cptCode: '96365',
-      },
-      {
-        name: 'STAT Compartment Pressure Monitoring (Stryker Intracompartmental Device)',
-        type: 'lab',
-        urgency: 'STAT',
-        cptCode: '20950',
-      },
-      {
-        name: 'Emergency Orthopedic Trauma Surgeon & Vascular Surgery Stat Operating Room Alert',
-        type: 'consult',
-        urgency: 'STAT',
-        cptCode: '99254',
-      },
-    ];
-
-    criticalRiskMitigations = [
-      'Maintain limb at heart level (do NOT elevate limb above heart if compartment syndrome is suspected)',
-      'Remove all circumferential dressings, splints, and constrictive garments immediately',
-      'Re-evaluate 5 Ps (Pain, Pallor, Pulselessness, Paresthesia, Paralysis) every 15 minutes',
-    ];
-
-    specialistReadinessChecklist = [
-      'Limb splinted and stabilized in anatomical alignment with distal pulse Doppler verification',
-      'NPO status confirmed for urgent operative intervention',
-      'Tetanus toxoid immunization history verified and administered if indicated',
-      'Type and Screen / Crossmatch 2 units Packed Red Blood Cells dispatched to blood bank',
-    ];
-  } else {
-    differentialDiagnoses = [
-      {
-        condition: `Acute ${diseaseName} Primary Presentation`,
-        probability: 'High',
-        justification: `Clinical presentation and symptom branch (${branchLabel}) indicate acute trajectory requiring rapid specialist assessment.`,
-        icdCode: 'R69',
-      },
-      {
-        condition: 'Secondary Systemic Inflammatory or Vascular Manifestation',
-        probability: 'Moderate',
-        justification: `Elevated physiological stress markers (BP ${bp}, HR ${hr} bpm, SpO2 ${spO2}%).`,
-        icdCode: 'R68.89',
-      },
-    ];
-
-    statOrders = [
-      {
-        name: `STAT Complete Metabolic Panel, CBC with Differential, & Inflammatory Markers`,
-        type: 'lab',
-        urgency: 'STAT',
-        cptCode: '80053',
-      },
-      {
-        name: `STAT Focused Diagnostic Imaging Protocol for ${diseaseName}`,
-        type: 'imaging',
-        urgency: 'STAT',
-        cptCode: '71045',
-      },
-      {
-        name: `Specialist Bedside Evaluation & Emergency Clinical Consultation`,
-        type: 'consult',
-        urgency: 'STAT',
-        cptCode: '99254',
-      },
-    ];
-
-    criticalRiskMitigations = [
-      'Continuous hemodynamic and telemetry monitoring during initial intake and stabilization',
-      'Verify comprehensive medication reconciliation and known drug allergy profiles',
-      `Maintain adherence to ${localization} evidence-based clinical protocols`,
-    ];
-
-    specialistReadinessChecklist = [
-      'Dual large-bore IV access secured and baseline blood panel dispatched to lab',
-      'Longitudinal medical record summary imported into G-HIMS EHR',
-      'On-call specialist team notified with full structured intake brief',
-    ];
-  }
+  const intakeLabel = diseaseName || 'specialty intake';
+  const branch = String(params.activeBranch?.label || '').trim();
+  const suppliedRisk = String(params.riskSignals?.overallRisk || '').trim();
 
   return {
-    executiveSummary: `High-priority ${diseaseName} clinical intake for ${patientName} (${age}y/o ${gender}). Risk level: ${riskLevel}. Immediate specialist evaluation indicated based on ${branchLabel}. Vital signs: BP ${bp} mmHg, HR ${hr} bpm, SpO2 ${spO2}%.`,
+    executiveSummary: `${intakeLabel} information has been organized for ${patientLabel} from the currently supplied intake data. No diagnosis or treatment recommendation has been generated.`,
     sbar: {
-      situation: `Patient presents with acute ${diseaseName} presentation consistent with ${branchLabel}. Active alert: ${primaryAlert}.`,
-      background: `Pertinent specialty history: ${JSON.stringify(specialtyHistory || {})}. Admission vitals: HR ${hr} bpm, BP ${bp} mmHg, SpO2 ${spO2}%.`,
-      assessment: `Intake assessment scores risk as ${riskLevel} with priority clinical flags (${riskSignals?.flags?.join(', ') || 'Protocolized criteria met'}). Evaluated under ${localization} guidelines.`,
-      recommendation: `Activate ${facilityTier} rapid specialist pathway. Proceed with stat diagnostic workup, bedside stabilization protocol, and clinical orders listed below.`,
+      situation: compact([
+        branch ? `Recorded intake branch: ${branch}.` : undefined,
+        suppliedRisk ? `Governed workflow risk state: ${suppliedRisk}.` : undefined,
+      ]).join(' ') || 'No additional situation statement is available from the supplied data.',
+      background: nonEmptyRecord(params.specialtyHistory)
+        ? `Specialty history fields supplied: ${Object.keys(params.specialtyHistory || {}).join(', ')}.`
+        : 'No specialty history was supplied.',
+      assessment:
+        riskFlags.length > 0
+          ? `Workflow-generated risk signals supplied for review: ${riskFlags.join('; ')}.`
+          : 'No workflow-generated risk signal was supplied.',
+      recommendation:
+        'Qualified clinician review is required before any consultation request, diagnostic order, prescription, treatment, or chart-signing action.',
     },
-    differentialDiagnoses,
-    statOrders,
-    criticalRiskMitigations,
-    specialistReadinessChecklist,
+    observedRiskSignals: riskFlags,
+    missingOrUnverifiedInformation,
+    sourceLimited: true,
+    status: 'DRAFT_REQUIRES_CLINICIAN_REVIEW',
   };
 }

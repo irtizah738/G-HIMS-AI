@@ -303,29 +303,44 @@ export function PatientConsultantRoutingModal({
   const [directoryError, setDirectoryError] = useState<string | null>(null);
   const [selectedDepartment, setSelectedDepartment] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedDoctorId, setSelectedDoctorId] = useState<string>(() =>
-    IS_DEMO_RUNTIME ? 'doc-card-01' : ''
-  );
-  const [routingUrgency, setRoutingUrgency] = useState<'STAT' | 'URGENT' | 'PRIORITY' | 'ROUTINE'>('STAT');
-  const [assignedRoom, setAssignedRoom] = useState<string>(() =>
-    IS_DEMO_RUNTIME ? 'Cath Lab Suite 01 (Direct Stage)' : ''
-  );
-  const [clinicalHandoffNote, setClinicalHandoffNote] = useState<string>(
-    'Patient presenting with crushing retrosternal pain. 12-lead ECG telemetry demonstrates acute anterolateral ST-elevation. Code STEMI activated. Expedited specialist bedside evaluation requested.'
-  );
+  const [selectedDoctorId, setSelectedDoctorId] = useState<string>('');
+  const [routingUrgency, setRoutingUrgency] = useState<'STAT' | 'URGENT' | 'PRIORITY' | 'ROUTINE'>('ROUTINE');
+  const [assignedRoom, setAssignedRoom] = useState<string>('');
+  const [clinicalHandoffNote, setClinicalHandoffNote] = useState<string>('');
 
   // Pre-Consult Diagnostics to auto-queue
   const [preOrders, setPreOrders] = useState<{ [key: string]: boolean }>({
-    ecg12: true,
-    troponin: true,
-    cbc_cmp: true,
-    portable_cxr: true,
+    ecg12: false,
+    troponin: false,
+    cbc_cmp: false,
+    portable_cxr: false,
     blood_gas: false,
     ct_scan: false,
   });
 
   const [isDispatching, setIsDispatching] = useState<boolean>(false);
   const [dispatchedConfirmation, setDispatchedConfirmation] = useState<any | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setSelectedDoctorId('');
+    setAssignedRoom('');
+    setRoutingUrgency('ROUTINE');
+    setClinicalHandoffNote(
+      chiefComplaint.trim()
+        ? `Specialist review requested. Chief complaint: ${chiefComplaint.trim()}.`
+        : 'Specialist review requested. Please review the current longitudinal context.'
+    );
+    setPreOrders({
+      ecg12: false,
+      troponin: false,
+      cbc_cmp: false,
+      portable_cxr: false,
+      blood_gas: false,
+      ct_scan: false,
+    });
+    setDispatchedConfirmation(null);
+  }, [isOpen, patientId, encounterId, chiefComplaint]);
 
   useEffect(() => {
     if (!isOpen || IS_DEMO_RUNTIME) return;
@@ -365,8 +380,13 @@ export function PatientConsultantRoutingModal({
         }));
         setConsultants(mapped);
         setSelectedDoctorId((current) =>
-          mapped.some((item) => item.id === current) ? current : mapped[0]?.id || ''
+          mapped.some((item) => item.id === current) ? current : ''
         );
+        if (mapped.length === 0) {
+          setDirectoryError(
+            'No credentialed consultants are currently available in the HCM directory for this tenant.'
+          );
+        }
       })
       .catch((error) => {
         if (cancelled) return;
@@ -510,11 +530,15 @@ export function PatientConsultantRoutingModal({
     return matchesDept && matchesSearch;
   });
 
-  const selectedDoctor = consultants.find((d) => d.id === selectedDoctorId) || consultants[0];
+  const selectedDoctor = consultants.find((d) => d.id === selectedDoctorId);
 
   const handleDispatchConsultant = async () => {
     if (!selectedDoctor) {
       setDirectoryError('Select an eligible consultant before routing.');
+      return;
+    }
+    if (selectedDoctor.status === 'OFF_DUTY') {
+      setDirectoryError('The selected consultant is off duty. Select an on-duty or on-call consultant.');
       return;
     }
     setIsDispatching(true);
@@ -531,11 +555,13 @@ export function PatientConsultantRoutingModal({
       handoffNote: clinicalHandoffNote,
       slaMinutes:
         routingUrgency === 'STAT'
-          ? 15
-          : routingUrgency === 'URGENT' || routingUrgency === 'PRIORITY'
-            ? 240
-            : undefined,
-      queuedDiagnostics: Object.entries(preOrders)
+          ? 10
+          : routingUrgency === 'URGENT'
+            ? 30
+            : routingUrgency === 'PRIORITY'
+              ? 60
+              : undefined,
+      preparationChecklist: Object.entries(preOrders)
         .filter(([_, val]) => val)
         .map(([key]) => key),
     };
@@ -602,7 +628,7 @@ export function PatientConsultantRoutingModal({
                 </span>
               </div>
               <p className="text-xs text-slate-300">
-                Match patient clinical trajectory to active attending sub-specialists with real-time SLA pacing
+                Route a governed consultation to a credentialed specialist with explicit urgency, destination and handoff context
               </p>
             </div>
           </div>
@@ -717,11 +743,11 @@ export function PatientConsultantRoutingModal({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
                   <UserCheck className="w-4 h-4 text-blue-600" />
-                  Select Attending Consultant
+                  Select Eligible Consultant
                 </h3>
 
                 {/* Filter Department Pills */}
-                <div className="flex items-center gap-1 overflow-x-auto text-[11px] pb-1">
+                <div className="flex items-center gap-1 flex-wrap text-[11px]">
                   {['ALL', 'Cardiovascular', 'Neuro', 'Ortho', 'Endo', 'OB/GYN', 'Oncology', 'Pediatrics', 'Gastro', 'Radiology', 'Anesthesia', 'Critical Care'].map((dept) => (
                     <button
                       key={dept}
@@ -752,6 +778,17 @@ export function PatientConsultantRoutingModal({
 
               {/* Doctors Roster List */}
               <div className="space-y-2.5 max-h-[340px] overflow-y-auto pr-1">
+                {filteredDoctors.length === 0 && (
+                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                    <UserCheck className="w-7 h-7 text-slate-400 mx-auto mb-2" />
+                    <p className="text-xs font-bold text-slate-700">
+                      No eligible consultants match this filter.
+                    </p>
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Clear the specialty filter or verify HCM credentials, privileges and roster availability.
+                    </p>
+                  </div>
+                )}
                 {filteredDoctors.map((doc) => {
                   const isAiMatch = doc.id === aiMatchId;
                   const isSelected = doc.id === selectedDoctorId;
@@ -910,8 +947,11 @@ export function PatientConsultantRoutingModal({
                 {/* Pre-Consult Diagnostics Checklist */}
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                    Pre-Arrival Stat Diagnostics (Auto-Dispatched)
+                    Handoff Preparation Checklist
                   </label>
+                  <p className="text-[10px] text-slate-500 mb-1.5">
+                    Optional context for the receiving specialist. Selecting an item does not place a diagnostic order.
+                  </p>
                   <div className="grid grid-cols-2 gap-1.5 text-[11px] bg-white p-2 rounded-lg border border-slate-200">
                     <label className="flex items-center gap-1.5 cursor-pointer">
                       <input
@@ -987,7 +1027,7 @@ export function PatientConsultantRoutingModal({
                   ) : (
                     <>
                       <Send className="w-3.5 h-3.5" />
-                      <span>{selectedDoctor ? `Request consultation from ${selectedDoctor.name.split(',')[0]}` : 'Select an eligible consultant'}</span>
+                      <span>{selectedDoctor ? `Send consultation request to ${selectedDoctor.name.split(',')[0]}` : 'Select an eligible consultant'}</span>
                     </>
                   )}
                 </button>

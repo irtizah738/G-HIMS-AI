@@ -50,10 +50,11 @@ import {
   Download,
 } from 'lucide-react';
 import { AuthClient } from '@/lib/auth/auth-client';
+import { PatientConsultantRoutingModal } from '@/components/clinical/patient-consultant-routing-modal';
 
 export function DiseaseCentricIntakeView() {
   const { patients, addClinicalNote, selectedPatientId, setSelectedPatientId } = useHospital();
-  const [localPatientId, setLocalPatientId] = useState<string>(selectedPatientId || 'p-1001');
+  const [localPatientId, setLocalPatientId] = useState<string>(selectedPatientId || '');
 
   // Synchronize with global hospital context patient
   useEffect(() => {
@@ -79,7 +80,7 @@ export function DiseaseCentricIntakeView() {
 
   // Selected Patient
   const selectedPatient = useMemo(() => {
-    return patients.find((p) => p.id === activePatientId) || patients[0];
+    return patients.find((p) => p.id === activePatientId);
   }, [patients, activePatientId]);
 
   // Localization and Facility Configuration
@@ -95,77 +96,58 @@ export function DiseaseCentricIntakeView() {
   }, [selectedTierId]);
 
   // Intake State: Tree branch navigation, answers, specialty history
-  const [selectedTreeNodeIds, setSelectedTreeNodeIds] = useState<string[]>(['cardiac_root', 'cardiac_crushing', 'cardiac_radiating_arm_jaw']);
-  const [guidedAnswers, setGuidedAnswers] = useState<Record<string, any>>({
-    chest_pain_severity: 8,
-    symptom_onset_duration: 'under_2h',
-    ecg_telemetry_findings: 'stemi_elevation',
-    associated_hemodynamic_signs: ['levine_sign'],
-    last_known_well_window: 'under_3h',
-    be_fast_screening: ['face', 'arm', 'speech'],
-    rapid_blood_glucose: 118,
-    estimated_nihss: 14,
-    point_of_care_glucose: 480,
-    blood_beta_hydroxybutyrate: 'severe_over_3_0',
-    serum_potassium_level: 'normal_3_3_to_5_3',
-    mental_status_hydration: 'somnolent_moderate',
-    mechanism_of_injury: 'high_speed_mvc',
-    gustilo_classification: 'type_3a',
-    distal_neurovascular_status: 'warm_palpable_pulses',
-    compartment_cardinal_signs: ['pain_disproportionate', 'passive_stretch'],
-    gestational_age_weeks: '34_to_36w',
-    obstetric_blood_pressure: 'severe_over_160_110',
-    fetal_heart_rate_category: 'category_2_indeterminate',
-    gravida_para_history: 'G3 P2 L2',
-  });
-
-  const [specialtyHistoryAnswers, setSpecialtyHistoryAnswers] = useState<Record<string, any>>({
-    prior_pci_cabg: 'PCI with Drug-Eluting Stents (< 12 months)',
-    baseline_ef: 'Preserved (> 50%)',
-    antiplatelet_regimen: ['Aspirin 81mg Daily', 'Ticagrelor (Brilinta) 90mg BID'],
-    known_cad_risk_factors: ['Type 2 Diabetes Mellitus', 'Hypertension'],
-    pre_morbid_mrs: '0 - No symptoms at all',
-    current_anticoagulant: 'None',
-    atrial_fibrillation_history: 'None',
-    diabetes_type: 'Type 1 Diabetes Mellitus (T1DM)',
-    insulin_modality: 'Multiple Daily Injections (MDI - Basal/Bolus)',
-    sglt2_inhibitor_use: 'No',
-    baseline_renal_creatinine: 'Normal (eGFR > 90 mL/min)',
-    tetanus_immunization_status: 'Up to date (< 5 years ago)',
-    anticoagulation_bleeding_risk: 'None',
-    pre_existing_ortho_hardware: 'None',
-    rh_factor_antibody: 'O-Positive (Rh+)',
-    prior_cesarean_scar: 'None (Prior Vaginal Deliveries Only / Nulliparous)',
-    prior_preeclampsia_gdm: ['Prior Preeclampsia / Eclampsia'],
-  });
+  const [selectedTreeNodeIds, setSelectedTreeNodeIds] = useState<string[]>([
+    INTAKE_TEMPLATES[0]?.symptomTree?.id || 'cardiac_root',
+  ]);
+  const [guidedAnswers, setGuidedAnswers] = useState<Record<string, any>>({});
+  const [specialtyHistoryAnswers, setSpecialtyHistoryAnswers] = useState<Record<string, any>>({});
 
   // AI Optimization State
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState<AiOptimizationResult | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
   const [committedSuccess, setCommittedSuccess] = useState(false);
+  const [commitError, setCommitError] = useState<string | null>(null);
+  const [showRoutingModal, setShowRoutingModal] = useState(false);
 
   // Template Customization / Studio state
   const [customQuestions, setCustomQuestions] = useState<GuidedQuestion[]>([]);
   const [customWeightMultiplier, setCustomWeightMultiplier] = useState<number>(1.0);
-  const [autoDispatchOnCritical, setAutoDispatchOnCritical] = useState<boolean>(true);
+  const [autoDispatchOnCritical, setAutoDispatchOnCritical] = useState<boolean>(false);
 
   // Reset Tree / Answers on template change
   useEffect(() => {
     if (currentTemplate.symptomTree) {
       setSelectedTreeNodeIds([currentTemplate.symptomTree.id]);
     }
+    setGuidedAnswers({});
+    setSpecialtyHistoryAnswers({});
     setAiResult(null);
     setCommittedSuccess(false);
+    setCommitError(null);
   }, [selectedTemplateId, currentTemplate]);
 
   // Real-time Risk Score & Active Signals Calculation
   const { totalRiskScore, activeRiskSignals, maxRiskSeverity } = useMemo(() => {
     let score = 0;
 
-    // 1. Tree node weights
+    // 1. Tree node weights. The template's governed risk weight is authoritative;
+    // merely selecting the root does not manufacture clinical risk.
+    const findNode = (
+      node: SymptomTreeNode,
+      nodeId: string
+    ): SymptomTreeNode | undefined => {
+      if (node.id === nodeId) return node;
+      for (const child of node.children || []) {
+        const found = findNode(child, nodeId);
+        if (found) return found;
+      }
+      return undefined;
+    };
     selectedTreeNodeIds.forEach((nodeId) => {
-      score += 3;
+      if (nodeId === currentTemplate.symptomTree.id) return;
+      const node = findNode(currentTemplate.symptomTree, nodeId);
+      if (node) score += Math.max(0, node.riskWeight || 0);
     });
 
     // 2. Guided answers risk points
@@ -317,22 +299,39 @@ export function DiseaseCentricIntakeView() {
     }
   };
 
-  // Commit Intake & Dispatch to Longitudinal EHR
-  const handleCommitToLongitudinalEhr = () => {
-    if (!selectedPatient) return;
+  // Save the clinician-reviewed intake through the authoritative note command.
+  const handleCommitToLongitudinalEhr = async () => {
+    if (!selectedPatient) {
+      setCommitError('Select a patient before saving the intake.');
+      return;
+    }
 
-    addClinicalNote(selectedPatient.id, {
-      author: 'Clinical Triage Specialist & G-HIMS Copilot',
-      role: 'Specialist Triage',
-      category: 'SOAP',
-      content: `Disease-Centric Intake Completed: ${currentTemplate.name}\nRisk Level: ${maxRiskSeverity} (Score: ${totalRiskScore}). Protocol: ${currentLocalization.name}.\nSBAR & Specialist Briefing prepared for ${currentTemplate.typicalSpecialists.join(', ')}.`,
-    });
+    setCommitError(null);
+    try {
+      await addClinicalNote(selectedPatient.id, {
+        author: 'Authenticated clinician',
+        role: 'Specialist Intake',
+        category: 'Consultation',
+        content: `Disease-Centric Intake Completed: ${currentTemplate.name}\nRisk Level: ${maxRiskSeverity} (Score: ${totalRiskScore}). Protocol: ${currentTemplate.clinicalGuidelines}.\nObserved protocol signals: ${activeRiskSignals.map((signal) => signal.title).join('; ') || 'None recorded'}.\nSpecialist preparation target: ${currentTemplate.typicalSpecialists.join(', ')}.`,
+      });
 
-    setCommittedSuccess(true);
-    setTimeout(() => {
-      setCommittedSuccess(false);
-    }, 4000);
+      setCommittedSuccess(true);
+      setTimeout(() => {
+        setCommittedSuccess(false);
+      }, 4000);
+    } catch (error) {
+      setCommitError(
+        error instanceof Error ? error.message : 'Intake could not be saved.'
+      );
+    }
   };
+
+  const activeEncounterId =
+    selectedPatient?.activeEncounterId ||
+    selectedPatient?.encounters.find((encounter) => encounter.status === 'active')?.id;
+  const activeEncounter = selectedPatient?.encounters.find(
+    (encounter) => encounter.id === activeEncounterId
+  );
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
@@ -347,19 +346,15 @@ export function DiseaseCentricIntakeView() {
                 Disease-Centric Clinical Intelligence
               </span>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 flex items-center gap-1.5">
-                <Globe className="w-3.5 h-3.5" />
-                {currentLocalization.flagEmoji} {currentLocalization.name.split('(')[0]}
-              </span>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-500/20 text-purple-300 border border-purple-400/30 flex items-center gap-1.5">
-                <Building2 className="w-3.5 h-3.5" />
-                {currentHospitalTier.name.split(' ')[0]} Facility
+                <ShieldCheck className="w-3.5 h-3.5" />
+                Source-limited • clinician reviewed
               </span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
               Disease-Centric Intake & Specialist Preparation Platform
             </h1>
             <p className="text-sm text-slate-300 font-normal leading-relaxed">
-              Event-driven longitudinal intake architecture with branching symptom trees, protocolized guided clinical questions, real-time hemodynamic risk signals, and instant AI specialist briefings.
+              Structured specialty intake that captures explicit findings, surfaces governed protocol signals, prepares a source-limited handoff, and routes the patient to an eligible specialist.
             </p>
           </div>
 
@@ -368,18 +363,18 @@ export function DiseaseCentricIntakeView() {
             <button
               id="btn-trigger-ai-optimize-top"
               onClick={handleRunAiOptimization}
-              disabled={aiLoading}
+              disabled={aiLoading || !selectedPatient}
               className="px-5 py-3 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold text-sm flex items-center gap-2 shadow-md hover:shadow-lg transition-all cursor-pointer active:scale-95 disabled:opacity-50"
             >
               {aiLoading ? (
                 <>
                   <RefreshCw className="w-4 h-4 animate-spin text-amber-300" />
-                  <span>Optimizing Intake Protocol...</span>
+                  <span>Preparing specialist brief...</span>
                 </>
               ) : (
                 <>
                   <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
-                  <span>AI Specialist Briefing</span>
+                  <span>Generate Specialist Brief</span>
                 </>
               )}
             </button>
@@ -468,9 +463,9 @@ export function DiseaseCentricIntakeView() {
               </span>
             </div>
             <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              <span>HR: <strong className="text-slate-800 dark:text-slate-200">{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.heartRate || 88}</strong> bpm</span>
-              <span>BP: <strong className="text-slate-800 dark:text-slate-200">{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.bloodPressure || '138/88'}</strong> mmHg</span>
-              <span>SpO2: <strong className="text-slate-800 dark:text-slate-200">{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.oxygenSaturation || 98}</strong>%</span>
+              <span>HR: <strong className="text-slate-800 dark:text-slate-200">{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.heartRate ?? '—'}</strong>{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.heartRate != null ? ' bpm' : ''}</span>
+              <span>BP: <strong className="text-slate-800 dark:text-slate-200">{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.bloodPressure || '—'}</strong></span>
+              <span>SpO2: <strong className="text-slate-800 dark:text-slate-200">{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.oxygenSaturation ?? '—'}</strong>{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.oxygenSaturation != null ? '%' : ''}</span>
             </div>
           </div>
         </div>
@@ -581,46 +576,31 @@ export function DiseaseCentricIntakeView() {
             }`}
           >
             <Sparkles className="w-4 h-4 text-amber-400" />
-            <span>AI Specialist Preparation Briefing</span>
+            <span>Source-Limited Specialist Brief</span>
             {aiResult && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />}
           </button>
 
-          <button
-            id="tab-mode-customize"
-            onClick={() => setActiveTabMode('customize')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
-              activeTabMode === 'customize'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
-            }`}
-          >
-            <Sliders className="w-4 h-4" />
-            <span>Configurable Studio</span>
-          </button>
-
-          <button
-            id="tab-mode-localization"
-            onClick={() => setActiveTabMode('localization')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
-              activeTabMode === 'localization'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
-            }`}
-          >
-            <Globe className="w-4 h-4" />
-            <span>Country & Hospital Localization</span>
-          </button>
         </div>
 
-        {/* Action Button: Commit to EHR */}
+        {/* Explicit clinical actions: save first, route separately. */}
         <div className="flex items-center gap-2">
           <button
             id="btn-commit-longitudinal-ehr"
-            onClick={handleCommitToLongitudinalEhr}
-            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+            onClick={() => void handleCommitToLongitudinalEhr()}
+            disabled={!selectedPatient}
+            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <FileCheck2 className="w-4 h-4" />
-            <span>Commit to Longitudinal EHR</span>
+            <span>Save Reviewed Intake</span>
+          </button>
+          <button
+            id="btn-route-specialist"
+            onClick={() => setShowRoutingModal(true)}
+            disabled={!selectedPatient || !activeEncounterId}
+            className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Send className="w-4 h-4" />
+            <span>Route to Specialist</span>
           </button>
         </div>
       </div>
@@ -632,6 +612,13 @@ export function DiseaseCentricIntakeView() {
             <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
             <span>Successfully recorded disease intake in patient longitudinal EHR & dispatched specialist notification!</span>
           </div>
+        </div>
+      )}
+
+      {commitError && (
+        <div className="p-3 bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 rounded-xl text-xs font-semibold flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>{commitError}</span>
         </div>
       )}
 
@@ -1154,7 +1141,7 @@ export function DiseaseCentricIntakeView() {
               <div className="flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-amber-500" />
                 <h2 className="text-base font-bold text-slate-900 dark:text-slate-100">
-                  Gemini Clinical Intelligence & Specialist Briefing Engine
+                  Source-Limited Specialist Preparation Brief
                 </h2>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
@@ -1243,101 +1230,59 @@ export function DiseaseCentricIntakeView() {
                 </div>
               </div>
 
-              {/* Differential Diagnoses & STAT Orders */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Differential Diagnosis Table */}
-                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-4">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-3">
                   <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-                    <Activity className="w-4 h-4 text-blue-600" />
-                    Differential Diagnosis Probability Matrix
+                    <ShieldAlert className="w-4 h-4 text-amber-600" />
+                    Observed Protocol Risk Signals
                   </h3>
-
-                  <div className="space-y-3">
-                    {aiResult.differentialDiagnoses?.map((diff, i) => (
-                      <div
-                        key={i}
-                        className="p-3 rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 space-y-1"
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-xs text-slate-900 dark:text-slate-100">
-                            {diff.condition}
-                          </span>
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
-                              {diff.icdCode}
-                            </span>
-                            <span
-                              className={`text-[10px] font-extrabold px-2 py-0.5 rounded ${
-                                diff.probability === 'High'
-                                  ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
-                                  : 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
-                              }`}
-                            >
-                              {diff.probability} Probability
-                            </span>
-                          </div>
+                  {aiResult.observedRiskSignals?.length ? (
+                    <div className="space-y-2">
+                      {aiResult.observedRiskSignals.map((item, i) => (
+                        <div
+                          key={i}
+                          className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-100"
+                        >
+                          {item}
                         </div>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                          {diff.justification}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      No additional source-limited risk signal was returned.
+                    </p>
+                  )}
                 </div>
 
-                {/* Recommended STAT Orders */}
-                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-4">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-3">
                   <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    Recommended STAT Diagnostic & Intervention Orders
+                    <AlertTriangle className="w-4 h-4 text-rose-600" />
+                    Missing or Unverified Information
                   </h3>
-
-                  <div className="space-y-2.5">
-                    {aiResult.statOrders?.map((order, i) => (
-                      <div
-                        key={i}
-                        className="p-3 rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 text-xs"
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <span
-                            className={`text-[10px] font-extrabold px-2 py-0.5 rounded ${
-                              order.urgency === 'STAT'
-                                ? 'bg-rose-600 text-white'
-                                : 'bg-blue-600 text-white'
-                            }`}
-                          >
-                            {order.urgency}
-                          </span>
-                          <span className="font-bold text-slate-900 dark:text-slate-100">
-                            {order.name}
-                          </span>
+                  {aiResult.missingOrUnverifiedInformation?.length ? (
+                    <div className="space-y-2">
+                      {aiResult.missingOrUnverifiedInformation.map((item, i) => (
+                        <div
+                          key={i}
+                          className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs text-rose-900 dark:text-rose-100"
+                        >
+                          {item}
                         </div>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-800 uppercase text-slate-600 dark:text-slate-300 shrink-0">
-                          {order.type}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      No missing-information item was returned by the source-limited brief.
+                    </p>
+                  )}
                 </div>
               </div>
 
-              {/* Pre-Specialist Arrival Checklist */}
-              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-3">
-                <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-blue-600" />
-                  Pre-Specialist Arrival Readiness Checklist
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {aiResult.specialistReadinessChecklist?.map((item, i) => (
-                    <div
-                      key={i}
-                      className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 text-xs font-medium text-slate-800 dark:text-slate-200 flex items-start gap-2"
-                    >
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0" />
-                      <span>{item}</span>
-                    </div>
-                  ))}
-                </div>
+              <div className="p-4 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-xs text-blue-900 dark:text-blue-100 flex items-start gap-2">
+                <ShieldCheck className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>
+                  Draft for clinician review only. This view does not diagnose, prescribe, place orders, or automatically dispatch a specialist.
+                </span>
               </div>
             </div>
           ) : (
@@ -1520,6 +1465,24 @@ export function DiseaseCentricIntakeView() {
             </div>
           </div>
         </div>
+      )}
+
+      {selectedPatient && (
+        <PatientConsultantRoutingModal
+          isOpen={showRoutingModal}
+          onClose={() => setShowRoutingModal(false)}
+          patientId={selectedPatient.id}
+          encounterId={activeEncounterId}
+          patientName={selectedPatient.fullName}
+          mrn={selectedPatient.mrn}
+          chiefComplaint={
+            activeEncounter?.chiefComplaint ||
+            `${currentTemplate.name} specialist review requested`
+          }
+          triageCategory={`${currentTemplate.specialty} / ${maxRiskSeverity}`}
+          currentAttending={activeEncounter?.attendingPhysician || 'Unassigned'}
+          onRoutedSuccess={() => setShowRoutingModal(false)}
+        />
       )}
     </div>
   );

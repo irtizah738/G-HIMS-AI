@@ -1368,6 +1368,10 @@ export function PatientMpiView() {
           isOpen={showRoutingModal}
           onClose={() => setShowRoutingModal(false)}
           patientId={currentPatient.id}
+          encounterId={
+            currentPatient.activeEncounterId ||
+            currentPatient.encounters.find((encounter) => encounter.status === 'active')?.id
+          }
           patientName={currentPatient.fullName}
           mrn={currentPatient.mrn}
           chiefComplaint={currentPatient.chronicConditions.join(', ') || 'Inpatient / Outpatient Consultation Request'}

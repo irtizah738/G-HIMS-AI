@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { PatientMPI, PatientIdentifier, Gender } from '@/types/mpi';
+import { normalizeCnic, normalizeMrn } from '@/lib/clinical/mpi/patient-mpi';
 import type { RegistrationRequest } from '@/lib/api/command-client';
 import {
   Search,
@@ -48,7 +49,7 @@ export function PatientSearchAndRegistrationPanel({
   const [chiefComplaint, setChiefComplaint] = useState('');
   const [department, setDepartment] = useState('General Medicine');
   const [priority, setPriority] = useState<'ROUTINE' | 'URGENT' | 'EMERGENCY'>('ROUTINE');
-  const [idType, setIdType] = useState<'CNIC' | 'MRN' | 'PASSPORT' | 'PHONE'>('CNIC');
+  const [idType, setIdType] = useState<'CNIC' | 'PASSPORT' | 'PHONE'>('CNIC');
   const [idValue, setIdValue] = useState('');
   const [identifiers, setIdentifiers] = useState<PatientIdentifier[]>([]);
   const [allergiesText, setAllergiesText] = useState('');
@@ -73,7 +74,7 @@ export function PatientSearchAndRegistrationPanel({
     if (searchFilter === 'PHONE') {
       return matchPhone;
     }
-    return matchName || matchMrn || matchPhone || matchId;
+    return matchName || matchMrn || matchCnic || matchPhone || matchId;
   });
 
   const handleAddIdentifier = () => {
@@ -148,7 +149,7 @@ export function PatientSearchAndRegistrationPanel({
                 Master Patient Index (MPI) Lookup
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Deterministic deduplication across MRN, CNIC & Phone
+                One institutional MRN per patient • exact MRN/CNIC identity lookup
               </p>
             </div>
           </div>
@@ -415,7 +416,6 @@ export function PatientSearchAndRegistrationPanel({
                 <option value="CNIC">CNIC</option>
                 <option value="PASSPORT">Passport</option>
                 <option value="PHONE">Phone</option>
-                <option value="MRN">Ext MRN</option>
               </select>
               <input
                 id="input-id-val"

@@ -87,6 +87,20 @@ describe('OPD-RP17 real dashboard KPIs', () => {
     expect(dashboard).toContain('Visible Clinician Workload');
   });
 
+  test('operational funnel and risk KPIs exclude closed historical encounters', async () => {
+    const dashboard = await source('components/opd/OpdDashboardKpis.tsx');
+
+    expect(dashboard).toContain('TERMINAL_ENCOUNTER_STATUSES');
+    expect(dashboard).toContain('const activeEncounters = encounters.filter');
+    expect(dashboard).toContain('for (const encounter of activeEncounters)');
+    expect(dashboard).toContain('Visible Closed Encounters');
+    expect(dashboard).toContain('Not a time-window throughput KPI');
+    expect(dashboard).toContain('active encounter');
+    expect(dashboard).toContain(
+      'No active department-scoped encounters are visible.'
+    );
+  });
+
   test('dashboard exposes snapshot provenance freshness and pending sync state', async () => {
     const dashboard = await source('components/opd/OpdDashboardKpis.tsx');
     const workspace = await source('components/opd/OpdMasterWorkspace.tsx');

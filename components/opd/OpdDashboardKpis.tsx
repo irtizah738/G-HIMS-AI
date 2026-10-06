@@ -45,7 +45,7 @@ type CanonicalDashboardStage =
 function normalizeDashboardStage(value: unknown): CanonicalDashboardStage {
   const stage = String(value || '').trim().toUpperCase();
   if (
-    ['REGISTRATION', 'BILLING_AUTHORIZATION'].includes(stage)
+    ['REGISTRATION', 'REGISTERED', 'BILLING_AUTHORIZATION'].includes(stage)
   ) {
     return 'REGISTRATION';
   }
@@ -69,6 +69,7 @@ function normalizeDashboardStage(value: unknown): CanonicalDashboardStage {
       'DISCHARGE_OR_REFERRAL',
       'DISPOSITION_CLOSURE',
       'TIMELINE_AUDIT',
+      'COMPLETED',
     ].includes(stage)
   ) {
     return 'DISPOSITION';

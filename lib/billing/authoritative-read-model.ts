@@ -50,6 +50,11 @@ function finiteNonNegative(value: unknown): number | null {
   return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
+function toMinorUnits(value: number): number | null {
+  const minor = Math.round(value * 100);
+  return Number.isSafeInteger(minor) && minor >= 0 ? minor : null;
+}
+
 function adaptChargeItem(rawValue: unknown): ChargeItem | null {
   if (!rawValue || typeof rawValue !== 'object' || Array.isArray(rawValue)) {
     return null;
@@ -165,6 +170,25 @@ export function adaptAuthoritativeInvoice(
     Object.values(totals).some((value) => value === null) ||
     !Array.isArray(raw.items) ||
     items.length !== raw.items.length
+  ) {
+    return null;
+  }
+
+  const patientDueMinor = toMinorUnits(totals.totalPatientDue!);
+  const paidMinor = toMinorUnits(totals.totalPaid!);
+  const balanceMinor = toMinorUnits(totals.balanceDue!);
+  const itemPatientMinor = items.reduce((sum, item) => {
+    const minor = toMinorUnits(item.patientPortion);
+    return minor === null ? Number.NaN : sum + minor;
+  }, 0);
+
+  if (
+    patientDueMinor === null ||
+    paidMinor === null ||
+    balanceMinor === null ||
+    !Number.isSafeInteger(itemPatientMinor) ||
+    paidMinor + balanceMinor !== patientDueMinor ||
+    itemPatientMinor !== patientDueMinor
   ) {
     return null;
   }

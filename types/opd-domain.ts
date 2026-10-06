@@ -514,7 +514,7 @@ export interface EncounterDisposition {
     admittingService?: string;
   };
   completedAt: number;
-  completedBy: string;
+  completedBy?: string;
 }
 
 export interface DiagnosticOrderItem {

@@ -183,6 +183,13 @@ async function readActiveOpdEncounters(
   if (!admin && facilities.length === 0) {
     throw new Error('OPD_EDGE_FACILITY_SCOPE_REQUIRED');
   }
+  if (
+    !admin &&
+    requiresDepartmentEncounterScope(context.roles) &&
+    departments.length === 0
+  ) {
+    throw new Error('OPD_EDGE_DEPARTMENT_SCOPE_REQUIRED');
+  }
 
   if (admin && facilities.length === 0) {
     const snapshot = await tenantRef
@@ -261,6 +268,13 @@ async function readActiveAppointments(
   if (!admin && facilities.length === 0) {
     throw new Error('OPD_EDGE_FACILITY_SCOPE_REQUIRED');
   }
+  if (
+    !admin &&
+    requiresDepartmentEncounterScope(context.roles) &&
+    departments.length === 0
+  ) {
+    throw new Error('OPD_EDGE_DEPARTMENT_SCOPE_REQUIRED');
+  }
 
   for (const status of ACTIVE_APPOINTMENT_STATUSES) {
     if (admin && facilities.length === 0) {
@@ -338,6 +352,13 @@ async function readActiveWaitlist(
 
   if (!admin && facilities.length === 0) {
     throw new Error('OPD_EDGE_FACILITY_SCOPE_REQUIRED');
+  }
+  if (
+    !admin &&
+    requiresDepartmentEncounterScope(context.roles) &&
+    departments.length === 0
+  ) {
+    throw new Error('OPD_EDGE_DEPARTMENT_SCOPE_REQUIRED');
   }
 
   for (const status of ACTIVE_WAITLIST_STATUSES) {

@@ -8,13 +8,15 @@ import {
   Receipt,
   ShieldCheck,
 } from 'lucide-react';
-import { useTenant } from '@/lib/tenant/context';
+import { useAuth } from '@/lib/auth/auth-context';
 
 export function BillingErpView() {
-  const { tenantId, isLoading, error } = useTenant();
-  const scopedTenantId = String(tenantId || '').trim();
+  const { activeTenant, user, loading, error } = useAuth();
+  const scopedTenantId = String(
+    activeTenant?.tenantId || user?.tenantId || ''
+  ).trim();
 
-  if (isLoading) {
+  if (loading) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-xs dark:border-slate-800 dark:bg-slate-900">
         Loading authorized billing workspace…

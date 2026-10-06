@@ -158,6 +158,56 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const authorizedFacilityIds = Array.from(
+      new Set(
+        (context.facilityIds || [])
+          .map((value) => String(value || '').trim())
+          .filter(Boolean)
+      )
+    );
+    const requestedFacilityId = String(body.facilityId || '').trim();
+    let facilityId = requestedFacilityId;
+
+    if (requestedFacilityId) {
+      if (!authorizedFacilityIds.includes(requestedFacilityId)) {
+        return NextResponse.json(
+          {
+            success: false,
+            code: 'FACILITY_ACCESS_DENIED',
+            error:
+              'Requested registration facility is outside the authenticated staff facility scope.',
+          },
+          { status: 403 }
+        );
+      }
+    } else if (authorizedFacilityIds.length === 1) {
+      facilityId = authorizedFacilityIds[0];
+    } else {
+      return NextResponse.json(
+        {
+          success: false,
+          code: 'FACILITY_SELECTION_REQUIRED',
+          error:
+            'OPD registration requires one authoritative facility. Select an authorized facility when the staff account spans multiple facilities.',
+        },
+        { status: 400 }
+      );
+    }
+
+    const departmentId = String(
+      body.departmentId || body.department || 'General Medicine'
+    ).trim();
+    if (!departmentId) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: 'DEPARTMENT_REQUIRED',
+          error: 'A target clinical department is required for OPD registration.',
+        },
+        { status: 400 }
+      );
+    }
+
     const normalizedParams: RegisterPatientEncounterParams = {
       tenantId: context.tenantId,
       commandId: String(body.commandId || `cmd_${crypto.randomUUID()}`),
@@ -170,7 +220,9 @@ export async function POST(req: NextRequest) {
       contactPhone: String(body.contactPhone || body.phone),
       address: String(body.address),
       encounterType: body.encounterType || 'OPD',
-      department: body.department || 'General Medicine',
+      facilityId,
+      departmentId,
+      department: body.department || departmentId,
       priority: body.priority || 'ROUTINE',
       chiefComplaint: body.chiefComplaint || '',
       assignedDoctor: body.assignedDoctor || body.attendingPhysicianName || '',

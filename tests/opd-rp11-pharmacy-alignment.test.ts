@@ -80,7 +80,7 @@ describe('OPD-RP11 pharmacy alignment', () => {
     expect(workspace).not.toContain('unitPriceMinorUnits: item.unitPriceMinorUnits');
   });
 
-  test('financially relevant pharmacy commands fail closed offline until RP15', async () => {
+  test('RP15 keeps prescribing and physical dispensing reconnect-required for safety', async () => {
     const workspace = await source('components/opd/OpdMasterWorkspace.tsx');
     const prescribeStart = workspace.indexOf("'PrescribeMedicationCommand'");
     const dispenseStart = workspace.indexOf("'DispensePrescriptionCommand'");
@@ -89,5 +89,11 @@ describe('OPD-RP11 pharmacy alignment', () => {
 
     expect(prescribeBlock).not.toContain('offlineQueue');
     expect(dispenseBlock).not.toContain('offlineQueue');
+    expect(workspace).toContain(
+      "requireOnlineOpdAuthority('medication prescribing safety evaluation')"
+    );
+    expect(workspace).toContain(
+      "requireOnlineOpdAuthority('physical FEFO pharmacy dispensing')"
+    );
   });
 });

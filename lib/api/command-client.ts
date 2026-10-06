@@ -17,6 +17,7 @@ export interface OfflineQueuePolicy {
   action: MutationAction;
   optimisticCache?: boolean;
   baseEntityVersion?: number;
+  dependsOnMutationIds?: string[];
 }
 
 export interface ExecuteCommandInput<TPayload extends Record<string, unknown> = Record<string, unknown>> {
@@ -48,6 +49,7 @@ async function queueGovernedOfflineCommand<TData>(
     idempotencyKey,
     schemaVersion: input.schemaVersion || 1,
     baseEntityVersion: input.offlineQueue.baseEntityVersion,
+    dependsOnMutationIds: input.offlineQueue.dependsOnMutationIds,
     optimisticCache: input.offlineQueue.optimisticCache,
     mutationId: commandId,
   });
@@ -269,6 +271,7 @@ async function queueOfflineRegistration<TData>(
       payload: { encounterId: localEncounterId },
       idempotencyKey: `opd-consultation-invoice:${localEncounterId}`,
       schemaVersion: 1,
+      dependsOnMutationIds: [commandId],
       optimisticCache: false,
       mutationId: `cmd_${crypto.randomUUID()}`,
     });

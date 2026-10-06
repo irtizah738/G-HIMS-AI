@@ -46,6 +46,18 @@ describe('OPD-RP13 authoritative appointments and waitlist', () => {
     expect(service).toContain('expectedServerVersion');
   });
 
+  test('non-admin scheduling is fail-closed to actor facility and department scope', async () => {
+    const service = await source(
+      'lib/backend/services/opd-appointment-domain-service.ts'
+    );
+
+    expect(service).toContain('requireActorSchedulingScope');
+    expect(service).toContain("'FACILITY_SCOPE_MISMATCH'");
+    expect(service).toContain("'DEPARTMENT_SCOPE_MISMATCH'");
+    expect(service).toContain('context.facilityIds');
+    expect(service).toContain('context.departmentIds');
+  });
+
   test('provider availability is derived from HCM roster privilege and leave authority', async () => {
     const service = await source(
       'lib/backend/services/opd-appointment-domain-service.ts'
@@ -151,6 +163,7 @@ describe('OPD-RP13 authoritative appointments and waitlist', () => {
     expect(rules).toContain('match /opdAppointments/{appointmentId}');
     expect(rules).toContain('match /opdWaitlist/{waitlistId}');
     expect(rules).toContain('match /opdAppointmentSlots/{slotId}');
+    expect(rules).toContain('match /opdWaitlistScopes/{scopeId}');
     expect(rules).toContain('allow write: if false');
   });
 

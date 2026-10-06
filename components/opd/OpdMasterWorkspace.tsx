@@ -55,6 +55,7 @@ import { OpdPatientTimelineAudit } from './OpdPatientTimelineAudit';
 import { OpdOfflineSyncManager } from './OpdOfflineSyncManager';
 import { executeActiveTenantCommand, registerActiveTenantPatient } from '@/lib/api/command-client';
 import { useAuth } from '@/lib/auth/auth-context';
+import { useOfflineStatus } from '@/hooks/useOfflineStatus';
 import { hydrateEdgeSnapshot } from '@/lib/offline/hydration';
 import {
   adaptAuthoritativeConsultationInvoice,
@@ -476,8 +477,16 @@ export function OpdMasterWorkspace() {
   // Active Context
   const [selectedEncounterId, setSelectedEncounterId] = useState<string>(() => IS_DEMO_RUNTIME ? 'enc-101' : '');
   const [activeTab, setActiveTab] = useState<string>('DASHBOARD');
-  const [isOnline, setIsOnline] = useState<boolean>(true);
-  const [pendingSyncCount, setPendingSyncCount] = useState<number>(0);
+  const {
+    isOnline,
+    isSyncing,
+    pendingSyncCount,
+    conflictsCount,
+    lastError: syncError,
+    offlineSimulationActive,
+    triggerSync,
+    setOfflineSimulation,
+  } = useOfflineStatus(auth.activeTenant?.tenantId);
   const [billingReconciliationBusy, setBillingReconciliationBusy] =
     useState<boolean>(false);
   const [billingReconciliationError, setBillingReconciliationError] =
@@ -597,9 +606,6 @@ export function OpdMasterWorkspace() {
       hash: 'DEMO-NON-AUTHORITATIVE',
     };
     setEvents((prev) => [newEvt, ...prev]);
-    if (!isOnline) {
-      setPendingSyncCount((c) => c + 1);
-    }
   };
 
   // HANDLER: Register new patient and start encounter through the
@@ -2552,15 +2558,25 @@ export function OpdMasterWorkspace() {
       {/* Offline Sync Status & Role Switcher Bar */}
       <OpdOfflineSyncManager
         isOnline={isOnline}
+        isSyncing={isSyncing}
         pendingSyncCount={pendingSyncCount}
+        conflictsCount={conflictsCount}
+        lastError={syncError}
         activeRole={activeRole}
         allowPersonaSwitch={false}
+        allowOfflineSimulation={IS_DEMO_RUNTIME}
+        offlineSimulationActive={offlineSimulationActive}
         onRoleChange={() => undefined}
-        onTriggerManualSync={() => {
-          setPendingSyncCount(0);
-          alert('Offline IndexedDB outbox batch synced to Firestore with zero conflict exceptions.');
+        onTriggerManualSync={async () => {
+          const result = await triggerSync(auth.activeTenant?.tenantId);
+          if (result.syncedCount > 0) {
+            await refreshAuthoritativeWorkspace();
+          }
         }}
-        onToggleOnlineStatus={() => setIsOnline(!isOnline)}
+        onToggleOfflineSimulation={async () => {
+          if (!IS_DEMO_RUNTIME) return;
+          await setOfflineSimulation(!offlineSimulationActive);
+        }}
       />
 
       {activeRole === 'UNAUTHORIZED' && (

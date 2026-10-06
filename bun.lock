@@ -44,6 +44,7 @@
   },
   "overrides": {
     "@grpc/grpc-js": "1.14.5",
+    "source-map-js": "1.2.2",
   },
   "packages": {
     "@alloc/quick-lru": ["@alloc/quick-lru@5.2.0", "", {}, ""],
@@ -1310,7 +1311,7 @@
 
     "signal-exit": ["signal-exit@4.1.0", "", {}, "sha512-bzyZ1e88w9O1iNJbKnOlvYTrWPDl46O1bG0D3XInv+9tkPrxrN8jUUTiFlDkkmKWgn1M6CfIA13SuGqOa9Korw=="],
 
-    "source-map-js": ["source-map-js@1.2.1", "", {}, ""],
+    "source-map-js": ["source-map-js@1.2.2", "", {}, ""],
 
     "space-separated-tokens": ["space-separated-tokens@2.0.2", "", {}, ""],
 

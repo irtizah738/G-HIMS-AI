@@ -60,7 +60,7 @@ function sanitizePayload(
 async function readEncounterEvents(
   tenantId: string,
   encounterId: string
-): Promise<DomainEventEnvelope[]> {
+): Promise<{ events: DomainEventEnvelope[]; truncated: boolean }> {
   const db = getAdminFirestore();
   if (!db) {
     throw new Error(
@@ -97,7 +97,7 @@ async function readEncounterEvents(
     }
   }
 
-  return [...byId.values()]
+  const scopedEvents = [...byId.values()]
     .filter(
       (event) =>
         String(event.tenantId || '') === tenantId &&
@@ -109,8 +109,15 @@ async function readEncounterEvents(
         Number(left.recordedAt || left.occurredAt || 0) -
           Number(right.recordedAt || right.occurredAt || 0) ||
         left.eventId.localeCompare(right.eventId)
-    )
-    .slice(-MAX_TIMELINE_EVENTS);
+    );
+
+  return {
+    events: scopedEvents.slice(-MAX_TIMELINE_EVENTS),
+    truncated:
+      aggregateSnapshot.size >= MAX_EVENTS_PER_QUERY ||
+      payloadSnapshot.size >= MAX_EVENTS_PER_QUERY ||
+      scopedEvents.length > MAX_TIMELINE_EVENTS,
+  };
 }
 
 async function readLinkedAudits(
@@ -272,13 +279,16 @@ export async function GET(req: NextRequest) {
 
     assertPatient360PatientAccess(context, patient, encounter);
 
-    const events = await readEncounterEvents(context.tenantId, encounterId);
-    const audits = await readLinkedAudits(
+    const eventRead = await readEncounterEvents(
       context.tenantId,
-      events.map((event) => event.eventId),
       encounterId
     );
-    const timeline = events.map((event) =>
+    const audits = await readLinkedAudits(
+      context.tenantId,
+      eventRead.events.map((event) => event.eventId),
+      encounterId
+    );
+    const timeline = eventRead.events.map((event) =>
       adaptTimelineEvent(event, audits.get(event.eventId), encounterId)
     );
 
@@ -298,7 +308,9 @@ export async function GET(req: NextRequest) {
           eventCount: timeline.length,
           linkedAuditCount: timeline.length - unlinkedEventCount,
           unlinkedEventCount,
-          fullyLinked: unlinkedEventCount === 0,
+          truncated: eventRead.truncated,
+          fullyLinked:
+            unlinkedEventCount === 0 && !eventRead.truncated,
         },
       },
       {

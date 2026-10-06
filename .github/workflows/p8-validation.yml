@@ -65,6 +65,9 @@ jobs:
       - name: Clinical identity routing and intake rework
         run: bun run test:clinical-rework
 
+      - name: Wave 1 clinical coordination closure
+        run: bun run test:wave1-clinical-coordination
+
       - name: Clinical Intelligence
         run: bun run test:ci7 && bun run test:ci8
 

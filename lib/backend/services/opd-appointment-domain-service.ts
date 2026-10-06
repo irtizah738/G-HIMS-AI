@@ -1482,7 +1482,9 @@ export class OpdAppointmentDomainService {
       );
     }
 
-    const link = await DomainStateRepository.getById<OpdAppointmentRecord>(
+    const link = await DomainStateRepository.getById<
+      OpdAppointmentRecord & { _serverVersion?: number }
+    >(
       context.tenantId,
       'opdAppointments',
       payload.appointmentId
@@ -1580,7 +1582,32 @@ export class OpdAppointmentDomainService {
           })),
         ],
         prepare: (current) => {
-          const appointment = current.appointment as unknown as OpdAppointmentRecord;
+          const appointment = current.appointment as unknown as
+            OpdAppointmentRecord & { _serverVersion?: number };
+
+          const sameStringSet = (left: string[] = [], right: string[] = []) =>
+            left.length === right.length &&
+            [...left].sort().every(
+              (value, index) => value === [...right].sort()[index]
+            );
+
+          if (
+            Number(appointment._serverVersion || 0) !==
+              Number(link._serverVersion || 0) ||
+            appointment.scheduledStartAt !== link.scheduledStartAt ||
+            appointment.scheduledEndAt !== link.scheduledEndAt ||
+            !sameStringSet(appointment.slotIds, link.slotIds) ||
+            !sameStringSet(
+              appointment.patientSlotIds || [],
+              link.patientSlotIds || []
+            )
+          ) {
+            throw new AtomicMutationRejectedError(
+              'APPOINTMENT_RESCHEDULE_CONCURRENCY_RETRY_REQUIRED',
+              'Appointment schedule changed after reschedule preflight. Refresh authoritative appointment state and retry.'
+            );
+          }
+
           assertProviderAuthoritySnapshot(current, {
             authority,
             providerEmployeeId: appointment.providerEmployeeId,

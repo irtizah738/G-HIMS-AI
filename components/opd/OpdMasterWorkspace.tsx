@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   Users,
   Search,
@@ -439,6 +440,10 @@ const SEED_EVENTS: OpdTimelineEvent[] = [
 
 export function OpdMasterWorkspace() {
   const auth = useAuth();
+  const searchParams = useSearchParams();
+  const requestedEncounterId = String(
+    searchParams.get('opdEncounterId') || ''
+  ).trim();
   const activeRole = useMemo(() => resolveOpdRole(auth.roles), [auth.roles]);
   const normalizedRoles = useMemo(
     () => new Set(auth.roles.map((role) => String(role).trim().toUpperCase())),
@@ -670,6 +675,14 @@ export function OpdMasterWorkspace() {
   ]);
 
   // Selected encounter object
+  useEffect(() => {
+    if (!requestedEncounterId) return;
+    if (!encounters.some((encounter) => encounter.id === requestedEncounterId)) {
+      return;
+    }
+    setSelectedEncounterId(requestedEncounterId);
+  }, [encounters, requestedEncounterId]);
+
   const activeEncounter = useMemo(() => {
     return encounters.find((e) => e.id === selectedEncounterId) || encounters[0];
   }, [encounters, selectedEncounterId]);
@@ -811,6 +824,10 @@ export function OpdMasterWorkspace() {
       insuranceDetails: newPatient.insuranceDetails,
       consentDecisions: newPatient.registrationConsentDecisions,
       encounterType: 'OPD',
+      ...(newPatient.registrationFacilityId
+        ? { facilityId: newPatient.registrationFacilityId }
+        : {}),
+      departmentId: 'General Medicine',
       department: 'General Medicine',
       priority: 'ROUTINE',
       chiefComplaint: 'New outpatient registration',
@@ -2014,7 +2031,9 @@ export function OpdMasterWorkspace() {
         );
       }
 
-      setActiveTab(isSettled ? 'QUEUE' : 'BILLING');
+      setActiveTab(
+        isSettled && canAccessTab('QUEUE') ? 'QUEUE' : 'BILLING'
+      );
       return;
     }
 
@@ -2765,7 +2784,9 @@ export function OpdMasterWorkspace() {
             : encounter
         )
       );
-      setActiveTab('DISPOSITION');
+      setActiveTab(
+        canAccessTab('DISPOSITION') ? 'DISPOSITION' : 'BILLING'
+      );
     } catch (error) {
       const message =
         error instanceof Error
@@ -3002,6 +3023,7 @@ export function OpdMasterWorkspace() {
             return (
               <button
                 key={tab.id}
+                data-testid={`opd-tab-${tab.id.toLowerCase()}`}
                 onClick={() => setActiveTab(tab.id)}
                 className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shrink-0 transition-all cursor-pointer ${
                   isActive
@@ -3019,7 +3041,12 @@ export function OpdMasterWorkspace() {
 
       {/* Active Patient Quick Banner (if patient is selected) */}
       {activeEncounter && activeTab !== 'DASHBOARD' && activeTab !== 'SEARCH_MPI' && (
-        <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-xs">
+        <div
+          data-testid="opd-active-patient-banner"
+          data-encounter-id={activeEncounter.id}
+          data-patient-id={activeEncounter.patientId}
+          className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-xs"
+        >
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 flex items-center justify-center font-black text-blue-600 text-sm">
               {activeEncounter.patientName.charAt(0)}
@@ -3104,6 +3131,7 @@ export function OpdMasterWorkspace() {
       {/* 3. Patient Registration & Informed Consent */}
       {activeTab === 'REGISTRATION' && (
         <OpdRegistrationConsent
+          authorizedFacilityIds={auth.user?.facilityIds || []}
           onRegisterSuccess={(newPatient) => handleRegisterSuccess(newPatient)}
           onCancel={() => setActiveTab('DASHBOARD')}
         />
@@ -3133,7 +3161,7 @@ export function OpdMasterWorkspace() {
       )}
 
       {/* 5. Live Queue Engine & Calling */}
-      {activeTab === 'QUEUE' && (
+      {activeTab === 'QUEUE' && canAccessTab('QUEUE') && (
         <OpdQueueEngine
           queue={queue}
           onCallToken={async (token, room) => {
@@ -3362,6 +3390,7 @@ export function OpdMasterWorkspace() {
             )}
 
             <button
+              data-testid="opd-final-reconcile"
               type="button"
               disabled={
                 !canSettlePayment ||

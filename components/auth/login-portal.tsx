@@ -101,12 +101,6 @@ const DEMO_PERSONAS: Persona[] = [
   },
 ];
 
-const TENANTS = [
-  { id: 'central-metro-hospital', name: 'Central Metro General Hospital (CMGH)' },
-  { id: 'st-jude-childrens', name: 'St. Jude Specialist Pediatric Center (SJPC)' },
-  { id: 'mayo-clinic-hub', name: 'Metropolitan Academic Medical Center (MAMC)' },
-];
-
 export function LoginPortal() {
   const router = useRouter();
   const { user, signIn, signInFederated, signInSSO, error } = useAuth();
@@ -114,7 +108,7 @@ export function LoginPortal() {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [tenantId, setTenantId] = useState('central-metro-hospital');
+  const [tenantId, setTenantId] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberDevice, setRememberDevice] = useState(true);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -152,7 +146,7 @@ export function LoginPortal() {
     setSubmitting(true);
     try {
       const result = await signIn(email, password, {
-        tenantId,
+        ...(tenantId.trim() ? { tenantId: tenantId.trim().toLowerCase() } : {}),
         rememberDevice,
       });
 
@@ -180,7 +174,7 @@ export function LoginPortal() {
       if (!googleToken) return;
 
       const result = await signInFederated({
-        tenantId,
+        ...(tenantId.trim() ? { tenantId: tenantId.trim().toLowerCase() } : {}),
         rememberDevice,
       });
 
@@ -209,8 +203,17 @@ export function LoginPortal() {
       return;
     }
 
+    if (!tenantId.trim()) {
+      setLocalError('Hospital tenant ID is required for enterprise SSO.');
+      setSsoLoading(false);
+      return;
+    }
+
     try {
-      const result = await signInSSO(ssoEmail, tenantId);
+      const result = await signInSSO(
+        ssoEmail,
+        tenantId.trim().toLowerCase()
+      );
       if (result?.authenticated) {
         setSsoModalOpen(false);
         if (typeof window !== 'undefined') {
@@ -295,22 +298,24 @@ export function LoginPortal() {
               {/* Facility Scope */}
               <div className="space-y-1.5">
                 <label className="block text-xs font-semibold text-slate-300">
-                  Hospital Facility Scope
+                  Hospital Tenant ID <span className="font-normal text-slate-500">(optional)</span>
                 </label>
                 <div className="relative">
-                  <select
+                  <input
+                    data-testid="login-tenant-id"
+                    type="text"
                     value={tenantId}
                     onChange={(e) => setTenantId(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-xs font-medium text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition appearance-none cursor-pointer"
-                  >
-                    {TENANTS.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
+                    placeholder="Leave blank to use your only authorized hospital"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    className="w-full pl-10 pr-4 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-xs font-medium text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition placeholder:text-slate-600"
+                  />
                   <Building2 className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                 </div>
+                <p className="text-[10px] leading-relaxed text-slate-500">
+                  Single-hospital staff can leave this blank. Multi-hospital staff must enter the tenant ID assigned by hospital administration.
+                </p>
               </div>
 
               {/* Email Input */}
@@ -320,6 +325,7 @@ export function LoginPortal() {
                 </label>
                 <div className="relative">
                   <input
+                    data-testid="login-email"
                     type="email"
                     required
                     value={email}
@@ -346,6 +352,7 @@ export function LoginPortal() {
                 </div>
                 <div className="relative">
                   <input
+                    data-testid="login-password"
                     type={showPassword ? 'text' : 'password'}
                     required
                     value={password}
@@ -382,6 +389,7 @@ export function LoginPortal() {
 
               {/* Submit Action */}
               <button
+                data-testid="login-submit"
                 type="submit"
                 disabled={submitting || ssoLoading}
                 className="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold text-xs shadow-lg shadow-blue-600/25 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed mt-2 cursor-pointer"

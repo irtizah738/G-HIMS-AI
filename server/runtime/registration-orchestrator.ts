@@ -58,6 +58,8 @@ export interface RegisterPatientEncounterParams {
   contactPhone: string;
   address: string;
   encounterType?: EncounterType;
+  facilityId: string;
+  departmentId: string;
   department?: string;
   priority?: 'ROUTINE' | 'URGENT' | 'EMERGENCY';
   chiefComplaint?: string;
@@ -93,6 +95,8 @@ export interface OrchestrationResult {
     patientName: string;
     mrn: string;
     tokenNumber: string;
+    facilityId: string;
+    departmentId: string;
     department: string;
     priority: string;
     status: 'payment_pending';
@@ -123,7 +127,9 @@ function registrationPayload(params: RegisterPatientEncounterParams): Record<str
     contactPhone: params.contactPhone,
     address: params.address,
     encounterType: params.encounterType || 'OPD',
-    department: params.department || 'General Medicine',
+    facilityId: params.facilityId,
+    departmentId: params.departmentId,
+    department: params.department || params.departmentId || 'General Medicine',
     priority: params.priority || 'ROUTINE',
     chiefComplaint: params.chiefComplaint || '',
     assignedDoctor: params.assignedDoctor || '',
@@ -254,7 +260,9 @@ export async function registerPatientAndEncounter(
     resourceAssignmentState: 'NONE',
     workflowSnapshotId: '',
     startedAt: now,
-    department: params.department || 'General Medicine',
+    facilityId: params.facilityId,
+    departmentId: params.departmentId,
+    department: params.department || params.departmentId || 'General Medicine',
     priority: params.priority || 'ROUTINE',
     chiefComplaint: params.chiefComplaint || '',
     assignedDoctor: params.assignedDoctor || '',
@@ -279,6 +287,8 @@ export async function registerPatientAndEncounter(
     severity: 'NORMAL',
     metadata: {
       tokenNumber,
+      facilityId: encounterRecord.facilityId,
+      departmentId: encounterRecord.departmentId,
       department: encounterRecord.department,
       chiefComplaint: encounterRecord.chiefComplaint,
       initialStage: 'REGISTRATION',
@@ -343,6 +353,8 @@ export async function registerPatientAndEncounter(
       gender: params.gender,
       dateOfBirth: params.dateOfBirth,
       encounterId,
+      facilityId: encounterRecord.facilityId,
+      departmentId: encounterRecord.departmentId,
       department: encounterRecord.department,
       timestamp: new Date(now).toISOString(),
     },
@@ -360,7 +372,9 @@ export async function registerPatientAndEncounter(
     patientName: params.fullName,
     mrn,
     tokenNumber,
-    department: encounterRecord.department || 'General Medicine',
+    facilityId: params.facilityId,
+    departmentId: params.departmentId,
+    department: encounterRecord.department || params.departmentId || 'General Medicine',
     priority: (params.priority || 'ROUTINE').toLowerCase(),
     status: 'payment_pending' as const,
     arrivalTime: new Date(now).toISOString(),

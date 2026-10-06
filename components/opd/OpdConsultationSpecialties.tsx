@@ -236,6 +236,7 @@ export function OpdConsultationSpecialties({
               S — Subjective & History of Present Illness (HPI)
             </h3>
             <textarea
+              data-testid="opd-consultation-subjective"
               rows={3}
               value={subjective}
               onChange={(e) => setSubjective(e.target.value)}
@@ -275,6 +276,7 @@ export function OpdConsultationSpecialties({
               O — Objective & Specialty Examination Protocol ({selectedSpecialty.replace(/_/g, ' ')})
             </h3>
             <textarea
+              data-testid="opd-consultation-objective"
               rows={3}
               value={objective}
               onChange={(e) => setObjective(e.target.value)}
@@ -478,6 +480,7 @@ export function OpdConsultationSpecialties({
                   A — Clinical Synthesis & Differential Assessment
                 </label>
                 <textarea
+                  data-testid="opd-consultation-assessment"
                   rows={2}
                   value={assessment}
                   onChange={(e) => setAssessment(e.target.value)}
@@ -490,6 +493,7 @@ export function OpdConsultationSpecialties({
                   P — Treatment, Investigations, Patient Counseling & Follow-up Plan
                 </label>
                 <textarea
+                  data-testid="opd-consultation-plan"
                   rows={3}
                   value={plan}
                   onChange={(e) => setPlan(e.target.value)}
@@ -539,6 +543,7 @@ export function OpdConsultationSpecialties({
             <div className="relative">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
+                data-testid="opd-consultation-icd-search"
                 type="text"
                 placeholder="Search ICD-10 code (e.g. I10, E11, Asthma)..."
                 value={icdSearchTerm}
@@ -557,6 +562,7 @@ export function OpdConsultationSpecialties({
                 ).map((c) => (
                   <button
                     key={c.code}
+                    data-testid={`opd-consultation-icd-${c.code.replace(/[^a-zA-Z0-9]/g, '-')}`}
                     onClick={() => {
                       handleAddDiagnosis(c);
                       setIcdSearchTerm('');
@@ -621,6 +627,7 @@ export function OpdConsultationSpecialties({
 
           {/* Final Commit Button */}
           <button
+            data-testid="opd-consultation-submit"
             onClick={handleCommitSoap}
             className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-all"
           >

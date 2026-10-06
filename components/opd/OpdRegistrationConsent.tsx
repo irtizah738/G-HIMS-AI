@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   UserPlus,
   ShieldCheck,
@@ -18,15 +18,39 @@ import { PatientDemographics, ConsentCaptureDecision } from '@/types/opd-domain'
 
 interface OpdRegistrationConsentProps {
   initialData?: Partial<PatientDemographics>;
+  authorizedFacilityIds?: string[];
   onRegisterSuccess: (patient: PatientDemographics) => void;
   onCancel?: () => void;
 }
 
 export function OpdRegistrationConsent({
   initialData,
+  authorizedFacilityIds = [],
   onRegisterSuccess,
   onCancel,
 }: OpdRegistrationConsentProps) {
+  const normalizedFacilityIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          authorizedFacilityIds
+            .map((value) => String(value || '').trim())
+            .filter(Boolean)
+        )
+      ),
+    [authorizedFacilityIds]
+  );
+  const [registrationFacilityId, setRegistrationFacilityId] =
+    useState<string>(
+      initialData?.registrationFacilityId ||
+        (normalizedFacilityIds.length === 1 ? normalizedFacilityIds[0] : '')
+    );
+
+  useEffect(() => {
+    if (!registrationFacilityId && normalizedFacilityIds.length === 1) {
+      setRegistrationFacilityId(normalizedFacilityIds[0]);
+    }
+  }, [normalizedFacilityIds, registrationFacilityId]);
   const [fullName, setFullName] = useState<string>(initialData?.fullName || '');
   const [preferredName, setPreferredName] = useState<string>(initialData?.preferredName || '');
   const [gender, setGender] = useState<'Male' | 'Female' | 'Other' | 'Unknown' | ''>(
@@ -101,6 +125,14 @@ export function OpdRegistrationConsent({
       alert('The controlled OPD pilot currently supports cash / out-of-pocket billing only.');
       return;
     }
+    if (
+      normalizedFacilityIds.length > 0 &&
+      (!registrationFacilityId ||
+        !normalizedFacilityIds.includes(registrationFacilityId))
+    ) {
+      alert('Select an authorized hospital facility before registration.');
+      return;
+    }
     if (generalConsentGranted === null || dataSharingGranted === null) {
       alert('Record an explicit Grant or Withhold decision for each registration consent.');
       return;
@@ -137,6 +169,7 @@ export function OpdRegistrationConsent({
       secondaryPhone: secondaryPhone.trim() || undefined,
       email: email.trim() || undefined,
       residentialAddress: residentialAddress.trim(),
+      registrationFacilityId: registrationFacilityId || undefined,
       emergencyContact:
         emergencyName.trim() && emergencyRelation.trim() && emergencyPhone.trim()
           ? {
@@ -192,6 +225,7 @@ export function OpdRegistrationConsent({
                 Full Legal Name *
               </label>
               <input
+                data-testid="opd-registration-full-name"
                 type="text"
                 required
                 value={fullName}
@@ -217,6 +251,7 @@ export function OpdRegistrationConsent({
                 CNIC / National ID *
               </label>
               <input
+                data-testid="opd-registration-national-id"
                 type="text"
                 required
                 value={nationalId}
@@ -232,6 +267,7 @@ export function OpdRegistrationConsent({
               </label>
               <div className="flex gap-2">
                 <input
+                  data-testid="opd-registration-dob"
                   type="date"
                   required
                   value={dob}
@@ -250,6 +286,7 @@ export function OpdRegistrationConsent({
             <div>
               <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">Gender</label>
               <select
+                data-testid="opd-registration-gender"
                 value={gender}
                 onChange={(e) => setGender(e.target.value as any)}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
@@ -295,6 +332,7 @@ export function OpdRegistrationConsent({
                 Primary Phone *
               </label>
               <input
+                data-testid="opd-registration-phone"
                 type="text"
                 required
                 value={phone}
@@ -314,6 +352,7 @@ export function OpdRegistrationConsent({
             <div>
               <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">Residential Address</label>
               <input
+                data-testid="opd-registration-address"
                 type="text"
                 required
                 value={residentialAddress}
@@ -352,6 +391,39 @@ export function OpdRegistrationConsent({
           </div>
         </div>
 
+        {/* Registration facility scope */}
+        <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+          <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+            Hospital Facility *
+          </label>
+          {normalizedFacilityIds.length > 0 ? (
+            <select
+              data-testid="opd-registration-facility"
+              required
+              value={registrationFacilityId}
+              onChange={(e) => setRegistrationFacilityId(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+            >
+              {normalizedFacilityIds.length > 1 && (
+                <option value="">Select authorized facility</option>
+              )}
+              {normalizedFacilityIds.map((facilityId) => (
+                <option key={facilityId} value={facilityId}>
+                  {facilityId}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800">
+              No authorized facility is available for this staff session.
+            </div>
+          )}
+          <p className="text-[10px] text-slate-500">
+            Facility scope comes from authenticated IAM. The server rejects any
+            facility outside this list.
+          </p>
+        </div>
+
         {/* Section 3: Payer Tariff & Insurance */}
         <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">
           <h3 className="text-xs font-bold uppercase tracking-wider text-blue-600 flex items-center gap-1.5">
@@ -362,6 +434,7 @@ export function OpdRegistrationConsent({
             <div>
               <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">Tariff Class</label>
               <select
+                data-testid="opd-registration-tariff"
                 value={tariffPlan}
                 onChange={(e) => setTariffPlan(e.target.value as any)}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
@@ -437,6 +510,7 @@ export function OpdRegistrationConsent({
                 </div>
                 <div className="flex gap-2">
                   <button
+                    data-testid={`opd-consent-${item.key}-grant`}
                     type="button"
                     onClick={() => item.setValue(true)}
                     className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold border ${
@@ -474,6 +548,7 @@ export function OpdRegistrationConsent({
         {/* Form Submission Actions */}
         <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-3">
           <button
+            data-testid="opd-registration-submit"
             type="submit"
             className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs transition-all cursor-pointer"
           >

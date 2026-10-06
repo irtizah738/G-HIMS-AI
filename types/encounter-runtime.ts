@@ -73,6 +73,8 @@ export interface EncounterRuntime {
   workflowSnapshotId: string;
   startedAt: number;
   endedAt?: number;
+  facilityId?: string;
+  departmentId?: string;
   department?: string;
   priority?: 'ROUTINE' | 'URGENT' | 'EMERGENCY';
   chiefComplaint?: string;

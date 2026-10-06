@@ -38,6 +38,7 @@ function conflictCategory(commandType: string): ConflictCategory {
       'RecordVitalsCommand',
       'SignClinicalNoteCommand',
       'PlaceDiagnosticOrderCommand',
+      'CreateOpdConsultationInvoiceCommand',
       'CreateEncounterCommand',
       'CreateTelehealthSessionCommand',
     ].includes(commandType)
@@ -65,6 +66,7 @@ function rewriteMappedReferences(
 function entityTypeForCommand(commandType: string): string {
   const map: Record<string, string> = {
     PlaceDiagnosticOrderCommand: 'DIAGNOSTIC_ORDER',
+    CreateOpdConsultationInvoiceCommand: 'INVOICE',
     PrescribeMedicationCommand: 'PRESCRIPTION',
     RecordVitalsCommand: 'ENCOUNTER_EVIDENCE',
     SignClinicalNoteCommand: 'ENCOUNTER_EVIDENCE',
@@ -128,6 +130,16 @@ async function processOfflineRegistration(
     chronicConditions: Array.isArray(payload.chronicConditions)
       ? payload.chronicConditions.map(String)
       : [],
+    tariffPlan: payload.tariffPlan
+      ? String(payload.tariffPlan) as any
+      : undefined,
+    insuranceDetails:
+      payload.insuranceDetails && typeof payload.insuranceDetails === 'object'
+        ? payload.insuranceDetails as any
+        : undefined,
+    consentDecisions: Array.isArray(payload.consentDecisions)
+      ? payload.consentDecisions as any
+      : undefined,
   });
 
   const mappings = [

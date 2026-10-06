@@ -1767,7 +1767,7 @@ export function OpdMasterWorkspace() {
             collection: 'cashReceipts',
             resourceId: payment.id,
             action: 'CREATE',
-            optimisticCache: false,
+            optimisticCache: true,
           },
         }
       );
@@ -1923,7 +1923,7 @@ export function OpdMasterWorkspace() {
             collection: 'cashReceipts',
             resourceId: payment.id,
             action: 'CREATE',
-            optimisticCache: false,
+            optimisticCache: true,
           },
         }
       );
@@ -2094,7 +2094,7 @@ export function OpdMasterWorkspace() {
             collection: 'cashReceipts',
             resourceId: payment.id,
             action: 'CREATE',
-            optimisticCache: false,
+            optimisticCache: true,
           },
         }
       );
@@ -2241,7 +2241,7 @@ export function OpdMasterWorkspace() {
             collection: 'cashReceipts',
             resourceId: payment.id,
             action: 'CREATE',
-            optimisticCache: false,
+            optimisticCache: true,
           },
         }
       );

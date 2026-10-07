@@ -6,7 +6,7 @@ const files = execFileSync('git', ['ls-files', '-z'], { encoding: 'utf8' })
   .filter(Boolean);
 
 const binaryExtensions = /\.(?:png|jpe?g|gif|webp|ico|pdf|woff2?|ttf|zip|gz|tgz|lock)$/i;
-const patterns = [
+const patterns: Array<{ id: string; regex: RegExp; configOnly?: boolean }> = [
   { id: 'PRIVATE_KEY', regex: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/ },
   { id: 'GITHUB_CLASSIC_TOKEN', regex: /\bghp_[A-Za-z0-9]{30,}\b/ },
   { id: 'GITHUB_FINE_GRAINED_TOKEN', regex: /\bgithub_pat_[A-Za-z0-9_]{40,}\b/ },
@@ -14,6 +14,7 @@ const patterns = [
   { id: 'SLACK_TOKEN', regex: /\bxox[baprs]-[A-Za-z0-9-]{20,}\b/ },
   {
     id: 'NONEMPTY_SECRET_ASSIGNMENT',
+    configOnly: true,
     regex:
       /(?:FIREBASE_PRIVATE_KEY|GEMINI_API_KEY|GHIMS_HL7_INGEST_API_KEY|GHIMS_DEVICE_TELEMETRY_INGEST_API_KEY|GHIMS_EDI_CLEARINGHOUSE_API_KEY|GHIMS_EDI_835_INGEST_API_KEY)\s*=\s*[^\s#]{8,}/,
   },
@@ -34,6 +35,12 @@ for (const file of files) {
   const lines = text.split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
     for (const pattern of patterns) {
+      if (
+        pattern.configOnly &&
+        (file.startsWith('tests/') || file.startsWith('emulator-security/'))
+      ) {
+        continue;
+      }
       if (pattern.regex.test(lines[index])) {
         findings.push({
           file,

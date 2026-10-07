@@ -13,12 +13,15 @@ import {
   XCircle,
 } from 'lucide-react';
 import {
+  acceptPacuTransferEdge,
   advanceSurgicalCaseEdge,
   cancelSurgicalCaseEdge,
+  completePacuRecoveryEdge,
   hydrateSurgicalProjection,
   loadLocalSurgicalProjection,
   recordSurgicalChecklistEdge,
   scheduleSurgicalCaseEdge,
+  transferSurgicalCaseToPacuEdge,
   type GovernedSurgicalCase,
   type SurgicalEdgeProjection,
 } from '@/lib/clinical/surgical-edge-adapter';
@@ -34,6 +37,7 @@ const empty: SurgicalEdgeProjection = {
   rooms: [],
   patients: [],
   encounters: [],
+  staff: [],
   source: 'LOCAL',
 };
 
@@ -56,6 +60,11 @@ export function SurgicalOperationsConsole({
   const [urgency, setUrgency] = useState<'elective' | 'urgent' | 'emergency'>('elective');
   const [checklistEvidence, setChecklistEvidence] = useState('');
   const [cancelReason, setCancelReason] = useState('');
+  const [pacuRoomId, setPacuRoomId] = useState('');
+  const [receivingClinicianId, setReceivingClinicianId] = useState('');
+  const [pacuHandoffSummary, setPacuHandoffSummary] = useState('');
+  const [pacuRecoveryAssessment, setPacuRecoveryAssessment] = useState('');
+  const [pacuDisposition, setPacuDisposition] = useState<'WARD' | 'ICU' | 'DISCHARGE'>('WARD');
   const [busy, setBusy] = useState(false);
 
   const apply = useCallback((next: SurgicalEdgeProjection) => {
@@ -187,6 +196,57 @@ export function SurgicalOperationsConsole({
     );
   };
 
+  const transferToPacu = async () => {
+    if (!selectedCase || !pacuRoomId || !receivingClinicianId || !pacuHandoffSummary.trim()) {
+      setError('Recovery room, receiving clinician and PACU handoff summary are required.');
+      return;
+    }
+    await run(
+      () =>
+        transferSurgicalCaseToPacuEdge({
+          caseId: selectedCase.id,
+          pacuRoomId,
+          receivingClinicianId,
+          handoffSummary: pacuHandoffSummary.trim(),
+          expectedActions: ['Receive postoperative patient', 'Perform PACU assessment', 'Escalate deterioration immediately'],
+        }),
+      'Patient transferred to PACU with a pending receiving-clinician handoff.'
+    );
+    setPacuHandoffSummary('');
+  };
+
+  const acceptPacu = async () => {
+    if (!selectedCase?.pacuHandoffId) {
+      setError('No pending PACU handoff is attached to this case.');
+      return;
+    }
+    await run(
+      () =>
+        acceptPacuTransferEdge({
+          caseId: selectedCase.id,
+          handoffId: selectedCase.pacuHandoffId!,
+        }),
+      'PACU handoff accepted by the authenticated receiving clinician.'
+    );
+  };
+
+  const completePacu = async () => {
+    if (!selectedCase || !pacuRecoveryAssessment.trim()) {
+      setError('A PACU recovery assessment is required before completing recovery.');
+      return;
+    }
+    await run(
+      () =>
+        completePacuRecoveryEdge({
+          caseId: selectedCase.id,
+          recoveryAssessment: pacuRecoveryAssessment.trim(),
+          disposition: pacuDisposition,
+        }),
+      'PACU recovery completed and recovery-room capacity released.'
+    );
+    setPacuRecoveryAssessment('');
+  };
+
   const cancel = async () => {
     if (!selectedCase || cancelReason.trim().length < 3) {
       setError('A substantive cancellation reason is required.');
@@ -254,9 +314,11 @@ export function SurgicalOperationsConsole({
             <input value={encounterId} readOnly placeholder="Active encounter resolved automatically" className="rounded-xl border bg-slate-50 p-2 text-sm dark:bg-slate-800" />
             <select value={roomId} onChange={(event) => setRoomId(event.target.value)} className="rounded-xl border bg-transparent p-2 text-sm">
               <option value="">Select operating room</option>
-              {projection.rooms.map((room) => (
-                <option key={room.roomId} value={room.roomId}>{room.roomNumber} — {room.departmentName}</option>
-              ))}
+              {projection.rooms
+                .filter((room) => room.roomType === 'operating_room')
+                .map((room) => (
+                  <option key={room.roomId} value={room.roomId}>{room.roomNumber} — {room.departmentName}</option>
+                ))}
             </select>
             <select value={urgency} onChange={(event) => setUrgency(event.target.value as typeof urgency)} className="rounded-xl border bg-transparent p-2 text-sm">
               <option value="elective">Elective</option>
@@ -346,9 +408,55 @@ export function SurgicalOperationsConsole({
                 <div className="flex flex-wrap gap-2">
                   {selectedCase.status === 'scheduled' && <button onClick={() => void advance('pre_op')} disabled={busy} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white">Start pre-op</button>}
                   {selectedCase.status === 'pre_op' && <button onClick={() => void advance('intra_op')} disabled={busy} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white">Start intra-op</button>}
-                  {selectedCase.status === 'intra_op' && <button onClick={() => void advance('post_op_pacu')} disabled={busy} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white">Transfer to PACU stage</button>}
-                  {selectedCase.status === 'post_op_pacu' && <button onClick={() => void advance('completed')} disabled={busy} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Complete case</button>}
                 </div>
+
+                {selectedCase.status === 'intra_op' && (
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    <select value={pacuRoomId} onChange={(event) => setPacuRoomId(event.target.value)} className="rounded-lg border bg-transparent p-2 text-xs">
+                      <option value="">Select PACU recovery room</option>
+                      {projection.rooms.filter((room) => room.roomType === 'recovery').map((room) => (
+                        <option key={room.roomId} value={room.roomId}>
+                          {room.roomNumber} — {room.currentOccupancy}/{room.capacity}
+                        </option>
+                      ))}
+                    </select>
+                    <select value={receivingClinicianId} onChange={(event) => setReceivingClinicianId(event.target.value)} className="rounded-lg border bg-transparent p-2 text-xs">
+                      <option value="">Select receiving clinician</option>
+                      {projection.staff
+                        .filter((member) => ['Nurse', 'Physician', 'Surgeon'].includes(member.role) && member.status !== 'off-duty')
+                        .map((member) => (
+                          <option key={member.id} value={member.id}>{member.fullName} — {member.role}</option>
+                        ))}
+                    </select>
+                    <textarea value={pacuHandoffSummary} onChange={(event) => setPacuHandoffSummary(event.target.value)} placeholder="Postoperative condition, airway/hemodynamic status, risks and immediate PACU priorities" className="rounded-lg border bg-transparent p-2 text-xs md:col-span-2" />
+                    <button onClick={() => void transferToPacu()} disabled={busy || !phaseComplete('signOut')} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white md:col-span-2 md:w-fit">
+                      Transfer to PACU with handoff
+                    </button>
+                  </div>
+                )}
+
+                {selectedCase.status === 'post_op_pacu' && selectedCase.pacuTransferStatus === 'PENDING_ACCEPTANCE' && (
+                  <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+                    PACU handoff is pending acceptance.
+                    <button onClick={() => void acceptPacu()} disabled={busy} className="ml-3 rounded-lg bg-amber-600 px-3 py-2 font-semibold text-white">
+                      Accept PACU handoff
+                    </button>
+                  </div>
+                )}
+
+                {selectedCase.status === 'post_op_pacu' && selectedCase.pacuTransferStatus === 'ACCEPTED' && (
+                  <div className="mt-3 grid gap-2">
+                    <textarea value={pacuRecoveryAssessment} onChange={(event) => setPacuRecoveryAssessment(event.target.value)} placeholder="PACU recovery assessment and readiness for disposition" className="rounded-lg border bg-transparent p-2 text-xs" />
+                    <select value={pacuDisposition} onChange={(event) => setPacuDisposition(event.target.value as typeof pacuDisposition)} className="rounded-lg border bg-transparent p-2 text-xs">
+                      <option value="WARD">Ward</option>
+                      <option value="ICU">ICU</option>
+                      <option value="DISCHARGE">Discharge</option>
+                    </select>
+                    <button onClick={() => void completePacu()} disabled={busy} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white w-fit">
+                      Complete PACU recovery
+                    </button>
+                  </div>
+                )}
               </div>
 
               {!['completed', 'cancelled'].includes(String(selectedCase.status)) && (

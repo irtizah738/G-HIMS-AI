@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 
 type PlaywrightSpec = {
   title?: string;
@@ -31,8 +32,10 @@ function currentGitSha(): string {
   ).trim();
   if (envSha) return envSha;
   try {
-    const result = Bun.spawnSync(['git', 'rev-parse', 'HEAD']);
-    if (result.exitCode === 0) return result.stdout.toString().trim();
+    return execFileSync('git', ['rev-parse', 'HEAD'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
   } catch {
     // Evidence generation remains fail-closed below if SHA cannot be proven.
   }

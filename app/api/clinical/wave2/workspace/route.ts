@@ -76,10 +76,13 @@ async function readPatientCollection(
   }
 
   return snapshot.docs
-    .map((document) => ({
-      id: document.id,
-      ...document.data(),
-    }))
+    .map((document) => {
+      const data = document.data() as Record<string, unknown>;
+      return {
+        id: document.id,
+        ...data,
+      } as Record<string, unknown>;
+    })
     .filter((record) => {
       const recordEncounter = String(record.encounterId || '').trim();
       return !recordEncounter || recordEncounter === encounterId;

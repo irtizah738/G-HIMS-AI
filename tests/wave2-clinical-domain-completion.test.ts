@@ -257,7 +257,7 @@ describe('Wave 2 clinical domain completion', () => {
       events,
     }, 600);
 
-    expect(projection.projectionVersion).toBe(5);
+    expect(projection.projectionVersion).toBe(6);
     expect(projection.recentMedicationAdministrations).toHaveLength(1);
     expect(projection.recentMedicationAdministrations[0]?.sourceEventId).toBe('evt-med');
     expect(projection.recentSpecialtyActivities.map((item) => item.domain)).toEqual([

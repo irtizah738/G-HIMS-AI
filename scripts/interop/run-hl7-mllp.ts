@@ -14,7 +14,7 @@ const server = startHl7MllpServer({
   port: Number(process.env.GHIMS_HL7_MLLP_PORT || 2575),
   ingestUrl: process.env.GHIMS_HL7_INTERNAL_INGEST_URL || 'http://127.0.0.1:3000/api/interop/hl7/receive',
   ingestApiKey: process.env.GHIMS_HL7_INGEST_API_KEY || '',
-  sourceRoutes: jsonRoutes(process.env.GHIMS_HL7_MLLP_SOURCE_ROUTES_JSON),
+  sourceRoutes: jsonRoutes(process.env.GHIMS_HL7_SOURCE_ROUTES_JSON || process.env.GHIMS_HL7_MLLP_SOURCE_ROUTES_JSON),
   tls: tlsEnabled
     ? {
         certPath: process.env.GHIMS_HL7_MLLP_TLS_CERT_PATH || '',

@@ -64,8 +64,10 @@ describe('Wave 2 clinical domain completion', () => {
     expect(service).toContain('EMAR_SCHEDULED_COMMAND_REQUIRED');
     expect(bus).toContain('NursingEmarDomainService.rejectLegacyAdministration');
 
-    expect(client).toContain("commandType: 'AdministerScheduledMedicationCommand'").toBe(false);
     expect(client).toContain("'AdministerScheduledMedicationCommand'");
+    expect(client).not.toContain("medicationName: payload.");
+    expect(client).not.toContain("dose: payload.");
+    expect(client).not.toContain("route: payload.");
     expect(client).toContain("offlineCollection: 'medicationAdministrations'");
     expect(client).toContain('optimisticCache: false');
   });

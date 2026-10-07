@@ -410,6 +410,36 @@ export class CareTransitionDomainService {
       updatedAt: now,
     };
 
+    const transitionPatient360 = sourceEncounter
+      ? await Patient360ProjectionService.getOrRebuildProjection(
+          context.tenantId,
+          patient.id
+        )
+      : null;
+    if (
+      sourceEncounter &&
+      (
+        !transitionPatient360 ||
+        (
+          sourceIsOpd &&
+          !transitionPatient360.careContexts.activeOpdEncounters.some(
+            (item) => item.encounterId === sourceEncounter.encounterId
+          )
+        )
+      )
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'ADMISSION_PATIENT360_CONTEXT_REQUIRED',
+          message:
+            'The source encounter must be present in authoritative Patient 360 before cross-setting inpatient admission can be committed.',
+        },
+      };
+    }
+
     const admissionHandoffId = sourceEncounter
       ? `handoff_admission_${encounterId}`
       : undefined;
@@ -438,6 +468,21 @@ export class CareTransitionDomainService {
             'Review admission context and active Patient 360 evidence.',
             'Accept inpatient clinical responsibility.',
           ],
+          sourceRefs: Array.from(
+            new Set(
+              [
+                sourceEncounter.encounterId,
+                sourceReconciliationId || undefined,
+                sourceAppointmentId || undefined,
+                admissionTransitionEvidenceId,
+                transitionPatient360?.lastEventId,
+              ].filter((value): value is string => Boolean(value))
+            )
+          ),
+          patient360Revision: transitionPatient360?.revision,
+          patient360SourceCheckpoint: transitionPatient360?.sourceCheckpoint,
+          sourceArtifactId: admissionTransitionEvidenceId,
+          sourceArtifactType: 'OTHER',
           status:
             receivingClinicianId && receivingClinicianId === context.actorId
               ? 'ACCEPTED'
@@ -504,6 +549,8 @@ export class CareTransitionDomainService {
       sourceAppointmentId: sourceAppointmentId || undefined,
       admissionHandoffId,
       bedId: bed.id,
+      patient360Revision: transitionPatient360?.revision,
+      patient360SourceCheckpoint: transitionPatient360?.sourceCheckpoint,
       facilityId: String(bed.facilityId || '').trim() || undefined,
       departmentId: authoritativeTargetWard,
       sourceRefs: Array.from(

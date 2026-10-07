@@ -371,21 +371,22 @@ export class ObstetricDomainService {
     }
 
     const deliveredAt = payload.deliveredAt || Date.now();
+    const deliveryOutcome: NonNullable<ObstetricEpisode['deliveryOutcome']> = {
+      deliveredAt,
+      mode: payload.mode,
+      newbornIds: uniqueWave2Strings(payload.newbornIds, 10),
+      maternalOutcome: String(payload.maternalOutcome || '').trim(),
+      neonatalOutcome: String(payload.neonatalOutcome || '').trim(),
+    };
+    if (!deliveryOutcome.maternalOutcome || !deliveryOutcome.neonatalOutcome) {
+      return wave2Failure(commandId, idempotencyKey, 'OBSTETRIC_OUTCOME_INCOMPLETE', 'Maternal and neonatal outcomes are required.');
+    }
     const next: ObstetricEpisode = {
       ...episode,
       stage: 'POSTPARTUM',
-      deliveryOutcome: {
-        deliveredAt,
-        mode: payload.mode,
-        newbornIds: uniqueWave2Strings(payload.newbornIds, 10),
-        maternalOutcome: String(payload.maternalOutcome || '').trim(),
-        neonatalOutcome: String(payload.neonatalOutcome || '').trim(),
-      },
+      deliveryOutcome,
       updatedAt: Date.now(),
     };
-    if (!next.deliveryOutcome.maternalOutcome || !next.deliveryOutcome.neonatalOutcome) {
-      return wave2Failure(commandId, idempotencyKey, 'OBSTETRIC_OUTCOME_INCOMPLETE', 'Maternal and neonatal outcomes are required.');
-    }
 
     const tx = await TransactionManager.executeAtomicMutation({
       tenantId: context.tenantId,
@@ -400,7 +401,7 @@ export class ObstetricDomainService {
         encounterId: payload.encounterId,
         deliveredAt,
         mode: payload.mode,
-        newbornIds: next.deliveryOutcome.newbornIds,
+        newbornIds: deliveryOutcome.newbornIds,
       },
       auditAction: 'RECORD_OBSTETRIC_DELIVERY',
       auditResourceType: 'OBSTETRIC_EPISODE',

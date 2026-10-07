@@ -438,6 +438,10 @@ service cloud.firestore {
       match /telemetryDeviceCheckpoints/{id} { allow read, write: if false; }
       match /preArrivalTelemetryRecords/{id} { allow read, write: if false; }
 
+      // Wave 4 external integration inboxes/evidence are server-owned.
+      match /integration_inbox/{id} { allow read, write: if false; }
+      match /ediRemittanceInbox/{id} { allow read, write: if false; }
+
       match /diagnosticResultAcknowledgements/{acknowledgementId} {
         allow read, write: if false;
       }

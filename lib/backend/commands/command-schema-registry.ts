@@ -687,7 +687,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       diagnosisCode: z.string().trim().max(100).optional(),
       stagingSystem: z.string().trim().max(200).optional(),
       stage: z.string().trim().max(200).optional(),
-      evidenceRefs: z.array(nonEmpty.max(200)).min(1).max(200),
+      evidenceRefs: z.array(nonEmpty.max(200)).min(1).max(20),
     }).strict(),
   },
   RecordTumorBoardRecommendationCommand: {
@@ -697,7 +697,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       oncologyCaseId: nonEmpty.max(150),
       attendees: z.array(nonEmpty.max(200)).min(2).max(50),
       recommendation: nonEmpty.max(10000),
-      evidenceRefs: z.array(nonEmpty.max(200)).min(1).max(200),
+      evidenceRefs: z.array(nonEmpty.max(200)).min(1).max(20),
     }).strict(),
   },
   ApproveOncologyRegimenCommand: {

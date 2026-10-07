@@ -1,0 +1,167 @@
+name: Wave 5 STAGING Rollback Rehearsal
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type WAVE5-ROLLBACK to deploy a known-good historical main commit into an isolated guarded STAGING Preview'
+        required: true
+        type: string
+      known_good_sha:
+        description: 'Full or abbreviated commit SHA already contained in main history'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ghims-wave5-rollback-rehearsal
+  cancel-in-progress: false
+
+jobs:
+  rollback-rehearsal:
+    name: Known-good commit redeploy and smoke qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: staging
+    env:
+      VERCEL_ORG_ID: team_0S9QQkyN4yTIj7QUZ9BVKsVV
+      VERCEL_PROJECT_ID: prj_a0TEuNNMAE61UziOoLNTok6Wbp1v
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      GHIMS_STAGING_EXPECTED_RUNTIME: STAGING
+      GHIMS_STAGING_SMOKE_HEADER_NAME: x-vercel-protection-bypass
+      GHIMS_STAGING_SMOKE_HEADER_VALUE: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+
+    steps:
+      - name: Require explicit rollback rehearsal confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.confirm }}" != "WAVE5-ROLLBACK" ]; then
+            echo "Refusing rollback rehearsal without exact confirmation." >&2
+            exit 1
+          fi
+
+      - name: Checkout main history
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Validate known-good commit belongs to main history
+        id: validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --tags
+          CURRENT_MAIN_SHA="$(git rev-parse origin/main)"
+          KNOWN_GOOD_SHA="$(git rev-parse "${{ inputs.known_good_sha }}^{commit}")"
+          if ! git merge-base --is-ancestor "$KNOWN_GOOD_SHA" "$CURRENT_MAIN_SHA"; then
+            echo "Known-good SHA is not an ancestor of current main." >&2
+            exit 1
+          fi
+          echo "current_main_sha=$CURRENT_MAIN_SHA" >> "$GITHUB_OUTPUT"
+          echo "known_good_sha=$KNOWN_GOOD_SHA" >> "$GITHUB_OUTPUT"
+          git checkout --detach "$KNOWN_GOOD_SHA"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install pinned Vercel CLI
+        run: npm install --global vercel@59.19.1
+
+      - name: Validate Vercel credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$VERCEL_TOKEN"
+
+      - name: Pull guarded Preview configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
+          vercel env pull .env.wave5-rollback --yes --environment=preview --token="$VERCEL_TOKEN"
+          chmod 600 .env.wave5-rollback
+
+      - name: Validate isolated STAGING runtime contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -a
+          source .env.wave5-rollback
+          set +a
+          export GHIMS_RUNTIME_MODE=STAGING
+          export NEXT_PUBLIC_GHIMS_RUNTIME_MODE=STAGING
+          bun run ops:staging-preflight > wave5-rollback-preflight.json
+
+      - name: Build known-good commit with STAGING configuration
+        run: vercel build --token="$VERCEL_TOKEN"
+
+      - name: Deploy known-good commit as isolated guarded Preview
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          vercel deploy --prebuilt --yes --token="$VERCEL_TOKEN" 2>&1 | tee /tmp/wave5-rollback-deploy.log
+          DEPLOY_URL="$(grep -Eo 'https://[A-Za-z0-9.-]+\.vercel\.app' /tmp/wave5-rollback-deploy.log | tail -n 1 || true)"
+          if [ -z "$DEPLOY_URL" ]; then
+            echo "Could not resolve rollback rehearsal deployment URL." >&2
+            exit 1
+          fi
+          echo "deployment_url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke known-good deployment
+        shell: bash
+        env:
+          GHIMS_STAGING_BASE_URL: ${{ steps.deploy.outputs.deployment_url }}
+        run: |
+          set -euo pipefail
+          bun run ops:staging-smoke > wave5-rollback-smoke.json
+
+      - name: Build rollback evidence
+        shell: bash
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment_url }}
+          CURRENT_MAIN_SHA: ${{ steps.validate.outputs.current_main_sha }}
+          KNOWN_GOOD_SHA: ${{ steps.validate.outputs.known_good_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/wave5
+          node - <<'NODE' > artifacts/wave5/wave5-rollback-rehearsal.json
+          const fs = require('fs');
+          const smoke = JSON.parse(fs.readFileSync('wave5-rollback-smoke.json','utf8'));
+          process.stdout.write(JSON.stringify({
+            schemaVersion: 1,
+            program: 'Wave 5 Enterprise Hardening',
+            check: 'known_good_staging_redeploy',
+            currentMainSha: process.env.CURRENT_MAIN_SHA,
+            knownGoodSha: process.env.KNOWN_GOOD_SHA,
+            deploymentUrl: process.env.DEPLOYMENT_URL,
+            smoke,
+            success: smoke?.success === true,
+            verifiedAt: new Date().toISOString(),
+            note: 'Current Hobby-plan STAGING uses guarded Preview deployments. This proves known-good redeploy capability; production traffic switching remains site/platform specific.'
+          }, null, 2));
+          NODE
+
+      - name: Upload rollback evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghims-wave5-rollback-${{ github.run_id }}
+          path: |
+            wave5-rollback-preflight.json
+            wave5-rollback-smoke.json
+            artifacts/wave5/wave5-rollback-rehearsal.json
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Remove pulled environment file
+        if: always()
+        run: rm -f .env.wave5-rollback

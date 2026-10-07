@@ -181,7 +181,7 @@ describe('P8 main baseline hardening', () => {
     expect(proxy).toContain("'strict-dynamic'");
     expect(proxy).toContain('Strict-Transport-Security');
     expect(proxy).not.toContain('picsum.photos');
-    expect(proxy).not.toContain(""style-src 'self' 'unsafe-inline'"");
+    expect(proxy).not.toContain("style-src 'self' 'unsafe-inline'");
     expect(proxy).toContain('style-src-attr');
   });
 

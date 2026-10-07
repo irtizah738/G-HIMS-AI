@@ -8,12 +8,12 @@ import {
   sourceIdentityFromHl7,
 } from '@/lib/interop/hl7-mllp-framing';
 import { getServerIntegrationState } from '@/lib/interop/integration-state';
+import {
+  resolveHl7TenantForSource,
+  type Hl7SourceTenantRoute,
+} from '@/lib/interop/hl7-source-routing';
 
-export interface MllpTenantRoute {
-  sendingApplication: string;
-  sendingFacility?: string;
-  tenantId: string;
-}
+export type MllpTenantRoute = Hl7SourceTenantRoute;
 
 export interface Hl7MllpServerConfig {
   host: string;
@@ -33,27 +33,6 @@ export interface Hl7MllpServerConfig {
     rejectUnauthorized?: boolean;
   };
   fetchImpl?: typeof fetch;
-}
-
-function normalizedKey(application: string, facility?: string): string {
-  return `${String(application || '').trim().toUpperCase()}|${String(facility || '').trim().toUpperCase()}`;
-}
-
-function routeTenant(routes: MllpTenantRoute[], app: string, facility: string): string | null {
-  const exact = routes.find(
-    (route) => normalizedKey(route.sendingApplication, route.sendingFacility) === normalizedKey(app, facility)
-  );
-  if (exact) return exact.tenantId.trim().toLowerCase();
-
-  const applicationOnly = routes.filter(
-    (route) =>
-      String(route.sendingApplication || '').trim().toUpperCase() ===
-        String(app || '').trim().toUpperCase() &&
-      !String(route.sendingFacility || '').trim()
-  );
-  return applicationOnly.length === 1
-    ? applicationOnly[0].tenantId.trim().toLowerCase()
-    : null;
 }
 
 function runtimeIsProduction(): boolean {
@@ -142,7 +121,7 @@ async function processMessage(config: Hl7MllpServerConfig, message: string): Pro
       return frameMllpMessage(generateACK(parsed, 'AR', 'MSH-10 message control ID is required'));
     }
 
-    const tenantId = routeTenant(
+    const tenantId = resolveHl7TenantForSource(
       config.sourceRoutes,
       source.sendingApplication,
       source.sendingFacility

@@ -113,6 +113,7 @@ export class RenalDialysisDomainService {
       commandId,
       correlationId: context.correlationId,
       domainState: order,
+      expectedPrimaryServerVersion: 0,
     });
 
     return { success: true, commandId, idempotencyKey, entityId: dialysisOrderId, eventId: tx.eventId, auditId: tx.auditId, outboxId: tx.outboxId, data: order };
@@ -198,6 +199,7 @@ export class RenalDialysisDomainService {
       commandId,
       correlationId: context.correlationId,
       domainState: session,
+      expectedPrimaryServerVersion: 0,
     });
     return { success: true, commandId, idempotencyKey, entityId: dialysisSessionId, eventId: tx.eventId, auditId: tx.auditId, outboxId: tx.outboxId, data: session };
   }
@@ -293,6 +295,7 @@ export class RenalDialysisDomainService {
         entityType: 'RENAL_DIALYSIS_ORDER',
         entityId: order.dialysisOrderId,
         domainState: nextOrder,
+        expectedServerVersion: Number((order as unknown as Record<string, unknown>)._serverVersion || 0),
       }],
     });
 

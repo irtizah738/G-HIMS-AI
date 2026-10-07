@@ -56,7 +56,7 @@ describe('G-HIMS P5C pilot readiness guards', () => {
   });
 
   test('P5C CI aligns Firebase Admin project identity with embedded emulator suites', async () => {
-    const workflow = await source('.github/workflows/p5c-validation.yml');
+    const workflow = await source('.github/workflows/ci-qualification.yml');
 
     expect(workflow).toContain('FIREBASE_PROJECT_ID: ghims-p5a-ci');
     expect(workflow).toContain('GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p5a-ci');

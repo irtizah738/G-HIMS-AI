@@ -217,8 +217,12 @@ export class Patient360ProjectionService {
     }
     try {
       return await this.rebuildPatient(tenantId, patientId);
-    } catch {
-      return null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.startsWith('PATIENT360_PATIENT_NOT_FOUND:')) {
+        return null;
+      }
+      throw error;
     }
   }
 
@@ -519,22 +523,19 @@ export class Patient360ProjectionService {
     return written;
   }
 
-  public static async rebuildPatient(
+  private static async commitProjectionMonotonically(
     tenantId: string,
     patientId: string,
-    options: { checkpointEventId?: string } = {}
-  ): Promise<Patient360Projection> {
+    projection: Patient360Projection
+  ): Promise<void> {
     const db = getAdminFirestore();
     if (!db) {
       throw new Error('PATIENT360_PROJECTION_STORE_UNAVAILABLE');
     }
 
-    const sources = await this.loadSources(tenantId, patientId);
-    const { projection, timeline } = Patient360Projector.project(sources);
-    await this.writeTimeline(tenantId, patientId, timeline);
-
-    const tenantRef = db.collection('tenants').doc(tenantId);
-    const projectionRef = tenantRef
+    const projectionRef = db
+      .collection('tenants')
+      .doc(tenantId)
       .collection('patient360Projections')
       .doc(patientId);
 
@@ -550,16 +551,11 @@ export class Patient360ProjectionService {
           currentProjection
         );
 
-        // Concurrent outbox workers may rebuild the same patient at once. Never
-        // let an older source cursor overwrite a newer Patient 360 projection.
         if (cursorComparison < 0) {
           return;
         }
 
         if (cursorComparison === 0) {
-          // No-op rebuilds preserve projectedAt to keep repeated rebuild output
-          // stable. A different content hash at the exact same authoritative
-          // event cursor would violate deterministic projection semantics.
           if (currentProjection.contentHash === projection.contentHash) {
             return;
           }
@@ -571,6 +567,27 @@ export class Patient360ProjectionService {
 
       transaction.set(projectionRef, sanitizeForFirestore(projection));
     });
+  }
+
+  public static async rebuildPatient(
+    tenantId: string,
+    patientId: string,
+    options: { checkpointEventId?: string } = {}
+  ): Promise<Patient360Projection> {
+    const db = getAdminFirestore();
+    if (!db) {
+      throw new Error('PATIENT360_PROJECTION_STORE_UNAVAILABLE');
+    }
+
+    const sources = await this.loadSources(tenantId, patientId);
+    const { projection, timeline } = Patient360Projector.project(sources);
+    await this.writeTimeline(tenantId, patientId, timeline);
+
+    const tenantRef = db.collection('tenants').doc(tenantId);
+
+    // All projection writers, including recovery, share the same monotonic
+    // cursor/content-hash commit primitive.
+    await this.commitProjectionMonotonically(tenantId, patientId, projection);
 
     if (options.checkpointEventId) {
       const checkpointRef = tenantRef
@@ -770,12 +787,11 @@ export class Patient360ProjectionService {
         patientId,
         projected.timeline
       );
-      await db
-        .collection('tenants')
-        .doc(tenantId)
-        .collection('patient360Projections')
-        .doc(patientId)
-        .set(sanitizeForFirestore(projected.projection));
+      await this.commitProjectionMonotonically(
+        tenantId,
+        patientId,
+        projected.projection
+      );
       projectionCount += 1;
     }
 

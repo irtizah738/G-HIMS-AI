@@ -1364,6 +1364,24 @@ export class CareTransitionDomainService {
       };
     }
 
+    const resolvedMedicationReconciliationEvidenceId = String(
+      medicationReconciliation.evidenceId ||
+        medicationReconciliation.id ||
+        ''
+    ).trim();
+    if (!resolvedMedicationReconciliationEvidenceId) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'MEDICATION_RECONCILIATION_EVIDENCE_ID_REQUIRED',
+          message:
+            'The final medication reconciliation is missing its immutable evidence identifier.',
+        },
+      };
+    }
+
     const latestVitals = encounterEvidence
       .filter((item) => item.evidenceType === 'VITALS' && item.status === 'FINAL')
       .sort((a, b) => Number(b.measuredAt || b.createdAt || 0) - Number(a.measuredAt || a.createdAt || 0))[0];
@@ -1431,11 +1449,8 @@ export class CareTransitionDomainService {
       departmentId: encounter.departmentId,
       admissionTransitionEvidenceId: encounter.admissionTransitionEvidenceId,
       dischargeSummaryEvidenceId: resolvedDischargeSummaryEvidenceId,
-      medicationReconciliationEvidenceId: String(
-        medicationReconciliation.evidenceId ||
-          medicationReconciliation.id ||
-          ''
-      ).trim(),
+      medicationReconciliationEvidenceId:
+        resolvedMedicationReconciliationEvidenceId,
       dischargeReadinessEvaluationId: readiness.evaluationId,
       dischargeReadinessReviewId,
       patient360Revision: patient360.revision,
@@ -1448,11 +1463,7 @@ export class CareTransitionDomainService {
             encounter.admissionTransitionEvidenceId,
             encounter.encounterId,
             resolvedDischargeSummaryEvidenceId,
-            String(
-              medicationReconciliation.evidenceId ||
-                medicationReconciliation.id ||
-                ''
-            ).trim(),
+            resolvedMedicationReconciliationEvidenceId,
             readiness.evaluationId,
             dischargeReadinessReviewId,
             bed.id,

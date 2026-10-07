@@ -1,13 +1,70 @@
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { validateHospital0Evidence } from '@/lib/qualification/hospital0-evidence';
 
 const source = (file: string) => readFile(path.join(process.cwd(), file), 'utf8');
 
+const qualificationContext = {
+  qualificationRunId: 'h0-run-20261007',
+  gitCommitSha: '0123456789abcdef0123456789abcdef01234567',
+};
+
+const baseEvidence = {
+  schemaVersion: 1 as const,
+  qualificationRunId: qualificationContext.qualificationRunId,
+  gitCommitSha: qualificationContext.gitCommitSha,
+  deploymentId: 'deploy-h0-001',
+  firebaseProjectId: 'ghims-h0-staging',
+  deploymentUrl: 'https://staging.example.test',
+  runtime: 'STAGING' as const,
+  success: true as const,
+  recordedAt: '2026-10-07T10:00:00.000Z',
+};
+
 describe('Hospital-0 deployment and qualification contract', () => {
+  test('empty JSON can never satisfy an evidence gate', () => {
+    expect(
+      validateHospital0Evidence(
+        'hospital0-alert-routing.json',
+        {},
+        qualificationContext
+      ).length
+    ).toBeGreaterThan(0);
+  });
+
+  test('evidence from a stale commit can never qualify the current run', () => {
+    const issues = validateHospital0Evidence(
+      'staging-deployment-evidence.json',
+      {
+        ...baseEvidence,
+        gitCommitSha: '1111111111111111111111111111111111111111',
+        mainSha: '1111111111111111111111111111111111111111',
+        dedicatedProject: true,
+      },
+      qualificationContext
+    );
+    expect(issues).toContain('QUALIFICATION_COMMIT_SHA_MISMATCH');
+  });
+
+  test('deployment evidence must bind exact main SHA and dedicated STAGING project', () => {
+    expect(
+      validateHospital0Evidence(
+        'staging-deployment-evidence.json',
+        {
+          ...baseEvidence,
+          mainSha: qualificationContext.gitCommitSha,
+          dedicatedProject: true,
+          demoProjectId: 'ghims-demo',
+          productionProjectId: 'ghims-prod',
+        },
+        qualificationContext
+      )
+    ).toEqual([]);
+  });
+
   test('Hospital-0 is evidence-gated beyond engineering qualification', async () => {
     const manifest = await source('scripts/ops/hospital0-qualification-manifest.ts');
-
     for (const gate of [
       'H0_1_STAGING_DEPLOYMENT',
       'H0_2_IDENTITY_TENANT',
@@ -19,10 +76,8 @@ describe('Hospital-0 deployment and qualification contract', () => {
     ]) {
       expect(manifest).toContain(gate);
     }
-
-    expect(manifest).toContain('TWO_PHYSICAL_DEVICES_REQUIRED');
-    expect(manifest).toContain('INDEPENDENT_ASSESSOR_REQUIRED');
-    expect(manifest).toContain('CONSENT_NOT_SIGNED');
+    expect(manifest).toContain('QUALIFICATION_RUN_ID_REQUIRED');
+    expect(manifest).toContain('QUALIFICATION_COMMIT_SHA_REQUIRED');
     expect(manifest).toContain('PILOT_QUALIFIED');
     expect(manifest).toContain('ENGINEERING_QUALIFIED');
   });

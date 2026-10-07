@@ -197,10 +197,9 @@ describe('Wave 3A IPD closure', () => {
   });
 
   test('legacy admission and discharge bypasses remain blocked', async () => {
-    const [bus, encounter, architecture] = await Promise.all([
+    const [bus, encounter] = await Promise.all([
       source('lib/backend/commands/command-bus.ts'),
       source('lib/backend/services/encounter-domain-service.ts'),
-      source('tests/clinical-workflow-architecture-contract.test.ts'),
     ]);
 
     expect(bus).toContain(
@@ -210,8 +209,8 @@ describe('Wave 3A IPD closure', () => {
       'Inpatient discharge must use DischargeInpatientEncounterCommand'
     );
     expect(encounter).toContain("'CARE_TRANSITION_COMMAND_REQUIRED'");
-    expect(architecture).toContain(
-      'governed inpatient discharge requires explicit disposition and follow-up'
+    expect(encounter).toContain(
+      'OPD inpatient admission must use AdmitPatientToInpatientCareCommand'
     );
   });
 });

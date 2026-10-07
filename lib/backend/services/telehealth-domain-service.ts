@@ -9,6 +9,11 @@ import { CommandContext, CommandResult } from '../types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import { TelehealthSession } from '@/lib/types/ghims';
 import { PatientMPI } from '@/types/mpi';
+import {
+  activateCareContext,
+  closeCareContext,
+  compatibilityEncounterId,
+} from '@/lib/clinical/patient360/care-context';
 
 export interface CreateTelehealthSessionPayload {
   patientId: string;
@@ -127,6 +132,19 @@ export class TelehealthDomainService {
       updatedAt: now,
     };
 
+    const patientCareContexts = activateCareContext(
+      patient.activeCareContexts,
+      'TELEHEALTH',
+      encounterId,
+      Date.now()
+    );
+    const patientState: PatientMPI = {
+      ...patient,
+      activeCareContexts: patientCareContexts,
+      activeEncounterId: compatibilityEncounterId(patientCareContexts),
+      updatedAt: Date.now(),
+    };
+
     const encounterState = {
       encounterId,
       tenantId: context.tenantId,
@@ -165,11 +183,21 @@ export class TelehealthDomainService {
       commandId,
       correlationId: context.correlationId,
       domainState: session,
-      additionalStateWrites: [{
-        entityType: 'ENCOUNTER',
-        entityId: encounterId,
-        domainState: encounterState,
-      }],
+      additionalStateWrites: [
+        {
+          entityType: 'ENCOUNTER',
+          entityId: encounterId,
+          domainState: encounterState,
+        },
+        {
+          entityType: 'PATIENT_MPI',
+          entityId: patient.id,
+          domainState: patientState,
+          expectedServerVersion: Number(
+            (patient as PatientMPI & { _serverVersion?: number })._serverVersion || 0
+          ),
+        },
+      ],
     });
 
     return {
@@ -353,56 +381,197 @@ export class TelehealthDomainService {
     payload: CompleteTelehealthSessionPayload
   ): Promise<CommandResult<TelehealthSession>> {
     const auth = AuthorizationPipeline.evaluate(context, {
-      requiredRoles:['DOCTOR','CONSULTANT'],
-      requiredPrivilege:'SIGN_CLINICAL_NOTES',
+      requiredRoles: ['DOCTOR', 'CONSULTANT'],
+      requiredPrivilege: 'SIGN_CLINICAL_NOTES',
     });
     if (!auth.authorized) {
-      return { success:false, commandId, idempotencyKey, error:{ code:auth.code || 'UNAUTHORIZED', message:auth.reason || 'Telehealth completion requires signing authority.' } };
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Telehealth completion requires signing authority.',
+        },
+      };
     }
 
-    const session = await DomainStateRepository.getById<TelehealthSession>(context.tenantId, 'telehealthSessions', payload.sessionId);
-    if (!session) return { success:false, commandId, idempotencyKey, error:{ code:'TELEHEALTH_SESSION_NOT_FOUND', message:'Telehealth session does not exist.' } };
-    if (session.status === 'CANCELLED') return { success:false, commandId, idempotencyKey, error:{ code:'TELEHEALTH_SESSION_CANCELLED', message:'Cancelled telehealth sessions cannot be completed.' } };
-
-    const signedEvidence = await DomainStateRepository.getById<Record<string, unknown>>(
+    const preflight = await DomainStateRepository.getById<TelehealthSession>(
       context.tenantId,
-      'encounterEvidence',
-      payload.signedEvidenceId
+      'telehealthSessions',
+      payload.sessionId
     );
-    if (
-      !signedEvidence ||
-      String(signedEvidence.patientId || '') !== session.patientId ||
-      String(signedEvidence.encounterId || '') !== session.encounterId ||
-      String(signedEvidence.status || '').toUpperCase() !== 'FINAL' ||
-      String(signedEvidence.evidenceType || '') !== 'SIGNED_CLINICAL_NOTE'
-    ) {
-      return { success:false, commandId, idempotencyKey, error:{ code:'TELEHEALTH_SIGNED_EVIDENCE_REQUIRED', message:'Telehealth completion requires a final signed clinical note from the same patient encounter.' } };
+    if (!preflight) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: { code: 'TELEHEALTH_SESSION_NOT_FOUND', message: 'Telehealth session does not exist.' },
+      };
     }
 
-    const next: TelehealthSession = {
-      ...session,
-      status:'COMPLETED',
-      signedEvidenceId:payload.signedEvidenceId,
-      recoveryState:session.recoveryState === 'INTERRUPTED' ? 'RECOVERED' : session.recoveryState,
-      updatedAt:new Date().toISOString(),
-    };
+    const nowMs = Date.now();
+    const now = new Date(nowMs).toISOString();
 
-    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
-      entityType:'TELEHEALTH_SESSION',
-      entityId:session.id,
-      eventType:'TELEHEALTH_SESSION_COMPLETED',
-      domainState:next,
-      eventPayload:{
-        sessionId:session.id,
-        patientId:session.patientId,
-        encounterId:session.encounterId,
-        signedEvidenceId:payload.signedEvidenceId,
-      },
-      auditReason:`Telehealth session ${session.id} completed from signed evidence ${payload.signedEvidenceId}.`,
-      outboxTopic:'g-hims-telehealth-events',
-    });
+    try {
+      const tx = await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.roles[0] || 'CLINICIAN',
+        aggregateType: 'TELEHEALTH_SESSION',
+        aggregateId: payload.sessionId,
+        eventType: 'TELEHEALTH_SESSION_COMPLETED',
+        auditAction: 'TELEHEALTH_SESSION_COMPLETED',
+        auditResourceType: 'TELEHEALTH_SESSION',
+        auditResourceId: payload.sessionId,
+        auditReason: `Completed telehealth session ${payload.sessionId} from final signed clinical evidence.`,
+        outboxTopic: 'g-hims-telehealth-events',
+        idempotencyKey,
+        commandId,
+        correlationId: context.correlationId,
+        readTargets: [
+          {
+            key: 'session',
+            entityType: 'TELEHEALTH_SESSION',
+            entityId: payload.sessionId,
+            required: true,
+          },
+          {
+            key: 'evidence',
+            entityType: 'ENCOUNTER_EVIDENCE',
+            entityId: payload.signedEvidenceId,
+            required: true,
+          },
+          {
+            key: 'encounter',
+            entityType: 'ENCOUNTER',
+            entityId: preflight.encounterId,
+            required: true,
+          },
+          {
+            key: 'patient',
+            entityType: 'PATIENT_MPI',
+            entityId: preflight.patientId,
+            required: true,
+          },
+        ],
+        prepare: (current) => {
+          const session = current.session as unknown as TelehealthSession;
+          const signedEvidence = current.evidence as Record<string, unknown>;
+          const encounter = current.encounter as Record<string, unknown>;
+          const patient = current.patient as unknown as PatientMPI;
 
-    return { success:true, commandId, idempotencyKey, entityId:session.id, eventId:tx.event.eventId, auditId:tx.audit.auditId, outboxId:tx.outbox.outboxId, data:next };
+          if (session.status === 'CANCELLED' || session.status === 'COMPLETED') {
+            throw new Error('TELEHEALTH_SESSION_FINAL: final telehealth sessions cannot be completed again.');
+          }
+          if (
+            String(session.patientId || '') !== preflight.patientId ||
+            String(session.encounterId || '') !== preflight.encounterId
+          ) {
+            throw new Error('TELEHEALTH_SESSION_CONCURRENCY_CONFLICT: session identity changed before completion.');
+          }
+          if (
+            String(signedEvidence.patientId || '') !== session.patientId ||
+            String(signedEvidence.encounterId || '') !== session.encounterId ||
+            String(signedEvidence.status || '').toUpperCase() !== 'FINAL' ||
+            String(signedEvidence.evidenceType || '') !== 'SIGNED_CLINICAL_NOTE'
+          ) {
+            throw new Error(
+              'TELEHEALTH_SIGNED_EVIDENCE_REQUIRED: completion requires a final signed clinical note from the same patient encounter.'
+            );
+          }
+          if (
+            String(encounter.patientId || '') !== session.patientId ||
+            String(encounter.encounterType || encounter.type || '').toUpperCase() !== 'TELEHEALTH'
+          ) {
+            throw new Error(
+              'TELEHEALTH_ENCOUNTER_SCOPE_INVALID: session is not bound to the authoritative telehealth encounter.'
+            );
+          }
+
+          const nextSession: TelehealthSession = {
+            ...session,
+            status: 'COMPLETED',
+            signedEvidenceId: payload.signedEvidenceId,
+            recoveryState:
+              session.recoveryState === 'INTERRUPTED'
+                ? 'RECOVERED'
+                : session.recoveryState,
+            updatedAt: now,
+          };
+
+          const nextEncounter = {
+            ...encounter,
+            status: 'COMPLETED',
+            currentStage: 'COMPLETED',
+            clinicalState: 'COMPLETED',
+            operationalState: 'COMPLETED',
+            resourceAssignmentState: 'RELEASED',
+            completedAt: nowMs,
+            updatedAt: nowMs,
+          };
+
+          const nextCareContexts = closeCareContext(
+            patient.activeCareContexts,
+            'TELEHEALTH',
+            session.encounterId,
+            nowMs
+          );
+          const nextPatient: PatientMPI = {
+            ...patient,
+            activeCareContexts: nextCareContexts,
+            activeEncounterId: compatibilityEncounterId(nextCareContexts),
+            updatedAt: nowMs,
+          };
+
+          return {
+            domainState: nextSession,
+            additionalStateWrites: [
+              {
+                entityType: 'ENCOUNTER',
+                entityId: session.encounterId,
+                domainState: nextEncounter,
+              },
+              {
+                entityType: 'PATIENT_MPI',
+                entityId: session.patientId,
+                domainState: nextPatient,
+              },
+            ],
+            eventPayload: {
+              sessionId: session.id,
+              patientId: session.patientId,
+              encounterId: session.encounterId,
+              signedEvidenceId: payload.signedEvidenceId,
+            },
+            resultData: nextSession,
+          };
+        },
+      });
+
+      return {
+        success: true,
+        commandId,
+        idempotencyKey,
+        entityId: payload.sessionId,
+        eventId: tx.eventId,
+        auditId: tx.auditId,
+        outboxId: tx.outboxId,
+        data: tx.resultData as TelehealthSession,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Telehealth completion failed.';
+      const [code] = message.split(':');
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: code || 'TELEHEALTH_COMPLETION_FAILED',
+          message,
+        },
+      };
+    }
   }
 
 }

@@ -35,7 +35,7 @@ export interface TransitionTelehealthConnectivityPayload {
 
 export interface ResumeTelehealthSessionPayload {
   sessionId: string;
-  expectedServerVersion: number;
+  expectedUpdatedAt: string;
 }
 
 export interface CompleteTelehealthSessionPayload {
@@ -304,7 +304,7 @@ export class TelehealthDomainService {
     if (['COMPLETED','CANCELLED'].includes(session.status)) {
       return { success:false, commandId, idempotencyKey, error:{ code:'TELEHEALTH_SESSION_FINAL', message:'Final telehealth sessions cannot be resumed.' } };
     }
-    if (Number(session._serverVersion || 0) !== payload.expectedServerVersion) {
+    if (String(session.updatedAt || '') !== payload.expectedUpdatedAt) {
       return { success:false, commandId, idempotencyKey, error:{ code:'TELEHEALTH_RECOVERY_VERSION_CONFLICT', message:'Telehealth session changed while disconnected. Refresh before resuming.' } };
     }
 
@@ -341,7 +341,7 @@ export class TelehealthDomainService {
       commandId,
       correlationId:context.correlationId,
       domainState:next,
-      expectedPrimaryServerVersion:payload.expectedServerVersion,
+      expectedPrimaryServerVersion:Number(session._serverVersion || 0),
     });
 
     return { success:true, commandId, idempotencyKey, entityId:session.id, eventId:tx.eventId, auditId:tx.auditId, outboxId:tx.outboxId, data:next };

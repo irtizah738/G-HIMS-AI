@@ -186,7 +186,9 @@
     "ops:wave5:load": "bun scripts/ops/wave5-authenticated-load.ts",
     "ops:wave5:governance": "bun scripts/ops/wave5-governance-preflight.ts",
     "ops:wave5:evidence": "bun scripts/ops/wave5-evidence-manifest.ts",
-    "ops:wave5:projection-failure-injection": "bun scripts/ops/wave5-projection-failure-injection.ts"
+    "ops:wave5:projection-failure-injection": "bun scripts/ops/wave5-projection-failure-injection.ts",
+    "test:hospital0-deployment": "bun test tests/hospital0-deployment-qualification.test.ts",
+    "ops:hospital0:qualification": "bun scripts/ops/hospital0-qualification-manifest.ts"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

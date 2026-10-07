@@ -46,6 +46,10 @@ for (const file of files.sort()) {
   const relative = path.relative(process.cwd(), file).replaceAll('\\', '/');
 
   for (const rule of FORBIDDEN) {
+    // The quality gate necessarily contains literal representations of the
+    // forbidden patterns it is looking for. Do not self-report those rule
+    // definitions, but still parse this file for syntax diagnostics below.
+    if (relative === 'scripts/ops/source-quality-gate.ts') break;
     const match = source.match(rule.regex);
     if (match?.index !== undefined) {
       const line = source.slice(0, match.index).split(/\r?\n/).length;

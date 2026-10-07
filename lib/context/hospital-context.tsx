@@ -1075,13 +1075,13 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       );
     };
 
-    void loadLocalEdgeSnapshot(tenantId)
+    void loadLocalEdgeSnapshot(tenantId, 'HOSPITAL_SHELL')
       .then(applySnapshot)
       .catch((error) => console.warn('EDGE_LOCAL_READ_MODEL_LOAD_FAILED', error));
 
     const refreshAuthoritativeSnapshot = () => {
       if (!user) return;
-      void hydrateEdgeSnapshot(tenantId)
+      void hydrateEdgeSnapshot(tenantId, { surface: 'HOSPITAL_SHELL' })
         .then(applySnapshot)
         .catch((error) => console.warn('EDGE_SERVER_HYDRATION_FAILED', error));
     };

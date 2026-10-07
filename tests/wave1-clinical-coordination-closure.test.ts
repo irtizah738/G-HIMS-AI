@@ -167,6 +167,23 @@ describe('Wave 1 clinical coordination closure', () => {
     expect(center).toContain('Commit consultation completion');
   });
 
+  test('consultation acceptance and source-linked handoff fail closed on server authority', async () => {
+    const service = await source(
+      'lib/backend/services/clinical-coordination-domain-service.ts'
+    );
+
+    expect(service).toContain("'CONSULTATION_ACKNOWLEDGEMENT_REQUIRED'");
+    expect(service).toContain("'CONSULTATION_ACKNOWLEDGEMENT_PROVENANCE_MISSING'");
+    expect(service).toContain("current.status !== 'ACKNOWLEDGED'");
+    expect(service).not.toContain("!['ACKNOWLEDGED', 'REQUESTED', 'ASSIGNED'].includes(current.status)");
+
+    expect(service).toContain('Patient360ProjectionService.getOrRebuildProjection');
+    expect(service).toContain("'HANDOFF_PATIENT360_REVIEW_STALE'");
+    expect(service).toContain("'HANDOFF_SOURCE_ARTIFACT_REFERENCE_INCOMPLETE'");
+    expect(service).toContain("'HANDOFF_SOURCE_DISEASE_INTAKE_INVALID'");
+    expect(service).toContain("'HANDOFF_ROLE_MISMATCH'");
+  });
+
   test('disease intake aggregate is server-only in Firestore', async () => {
     const rules = await source('firestore.rules');
     const marker = 'match /diseaseIntakeArtifacts/{intakeArtifactId}';

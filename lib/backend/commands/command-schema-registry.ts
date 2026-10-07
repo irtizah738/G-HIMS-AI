@@ -557,7 +557,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       outcome: z.enum(['GIVEN','HELD','REFUSED','MISSED','DELAYED']),
       administeredAt: z.number().int().safe().positive().optional(),
       reason: z.string().trim().max(4000).optional(),
-      expectedMedicationOrderVersion: z.number().int().nonnegative().optional(),
+      expectedMedicationOrderVersion: z.number().int().nonnegative(),
     }).strict(),
   },
   CreateNursingCarePlanCommand: {

@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
     };
 
     const syncResponse = await OfflineReconciliationDomainService.processSyncBatch(
-      context,
+      { ...context, source: 'offline' },
       authoritativeBatch
     );
 

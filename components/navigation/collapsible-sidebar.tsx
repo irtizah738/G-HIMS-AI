@@ -269,12 +269,6 @@ export function CollapsibleSidebar({
       title: 'Operations, Finance & ERP',
       items: [
         {
-          id: 'billing',
-          name: 'Billing & Revenue Audit',
-          shortName: 'Billing ERP',
-          icon: DollarSign,
-        },
-        {
           id: 'claims',
           name: 'Claims Scrubber (EDI 837)',
           shortName: 'Claims',

@@ -915,41 +915,23 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       }).strict().refine((value)=>Object.keys(value).length>0,'At least one telehealth field must be updated.'),
     }).strict(),
   },
+  TransitionTelehealthConnectivityCommand: {
+    1: z.object({
+      sessionId: nonEmpty.max(150),
+      targetMode: z.enum(['VIDEO','AUDIO_ONLY','TEXT_ONLY','PAUSED_OFFLINE']),
+      reason: nonEmpty.max(4000),
+    }).strict(),
+  },
+  ResumeTelehealthSessionCommand: {
+    1: z.object({
+      sessionId: nonEmpty.max(150),
+      expectedServerVersion: z.number().int().nonnegative(),
+    }).strict(),
+  },
   CompleteTelehealthSessionCommand: {
     1: z.object({
       sessionId: nonEmpty.max(150),
-      soapNote: z.object({
-        subjective: z.string().max(20000).optional(),
-        objective: z.string().max(20000).optional(),
-        assessment: z.string().max(20000).optional(),
-        plan: z.string().max(20000).optional(),
-        icd10Codes: z.array(z.object({
-          code: nonEmpty.max(50),
-          description: nonEmpty.max(500),
-          confidence: z.number().finite().min(0).max(1).optional(),
-        }).strict()).max(200).optional(),
-        cptCodes: z.array(z.object({
-          code: nonEmpty.max(50),
-          description: nonEmpty.max(500),
-          fee: z.number().finite().nonnegative().optional(),
-        }).strict()).max(200).optional(),
-        signedAt: z.string().max(100).optional(),
-        signedBy: z.string().max(250).optional(),
-        clinicianNpi: z.string().max(100).optional(),
-      }).strict().optional(),
-      prescriptions: z.array(z.object({
-        id: nonEmpty.max(150),
-        medication: nonEmpty.max(500),
-        dosage: nonEmpty.max(200),
-        frequency: nonEmpty.max(200),
-        duration: nonEmpty.max(200),
-        instructions: z.string().max(4000),
-        prescribedAt: nonEmpty.max(100),
-        pharmacyName: z.string().max(250),
-        pharmacyNpi: z.string().max(100),
-        status: z.enum(['DRAFT','PENDING_TRANSMISSION','TRANSMITTED','DISPENSED']),
-        transactionRef: z.string().max(250).optional(),
-      }).strict()).max(200).optional(),
+      signedEvidenceId: nonEmpty.max(200),
     }).strict(),
   },
   MergePatientCommand: {

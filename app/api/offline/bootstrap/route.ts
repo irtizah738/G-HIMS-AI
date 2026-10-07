@@ -8,6 +8,7 @@ import {
 } from 'firebase-admin/firestore';
 import { OPD_EDGE_COLLECTIONS } from '@/lib/opd/edge-surface';
 import { loadOpdScopedEdgeCollections } from '@/lib/opd/opd-edge-bootstrap';
+import { requireEdgeHydrationSurface } from '@/lib/offline/hydration-policy';
 
 export const dynamic = 'force-dynamic';
 
@@ -79,16 +80,14 @@ const FACILITIES_COLLECTIONS = [
   'calibrationRecords',
 ] as const;
 
-const OFFLINE_SURFACES = new Set([
-  'GENERIC',
-  'OPD',
-  'CLINICAL',
-  'BILLING',
-  'FINANCE',
-  'HCM',
-  'SCM',
-  'FACILITIES',
-]);
+const HOSPITAL_SHELL_COLLECTIONS = [
+  'patients',
+  'encounters',
+  'opd_queue',
+  'beds',
+  'billingMismatches',
+  'telehealthSessions',
+] as const;
 
 const HCM_COLLECTIONS = [
   'employees',
@@ -843,24 +842,27 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const requestedSurface = surface || 'GENERIC';
-    if (!OFFLINE_SURFACES.has(requestedSurface)) {
+    let requestedSurface;
+    try {
+      requestedSurface = requireEdgeHydrationSurface(surface);
+    } catch (error) {
+      const code =
+        error instanceof Error && error.message === 'EDGE_HYDRATION_SURFACE_REQUIRED'
+          ? 'EDGE_BOOTSTRAP_SURFACE_REQUIRED'
+          : 'EDGE_BOOTSTRAP_SURFACE_INVALID';
       return NextResponse.json(
-        {
-          success: false,
-          error: { code: 'EDGE_BOOTSTRAP_SURFACE_INVALID' },
-        },
+        { success: false, error: { code } },
         { status: 400, headers: { 'Cache-Control': 'no-store' } }
       );
     }
 
     const tenantRef = db.collection('tenants').doc(context.tenantId);
     const authorized = authorizedCollections(context.roles);
-    const admin = isAdministrativeRole(context.roles);
-
     const requestedCollections: readonly string[] =
-      requestedSurface === 'OPD'
-        ? OPD_EDGE_COLLECTIONS
+      requestedSurface === 'HOSPITAL_SHELL'
+        ? HOSPITAL_SHELL_COLLECTIONS
+        : requestedSurface === 'OPD'
+          ? OPD_EDGE_COLLECTIONS
         : requestedSurface === 'CLINICAL'
           ? CLINICAL_COLLECTIONS
           : requestedSurface === 'BILLING'
@@ -873,12 +875,10 @@ export async function GET(req: NextRequest) {
                   ? SCM_COLLECTIONS
                   : requestedSurface === 'FACILITIES'
                     ? FACILITIES_COLLECTIONS
-                    : admin
-                      ? []
-                      : authorized;
+                    : [];
 
-    // Even an administrator must choose an explicit offline surface. GENERIC
-    // never means "cache the tenant".
+    // Every offline read model is bound to an explicit, named minimum-necessary
+    // surface. There is no generic tenant cache fallback.
     const collections = [...new Set(requestedCollections)].filter((collection) =>
       authorized.includes(collection)
     );

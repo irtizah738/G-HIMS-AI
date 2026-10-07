@@ -162,7 +162,7 @@ export async function getPendingMutations(tenantId?: string): Promise<SyncMutati
 }
 
 export async function addMutation(
-  mutationOrParams:
+  _mutationOrParams:
     | SyncMutation
     | {
         tenantId: string;
@@ -181,33 +181,9 @@ export async function addMutation(
         clientTimestamp?: number;
       }
 ): Promise<SyncMutation> {
-  const docId = mutationOrParams.docId || (mutationOrParams as any).resourceId || `doc_${Date.now()}`;
-  const resourceId = (mutationOrParams as any).resourceId || docId;
-  const now = Date.now();
-  const mutation: SyncMutation = {
-    id: mutationOrParams.id || `mut_${now}_${Math.random().toString(36).substring(2, 9)}`,
-    tenantId: mutationOrParams.tenantId,
-    actorId: (mutationOrParams as any).actorId,
-    collection: mutationOrParams.collection,
-    docId,
-    resourceId,
-    action: mutationOrParams.action,
-    commandType: (mutationOrParams as any).commandType,
-    idempotencyKey: (mutationOrParams as any).idempotencyKey,
-    schemaVersion: (mutationOrParams as any).schemaVersion || 1,
-    baseEntityVersion: (mutationOrParams as any).baseEntityVersion,
-    payload: mutationOrParams.payload || {},
-    vectorClock: (mutationOrParams as any).vectorClock || { localNode: 1 },
-    timestamp: (mutationOrParams as any).timestamp || now,
-    clientTimestamp: (mutationOrParams as any).clientTimestamp || now,
-    retryCount: (mutationOrParams as any).retryCount || 0,
-    status: (mutationOrParams as any).status || 'pending',
-    errorMessage: (mutationOrParams as any).errorMessage,
-    conflictDetails: (mutationOrParams as any).conflictDetails,
-  };
-
-  await localDb.mutations.put(mutation);
-  return mutation;
+  throw new Error(
+    'LEGACY_RAW_MUTATION_RETIRED: use putSecureMutation through the governed sync engine.'
+  );
 }
 
 export async function updateMutationStatus(
@@ -265,89 +241,32 @@ export async function clearOfflineReadModelsForTenant(tenantId: string): Promise
 
 
 export async function replaceTenantEdgeSnapshot(
-  tenantId: string,
-  collections: Record<string, Array<Record<string, unknown>>>,
-  metadata: Omit<EdgeSyncMetadata, 'key' | 'tenantId' | 'scope'> & { scope?: string }
+  _tenantId: string,
+  _collections: Record<string, Array<Record<string, unknown>>>,
+  _metadata: Omit<EdgeSyncMetadata, 'key' | 'tenantId' | 'scope'> & { scope?: string }
 ): Promise<void> {
-  const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
-  if (!normalizedTenantId) throw new Error('EDGE_TENANT_REQUIRED');
-
-  const records: EdgeEntityRecord[] = [];
-  for (const [collection, entities] of Object.entries(collections || {})) {
-    for (const entity of entities || []) {
-      const entityId = String(
-        (entity as any).id ||
-        (entity as any).patientId ||
-        (entity as any).encounterId ||
-        (entity as any).orderId ||
-        (entity as any).tokenId ||
-        (entity as any).evidenceId ||
-        (entity as any).findingId ||
-        ''
-      ).trim();
-      if (!entityId) continue;
-      records.push({
-        key: `${normalizedTenantId}:${collection}:${entityId}`,
-        tenantId: normalizedTenantId,
-        collection,
-        entityId,
-        data: entity,
-        updatedAt: Date.now(),
-        serverVersion: Number((entity as any).version || (entity as any).serverVersion || 0) || undefined,
-      });
-    }
-  }
-
-  const collectionNames = Object.keys(collections || {});
-  await localDb.transaction(
-    'rw',
-    localDb.edge_entities,
-    localDb.sync_metadata,
-    async () => {
-      for (const collection of collectionNames) {
-        await localDb.edge_entities
-          .where('[tenantId+collection]')
-          .equals([normalizedTenantId, collection])
-          .delete();
-      }
-      if (records.length > 0) await localDb.edge_entities.bulkPut(records);
-      const scope = metadata.scope || 'clinical-core';
-      await localDb.sync_metadata.put({
-        key: `${normalizedTenantId}:${scope}`,
-        tenantId: normalizedTenantId,
-        scope,
-        snapshotVersion: metadata.snapshotVersion,
-        lastHydratedAt: metadata.lastHydratedAt,
-        serverGeneratedAt: metadata.serverGeneratedAt,
-      });
-    }
+  throw new Error(
+    'LEGACY_PLAINTEXT_EDGE_API_RETIRED: use replaceSecureTenantEdgeSnapshot.'
   );
 }
 
 export async function listEdgeEntities<T extends Record<string, unknown> = Record<string, unknown>>(
-  tenantId: string,
-  collection: string
+  _tenantId: string,
+  _collection: string
 ): Promise<T[]> {
-  const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
-  if (!normalizedTenantId || !collection) return [];
-  const rows = await localDb.edge_entities
-    .where('[tenantId+collection]')
-    .equals([normalizedTenantId, collection])
-    .toArray();
-  return rows
-    .filter((row) => !row.deleted)
-    .sort((a, b) => a.updatedAt - b.updatedAt)
-    .map((row) => row.data as T);
+  throw new Error(
+    'LEGACY_PLAINTEXT_EDGE_API_RETIRED: use listSecureEdgeEntities.'
+  );
 }
 
 export async function getEdgeEntity<T extends Record<string, unknown> = Record<string, unknown>>(
-  tenantId: string,
-  collection: string,
-  entityId: string
+  _tenantId: string,
+  _collection: string,
+  _entityId: string
 ): Promise<T | null> {
-  const key = `${String(tenantId || '').trim().toLowerCase()}:${collection}:${entityId}`;
-  const row = await localDb.edge_entities.get(key);
-  return row && !row.deleted ? (row.data as T) : null;
+  throw new Error(
+    'LEGACY_PLAINTEXT_EDGE_API_RETIRED: use actor-scoped secure-store access.'
+  );
 }
 
 export async function getEdgeSyncMetadata(

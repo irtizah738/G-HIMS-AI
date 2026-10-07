@@ -22,6 +22,14 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
   // DRP-1: Clinical / identity / telehealth command perimeter.
   // Every CommandBus handler must have an explicit versioned schema.
   // --------------------------------------------------------------------------
+  AcknowledgeEmergencyPrearrivalTelemetryCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      encounterId: nonEmpty.max(150),
+      telemetryId: nonEmpty.max(250),
+      note: z.string().trim().max(4000).optional(),
+    }).strict(),
+  },
   CreateEncounterCommand: {
     1: z.object({
       patientId: nonEmpty.max(150),

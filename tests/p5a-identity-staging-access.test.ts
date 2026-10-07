@@ -124,7 +124,12 @@ describe('G-HIMS P5A identity and staging access boundary',()=>{
     expect(sw).toContain("url.pathname === '/' || url.pathname === '/login'");
     expect(sw).toContain('Never cache rendered clinical/deep-link HTML');
     expect(sw).toContain("caches.match('/')");
-    expect(db).toContain('DEMO_SEED_FORBIDDEN');
+    expect(db).toContain("offline_cache: null");
+    expect(db).toContain("clinical_patients: null");
+    expect(db).toContain("bed_occupancy: null");
+    expect(db).toContain("surgical_cases: null");
+    expect(db).not.toContain('seedDefaultBedOccupancy');
+    expect(db).not.toContain('seedDefaultSurgicalCases');
   });
 
   test('auth/session material is not mirrored into localStorage',async()=>{

@@ -10,7 +10,6 @@ import type { SurgicalCase } from '@/types/inpatient-or';
 import type { HospitalRoom } from '@/types/resource-management';
 import type { PatientMPI } from '@/types/mpi';
 import type { EncounterRuntime } from '@/types/encounter-runtime';
-import type { StaffMember } from '@/lib/types/ghims';
 
 export type GovernedSurgicalCase = SurgicalCase & {
   facilityId?: string;
@@ -34,7 +33,6 @@ export interface SurgicalEdgeProjection {
   rooms: HospitalRoom[];
   patients: PatientMPI[];
   encounters: EncounterRuntime[];
-  staff: StaffMember[];
   source: 'LOCAL' | 'SERVER';
 }
 
@@ -50,7 +48,6 @@ function adapt(snapshot: EdgeSnapshot): SurgicalEdgeProjection {
     ),
     patients: rows<PatientMPI>(snapshot, 'patients'),
     encounters: rows<EncounterRuntime>(snapshot, 'encounters'),
-    staff: rows<StaffMember>(snapshot, 'staff'),
     source: snapshot.source,
   };
 }
@@ -121,7 +118,6 @@ export const transferSurgicalCaseToPacuEdge = (
   payload: {
     caseId: string;
     pacuRoomId: string;
-    receivingClinicianId: string;
     handoffSummary: string;
     activeRisks?: string[];
     medicationConcerns?: string[];

@@ -40,6 +40,11 @@ export interface Wave2WorkspaceSnapshot {
   rehabilitationPlans: Record<string, unknown>[];
   rehabilitationSessions: Record<string, unknown>[];
   acceptedClinicalHandoffs: Record<string, unknown>[];
+  oncologyEvidenceSources: Array<{
+    evidenceId: string;
+    evidenceType: string;
+    label: string;
+  }>;
 }
 
 type CommandPayload = Record<string, unknown>;

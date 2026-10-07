@@ -153,7 +153,8 @@ export class FhirR4Adapter {
   private readonly requireHttpsInProduction: boolean;
 
   constructor(config: FhirR4AdapterConfig) {
-    this.baseUrl = String(config.baseUrl || '').replace(/\\/$/, '');
+    const configuredBaseUrl = String(config.baseUrl || '');
+    this.baseUrl = configuredBaseUrl.endsWith('/') ? configuredBaseUrl.slice(0, -1) : configuredBaseUrl;
     this.state = config.state;
     this.accessToken = config.accessToken;
     this.getAccessToken = config.getAccessToken;

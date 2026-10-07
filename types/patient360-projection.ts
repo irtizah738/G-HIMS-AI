@@ -162,6 +162,29 @@ export interface Patient360DiseaseIntakeSummary {
   sourceRefs: string[];
 }
 
+export interface Patient360MedicationAdministrationSummary {
+  administrationId: string;
+  encounterId?: string;
+  medicationOrderId?: string;
+  medicationName: string;
+  dose?: string;
+  route?: string;
+  outcome: string;
+  scheduledFor?: number;
+  administeredAt: number;
+  sourceEventId: string;
+}
+
+export interface Patient360SpecialtyActivitySummary {
+  activityId: string;
+  domain: 'NURSING' | 'RENAL' | 'OBSTETRICS' | 'ONCOLOGY' | 'REHABILITATION';
+  eventType: string;
+  encounterId?: string;
+  occurredAt: number;
+  summary: string;
+  sourceRefs: string[];
+}
+
 export interface Patient360DataQuality {
   allergyKnowledge: KnownStatus;
   problemListKnowledge: KnownStatus;
@@ -197,6 +220,8 @@ export interface Patient360Projection {
   activeCarePlans: Patient360CarePlanSummary[];
   recentDocuments: Patient360DocumentSummary[];
   recentDiseaseIntakes: Patient360DiseaseIntakeSummary[];
+  recentMedicationAdministrations: Patient360MedicationAdministrationSummary[];
+  recentSpecialtyActivities: Patient360SpecialtyActivitySummary[];
   dataQuality: Patient360DataQuality;
   counts: {
     encounters: number;
@@ -210,6 +235,8 @@ export interface Patient360Projection {
     carePlans: number;
     documents: number;
     diseaseIntakes: number;
+    medicationAdministrations: number;
+    specialtyActivities: number;
   };
   /** Projection schema version. Increment only for a read-model contract change. */
   projectionVersion: number;

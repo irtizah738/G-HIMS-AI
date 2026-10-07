@@ -16,6 +16,7 @@ export interface CommandContext {
   verifiedCredentials?: string[];
   clinicalPrivileges?: string[];
   deviceId?: string;
+  sessionId?: string;
   correlationId: string;
   causationEventId?: string;
   requestId: string;
@@ -69,6 +70,9 @@ export interface DomainEventEnvelope<TPayload = Record<string, unknown>> {
   payload: TPayload;
   actorId: string;
   actorRole: string;
+  actorRoles?: string[];
+  deviceId?: string;
+  sessionId?: string;
   occurredAt: number;
   recordedAt: number;
   correlationId: string;

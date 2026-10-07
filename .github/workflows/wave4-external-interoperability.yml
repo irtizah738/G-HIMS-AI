@@ -52,7 +52,7 @@ jobs:
       - name: Wave 4 protocol and authority tests
         run: bun run test:wave4
       - name: P2 interoperability safety boundary
-        run: bun run test:p2
+        run: bun test tests/p2-offline-ai-interop-boundary.test.ts
       - name: Preserve Wave 3
         run: bun run test:wave3
       - name: P8 baseline

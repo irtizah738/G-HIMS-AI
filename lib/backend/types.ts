@@ -21,6 +21,8 @@ export interface CommandContext {
   requestId: string;
   ipAddress?: string;
   userAgent?: string;
+  /** Immutable origin of the authoritative command/event. */
+  source?: DomainEventEnvelope['source'];
   isEmergencyOverride?: boolean;
   breakGlassGrantId?: string;
   breakGlassPatientId?: string;

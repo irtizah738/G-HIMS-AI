@@ -53,6 +53,9 @@ describe('Wave 2 clinical domain completion', () => {
 
     expect(service).toContain('EMAR_ACTIVE_MEDICATION_ORDER_REQUIRED');
     expect(service).toContain('EMAR_ORDER_VERSION_CONFLICT');
+    expect(service).toContain('EMAR_CRITICAL_MEDICATION_SAFETY_REVIEW_REQUIRED');
+    expect(service).toContain('MedicationSafetyService.evaluateProjection');
+    expect(service).toContain('safetyOverrideAllergyIds');
     expect(service).toContain('EMAR_RIGHT_TIME_FAILED');
     expect(service).toContain('EMAR_DUPLICATE_ADMINISTRATION');
     expect(service).toContain("order.status !== 'ACTIVE'");
@@ -262,11 +265,27 @@ describe('Wave 2 clinical domain completion', () => {
     expect(route).toContain('.limit(251)');
     expect(route).toContain('WAVE2_WORKSPACE_LIMIT_EXCEEDED');
     expect(route).toContain('oncologyEvidenceSources');
+    expect(route).toContain('EmarOverdueProjectionService.refreshEncounter');
+    expect(route).toContain('overdueMedicationSlots');
     expect(client).toContain('fetchWave2Workspace');
     expect(workspace).toContain('Load authoritative workspace');
     expect(workspace).toContain('RecordSelect');
     expect(workspace).toContain('selectedPatientId');
     expect(workspace).toContain('activeEncounterId');
+  });
+
+  test('overdue eMAR slots create source-controlled attention without fabricating administration', async () => {
+    const service = await source(
+      'lib/clinical/intelligence/emar-overdue-projection-service.ts'
+    );
+
+    expect(service).toContain("slot.status === 'DUE'");
+    expect(service).toContain("generatedBy: 'WAVE2_EMAR_OVERDUE'");
+    expect(service).toContain("resolutionMode: 'SOURCE_STATE'");
+    expect(service).toContain("status: 'RESOLVED'");
+    expect(service).toContain("resolvedBy: 'SYSTEM_PROJECTION'");
+    expect(service).not.toContain('MEDICATION_ADMINISTERED');
+    expect(service).not.toContain('MEDICATION_ADMINISTRATION_MISSED');
   });
 
   test('oncology evidence resolves to authoritative patient-scoped records', async () => {

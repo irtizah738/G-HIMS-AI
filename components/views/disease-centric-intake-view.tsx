@@ -60,13 +60,15 @@ export function DiseaseCentricIntakeView() {
   useEffect(() => {
     if (selectedPatientId) {
       setLocalPatientId(selectedPatientId);
+    } else {
+      setLocalPatientId('');
     }
   }, [selectedPatientId]);
 
   const activePatientId = localPatientId;
   const setActivePatientId = (id: string) => {
     setLocalPatientId(id);
-    setSelectedPatientId(id);
+    setSelectedPatientId(id || null);
   };
 
   // Selected Template
@@ -475,24 +477,46 @@ export function DiseaseCentricIntakeView() {
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex flex-wrap items-center justify-between gap-4 shadow-xs">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-bold flex items-center justify-center text-sm border border-blue-200 dark:border-blue-800">
-            {selectedPatient?.fullName?.charAt(0) || 'P'}
+            {selectedPatient?.fullName?.charAt(0) || '—'}
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-bold text-slate-900 dark:text-slate-100 text-sm">
-                {selectedPatient?.fullName || 'Selected Patient'}
-              </span>
-              <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">
-                ({selectedPatient?.age || 54}y/o {selectedPatient?.gender || 'M'})
-              </span>
-              <span className="text-xs px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-mono text-slate-600 dark:text-slate-300">
-                MRN: {selectedPatient?.mrn || 'MRN-1049'}
-              </span>
+              {selectedPatient ? (
+                <>
+                  <span className="font-bold text-slate-900 dark:text-slate-100 text-sm">
+                    {selectedPatient.fullName}
+                  </span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">
+                    ({selectedPatient.age}y/o {selectedPatient.gender})
+                  </span>
+                  <span className="text-xs px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/60 font-mono font-semibold text-emerald-700 dark:text-emerald-300">
+                    MRN: {selectedPatient.mrn}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="font-bold text-amber-600 dark:text-amber-400 text-sm italic">
+                    No Patient Selected
+                  </span>
+                  <span className="text-xs text-slate-400 font-mono">
+                    (Choose below)
+                  </span>
+                  <span className="text-xs px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800/50 font-mono text-amber-600 dark:text-amber-400">
+                    MRN: None
+                  </span>
+                </>
+              )}
             </div>
             <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              <span>HR: <strong className="text-slate-800 dark:text-slate-200">{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.heartRate ?? '—'}</strong>{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.heartRate != null ? ' bpm' : ''}</span>
-              <span>BP: <strong className="text-slate-800 dark:text-slate-200">{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.bloodPressure || '—'}</strong></span>
-              <span>SpO2: <strong className="text-slate-800 dark:text-slate-200">{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.oxygenSaturation ?? '—'}</strong>{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.oxygenSaturation != null ? '%' : ''}</span>
+              {selectedPatient ? (
+                <>
+                  <span>HR: <strong className="text-slate-800 dark:text-slate-200">{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.heartRate ?? '—'}</strong>{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.heartRate != null ? ' bpm' : ''}</span>
+                  <span>BP: <strong className="text-slate-800 dark:text-slate-200">{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.bloodPressure || '—'}</strong></span>
+                  <span>SpO2: <strong className="text-slate-800 dark:text-slate-200">{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.oxygenSaturation ?? '—'}</strong>{selectedPatient?.encounters?.[0]?.vitalsHistory?.[0]?.oxygenSaturation != null ? '%' : ''}</span>
+                </>
+              ) : (
+                <span className="text-slate-400 dark:text-slate-500 italic">Select a patient context to view vital signs and begin governed intake</span>
+              )}
             </div>
           </div>
         </div>
@@ -501,10 +525,11 @@ export function DiseaseCentricIntakeView() {
         <div className="flex items-center gap-2">
           <select
             id="select-intake-patient"
-            value={selectedPatient?.id}
+            value={selectedPatient?.id || ''}
             onChange={(e) => setActivePatientId(e.target.value)}
-            className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-medium"
+            className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-medium cursor-pointer"
           >
+            <option value="">-- Select Patient Context --</option>
             {patients.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.fullName} ({p.mrn})

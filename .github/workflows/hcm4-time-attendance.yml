@@ -1,0 +1,46 @@
+name: HCM-4 Time and Attendance
+
+on:
+  push:
+    branches:
+      - hcm/hcm4-time-attendance
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hcm4-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hcm4:
+    name: HCM-4 time and attendance gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      GHIMS_HCM_TEST_TENANT: central-metro-hospital
+      FIREBASE_PROJECT_ID: ghims-hcm4-ci
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-hcm4-ci
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-hcm4-ci
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-hcm4-ci
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      GHIMS_INTEGRATION_HL7_STATE: DISABLED
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_INTEGRATION_DICOMWEB_STATE: DISABLED
+      GHIMS_INTEGRATION_DEVICE_TELEMETRY_STATE: DISABLED
+      GHIMS_INTEGRATION_EDI_X12_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun run validate:hcm4

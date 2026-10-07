@@ -1,0 +1,90 @@
+name: Clinical Intelligence CI-7 Discharge Readiness
+
+on:
+  push:
+    branches:
+      - ci/ci7-discharge-readiness
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci7-discharge-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci7:
+    name: CI-7 deterministic discharge readiness
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-ci7
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-ci7
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-ci7
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-ci7
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      GHIMS_INTEGRATION_HL7_STATE: DISABLED
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_INTEGRATION_DICOMWEB_STATE: DISABLED
+      GHIMS_INTEGRATION_DEVICE_TELEMETRY_STATE: DISABLED
+      GHIMS_INTEGRATION_EDI_X12_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: TypeScript
+        run: bun run typecheck
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Preserve CI-0 through CI-6
+        run: bun run test:ci-foundation && bun run test:ci1 && bun run test:ci2 && bun run test:ci3 && bun run test:ci4 && bun run test:ci5 && bun run test:ci6
+
+      - name: CI-7 discharge readiness guards
+        run: bun run test:ci7
+
+      - name: Preserve P6 offline-first guarantees
+        run: bun run test:p6
+
+      - name: Preserve P7 qualification guarantees
+        run: bun run test:p7
+
+      - name: Security regression
+        run: bun run test:security
+
+      - name: Production build
+        run: bun run build
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "## G-HIMS Clinical Intelligence — CI-7"
+            echo ""
+            echo "- Deterministic discharge-readiness rules: PASS"
+            echo "- Source-linked blockers/warnings/information: PASS"
+            echo "- Immutable intelligence evaluation history: PASS"
+            echo "- Event-driven Patient 360 evaluation: PASS"
+            echo "- Offline encrypted last-known readiness: PASS"
+            echo "- Clinician review audit without autonomous discharge: PASS"
+            echo "- CI-0 through CI-6 / P6 / P7 / security regression: PASS"
+            echo "- Production build: PASS"
+          } >> "$GITHUB_STEP_SUMMARY"

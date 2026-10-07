@@ -1,0 +1,90 @@
+name: P4 Release Candidate Resilience
+
+on:
+  pull_request:
+    branches:
+      - hardening/ops-assurance-p3
+      - main
+  push:
+    branches:
+      - hardening/release-candidate-p4
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p4-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  p4-release-candidate:
+    name: P4 synthetic journey and recovery evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-p4-ci
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p4-ci
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      GHIMS_INTEGRATION_HL7_STATE: DISABLED
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_INTEGRATION_DICOMWEB_STATE: DISABLED
+      GHIMS_INTEGRATION_DEVICE_TELEMETRY_STATE: DISABLED
+      GHIMS_INTEGRATION_EDI_X12_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: TypeScript typecheck
+        run: bun run typecheck
+
+      - name: ESLint quality gate
+        run: bun run lint
+
+      - name: P4 recovery boundary tests
+        run: bun run test:p4
+
+      - name: Full unit and domain regression
+        run: bun run test:unit
+
+      - name: P0-P3 security regression
+        run: bun run test:security
+
+      - name: Setup Java for Firestore Emulator
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install Firestore emulator tooling
+        run: npm install --no-save --package-lock=false @firebase/rules-unit-testing@5.0.2 firebase-tools@15.30.2
+
+      - name: Existing Firestore tenant and durability suites
+        run: bun run test:rules
+
+      - name: P4 synthetic patient and recovery journey
+        run: bun run test:p4:emulator
+
+      - name: Production build
+        run: bun run build
+
+      - name: Install Playwright Chromium
+        run: bunx playwright install --with-deps chromium
+
+      - name: Deployment fail-closed smoke
+        run: bun run test:e2e

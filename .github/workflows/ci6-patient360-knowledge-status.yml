@@ -1,0 +1,105 @@
+name: Clinical Intelligence CI-6 Knowledge Status
+
+on:
+  push:
+    branches:
+      - ci/patient360-ci6-knowledge-status
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci6-knowledge-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci6:
+    name: CI-6 Patient 360 clinical knowledge status
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-ci6
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-ci6
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-ci6
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-ci6
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      GHIMS_INTEGRATION_HL7_STATE: DISABLED
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_INTEGRATION_DICOMWEB_STATE: DISABLED
+      GHIMS_INTEGRATION_DEVICE_TELEMETRY_STATE: DISABLED
+      GHIMS_INTEGRATION_EDI_X12_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: TypeScript
+        run: bun run typecheck
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Preserve CI-0 authority boundary
+        run: bun run test:ci-foundation
+
+      - name: Preserve CI-1 canonical clinical model
+        run: bun run test:ci1
+
+      - name: Preserve CI-2 terminology
+        run: bun run test:ci2
+
+      - name: Preserve CI-3 diagnostics
+        run: bun run test:ci3
+
+      - name: Preserve CI-4 Patient 360 projection
+        run: bun run test:ci4
+
+      - name: Preserve CI-5 Patient 360 read surface
+        run: bun run test:ci5
+
+      - name: CI-6 knowledge status guards
+        run: bun run test:ci6
+
+      - name: Preserve P6 offline-first guarantees
+        run: bun run test:p6
+
+      - name: Preserve P7 qualification guarantees
+        run: bun run test:p7
+
+      - name: Security regression
+        run: bun run test:security
+
+      - name: Production build
+        run: bun run build
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "## G-HIMS Clinical Intelligence — CI-6"
+            echo ""
+            echo "- Per-domain clinical knowledge records: PASS"
+            echo "- KNOWN / KNOWN_NONE / UNKNOWN / NOT_ASSESSED / UNABLE_TO_REPORT: PASS"
+            echo "- Atomic knowledge promotion with clinical facts: PASS"
+            echo "- Medication reconciliation known-none semantics: PASS"
+            echo "- Deterministic Patient 360 projection integration: PASS"
+            echo "- Clinician UI explicit knowledge semantics: PASS"
+            echo "- CI-0 through CI-5 / P6 / P7 / security regression: PASS"
+            echo "- Production build: PASS"
+          } >> "$GITHUB_STEP_SUMMARY"

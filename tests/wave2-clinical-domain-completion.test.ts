@@ -75,6 +75,27 @@ describe('Wave 2 clinical domain completion', () => {
     expect(client).toContain('optimisticCache: false');
   });
 
+  test('Wave 2 clinical references fail closed on stale or cross-scope identifiers', async () => {
+    const [emar, schemas, renal, oncology] = await Promise.all([
+      source('lib/backend/services/nursing-emar-domain-service.ts'),
+      source('lib/backend/commands/command-schema-registry.ts'),
+      source('lib/backend/services/renal-dialysis-domain-service.ts'),
+      source('lib/backend/services/oncology-domain-service.ts'),
+    ]);
+
+    expect(schemas).toContain('expectedMedicationOrderVersion: z.number().int().nonnegative()');
+    expect(schemas).not.toContain('expectedMedicationOrderVersion: z.number().int().nonnegative().optional()');
+    expect(emar).toContain("'EMAR_ORDER_VERSION_REQUIRED'");
+    expect(emar).toContain('payload.expectedMedicationOrderVersion !== orderVersion');
+
+    expect(renal).toContain('validateDialysisClinicalRefs');
+    expect(renal).toContain("'DIALYSIS_MEDICATION_ORDER_SCOPE_MISMATCH'");
+    expect(renal).toContain("'DIALYSIS_DIAGNOSTIC_REPORT_SCOPE_MISMATCH'");
+    expect(renal).toContain("String(medicationOrder.encounterId || '') !== encounterId");
+
+    expect(oncology).toContain("String(medication.encounterId || '') !== payload.encounterId");
+  });
+
   test('renal workflow enforces order → active session → terminal session lifecycle', async () => {
     const service = await source(
       'lib/backend/services/renal-dialysis-domain-service.ts'

@@ -80,3 +80,22 @@ For each rehearsal retain:
 - PASS/FAIL and defect references.
 
 Repository tests demonstrate the rebuild mechanics in an emulator. They do not constitute a measured hospital RPO/RTO exercise.
+
+
+## Wave 5 failure-injection rehearsal
+
+Failure injection is supported only in an explicitly confirmed TEST/STAGING recovery environment. Production remains blocked by the same recovery service guard.
+
+After restoring an isolated project, run:
+
+```bash
+GHIMS_RUNTIME_MODE=STAGING \
+GHIMS_PROJECTION_REBUILD_TENANT=<tenant-id> \
+GHIMS_PROJECTION_REBUILD_CONFIRM_TENANT=<tenant-id> \
+GHIMS_ALLOW_DESTRUCTIVE_PROJECTION_REBUILD=true \
+bun run ops:wave5:projection-failure-injection
+```
+
+The drill intentionally fails after projection-worker execution and must create a FAILED recovery manifest with error code `PROJECTION_REBUILD_INJECTED_FAILURE`.
+
+After the injected failure, run a normal clean `bun run ops:projection-rebuild` against the same isolated authoritative event stream. Deterministic event/projection fingerprints and cardinality checks must pass before the recovery exercise can be accepted.

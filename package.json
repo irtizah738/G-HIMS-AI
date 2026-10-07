@@ -170,7 +170,9 @@
     "ops:ci10i:live-ai-smoke": "bun scripts/ops/ci10i-live-ai-smoke.ts",
     "validate:ci10i": "bun run typecheck && bun run lint && bun run test:ci10i && bun run test:ci10h && bun run ops:ci10h:safety-eval && bun run test:ci10g && bun run test:ci10f && bun run test:ci10e && bun run test:ci10d && bun run test:ci10c && bun run test:ci10b && bun run test:ci10 && bun run test:drp6 && bun run test:p6 && bun run test:p5c && bun run test:p7 && bun run test:security && bun run build",
     "test:wave3a": "bun test tests/wave3a-ipd-closure.test.ts tests/opd-rp14-atomic-opd-ipd-transition.test.ts",
-    "validate:wave3a": "bun run typecheck && bun run lint && bun run test:wave3a && bun run test:clinical-architecture && bun run test:ci7 && bun run test:ci4 && bun run test:cbe && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build"
+    "validate:wave3a": "bun run typecheck && bun run lint && bun run test:wave3a && bun run test:clinical-architecture && bun run test:ci7 && bun run test:ci4 && bun run test:cbe && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",
+    "test:wave3b": "bun test tests/wave3b-emergency-telemetry-qualification.test.ts",
+    "validate:wave3b": "bun run typecheck && bun run lint && bun run test:wave3b && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

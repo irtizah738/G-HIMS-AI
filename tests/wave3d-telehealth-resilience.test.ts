@@ -27,12 +27,17 @@ describe('Wave 3D telehealth resilience and remote signing qualification', () =>
     expect(block).not.toContain('isRecording');
   });
 
-  test('completion requires same-encounter signed evidence', async () => {
+  test('completion requires signed evidence and atomically closes telehealth care context', async () => {
     const service = await source('lib/backend/services/telehealth-domain-service.ts');
-    expect(service).toContain("'encounterEvidence'");
-    expect(service).toContain("'TELEHEALTH_SIGNED_EVIDENCE_REQUIRED'");
+    expect(service).toContain("entityType: 'ENCOUNTER_EVIDENCE'");
+    expect(service).toContain('TELEHEALTH_SIGNED_EVIDENCE_REQUIRED');
     expect(service).toContain("String(signedEvidence.evidenceType || '') !== 'SIGNED_CLINICAL_NOTE'");
-    expect(service).toContain('signedEvidenceId:payload.signedEvidenceId');
+    expect(service).toContain('signedEvidenceId: payload.signedEvidenceId');
+    expect(service).toContain("entityType: 'ENCOUNTER'");
+    expect(service).toContain("entityType: 'PATIENT_MPI'");
+    expect(service).toContain("closeCareContext(");
+    expect(service).toContain("'TELEHEALTH'");
+    expect(service).toContain("activeEncounterId: compatibilityEncounterId(nextCareContexts)");
   });
 
   test('visible telehealth surface contains no fabricated clinical or integration claims', async () => {

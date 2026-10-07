@@ -37,7 +37,6 @@ const empty: SurgicalEdgeProjection = {
   rooms: [],
   patients: [],
   encounters: [],
-  staff: [],
   source: 'LOCAL',
 };
 
@@ -61,7 +60,6 @@ export function SurgicalOperationsConsole({
   const [checklistEvidence, setChecklistEvidence] = useState('');
   const [cancelReason, setCancelReason] = useState('');
   const [pacuRoomId, setPacuRoomId] = useState('');
-  const [receivingClinicianId, setReceivingClinicianId] = useState('');
   const [pacuHandoffSummary, setPacuHandoffSummary] = useState('');
   const [pacuRecoveryAssessment, setPacuRecoveryAssessment] = useState('');
   const [pacuDisposition, setPacuDisposition] = useState<'WARD' | 'ICU' | 'DISCHARGE'>('WARD');
@@ -197,8 +195,8 @@ export function SurgicalOperationsConsole({
   };
 
   const transferToPacu = async () => {
-    if (!selectedCase || !pacuRoomId || !receivingClinicianId || !pacuHandoffSummary.trim()) {
-      setError('Recovery room, receiving clinician and PACU handoff summary are required.');
+    if (!selectedCase || !pacuRoomId || !pacuHandoffSummary.trim()) {
+      setError('Recovery room and PACU handoff summary are required.');
       return;
     }
     await run(
@@ -206,7 +204,6 @@ export function SurgicalOperationsConsole({
         transferSurgicalCaseToPacuEdge({
           caseId: selectedCase.id,
           pacuRoomId,
-          receivingClinicianId,
           handoffSummary: pacuHandoffSummary.trim(),
           expectedActions: ['Receive postoperative patient', 'Perform PACU assessment', 'Escalate deterioration immediately'],
         }),
@@ -420,14 +417,9 @@ export function SurgicalOperationsConsole({
                         </option>
                       ))}
                     </select>
-                    <select value={receivingClinicianId} onChange={(event) => setReceivingClinicianId(event.target.value)} className="rounded-lg border bg-transparent p-2 text-xs">
-                      <option value="">Select receiving clinician</option>
-                      {projection.staff
-                        .filter((member) => ['Nurse', 'Physician', 'Surgeon'].includes(member.role) && member.status !== 'off-duty')
-                        .map((member) => (
-                          <option key={member.id} value={member.id}>{member.fullName} — {member.role}</option>
-                        ))}
-                    </select>
+                    <div className="rounded-lg border bg-slate-50 p-2 text-xs text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+                      Receiving authority is the selected recovery room's department. An authenticated clinician assigned to that department must accept the handoff.
+                    </div>
                     <textarea value={pacuHandoffSummary} onChange={(event) => setPacuHandoffSummary(event.target.value)} placeholder="Postoperative condition, airway/hemodynamic status, risks and immediate PACU priorities" className="rounded-lg border bg-transparent p-2 text-xs md:col-span-2" />
                     <button onClick={() => void transferToPacu()} disabled={busy || !phaseComplete('signOut')} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white md:col-span-2 md:w-fit">
                       Transfer to PACU with handoff

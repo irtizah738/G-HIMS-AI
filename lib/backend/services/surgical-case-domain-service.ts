@@ -965,7 +965,7 @@ export class SurgicalCaseDomainService {
             expectedActions: (payload.expectedActions || []).map((item) => item.trim()).filter(Boolean),
             sourceRefs: [surgicalCase.id],
             sourceArtifactId: surgicalCase.id,
-            sourceArtifactType: 'OTHER',
+            sourceArtifactType: 'SURGICAL_CASE',
             status: 'PENDING_ACCEPTANCE',
             createdAt: nowMs,
             updatedAt: nowMs,

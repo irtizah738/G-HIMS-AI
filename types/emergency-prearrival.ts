@@ -5,6 +5,7 @@ export type EmergencyTelemetryDeviceType =
 export interface EmergencyTelemetryDeviceProfile {
   deviceId: string;
   tenantId: string;
+  resourceId: string;
   sourceUnitId: string;
   deviceType: EmergencyTelemetryDeviceType;
   deviceModel: string;

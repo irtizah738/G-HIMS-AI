@@ -176,7 +176,11 @@
     "test:wave3c": "bun test tests/wave3c-or-pacu-transition.test.ts",
     "test:wave3d": "bun test tests/wave3d-telehealth-resilience.test.ts",
     "test:wave3": "bun run test:wave3a && bun run test:wave3b && bun run test:wave3c && bun run test:wave3d && bun test tests/wave3-completion.test.ts",
-    "validate:wave3": "bun run typecheck && bun run lint && bun run test:wave3 && bun run test:ci10i && bun run test:hospital0-ci && bun run test:ci-demo && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build"
+    "validate:wave3": "bun run typecheck && bun run lint && bun run test:wave3 && bun run test:ci10i && bun run test:hospital0-ci && bun run test:ci-demo && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",
+    "test:wave4": "bun test tests/wave4-external-interoperability.test.ts tests/claims-edi.test.ts",
+    "validate:wave4": "bun run typecheck && bun run lint && bun run test:wave4 && bun run test:wave3 && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",
+    "interop:hl7:mllp": "bun scripts/interop/run-hl7-mllp.ts",
+    "ops:wave4:live-qualification": "bun scripts/ops/wave4-live-qualification.ts"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

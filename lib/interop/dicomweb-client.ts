@@ -47,12 +47,34 @@ export interface DicomSimulationProvider {
   searchSeries(studyInstanceUid: string): Promise<DicomSeriesMetadata[]>;
 }
 
+export interface DicomWebQualificationReport {
+  valid: boolean;
+  checkedAt: number;
+  qidoReachable: boolean;
+  responseContentType?: string;
+  errors: string[];
+}
+
 export interface DicomWebClientConfig {
   baseUrl?: string;
   authToken?: string;
   state?: IntegrationState;
   simulationProvider?: DicomSimulationProvider;
   fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+  maxReadRetries?: number;
+  allowedHosts?: string[];
+  requireHttpsInProduction?: boolean;
+}
+
+function isProductionRuntime(): boolean {
+  return String(process.env.GHIMS_RUNTIME_MODE || process.env.NODE_ENV || '')
+    .trim()
+    .toUpperCase() === 'PRODUCTION';
+}
+
+function retryable(status: number): boolean {
+  return status === 429 || status === 502 || status === 503 || status === 504;
 }
 
 /**
@@ -60,6 +82,10 @@ export interface DicomWebClientConfig {
  *
  * There is no automatic mock fallback. Synthetic data is available only through an
  * explicitly supplied simulationProvider while state === SIMULATION.
+ *
+ * LIVE mode is read-only by default in G-HIMS Wave 4: QIDO-RS/WADO-RS access is
+ * permitted only through an explicitly configured PACS endpoint. STOW-RS remains
+ * outside the approved Wave 4 contract until a deployment intentionally enables it.
  */
 export class DicomWebClient {
   private readonly baseUrl: string;
@@ -67,23 +93,52 @@ export class DicomWebClient {
   private readonly state: IntegrationState;
   private readonly simulationProvider?: DicomSimulationProvider;
   private readonly fetchImpl: typeof fetch;
+  private readonly timeoutMs: number;
+  private readonly maxReadRetries: number;
+  private readonly allowedHosts: Set<string>;
+  private readonly requireHttpsInProduction: boolean;
 
   constructor(config: DicomWebClientConfig = {}) {
-    this.baseUrl = (config.baseUrl || '/api/pacs/dicomweb').replace(/\/$/, '');
+    const configuredBaseUrl = config.baseUrl || '/api/pacs/dicomweb';
+    this.baseUrl = configuredBaseUrl.endsWith('/') ? configuredBaseUrl.slice(0, -1) : configuredBaseUrl;
     this.authToken = config.authToken;
     this.state = config.state || 'DISABLED';
     this.simulationProvider = config.simulationProvider;
     this.fetchImpl = config.fetchImpl || fetch;
+    this.timeoutMs = config.timeoutMs || 15000;
+    this.maxReadRetries = Math.max(0, Math.min(3, config.maxReadRetries ?? 1));
+    this.allowedHosts = new Set((config.allowedHosts || []).map((host) => host.trim().toLowerCase()).filter(Boolean));
+    this.requireHttpsInProduction = config.requireHttpsInProduction ?? true;
+
+    if (this.state === 'LIVE') {
+      let url: URL;
+      try {
+        url = new URL(this.baseUrl);
+      } catch {
+        throw new Error('DICOM_LIVE_BASE_URL_MUST_BE_ABSOLUTE');
+      }
+      if (
+        isProductionRuntime() &&
+        this.requireHttpsInProduction &&
+        url.protocol !== 'https:'
+      ) {
+        throw new Error('DICOM_TLS_REQUIRED_IN_PRODUCTION');
+      }
+      if (
+        this.allowedHosts.size > 0 &&
+        !this.allowedHosts.has(url.hostname.toLowerCase())
+      ) {
+        throw new Error('DICOM_HOST_NOT_ALLOWLISTED');
+      }
+    }
   }
 
   public getState(): IntegrationState {
     return this.state;
   }
 
-  private getHeaders(): HeadersInit {
-    const headers: Record<string, string> = {
-      Accept: 'application/dicom+json',
-    };
+  private getHeaders(accept = 'application/dicom+json'): HeadersInit {
+    const headers: Record<string, string> = { Accept: accept };
     if (this.authToken) headers.Authorization = 'Bearer ' + this.authToken;
     return headers;
   }
@@ -106,6 +161,82 @@ export class DicomWebClient {
     return this.simulationProvider;
   }
 
+  private async request(
+    path: string,
+    accept = 'application/dicom+json'
+  ): Promise<Response> {
+    this.assertLive();
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt <= this.maxReadRetries; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+      try {
+        const response = await this.fetchImpl(this.baseUrl + path, {
+          method: 'GET',
+          headers: this.getHeaders(accept),
+          signal: controller.signal,
+        });
+
+        if (
+          !response.ok &&
+          retryable(response.status) &&
+          attempt < this.maxReadRetries
+        ) {
+          lastError = new Error('DICOM_HTTP_' + response.status);
+          continue;
+        }
+
+        return response;
+      } catch (error) {
+        lastError = error;
+        if (attempt >= this.maxReadRetries) throw error;
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error('DICOM_REQUEST_FAILED');
+  }
+
+  public async qualifyLiveEnvironment(): Promise<DicomWebQualificationReport> {
+    this.assertLive();
+    const errors: string[] = [];
+    let responseContentType: string | undefined;
+
+    try {
+      const response = await this.request('/studies?limit=1');
+      responseContentType = response.headers.get('content-type') || undefined;
+      if (!response.ok) {
+        errors.push('DICOM_QIDO_PROBE_FAILED:' + response.status);
+      } else {
+        const payload = await response.json();
+        if (!Array.isArray(payload)) {
+          errors.push('DICOM_QIDO_PROBE_INVALID_BODY');
+        } else {
+          this.parseQidoStudiesResponse(payload);
+        }
+      }
+      if (
+        responseContentType &&
+        !responseContentType.toLowerCase().includes('application/dicom+json') &&
+        !responseContentType.toLowerCase().includes('application/json')
+      ) {
+        errors.push('DICOM_QIDO_CONTENT_TYPE_INVALID:' + responseContentType);
+      }
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : 'DICOM_QIDO_PROBE_FAILED');
+    }
+
+    return {
+      valid: errors.length === 0,
+      checkedAt: Date.now(),
+      qidoReachable: errors.length === 0,
+      responseContentType,
+      errors,
+    };
+  }
+
   public async searchStudies(params: {
     patientId?: string;
     accessionNumber?: string;
@@ -119,18 +250,22 @@ export class DicomWebClient {
 
     this.assertLive();
 
+    const patientId = String(params.patientId || '').trim();
+    const accessionNumber = String(params.accessionNumber || '').trim();
+    if (!patientId && !accessionNumber) {
+      throw new Error(
+        'DICOM_BOUNDED_QUERY_REQUIRED: LIVE study search requires PatientID or AccessionNumber.'
+      );
+    }
+
     const query = new URLSearchParams();
-    if (params.patientId) query.set('PatientID', params.patientId);
-    if (params.accessionNumber) query.set('AccessionNumber', params.accessionNumber);
+    if (patientId) query.set('PatientID', patientId);
+    if (accessionNumber) query.set('AccessionNumber', accessionNumber);
     if (params.studyDate) query.set('StudyDate', params.studyDate);
     if (params.modalitiesInStudy) query.set('ModalitiesInStudy', params.modalitiesInStudy);
-    if (params.limit) query.set('limit', String(params.limit));
+    query.set('limit', String(Math.max(1, Math.min(100, params.limit || 25))));
 
-    const response = await this.fetchImpl(
-      this.baseUrl + '/studies?' + query.toString(),
-      { method: 'GET', headers: this.getHeaders() }
-    );
-
+    const response = await this.request('/studies?' + query.toString());
     if (!response.ok) {
       throw new Error('DICOM_QIDO_STUDIES_FAILED: ' + response.status + ' ' + response.statusText);
     }
@@ -145,16 +280,44 @@ export class DicomWebClient {
 
     this.assertLive();
 
-    const response = await this.fetchImpl(
-      this.baseUrl + '/studies/' + encodeURIComponent(studyInstanceUid) + '/series',
-      { method: 'GET', headers: this.getHeaders() }
+    const uid = String(studyInstanceUid || '').trim();
+    if (!uid) throw new Error('DICOM_STUDY_UID_REQUIRED');
+
+    const response = await this.request(
+      '/studies/' + encodeURIComponent(uid) + '/series'
     );
 
     if (!response.ok) {
       throw new Error('DICOM_QIDO_SERIES_FAILED: ' + response.status + ' ' + response.statusText);
     }
 
-    return this.parseQidoSeriesResponse(await response.json(), studyInstanceUid);
+    return this.parseQidoSeriesResponse(await response.json(), uid);
+  }
+
+  public async fetchInstanceMetadata(
+    studyInstanceUid: string,
+    seriesInstanceUid: string,
+    sopInstanceUid: string
+  ): Promise<unknown[]> {
+    const study = String(studyInstanceUid || '').trim();
+    const series = String(seriesInstanceUid || '').trim();
+    const instance = String(sopInstanceUid || '').trim();
+    if (!study || !series || !instance) {
+      throw new Error('DICOM_INSTANCE_IDENTIFIERS_REQUIRED');
+    }
+
+    const response = await this.request(
+      '/studies/' + encodeURIComponent(study) +
+      '/series/' + encodeURIComponent(series) +
+      '/instances/' + encodeURIComponent(instance) +
+      '/metadata'
+    );
+    if (!response.ok) {
+      throw new Error('DICOM_WADO_METADATA_FAILED: ' + response.status + ' ' + response.statusText);
+    }
+    const payload = await response.json();
+    if (!Array.isArray(payload)) throw new Error('DICOM_WADO_METADATA_INVALID');
+    return payload;
   }
 
   public getRenderedFrameUrl(
@@ -164,6 +327,9 @@ export class DicomWebClient {
     frameNumber = 1
   ): string {
     this.assertLive();
+    if (!Number.isInteger(frameNumber) || frameNumber < 1) {
+      throw new Error('DICOM_FRAME_NUMBER_INVALID');
+    }
     return (
       this.baseUrl +
       '/studies/' + encodeURIComponent(studyInstanceUid) +

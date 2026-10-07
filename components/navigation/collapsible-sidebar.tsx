@@ -223,6 +223,36 @@ export function CollapsibleSidebar({
           icon: BedDouble,
         },
         {
+          id: 'nursing-emar',
+          name: 'Inpatient Nursing & eMAR',
+          shortName: 'Nursing eMAR',
+          icon: BedDouble,
+        },
+        {
+          id: 'dialysis-nephrology',
+          name: 'Renal Care & Dialysis',
+          shortName: 'Dialysis',
+          icon: Droplet,
+        },
+        {
+          id: 'maternity-labor-delivery',
+          name: 'Obstetrics & Partogram',
+          shortName: 'Obstetrics',
+          icon: HeartPulse,
+        },
+        {
+          id: 'oncology-tumor-board',
+          name: 'Oncology & Tumor Board',
+          shortName: 'Oncology',
+          icon: Activity,
+        },
+        {
+          id: 'rehab-physical-therapy',
+          name: 'Rehabilitation',
+          shortName: 'Rehab',
+          icon: Stethoscope,
+        },
+        {
           id: 'disease-intake',
           name: 'Disease Protocols & Intake',
           shortName: 'Disease Intake',

@@ -1,0 +1,54 @@
+name: Cleanup Obsolete Branches
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/cleanup-obsolete-branches.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    name: Delete verified obsolete branches
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout canonical main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Delete merged, superseded, or fully-behind branches
+        shell: bash
+        run: |
+          set -euo pipefail
+          branches=(
+            "ci/patient360-completeness-closure"
+            "ci/patient360-completeness-reconcile"
+            "clinical/identity-routing-intake-completion"
+            "clinical/identity-routing-intake-rework"
+            "fix/p8-bun-lockfile-sync"
+            "fix/patient-identity-routing-intake-workflows"
+            "hospital0/deployment-qualification"
+            "wave1/clinical-coordination-closure"
+            "wave2a/nursing-emar-authority"
+            "wave2/clinical-domain-completion"
+            "wave3a/ipd-closure"
+            "wave3b/emergency-telemetry-qualification"
+            "wave4/external-interoperability"
+            "wave5/enterprise-hardening"
+          )
+
+          for branch in "${branches[@]}"; do
+            if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+              echo "Deleting $branch"
+              git push origin --delete "$branch"
+            else
+              echo "Already absent: $branch"
+            fi
+          done
+
+          echo "Obsolete branch cleanup complete."

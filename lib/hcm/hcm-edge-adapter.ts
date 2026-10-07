@@ -130,11 +130,11 @@ function mapWorkforceSnapshot(
 }
 
 export async function loadLocalWorkforceMaster(tenantId:string){
-  return mapWorkforceSnapshot(await loadLocalEdgeSnapshot(tenantId));
+  return mapWorkforceSnapshot(await loadLocalEdgeSnapshot(tenantId, 'HCM'));
 }
 
 export async function hydrateWorkforceMaster(tenantId:string){
-  return mapWorkforceSnapshot(await hydrateEdgeSnapshot(tenantId));
+  return mapWorkforceSnapshot(await hydrateEdgeSnapshot(tenantId, { surface: 'HCM' }));
 }
 
 
@@ -556,11 +556,11 @@ function mapCredentialingSnapshot(
 }
 
 export async function loadLocalCredentialing(tenantId:string){
-  return mapCredentialingSnapshot(await loadLocalEdgeSnapshot(tenantId));
+  return mapCredentialingSnapshot(await loadLocalEdgeSnapshot(tenantId, 'HCM'));
 }
 
 export async function hydrateCredentialing(tenantId:string){
-  return mapCredentialingSnapshot(await hydrateEdgeSnapshot(tenantId));
+  return mapCredentialingSnapshot(await hydrateEdgeSnapshot(tenantId, { surface: 'HCM' }));
 }
 
 function inferLegacyShiftType(shift:RosterShiftEntry):ShiftType{
@@ -631,11 +631,11 @@ function mapRosterSnapshot(
 }
 
 export async function loadLocalRoster(tenantId:string){
-  return mapRosterSnapshot(await loadLocalEdgeSnapshot(tenantId));
+  return mapRosterSnapshot(await loadLocalEdgeSnapshot(tenantId, 'HCM'));
 }
 
 export async function hydrateRoster(tenantId:string){
-  return mapRosterSnapshot(await hydrateEdgeSnapshot(tenantId));
+  return mapRosterSnapshot(await hydrateEdgeSnapshot(tenantId, { surface: 'HCM' }));
 }
 
 
@@ -656,9 +656,9 @@ function mapPayrollSnapshot(
 }
 
 export async function loadLocalPayroll(tenantId:string){
-  return mapPayrollSnapshot(await loadLocalEdgeSnapshot(tenantId));
+  return mapPayrollSnapshot(await loadLocalEdgeSnapshot(tenantId, 'HCM'));
 }
 
 export async function hydratePayroll(tenantId:string){
-  return mapPayrollSnapshot(await hydrateEdgeSnapshot(tenantId));
+  return mapPayrollSnapshot(await hydrateEdgeSnapshot(tenantId, { surface: 'HCM' }));
 }

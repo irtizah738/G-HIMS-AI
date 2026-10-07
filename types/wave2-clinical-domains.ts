@@ -5,6 +5,20 @@ export type MedicationAdministrationOutcome =
   | 'MISSED'
   | 'DELAYED';
 
+export interface EmarScheduleSlot {
+  emarSlotId: string;
+  tenantId: string;
+  patientId: string;
+  encounterId: string;
+  medicationOrderId: string;
+  scheduledFor: number;
+  toleranceMinutes: number;
+  status: 'DUE' | 'ADMINISTERED' | 'HELD' | 'REFUSED' | 'MISSED' | 'DELAYED' | 'CANCELLED';
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface NursingCarePlanRecord {
   carePlanId: string;
   tenantId: string;

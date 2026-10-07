@@ -424,7 +424,6 @@ export class TelehealthDomainService {
         auditAction: 'TELEHEALTH_SESSION_COMPLETED',
         auditResourceType: 'TELEHEALTH_SESSION',
         auditResourceId: payload.sessionId,
-        auditReason: `Completed telehealth session ${payload.sessionId} from final signed clinical evidence.`,
         outboxTopic: 'g-hims-telehealth-events',
         idempotencyKey,
         commandId,
@@ -544,6 +543,7 @@ export class TelehealthDomainService {
               encounterId: session.encounterId,
               signedEvidenceId: payload.signedEvidenceId,
             },
+            auditReason: `Completed telehealth session ${session.id} from final signed clinical evidence.`,
             resultData: nextSession,
           };
         },

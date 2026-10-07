@@ -32,7 +32,7 @@ describe('Hospital-0 exact engineering closure', () => {
       'cmd-provenance-1',
       'idemp-provenance-1',
       {
-        entityType: 'RESOURCE',
+        entityType: 'RESOURCE_MASTER',
         entityId: 'resource-provenance-1',
         eventType: 'PROVENANCE_TEST_EVENT',
         domainState: { resourceId: 'resource-provenance-1', status: 'ACTIVE' },
@@ -66,7 +66,7 @@ describe('Hospital-0 exact engineering closure', () => {
     });
 
     expect(result.success).toBe(true);
-    const events = TransactionManager.getInMemoryEvents();
+    const events = await TransactionManager.getEvents('tenant-provenance-test');
     const event = events.find((item) => item.eventId === result.eventId);
     expect(event?.source).toBe('system');
   });

@@ -229,10 +229,15 @@ export class NursingEmarDomainService {
     }
 
     const orderVersion = Number((order as unknown as Record<string, unknown>)._serverVersion || 0);
-    if (
-      payload.expectedMedicationOrderVersion !== undefined &&
-      payload.expectedMedicationOrderVersion !== orderVersion
-    ) {
+    if (!Number.isInteger(payload.expectedMedicationOrderVersion)) {
+      return wave2Failure(
+        commandId,
+        idempotencyKey,
+        'EMAR_ORDER_VERSION_REQUIRED',
+        'Bedside medication administration requires the exact reviewed medication-order version.'
+      );
+    }
+    if (payload.expectedMedicationOrderVersion !== orderVersion) {
       return wave2Failure(commandId, idempotencyKey, 'EMAR_ORDER_VERSION_CONFLICT', 'Medication order changed after bedside review. Refresh eMAR before proceeding.');
     }
 

@@ -877,6 +877,24 @@ export class CommandBus {
           );
           break;
 
+        case 'TransferSurgicalCaseToPacuCommand':
+          result = await SurgicalCaseDomainService.transferToPacu(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'AcceptPacuTransferCommand':
+          result = await SurgicalCaseDomainService.acceptPacuTransfer(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'CompletePacuRecoveryCommand':
+          result = await SurgicalCaseDomainService.completePacuRecovery(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
         case 'CancelSurgicalCaseCommand':
           result = await SurgicalCaseDomainService.cancelCase(
             context,

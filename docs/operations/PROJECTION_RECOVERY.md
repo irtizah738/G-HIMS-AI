@@ -52,7 +52,7 @@ The recovery service:
 - records SHA-256 fingerprints of the normalized event stream and rebuilt projections;
 - stores a PHI-free recovery-run manifest in `projectionRecoveryRuns`.
 
-Repeated rebuilds of the same authoritative stream should produce the same event-stream and projection fingerprints. A mismatch is a release/recovery blocker.
+Repeated rebuilds of the same authoritative stream should produce the same event-stream and projection fingerprints. In other words, identical authoritative input must yield the same projection fingerprint. A mismatch is a release/recovery blocker.
 
 ## What is not rebuilt
 

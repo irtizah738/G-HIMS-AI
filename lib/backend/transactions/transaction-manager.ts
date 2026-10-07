@@ -191,6 +191,8 @@ function collectionForEntityType(entityType: string): string {
     ONCOLOGY_TOXICITY_ASSESSMENT: 'oncologyToxicityAssessments',
     REHABILITATION_PLAN: 'rehabilitationPlans',
     REHABILITATION_SESSION: 'rehabilitationSessions',
+    EMERGENCY_PREARRIVAL_TELEMETRY: 'preArrivalTelemetryRecords',
+    TELEMETRY_DEVICE_CHECKPOINT: 'telemetryDeviceCheckpoints',
     JOURNAL_ENTRY: 'journalEntries',
     GL_ACCOUNT: 'accounts',
     FINANCE_PERIOD: 'accountingPeriods',

@@ -117,7 +117,6 @@ export interface AdvanceSurgicalCasePayload {
 export interface TransferSurgicalCaseToPacuPayload {
   caseId: string;
   pacuRoomId: string;
-  receivingClinicianId: string;
   handoffSummary: string;
   activeRisks?: string[];
   medicationConcerns?: string[];
@@ -846,6 +845,28 @@ export class SurgicalCaseDomainService {
       );
     }
 
+    const preflight = await DomainStateRepository.getById<GovernedSurgicalCase>(
+      context.tenantId,
+      'surgicalCases',
+      payload.caseId
+    );
+    if (!preflight) {
+      return reject(
+        commandId,
+        idempotencyKey,
+        'SURGICAL_CASE_NOT_FOUND',
+        'Surgical case does not exist.'
+      );
+    }
+    if (!preflight.encounterId) {
+      return reject(
+        commandId,
+        idempotencyKey,
+        'SURGICAL_ENCOUNTER_NOT_BOUND',
+        'Surgical case does not have an authoritative encounter binding.'
+      );
+    }
+
     const handoffId = `handoff_pacu_${crypto.randomUUID()}`;
     const nowMs = Date.now();
     const now = new Date(nowMs).toISOString();
@@ -868,10 +889,12 @@ export class SurgicalCaseDomainService {
         readTargets: [
           { key: 'case', entityType: 'SURGICAL_CASE', entityId: payload.caseId, required: true },
           { key: 'room', entityType: 'HOSPITAL_ROOM', entityId: payload.pacuRoomId, required: true },
+          { key: 'encounter', entityType: 'ENCOUNTER', entityId: preflight.encounterId, required: true },
         ],
         prepare: (current) => {
           const surgicalCase = current.case as unknown as GovernedSurgicalCase;
           const room = current.room as unknown as HospitalRoom;
+          const encounter = current.encounter as unknown as PersistedEncounter;
 
           assertFacilityScope(context, surgicalCase.facilityId);
           if (String(surgicalCase.status || '') !== 'intra_op') {
@@ -912,10 +935,9 @@ export class SurgicalCaseDomainService {
             encounterId: surgicalCase.encounterId,
             sourceEncounterId: surgicalCase.encounterId,
             episodeId: surgicalCase.id,
-            careSetting: 'IPD',
+            careSetting: normalizeCareSetting(encounter.encounterType || encounter.type),
             fromClinicianId: context.actorId,
             fromDepartmentId: surgicalCase.departmentId,
-            toClinicianId: payload.receivingClinicianId,
             toDepartmentId: room.departmentId,
             toRole: 'PACU_CLINICIAN',
             currentProblemSummary: payload.handoffSummary.trim(),
@@ -976,7 +998,7 @@ export class SurgicalCaseDomainService {
               encounterId: surgicalCase.encounterId,
               pacuRoomId: room.roomId,
               handoffId,
-              receivingClinicianId: payload.receivingClinicianId,
+              receivingDepartmentId: room.departmentId,
             },
             auditReason: `Transferred surgical case ${surgicalCase.id} to PACU with handoff ${handoffId}.`,
             resultData: next,
@@ -1058,14 +1080,22 @@ export class SurgicalCaseDomainService {
               'PACU handoff is not pending acceptance for this surgical case.'
             );
           }
+          const actorDepartments = new Set(
+            [
+              ...(context.departmentIds || []),
+              ...(context.departmentId ? [context.departmentId] : []),
+            ]
+              .map((department) => String(department || '').trim().toUpperCase())
+              .filter(Boolean)
+          );
+          const targetDepartment = String(handoff.toDepartmentId || '').trim().toUpperCase();
           if (
-            handoff.toClinicianId &&
-            handoff.toClinicianId !== context.actorId &&
-            !context.roles.includes('SYSTEM_ADMIN')
+            !context.roles.includes('SYSTEM_ADMIN') &&
+            (!targetDepartment || !actorDepartments.has(targetDepartment))
           ) {
             throw new AtomicMutationRejectedError(
-              'PACU_RECEIVER_MISMATCH',
-              'Only the designated PACU receiving clinician may accept this handoff.'
+              'PACU_RECEIVER_DEPARTMENT_MISMATCH',
+              'PACU handoff may only be accepted by a clinician assigned to the receiving recovery department.'
             );
           }
 

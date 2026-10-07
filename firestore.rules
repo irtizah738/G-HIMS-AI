@@ -414,6 +414,21 @@ service cloud.firestore {
         allow read, write: if false;
       }
 
+      // Wave 2 specialty clinical aggregates are server-authoritative PHI.
+      match /emarScheduleSlots/{id} { allow read, write: if false; }
+      match /nursingCarePlans/{id} { allow read, write: if false; }
+      match /renalDialysisOrders/{id} { allow read, write: if false; }
+      match /renalDialysisSessions/{id} { allow read, write: if false; }
+      match /obstetricEpisodes/{id} { allow read, write: if false; }
+      match /obstetricPartogramEntries/{id} { allow read, write: if false; }
+      match /oncologyCases/{id} { allow read, write: if false; }
+      match /oncologyTumorBoardRecommendations/{id} { allow read, write: if false; }
+      match /oncologyRegimens/{id} { allow read, write: if false; }
+      match /oncologyChemotherapyLinks/{id} { allow read, write: if false; }
+      match /oncologyToxicityAssessments/{id} { allow read, write: if false; }
+      match /rehabilitationPlans/{id} { allow read, write: if false; }
+      match /rehabilitationSessions/{id} { allow read, write: if false; }
+
       match /diagnosticResultAcknowledgements/{acknowledgementId} {
         allow read, write: if false;
       }

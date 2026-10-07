@@ -51,7 +51,7 @@ export function HospitalOperationalContextBar({ onOpenPatientSearch }: Operation
   const [facilityDropdownOpen, setFacilityDropdownOpen] = useState(false);
 
   // Active patient resolution
-  const activePatient = patients.find((p) => p.id === selectedPatientId) || patients[0];
+  const activePatient = selectedPatientId ? (patients.find((p) => p.id === selectedPatientId) || null) : null;
 
   // Resolve departmental and workflow context based on active tab
   const getDepartmentAndWorkflow = () => {
@@ -230,7 +230,7 @@ export function HospitalOperationalContextBar({ onOpenPatientSearch }: Operation
               }}
               className="ml-1 text-[11px] text-blue-400 hover:text-blue-300 font-medium underline flex items-center gap-0.5 cursor-pointer"
             >
-              Switch
+              {activePatient ? 'Switch' : 'Select'}
             </button>
           </div>
         )}

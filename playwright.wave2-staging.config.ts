@@ -25,7 +25,7 @@ export default defineConfig({
   testMatch: /wave2-cross-role\.spec\.ts/,
   fullyParallel: false,
   workers: 1,
-  retries: 1,
+  retries: 0,
   timeout: 300_000,
   expect: { timeout: 25_000 },
   reporter: [

@@ -34,7 +34,7 @@ describe('OPD-RP19 Firestore indexes and projections', () => {
     expect(workspace).toContain("surface: 'OPD'");
     expect(hydration).toContain("surface === 'OPD'");
     expect(hydration).toContain('OPD_EDGE_COLLECTIONS');
-    expect(route).toContain("surface === 'OPD'");
+    expect(route).toContain("requestedSurface === 'OPD'");
     expect(route).toContain('loadOpdScopedEdgeCollections');
     expect(route).toContain('readCollectionSnapshot');
     expect(surface).not.toContain("'accounts'");

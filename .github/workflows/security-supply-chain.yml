@@ -1,0 +1,62 @@
+name: Security Supply Chain
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  supply-chain:
+    name: Dependency, secret and SBOM gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: High and critical dependency advisory gate
+        run: bun audit --audit-level=high
+
+      - name: Repository credential leak gate
+        run: bun scripts/ops/repository-secret-scan.ts
+
+      - name: Security regression suite
+        run: bun run test:security
+
+      - name: Generate license inventory
+        run: |
+          mkdir -p artifacts/security
+          bun pm licenses --json > artifacts/security/licenses.json
+
+      - name: Generate CycloneDX SBOM with verified cdxgen binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/security
+          gh release download v13.3.0 \
+            --repo cdxgen/cdxgen \
+            --pattern 'cdxgen-linux-amd64' \
+            --pattern 'cdxgen-linux-amd64.sha256'
+          sha256sum -c cdxgen-linux-amd64.sha256
+          chmod +x cdxgen-linux-amd64
+          ./cdxgen-linux-amd64 -t bun -o artifacts/security/sbom.cdx.json
+
+      - name: Upload software supply-chain evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghims-security-supply-chain-${{ github.sha }}
+          path: artifacts/security/
+          if-no-files-found: error
+          retention-days: 30

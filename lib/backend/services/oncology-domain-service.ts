@@ -301,8 +301,18 @@ export class OncologyDomainService {
         'medicationOrders',
         medicationOrderId
       );
-      if (!medication || String(medication.patientId || '') !== payload.patientId || !['ACTIVE', 'ON_HOLD'].includes(String(medication.status || ''))) {
-        return wave2Failure(commandId, idempotencyKey, 'ONCOLOGY_MEDICATION_ORDER_INVALID', `Medication order ${medicationOrderId} is not an active order for this patient.`);
+      if (
+        !medication ||
+        String(medication.patientId || '') !== payload.patientId ||
+        String(medication.encounterId || '') !== payload.encounterId ||
+        !['ACTIVE', 'ON_HOLD'].includes(String(medication.status || ''))
+      ) {
+        return wave2Failure(
+          commandId,
+          idempotencyKey,
+          'ONCOLOGY_MEDICATION_ORDER_INVALID',
+          `Medication order ${medicationOrderId} is not an active order for this patient encounter.`
+        );
       }
     }
 

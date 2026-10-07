@@ -167,11 +167,11 @@ function mapLedgerSnapshot(snapshot:Awaited<ReturnType<typeof loadLocalEdgeSnaps
 }
 
 export async function loadLocalFinanceLedger(tenantId:string){
-  return mapLedgerSnapshot(await loadLocalEdgeSnapshot(tenantId));
+  return mapLedgerSnapshot(await loadLocalEdgeSnapshot(tenantId, 'FINANCE'));
 }
 
 export async function hydrateFinanceLedger(tenantId:string){
-  return mapLedgerSnapshot(await hydrateEdgeSnapshot(tenantId));
+  return mapLedgerSnapshot(await hydrateEdgeSnapshot(tenantId, { surface: 'FINANCE' }));
 }
 
 export const capitalizeFixedAssetEdge=(
@@ -298,9 +298,9 @@ function mapSnapshot(snapshot:Awaited<ReturnType<typeof loadLocalEdgeSnapshot>>)
 }
 
 export async function loadLocalFinanceAssets(tenantId:string){
-  return mapSnapshot(await loadLocalEdgeSnapshot(tenantId));
+  return mapSnapshot(await loadLocalEdgeSnapshot(tenantId, 'FINANCE'));
 }
 
 export async function hydrateFinanceAssets(tenantId:string){
-  return mapSnapshot(await hydrateEdgeSnapshot(tenantId));
+  return mapSnapshot(await hydrateEdgeSnapshot(tenantId, { surface: 'FINANCE' }));
 }

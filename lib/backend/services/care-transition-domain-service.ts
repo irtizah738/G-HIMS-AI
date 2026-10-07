@@ -1420,10 +1420,7 @@ export class CareTransitionDomainService {
     const dischargeTransitionEvidenceId =
       `care_transition_discharge_${encounter.encounterId}`;
     const dischargeReadinessReviewId = String(
-      currentReadinessReview.reviewId ||
-        currentReadinessReview.dischargeReadinessReviewId ||
-        currentReadinessReview.id ||
-        ''
+      currentReadinessReview.reviewId || ''
     ).trim();
 
     if (!dischargeReadinessReviewId) {

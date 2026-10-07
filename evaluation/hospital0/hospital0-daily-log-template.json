@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "evidenceType": "HOSPITAL0_DAILY_OPERATIONAL_LOG",
+  "date": "",
+  "site": "",
+  "runtime": "PILOT",
+  "frozenCommitSha": "",
+  "participants": [],
+  "encountersObserved": 0,
+  "ciOperations": {
+    "encounterPreparation": 0,
+    "longitudinalSummary": 0,
+    "trendIntelligence": 0,
+    "medicationReconciliation": 0,
+    "governedDrafting": 0
+  },
+  "incidents": [],
+  "defects": [],
+  "clinicianFeedback": [],
+  "stopCriteriaTriggered": false,
+  "stopCriteriaDetails": "",
+  "operatorName": "",
+  "reviewedBy": "",
+  "notes": "Use pseudonymous participant/case identifiers. Do not place unnecessary PHI in this file."
+}

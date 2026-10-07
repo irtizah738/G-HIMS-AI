@@ -821,6 +821,30 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       targetStatus: z.enum(['pre_op','intra_op','post_op_pacu','completed']),
     }).strict(),
   },
+  TransferSurgicalCaseToPacuCommand: {
+    1: z.object({
+      caseId: nonEmpty.max(150),
+      pacuRoomId: nonEmpty.max(150),
+      receivingClinicianId: nonEmpty.max(150),
+      handoffSummary: nonEmpty.max(8000),
+      activeRisks: z.array(nonEmpty.max(1000)).max(100).optional(),
+      medicationConcerns: z.array(nonEmpty.max(1000)).max(100).optional(),
+      expectedActions: z.array(nonEmpty.max(1000)).max(100).optional(),
+    }).strict(),
+  },
+  AcceptPacuTransferCommand: {
+    1: z.object({
+      caseId: nonEmpty.max(150),
+      handoffId: nonEmpty.max(150),
+    }).strict(),
+  },
+  CompletePacuRecoveryCommand: {
+    1: z.object({
+      caseId: nonEmpty.max(150),
+      recoveryAssessment: nonEmpty.max(12000),
+      disposition: z.enum(['WARD','ICU','DISCHARGE']),
+    }).strict(),
+  },
   CancelSurgicalCaseCommand: {
     1: z.object({
       caseId: nonEmpty.max(150),

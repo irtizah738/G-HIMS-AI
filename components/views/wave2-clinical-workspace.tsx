@@ -589,6 +589,7 @@ export function Wave2ClinicalWorkspace({
           <div className="mt-4 text-xs text-slate-500">
             Hydrated {new Date(workspace.generatedAt).toLocaleString()} ·
             {' '}{workspace.activeMedicationOrders.length} active/on-hold medication orders ·
+            {' '}{workspace.overdueMedicationSlots.length} overdue eMAR slots ·
             {' '}{workspace.acceptedClinicalHandoffs.length} accepted handoffs
           </div>
         )}

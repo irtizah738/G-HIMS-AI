@@ -172,7 +172,11 @@
     "test:wave3a": "bun test tests/wave3a-ipd-closure.test.ts tests/opd-rp14-atomic-opd-ipd-transition.test.ts",
     "validate:wave3a": "bun run typecheck && bun run lint && bun run test:wave3a && bun run test:clinical-architecture && bun run test:ci7 && bun run test:ci4 && bun run test:cbe && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",
     "test:wave3b": "bun test tests/wave3b-emergency-telemetry-qualification.test.ts",
-    "validate:wave3b": "bun run typecheck && bun run lint && bun run test:wave3b && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build"
+    "validate:wave3b": "bun run typecheck && bun run lint && bun run test:wave3b && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",
+    "test:wave3c": "bun test tests/wave3c-or-pacu-transition.test.ts",
+    "test:wave3d": "bun test tests/wave3d-telehealth-resilience.test.ts",
+    "test:wave3": "bun run test:wave3a && bun run test:wave3b && bun run test:wave3c && bun run test:wave3d && bun test tests/wave3-completion.test.ts",
+    "validate:wave3": "bun run typecheck && bun run lint && bun run test:wave3 && bun run test:ci10i && bun run test:hospital0-ci && bun run test:ci-demo && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

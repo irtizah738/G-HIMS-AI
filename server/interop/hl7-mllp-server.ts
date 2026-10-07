@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import net, { type Server as NetServer, type Socket } from 'node:net';
-import tls, { type Server as TlsServer, type TLSSocket } from 'node:tls';
+import tls, { type Server as TlsServer, type TLSSocket, type TlsOptions } from 'node:tls';
 import { generateACK, parseHL7 } from '@/lib/interop/hl7-parser';
 import {
   frameMllpMessage,
@@ -134,7 +134,7 @@ async function postToIngest(
 }
 
 async function processMessage(config: Hl7MllpServerConfig, message: string): Promise<Buffer> {
-  let parsed;
+  let parsed: ReturnType<typeof parseHL7> | undefined;
   try {
     parsed = parseHL7(message);
     const source = sourceIdentityFromHl7(message);
@@ -195,7 +195,7 @@ export function createHl7MllpServer(config: Hl7MllpServerConfig): NetServer | Tl
   validateHl7MllpConfig(config);
 
   if (config.tls) {
-    const options: tls.TlsOptions = {
+    const options: TlsOptions = {
       cert: fs.readFileSync(config.tls.certPath),
       key: fs.readFileSync(config.tls.keyPath),
       ...(config.tls.caPath ? { ca: fs.readFileSync(config.tls.caPath) } : {}),

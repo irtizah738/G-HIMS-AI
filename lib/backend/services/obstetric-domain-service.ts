@@ -125,8 +125,8 @@ export class ObstetricDomainService {
       'obstetricEpisodes',
       obstetricEpisodeId
     );
-    if (existing && existing.stage !== 'COMPLETED') {
-      return wave2Failure(commandId, idempotencyKey, 'OBSTETRIC_EPISODE_ALREADY_ACTIVE', 'This encounter already has an active obstetric episode.');
+    if (existing) {
+      return wave2Failure(commandId, idempotencyKey, 'OBSTETRIC_EPISODE_ALREADY_EXISTS', 'This encounter already has an obstetric episode and cannot be reinitialized.');
     }
 
     const now = Date.now();
@@ -170,6 +170,7 @@ export class ObstetricDomainService {
       commandId,
       correlationId: context.correlationId,
       domainState: episode,
+      expectedPrimaryServerVersion: 0,
     });
 
     return { success: true, commandId, idempotencyKey, entityId: obstetricEpisodeId, eventId: tx.eventId, auditId: tx.auditId, outboxId: tx.outboxId, data: episode };
@@ -271,10 +272,12 @@ export class ObstetricDomainService {
       commandId,
       correlationId: context.correlationId,
       domainState: entry,
+      expectedPrimaryServerVersion: 0,
       additionalStateWrites: [{
         entityType: 'OBSTETRIC_EPISODE',
         entityId: episode.obstetricEpisodeId,
         domainState: nextEpisode,
+        expectedServerVersion: Number((episode as unknown as Record<string, unknown>)._serverVersion || 0),
       }],
     });
 

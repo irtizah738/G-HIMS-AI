@@ -38,6 +38,11 @@ const WAVE2_COLLECTIONS = [
   'rehabilitationPlans',
   'rehabilitationSessions',
   'clinicalHandoffs',
+  'clinicalConditions',
+  'diagnosticReports',
+  'clinicalDocuments',
+  'clinicalObservations',
+  'diseaseIntakeArtifacts',
 ] as const;
 
 type Wave2Collection = (typeof WAVE2_COLLECTIONS)[number];
@@ -232,6 +237,47 @@ export async function GET(req: NextRequest) {
         ),
         ['acceptedAt', 'updatedAt', 'createdAt']
       ),
+      oncologyEvidenceSources: [
+        ...byCollection.clinicalConditions.map((item) => ({
+          evidenceId: item.id,
+          evidenceType: 'CLINICAL_CONDITION',
+          label:
+            String((item.code as Record<string, unknown> | undefined)?.text || '') ||
+            String(item.display || item.id || ''),
+        })),
+        ...byCollection.diagnosticReports
+          .filter((item) => String(item.status || '').toUpperCase() !== 'ENTERED_IN_ERROR')
+          .map((item) => ({
+            evidenceId: item.id,
+            evidenceType: 'DIAGNOSTIC_REPORT',
+            label:
+              String((item.code as Record<string, unknown> | undefined)?.text || '') ||
+              String(item.conclusion || item.id || ''),
+          })),
+        ...byCollection.clinicalDocuments
+          .filter((item) => String(item.status || '').toUpperCase() !== 'ENTERED_IN_ERROR')
+          .map((item) => ({
+            evidenceId: item.id,
+            evidenceType: 'CLINICAL_DOCUMENT',
+            label: String(item.title || item.documentType || item.id || ''),
+          })),
+        ...byCollection.clinicalObservations
+          .filter((item) => String(item.status || '').toUpperCase() !== 'ENTERED_IN_ERROR')
+          .map((item) => ({
+            evidenceId: item.id,
+            evidenceType: 'CLINICAL_OBSERVATION',
+            label:
+              String((item.code as Record<string, unknown> | undefined)?.text || '') ||
+              String(item.id || ''),
+          })),
+        ...byCollection.diseaseIntakeArtifacts
+          .filter((item) => String(item.status || '').toUpperCase() === 'FINAL')
+          .map((item) => ({
+            evidenceId: item.id,
+            evidenceType: 'DISEASE_INTAKE',
+            label: String(item.templateName || item.id || ''),
+          })),
+      ].slice(0, 100),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

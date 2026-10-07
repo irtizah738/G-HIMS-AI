@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "evidenceType": "HOSPITAL0_SITE_SIGNOFF",
+  "status": "PENDING_HUMAN_SIGNATURE",
+  "site": "",
+  "frozenCommitSha": "",
+  "pilotWindow": {
+    "startDate": "",
+    "endDate": ""
+  },
+  "scopeReviewed": false,
+  "quantitativeResultsReviewed": false,
+  "incidentsReviewed": false,
+  "unresolvedCriticalIssues": 0,
+  "unresolvedHighIssues": 0,
+  "signatories": [],
+  "disposition": "",
+  "sourceDocumentReference": "",
+  "statement": "Site sign-off must reflect actual pilot evidence. This template is not itself evidence."
+}

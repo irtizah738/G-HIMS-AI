@@ -39,13 +39,13 @@ function mapProjection(
 export async function loadLocalFacilitiesProjection(
   tenantId: string
 ): Promise<FacilitiesEdgeProjection> {
-  return mapProjection(await loadLocalEdgeSnapshot(tenantId));
+  return mapProjection(await loadLocalEdgeSnapshot(tenantId, 'FACILITIES'));
 }
 
 export async function hydrateFacilitiesProjection(
   tenantId: string
 ): Promise<FacilitiesEdgeProjection> {
-  return mapProjection(await hydrateEdgeSnapshot(tenantId));
+  return mapProjection(await hydrateEdgeSnapshot(tenantId, { surface: 'FACILITIES' }));
 }
 
 async function run<T>(

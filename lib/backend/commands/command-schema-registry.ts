@@ -925,7 +925,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
   ResumeTelehealthSessionCommand: {
     1: z.object({
       sessionId: nonEmpty.max(150),
-      expectedServerVersion: z.number().int().nonnegative(),
+      expectedUpdatedAt: nonEmpty.max(100),
     }).strict(),
   },
   CompleteTelehealthSessionCommand: {

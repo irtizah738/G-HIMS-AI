@@ -30,6 +30,7 @@ export default defineConfig({
   expect: { timeout: 25_000 },
   reporter: [
     ['list'],
+    ['json', { outputFile: 'test-results/wave2-staging/results.json' }],
     ['html', { outputFolder: 'playwright-report/wave2-staging', open: 'never' }],
   ],
   use: {

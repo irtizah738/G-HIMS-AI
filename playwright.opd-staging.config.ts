@@ -20,6 +20,18 @@ if (
   );
 }
 
+
+const bypassHeaderName = String(
+  process.env.GHIMS_STAGING_BYPASS_HEADER_NAME || ''
+).trim();
+const bypassHeaderValue = String(
+  process.env.GHIMS_STAGING_BYPASS_HEADER_VALUE || ''
+).trim();
+const extraHTTPHeaders =
+  bypassHeaderName && bypassHeaderValue
+    ? { [bypassHeaderName]: bypassHeaderValue }
+    : undefined;
+
 export default defineConfig({
   testDir: './e2e/staging',
   testMatch: /opd-cross-role\.spec\.ts/,
@@ -37,6 +49,7 @@ export default defineConfig({
   use: {
     baseURL,
     trace: 'retain-on-failure',
+    ...(extraHTTPHeaders ? { extraHTTPHeaders } : {}),
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
     actionTimeout: 20_000,

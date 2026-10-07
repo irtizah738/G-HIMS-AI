@@ -10,6 +10,8 @@ import type {
   NursingCarePlanRecord,
 } from '@/types/wave2-clinical-domains';
 import { buildCanonicalMedicationAdministration } from '@/lib/clinical/canonical-fact-builders';
+import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
+import { MedicationSafetyService } from '@/lib/clinical/intelligence/medication-safety-service';
 import {
   clinicianAuthorization,
   loadWave2ScopedEncounter,
@@ -232,6 +234,64 @@ export class NursingEmarDomainService {
       payload.expectedMedicationOrderVersion !== orderVersion
     ) {
       return wave2Failure(commandId, idempotencyKey, 'EMAR_ORDER_VERSION_CONFLICT', 'Medication order changed after bedside review. Refresh eMAR before proceeding.');
+    }
+
+    if (payload.outcome === 'GIVEN') {
+      const patient360 =
+        await Patient360ProjectionService.getOrRebuildProjection(
+          context.tenantId,
+          payload.patientId
+        );
+      if (!patient360) {
+        return wave2Failure(
+          commandId,
+          idempotencyKey,
+          'EMAR_PATIENT360_UNAVAILABLE',
+          'Patient 360 is required for bedside medication-safety validation.'
+        );
+      }
+
+      const safety = MedicationSafetyService.evaluateProjection(patient360);
+      const overriddenAllergyIds = new Set(
+        (order.safetyOverrideAllergyIds || [])
+          .map((value) => String(value || '').trim())
+          .filter(Boolean)
+      );
+      const hasDocumentedOverride = Boolean(
+        String(order.safetyOverrideReason || '').trim()
+      );
+      const unapprovedAllergyConflicts = safety.findings.filter(
+        (finding) =>
+          finding.type === 'MEDICATION_ALLERGY_CONFLICT' &&
+          finding.medicationOrderIds.includes(order.medicationOrderId) &&
+          (
+            !hasDocumentedOverride ||
+            finding.allergyIds.some(
+              (allergyId) => !overriddenAllergyIds.has(allergyId)
+            )
+          )
+      );
+
+      if (unapprovedAllergyConflicts.length > 0) {
+        return {
+          ...wave2Failure(
+            commandId,
+            idempotencyKey,
+            'EMAR_CRITICAL_MEDICATION_SAFETY_REVIEW_REQUIRED',
+            'Current Patient 360 contains an exact medication-allergy conflict that was not covered by the prescribing-time override. Clinician review is required before administration.'
+          ),
+          error: {
+            code: 'EMAR_CRITICAL_MEDICATION_SAFETY_REVIEW_REQUIRED',
+            message:
+              'Current Patient 360 contains an exact medication-allergy conflict that was not covered by the prescribing-time override. Clinician review is required before administration.',
+            details: {
+              findings: unapprovedAllergyConflicts,
+              patient360Revision: patient360.revision,
+              patient360SourceCheckpoint: patient360.sourceCheckpoint,
+            },
+          },
+        };
+      }
     }
 
     const administeredAt = payload.administeredAt || Date.now();

@@ -194,6 +194,13 @@ export interface MedicationOrder extends ClinicalFactBase {
   instructions?: string;
   prescribedBy: string;
   authoredAt: number;
+  /** CI-9 finding IDs reviewed at prescribing time. */
+  safetyFindingIds?: string[];
+  /** Medication-allergy IDs explicitly overridden by the prescriber. */
+  safetyOverrideAllergyIds?: string[];
+  /** Clinical reason recorded for the prescribing-time critical safety override. */
+  safetyOverrideReason?: string;
+  safetyReviewedAt?: number;
 }
 
 export interface MedicationDispense extends ClinicalFactBase {

@@ -22,6 +22,8 @@ import type {
   Patient360ConditionSummary,
   Patient360DocumentSummary,
   Patient360DiseaseIntakeSummary,
+  Patient360MedicationAdministrationSummary,
+  Patient360SpecialtyActivitySummary,
   Patient360EncounterSummary,
   Patient360MedicationSummary,
   Patient360ObservationSummary,
@@ -270,6 +272,38 @@ function diseaseIntakeSummary(
   };
 }
 
+function medicationAdministrationSummary(
+  event: Patient360SourceEvent
+): Patient360MedicationAdministrationSummary {
+  const payload = event.payload || {};
+  return {
+    administrationId: asString(payload.administrationId || event.aggregateId || event.eventId),
+    encounterId: asString(payload.encounterId) || undefined,
+    medicationOrderId: asString(payload.medicationOrderId) || undefined,
+    medicationName: asString(payload.medicationName, 'Medication'),
+    dose: asString(payload.dose) || undefined,
+    route: asString(payload.route) || undefined,
+    outcome: asString(payload.outcome || payload.status, event.eventType === 'MEDICATION_ADMINISTERED' ? 'GIVEN' : 'RECORDED'),
+    scheduledFor:
+      typeof payload.scheduledFor === 'number' && Number.isFinite(payload.scheduledFor)
+        ? payload.scheduledFor
+        : undefined,
+    administeredAt: Number(payload.administeredAt || event.occurredAt || event.recordedAt || 0),
+    sourceEventId: event.eventId,
+  };
+}
+
+function specialtyDomain(eventType: string): Patient360SpecialtyActivitySummary['domain'] | null {
+  if (eventType.startsWith('NURSING_') || eventType.startsWith('EMAR_') || eventType.startsWith('MEDICATION_ADMINISTRATION_') || eventType === 'MEDICATION_ADMINISTERED') {
+    return 'NURSING';
+  }
+  if (eventType.startsWith('RENAL_DIALYSIS_')) return 'RENAL';
+  if (eventType.startsWith('OBSTETRIC_')) return 'OBSTETRICS';
+  if (eventType.startsWith('ONCOLOGY_')) return 'ONCOLOGY';
+  if (eventType.startsWith('REHABILITATION_')) return 'REHABILITATION';
+  return null;
+}
+
 function eventSummary(event: Patient360SourceEvent): string {
   const payload = event.payload || {};
   switch (event.eventType) {
@@ -318,6 +352,58 @@ function eventSummary(event: Patient360SourceEvent): string {
     case 'INPATIENT_ENCOUNTER_DISCHARGED':
     case 'PATIENT_DISCHARGED_FROM_BED':
       return 'Inpatient discharge completed';
+    case 'NURSING_CARE_PLAN_CREATED':
+      return 'Nursing care plan created';
+    case 'NURSING_CARE_PLAN_INTERVENTION_UPDATED':
+      return 'Nursing care-plan intervention updated';
+    case 'EMAR_MEDICATION_SLOT_SCHEDULED':
+      return 'eMAR medication slot scheduled';
+    case 'MEDICATION_ADMINISTRATION_HELD':
+    case 'MEDICATION_ADMINISTRATION_REFUSED':
+    case 'MEDICATION_ADMINISTRATION_MISSED':
+    case 'MEDICATION_ADMINISTRATION_DELAYED':
+      return `Medication administration ${asString(payload.outcome, 'exception').toLowerCase()}`;
+    case 'RENAL_DIALYSIS_ORDER_CREATED':
+      return 'Dialysis order created';
+    case 'RENAL_DIALYSIS_SESSION_STARTED':
+      return 'Dialysis session started';
+    case 'RENAL_DIALYSIS_SESSION_COMPLETED':
+      return 'Dialysis session completed';
+    case 'RENAL_DIALYSIS_SESSION_ABORTED':
+      return 'Dialysis session aborted';
+    case 'OBSTETRIC_EPISODE_CREATED':
+      return 'Obstetric episode created';
+    case 'OBSTETRIC_PARTOGRAM_RECORDED':
+      return 'Partogram observation recorded';
+    case 'OBSTETRIC_PARTOGRAM_ESCALATION_RECORDED':
+      return `Partogram escalation: ${asString(payload.escalationState, 'review required').replace(/_/g, ' ').toLowerCase()}`;
+    case 'OBSTETRIC_THEATRE_TRANSITIONED':
+      return 'Obstetric episode transitioned to theatre';
+    case 'OBSTETRIC_STAGE_TRANSITIONED':
+      return `Obstetric stage transitioned to ${asString(payload.toStage, 'next stage').toLowerCase()}`;
+    case 'OBSTETRIC_DELIVERY_RECORDED':
+      return `Delivery recorded: ${asString(payload.mode, 'delivery').toLowerCase()}`;
+    case 'ONCOLOGY_CASE_OPENED':
+      return 'Oncology case opened';
+    case 'ONCOLOGY_TUMOR_BOARD_RECOMMENDATION_RECORDED':
+      return 'Tumor board recommendation recorded';
+    case 'ONCOLOGY_REGIMEN_APPROVED':
+      return 'Oncology regimen approved';
+    case 'ONCOLOGY_CHEMOTHERAPY_ADMINISTRATION_LINKED':
+      return 'Chemotherapy administration linked to regimen';
+    case 'ONCOLOGY_TOXICITY_RECORDED':
+    case 'ONCOLOGY_HIGH_GRADE_TOXICITY_RECORDED':
+      return `Oncology toxicity grade ${asString(payload.grade, '?')} recorded`;
+    case 'REHABILITATION_PLAN_CREATED':
+      return 'Rehabilitation plan created';
+    case 'REHABILITATION_SESSION_COMPLETED':
+      return 'Rehabilitation session completed';
+    case 'REHABILITATION_SESSION_NOT_DONE':
+      return 'Rehabilitation session not completed';
+    case 'REHABILITATION_GOAL_UPDATED':
+      return 'Rehabilitation goal updated';
+    case 'REHABILITATION_PLAN_COMPLETED':
+      return 'Rehabilitation plan completed';
     default:
       return event.eventType.replace(/_/g, ' ').toLowerCase();
   }
@@ -473,6 +559,47 @@ export class Patient360Projector {
         b.eventId.localeCompare(a.eventId)
       );
 
+    const recentMedicationAdministrations = patientEvents
+      .filter((event) =>
+        event.eventType === 'MEDICATION_ADMINISTERED' ||
+        event.eventType.startsWith('MEDICATION_ADMINISTRATION_')
+      )
+      .slice(0, 100)
+      .map(medicationAdministrationSummary);
+
+    const recentSpecialtyActivities: Patient360SpecialtyActivitySummary[] =
+      patientEvents
+        .flatMap((event): Patient360SpecialtyActivitySummary[] => {
+          const domain = specialtyDomain(event.eventType);
+          if (!domain) return [];
+          const payload = event.payload || {};
+          const sourceRefs = [
+            asString(payload.medicationOrderId),
+            asString(payload.emarSlotId),
+            asString(payload.carePlanId),
+            asString(payload.dialysisOrderId),
+            asString(payload.dialysisSessionId),
+            asString(payload.obstetricEpisodeId),
+            asString(payload.partogramEntryId),
+            asString(payload.oncologyCaseId),
+            asString(payload.regimenId),
+            asString(payload.recommendationId),
+            asString(payload.rehabilitationPlanId),
+            asString(payload.rehabilitationSessionId),
+          ].filter(Boolean);
+          const encounterId = asString(payload.encounterId);
+          return [{
+            activityId: event.aggregateId || event.eventId,
+            domain,
+            eventType: event.eventType,
+            ...(encounterId ? { encounterId } : {}),
+            occurredAt: Number(event.occurredAt || event.recordedAt || 0),
+            summary: eventSummary(event),
+            sourceRefs: Array.from(new Set(sourceRefs)),
+          }];
+        })
+        .slice(0, 200);
+
     const latestEvent = patientEvents[0];
     const lastEventRecordedAt = latestEvent
       ? Number(latestEvent.recordedAt || latestEvent.occurredAt || 0)
@@ -564,6 +691,8 @@ export class Patient360Projector {
       activeCarePlans,
       recentDocuments,
       recentDiseaseIntakes,
+      recentMedicationAdministrations,
+      recentSpecialtyActivities,
       dataQuality: {
         allergyKnowledge:
           allergies.length > 0
@@ -639,8 +768,10 @@ export class Patient360Projector {
         carePlans: carePlans.length,
         documents: documents.length,
         diseaseIntakes: diseaseIntakeArtifacts.length,
+        medicationAdministrations: recentMedicationAdministrations.length,
+        specialtyActivities: recentSpecialtyActivities.length,
       },
-      projectionVersion: 4,
+      projectionVersion: 5,
       revision: patientEvents.length,
       eventCheckpoint,
       sourceFingerprint,

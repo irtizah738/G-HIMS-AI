@@ -46,6 +46,7 @@ const ClaimsPreAuthView = dynamic(() => import('@/components/views/claims-preaut
 const AllModulesDirectory = dynamic(() => import('@/components/views/all-modules-directory').then(m => m.AllModulesDirectory), { loading: ViewSkeleton, ssr: false });
 const GoogleSheetsView = dynamic(() => import('@/components/views/google-sheets-view').then(m => m.GoogleSheetsView), { loading: ViewSkeleton, ssr: false });
 const DiseaseCentricIntakeView = dynamic(() => import('@/components/views/disease-centric-intake-view').then(m => m.DiseaseCentricIntakeView), { loading: ViewSkeleton, ssr: false });
+const Wave2ClinicalWorkspace = dynamic(() => import('@/components/views/wave2-clinical-workspace').then(m => m.Wave2ClinicalWorkspace), { loading: ViewSkeleton, ssr: false });
 const SettingsView = dynamic(() => import('@/components/views/settings-view').then(m => m.SettingsView), { loading: ViewSkeleton, ssr: false });
 const PatientPortalView = dynamic(() => import('@/components/views/patient-portal-view').then(m => m.PatientPortalView), { loading: ViewSkeleton, ssr: false });
 const HrManagementView = dynamic(() => import('@/components/views/hr-management-view').then(m => m.HrManagementView), { loading: ViewSkeleton, ssr: false });
@@ -267,6 +268,31 @@ export function TenantDashboard() {
             {activeTab === 'beds' && (
               <RbacModuleGate moduleId="beds" moduleName="Inpatient Bed Occupancy">
                 <GovernedBedBoard />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'nursing-emar' && (
+              <RbacModuleGate moduleId="nursing-emar" moduleName="Inpatient Nursing & eMAR">
+                <Wave2ClinicalWorkspace initialDomain="nursing" />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'dialysis-nephrology' && (
+              <RbacModuleGate moduleId="dialysis-nephrology" moduleName="Renal Care & Dialysis">
+                <Wave2ClinicalWorkspace initialDomain="renal" />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'maternity-labor-delivery' && (
+              <RbacModuleGate moduleId="maternity-labor-delivery" moduleName="Obstetrics & Partogram">
+                <Wave2ClinicalWorkspace initialDomain="obstetrics" />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'oncology-tumor-board' && (
+              <RbacModuleGate moduleId="oncology-tumor-board" moduleName="Oncology & Tumor Board">
+                <Wave2ClinicalWorkspace initialDomain="oncology" />
+              </RbacModuleGate>
+            )}
+            {activeTab === 'rehab-physical-therapy' && (
+              <RbacModuleGate moduleId="rehab-physical-therapy" moduleName="Rehabilitation">
+                <Wave2ClinicalWorkspace initialDomain="rehabilitation" />
               </RbacModuleGate>
             )}
             {activeTab === 'surgery' && (

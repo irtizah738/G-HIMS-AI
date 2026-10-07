@@ -451,7 +451,7 @@ describe('G-HIMS CI-4 authoritative Patient 360 projection', () => {
     expect(projection.counts.diagnosticOrders).toBe(1);
     expect(projection.counts.procedures).toBe(1);
     expect(projection.counts.carePlans).toBe(1);
-    expect(projection.projectionVersion).toBe(4);
+    expect(projection.projectionVersion).toBe(5);
   });
 
   test('event checkpoint uses authoritative recordedAt ordering and revision is patient-event count', () => {

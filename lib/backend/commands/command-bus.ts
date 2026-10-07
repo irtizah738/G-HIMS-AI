@@ -49,6 +49,11 @@ import { DischargeReadinessReviewDomainService } from '../services/discharge-rea
 import { ConsultantReviewDomainService } from '../services/consultant-review-domain-service';
 import { ClinicalCoordinationDomainService } from '../services/clinical-coordination-domain-service';
 import { DiseaseIntakeDomainService } from '../services/disease-intake-domain-service';
+import { NursingEmarDomainService } from '../services/nursing-emar-domain-service';
+import { RenalDialysisDomainService } from '../services/renal-dialysis-domain-service';
+import { ObstetricDomainService } from '../services/obstetric-domain-service';
+import { OncologyDomainService } from '../services/oncology-domain-service';
+import { RehabilitationDomainService } from '../services/rehabilitation-domain-service';
 import { IdempotencyService } from '../idempotency/idempotency-service';
 import { validateCommandPayload } from './command-schema-registry';
 import { emitOperationalEvent, operationalTimer } from '@/lib/observability/server-telemetry';
@@ -655,11 +660,130 @@ export class CommandBus {
           break;
 
         case 'RecordMedicationAdministrationCommand':
-          result = await InpatientClinicalDomainService.recordMedicationAdministration(
+          result = await NursingEmarDomainService.rejectLegacyAdministration(
             context,
             command.commandId,
-            command.idempotencyKey,
-            command.payload as any
+            command.idempotencyKey
+          );
+          break;
+
+        case 'ScheduleMedicationAdministrationCommand':
+          result = await NursingEmarDomainService.scheduleMedication(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'AdministerScheduledMedicationCommand':
+          result = await NursingEmarDomainService.administerMedication(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'CreateNursingCarePlanCommand':
+          result = await NursingEmarDomainService.createCarePlan(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'UpdateNursingCarePlanInterventionCommand':
+          result = await NursingEmarDomainService.updateCarePlanIntervention(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'CreateDialysisOrderCommand':
+          result = await RenalDialysisDomainService.createOrder(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'StartDialysisSessionCommand':
+          result = await RenalDialysisDomainService.startSession(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'CompleteDialysisSessionCommand':
+          result = await RenalDialysisDomainService.completeSession(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'CreateObstetricEpisodeCommand':
+          result = await ObstetricDomainService.createEpisode(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'RecordPartogramObservationCommand':
+          result = await ObstetricDomainService.recordPartogram(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'TransitionObstetricEpisodeCommand':
+          result = await ObstetricDomainService.transitionEpisode(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'RecordDeliveryOutcomeCommand':
+          result = await ObstetricDomainService.recordDeliveryOutcome(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'OpenOncologyCaseCommand':
+          result = await OncologyDomainService.openCase(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'RecordTumorBoardRecommendationCommand':
+          result = await OncologyDomainService.recordTumorBoardRecommendation(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'ApproveOncologyRegimenCommand':
+          result = await OncologyDomainService.approveRegimen(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'LinkChemotherapyAdministrationCommand':
+          result = await OncologyDomainService.linkChemotherapyAdministration(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'RecordOncologyToxicityCommand':
+          result = await OncologyDomainService.recordToxicity(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'CreateRehabilitationPlanCommand':
+          result = await RehabilitationDomainService.createPlan(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'RecordRehabilitationSessionCommand':
+          result = await RehabilitationDomainService.recordSession(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'UpdateRehabilitationGoalCommand':
+          result = await RehabilitationDomainService.updateGoal(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'CompleteRehabilitationPlanCommand':
+          result = await RehabilitationDomainService.completePlan(
+            context, command.commandId, command.idempotencyKey, command.payload as any
           );
           break;
 

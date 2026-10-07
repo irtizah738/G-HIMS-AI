@@ -1951,7 +1951,7 @@ export class ClinicalOrderDomainService {
       createdAt: Date.now(),
     };
 
-    const canonicalMedicationOrder = buildCanonicalMedicationOrder({
+    const baseCanonicalMedicationOrder = buildCanonicalMedicationOrder({
       tenantId: context.tenantId,
       patientId: payload.patientId,
       encounterId: payload.encounterId,
@@ -1968,6 +1968,28 @@ export class ClinicalOrderDomainService {
       instructions: payload.instructions,
       authoredAt: domainState.createdAt,
     });
+    const overriddenAllergyIds = Array.from(
+      new Set(
+        safetyEvaluation.findings
+          .filter(
+            (finding) =>
+              finding.requiresOverride &&
+              safetyEvaluation.blockingFindingIds.includes(finding.findingId)
+          )
+          .flatMap((finding) => finding.allergyIds)
+      )
+    );
+    const canonicalMedicationOrder = {
+      ...baseCanonicalMedicationOrder,
+      safetyFindingIds: safetyEvaluation.findings.map(
+        (finding) => finding.findingId
+      ),
+      safetyOverrideAllergyIds:
+        overriddenAllergyIds.length > 0 ? overriddenAllergyIds : undefined,
+      safetyOverrideReason:
+        String(payload.safetyOverrideReason || '').trim() || undefined,
+      safetyReviewedAt: domainState.createdAt,
+    };
 
     const knowledgeRecord =
       PatientClinicalKnowledgeDomainService.buildRecord({

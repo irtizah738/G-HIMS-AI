@@ -26,6 +26,7 @@ export interface Wave2WorkspaceSnapshot {
   encounter: Record<string, unknown>;
   activeMedicationOrders: Record<string, unknown>[];
   emarScheduleSlots: Record<string, unknown>[];
+  overdueMedicationSlots: Record<string, unknown>[];
   medicationAdministrations: Record<string, unknown>[];
   nursingCarePlans: Record<string, unknown>[];
   renalDialysisOrders: Record<string, unknown>[];

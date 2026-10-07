@@ -1,0 +1,198 @@
+name: Wave 5 STAGING Qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type WAVE5-STAGING to run deployed enterprise hardening qualification'
+        required: true
+        type: string
+      staging_base_url:
+        description: 'Exact remote HTTPS URL of the qualified STAGING deployment'
+        required: true
+        type: string
+      tenant_id:
+        description: 'Synthetic qualification tenant'
+        required: true
+        default: 'p7-hospital-zero'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ghims-wave5-staging-qualification
+  cancel-in-progress: false
+
+jobs:
+  staging-qualification:
+    name: Cross-role, load and operational STAGING evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    environment: staging
+    env:
+      GHIMS_RUNTIME_MODE: STAGING
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: STAGING
+      GHIMS_STAGING_BASE_URL: ${{ inputs.staging_base_url }}
+      GHIMS_P7_BASE_URL: ${{ inputs.staging_base_url }}
+      GHIMS_WAVE5_BASE_URL: ${{ inputs.staging_base_url }}
+      GHIMS_P7_TENANT_ID: ${{ inputs.tenant_id }}
+      GHIMS_WAVE5_TENANT_ID: ${{ inputs.tenant_id }}
+      GHIMS_OPS_TENANT_ID: ${{ inputs.tenant_id }}
+      GHIMS_OPD_SQ1_CONFIRM_TENANT: ${{ inputs.tenant_id }}
+      GHIMS_STAGING_EXPECTED_RUNTIME: STAGING
+
+      FIREBASE_PROJECT_ID: ${{ secrets.GHIMS_P7_STAGING_FIREBASE_PROJECT_ID }}
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${{ secrets.GHIMS_P7_STAGING_FIREBASE_PROJECT_ID }}
+      GHIMS_FIREBASE_PROJECT_ID_STAGING: ${{ secrets.GHIMS_P7_STAGING_FIREBASE_PROJECT_ID }}
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING: ${{ secrets.GHIMS_P7_STAGING_FIREBASE_PROJECT_ID }}
+      GHIMS_P7_CONFIRM_PROJECT: ${{ secrets.GHIMS_P7_STAGING_FIREBASE_PROJECT_ID }}
+      GHIMS_DRP10_CONFIRM_PROJECT: ${{ secrets.GHIMS_P7_STAGING_FIREBASE_PROJECT_ID }}
+
+      FIREBASE_CLIENT_EMAIL: ${{ secrets.GHIMS_P7_FIREBASE_CLIENT_EMAIL }}
+      FIREBASE_PRIVATE_KEY: ${{ secrets.GHIMS_P7_FIREBASE_PRIVATE_KEY }}
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIREBASE_API_KEY: ${{ secrets.GHIMS_P7_FIREBASE_WEB_API_KEY }}
+      GHIMS_P7_BOOTSTRAP_PASSWORD: ${{ secrets.GHIMS_P7_BOOTSTRAP_PASSWORD }}
+
+      GHIMS_P7_ALLOW_STAGING_PROVISION: "true"
+      GHIMS_DRP10_ALLOW_STAGING_PROVISION: "true"
+
+      GHIMS_P7_BYPASS_HEADER_NAME: x-vercel-protection-bypass
+      GHIMS_P7_BYPASS_HEADER_VALUE: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+      GHIMS_STAGING_SMOKE_HEADER_NAME: x-vercel-protection-bypass
+      GHIMS_STAGING_SMOKE_HEADER_VALUE: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+      GHIMS_STAGING_BYPASS_HEADER_NAME: x-vercel-protection-bypass
+      GHIMS_STAGING_BYPASS_HEADER_VALUE: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+      GHIMS_WAVE5_BYPASS_HEADER_NAME: x-vercel-protection-bypass
+      GHIMS_WAVE5_BYPASS_HEADER_VALUE: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+
+      GHIMS_WAVE5_LOAD_EMAIL: ${{ vars.GHIMS_P7_DOCTOR_EMAIL || 'p7.doctor@g-hims.invalid' }}
+      GHIMS_WAVE5_LOAD_PASSWORD: ${{ secrets.GHIMS_P7_BOOTSTRAP_PASSWORD }}
+      GHIMS_WAVE5_LOAD_REQUESTS: "100"
+      GHIMS_WAVE5_LOAD_CONCURRENCY: "10"
+      GHIMS_WAVE5_LOAD_P95_LIMIT_MS: "3000"
+      GHIMS_WAVE5_LOAD_MAX_ERROR_RATE: "0.01"
+
+      GHIMS_OUTBOX_MAX_PENDING_AGE_MS: "300000"
+      GHIMS_OUTBOX_FAIL_ON_FAILED: "true"
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - name: Require exact confirmation and remote HTTPS target
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.confirm }}" != "WAVE5-STAGING" ]; then
+            echo "Confirmation must be exactly WAVE5-STAGING." >&2
+            exit 1
+          fi
+          node - <<'NODE'
+          const url = new URL(process.env.GHIMS_STAGING_BASE_URL);
+          if (url.protocol !== 'https:' || ['localhost','127.0.0.1','0.0.0.0'].includes(url.hostname)) {
+            throw new Error('Wave 5 STAGING qualification requires a remote HTTPS target.');
+          }
+          NODE
+
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Verify current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Validate required deployment credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(
+            FIREBASE_PROJECT_ID
+            FIREBASE_CLIENT_EMAIL
+            FIREBASE_PRIVATE_KEY
+            NEXT_PUBLIC_FIREBASE_API_KEY
+            GHIMS_P7_BOOTSTRAP_PASSWORD
+          )
+          for key in "${required[@]}"; do
+            if [ -z "${!key:-}" ]; then
+              echo "Missing required Wave 5 STAGING credential: $key" >&2
+              exit 1
+            fi
+          done
+
+      - name: Prepare evidence directory
+        run: mkdir -p artifacts/wave5
+
+      - name: STAGING readiness smoke
+        run: bun run ops:staging-smoke > artifacts/wave5/wave5-staging-smoke.json
+
+      - name: Provision synthetic qualification identities
+        run: bun run ops:p7:provision > artifacts/wave5/wave5-p7-provision.json
+
+      - name: Provision DRP-10 cross-domain fixtures
+        run: bun run ops:drp10:provision > artifacts/wave5/wave5-drp10-fixtures.json
+
+      - name: Authenticated multi-role hospital-day rehearsal
+        run: bun run ops:p7:rehearsal > artifacts/wave5/wave5-p7-hospital-day.json
+
+      - name: Authenticated cross-domain rehearsal
+        env:
+          GHIMS_DRP10_P7_EVIDENCE_PATH: artifacts/wave5/wave5-p7-hospital-day.json
+        run: bun run ops:drp10:rehearsal > artifacts/wave5/wave5-cross-domain-rehearsal.json
+
+      - name: Authenticated concurrent read-model load
+        run: bun run ops:wave5:load > artifacts/wave5/wave5-authenticated-load.json
+
+      - name: Outbox operational health
+        run: bun run ops:drp-operational-check > artifacts/wave5/wave5-operational-check.json
+
+      - name: Install Playwright Chromium
+        run: bunx playwright install --with-deps chromium
+
+      - name: Deployed OPD cross-role browser journey
+        run: bun run test:opd-sq1:staging
+
+      - name: Build incomplete evidence manifest
+        run: bun run ops:wave5:evidence > artifacts/wave5/wave5-evidence-manifest.json
+
+      - name: Upload Wave 5 STAGING evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghims-wave5-staging-${{ github.sha }}
+          path: |
+            artifacts/wave5
+            playwright-report/opd-staging
+            test-results/opd-staging
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Qualification summary
+        shell: bash
+        run: |
+          {
+            echo "## Wave 5 STAGING qualification"
+            echo ""
+            echo "- Remote readiness smoke: PASS"
+            echo "- Authenticated hospital-day rehearsal: PASS"
+            echo "- Cross-domain rehearsal: PASS"
+            echo "- Authenticated concurrent read-model load: PASS"
+            echo "- Outbox operational health: PASS"
+            echo "- OPD cross-role browser journey: PASS"
+            echo ""
+            echo "Backup/restore, rollback, alert routing, independent penetration testing and deployment retention approval remain separate evidence gates."
+          } >> "$GITHUB_STEP_SUMMARY"

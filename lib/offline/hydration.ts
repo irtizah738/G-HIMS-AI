@@ -9,8 +9,10 @@ import {
 } from '@/lib/offline/secure-store';
 import { enforceEdgeStorageBudget } from '@/lib/offline/storage-manager';
 import { OPD_EDGE_COLLECTIONS } from '@/lib/opd/edge-surface';
-
-export type EdgeHydrationSurface = 'OPD' | 'CLINICAL' | 'BILLING' | 'FINANCE' | 'HCM' | 'SCM' | 'FACILITIES' | 'GENERIC';
+import {
+  requireEdgeHydrationSurface,
+  type EdgeHydrationSurface,
+} from '@/lib/offline/hydration-policy';
 
 export interface EdgeSnapshot {
   tenantId: string;
@@ -22,8 +24,9 @@ export interface EdgeSnapshot {
 
 export async function loadLocalEdgeSnapshot(
   tenantId: string,
-  surface: EdgeHydrationSurface = 'GENERIC'
+  requestedSurface: EdgeHydrationSurface
 ): Promise<EdgeSnapshot> {
+  const surface = requireEdgeHydrationSurface(requestedSurface);
   const cached = await getCachedAuthSession();
   const actorId = cached?.user?.uid || '';
   if (!actorId) {
@@ -37,6 +40,14 @@ export async function loadLocalEdgeSnapshot(
   }
 
   const surfaceCollections: Record<Exclude<EdgeHydrationSurface, 'OPD'>, string[]> = {
+    HOSPITAL_SHELL: [
+      'patients',
+      'encounters',
+      'opd_queue',
+      'beds',
+      'billingMismatches',
+      'telehealthSessions',
+    ],
     CLINICAL: [
       'patients', 'encounters', 'encounterEvidence', 'orders', 'prescriptions',
       'opd_queue', 'opdAppointments', 'opdWaitlist', 'beds', 'surgicalCases',
@@ -74,24 +85,12 @@ export async function loadLocalEdgeSnapshot(
       'beds', 'resources', 'rooms', 'resourceReservations',
       'maintenanceWorkOrders', 'calibrationRecords',
     ],
-    // GENERIC is a compatibility surface. It is role-scoped by the server, but
-    // administrators never use it because tenant-wide offline caching is forbidden.
-    GENERIC: [],
   };
-
-  const normalizedRoles = new Set(
-    (cached?.user?.roles || []).map((role) => String(role).trim().toUpperCase())
-  );
-  const isAdmin = ['ADMIN', 'ADMINISTRATOR', 'SYSTEM_ADMIN'].some((role) =>
-    normalizedRoles.has(role)
-  );
 
   const collectionsToLoad =
     surface === 'OPD'
       ? [...OPD_EDGE_COLLECTIONS]
-      : surface === 'GENERIC' && !isAdmin
-        ? [...new Set(Object.values(surfaceCollections).flat())]
-        : surfaceCollections[surface];
+      : surfaceCollections[surface];
 
   const entries = await Promise.all(
     collectionsToLoad.map(async (collection) => [
@@ -112,9 +111,9 @@ export async function loadLocalEdgeSnapshot(
 
 export async function hydrateEdgeSnapshot(
   tenantId: string,
-  options: { surface?: EdgeHydrationSurface } = {}
+  options: { surface: EdgeHydrationSurface }
 ): Promise<EdgeSnapshot> {
-  const surface = options.surface || 'GENERIC';
+  const surface = requireEdgeHydrationSurface(options.surface);
   const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
   const currentUser = auth.currentUser;
   const cached = await getCachedAuthSession();

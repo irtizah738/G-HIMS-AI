@@ -65,7 +65,7 @@ export interface IngestedTelemetryRecord {
     interpretationStatus: 'NOT_EVALUATED';
   };
   qualityFlag: 'GOOD' | 'SIGNAL_DEGRADED';
-  persistence: 'SIMULATION_ONLY_NOT_COMMITTED';
+  persistence: 'SIMULATION_ONLY_NOT_COMMITTED' | 'ELIGIBLE_FOR_AUTHORITATIVE_COMMIT';
 }
 
 type TelemetryError = { code: string; message: string };
@@ -114,24 +114,24 @@ export class DeviceTelemetryAdapter {
       };
     }
 
-    if (currentMode === 'PRODUCTION_MODE') {
-      const state = getServerIntegrationState('DEVICE_TELEMETRY');
+    const state = getServerIntegrationState('DEVICE_TELEMETRY');
+    if (currentMode === 'PRODUCTION_MODE' && state !== 'LIVE') {
       return {
         success: false,
         error: {
-          code:
-            state === 'LIVE'
-              ? 'TELEMETRY_LIVE_VALIDATION_INCOMPLETE'
-              : 'TELEMETRY_INTEGRATION_NOT_LIVE',
-          message:
-            'Real device telemetry is blocked until device identity, transport, calibration, durable deduplication and clinical validation are completed.',
+          code: 'TELEMETRY_INTEGRATION_NOT_LIVE',
+          message: 'Production device telemetry is blocked until the integration state is LIVE.',
         },
       };
     }
 
-    const state = getServerIntegrationState('DEVICE_TELEMETRY');
     const runtime = String(process.env.GHIMS_RUNTIME_MODE || '').trim().toUpperCase();
-    if (state !== 'SIMULATION' && runtime !== 'TEST' && runtime !== 'DEMO') {
+    if (
+      currentMode === 'SIMULATION_MODE' &&
+      state !== 'SIMULATION' &&
+      runtime !== 'TEST' &&
+      runtime !== 'DEMO'
+    ) {
       return {
         success: false,
         error: {
@@ -197,7 +197,8 @@ export class DeviceTelemetryAdapter {
 
     const record: IngestedTelemetryRecord = {
       telemetryId:
-        'sim_tel_' + rawPacket.deviceId + '_' + rawPacket.packetSequenceNumber + '_' + rawPacket.deviceTimestamp,
+        (currentMode === 'PRODUCTION_MODE' ? 'tel_' : 'sim_tel_') +
+        rawPacket.deviceId + '_' + rawPacket.packetSequenceNumber + '_' + rawPacket.deviceTimestamp,
       mode: currentMode,
       deviceId: rawPacket.deviceId,
       encounterId: String(rawPacket.patientBinding.encounterId || 'UNBOUND_SIMULATION'),
@@ -224,7 +225,10 @@ export class DeviceTelemetryAdapter {
           }
         : undefined,
       qualityFlag: ageMs > 10000 ? 'SIGNAL_DEGRADED' : 'GOOD',
-      persistence: 'SIMULATION_ONLY_NOT_COMMITTED',
+      persistence:
+        currentMode === 'PRODUCTION_MODE'
+          ? 'ELIGIBLE_FOR_AUTHORITATIVE_COMMIT'
+          : 'SIMULATION_ONLY_NOT_COMMITTED',
     };
 
     return { success: true, record };

@@ -4,7 +4,10 @@ import type {
   ClinicalCondition,
   ClinicalDocument,
   ClinicalObservation,
+  DiagnosticOrder,
   DiagnosticReport,
+  ClinicalProcedure,
+  CarePlan,
   MedicationOrder,
   PatientClinicalKnowledgeStatus,
 } from '@/types/clinical-canonical';
@@ -22,6 +25,9 @@ import type {
   Patient360EncounterSummary,
   Patient360MedicationSummary,
   Patient360ObservationSummary,
+  Patient360DiagnosticOrderSummary,
+  Patient360ProcedureSummary,
+  Patient360CarePlanSummary,
   Patient360Projection,
   Patient360ResultSummary,
   Patient360TimelineItem,
@@ -45,7 +51,10 @@ export interface Patient360ProjectionSources {
   allergies: ClinicalAllergy[];
   medicationOrders: MedicationOrder[];
   observations: ClinicalObservation[];
+  diagnosticOrders?: DiagnosticOrder[];
   diagnosticReports: DiagnosticReport[];
+  procedures?: ClinicalProcedure[];
+  carePlans?: CarePlan[];
   documents: ClinicalDocument[];
   diseaseIntakeArtifacts?: DiseaseIntakeArtifact[];
   events: Patient360SourceEvent[];
@@ -173,6 +182,52 @@ function observationSummary(item: ClinicalObservation): Patient360ObservationSum
   };
 }
 
+function diagnosticOrderSummary(item: DiagnosticOrder): Patient360DiagnosticOrderSummary {
+  const coding = firstCoding(item.service);
+  return {
+    diagnosticOrderId: item.diagnosticOrderId,
+    display: item.service.text || coding?.display || coding?.code || item.diagnosticOrderId,
+    code: coding?.code,
+    system: coding?.system,
+    orderType: item.orderType,
+    priority: item.priority,
+    status: item.status,
+    orderedBy: item.orderedBy,
+    orderedAt: item.orderedAt,
+  };
+}
+
+function procedureSummary(item: ClinicalProcedure): Patient360ProcedureSummary {
+  const coding = firstCoding(item.code);
+  const outcomeCoding = firstCoding(item.outcome || {});
+  return {
+    procedureId: item.procedureId,
+    display: item.code.text || coding?.display || coding?.code || item.procedureId,
+    code: coding?.code,
+    system: coding?.system,
+    status: item.status,
+    performedAt: item.performedAt,
+    performerIds: [...item.performerIds],
+    outcome: item.outcome?.text || outcomeCoding?.display || outcomeCoding?.code,
+  };
+}
+
+function carePlanSummary(item: CarePlan): Patient360CarePlanSummary {
+  return {
+    carePlanId: item.carePlanId,
+    title: item.title,
+    status: item.status,
+    description: item.description,
+    addressesConditionIds: [...item.addressesConditionIds],
+    activityCount: item.activities.length,
+    openActivityCount: item.activities.filter(
+      (activity) => !['COMPLETED', 'CANCELLED'].includes(activity.status)
+    ).length,
+    authoredBy: item.authoredBy,
+    authoredAt: item.authoredAt,
+  };
+}
+
 function resultSummary(item: DiagnosticReport): Patient360ResultSummary {
   const coding = firstCoding(item.code);
   return {
@@ -271,7 +326,8 @@ function eventSummary(event: Patient360SourceEvent): string {
 function sourceVersion(item: Record<string, unknown>): string {
   return [
     asString(item.id || item.encounterId || item.conditionId || item.allergyId ||
-      item.medicationOrderId || item.observationId || item.diagnosticReportId ||
+      item.medicationOrderId || item.observationId || item.diagnosticOrderId ||
+      item.diagnosticReportId || item.procedureId || item.carePlanId ||
       item.clinicalDocumentId || item.intakeArtifactId),
     asString(item.version || item._serverVersion || 0),
     asString(item.updatedAt || item.recordedAt || item.createdAt || 0),
@@ -312,7 +368,10 @@ export class Patient360Projector {
     const allergies = samePatient(sources.allergies);
     const medicationOrders = samePatient(sources.medicationOrders);
     const observations = samePatient(sources.observations);
+    const diagnosticOrders = samePatient(sources.diagnosticOrders || []);
     const diagnosticReports = samePatient(sources.diagnosticReports);
+    const procedures = samePatient(sources.procedures || []);
+    const carePlans = samePatient(sources.carePlans || []);
     const documents = samePatient(sources.documents);
     const diseaseIntakeArtifacts = samePatient(sources.diseaseIntakeArtifacts || []);
 
@@ -363,11 +422,29 @@ export class Patient360Projector {
       .slice(0, 20)
       .map(observationSummary);
 
+    const recentDiagnosticOrders = diagnosticOrders
+      .filter((item) => !['CANCELLED', 'ENTERED_IN_ERROR'].includes(item.status))
+      .sort((a, b) => b.orderedAt - a.orderedAt)
+      .slice(0, 50)
+      .map(diagnosticOrderSummary);
+
     const recentResults = diagnosticReports
       .filter((item) => item.status !== 'ENTERED_IN_ERROR' && item.status !== 'CANCELLED')
       .sort((a, b) => Number(b.issuedAt || b.updatedAt) - Number(a.issuedAt || a.updatedAt))
       .slice(0, 30)
       .map(resultSummary);
+
+    const recentProcedures = procedures
+      .filter((item) => item.status !== 'ENTERED_IN_ERROR')
+      .sort((a, b) => Number(b.performedAt || b.updatedAt) - Number(a.performedAt || a.updatedAt))
+      .slice(0, 50)
+      .map(procedureSummary);
+
+    const activeCarePlans = carePlans
+      .filter((item) => ['ACTIVE', 'ON_HOLD'].includes(item.status))
+      .sort((a, b) => b.authoredAt - a.authoredAt)
+      .slice(0, 30)
+      .map(carePlanSummary);
 
     const recentDocuments = documents
       .filter((item) => item.status !== 'ENTERED_IN_ERROR')
@@ -445,7 +522,10 @@ export class Patient360Projector {
       allergies: allergies.map((item) => sourceVersion(item as unknown as Record<string, unknown>)).sort(),
       medicationOrders: medicationOrders.map((item) => sourceVersion(item as unknown as Record<string, unknown>)).sort(),
       observations: observations.map((item) => sourceVersion(item as unknown as Record<string, unknown>)).sort(),
+      diagnosticOrders: diagnosticOrders.map((item) => sourceVersion(item as unknown as Record<string, unknown>)).sort(),
       diagnosticReports: diagnosticReports.map((item) => sourceVersion(item as unknown as Record<string, unknown>)).sort(),
+      procedures: procedures.map((item) => sourceVersion(item as unknown as Record<string, unknown>)).sort(),
+      carePlans: carePlans.map((item) => sourceVersion(item as unknown as Record<string, unknown>)).sort(),
       documents: documents.map((item) => sourceVersion(item as unknown as Record<string, unknown>)).sort(),
       diseaseIntakeArtifacts: diseaseIntakeArtifacts
         .map((item) => sourceVersion(item as unknown as Record<string, unknown>))
@@ -478,7 +558,10 @@ export class Patient360Projector {
       allergies: activeAllergies,
       currentMedications,
       latestVitals,
+      recentDiagnosticOrders,
       recentResults,
+      recentProcedures,
+      activeCarePlans,
       recentDocuments,
       recentDiseaseIntakes,
       dataQuality: {
@@ -550,11 +633,14 @@ export class Patient360Projector {
         allergies: allergies.length,
         medicationOrders: medicationOrders.length,
         observations: observations.length,
+        diagnosticOrders: diagnosticOrders.length,
         diagnosticReports: diagnosticReports.length,
+        procedures: procedures.length,
+        carePlans: carePlans.length,
         documents: documents.length,
         diseaseIntakes: diseaseIntakeArtifacts.length,
       },
-      projectionVersion: 3,
+      projectionVersion: 4,
       revision: patientEvents.length,
       eventCheckpoint,
       sourceFingerprint,

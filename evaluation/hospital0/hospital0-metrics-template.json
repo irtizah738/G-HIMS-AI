@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "evidenceType": "HOSPITAL0_METRICS_SUMMARY",
+  "status": "PENDING_REAL_PILOT_DATA",
+  "frozenCommitSha": "",
+  "patient360ProjectionVersion": 0,
+  "aiProvider": "",
+  "aiModel": "",
+  "clinicalEvaluationProtocolVersion": "ci-clinical-evaluation-v1",
+  "pilot": {
+    "hospital": "",
+    "department": "",
+    "startDate": "",
+    "endDate": "",
+    "clinicianCount": 0,
+    "encounterCount": 0
+  },
+  "clinicalMetrics": {
+    "supportedClaims": 0,
+    "totalFactualClaims": 0,
+    "relevantFactsCaptured": 0,
+    "relevantFactsExpected": 0,
+    "criticalFactsCaptured": 0,
+    "criticalFactsExpected": 0,
+    "correctSourceLinks": 0,
+    "totalSourceLinks": 0,
+    "temporallyCorrectClaims": 0,
+    "temporalClaims": 0,
+    "medicationDiscrepanciesDetected": 0,
+    "medicationDiscrepanciesExpected": 0,
+    "criticalSafetyIssuesDetected": 0,
+    "criticalSafetyIssuesExpected": 0,
+    "harmfulRecommendations": 0,
+    "generatedRecommendations": 0,
+    "draftsWithMajorCorrection": 0,
+    "totalDraftsReviewed": 0,
+    "draftsAcceptedWithMinorOrNoEdit": 0,
+    "usefulRatingsAtOrAbove4": 0,
+    "totalUsefulnessRatings": 0
+  },
+  "operationalMetrics": {
+    "successfulIntelligenceOperations": 0,
+    "attemptedIntelligenceOperations": 0,
+    "generationLatencyMs": [],
+    "incidentsBySeverity": {
+      "critical": 0,
+      "high": 0,
+      "medium": 0,
+      "low": 0
+    }
+  },
+  "notes": "Populate from real Hospital-0 evidence only."
+}

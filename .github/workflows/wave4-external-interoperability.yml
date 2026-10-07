@@ -61,6 +61,15 @@ jobs:
         run: bun run test:p6
       - name: Security regression
         run: bun run test:security
+      - name: Setup Java for Firestore emulator
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install Firestore rules tooling
+        run: npm install --no-save --package-lock=false @firebase/rules-unit-testing@5.0.2 firebase-tools@15.30.2
+
       - name: Firestore rules
         run: bun run test:rules
       - name: Production build

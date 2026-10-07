@@ -208,6 +208,15 @@ export class ProjectionRecoveryService {
         }
       );
 
+      if (
+        process.env.GHIMS_PROJECTION_REBUILD_INJECT_FAILURE ===
+        'AFTER_PROJECTION_WORKER'
+      ) {
+        throw new Error(
+          'PROJECTION_REBUILD_INJECTED_FAILURE: Wave 5 isolated recovery failure injection.'
+        );
+      }
+
       const tenantRef = db.collection('tenants').doc(tenantId);
       const [
         checkpointSnapshot,

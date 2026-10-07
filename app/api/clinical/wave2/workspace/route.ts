@@ -3,6 +3,7 @@ import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import { assertPatient360PatientAccess } from '@/lib/clinical/patient360/patient360-access';
 import { getAdminFirestore } from '@/server/firebase/admin';
+import { EmarOverdueProjectionService } from '@/lib/clinical/intelligence/emar-overdue-projection-service';
 
 const WAVE2_READ_ROLES = new Set([
   'SYSTEM_ADMIN',
@@ -148,6 +149,13 @@ export async function GET(req: NextRequest) {
 
     assertPatient360PatientAccess(context, patient, encounter);
 
+    const overdueSafety =
+      await EmarOverdueProjectionService.refreshEncounter(
+        tenantId,
+        patientId,
+        encounterId
+      );
+
     const reads = await Promise.all(
       WAVE2_COLLECTIONS.map((collection) =>
         readPatientCollection(tenantId, collection, patientId, encounterId)
@@ -182,6 +190,14 @@ export async function GET(req: NextRequest) {
         'scheduledFor',
         'createdAt',
       ]),
+      overdueMedicationSlots: sortByTimestamp(
+        byCollection.emarScheduleSlots.filter((item) =>
+          overdueSafety.overdueSlotIds.includes(
+            String(item.emarSlotId || item.id || '')
+          )
+        ),
+        ['scheduledFor', 'createdAt']
+      ),
       medicationAdministrations: sortByTimestamp(
         byCollection.medicationAdministrations,
         ['administeredAt', 'createdAt']

@@ -38,8 +38,9 @@ function buildContentSecurityPolicy(nonce: string): string {
   return [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${developmentScriptPolicy}`,
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' blob: data: https://lh3.googleusercontent.com https://picsum.photos",
+    `style-src 'self' 'nonce-${nonce}'`,
+    "style-src-attr 'unsafe-inline'",
+    "img-src 'self' blob: data: https://lh3.googleusercontent.com",
     "font-src 'self' data:",
     "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://*.google.com",
     "frame-src 'self' https://*.firebaseapp.com https://accounts.google.com",

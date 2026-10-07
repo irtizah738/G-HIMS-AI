@@ -27,10 +27,20 @@ export interface UpdateTelehealthSessionPayload {
   >>;
 }
 
+export interface TransitionTelehealthConnectivityPayload {
+  sessionId: string;
+  targetMode: 'VIDEO' | 'AUDIO_ONLY' | 'TEXT_ONLY' | 'PAUSED_OFFLINE';
+  reason: string;
+}
+
+export interface ResumeTelehealthSessionPayload {
+  sessionId: string;
+  expectedServerVersion: number;
+}
+
 export interface CompleteTelehealthSessionPayload {
   sessionId: string;
-  soapNote?: Partial<TelehealthSoapNote>;
-  prescriptions?: TelehealthPrescription[];
+  signedEvidenceId: string;
 }
 
 export class TelehealthDomainService {
@@ -89,6 +99,10 @@ export class TelehealthDomainService {
       chiefComplaint: payload.chiefComplaint.trim(),
       roomToken,
       connectionQuality: 'GOOD',
+      connectionMode: 'VIDEO',
+      recoveryState: 'ACTIVE',
+      recoveryCount: 0,
+      lastConnectivityChangeAt: now,
       callDurationSeconds: 0,
       vitals: {
         bp: '',
@@ -215,6 +229,124 @@ export class TelehealthDomainService {
     return { success:true, commandId, idempotencyKey, entityId:session.id, eventId:tx.event.eventId, auditId:tx.audit.auditId, outboxId:tx.outbox.outboxId, data:next };
   }
 
+
+  public static async transitionConnectivity(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: TransitionTelehealthConnectivityPayload
+  ): Promise<CommandResult<TelehealthSession>> {
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: ['DOCTOR', 'CONSULTANT', 'NURSE'],
+    });
+    if (!auth.authorized) {
+      return { success:false, commandId, idempotencyKey, error:{ code:auth.code || 'UNAUTHORIZED', message:auth.reason || 'Telehealth connectivity authority required.' } };
+    }
+    if (payload.reason.trim().length < 5) {
+      return { success:false, commandId, idempotencyKey, error:{ code:'TELEHEALTH_CONNECTIVITY_REASON_REQUIRED', message:'Connectivity changes require a substantive reason.' } };
+    }
+
+    const session = await DomainStateRepository.getById<TelehealthSession>(context.tenantId, 'telehealthSessions', payload.sessionId);
+    if (!session) return { success:false, commandId, idempotencyKey, error:{ code:'TELEHEALTH_SESSION_NOT_FOUND', message:'Telehealth session does not exist.' } };
+    if (['COMPLETED','CANCELLED'].includes(session.status)) {
+      return { success:false, commandId, idempotencyKey, error:{ code:'TELEHEALTH_SESSION_FINAL', message:'Final telehealth sessions cannot change connectivity mode.' } };
+    }
+
+    const now = new Date().toISOString();
+    const next: TelehealthSession = {
+      ...session,
+      connectionMode: payload.targetMode,
+      connectionQuality: payload.targetMode === 'VIDEO' ? session.connectionQuality : 'DEGRADED',
+      recoveryState: payload.targetMode === 'PAUSED_OFFLINE' ? 'INTERRUPTED' : 'ACTIVE',
+      status: payload.targetMode === 'PAUSED_OFFLINE' ? 'DOCUMENTING' : 'IN_CONSULTATION',
+      lastConnectivityChangeAt: now,
+      updatedAt: now,
+    };
+
+    const tx = await TransactionManager.executeAtomicWrite(context, commandId, idempotencyKey, {
+      entityType:'TELEHEALTH_SESSION',
+      entityId:session.id,
+      eventType:'TELEHEALTH_CONNECTIVITY_MODE_CHANGED',
+      domainState:next,
+      eventPayload:{
+        sessionId:session.id,
+        encounterId:session.encounterId,
+        previousMode:session.connectionMode || 'VIDEO',
+        targetMode:payload.targetMode,
+        reason:payload.reason.trim(),
+      },
+      auditReason:`Telehealth connectivity changed to ${payload.targetMode}: ${payload.reason.trim()}`,
+      outboxTopic:'g-hims-telehealth-events',
+    });
+
+    return { success:true, commandId, idempotencyKey, entityId:session.id, eventId:tx.event.eventId, auditId:tx.audit.auditId, outboxId:tx.outbox.outboxId, data:next };
+  }
+
+  public static async resume(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: ResumeTelehealthSessionPayload
+  ): Promise<CommandResult<TelehealthSession>> {
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: ['DOCTOR', 'CONSULTANT', 'NURSE'],
+    });
+    if (!auth.authorized) {
+      return { success:false, commandId, idempotencyKey, error:{ code:auth.code || 'UNAUTHORIZED', message:auth.reason || 'Telehealth recovery authority required.' } };
+    }
+
+    const session = await DomainStateRepository.getById<TelehealthSession & { _serverVersion?: number }>(
+      context.tenantId,
+      'telehealthSessions',
+      payload.sessionId
+    );
+    if (!session) return { success:false, commandId, idempotencyKey, error:{ code:'TELEHEALTH_SESSION_NOT_FOUND', message:'Telehealth session does not exist.' } };
+    if (['COMPLETED','CANCELLED'].includes(session.status)) {
+      return { success:false, commandId, idempotencyKey, error:{ code:'TELEHEALTH_SESSION_FINAL', message:'Final telehealth sessions cannot be resumed.' } };
+    }
+    if (Number(session._serverVersion || 0) !== payload.expectedServerVersion) {
+      return { success:false, commandId, idempotencyKey, error:{ code:'TELEHEALTH_RECOVERY_VERSION_CONFLICT', message:'Telehealth session changed while disconnected. Refresh before resuming.' } };
+    }
+
+    const now = new Date().toISOString();
+    const next: TelehealthSession = {
+      ...session,
+      status:'IN_CONSULTATION',
+      connectionMode: session.connectionMode === 'PAUSED_OFFLINE' ? 'AUDIO_ONLY' : (session.connectionMode || 'VIDEO'),
+      recoveryState:'RECOVERED',
+      recoveryCount:Number(session.recoveryCount || 0) + 1,
+      lastConnectivityChangeAt:now,
+      updatedAt:now,
+    };
+
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId:context.tenantId,
+      actorId:context.actorId,
+      actorRole:context.roles[0] || 'CLINICIAN',
+      aggregateType:'TELEHEALTH_SESSION',
+      aggregateId:session.id,
+      eventType:'TELEHEALTH_SESSION_RECOVERED',
+      eventPayload:{
+        sessionId:session.id,
+        encounterId:session.encounterId,
+        recoveryCount:next.recoveryCount,
+        connectionMode:next.connectionMode,
+      },
+      auditAction:'TELEHEALTH_SESSION_RECOVERED',
+      auditResourceType:'TELEHEALTH_SESSION',
+      auditResourceId:session.id,
+      auditReason:`Recovered interrupted telehealth session ${session.id}.`,
+      outboxTopic:'g-hims-telehealth-events',
+      idempotencyKey,
+      commandId,
+      correlationId:context.correlationId,
+      domainState:next,
+      expectedPrimaryServerVersion:payload.expectedServerVersion,
+    });
+
+    return { success:true, commandId, idempotencyKey, entityId:session.id, eventId:tx.eventId, auditId:tx.auditId, outboxId:tx.outboxId, data:next };
+  }
+
   public static async complete(
     context: CommandContext,
     commandId: string,
@@ -233,11 +365,26 @@ export class TelehealthDomainService {
     if (!session) return { success:false, commandId, idempotencyKey, error:{ code:'TELEHEALTH_SESSION_NOT_FOUND', message:'Telehealth session does not exist.' } };
     if (session.status === 'CANCELLED') return { success:false, commandId, idempotencyKey, error:{ code:'TELEHEALTH_SESSION_CANCELLED', message:'Cancelled telehealth sessions cannot be completed.' } };
 
+    const signedEvidence = await DomainStateRepository.getById<Record<string, unknown>>(
+      context.tenantId,
+      'encounterEvidence',
+      payload.signedEvidenceId
+    );
+    if (
+      !signedEvidence ||
+      String(signedEvidence.patientId || '') !== session.patientId ||
+      String(signedEvidence.encounterId || '') !== session.encounterId ||
+      String(signedEvidence.status || '').toUpperCase() !== 'FINAL' ||
+      String(signedEvidence.evidenceType || '') !== 'SIGNED_CLINICAL_NOTE'
+    ) {
+      return { success:false, commandId, idempotencyKey, error:{ code:'TELEHEALTH_SIGNED_EVIDENCE_REQUIRED', message:'Telehealth completion requires a final signed clinical note from the same patient encounter.' } };
+    }
+
     const next: TelehealthSession = {
       ...session,
       status:'COMPLETED',
-      soapNote:{ ...session.soapNote, ...(payload.soapNote || {}) },
-      prescriptions:Array.isArray(payload.prescriptions) ? payload.prescriptions : session.prescriptions,
+      signedEvidenceId:payload.signedEvidenceId,
+      recoveryState:session.recoveryState === 'INTERRUPTED' ? 'RECOVERED' : session.recoveryState,
       updatedAt:new Date().toISOString(),
     };
 
@@ -246,11 +393,17 @@ export class TelehealthDomainService {
       entityId:session.id,
       eventType:'TELEHEALTH_SESSION_COMPLETED',
       domainState:next,
-      eventPayload:{ sessionId:session.id, patientId:session.patientId, encounterId:session.encounterId },
-      auditReason:`Telehealth session ${session.id} completed by ${context.actorId}.`,
+      eventPayload:{
+        sessionId:session.id,
+        patientId:session.patientId,
+        encounterId:session.encounterId,
+        signedEvidenceId:payload.signedEvidenceId,
+      },
+      auditReason:`Telehealth session ${session.id} completed from signed evidence ${payload.signedEvidenceId}.`,
       outboxTopic:'g-hims-telehealth-events',
     });
 
     return { success:true, commandId, idempotencyKey, entityId:session.id, eventId:tx.event.eventId, auditId:tx.audit.auditId, outboxId:tx.outbox.outboxId, data:next };
   }
+
 }

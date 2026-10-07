@@ -567,37 +567,38 @@ export class Patient360Projector {
       .slice(0, 100)
       .map(medicationAdministrationSummary);
 
-    const recentSpecialtyActivities = patientEvents
-      .map((event) => {
-        const domain = specialtyDomain(event.eventType);
-        if (!domain) return null;
-        const payload = event.payload || {};
-        const sourceRefs = [
-          asString(payload.medicationOrderId),
-          asString(payload.emarSlotId),
-          asString(payload.carePlanId),
-          asString(payload.dialysisOrderId),
-          asString(payload.dialysisSessionId),
-          asString(payload.obstetricEpisodeId),
-          asString(payload.partogramEntryId),
-          asString(payload.oncologyCaseId),
-          asString(payload.regimenId),
-          asString(payload.recommendationId),
-          asString(payload.rehabilitationPlanId),
-          asString(payload.rehabilitationSessionId),
-        ].filter(Boolean);
-        return {
-          activityId: event.aggregateId || event.eventId,
-          domain,
-          eventType: event.eventType,
-          encounterId: asString(payload.encounterId) || undefined,
-          occurredAt: Number(event.occurredAt || event.recordedAt || 0),
-          summary: eventSummary(event),
-          sourceRefs: Array.from(new Set(sourceRefs)),
-        } satisfies Patient360SpecialtyActivitySummary;
-      })
-      .filter((item): item is Patient360SpecialtyActivitySummary => Boolean(item))
-      .slice(0, 200);
+    const recentSpecialtyActivities: Patient360SpecialtyActivitySummary[] =
+      patientEvents
+        .flatMap((event): Patient360SpecialtyActivitySummary[] => {
+          const domain = specialtyDomain(event.eventType);
+          if (!domain) return [];
+          const payload = event.payload || {};
+          const sourceRefs = [
+            asString(payload.medicationOrderId),
+            asString(payload.emarSlotId),
+            asString(payload.carePlanId),
+            asString(payload.dialysisOrderId),
+            asString(payload.dialysisSessionId),
+            asString(payload.obstetricEpisodeId),
+            asString(payload.partogramEntryId),
+            asString(payload.oncologyCaseId),
+            asString(payload.regimenId),
+            asString(payload.recommendationId),
+            asString(payload.rehabilitationPlanId),
+            asString(payload.rehabilitationSessionId),
+          ].filter(Boolean);
+          const encounterId = asString(payload.encounterId);
+          return [{
+            activityId: event.aggregateId || event.eventId,
+            domain,
+            eventType: event.eventType,
+            ...(encounterId ? { encounterId } : {}),
+            occurredAt: Number(event.occurredAt || event.recordedAt || 0),
+            summary: eventSummary(event),
+            sourceRefs: Array.from(new Set(sourceRefs)),
+          }];
+        })
+        .slice(0, 200);
 
     const latestEvent = patientEvents[0];
     const lastEventRecordedAt = latestEvent

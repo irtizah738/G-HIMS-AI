@@ -15,7 +15,7 @@ describe('Wave 3 complete clinical integration closure', () => {
       'tests/ci10i-offline-production-qualification.test.ts',
       'tests/hospital0-clinical-intelligence-evidence.test.ts',
     ]) {
-      await expect(access(path.join(root, file))).resolves.toBeUndefined();
+      await access(path.join(root, file));
     }
   });
 

@@ -8,6 +8,7 @@ import { getUserAccessibleTenants } from '@/server/auth/tenant-membership';
 import { getAdminAuth } from '@/server/firebase/admin';
 import { LoginResponsePayload } from '@/lib/auth/auth-types';
 import { AuthError } from '@/lib/auth/auth-errors';
+import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
 
 function errorResponse(error: unknown, fallbackCode: 'AUTHENTICATION_REQUIRED' | 'SESSION_EXPIRED' = 'AUTHENTICATION_REQUIRED') {
   const authError = error instanceof AuthError
@@ -39,9 +40,20 @@ export async function POST(req: NextRequest) {
     const requestedTenantId = String(body.tenantId || '').trim().toLowerCase();
     const deviceData = body.device || {};
     const rememberDevice = body.rememberDevice !== false;
+    const runtimeMode = getRuntimeMode();
+    const deviceBindingRequired = runtimeMode === 'STAGING' || runtimeMode === 'PRODUCTION';
 
     if (!requestedTenantId) {
       return NextResponse.json({ error: 'tenantId is required' }, { status: 400 });
+    }
+
+    if (deviceBindingRequired && !String(deviceData.deviceId || '').trim()) {
+      throw new AuthError({
+        code: 'DEVICE_REVOKED',
+        message: `Registered device identity is required in ${runtimeMode}.`,
+        statusCode: 403,
+        userMessage: 'This environment requires a registered clinical workstation or device.',
+      });
     }
 
     // Authentication never creates authorization. Tenant membership, roles,
@@ -51,7 +63,7 @@ export async function POST(req: NextRequest) {
     await resolveAuthorizationContext(verifiedToken, requestedTenantId);
 
     let registeredDevice;
-    if (rememberDevice && deviceData.deviceId) {
+    if ((deviceBindingRequired || rememberDevice) && deviceData.deviceId) {
       registeredDevice = await registerOrUpdateDevice({
         deviceId: deviceData.deviceId,
         userId: verifiedToken.uid,

@@ -90,6 +90,7 @@ function integrationContext(input: {
     roles: ['INTEGRATION_SERVICE'],
     permissions: ['RECORD_DIAGNOSTIC_RESULT'],
     clinicalPrivileges: [],
+    source: 'integration',
     correlationId: input.correlationId || `corr_${crypto.randomUUID()}`,
     requestId: input.requestId || `req_${crypto.randomUUID()}`,
     ipAddress: input.req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || undefined,

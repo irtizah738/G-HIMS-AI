@@ -158,4 +158,43 @@ describe('P8 main baseline hardening', () => {
     expect(gitignore).toContain('artifacts/');
     expect(gitignore).toContain('backups/');
   });
+  test('clinical privileges require canonical HCM employee credential authority', async () => {
+    const authorization = await source('server/auth/authorization-context.ts');
+    expect(authorization).toContain('Clinical authority has exactly one source of truth');
+    expect(authorization).not.toContain("tenantRef.collection('users').doc(params.userId)");
+    expect(authorization).toContain("mandatory.length===0");
+    expect(authorization).toContain("privilege.status!=='GRANTED'");
+  });
+
+  test('staging and production sessions cannot opt out of device binding', async () => {
+    const sessionRoute = await source('app/api/auth/session/route.ts');
+    expect(sessionRoute).toContain("runtimeMode === 'STAGING' || runtimeMode === 'PRODUCTION'");
+    expect(sessionRoute).toContain('deviceBindingRequired && !String(deviceData.deviceId');
+    expect(sessionRoute).toContain('(deviceBindingRequired || rememberDevice)');
+  });
+
+  test('tenant routing never invents a fallback tenant and browser responses carry CSP', async () => {
+    const proxy = await source('proxy.ts');
+    expect(proxy).not.toContain("extractedTenantId || 'central-metro-hospital'");
+    expect(proxy).toContain("requestHeaders.delete('x-ghims-tenant-id')");
+    expect(proxy).toContain("'nonce-");
+    expect(proxy).toContain("'strict-dynamic'");
+    expect(proxy).toContain('Strict-Transport-Security');
+    expect(proxy).not.toContain('picsum.photos');
+    expect(proxy).not.toContain("style-src 'self' 'unsafe-inline'");
+    expect(proxy).toContain('style-src-attr');
+  });
+
+  test('Patient 360 recovery uses the same monotonic projection commit primitive', async () => {
+    const patient360 = await source(
+      'lib/clinical/patient360/patient360-projection-service.ts'
+    );
+    expect(patient360).toContain('commitProjectionMonotonically');
+    expect(patient360).not.toContain(
+      ".collection('patient360Projections')\n        .doc(patientId)\n        .set(sanitizeForFirestore(projected.projection))"
+    );
+    expect(patient360).toContain("message.startsWith('PATIENT360_PATIENT_NOT_FOUND:')");
+    expect(patient360).toContain('throw error;');
+  });
+
 });

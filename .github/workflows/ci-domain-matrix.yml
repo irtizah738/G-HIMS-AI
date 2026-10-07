@@ -1,0 +1,67 @@
+name: CI Domain Matrix
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-domain-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  domain:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Core trust and authorization
+            command: bun run test:p0 && bun run test:p8 && bun run test:security
+          - name: Clinical workflow
+            command: bun run test:clinical-architecture && bun run test:cbe && bun run test:wave2 && bun run test:wave3 && bun run test:wave4
+          - name: Clinical intelligence
+            command: bun run test:ci10i && bun run test:ci-validation && bun run test:hospital0-ci && bun run test:ci-demo
+          - name: Offline and reconciliation
+            command: bun run test:p6 && bun run test:drp6 && bun test tests/offline-capability-lease.test.ts
+          - name: Finance
+            command: bun run test:finance
+          - name: HCM
+            command: bun run test:hcm1 && bun run test:hcm2 && bun run test:hcm3 && bun run test:hcm4 && bun run test:hcm5 && bun run test:hcm6 && bun run test:hcm7-11
+          - name: SCM
+            command: bun run test:scm-completion
+          - name: Facilities
+            command: bun run test:fac1 && bun run test:fac2
+          - name: DRP staging contracts
+            command: bun run test:drp-all && bun run test:p7
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-ci-domain
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-ci-domain
+      FIREBASE_PROJECT_ID: ghims-ci-domain
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-ci-domain
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      GHIMS_INTEGRATION_HL7_STATE: DISABLED
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_INTEGRATION_DICOMWEB_STATE: DISABLED
+      GHIMS_INTEGRATION_DEVICE_TELEMETRY_STATE: DISABLED
+      GHIMS_INTEGRATION_EDI_X12_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - name: Run domain contract
+        shell: bash
+        run: ${{ matrix.command }}

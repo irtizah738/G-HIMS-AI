@@ -6,12 +6,14 @@ const source = (file: string) =>
   readFile(path.join(process.cwd(), file), 'utf8');
 
 describe('DRP-6 offline qualification contracts', () => {
-  test('offline capture requires a still-valid authenticated actor and tenant', async () => {
+  test('offline capture requires an active session or a bounded server-issued outage lease', async () => {
     const sync = await source('lib/offline/sync-engine.ts');
     expect(sync).toContain('AUTHENTICATION_REQUIRED: offline commands require an authenticated originating user.');
-    expect(sync).toContain('TENANT_MISMATCH: offline command tenant must match the active session.');
-    expect(sync).toContain('SESSION_EXPIRED: offline command capture requires a still-valid cached session.');
-    expect(sync).toContain('actorId: cached.user.uid');
+    expect(sync).toContain('TENANT_MISMATCH: offline command tenant must match the active session or capture lease.');
+    expect(sync).toContain('getCachedOfflineCapabilityLease');
+    expect(sync).toContain('OFFLINE_CAPABILITY_REQUIRED');
+    expect(sync).toContain('OFFLINE_CAPABILITY_COMMAND_DENIED');
+    expect(sync).toContain('online command capture requires renewed authoritative authentication');
   });
 
   test('replay re-authenticates and replaces client actor/device claims with authoritative context', async () => {
@@ -95,4 +97,33 @@ describe('DRP-6 offline qualification contracts', () => {
     const acceptedIndex = sync.lastIndexOf("if (result.status === 'accepted')", deleteIndex);
     expect(acceptedIndex).toBeGreaterThan(-1);
   });
+  test('legacy plaintext offline authority APIs are retired and read snapshots are minimum-necessary', async () => {
+    const [db, bootstrap, secureStore] = await Promise.all([
+      source('lib/offline/db.ts'),
+      source('app/api/offline/bootstrap/route.ts'),
+      source('lib/offline/secure-store.ts'),
+    ]);
+
+    expect(db).toContain('LEGACY_RAW_MUTATION_RETIRED');
+    expect(db).toContain('LEGACY_PLAINTEXT_EDGE_API_RETIRED');
+    expect(db).toContain("offline_cache: null");
+    expect(db).toContain("clinical_patients: null");
+    expect(bootstrap).toContain("requestedSurface === 'FACILITIES'");
+    expect(bootstrap).toContain("requestedSurface === 'HOSPITAL_SHELL'");
+    expect(bootstrap).toContain('requireEdgeHydrationSurface');
+    expect(bootstrap).toContain('There is no generic tenant cache fallback');
+    expect(bootstrap).not.toContain("'GENERIC'");
+    expect(secureStore).toContain('Purge stale collections from older/broader surfaces');
+    expect(secureStore).toContain('.primaryKeys()');
+  });
+
+  test('encrypted auth storage no longer accepts legacy plaintext session or membership records', async () => {
+    const authStorage = await source('lib/offline/auth-storage.ts');
+    expect(authStorage).not.toContain('record.user && record.session');
+    expect(authStorage).not.toContain('Legacy plaintext record');
+    expect(authStorage).toContain('STORE_OFFLINE_CAPABILITY');
+    expect(authStorage).toContain('saveCachedOfflineCapabilityLease');
+    expect(authStorage).toContain('getCachedOfflineCapabilityLease');
+  });
+
 });

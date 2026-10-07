@@ -59,7 +59,7 @@ export default function InvoiceCashCollectionPage({ params }: PageProps) {
     setLoading(true);
     setError(null);
     try {
-      const snapshot = await hydrateEdgeSnapshot(tenantId);
+      const snapshot = await hydrateEdgeSnapshot(tenantId, { surface: 'BILLING' });
       const model = buildBillingInvoiceReadModel(snapshot);
       setSnapshotSource(model.source);
       const nextInvoice =

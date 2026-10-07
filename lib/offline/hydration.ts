@@ -9,8 +9,10 @@ import {
 } from '@/lib/offline/secure-store';
 import { enforceEdgeStorageBudget } from '@/lib/offline/storage-manager';
 import { OPD_EDGE_COLLECTIONS } from '@/lib/opd/edge-surface';
-
-export type EdgeHydrationSurface = 'OPD' | 'GENERIC';
+import {
+  requireEdgeHydrationSurface,
+  type EdgeHydrationSurface,
+} from '@/lib/offline/hydration-policy';
 
 export interface EdgeSnapshot {
   tenantId: string;
@@ -22,8 +24,9 @@ export interface EdgeSnapshot {
 
 export async function loadLocalEdgeSnapshot(
   tenantId: string,
-  surface: EdgeHydrationSurface = 'GENERIC'
+  requestedSurface: EdgeHydrationSurface
 ): Promise<EdgeSnapshot> {
+  const surface = requireEdgeHydrationSurface(requestedSurface);
   const cached = await getCachedAuthSession();
   const actorId = cached?.user?.uid || '';
   if (!actorId) {
@@ -36,89 +39,58 @@ export async function loadLocalEdgeSnapshot(
     };
   }
 
-  const genericCollectionsToLoad = [
-    'patients',
-    'encounters',
-    'encounterEvidence',
-    'orders',
-    'prescriptions',
-    'opd_queue',
-    'opdAppointments',
-    'opdWaitlist',
-    'beds',
-    'surgicalCases',
-    'orRoomSchedules',
-    'patient360Projections',
-    'dischargeReadinessProjections',
-    'billingMismatches',
-    'encounterCharges',
-    'invoices',
-    'invoiceSettlements',
-    'journalEntries',
-    'cashReceipts',
-    'telehealthSessions',
-    'employees',
-    'employeeAssignments',
-    'clinicalCredentials',
-    'clinicalPrivileges',
-    'rosterAssignments',
-    'attendanceRecords',
-    'leaveRequests',
-    'leaveBalances',
-    'compensationProfiles',
-    'payrollPeriods',
-    'payrollEmployeeSlots',
-    'payrollPayslips',
-    'payrollStatutoryLiabilities',
-    'payrollComplianceSnapshots',
-    'hcmIntelligenceSnapshots',
-    'resources',
-    'rooms',
-    'resourceReservations',
-    'maintenanceWorkOrders',
-    'calibrationRecords',
-    'items',
-    'inventoryBalances',
-    'batches',
-    'stockTransactions',
-    'patientConsumptions',
-    'purchaseRequisitions',
-    'inventoryLocations',
-    'scmPurchaseOrders',
-    'goodsReceiptNotes',
-    'stockTransfers',
-    'recallCases',
-    'suppliers',
-    'threeWayMatches',
-    'scmCycleCounts',
-    'scmReplenishmentPolicies',
-    'scmReplenishmentPlans',
-    'scmReplenishmentOrders',
-    'scmSupplierContracts',
-    'scmOperationalSnapshots',
-    'accounts',
-    'accountingPeriods',
-    'arOpenItems',
-    'financeArReceipts',
-    'financeArAdjustments',
-    'financeArAgingSnapshots',
-    'treasuryAccounts',
-    'cashRegisterShifts',
-    'financeBankReconciliations',
-    'financeApAgingSnapshots',
-    'financeCostCenters',
-    'financeBudgets',
-    'financeBudgetCommitments',
-    'financeFixedAssets',
-    'financeDepreciationRuns',
-    'financeStatementSnapshots',
-    'financeTaxSummarySnapshots',
-    'financeIntelligenceSnapshots',
-  ];
+  const surfaceCollections: Record<Exclude<EdgeHydrationSurface, 'OPD'>, string[]> = {
+    HOSPITAL_SHELL: [
+      'patients',
+      'encounters',
+      'opd_queue',
+      'beds',
+      'billingMismatches',
+      'telehealthSessions',
+    ],
+    CLINICAL: [
+      'patients', 'encounters', 'encounterEvidence', 'orders', 'prescriptions',
+      'opd_queue', 'opdAppointments', 'opdWaitlist', 'beds', 'surgicalCases',
+      'orRoomSchedules', 'patient360Projections', 'dischargeReadinessProjections',
+      'deteriorationProjections', 'medicationSafetyProjections', 'clinicalOpenItems',
+      'clinicalEscalations', 'consultationRequests', 'clinicalHandoffs',
+    ],
+    BILLING: [
+      'patients', 'encounters', 'billingMismatches', 'encounterCharges',
+      'invoices', 'invoiceSettlements', 'arOpenItems', 'journalEntries', 'cashReceipts',
+    ],
+    FINANCE: [
+      'accounts', 'accountingPeriods', 'journalEntries', 'cashReceipts', 'arOpenItems',
+      'financeArReceipts', 'financeArAdjustments', 'financeArAgingSnapshots',
+      'treasuryAccounts', 'cashRegisterShifts', 'financeBankReconciliations',
+      'financeApAgingSnapshots', 'financeCostCenters', 'financeBudgets',
+      'financeBudgetCommitments', 'financeFixedAssets', 'financeDepreciationRuns',
+      'financeStatementSnapshots', 'financeTaxSummarySnapshots', 'financeIntelligenceSnapshots',
+    ],
+    HCM: [
+      'employees', 'employeeAssignments', 'clinicalCredentials', 'clinicalPrivileges',
+      'rosterAssignments', 'attendanceRecords', 'leaveRequests', 'leaveBalances',
+      'compensationProfiles', 'payrollPeriods', 'payrollEmployeeSlots',
+      'payrollPayslips', 'payrollStatutoryLiabilities',
+      'payrollComplianceSnapshots', 'hcmIntelligenceSnapshots',
+    ],
+    SCM: [
+      'items', 'inventoryBalances', 'batches', 'stockTransactions', 'patientConsumptions',
+      'purchaseRequisitions', 'inventoryLocations', 'scmPurchaseOrders', 'goodsReceiptNotes',
+      'stockTransfers', 'recallCases', 'suppliers', 'threeWayMatches',
+      'scmCycleCounts', 'scmReplenishmentPolicies', 'scmReplenishmentPlans',
+      'scmReplenishmentOrders', 'scmSupplierContracts', 'scmOperationalSnapshots',
+    ],
+    FACILITIES: [
+      'beds', 'resources', 'rooms', 'resourceReservations',
+      'maintenanceWorkOrders', 'calibrationRecords',
+    ],
+  };
+
   const collectionsToLoad =
     surface === 'OPD'
       ? [...OPD_EDGE_COLLECTIONS]
-      : genericCollectionsToLoad;
+      : surfaceCollections[surface];
 
   const entries = await Promise.all(
     collectionsToLoad.map(async (collection) => [
@@ -139,9 +111,9 @@ export async function loadLocalEdgeSnapshot(
 
 export async function hydrateEdgeSnapshot(
   tenantId: string,
-  options: { surface?: EdgeHydrationSurface } = {}
+  options: { surface: EdgeHydrationSurface }
 ): Promise<EdgeSnapshot> {
-  const surface = options.surface || 'GENERIC';
+  const surface = requireEdgeHydrationSurface(options.surface);
   const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
   const currentUser = auth.currentUser;
   const cached = await getCachedAuthSession();

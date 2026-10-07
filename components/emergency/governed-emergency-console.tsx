@@ -153,11 +153,11 @@ export function GovernedEmergencyConsole() {
     setMessage('');
 
     try {
-      const local = await loadLocalEdgeSnapshot(tenantId);
+      const local = await loadLocalEdgeSnapshot(tenantId, 'CLINICAL');
       applySnapshot(local);
       setSource('LOCAL_EDGE');
 
-      const server = await hydrateEdgeSnapshot(tenantId);
+      const server = await hydrateEdgeSnapshot(tenantId, { surface: 'CLINICAL' });
       applySnapshot(server);
       setSource(server.source === 'SERVER' ? 'SERVER' : 'LOCAL_EDGE');
     } catch (error) {

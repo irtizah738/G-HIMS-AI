@@ -18,6 +18,7 @@ export interface TransactionPayload<TState = unknown> {
   auditReason?: string;
   auditMetadata?: Record<string, unknown>;
   outboxTopic?: string;
+  source?: DomainEventEnvelope['source'];
 }
 
 export interface CommittedTransaction<TState = unknown> {
@@ -45,6 +46,9 @@ export interface AtomicMutationParams {
   tenantId: string;
   actorId: string;
   actorRole: string;
+  actorRoles?: string[];
+  deviceId?: string;
+  sessionId?: string;
   aggregateType: string;
   aggregateId: string;
   eventType: string;
@@ -55,6 +59,7 @@ export interface AtomicMutationParams {
   auditReason?: string;
   auditMetadata?: Record<string, unknown>;
   outboxTopic?: string;
+  source?: DomainEventEnvelope['source'];
   idempotencyKey?: string;
   commandId?: string;
   correlationId?: string;
@@ -453,6 +458,9 @@ export class TransactionManager {
     tenantId: string;
     actorId: string;
     actorRole: string;
+    actorRoles?: string[];
+    deviceId?: string;
+    sessionId?: string;
     aggregateType: string;
     aggregateId: string;
     eventType: string;
@@ -467,6 +475,7 @@ export class TransactionManager {
     commandId: string;
     correlationId: string;
     domainState?: unknown;
+    source?: DomainEventEnvelope['source'];
     timestamp?: number;
     eventId?: string;
     auditId?: string;
@@ -487,12 +496,15 @@ export class TransactionManager {
       payload: params.eventPayload,
       actorId: params.actorId,
       actorRole: params.actorRole,
+      actorRoles: params.actorRoles?.length ? [...params.actorRoles] : [params.actorRole],
+      ...(params.deviceId ? { deviceId: params.deviceId } : {}),
+      ...(params.sessionId ? { sessionId: params.sessionId } : {}),
       occurredAt: timestamp,
       recordedAt: timestamp,
       correlationId: params.correlationId,
       commandId: params.commandId,
       idempotencyKey: params.idempotencyKey,
-      source: 'web',
+      source: params.source || 'system',
       schemaVersion: 1,
     };
 
@@ -982,6 +994,9 @@ export class TransactionManager {
       tenantId: context.tenantId,
       actorId: context.actorId,
       actorRole: context.roles[0] || 'CLINICIAN',
+      actorRoles: [...context.roles],
+      deviceId: context.deviceId,
+      sessionId: context.sessionId,
       aggregateType: payload.entityType,
       aggregateId: payload.entityId,
       eventType: payload.eventType,
@@ -989,6 +1004,16 @@ export class TransactionManager {
       auditReason: payload.auditReason,
       auditMetadata: {
         ...(payload.auditMetadata || {}),
+        authorization: {
+          effectiveRoles: [...context.roles],
+          permissions: [...context.permissions],
+          clinicalPrivileges: [...(context.clinicalPrivileges || [])],
+          facilityIds: [...(context.facilityIds || [])],
+          departmentIds: [...(context.departmentIds || [])],
+          sessionId: context.sessionId || null,
+          deviceId: context.deviceId || null,
+          source: context.source || payload.source || 'system',
+        },
         ...(context.isEmergencyOverride && context.breakGlassGrantId
           ? {
               breakGlassGrantId: context.breakGlassGrantId,
@@ -998,6 +1023,7 @@ export class TransactionManager {
           : {}),
       },
       outboxTopic: payload.outboxTopic,
+      source: context.source || payload.source || 'system',
       idempotencyKey,
       commandId,
       correlationId: context.correlationId,

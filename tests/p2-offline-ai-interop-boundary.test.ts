@@ -87,7 +87,8 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
 
     expect(engine).toContain('getSecurePendingVectorClock');
     expect(engine).toContain('incrementClock');
-    expect(engine).toContain('clockNodeId = cached.session.deviceId || cached.user.uid');
+    expect(engine).toContain('clockNodeId = deviceId || actorId');
+    expect(engine).toContain('getCachedOfflineCapabilityLease');
     expect(engine).toContain('id: params.mutationId');
 
     expect(types).toContain('queuedOffline?: boolean');

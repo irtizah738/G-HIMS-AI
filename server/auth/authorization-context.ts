@@ -105,22 +105,10 @@ async function resolveCredentialGatedPrivileges(params:{
     'ACKNOWLEDGE_CRITICAL_RESULT',
   ]);
 
-  if (!employee) {
-    try {
-      const userDoc = await tenantRef.collection('users').doc(params.userId).get();
-      if (
-        userDoc.exists &&
-        String((userDoc.data() || {}).credentialStatus || '').trim().toUpperCase() === 'VERIFIED'
-      ) {
-        return params.declaredClinicalPrivileges.filter((value) =>
-          credentialGatedRoleBaseline.has(String(value).trim().toUpperCase())
-        );
-      }
-    } catch {
-      // Continue to fail-closed return
-    }
-  }
-
+  // Clinical authority has exactly one source of truth: the canonical HCM
+  // employee -> mandatory credentials -> scoped ClinicalPrivilege chain.
+  // Tenant membership metadata may describe identity/role, but it can never
+  // substitute for a missing clinical employee or credential record.
   if(!employee || employee.employmentStatus!=='ACTIVE') return [];
 
   const [credentialSnap,privilegeSnap]=await Promise.all([

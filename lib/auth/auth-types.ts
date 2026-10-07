@@ -139,6 +139,22 @@ export interface AuthorizationContext {
   isEmergencyOverride?: boolean;
 }
 
+export interface OfflineCaptureCapabilityLease {
+  leaseId: string;
+  tenantId: string;
+  actorId: string;
+  deviceId: string;
+  allowedCommandTypes: string[];
+  facilityIds: string[];
+  departmentIds: string[];
+  clinicalPrivileges: string[];
+  issuedAt: string;
+  expiresAt: string;
+  policyVersion: 1;
+  captureOnly: true;
+  replayRequiresOnlineReauthorization: true;
+}
+
 export interface LoginResponsePayload {
   authenticated: boolean;
   customToken?: string;
@@ -164,7 +180,9 @@ export interface LoginResponsePayload {
   session: {
     sessionId: string;
     expiresAt: string;
+    deviceId?: string;
   };
+  offlineCapability?: OfflineCaptureCapabilityLease;
   accessibleTenants: Array<{
     tenantId: string;
     name: string;

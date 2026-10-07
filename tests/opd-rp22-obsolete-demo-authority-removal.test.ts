@@ -115,7 +115,7 @@ describe('OPD-RP22 obsolete and demo authority removal', () => {
   test('invoice directory has no synthetic initial financial records', async () => {
     const page = await source('app/[tenantId]/billing/invoices/page.tsx');
 
-    expect(page).toContain('hydrateEdgeSnapshot(tenantId)');
+    expect(page).toContain("hydrateEdgeSnapshot(tenantId, { surface: 'BILLING' })");
     expect(page).toContain('buildBillingInvoiceReadModel(snapshot)');
     expect(page).not.toContain("inv-enc-8092-441");
     expect(page).not.toContain("Robert Martinez");
@@ -132,7 +132,7 @@ describe('OPD-RP22 obsolete and demo authority removal', () => {
     );
 
     expect(page).toContain("'RecordCashReceiptCommand'");
-    expect(page).toContain('hydrateEdgeSnapshot(tenantId)');
+    expect(page).toContain("hydrateEdgeSnapshot(tenantId, { surface: 'BILLING' })");
     expect(page).not.toContain('calculateLineItem');
     expect(page).not.toContain('handleAddNewItem');
     expect(page).not.toContain("setInvoice((prev)");

@@ -85,12 +85,7 @@ export async function migrateLegacyEdgeStorage(
     });
   }
 
-  // Pre-P6 read-model tables were plaintext. They are projections, never the
-  // authoritative write ledger, so purge them rather than retaining PHI.
-  await Promise.all([
-    localDb.offline_cache.where('tenantId').equals(tenantId).delete(),
-    localDb.clinical_patients.where('tenantId').equals(tenantId).delete(),
-    localDb.bed_occupancy.where('tenantId').equals(tenantId).delete(),
-    localDb.surgical_cases.where('tenantId').equals(tenantId).delete(),
-  ]);
+  // Generation-1 plaintext read-model stores are deleted by the Dexie v3
+  // schema migration before this function runs. Do not reintroduce typed access
+  // to those stores merely for cleanup; IndexedDB upgrade is the deletion boundary.
 }

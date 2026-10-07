@@ -133,6 +133,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       accountStatus: payload.authorization.accountStatus,
       clinicalPrivileges: payload.authorization.clinicalPrivileges,
       sessionId: payload.session.sessionId,
+      deviceId: payload.session.deviceId,
       lastAuthenticatedAt: new Date().toISOString(),
     };
 
@@ -140,6 +141,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       sessionId: payload.session.sessionId,
       userId: payload.user.uid,
       tenantId: payload.tenant.tenantId,
+      deviceId: payload.session.deviceId,
       status: 'ACTIVE',
       createdAt: new Date().toISOString(),
       lastSeenAt: new Date().toISOString(),

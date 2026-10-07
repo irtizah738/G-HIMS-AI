@@ -182,17 +182,20 @@ export async function replaceSecureTenantEdgeSnapshot(
     }
   }
 
-  const collectionNames = Object.keys(collections || {});
   await localDb.transaction(
     'rw',
     localDb.edge_entities,
     localDb.sync_metadata,
     async () => {
-      for (const collection of collectionNames) {
-        await localDb.edge_entities
-          .where('[tenantId+collection]')
-          .equals([normalizedTenantId, collection])
-          .delete();
+      // One actor/device retains one current minimum-necessary read snapshot.
+      // Purge stale collections from older/broader surfaces before replacing it.
+      const staleKeys = await localDb.edge_entities
+        .where('tenantId')
+        .equals(normalizedTenantId)
+        .filter((row) => !row.actorId || row.actorId === actorId)
+        .primaryKeys();
+      if (staleKeys.length > 0) {
+        await localDb.edge_entities.bulkDelete(staleKeys as string[]);
       }
       if (records.length) await localDb.edge_entities.bulkPut(records);
       const scope = metadata.scope || 'clinical-core';

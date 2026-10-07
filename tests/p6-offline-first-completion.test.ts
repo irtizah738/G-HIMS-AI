@@ -38,7 +38,8 @@ describe('G-HIMS P6 full offline-first completion', () => {
     );
     expect(secure).toContain('getSecurePendingVectorClock');
     expect(engine).toContain('getSecurePendingMutations(activeTenantId, cached.user.uid)');
-    expect(engine).toContain('getSecurePendingVectorClock(params.tenantId, cached.user.uid)');
+    expect(engine).toContain('getSecurePendingVectorClock(params.tenantId, actorId)');
+    expect(engine).toContain('const clockNodeId = deviceId || actorId');
     expect(hook).toContain('getSecurePendingMutations(tenantId, cached.user.uid)');
     expect(hook).toContain('getSecurePendingVectorClock(tenantId, cached.user.uid)');
   });
@@ -52,11 +53,9 @@ describe('G-HIMS P6 full offline-first completion', () => {
     expect(migration).toContain('payload: {}');
     expect(migration).toContain("status: 'failed'");
     expect(migration).toContain('LEGACY_ACTOR_UNKNOWN');
-    expect(migration).toContain('localDb.offline_cache.where');
-    expect(migration).toContain('localDb.clinical_patients.where');
-    expect(migration).toContain('localDb.bed_occupancy.where');
-    expect(migration).toContain('localDb.surgical_cases.where');
     expect(migration).toContain('await encryptEdgeJson');
+    expect(migration).toContain('Generation-1 plaintext read-model stores are deleted by the Dexie v3');
+    expect(migration).not.toContain('localDb.offline_cache.where');
     expect(migration).not.toContain("localDb.transaction(\n    'rw'");
 
     expect(auth).toContain('migrateLegacyEdgeStorage');
@@ -78,8 +77,8 @@ describe('G-HIMS P6 full offline-first completion', () => {
     expect(bootstrap).toContain('EDGE_PAGE_SIZE');
     expect(bootstrap).toContain('EDGE_COLLECTION_MAX');
     expect(bootstrap).not.toContain('.limit(1000)');
-    expect(hospital).toContain('void loadLocalEdgeSnapshot(tenantId)');
-    expect(hospital).toContain('void hydrateEdgeSnapshot(tenantId)');
+    expect(hospital).toContain("void loadLocalEdgeSnapshot(tenantId, 'HOSPITAL_SHELL')");
+    expect(hospital).toContain("void hydrateEdgeSnapshot(tenantId, { surface: 'HOSPITAL_SHELL' })");
     expect(hospital).toContain("window.addEventListener('ghims:edge-sync-complete'");
   });
 

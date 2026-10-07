@@ -3,15 +3,16 @@
  * IndexedDB backed persistent offline session cache and audit queue
  */
 
-import { AuthenticatedUser, TenantMembership, UserSessionRecord } from '@/lib/auth/auth-types';
+import { AuthenticatedUser, OfflineCaptureCapabilityLease, TenantMembership, UserSessionRecord } from '@/lib/auth/auth-types';
 import { clearOfflineReadModelsForTenant } from '@/lib/offline/db';
 import { decryptEdgeJson, encryptEdgeJson, type EncryptedEdgeEnvelope } from '@/lib/offline/crypto';
 
 const DB_NAME = 'ghims_offline_auth_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_SESSION = 'auth_session';
 const STORE_MEMBERSHIPS = 'tenant_memberships';
 const STORE_AUDIT_QUEUE = 'offline_audit_queue';
+const STORE_OFFLINE_CAPABILITY = 'offline_capture_capability';
 
 interface CachedAuthRecord {
   id: string;
@@ -27,6 +28,15 @@ interface CachedMembershipRecord {
   cryptoTenantId: string;
   actorId: string;
   encryptedPayload: EncryptedEdgeEnvelope;
+}
+
+interface CachedOfflineCapabilityRecord {
+  id: string;
+  tenantId: string;
+  actorId: string;
+  deviceId: string;
+  encryptedPayload: EncryptedEdgeEnvelope;
+  expiresAt: string;
 }
 
 interface CachedAuditRecord {
@@ -66,6 +76,9 @@ function openDatabase(): Promise<IDBDatabase> {
         }
         if (!db.objectStoreNames.contains(STORE_AUDIT_QUEUE)) {
           db.createObjectStore(STORE_AUDIT_QUEUE, { keyPath: 'id', autoIncrement: true });
+        }
+        if (!db.objectStoreNames.contains(STORE_OFFLINE_CAPABILITY)) {
+          db.createObjectStore(STORE_OFFLINE_CAPABILITY, { keyPath: 'id' });
         }
       };
 
@@ -164,14 +177,6 @@ export async function getCachedAuthSession(): Promise<{ user: AuthenticatedUser;
           return;
         }
 
-        // One-release migration path for pre-P8 plaintext records.
-        if (record.user && record.session) {
-          const legacy = { user: record.user, session: record.session };
-          void saveCachedAuthSession(record.user, record.session).catch(() => {});
-          resolve(legacy);
-          return;
-        }
-
         if (!record.encryptedPayload || !record.tenantId || !record.actorId) {
           resolve(null);
           return;
@@ -188,6 +193,60 @@ export async function getCachedAuthSession(): Promise<{ user: AuthenticatedUser;
         resolve(null);
       };
     });
+  } catch {
+    return null;
+  }
+}
+
+export async function saveCachedOfflineCapabilityLease(
+  lease: OfflineCaptureCapabilityLease
+): Promise<void> {
+  const encryptedPayload = await encryptEdgeJson(
+    lease.tenantId,
+    lease.actorId,
+    lease
+  );
+  const db = await openDatabase();
+  const tx = db.transaction(STORE_OFFLINE_CAPABILITY, 'readwrite');
+  const record: CachedOfflineCapabilityRecord = {
+    id: 'current_offline_capture_capability',
+    tenantId: lease.tenantId,
+    actorId: lease.actorId,
+    deviceId: lease.deviceId,
+    encryptedPayload,
+    expiresAt: lease.expiresAt,
+  };
+  tx.objectStore(STORE_OFFLINE_CAPABILITY).put(record);
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || new Error('OFFLINE_CAPABILITY_WRITE_FAILED'));
+    tx.onabort = () => reject(tx.error || new Error('OFFLINE_CAPABILITY_WRITE_ABORTED'));
+  });
+}
+
+export async function getCachedOfflineCapabilityLease(): Promise<OfflineCaptureCapabilityLease | null> {
+  try {
+    const db = await openDatabase();
+    const tx = db.transaction(STORE_OFFLINE_CAPABILITY, 'readonly');
+    const request = tx
+      .objectStore(STORE_OFFLINE_CAPABILITY)
+      .get('current_offline_capture_capability');
+    const record = await new Promise<CachedOfflineCapabilityRecord | undefined>((resolve) => {
+      request.onsuccess = () => resolve(request.result as CachedOfflineCapabilityRecord | undefined);
+      request.onerror = () => resolve(undefined);
+    });
+    if (!record || Date.now() >= Date.parse(record.expiresAt)) return null;
+    const lease = await decryptEdgeJson<OfflineCaptureCapabilityLease>(record.encryptedPayload);
+    if (
+      lease.tenantId !== record.tenantId ||
+      lease.actorId !== record.actorId ||
+      lease.deviceId !== record.deviceId ||
+      lease.captureOnly !== true ||
+      lease.replayRequiresOnlineReauthorization !== true
+    ) {
+      return null;
+    }
+    return lease;
   } catch {
     return null;
   }
@@ -219,9 +278,10 @@ export async function clearCachedAuthSession(): Promise<void> {
     });
     tenantId = existing?.tenantId || '';
 
-    const tx = db.transaction([STORE_SESSION, STORE_MEMBERSHIPS], 'readwrite');
+    const tx = db.transaction([STORE_SESSION, STORE_MEMBERSHIPS, STORE_OFFLINE_CAPABILITY], 'readwrite');
     tx.objectStore(STORE_SESSION).clear();
     tx.objectStore(STORE_MEMBERSHIPS).clear();
+    tx.objectStore(STORE_OFFLINE_CAPABILITY).clear();
 
     await new Promise<void>((resolve) => {
       tx.oncomplete = () => resolve();
@@ -294,9 +354,6 @@ export async function getCachedTenantMemberships(): Promise<TenantMembership[]> 
         } catch {
           // Ignore unreadable records from another actor/key.
         }
-      } else if ((row as Partial<TenantMembership>).status) {
-        // Legacy plaintext record: return for this session and let next save migrate.
-        decoded.push(row as unknown as TenantMembership);
       }
     }
     return decoded;

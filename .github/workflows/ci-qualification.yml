@@ -1,0 +1,75 @@
+name: CI Qualification
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-qualification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualification:
+    name: Emulator, offline, Hospital-0 and browser qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-ci-qualification
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-ci-qualification
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-ci-qualification
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-ci-qualification
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      GHIMS_INTEGRATION_HL7_STATE: DISABLED
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_INTEGRATION_DICOMWEB_STATE: DISABLED
+      GHIMS_INTEGRATION_DEVICE_TELEMETRY_STATE: DISABLED
+      GHIMS_INTEGRATION_EDI_X12_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install Firebase emulator tooling without creating npm authority
+        run: npm install --no-save --package-lock=false @firebase/rules-unit-testing@5.0.2 firebase-tools@15.30.2
+      - name: Firestore least-privilege suites
+        run: bun run test:rules
+      - name: Auth/IAM emulator
+        env:
+          FIREBASE_PROJECT_ID: ghims-p5a-ci
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p5a-ci
+          GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p5a-ci
+          NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p5a-ci
+        run: bun run test:p5a:emulator
+      - name: Recovery emulator
+        env:
+          FIREBASE_PROJECT_ID: ghims-p4-ci
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p4-ci
+          GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+          NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+        run: bun run test:p4:emulator
+      - name: Hospital-0 evidence contract
+        env:
+          GHIMS_HOSPITAL0_QUALIFICATION_RUN_ID: ci-contract-only
+          GHIMS_HOSPITAL0_QUALIFICATION_SHA: ${{ github.sha }}
+        run: bun test tests/hospital0-deployment-qualification.test.ts
+      - name: Production build for browser qualification
+        run: bun run build
+      - name: Install Playwright Chromium
+        run: bunx playwright install --with-deps chromium
+      - name: Browser fail-closed qualification
+        run: bun run test:e2e

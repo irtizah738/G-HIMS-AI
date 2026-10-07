@@ -82,7 +82,7 @@ export default function InvoicesDirectoryPage({ params }: PageProps) {
     setLoading(true);
     setError(null);
     try {
-      const snapshot = await hydrateEdgeSnapshot(tenantId);
+      const snapshot = await hydrateEdgeSnapshot(tenantId, { surface: 'BILLING' });
       setModel(buildBillingInvoiceReadModel(snapshot));
     } catch (cause) {
       setModel(null);

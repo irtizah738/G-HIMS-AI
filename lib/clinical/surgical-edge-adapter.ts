@@ -55,13 +55,13 @@ function adapt(snapshot: EdgeSnapshot): SurgicalEdgeProjection {
 export async function loadLocalSurgicalProjection(
   tenantId: string
 ): Promise<SurgicalEdgeProjection> {
-  return adapt(await loadLocalEdgeSnapshot(tenantId));
+  return adapt(await loadLocalEdgeSnapshot(tenantId, 'CLINICAL'));
 }
 
 export async function hydrateSurgicalProjection(
   tenantId: string
 ): Promise<SurgicalEdgeProjection> {
-  return adapt(await hydrateEdgeSnapshot(tenantId));
+  return adapt(await hydrateEdgeSnapshot(tenantId, { surface: 'CLINICAL' }));
 }
 
 async function run<T>(

@@ -62,11 +62,11 @@ function adapt(snapshot: EdgeSnapshot): ScmEdgeData {
 }
 
 export async function loadLocalScmEdgeData(tenantId: string): Promise<ScmEdgeData> {
-  return adapt(await loadLocalEdgeSnapshot(tenantId));
+  return adapt(await loadLocalEdgeSnapshot(tenantId, 'SCM'));
 }
 
 export async function hydrateScmEdgeData(tenantId: string): Promise<ScmEdgeData> {
-  return adapt(await hydrateEdgeSnapshot(tenantId));
+  return adapt(await hydrateEdgeSnapshot(tenantId, { surface: 'SCM' }));
 }
 
 export async function recordStockTransactionEdge(

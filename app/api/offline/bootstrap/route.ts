@@ -8,6 +8,7 @@ import {
 } from 'firebase-admin/firestore';
 import { OPD_EDGE_COLLECTIONS } from '@/lib/opd/edge-surface';
 import { loadOpdScopedEdgeCollections } from '@/lib/opd/opd-edge-bootstrap';
+import { requireEdgeHydrationSurface } from '@/lib/offline/hydration-policy';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,6 +71,24 @@ const ADMIN_COLLECTIONS = [
   'telehealthSessions',
 ] as const;
 
+const FACILITIES_COLLECTIONS = [
+  'beds',
+  'resources',
+  'rooms',
+  'resourceReservations',
+  'maintenanceWorkOrders',
+  'calibrationRecords',
+] as const;
+
+const HOSPITAL_SHELL_COLLECTIONS = [
+  'patients',
+  'encounters',
+  'opd_queue',
+  'beds',
+  'billingMismatches',
+  'telehealthSessions',
+] as const;
+
 const HCM_COLLECTIONS = [
   'employees',
   'employeeAssignments',
@@ -79,6 +98,13 @@ const HCM_COLLECTIONS = [
   'attendanceRecords',
   'leaveRequests',
   'leaveBalances',
+  'compensationProfiles',
+  'payrollPeriods',
+  'payrollEmployeeSlots',
+  'payrollPayslips',
+  'payrollStatutoryLiabilities',
+  'payrollComplianceSnapshots',
+  'hcmIntelligenceSnapshots',
 ] as const;
 
 const SCM_COLLECTIONS = [
@@ -95,6 +121,12 @@ const SCM_COLLECTIONS = [
   'recallCases',
   'suppliers',
   'threeWayMatches',
+  'scmCycleCounts',
+  'scmReplenishmentPolicies',
+  'scmReplenishmentPlans',
+  'scmReplenishmentOrders',
+  'scmSupplierContracts',
+  'scmOperationalSnapshots',
 ] as const;
 
 const EDGE_PAGE_SIZE = 500;
@@ -810,18 +842,50 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    let requestedSurface;
+    try {
+      requestedSurface = requireEdgeHydrationSurface(surface);
+    } catch (error) {
+      const code =
+        error instanceof Error && error.message === 'EDGE_HYDRATION_SURFACE_REQUIRED'
+          ? 'EDGE_BOOTSTRAP_SURFACE_REQUIRED'
+          : 'EDGE_BOOTSTRAP_SURFACE_INVALID';
+      return NextResponse.json(
+        { success: false, error: { code } },
+        { status: 400, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
     const tenantRef = db.collection('tenants').doc(context.tenantId);
     const authorized = authorizedCollections(context.roles);
-    const collections =
-      surface === 'OPD'
-        ? authorized.filter((collection) =>
-            (OPD_EDGE_COLLECTIONS as readonly string[]).includes(collection)
-          )
-        : authorized;
+    const requestedCollections: readonly string[] =
+      requestedSurface === 'HOSPITAL_SHELL'
+        ? HOSPITAL_SHELL_COLLECTIONS
+        : requestedSurface === 'OPD'
+          ? OPD_EDGE_COLLECTIONS
+        : requestedSurface === 'CLINICAL'
+          ? CLINICAL_COLLECTIONS
+          : requestedSurface === 'BILLING'
+            ? [...BILLING_COLLECTIONS, 'patients', 'encounters']
+            : requestedSurface === 'FINANCE'
+              ? FINANCE_COLLECTIONS
+              : requestedSurface === 'HCM'
+                ? HCM_COLLECTIONS
+                : requestedSurface === 'SCM'
+                  ? SCM_COLLECTIONS
+                  : requestedSurface === 'FACILITIES'
+                    ? FACILITIES_COLLECTIONS
+                    : [];
+
+    // Every offline read model is bound to an explicit, named minimum-necessary
+    // surface. There is no generic tenant cache fallback.
+    const collections = [...new Set(requestedCollections)].filter((collection) =>
+      authorized.includes(collection)
+    );
     const generatedAt = Date.now();
 
     const rawCollections =
-      surface === 'OPD'
+      requestedSurface === 'OPD'
         ? await loadOpdScopedEdgeCollections(
             tenantRef,
             context,
@@ -843,7 +907,7 @@ export async function GET(req: NextRequest) {
     );
 
     const snapshotVersion = `${context.tenantId}:${
-      surface === 'OPD' ? 'opd:' : ''
+      requestedSurface.toLowerCase() + ':'
     }${generatedAt}`;
 
     return NextResponse.json(
@@ -852,7 +916,7 @@ export async function GET(req: NextRequest) {
         tenantId: context.tenantId,
         generatedAt,
         snapshotVersion,
-        surface: surface === 'OPD' ? 'OPD' : 'GENERIC',
+        surface: requestedSurface,
         collections: scopedCollections,
       },
       {

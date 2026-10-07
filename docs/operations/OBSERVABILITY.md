@@ -43,3 +43,12 @@ Alert on:
 - Clinical Intelligence readiness becoming not-ready in a deployed pilot/production environment
 
 Thresholds are deployment-specific and must be set from measured hospital traffic. This repository does not claim that an external dashboard, SIEM, pager, or SLO is already provisioned.
+
+
+## Wave 5 evidence boundary
+
+Wave 5 treats repository telemetry contracts and external alerting as separate gates.
+
+Engineering qualification proves PHI-sanitized structured event emission, readiness behavior, and operational-check logic. STAGING/PILOT qualification additionally requires evidence that the deployment's external log/metrics destination received the test signal and that the configured alert route was delivered and acknowledged.
+
+The authenticated Wave 5 load probe records p50/p95/p99 latency and error rate for a bounded synthetic STAGING read-model workload. Those measurements are qualification samples, not a long-term availability/SLO claim.

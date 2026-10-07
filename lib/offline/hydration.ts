@@ -59,11 +59,16 @@ export async function loadLocalEdgeSnapshot(
     HCM: [
       'employees', 'employeeAssignments', 'clinicalCredentials', 'clinicalPrivileges',
       'rosterAssignments', 'attendanceRecords', 'leaveRequests', 'leaveBalances',
+      'compensationProfiles', 'payrollPeriods', 'payrollEmployeeSlots',
+      'payrollPayslips', 'payrollStatutoryLiabilities',
+      'payrollComplianceSnapshots', 'hcmIntelligenceSnapshots',
     ],
     SCM: [
       'items', 'inventoryBalances', 'batches', 'stockTransactions', 'patientConsumptions',
       'purchaseRequisitions', 'inventoryLocations', 'scmPurchaseOrders', 'goodsReceiptNotes',
       'stockTransfers', 'recallCases', 'suppliers', 'threeWayMatches',
+      'scmCycleCounts', 'scmReplenishmentPolicies', 'scmReplenishmentPlans',
+      'scmReplenishmentOrders', 'scmSupplierContracts', 'scmOperationalSnapshots',
     ],
     FACILITIES: [
       'beds', 'resources', 'rooms', 'resourceReservations',

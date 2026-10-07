@@ -58,26 +58,21 @@ for (const file of files.sort()) {
     }
   }
 
-  const scriptKind = file.endsWith('.tsx')
-    ? ts.ScriptKind.TSX
-    : ts.ScriptKind.TS;
-  const parsed = ts.createSourceFile(
-    file,
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    scriptKind
-  );
+  const result = ts.transpileModule(source, {
+    fileName: file,
+    reportDiagnostics: true,
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.ESNext,
+      jsx: ts.JsxEmit.Preserve,
+    },
+  });
 
-  for (const diagnostic of parsed.parseDiagnostics) {
-    const position =
-      diagnostic.start === undefined
-        ? undefined
-        : parsed.getLineAndCharacterOfPosition(diagnostic.start);
+  for (const diagnostic of result.diagnostics || []) {
+    if (diagnostic.category !== ts.DiagnosticCategory.Error) continue;
     findings.push({
       file: relative,
       kind: 'TYPESCRIPT_PARSE',
-      line: position ? position.line + 1 : undefined,
       message: ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'),
     });
   }

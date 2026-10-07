@@ -99,6 +99,13 @@ const HCM_COLLECTIONS = [
   'attendanceRecords',
   'leaveRequests',
   'leaveBalances',
+  'compensationProfiles',
+  'payrollPeriods',
+  'payrollEmployeeSlots',
+  'payrollPayslips',
+  'payrollStatutoryLiabilities',
+  'payrollComplianceSnapshots',
+  'hcmIntelligenceSnapshots',
 ] as const;
 
 const SCM_COLLECTIONS = [
@@ -115,6 +122,12 @@ const SCM_COLLECTIONS = [
   'recallCases',
   'suppliers',
   'threeWayMatches',
+  'scmCycleCounts',
+  'scmReplenishmentPolicies',
+  'scmReplenishmentPlans',
+  'scmReplenishmentOrders',
+  'scmSupplierContracts',
+  'scmOperationalSnapshots',
 ] as const;
 
 const EDGE_PAGE_SIZE = 500;

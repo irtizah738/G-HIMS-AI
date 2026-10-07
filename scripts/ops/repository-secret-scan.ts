@@ -1,15 +1,7 @@
 import { readFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 
-const result = Bun.spawnSync(['git', 'ls-files', '-z'], {
-  stdout: 'pipe',
-  stderr: 'pipe',
-});
-if (result.exitCode !== 0) {
-  throw new Error('Unable to enumerate tracked repository files.');
-}
-
-const files = new TextDecoder()
-  .decode(result.stdout)
+const files = execFileSync('git', ['ls-files', '-z'], { encoding: 'utf8' })
   .split('\0')
   .filter(Boolean);
 

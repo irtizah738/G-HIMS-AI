@@ -38,7 +38,7 @@ function adapt(snapshot: EdgeSnapshot): SurgicalEdgeProjection {
   return {
     cases: rows<GovernedSurgicalCase>(snapshot, 'surgicalCases'),
     rooms: rows<HospitalRoom>(snapshot, 'rooms').filter((room) =>
-      ['operating_room', 'procedure'].includes(String(room.roomType || ''))
+      ['operating_room', 'procedure', 'recovery'].includes(String(room.roomType || ''))
     ),
     patients: rows<PatientMPI>(snapshot, 'patients'),
     encounters: rows<EncounterRuntime>(snapshot, 'encounters'),
@@ -107,6 +107,33 @@ export const advanceSurgicalCaseEdge = (
   },
   idempotencyKey?: string
 ) => run<GovernedSurgicalCase>('AdvanceSurgicalCaseCommand', payload, idempotencyKey);
+
+export const transferSurgicalCaseToPacuEdge = (
+  payload: {
+    caseId: string;
+    pacuRoomId: string;
+    receivingClinicianId: string;
+    handoffSummary: string;
+    activeRisks?: string[];
+    medicationConcerns?: string[];
+    expectedActions?: string[];
+  },
+  idempotencyKey?: string
+) => run<GovernedSurgicalCase>('TransferSurgicalCaseToPacuCommand', payload, idempotencyKey);
+
+export const acceptPacuTransferEdge = (
+  payload: { caseId: string; handoffId: string },
+  idempotencyKey?: string
+) => run<GovernedSurgicalCase>('AcceptPacuTransferCommand', payload, idempotencyKey);
+
+export const completePacuRecoveryEdge = (
+  payload: {
+    caseId: string;
+    recoveryAssessment: string;
+    disposition: 'WARD' | 'ICU' | 'DISCHARGE';
+  },
+  idempotencyKey?: string
+) => run<GovernedSurgicalCase>('CompletePacuRecoveryCommand', payload, idempotencyKey);
 
 export const cancelSurgicalCaseEdge = (
   payload: { caseId: string; reason: string },

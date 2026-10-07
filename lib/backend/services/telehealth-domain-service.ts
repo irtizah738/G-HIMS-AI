@@ -22,8 +22,7 @@ export interface UpdateTelehealthSessionPayload {
   sessionId: string;
   updates: Partial<Pick<
     TelehealthSession,
-    'status' | 'connectionQuality' | 'callDurationSeconds' | 'vitals' |
-    'transcription' | 'soapNote' | 'isAudioMuted' | 'isVideoMuted' | 'isRecording'
+    'connectionQuality' | 'callDurationSeconds' | 'isAudioMuted' | 'isVideoMuted'
   >>;
 }
 

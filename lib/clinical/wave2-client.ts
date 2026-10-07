@@ -140,7 +140,7 @@ export const wave2Client = {
       outcome: 'GIVEN' | 'HELD' | 'REFUSED' | 'MISSED' | 'DELAYED';
       administeredAt?: number;
       reason?: string;
-      expectedMedicationOrderVersion?: number;
+      expectedMedicationOrderVersion: number;
     }
   ) {
     const deterministicAdministrationId = `medadm_${payload.emarSlotId}`;

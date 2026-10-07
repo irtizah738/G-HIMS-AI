@@ -17,6 +17,8 @@ describe('Wave 3C governed OR/PACU transition automation', () => {
     expect(service).toContain('transferToPacu');
     expect(service).toContain("room.roomType !== 'recovery'");
     expect(service).toContain("'PACU_CAPACITY_EXHAUSTED'");
+    expect(service).toContain("'PACU_ENCOUNTER_SCOPE_INVALID'");
+    expect(service).toContain('encounterCareSetting');
     expect(service).toContain("entityType: 'CLINICAL_HANDOFF'");
     expect(service).toContain("status: 'PENDING_ACCEPTANCE'");
     expect(service).toContain("currentOccupancy: Number(room.currentOccupancy || 0) + 1");

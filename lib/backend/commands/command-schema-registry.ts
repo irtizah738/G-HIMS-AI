@@ -825,7 +825,6 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
     1: z.object({
       caseId: nonEmpty.max(150),
       pacuRoomId: nonEmpty.max(150),
-      receivingClinicianId: nonEmpty.max(150),
       handoffSummary: nonEmpty.max(8000),
       activeRisks: z.array(nonEmpty.max(1000)).max(100).optional(),
       medicationConcerns: z.array(nonEmpty.max(1000)).max(100).optional(),

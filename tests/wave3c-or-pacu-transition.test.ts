@@ -34,6 +34,17 @@ describe('Wave 3C governed OR/PACU transition automation', () => {
     expect(service).toContain("eventType: 'PACU_TRANSFER_ACCEPTED'");
   });
 
+  test('generic clinical handoff acceptance cannot bypass PACU case authority', async () => {
+    const [surgical, coordination] = await Promise.all([
+      source('lib/backend/services/surgical-case-domain-service.ts'),
+      source('lib/backend/services/clinical-coordination-domain-service.ts'),
+    ]);
+    expect(surgical).toContain("sourceArtifactType: 'SURGICAL_CASE'");
+    expect(coordination).toContain("current.sourceArtifactType === 'SURGICAL_CASE'");
+    expect(coordination).toContain("'PACU_HANDOFF_COMMAND_REQUIRED'");
+    expect(coordination).toContain('AcceptPacuTransferCommand');
+  });
+
   test('PACU completion requires accepted handoff and releases recovery capacity', async () => {
     const service = await source('lib/backend/services/surgical-case-domain-service.ts');
     expect(service).toContain('completePacuRecovery');

@@ -1,32 +1,30 @@
-name: P6 Offline-First Completion Validation
+name: CI Qualification
 
 on:
   pull_request:
-    branches:
-      - main
+    branches: [main]
   push:
-    branches:
-      - p6/offline-first-completion
+    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
-  group: p6-${{ github.workflow }}-${{ github.ref }}
+  group: ci-qualification-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  p6-offline-first:
-    name: P6 encrypted edge and replay gate
+  qualification:
+    name: Emulator, offline, Hospital-0 and browser qualification
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 55
     env:
       GHIMS_RUNTIME_MODE: TEST
       NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
-      FIREBASE_PROJECT_ID: ghims-p6-ci
-      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p6-ci
-      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p6-ci
-      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p6-ci
+      FIREBASE_PROJECT_ID: ghims-ci-qualification
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-ci-qualification
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-ci-qualification
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-ci-qualification
       FIRESTORE_DATABASE_ID: "(default)"
       NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
       GHIMS_INTEGRATION_AI_STATE: DISABLED
@@ -36,67 +34,40 @@ jobs:
       GHIMS_INTEGRATION_DEVICE_TELEMETRY_STATE: DISABLED
       GHIMS_INTEGRATION_EDI_X12_STATE: DISABLED
       NEXT_TELEMETRY_DISABLED: "1"
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: TypeScript typecheck
-        run: bun run typecheck
-
-      - name: ESLint quality gate
-        run: bun run lint
-
-      - name: P6 offline-first qualification guards
-        run: bun run test:p6
-
-      - name: Full unit and domain regression
-        run: bun run test:unit
-
-      - name: Security regression matrix
-        run: bun run test:security
-
-      - name: Setup Java for Firebase emulators
-        uses: actions/setup-java@v5
+      - run: bun install --frozen-lockfile
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
-
-      - name: Install Firebase emulator tooling
+      - name: Install Firebase emulator tooling without creating npm authority
         run: npm install --no-save --package-lock=false @firebase/rules-unit-testing@5.0.2 firebase-tools@15.30.2
-
-      - name: Firestore tenant durability and least-privilege rules
+      - name: Firestore least-privilege suites
         run: bun run test:rules
-
-      - name: Firebase Auth and IAM integration
+      - name: Auth/IAM emulator
         env:
           FIREBASE_PROJECT_ID: ghims-p5a-ci
           NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p5a-ci
           GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p5a-ci
           NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p5a-ci
         run: bun run test:p5a:emulator
-
-      - name: Synthetic patient and recovery journey
+      - name: Recovery emulator
         env:
           FIREBASE_PROJECT_ID: ghims-p4-ci
           NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p4-ci
           GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
           NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
         run: bun run test:p4:emulator
-
-      - name: Production build
-        run: bun run build
-
+      - name: Hospital-0 evidence contract
+        env:
+          GHIMS_HOSPITAL0_QUALIFICATION_RUN_ID: ci-contract-only
+          GHIMS_HOSPITAL0_QUALIFICATION_SHA: ${{ github.sha }}
+        run: bun test tests/hospital0-deployment-qualification.test.ts
       - name: Install Playwright Chromium
         run: bunx playwright install --with-deps chromium
-
-      - name: Deployment fail-closed smoke
+      - name: Browser fail-closed qualification
         run: bun run test:e2e

@@ -244,7 +244,7 @@ export function CollapsibleSidebar({
           id: 'oncology-tumor-board',
           name: 'Oncology & Tumor Board',
           shortName: 'Oncology',
-          icon: Activity,
+          icon: HeartPulse,
         },
         {
           id: 'rehab-physical-therapy',

@@ -1,6 +1,8 @@
 'use client';
 
 import { executeCommand } from '@/lib/api/command-client';
+import { auth } from '@/lib/firebase/client';
+import { getCachedAuthSession } from '@/lib/offline/auth-storage';
 import type {
   EmarScheduleSlot,
   RehabilitationPlan,
@@ -16,7 +18,67 @@ import type {
   NursingCarePlanRecord,
 } from '@/types/wave2-clinical-domains';
 
+export interface Wave2WorkspaceSnapshot {
+  tenantId: string;
+  patientId: string;
+  encounterId: string;
+  generatedAt: number;
+  encounter: Record<string, unknown>;
+  activeMedicationOrders: Record<string, unknown>[];
+  emarScheduleSlots: Record<string, unknown>[];
+  medicationAdministrations: Record<string, unknown>[];
+  nursingCarePlans: Record<string, unknown>[];
+  renalDialysisOrders: Record<string, unknown>[];
+  renalDialysisSessions: Record<string, unknown>[];
+  obstetricEpisodes: Record<string, unknown>[];
+  obstetricPartogramEntries: Record<string, unknown>[];
+  oncologyCases: Record<string, unknown>[];
+  oncologyTumorBoardRecommendations: Record<string, unknown>[];
+  oncologyRegimens: Record<string, unknown>[];
+  oncologyChemotherapyLinks: Record<string, unknown>[];
+  oncologyToxicityAssessments: Record<string, unknown>[];
+  rehabilitationPlans: Record<string, unknown>[];
+  rehabilitationSessions: Record<string, unknown>[];
+  acceptedClinicalHandoffs: Record<string, unknown>[];
+}
+
 type CommandPayload = Record<string, unknown>;
+
+export async function fetchWave2Workspace(
+  tenantId: string,
+  patientId: string,
+  encounterId: string
+): Promise<Wave2WorkspaceSnapshot> {
+  const currentUser = auth.currentUser;
+  const cached = await getCachedAuthSession();
+  if (!currentUser || !cached) {
+    throw new Error('AUTHENTICATION_REQUIRED: active G-HIMS session is required.');
+  }
+  if (cached.user.tenantId !== tenantId) {
+    throw new Error('TENANT_MISMATCH: active session does not match requested tenant.');
+  }
+
+  const idToken = await currentUser.getIdToken(false);
+  const query = new URLSearchParams({ tenantId, patientId, encounterId });
+  const response = await fetch(`/api/clinical/wave2/workspace?${query.toString()}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      'x-ghims-tenant-id': tenantId,
+      'x-ghims-session-id': cached.session.sessionId,
+      ...(cached.session.deviceId
+        ? { 'x-ghims-device-id': cached.session.deviceId }
+        : {}),
+    },
+  });
+  const body = (await response.json()) as Wave2WorkspaceSnapshot & {
+    error?: string;
+  };
+  if (!response.ok) {
+    throw new Error(body.error || 'Wave 2 workspace could not be loaded.');
+  }
+  return body;
+}
 
 async function run<T>(
   tenantId: string,

@@ -1147,8 +1147,12 @@ export class SurgicalCaseDomainService {
     if (!preflight?.pacuRoomId) {
       return reject(commandId, idempotencyKey, 'PACU_ROOM_NOT_BOUND', 'Surgical case does not have an authoritative PACU room assignment.');
     }
+    if (!preflight.orRoomId) {
+      return reject(commandId, idempotencyKey, 'OPERATING_ROOM_NOT_BOUND', 'Surgical case does not have an authoritative operating-room assignment.');
+    }
 
-    const scheduleId = `or_schedule_${preflight.orRoomId}`;
+    const orRoomId = preflight.orRoomId;
+    const scheduleId = `or_schedule_${orRoomId}`;
     const now = new Date().toISOString();
     try {
       const tx = await TransactionManager.executeAtomicReadModifyMutation({
@@ -1212,7 +1216,7 @@ export class SurgicalCaseDomainService {
           };
 
           const nextSchedule: OrRoomSchedule = {
-            roomId: surgicalCase.orRoomId,
+            roomId: orRoomId,
             tenantId: context.tenantId,
             facilityId: surgicalCase.facilityId,
             slots: (roomSchedule?.slots || []).map((slot) =>

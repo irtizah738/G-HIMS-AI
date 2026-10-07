@@ -2070,15 +2070,10 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     updates: Partial<TelehealthSession>
   ): Promise<void> => {
     const allowedUpdates = {
-      status: updates.status,
       connectionQuality: updates.connectionQuality,
       callDurationSeconds: updates.callDurationSeconds,
-      vitals: updates.vitals,
-      transcription: updates.transcription,
-      soapNote: updates.soapNote,
       isAudioMuted: updates.isAudioMuted,
       isVideoMuted: updates.isVideoMuted,
-      isRecording: updates.isRecording,
     };
 
     const result = await executeActiveTenantCommand<TelehealthSession>('UpdateTelehealthSessionCommand', {

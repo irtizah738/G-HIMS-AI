@@ -54,6 +54,7 @@ import { RenalDialysisDomainService } from '../services/renal-dialysis-domain-se
 import { ObstetricDomainService } from '../services/obstetric-domain-service';
 import { OncologyDomainService } from '../services/oncology-domain-service';
 import { RehabilitationDomainService } from '../services/rehabilitation-domain-service';
+import { EmergencyPrearrivalDomainService } from '../services/emergency-prearrival-domain-service';
 import { IdempotencyService } from '../idempotency/idempotency-service';
 import { validateCommandPayload } from './command-schema-registry';
 import { emitOperationalEvent, operationalTimer } from '@/lib/observability/server-telemetry';
@@ -197,6 +198,15 @@ export class CommandBus {
 
       switch (command.commandType) {
         // --- Clinical Domain ---
+        case 'AcknowledgeEmergencyPrearrivalTelemetryCommand':
+          result = await EmergencyPrearrivalDomainService.acknowledge(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
         case 'CreateEncounterCommand':
           result = await EncounterDomainService.createEncounter(
             context,

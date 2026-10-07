@@ -78,7 +78,7 @@ export interface ClinicalHandoff {
   patient360Revision?: number;
   patient360SourceCheckpoint?: string;
   sourceArtifactId?: string;
-  sourceArtifactType?: 'DISEASE_INTAKE' | 'CLINICAL_DOCUMENT' | 'CONSULTATION' | 'OTHER';
+  sourceArtifactType?: 'DISEASE_INTAKE' | 'CLINICAL_DOCUMENT' | 'CONSULTATION' | 'SURGICAL_CASE' | 'OTHER';
   status: ClinicalHandoffStatus;
   createdAt: number;
   acceptedAt?: number;

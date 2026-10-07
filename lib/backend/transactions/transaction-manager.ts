@@ -18,6 +18,7 @@ export interface TransactionPayload<TState = unknown> {
   auditReason?: string;
   auditMetadata?: Record<string, unknown>;
   outboxTopic?: string;
+  source?: DomainEventEnvelope['source'];
 }
 
 export interface CommittedTransaction<TState = unknown> {
@@ -55,6 +56,7 @@ export interface AtomicMutationParams {
   auditReason?: string;
   auditMetadata?: Record<string, unknown>;
   outboxTopic?: string;
+  source?: DomainEventEnvelope['source'];
   idempotencyKey?: string;
   commandId?: string;
   correlationId?: string;
@@ -467,6 +469,7 @@ export class TransactionManager {
     commandId: string;
     correlationId: string;
     domainState?: unknown;
+    source?: DomainEventEnvelope['source'];
     timestamp?: number;
     eventId?: string;
     auditId?: string;
@@ -492,7 +495,7 @@ export class TransactionManager {
       correlationId: params.correlationId,
       commandId: params.commandId,
       idempotencyKey: params.idempotencyKey,
-      source: 'web',
+      source: params.source || 'web',
       schemaVersion: 1,
     };
 
@@ -989,6 +992,14 @@ export class TransactionManager {
       auditReason: payload.auditReason,
       auditMetadata: {
         ...(payload.auditMetadata || {}),
+        authorization: {
+          roles: [...context.roles],
+          permissions: [...context.permissions],
+          clinicalPrivileges: [...(context.clinicalPrivileges || [])],
+          facilityIds: [...(context.facilityIds || [])],
+          departmentIds: [...(context.departmentIds || [])],
+          sessionDeviceId: context.deviceId || null,
+        },
         ...(context.isEmergencyOverride && context.breakGlassGrantId
           ? {
               breakGlassGrantId: context.breakGlassGrantId,
@@ -998,6 +1009,7 @@ export class TransactionManager {
           : {}),
       },
       outboxTopic: payload.outboxTopic,
+      source: context.source || payload.source || 'web',
       idempotencyKey,
       commandId,
       correlationId: context.correlationId,

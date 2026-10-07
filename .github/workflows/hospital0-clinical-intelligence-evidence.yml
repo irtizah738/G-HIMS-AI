@@ -1,0 +1,57 @@
+name: Clinical Intelligence Hospital-0 Evidence Contract
+
+on:
+  pull_request:
+    paths:
+      - 'docs/clinical-intelligence/HOSPITAL0_PILOT_CHARTER.md'
+      - 'evaluation/hospital0/**'
+      - 'scripts/ops/hospital0-evidence-manifest.ts'
+      - 'tests/hospital0-clinical-intelligence-evidence.test.ts'
+      - 'package.json'
+      - 'bun.lock'
+      - '.github/workflows/hospital0-clinical-intelligence-evidence.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/clinical-intelligence/HOSPITAL0_PILOT_CHARTER.md'
+      - 'evaluation/hospital0/**'
+      - 'scripts/ops/hospital0-evidence-manifest.ts'
+      - 'tests/hospital0-clinical-intelligence-evidence.test.ts'
+      - 'package.json'
+      - 'bun.lock'
+      - '.github/workflows/hospital0-clinical-intelligence-evidence.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  hospital0-evidence-contract:
+    name: Hospital-0 evidence contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: TypeScript
+        run: bun run typecheck
+
+      - name: Hospital-0 evidence contract
+        run: bun run test:hospital0-ci
+
+      - name: Verify empty evidence directory remains incomplete
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf artifacts/hospital0
+          mkdir -p artifacts/hospital0
+          bun run ops:hospital0:evidence > hospital0-empty-manifest.json
+          node -e "const x=require('./hospital0-empty-manifest.json'); if(x.hospital0EvidenceReady!==false) process.exit(1)"

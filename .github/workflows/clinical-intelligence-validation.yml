@@ -1,0 +1,75 @@
+name: Clinical Intelligence Preclinical Validation
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/ops/ci-synthetic-validation.ts'
+      - 'scripts/ops/clinical-intelligence-evaluate.ts'
+      - 'lib/clinical/intelligence/clinical-evaluation-framework.ts'
+      - 'lib/clinical/intelligence/clinical-safety-evaluation-suite.ts'
+      - 'types/clinical-intelligence-evaluation.ts'
+      - 'types/clinical-intelligence-safety.ts'
+      - 'evaluation/retrospective/**'
+      - 'docs/clinical-intelligence/RETROSPECTIVE_VALIDATION_RUNBOOK.md'
+      - 'tests/clinical-intelligence-validation-program.test.ts'
+      - 'package.json'
+      - 'bun.lock'
+      - '.github/workflows/clinical-intelligence-validation.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/ops/ci-synthetic-validation.ts'
+      - 'scripts/ops/clinical-intelligence-evaluate.ts'
+      - 'lib/clinical/intelligence/clinical-evaluation-framework.ts'
+      - 'lib/clinical/intelligence/clinical-safety-evaluation-suite.ts'
+      - 'types/clinical-intelligence-evaluation.ts'
+      - 'types/clinical-intelligence-safety.ts'
+      - 'evaluation/retrospective/**'
+      - 'docs/clinical-intelligence/RETROSPECTIVE_VALIDATION_RUNBOOK.md'
+      - 'tests/clinical-intelligence-validation-program.test.ts'
+      - 'package.json'
+      - 'bun.lock'
+      - '.github/workflows/clinical-intelligence-validation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  preclinical-validation:
+    name: Synthetic preclinical validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: TypeScript
+        run: bun run typecheck
+
+      - name: Validation program contract
+        run: bun run test:ci-validation
+
+      - name: Clinical evaluation contract
+        run: bun run test:ci-evaluation
+
+      - name: Execute synthetic preclinical validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/clinical-intelligence
+          bun run ops:ci:synthetic-validation > artifacts/clinical-intelligence/synthetic-validation-report.json
+
+      - name: Upload synthetic validation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: clinical-intelligence-synthetic-validation
+          retention-days: 90
+          path: artifacts/clinical-intelligence/synthetic-validation-report.json

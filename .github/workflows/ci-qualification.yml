@@ -67,6 +67,8 @@ jobs:
           GHIMS_HOSPITAL0_QUALIFICATION_RUN_ID: ci-contract-only
           GHIMS_HOSPITAL0_QUALIFICATION_SHA: ${{ github.sha }}
         run: bun test tests/hospital0-deployment-qualification.test.ts
+      - name: Production build for browser qualification
+        run: bun run build
       - name: Install Playwright Chromium
         run: bunx playwright install --with-deps chromium
       - name: Browser fail-closed qualification

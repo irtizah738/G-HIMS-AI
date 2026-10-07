@@ -107,6 +107,8 @@ export async function deriveAuthoritativeContext(
     correlationId: req.headers.get('x-correlation-id') || `corr_${crypto.randomUUID()}`,
     requestId: req.headers.get('x-request-id') || `req_${crypto.randomUUID()}`,
     deviceId: authContext.deviceId,
+    sessionId: session.sessionId,
+    source: 'web',
     ipAddress: req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || undefined,
     userAgent: req.headers.get('user-agent') || undefined,
   };

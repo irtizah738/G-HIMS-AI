@@ -16,6 +16,44 @@ import {
   wave2Failure,
 } from './wave2-clinical-common';
 
+const ONCOLOGY_EVIDENCE_COLLECTIONS = [
+  'clinicalConditions',
+  'diagnosticReports',
+  'clinicalDocuments',
+  'clinicalObservations',
+  'diseaseIntakeArtifacts',
+] as const;
+
+async function validateOncologyEvidenceRefs(
+  context: CommandContext,
+  patientId: string,
+  evidenceRefs: string[]
+): Promise<boolean> {
+  if (evidenceRefs.length === 0 || evidenceRefs.length > 20) return false;
+
+  for (const evidenceRef of evidenceRefs) {
+    const candidates = await Promise.all(
+      ONCOLOGY_EVIDENCE_COLLECTIONS.map((collection) =>
+        DomainStateRepository.getById<Record<string, unknown>>(
+          context.tenantId,
+          collection,
+          evidenceRef
+        )
+      )
+    );
+    const valid = candidates.some(
+      (candidate) =>
+        candidate &&
+        String(candidate.patientId || '') === patientId &&
+        String(candidate.status || '').toUpperCase() !== 'ENTERED_IN_ERROR'
+    );
+    if (!valid) return false;
+  }
+
+  return true;
+}
+
+
 export interface OpenOncologyCasePayload {
   patientId: string;
   encounterId: string;
@@ -78,8 +116,17 @@ export class OncologyDomainService {
 
     const diagnosis = String(payload.primaryDiagnosis || '').trim();
     const evidenceRefs = uniqueWave2Strings(payload.evidenceRefs, 200);
-    if (!diagnosis || evidenceRefs.length === 0) {
-      return wave2Failure(commandId, idempotencyKey, 'ONCOLOGY_CASE_EVIDENCE_REQUIRED', 'Oncology case creation requires a diagnosis statement and source evidence.');
+    if (
+      !diagnosis ||
+      evidenceRefs.length === 0 ||
+      !(await validateOncologyEvidenceRefs(context, payload.patientId, evidenceRefs))
+    ) {
+      return wave2Failure(
+        commandId,
+        idempotencyKey,
+        'ONCOLOGY_CASE_EVIDENCE_REQUIRED',
+        'Oncology case creation requires patient-scoped authoritative clinical evidence.'
+      );
     }
 
     const oncologyCaseId = `onc_case_${crypto.randomUUID()}`;
@@ -155,8 +202,18 @@ export class OncologyDomainService {
     const attendees = uniqueWave2Strings(payload.attendees, 50);
     const evidenceRefs = uniqueWave2Strings(payload.evidenceRefs, 200);
     const recommendationText = String(payload.recommendation || '').trim();
-    if (attendees.length < 2 || evidenceRefs.length === 0 || recommendationText.length < 10) {
-      return wave2Failure(commandId, idempotencyKey, 'TUMOR_BOARD_RECOMMENDATION_INCOMPLETE', 'Tumor board recommendation requires at least two attendees, evidence, and a substantive recommendation.');
+    if (
+      attendees.length < 2 ||
+      evidenceRefs.length === 0 ||
+      recommendationText.length < 10 ||
+      !(await validateOncologyEvidenceRefs(context, payload.patientId, evidenceRefs))
+    ) {
+      return wave2Failure(
+        commandId,
+        idempotencyKey,
+        'TUMOR_BOARD_RECOMMENDATION_INCOMPLETE',
+        'Tumor board recommendation requires at least two attendees, patient-scoped authoritative evidence, and a substantive recommendation.'
+      );
     }
 
     const recommendationId = `tumor_board_${crypto.randomUUID()}`;

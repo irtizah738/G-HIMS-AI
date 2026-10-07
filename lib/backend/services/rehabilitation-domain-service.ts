@@ -126,6 +126,7 @@ export class RehabilitationDomainService {
       commandId,
       correlationId: context.correlationId,
       domainState: plan,
+      expectedPrimaryServerVersion: 0,
     });
     return { success: true, commandId, idempotencyKey, entityId: rehabilitationPlanId, eventId: tx.eventId, auditId: tx.auditId, outboxId: tx.outboxId, data: plan };
   }
@@ -210,6 +211,7 @@ export class RehabilitationDomainService {
       commandId,
       correlationId: context.correlationId,
       domainState: session,
+      expectedPrimaryServerVersion: 0,
     });
 
     return { success: true, commandId, idempotencyKey, entityId: rehabilitationSessionId, eventId: tx.eventId, auditId: tx.auditId, outboxId: tx.outboxId, data: session };

@@ -59,6 +59,84 @@ function seedAtomicOpdSource(
 
   TransactionManager.seedEphemeralStateForTesting(
     tenantId,
+    'PATIENT360_PROJECTION',
+    patientId,
+    {
+      tenantId,
+      patientId,
+      identity: {
+        patientId,
+        mrn: `MRN-${suffix}`,
+        fullName: 'RP14 Test Patient',
+      },
+      careContexts: {
+        activeOpdEncounters: [
+          {
+            encounterId: opdEncounterId,
+            encounterType: 'OPD',
+            careSetting: 'OPD',
+            status: 'ACTIVE',
+          },
+        ],
+        activeTelehealthEncounters: [],
+        latestOpdEncounter: {
+          encounterId: opdEncounterId,
+          encounterType: 'OPD',
+          careSetting: 'OPD',
+          status: 'ACTIVE',
+        },
+      },
+      recentEncounters: [],
+      activeProblems: [],
+      resolvedProblems: [],
+      allergies: [],
+      currentMedications: [],
+      latestVitals: [],
+      recentDiagnosticOrders: [],
+      recentResults: [],
+      recentProcedures: [],
+      activeCarePlans: [],
+      recentDocuments: [],
+      recentDiseaseIntakes: [],
+      recentMedicationAdministrations: [],
+      recentSpecialtyActivities: [],
+      dataQuality: {
+        allergyKnowledge: 'UNKNOWN',
+        problemListKnowledge: 'UNKNOWN',
+        medicationKnowledge: 'UNKNOWN',
+        hasUnverifiedAllergies: false,
+        hasUnverifiedProblems: false,
+        hasPreliminaryResults: false,
+        missingCanonicalFacts: [],
+      },
+      counts: {
+        encounters: 1,
+        conditions: 0,
+        allergies: 0,
+        medicationOrders: 0,
+        observations: 0,
+        diagnosticOrders: 0,
+        diagnosticReports: 0,
+        procedures: 0,
+        carePlans: 0,
+        documents: 0,
+        diseaseIntakes: 0,
+        medicationAdministrations: 0,
+        specialtyActivities: 0,
+      },
+      projectionVersion: 6,
+      revision: 11,
+      sourceFingerprint: 'rp14-source',
+      sourceCheckpoint: '11:evt-rp14',
+      contentHash: 'rp14-content',
+      projectedAt: 11,
+      lastEventId: 'evt-rp14',
+      lastEventRecordedAt: 11,
+    }
+  );
+
+  TransactionManager.seedEphemeralStateForTesting(
+    tenantId,
     'ENCOUNTER',
     opdEncounterId,
     {
@@ -290,6 +368,12 @@ describe('OPD-RP14 atomic OPD to IPD transition', () => {
         'CLINICAL_HANDOFF',
         `handoff_admission_${ipdEncounterId}`
       ) || {};
+    const transitionEvidence =
+      TransactionManager.getEphemeralStateForTesting(
+        tenantId,
+        'CARE_TRANSITION_EVIDENCE',
+        `care_transition_admission_${ipdEncounterId}`
+      ) || {};
 
     expect(sourceEncounter.status).toBe('TRANSFERRED');
     expect(sourceEncounter.currentStage).toBe('COMPLETED');
@@ -323,6 +407,24 @@ describe('OPD-RP14 atomic OPD to IPD transition', () => {
     expect(handoff.sourceEncounterId).toBe(fixture.opdEncounterId);
     expect(handoff.encounterId).toBe(ipdEncounterId);
     expect(handoff.toDepartmentId).toBe('MEDICAL_WARD');
+
+    expect(handoff.patient360Revision).toBe(11);
+    expect(handoff.patient360SourceCheckpoint).toBe('11:evt-rp14');
+    expect(handoff.sourceArtifactId).toBe(
+      `care_transition_admission_${ipdEncounterId}`
+    );
+
+    expect(transitionEvidence.transitionType).toBe('OPD_TO_IPD_ADMISSION');
+    expect(transitionEvidence.sourceEncounterId).toBe(fixture.opdEncounterId);
+    expect(transitionEvidence.targetEncounterId).toBe(ipdEncounterId);
+    expect(transitionEvidence.inpatientEncounterId).toBe(ipdEncounterId);
+    expect(transitionEvidence.patient360Revision).toBe(11);
+    expect(transitionEvidence.patient360SourceCheckpoint).toBe(
+      '11:evt-rp14'
+    );
+    expect(inpatientEncounter.admissionTransitionEvidenceId).toBe(
+      `care_transition_admission_${ipdEncounterId}`
+    );
   });
 
   test('missing final billing reconciliation fails before any OPD or bed mutation', async () => {

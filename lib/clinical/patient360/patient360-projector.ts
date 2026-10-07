@@ -107,6 +107,15 @@ function encounterSummary(raw: Record<string, unknown>): Patient360EncounterSumm
     careSetting: normalizeCareSetting(raw.careSetting || encounterType),
     episodeId: asString(raw.episodeId) || undefined,
     sourceEncounterId: asString(raw.sourceEncounterId) || undefined,
+    linkedEncounterId: asString(raw.linkedEncounterId) || undefined,
+    admissionTransitionEvidenceId:
+      asString(raw.admissionTransitionEvidenceId) || undefined,
+    dischargeTransitionEvidenceId:
+      asString(raw.dischargeTransitionEvidenceId) || undefined,
+    dischargeSummaryEvidenceId:
+      asString(raw.dischargeSummaryEvidenceId) || undefined,
+    disposition: asString(raw.disposition) || undefined,
+    dischargedAt: timestamp(raw.dischargedAt || raw.dischargeDate),
     assignedProviderId:
       asString(
         raw.assignedProviderId ||
@@ -346,6 +355,7 @@ function eventSummary(event: Patient360SourceEvent): string {
       return `${asString(payload.domain, 'clinical')} knowledge status reviewed: ${asString(payload.status, 'updated')}`;
     case 'DISCHARGE_READINESS_REVIEW_RECORDED':
       return `Discharge readiness reviewed: ${asString(payload.outcome, 'acknowledged').replace(/_/g, ' ').toLowerCase()}`;
+    case 'INPATIENT_ADMISSION_CREATED':
     case 'PATIENT_ADMITTED_TO_INPATIENT_CARE':
     case 'PATIENT_ADMITTED_TO_BED':
       return 'Patient admitted to inpatient care';
@@ -771,7 +781,7 @@ export class Patient360Projector {
         medicationAdministrations: recentMedicationAdministrations.length,
         specialtyActivities: recentSpecialtyActivities.length,
       },
-      projectionVersion: 5,
+      projectionVersion: 6,
       revision: patientEvents.length,
       eventCheckpoint,
       sourceFingerprint,

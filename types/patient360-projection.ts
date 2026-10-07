@@ -29,6 +29,12 @@ export interface Patient360EncounterSummary {
   careSetting: ClinicalCareSetting;
   episodeId?: string;
   sourceEncounterId?: string;
+  linkedEncounterId?: string;
+  admissionTransitionEvidenceId?: string;
+  dischargeTransitionEvidenceId?: string;
+  dischargeSummaryEvidenceId?: string;
+  disposition?: string;
+  dischargedAt?: number | string;
   assignedProviderId?: string;
   status: string;
   department?: string;

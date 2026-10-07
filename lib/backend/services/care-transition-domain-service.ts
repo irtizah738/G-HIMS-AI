@@ -26,6 +26,8 @@ import {
 } from '@/lib/clinical/diagnostics/critical-result';
 import type { Bed } from '@/lib/types/ghims';
 import type { PatientMPI } from '@/types/mpi';
+import type { CareTransitionEvidence } from '@/types/care-transition-evidence';
+import type { Patient360Projection } from '@/types/patient360-projection';
 import type {
   FinancialClearanceState,
   ResourceAssignmentState,
@@ -60,6 +62,8 @@ interface PersistedEncounter {
   updatedAt?: number;
   completedAt?: number;
   dischargedAt?: number;
+  admissionTransitionEvidenceId?: string;
+  dischargeTransitionEvidenceId?: string;
   dischargeSummaryEvidenceId?: string;
   followUpInstructions?: string;
 }
@@ -346,6 +350,7 @@ export class CareTransitionDomainService {
 
     const now = Date.now();
     const encounterId = `enc_ipd_${crypto.randomUUID()}`;
+    const admissionTransitionEvidenceId = `care_transition_admission_${encounterId}`;
     const admissionDate = new Date(now).toISOString().slice(0, 10);
 
     const inpatientEncounter: PersistedEncounter = {
@@ -364,6 +369,7 @@ export class CareTransitionDomainService {
       priority: payload.priority || 'ROUTINE',
       assignedProviderId: assignedDoctor,
       sourceEncounterId: payload.sourceEncounterId,
+      admissionTransitionEvidenceId,
       createdAt: now,
       updatedAt: now,
     };
@@ -405,6 +411,37 @@ export class CareTransitionDomainService {
       updatedAt: now,
     };
 
+    const transitionPatient360 = sourceEncounter
+      ? await DomainStateRepository.getById<Patient360Projection>(
+          context.tenantId,
+          'patient360Projections',
+          patient.id
+        )
+      : null;
+    if (
+      sourceEncounter &&
+      (
+        !transitionPatient360 ||
+        (
+          sourceIsOpd &&
+          !transitionPatient360.careContexts.activeOpdEncounters.some(
+            (item) => item.encounterId === sourceEncounter.encounterId
+          )
+        )
+      )
+    ) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'ADMISSION_PATIENT360_CONTEXT_REQUIRED',
+          message:
+            'The source encounter must be present in authoritative Patient 360 before cross-setting inpatient admission can be committed.',
+        },
+      };
+    }
+
     const admissionHandoffId = sourceEncounter
       ? `handoff_admission_${encounterId}`
       : undefined;
@@ -433,6 +470,21 @@ export class CareTransitionDomainService {
             'Review admission context and active Patient 360 evidence.',
             'Accept inpatient clinical responsibility.',
           ],
+          sourceRefs: Array.from(
+            new Set(
+              [
+                sourceEncounter.encounterId,
+                sourceReconciliationId || undefined,
+                sourceAppointmentId || undefined,
+                admissionTransitionEvidenceId,
+                transitionPatient360?.lastEventId,
+              ].filter((value): value is string => Boolean(value))
+            )
+          ),
+          patient360Revision: transitionPatient360?.revision,
+          patient360SourceCheckpoint: transitionPatient360?.sourceCheckpoint,
+          sourceArtifactId: admissionTransitionEvidenceId,
+          sourceArtifactType: 'OTHER',
           status:
             receivingClinicianId && receivingClinicianId === context.actorId
               ? 'ACCEPTED'
@@ -467,6 +519,7 @@ export class CareTransitionDomainService {
               clinicalIndication: payload.admittingDiagnosis,
               requestedTargetWard: payload.targetWard,
             },
+            careTransitionEvidenceId: admissionTransitionEvidenceId,
           },
           linkedEncounterId: encounterId,
           completedAt: now,
@@ -485,6 +538,40 @@ export class CareTransitionDomainService {
           }
         : null;
 
+    const admissionTransitionEvidence: CareTransitionEvidence = {
+      careTransitionEvidenceId: admissionTransitionEvidenceId,
+      tenantId: context.tenantId,
+      patientId: patient.id,
+      transitionType: sourceIsOpd
+        ? 'OPD_TO_IPD_ADMISSION'
+        : 'DIRECT_IPD_ADMISSION',
+      sourceEncounterId: sourceEncounter?.encounterId,
+      targetEncounterId: encounterId,
+      inpatientEncounterId: encounterId,
+      sourceAppointmentId: sourceAppointmentId || undefined,
+      admissionHandoffId,
+      bedId: bed.id,
+      patient360Revision: transitionPatient360?.revision,
+      patient360SourceCheckpoint: transitionPatient360?.sourceCheckpoint,
+      facilityId: String(bed.facilityId || '').trim() || undefined,
+      departmentId: authoritativeTargetWard,
+      sourceRefs: Array.from(
+        new Set(
+          [
+            sourceEncounter?.encounterId,
+            encounterId,
+            sourceAppointmentId || undefined,
+            admissionHandoffId,
+            bed.id,
+            sourceReconciliationId || undefined,
+          ].filter((value): value is string => Boolean(value))
+        )
+      ),
+      recordedBy: context.actorId,
+      recordedAt: now,
+      schemaVersion: 1,
+    };
+
     const tx = await TransactionManager.executeAtomicMutation({
       tenantId: context.tenantId,
       actorId: context.actorId,
@@ -501,6 +588,7 @@ export class CareTransitionDomainService {
         requestedTargetWard: payload.targetWard,
         admittingDiagnosis: payload.admittingDiagnosis,
         admissionHandoffId,
+        admissionTransitionEvidenceId,
       },
       auditAction: 'ADMIT_PATIENT_TO_INPATIENT_CARE',
       auditResourceType: 'ENCOUNTER',
@@ -558,6 +646,12 @@ export class CareTransitionDomainService {
               ),
             }]
           : []),
+        {
+          entityType: 'CARE_TRANSITION_EVIDENCE',
+          entityId: admissionTransitionEvidenceId,
+          domainState: admissionTransitionEvidence,
+          expectedServerVersion: 0,
+        },
       ],
     });
 
@@ -575,6 +669,7 @@ export class CareTransitionDomainService {
         bed: bedState,
         sourceEncounter: sourceEncounterState,
         sourceAppointment: sourceAppointmentState,
+        careTransitionEvidence: admissionTransitionEvidence,
       },
     };
   }
@@ -971,16 +1066,22 @@ export class CareTransitionDomainService {
       };
     }
 
-    const currentReviewAccepted = readinessReviews.some((review) => {
-      const outcome = String(review.outcome || '').toUpperCase();
-      return (
-        String(review.evaluationId || '') === readiness.evaluationId &&
-        String(review.patientId || '') === encounter.patientId &&
-        ['ACKNOWLEDGED', 'PROCEED_WITH_WARNINGS'].includes(outcome)
-      );
-    });
+    const currentReadinessReview = [...readinessReviews]
+      .filter((review) => {
+        const outcome = String(review.outcome || '').toUpperCase();
+        return (
+          String(review.evaluationId || '') === readiness.evaluationId &&
+          String(review.patientId || '') === encounter.patientId &&
+          ['ACKNOWLEDGED', 'PROCEED_WITH_WARNINGS'].includes(outcome)
+        );
+      })
+      .sort(
+        (left, right) =>
+          Number(right.reviewedAt || right.createdAt || 0) -
+          Number(left.reviewedAt || left.createdAt || 0)
+      )[0];
 
-    if (!currentReviewAccepted) {
+    if (!currentReadinessReview) {
       return {
         success: false,
         commandId,
@@ -1121,6 +1222,22 @@ export class CareTransitionDomainService {
       };
     }
 
+    const resolvedDischargeSummaryEvidenceId = String(
+      dischargeEvidence.evidenceId || dischargeEvidence.id || ''
+    ).trim();
+    if (!resolvedDischargeSummaryEvidenceId) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'DISCHARGE_SUMMARY_EVIDENCE_ID_REQUIRED',
+          message:
+            'The authoritative signed discharge summary is missing its immutable evidence identifier.',
+        },
+      };
+    }
+
     const unresolvedStatOrders = diagnosticOrders.filter((order) => {
       const priority = String(order.priority || '').toUpperCase();
       const status = String(order.status || '').toUpperCase();
@@ -1249,6 +1366,24 @@ export class CareTransitionDomainService {
       };
     }
 
+    const resolvedMedicationReconciliationEvidenceId = String(
+      medicationReconciliation.evidenceId ||
+        medicationReconciliation.id ||
+        ''
+    ).trim();
+    if (!resolvedMedicationReconciliationEvidenceId) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'MEDICATION_RECONCILIATION_EVIDENCE_ID_REQUIRED',
+          message:
+            'The final medication reconciliation is missing its immutable evidence identifier.',
+        },
+      };
+    }
+
     const latestVitals = encounterEvidence
       .filter((item) => item.evidenceType === 'VITALS' && item.status === 'FINAL')
       .sort((a, b) => Number(b.measuredAt || b.createdAt || 0) - Number(a.measuredAt || a.createdAt || 0))[0];
@@ -1282,6 +1417,63 @@ export class CareTransitionDomainService {
     }
 
     const now = Date.now();
+    const dischargeTransitionEvidenceId =
+      `care_transition_discharge_${encounter.encounterId}`;
+    const dischargeReadinessReviewId = String(
+      currentReadinessReview.reviewId || ''
+    ).trim();
+
+    if (!dischargeReadinessReviewId) {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'DISCHARGE_READINESS_REVIEW_ID_REQUIRED',
+          message:
+            'The accepted CI-7 review is missing its immutable review identifier.',
+        },
+      };
+    }
+
+    const dischargeTransitionEvidence: CareTransitionEvidence = {
+      careTransitionEvidenceId: dischargeTransitionEvidenceId,
+      tenantId: context.tenantId,
+      patientId: encounter.patientId,
+      transitionType: 'IPD_DISCHARGE',
+      sourceEncounterId: encounter.sourceEncounterId,
+      inpatientEncounterId: encounter.encounterId,
+      bedId: bed.id,
+      facilityId: encounter.facilityId,
+      departmentId: encounter.departmentId,
+      admissionTransitionEvidenceId: encounter.admissionTransitionEvidenceId,
+      dischargeSummaryEvidenceId: resolvedDischargeSummaryEvidenceId,
+      medicationReconciliationEvidenceId:
+        resolvedMedicationReconciliationEvidenceId,
+      dischargeReadinessEvaluationId: readiness.evaluationId,
+      dischargeReadinessReviewId,
+      patient360Revision: patient360.revision,
+      patient360SourceCheckpoint: patient360.sourceCheckpoint,
+      disposition: String(payload.disposition).trim(),
+      sourceRefs: Array.from(
+        new Set(
+          [
+            encounter.sourceEncounterId,
+            encounter.admissionTransitionEvidenceId,
+            encounter.encounterId,
+            resolvedDischargeSummaryEvidenceId,
+            resolvedMedicationReconciliationEvidenceId,
+            readiness.evaluationId,
+            dischargeReadinessReviewId,
+            bed.id,
+          ].filter((value): value is string => Boolean(value))
+        )
+      ),
+      recordedBy: context.actorId,
+      recordedAt: now,
+      schemaVersion: 1,
+    };
+
     const dischargedEncounter: PersistedEncounter = {
       ...encounter,
       status: 'DISCHARGED',
@@ -1290,7 +1482,8 @@ export class CareTransitionDomainService {
       operationalState: 'COMPLETED',
       resourceAssignmentState: 'RELEASED',
       disposition: payload.disposition,
-      dischargeSummaryEvidenceId: payload.dischargeSummaryEvidenceId,
+      dischargeTransitionEvidenceId,
+      dischargeSummaryEvidenceId: resolvedDischargeSummaryEvidenceId,
       followUpInstructions: payload.followUpInstructions,
       completedAt: now,
       dischargedAt: now,
@@ -1334,8 +1527,16 @@ export class CareTransitionDomainService {
         patientId: encounter.patientId,
         bedId: bed.id,
         disposition: payload.disposition,
-        dischargeSummaryEvidenceId: payload.dischargeSummaryEvidenceId,
-        medicationReconciliationEvidenceId: medicationReconciliation.evidenceId,
+        sourceEncounterId: encounter.sourceEncounterId,
+        admissionTransitionEvidenceId: encounter.admissionTransitionEvidenceId,
+        dischargeTransitionEvidenceId,
+        dischargeSummaryEvidenceId: resolvedDischargeSummaryEvidenceId,
+        medicationReconciliationEvidenceId:
+          dischargeTransitionEvidence.medicationReconciliationEvidenceId,
+        dischargeReadinessEvaluationId: readiness.evaluationId,
+        dischargeReadinessReviewId,
+        patient360Revision: patient360.revision,
+        patient360SourceCheckpoint: patient360.sourceCheckpoint,
         latestNews2Score: Number(latestVitals.news2Score),
       },
       auditAction: 'DISCHARGE_INPATIENT_ENCOUNTER',
@@ -1367,6 +1568,12 @@ export class CareTransitionDomainService {
             (patient as PatientMPI & { _serverVersion?: number })._serverVersion || 0
           ),
         },
+        {
+          entityType: 'CARE_TRANSITION_EVIDENCE',
+          entityId: dischargeTransitionEvidenceId,
+          domainState: dischargeTransitionEvidence,
+          expectedServerVersion: 0,
+        },
       ],
     });
 
@@ -1382,6 +1589,7 @@ export class CareTransitionDomainService {
         encounter: dischargedEncounter,
         patient: patientState,
         bed: bedState,
+        careTransitionEvidence: dischargeTransitionEvidence,
       },
     };
   }

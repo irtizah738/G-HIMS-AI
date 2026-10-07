@@ -413,6 +413,9 @@ service cloud.firestore {
       match /clinicalHandoffs/{handoffId} {
         allow read, write: if false;
       }
+      match /careTransitionEvidence/{careTransitionEvidenceId} {
+        allow read, write: if false;
+      }
 
       // Wave 2 specialty clinical aggregates are server-authoritative PHI.
       match /emarScheduleSlots/{id} { allow read, write: if false; }

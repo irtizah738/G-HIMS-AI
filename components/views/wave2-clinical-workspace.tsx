@@ -322,7 +322,7 @@ export function Wave2ClinicalWorkspace({
     () =>
       (workspace?.activeMedicationOrders || []).map((item) => ({
         id: recordId(item, 'medicationOrderId', 'id'),
-        label: medicationLabel(item),
+        label: `${medicationLabel(item)} [${recordId(item, 'medicationOrderId', 'id')}]`,
       })).filter((item) => item.id),
     [workspace]
   );
@@ -331,7 +331,7 @@ export function Wave2ClinicalWorkspace({
     () =>
       (workspace?.oncologyEvidenceSources || []).map((item) => ({
         id: item.evidenceId,
-        label: `${item.evidenceType}: ${item.label || item.evidenceId}`,
+        label: `${item.evidenceType}: ${item.label || item.evidenceId} [${item.evidenceId}]`,
       })),
     [workspace]
   );
@@ -1639,7 +1639,7 @@ export function Wave2ClinicalWorkspace({
               records={workspace?.acceptedClinicalHandoffs || []}
               idKeys={['handoffId', 'id']}
               labelFor={(item) =>
-                `${text(item, 'currentProblemSummary').slice(0, 100)} · accepted`
+                `${text(item, 'currentProblemSummary').slice(0, 100)} · accepted [${recordId(item, 'handoffId', 'id')}]`
               }
               onChange={setRehabHandoffId}
             />

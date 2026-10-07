@@ -27,6 +27,7 @@ import {
 import type { Bed } from '@/lib/types/ghims';
 import type { PatientMPI } from '@/types/mpi';
 import type { CareTransitionEvidence } from '@/types/care-transition-evidence';
+import type { Patient360Projection } from '@/types/patient360-projection';
 import type {
   FinancialClearanceState,
   ResourceAssignmentState,
@@ -411,8 +412,9 @@ export class CareTransitionDomainService {
     };
 
     const transitionPatient360 = sourceEncounter
-      ? await Patient360ProjectionService.getOrRebuildProjection(
+      ? await DomainStateRepository.getById<Patient360Projection>(
           context.tenantId,
+          'patient360Projections',
           patient.id
         )
       : null;

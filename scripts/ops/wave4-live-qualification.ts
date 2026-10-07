@@ -57,7 +57,7 @@ async function qualifyHl7() {
     port: Number(process.env.GHIMS_HL7_MLLP_PORT || 2575),
     ingestUrl: required('GHIMS_HL7_INTERNAL_INGEST_URL'),
     ingestApiKey: required('GHIMS_HL7_INGEST_API_KEY'),
-    sourceRoutes: jsonRoutes(process.env.GHIMS_HL7_MLLP_SOURCE_ROUTES_JSON),
+    sourceRoutes: jsonRoutes(process.env.GHIMS_HL7_SOURCE_ROUTES_JSON || process.env.GHIMS_HL7_MLLP_SOURCE_ROUTES_JSON),
     tls: tlsEnabled
       ? {
           certPath: required('GHIMS_HL7_MLLP_TLS_CERT_PATH'),

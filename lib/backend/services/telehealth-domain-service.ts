@@ -7,7 +7,7 @@ import { AuthorizationPipeline } from '../auth/authorization-pipeline';
 import { TransactionManager } from '../transactions/transaction-manager';
 import { CommandContext, CommandResult } from '../types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
-import { TelehealthSession, TelehealthSoapNote, TelehealthPrescription } from '@/lib/types/ghims';
+import { TelehealthSession } from '@/lib/types/ghims';
 import { PatientMPI } from '@/types/mpi';
 
 export interface CreateTelehealthSessionPayload {

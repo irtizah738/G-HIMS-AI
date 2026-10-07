@@ -109,8 +109,10 @@ describe('DRP-6 offline qualification contracts', () => {
     expect(db).toContain("offline_cache: null");
     expect(db).toContain("clinical_patients: null");
     expect(bootstrap).toContain("requestedSurface === 'FACILITIES'");
-    expect(bootstrap).toContain('Even an administrator must choose an explicit offline surface');
-    expect(bootstrap).toContain('admin\n                      ? []');
+    expect(bootstrap).toContain("requestedSurface === 'HOSPITAL_SHELL'");
+    expect(bootstrap).toContain('requireEdgeHydrationSurface');
+    expect(bootstrap).toContain('There is no generic tenant cache fallback');
+    expect(bootstrap).not.toContain("'GENERIC'");
     expect(secureStore).toContain('Purge stale collections from older/broader surfaces');
     expect(secureStore).toContain('.primaryKeys()');
   });

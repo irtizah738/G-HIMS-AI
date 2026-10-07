@@ -368,6 +368,12 @@ describe('OPD-RP14 atomic OPD to IPD transition', () => {
         'CLINICAL_HANDOFF',
         `handoff_admission_${ipdEncounterId}`
       ) || {};
+    const transitionEvidence =
+      TransactionManager.getEphemeralStateForTesting(
+        tenantId,
+        'CARE_TRANSITION_EVIDENCE',
+        `care_transition_admission_${ipdEncounterId}`
+      ) || {};
 
     expect(sourceEncounter.status).toBe('TRANSFERRED');
     expect(sourceEncounter.currentStage).toBe('COMPLETED');
@@ -401,6 +407,24 @@ describe('OPD-RP14 atomic OPD to IPD transition', () => {
     expect(handoff.sourceEncounterId).toBe(fixture.opdEncounterId);
     expect(handoff.encounterId).toBe(ipdEncounterId);
     expect(handoff.toDepartmentId).toBe('MEDICAL_WARD');
+
+    expect(handoff.patient360Revision).toBe(11);
+    expect(handoff.patient360SourceCheckpoint).toBe('11:evt-rp14');
+    expect(handoff.sourceArtifactId).toBe(
+      `care_transition_admission_${ipdEncounterId}`
+    );
+
+    expect(transitionEvidence.transitionType).toBe('OPD_TO_IPD_ADMISSION');
+    expect(transitionEvidence.sourceEncounterId).toBe(fixture.opdEncounterId);
+    expect(transitionEvidence.targetEncounterId).toBe(ipdEncounterId);
+    expect(transitionEvidence.inpatientEncounterId).toBe(ipdEncounterId);
+    expect(transitionEvidence.patient360Revision).toBe(11);
+    expect(transitionEvidence.patient360SourceCheckpoint).toBe(
+      '11:evt-rp14'
+    );
+    expect(inpatientEncounter.admissionTransitionEvidenceId).toBe(
+      `care_transition_admission_${ipdEncounterId}`
+    );
   });
 
   test('missing final billing reconciliation fails before any OPD or bed mutation', async () => {

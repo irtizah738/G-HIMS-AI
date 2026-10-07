@@ -922,6 +922,18 @@ export class CommandBus {
           );
           break;
 
+        case 'TransitionTelehealthConnectivityCommand':
+          result = await TelehealthDomainService.transitionConnectivity(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'ResumeTelehealthSessionCommand':
+          result = await TelehealthDomainService.resume(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
         case 'CompleteTelehealthSessionCommand':
           result = await TelehealthDomainService.complete(
             context,

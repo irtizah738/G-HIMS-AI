@@ -126,6 +126,7 @@ export class OncologyDomainService {
       commandId,
       correlationId: context.correlationId,
       domainState: record,
+      expectedPrimaryServerVersion: 0,
     });
 
     return { success: true, commandId, idempotencyKey, entityId: oncologyCaseId, eventId: tx.eventId, auditId: tx.auditId, outboxId: tx.outboxId, data: record };
@@ -198,10 +199,12 @@ export class OncologyDomainService {
       commandId,
       correlationId: context.correlationId,
       domainState: recommendation,
+      expectedPrimaryServerVersion: 0,
       additionalStateWrites: [{
         entityType: 'ONCOLOGY_CASE',
         entityId: oncologyCase.oncologyCaseId,
         domainState: nextCase,
+        expectedServerVersion: Number((oncologyCase as unknown as Record<string, unknown>)._serverVersion || 0),
       }],
     });
 
@@ -290,10 +293,12 @@ export class OncologyDomainService {
       commandId,
       correlationId: context.correlationId,
       domainState: regimen,
+      expectedPrimaryServerVersion: 0,
       additionalStateWrites: [{
         entityType: 'ONCOLOGY_CASE',
         entityId: oncologyCase.oncologyCaseId,
         domainState: nextCase,
+        expectedServerVersion: Number((oncologyCase as unknown as Record<string, unknown>)._serverVersion || 0),
       }],
     });
 
@@ -381,9 +386,20 @@ export class OncologyDomainService {
       commandId,
       correlationId: context.correlationId,
       domainState: link,
+      expectedPrimaryServerVersion: 0,
       additionalStateWrites: [
-        { entityType: 'ONCOLOGY_REGIMEN', entityId: regimen.regimenId, domainState: nextRegimen },
-        { entityType: 'ONCOLOGY_CASE', entityId: oncologyCase.oncologyCaseId, domainState: nextCase },
+        {
+          entityType: 'ONCOLOGY_REGIMEN',
+          entityId: regimen.regimenId,
+          domainState: nextRegimen,
+          expectedServerVersion: Number((regimen as unknown as Record<string, unknown>)._serverVersion || 0),
+        },
+        {
+          entityType: 'ONCOLOGY_CASE',
+          entityId: oncologyCase.oncologyCaseId,
+          domainState: nextCase,
+          expectedServerVersion: Number((oncologyCase as unknown as Record<string, unknown>)._serverVersion || 0),
+        },
       ],
     });
     return { success: true, commandId, idempotencyKey, entityId: linkId, eventId: tx.eventId, auditId: tx.auditId, outboxId: tx.outboxId, data: link };
@@ -457,6 +473,7 @@ export class OncologyDomainService {
       commandId,
       correlationId: context.correlationId,
       domainState: assessment,
+      expectedPrimaryServerVersion: 0,
     });
 
     return { success: true, commandId, idempotencyKey, entityId: toxicityAssessmentId, eventId: tx.eventId, auditId: tx.auditId, outboxId: tx.outboxId, data: assessment };

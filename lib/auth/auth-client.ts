@@ -26,6 +26,7 @@ import {
   saveCachedAuthSession,
   clearCachedAuthSession,
   getCachedAuthSession,
+  saveCachedOfflineCapabilityLease,
 } from '@/lib/offline/auth-storage';
 import { migrateLegacyEdgeStorage } from '@/lib/offline/migration';
 
@@ -128,7 +129,7 @@ export class AuthClient {
     const loginPayload: LoginResponsePayload = data;
     await currentUser.getIdToken(true);
 
-    const effectiveDeviceId = rememberDevice ? deviceMeta.deviceId : undefined;
+    const effectiveDeviceId = loginPayload.session.deviceId || (rememberDevice ? deviceMeta.deviceId : undefined);
 
     const authUser: AuthenticatedUser = {
       uid: loginPayload.user.uid,
@@ -164,6 +165,9 @@ export class AuthClient {
 
     try {
       await saveCachedAuthSession(authUser, sessionRecord);
+      if (loginPayload.offlineCapability) {
+        await saveCachedOfflineCapabilityLease(loginPayload.offlineCapability);
+      }
       await migrateLegacyEdgeStorage({
         tenantId: authUser.tenantId,
         actorId: authUser.uid,

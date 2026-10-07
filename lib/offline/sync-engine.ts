@@ -20,7 +20,7 @@ import {
 import { withEdgeSyncLeadership } from '@/lib/offline/sync-leader';
 import { ensurePersistentEdgeStorage } from '@/lib/offline/storage-manager';
 import { auth } from '@/lib/firebase/client';
-import { getCachedAuthSession } from '@/lib/offline/auth-storage';
+import { getCachedAuthSession, getCachedOfflineCapabilityLease } from '@/lib/offline/auth-storage';
 import { probeApplicationConnectivity, ConnectivityProbeResult } from '@/lib/offline/connectivity';
 import { incrementClock, mergeClocks } from '@/lib/offline/vector-clock';
 
@@ -327,37 +327,70 @@ class ClinicalSyncEngine {
    */
   public async queueMutation(params: QueueMutationParams): Promise<OfflineMutation> {
     const cached = await getCachedAuthSession();
-    if (!cached?.user?.uid) {
+    let actorId = String(cached?.user?.uid || '').trim();
+    let deviceId = String(cached?.session?.deviceId || cached?.user?.deviceId || '').trim();
+    let activeTenantId = String(cached?.user?.tenantId || '').trim().toLowerCase();
+
+    if (!cached) {
+      const connectivity = await probeApplicationConnectivity();
+      this.updateState({ isOnline: connectivity.isOnline });
+      if (connectivity.isOnline) {
+        throw new Error(
+          'SESSION_EXPIRED: online command capture requires renewed authoritative authentication.'
+        );
+      }
+
+      const lease = await getCachedOfflineCapabilityLease();
+      if (!lease) {
+        throw new Error(
+          'OFFLINE_CAPABILITY_REQUIRED: extended-outage capture requires a valid server-issued offline capability.'
+        );
+      }
+      if (Date.now() >= Date.parse(lease.expiresAt)) {
+        throw new Error('OFFLINE_CAPABILITY_EXPIRED');
+      }
+      if (!lease.allowedCommandTypes.includes(params.commandType)) {
+        throw new Error(
+          `OFFLINE_CAPABILITY_COMMAND_DENIED: ${params.commandType} is not permitted for extended-outage capture.`
+        );
+      }
+
+      actorId = lease.actorId;
+      deviceId = lease.deviceId;
+      activeTenantId = lease.tenantId.trim().toLowerCase();
+    }
+
+    if (!actorId) {
       throw new Error('AUTHENTICATION_REQUIRED: offline commands require an authenticated originating user.');
     }
-    if (cached.user.tenantId !== params.tenantId) {
-      throw new Error('TENANT_MISMATCH: offline command tenant must match the active session.');
+    if (activeTenantId !== params.tenantId.trim().toLowerCase()) {
+      throw new Error('TENANT_MISMATCH: offline command tenant must match the active session or capture lease.');
     }
-    if (
+    if (cached && (
       cached.session.status !== 'ACTIVE' ||
       Date.now() >= new Date(cached.session.expiresAt).getTime()
-    ) {
+    )) {
       throw new Error('SESSION_EXPIRED: offline command capture requires a still-valid cached session.');
     }
 
     const [pendingClock, entityMetadata] = await Promise.all([
-      getSecurePendingVectorClock(params.tenantId, cached.user.uid),
+      getSecurePendingVectorClock(params.tenantId, actorId),
       getSecureEdgeEntityMetadata(
         params.tenantId,
-        cached.user.uid,
+        actorId,
         params.collection,
         params.resourceId
       ),
     ]);
     const baseVectorClock = entityMetadata?.vectorClock || {};
     const currentClock = mergeClocks(baseVectorClock, pendingClock);
-    const clockNodeId = cached.session.deviceId || cached.user.uid;
+    const clockNodeId = deviceId || actorId;
     const vectorClock = incrementClock(currentClock, clockNodeId);
 
     const mutation = await putSecureMutation({
       id: params.mutationId || `mut_${crypto.randomUUID()}`,
       tenantId: params.tenantId,
-      actorId: cached.user.uid,
+      actorId,
       collection: params.collection,
       action: params.action,
       resourceId: params.resourceId,
@@ -382,7 +415,7 @@ class ClinicalSyncEngine {
       if (params.action === 'UPDATE') {
         const existingRows = await listSecureEdgeEntities<Record<string, unknown>>(
           params.tenantId,
-          cached.user.uid,
+          actorId,
           params.collection
         );
         const existing = existingRows.find((row) => {
@@ -405,7 +438,7 @@ class ClinicalSyncEngine {
 
       await putSecureEdgeEntities(
         params.tenantId,
-        cached.user.uid,
+        actorId,
         params.collection,
         [optimisticEntity]
       );

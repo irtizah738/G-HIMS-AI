@@ -9,6 +9,7 @@ import { getAdminAuth } from '@/server/firebase/admin';
 import { LoginResponsePayload } from '@/lib/auth/auth-types';
 import { AuthError } from '@/lib/auth/auth-errors';
 import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
+import { issueOfflineCaptureCapability } from '@/server/auth/offline-capability';
 
 function errorResponse(error: unknown, fallbackCode: 'AUTHENTICATION_REQUIRED' | 'SESSION_EXPIRED' = 'AUTHENTICATION_REQUIRED') {
   const authError = error instanceof AuthError
@@ -90,6 +91,10 @@ export async function POST(req: NextRequest) {
     );
 
     const accessibleTenants = await getUserAccessibleTenants(verifiedToken.uid, verifiedToken.email);
+    const offlineCapability = await issueOfflineCaptureCapability(
+      authContext,
+      session
+    );
 
     // Claims are a convenience for Firestore read rules only. Tenant membership
     // remains the server-side authority and is re-resolved on every sensitive request.
@@ -143,7 +148,9 @@ export async function POST(req: NextRequest) {
       session: {
         sessionId: session.sessionId,
         expiresAt: session.expiresAt,
+        deviceId: session.deviceId,
       },
+      ...(offlineCapability ? { offlineCapability } : {}),
       accessibleTenants: accessibleTenants.map((tenant) => ({
         tenantId: tenant.tenantId,
         name: tenant.name,

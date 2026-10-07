@@ -10,7 +10,7 @@ import {
 import { enforceEdgeStorageBudget } from '@/lib/offline/storage-manager';
 import { OPD_EDGE_COLLECTIONS } from '@/lib/opd/edge-surface';
 
-export type EdgeHydrationSurface = 'OPD' | 'GENERIC';
+export type EdgeHydrationSurface = 'OPD' | 'CLINICAL' | 'BILLING' | 'FINANCE' | 'HCM' | 'SCM' | 'FACILITIES' | 'GENERIC';
 
 export interface EdgeSnapshot {
   tenantId: string;
@@ -36,89 +36,57 @@ export async function loadLocalEdgeSnapshot(
     };
   }
 
-  const genericCollectionsToLoad = [
-    'patients',
-    'encounters',
-    'encounterEvidence',
-    'orders',
-    'prescriptions',
-    'opd_queue',
-    'opdAppointments',
-    'opdWaitlist',
-    'beds',
-    'surgicalCases',
-    'orRoomSchedules',
-    'patient360Projections',
-    'dischargeReadinessProjections',
-    'billingMismatches',
-    'encounterCharges',
-    'invoices',
-    'invoiceSettlements',
-    'journalEntries',
-    'cashReceipts',
-    'telehealthSessions',
-    'employees',
-    'employeeAssignments',
-    'clinicalCredentials',
-    'clinicalPrivileges',
-    'rosterAssignments',
-    'attendanceRecords',
-    'leaveRequests',
-    'leaveBalances',
-    'compensationProfiles',
-    'payrollPeriods',
-    'payrollEmployeeSlots',
-    'payrollPayslips',
-    'payrollStatutoryLiabilities',
-    'payrollComplianceSnapshots',
-    'hcmIntelligenceSnapshots',
-    'resources',
-    'rooms',
-    'resourceReservations',
-    'maintenanceWorkOrders',
-    'calibrationRecords',
-    'items',
-    'inventoryBalances',
-    'batches',
-    'stockTransactions',
-    'patientConsumptions',
-    'purchaseRequisitions',
-    'inventoryLocations',
-    'scmPurchaseOrders',
-    'goodsReceiptNotes',
-    'stockTransfers',
-    'recallCases',
-    'suppliers',
-    'threeWayMatches',
-    'scmCycleCounts',
-    'scmReplenishmentPolicies',
-    'scmReplenishmentPlans',
-    'scmReplenishmentOrders',
-    'scmSupplierContracts',
-    'scmOperationalSnapshots',
-    'accounts',
-    'accountingPeriods',
-    'arOpenItems',
-    'financeArReceipts',
-    'financeArAdjustments',
-    'financeArAgingSnapshots',
-    'treasuryAccounts',
-    'cashRegisterShifts',
-    'financeBankReconciliations',
-    'financeApAgingSnapshots',
-    'financeCostCenters',
-    'financeBudgets',
-    'financeBudgetCommitments',
-    'financeFixedAssets',
-    'financeDepreciationRuns',
-    'financeStatementSnapshots',
-    'financeTaxSummarySnapshots',
-    'financeIntelligenceSnapshots',
-  ];
+  const surfaceCollections: Record<Exclude<EdgeHydrationSurface, 'OPD'>, string[]> = {
+    CLINICAL: [
+      'patients', 'encounters', 'encounterEvidence', 'orders', 'prescriptions',
+      'opd_queue', 'opdAppointments', 'opdWaitlist', 'beds', 'surgicalCases',
+      'orRoomSchedules', 'patient360Projections', 'dischargeReadinessProjections',
+      'deteriorationProjections', 'medicationSafetyProjections', 'clinicalOpenItems',
+      'clinicalEscalations', 'consultationRequests', 'clinicalHandoffs',
+    ],
+    BILLING: [
+      'patients', 'encounters', 'billingMismatches', 'encounterCharges',
+      'invoices', 'invoiceSettlements', 'arOpenItems', 'journalEntries', 'cashReceipts',
+    ],
+    FINANCE: [
+      'accounts', 'accountingPeriods', 'journalEntries', 'cashReceipts', 'arOpenItems',
+      'financeArReceipts', 'financeArAdjustments', 'financeArAgingSnapshots',
+      'treasuryAccounts', 'cashRegisterShifts', 'financeBankReconciliations',
+      'financeApAgingSnapshots', 'financeCostCenters', 'financeBudgets',
+      'financeBudgetCommitments', 'financeFixedAssets', 'financeDepreciationRuns',
+      'financeStatementSnapshots', 'financeTaxSummarySnapshots', 'financeIntelligenceSnapshots',
+    ],
+    HCM: [
+      'employees', 'employeeAssignments', 'clinicalCredentials', 'clinicalPrivileges',
+      'rosterAssignments', 'attendanceRecords', 'leaveRequests', 'leaveBalances',
+    ],
+    SCM: [
+      'items', 'inventoryBalances', 'batches', 'stockTransactions', 'patientConsumptions',
+      'purchaseRequisitions', 'inventoryLocations', 'scmPurchaseOrders', 'goodsReceiptNotes',
+      'stockTransfers', 'recallCases', 'suppliers', 'threeWayMatches',
+    ],
+    FACILITIES: [
+      'beds', 'resources', 'rooms', 'resourceReservations',
+      'maintenanceWorkOrders', 'calibrationRecords',
+    ],
+    // GENERIC is a compatibility surface. It is role-scoped by the server, but
+    // administrators never use it because tenant-wide offline caching is forbidden.
+    GENERIC: [],
+  };
+
+  const normalizedRoles = new Set(
+    (cached?.user?.roles || []).map((role) => String(role).trim().toUpperCase())
+  );
+  const isAdmin = ['ADMIN', 'ADMINISTRATOR', 'SYSTEM_ADMIN'].some((role) =>
+    normalizedRoles.has(role)
+  );
+
   const collectionsToLoad =
     surface === 'OPD'
       ? [...OPD_EDGE_COLLECTIONS]
-      : genericCollectionsToLoad;
+      : surface === 'GENERIC' && !isAdmin
+        ? [...new Set(Object.values(surfaceCollections).flat())]
+        : surfaceCollections[surface];
 
   const entries = await Promise.all(
     collectionsToLoad.map(async (collection) => [

@@ -70,6 +70,26 @@ const ADMIN_COLLECTIONS = [
   'telehealthSessions',
 ] as const;
 
+const FACILITIES_COLLECTIONS = [
+  'beds',
+  'resources',
+  'rooms',
+  'resourceReservations',
+  'maintenanceWorkOrders',
+  'calibrationRecords',
+] as const;
+
+const OFFLINE_SURFACES = new Set([
+  'GENERIC',
+  'OPD',
+  'CLINICAL',
+  'BILLING',
+  'FINANCE',
+  'HCM',
+  'SCM',
+  'FACILITIES',
+]);
+
 const HCM_COLLECTIONS = [
   'employees',
   'employeeAssignments',
@@ -810,18 +830,49 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    const requestedSurface = surface || 'GENERIC';
+    if (!OFFLINE_SURFACES.has(requestedSurface)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: { code: 'EDGE_BOOTSTRAP_SURFACE_INVALID' },
+        },
+        { status: 400, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
     const tenantRef = db.collection('tenants').doc(context.tenantId);
     const authorized = authorizedCollections(context.roles);
-    const collections =
-      surface === 'OPD'
-        ? authorized.filter((collection) =>
-            (OPD_EDGE_COLLECTIONS as readonly string[]).includes(collection)
-          )
-        : authorized;
+    const admin = isAdministrativeRole(context.roles);
+
+    const requestedCollections: readonly string[] =
+      requestedSurface === 'OPD'
+        ? OPD_EDGE_COLLECTIONS
+        : requestedSurface === 'CLINICAL'
+          ? CLINICAL_COLLECTIONS
+          : requestedSurface === 'BILLING'
+            ? [...BILLING_COLLECTIONS, 'patients', 'encounters']
+            : requestedSurface === 'FINANCE'
+              ? FINANCE_COLLECTIONS
+              : requestedSurface === 'HCM'
+                ? HCM_COLLECTIONS
+                : requestedSurface === 'SCM'
+                  ? SCM_COLLECTIONS
+                  : requestedSurface === 'FACILITIES'
+                    ? FACILITIES_COLLECTIONS
+                    : admin
+                      ? []
+                      : authorized;
+
+    // Even an administrator must choose an explicit offline surface. GENERIC
+    // never means "cache the tenant".
+    const collections = [...new Set(requestedCollections)].filter((collection) =>
+      authorized.includes(collection)
+    );
     const generatedAt = Date.now();
 
     const rawCollections =
-      surface === 'OPD'
+      requestedSurface === 'OPD'
         ? await loadOpdScopedEdgeCollections(
             tenantRef,
             context,
@@ -843,7 +894,7 @@ export async function GET(req: NextRequest) {
     );
 
     const snapshotVersion = `${context.tenantId}:${
-      surface === 'OPD' ? 'opd:' : ''
+      requestedSurface.toLowerCase() + ':'
     }${generatedAt}`;
 
     return NextResponse.json(
@@ -852,7 +903,7 @@ export async function GET(req: NextRequest) {
         tenantId: context.tenantId,
         generatedAt,
         snapshotVersion,
-        surface: surface === 'OPD' ? 'OPD' : 'GENERIC',
+        surface: requestedSurface,
         collections: scopedCollections,
       },
       {

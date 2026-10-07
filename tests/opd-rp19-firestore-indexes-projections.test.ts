@@ -150,76 +150,76 @@ describe('OPD-RP19 Firestore indexes and projections', () => {
     const required: Array<
       [string, Array<[string, 'ASCENDING' | 'DESCENDING']>]
     > = [
-      [
-        'encounters',
         [
-          ['encounterType', 'ASCENDING'],
-          ['status', 'ASCENDING'],
-          ['updatedAt', 'DESCENDING'],
+          'encounters',
+          [
+            ['encounterType', 'ASCENDING'],
+            ['status', 'ASCENDING'],
+            ['updatedAt', 'DESCENDING'],
+          ],
         ],
-      ],
-      [
-        'encounters',
         [
-          ['facilityId', 'ASCENDING'],
-          ['departmentId', 'ASCENDING'],
-          ['encounterType', 'ASCENDING'],
-          ['status', 'ASCENDING'],
-          ['updatedAt', 'DESCENDING'],
+          'encounters',
+          [
+            ['facilityId', 'ASCENDING'],
+            ['departmentId', 'ASCENDING'],
+            ['encounterType', 'ASCENDING'],
+            ['status', 'ASCENDING'],
+            ['updatedAt', 'DESCENDING'],
+          ],
         ],
-      ],
-      [
-        'opdAppointments',
         [
-          ['facilityId', 'ASCENDING'],
-          ['departmentId', 'ASCENDING'],
-          ['status', 'ASCENDING'],
-          ['scheduledEndAt', 'ASCENDING'],
+          'opdAppointments',
+          [
+            ['facilityId', 'ASCENDING'],
+            ['departmentId', 'ASCENDING'],
+            ['status', 'ASCENDING'],
+            ['scheduledEndAt', 'ASCENDING'],
+          ],
         ],
-      ],
-      [
-        'opdWaitlist',
         [
-          ['facilityId', 'ASCENDING'],
-          ['preferredDepartmentId', 'ASCENDING'],
-          ['status', 'ASCENDING'],
-          ['updatedAt', 'DESCENDING'],
+          'opdWaitlist',
+          [
+            ['facilityId', 'ASCENDING'],
+            ['preferredDepartmentId', 'ASCENDING'],
+            ['status', 'ASCENDING'],
+            ['updatedAt', 'DESCENDING'],
+          ],
         ],
-      ],
-      [
-        'rosterAssignments',
         [
-          ['facilityId', 'ASCENDING'],
-          ['departmentId', 'ASCENDING'],
-          ['date', 'ASCENDING'],
-          ['status', 'ASCENDING'],
-          ['startTime', 'ASCENDING'],
+          'rosterAssignments',
+          [
+            ['facilityId', 'ASCENDING'],
+            ['departmentId', 'ASCENDING'],
+            ['date', 'ASCENDING'],
+            ['status', 'ASCENDING'],
+            ['startTime', 'ASCENDING'],
+          ],
         ],
-      ],
-      [
-        'opdAppointmentSlots',
         [
-          ['providerEmployeeId', 'ASCENDING'],
-          ['bucketStartAt', 'ASCENDING'],
+          'opdAppointmentSlots',
+          [
+            ['providerEmployeeId', 'ASCENDING'],
+            ['bucketStartAt', 'ASCENDING'],
+          ],
         ],
-      ],
-      [
-        'clinicalOpenItems',
         [
-          ['ownerId', 'ASCENDING'],
-          ['status', 'ASCENDING'],
-          ['updatedAt', 'DESCENDING'],
+          'clinicalOpenItems',
+          [
+            ['ownerId', 'ASCENDING'],
+            ['status', 'ASCENDING'],
+            ['updatedAt', 'DESCENDING'],
+          ],
         ],
-      ],
-      [
-        'consultantReviewCheckpoints',
         [
-          ['consultantId', 'ASCENDING'],
-          ['patientId', 'ASCENDING'],
-          ['reviewedAt', 'DESCENDING'],
+          'consultantReviewCheckpoints',
+          [
+            ['consultantId', 'ASCENDING'],
+            ['patientId', 'ASCENDING'],
+            ['reviewedAt', 'DESCENDING'],
+          ],
         ],
-      ],
-    ];
+      ];
 
     for (const [collection, fields] of required) {
       expect(existing.has(indexKey(collection, fields))).toBe(true);

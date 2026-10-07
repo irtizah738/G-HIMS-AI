@@ -2,11 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const source=(file:string)=>readFile(path.join(process.cwd(),file),'utf8');
+const source = (file: string) => readFile(path.join(process.cwd(), file), 'utf8');
 
-describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
-  test('legacy offline worker cannot write Firestore or perform client LWW merges',async()=>{
-    const worker=await source('lib/offline/sync-worker.ts');
+describe('G-HIMS P2 offline / AI / interoperability safety boundaries', () => {
+  test('legacy offline worker cannot write Firestore or perform client LWW merges', async () => {
+    const worker = await source('lib/offline/sync-worker.ts');
     expect(worker).not.toContain('firebase/firestore');
     expect(worker).not.toContain('runTransaction');
     expect(worker).not.toContain('resolveVectorConflict');
@@ -14,10 +14,10 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(worker).toContain('syncEngine.queueMutation');
   });
 
-  test('offline state is based on application reachability, not navigator.onLine alone',async()=>{
-    const connectivity=await source('lib/offline/connectivity.ts');
-    const engine=await source('lib/offline/sync-engine.ts');
-    const hook=await source('hooks/useOfflineStatus.ts');
+  test('offline state is based on application reachability, not navigator.onLine alone', async () => {
+    const connectivity = await source('lib/offline/connectivity.ts');
+    const engine = await source('lib/offline/sync-engine.ts');
+    const hook = await source('hooks/useOfflineStatus.ts');
 
     expect(connectivity).toContain('/api/health?connectivityProbe=');
     expect(connectivity).toContain("cache: 'no-store'");
@@ -29,12 +29,12 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(hook).not.toContain('navigator.onLine');
   });
 
-  test('sync status indicator is driven by real edge and replica telemetry',async()=>{
-    const indicator=await source('components/navigation/sync-status-indicator.tsx');
-    const hook=await source('hooks/useOfflineStatus.ts');
-    const engine=await source('lib/offline/sync-engine.ts');
-    const db=await source('lib/offline/db.ts');
-    const statusRoute=await source('app/api/sync/status/route.ts');
+  test('sync status indicator is driven by real edge and replica telemetry', async () => {
+    const indicator = await source('components/navigation/sync-status-indicator.tsx');
+    const hook = await source('hooks/useOfflineStatus.ts');
+    const engine = await source('lib/offline/sync-engine.ts');
+    const db = await source('lib/offline/db.ts');
+    const statusRoute = await source('app/api/sync/status/route.ts');
 
     expect(indicator).toContain("useOfflineStatus");
     expect(indicator).toContain("activeTenant");
@@ -70,11 +70,11 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(statusRoute).toContain("Cache-Control");
   });
 
-  test('governed clinical commands use the real IndexedDB outbox on transport failure',async()=>{
-    const client=await source('lib/api/command-client.ts');
-    const engine=await source('lib/offline/sync-engine.ts');
-    const hospital=await source('lib/context/hospital-context.tsx');
-    const types=await source('lib/backend/types.ts');
+  test('governed clinical commands use the real IndexedDB outbox on transport failure', async () => {
+    const client = await source('lib/api/command-client.ts');
+    const engine = await source('lib/offline/sync-engine.ts');
+    const hospital = await source('lib/context/hospital-context.tsx');
+    const types = await source('lib/backend/types.ts');
 
     expect(client).toContain('queueGovernedOfflineCommand');
     expect(client).toContain('syncEngine.queueMutation');
@@ -101,18 +101,18 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(hospital).toContain('result.queuedOffline');
   });
 
-  test('sync telemetry cannot extend session activity or strand in-flight mutations',async()=>{
-    const statusRoute=await source('app/api/sync/status/route.ts');
-    const sessionService=await source('server/auth/session-service.ts');
-    const authoritative=await source('lib/backend/security/authoritative-context.ts');
-    const engine=await source('lib/offline/sync-engine.ts');
+  test('sync telemetry cannot extend session activity or strand in-flight mutations', async () => {
+    const statusRoute = await source('app/api/sync/status/route.ts');
+    const sessionService = await source('server/auth/session-service.ts');
+    const authoritative = await source('lib/backend/security/authoritative-context.ts');
+    const engine = await source('lib/offline/sync-engine.ts');
 
     expect(statusRoute).toContain('touchSessionActivity: false');
     expect(authoritative).toContain('touchSessionActivity?: boolean');
     expect(authoritative).toContain('touchActivity: options.touchSessionActivity !== false');
     expect(sessionService).toContain('touchActivity?: boolean');
 
-    const validateSessionSection=sessionService.slice(
+    const validateSessionSection = sessionService.slice(
       sessionService.indexOf('export async function validateSession('),
       sessionService.indexOf('export function validateSessionRecord(')
     );
@@ -128,9 +128,9 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(engine).toContain('AbortController');
   });
 
-  test('clinical sync conflicts are review-only in the browser',async()=>{
-    const db=await source('lib/offline/db.ts');
-    const banner=await source('components/offline/SyncStatusBanner.tsx');
+  test('clinical sync conflicts are review-only in the browser', async () => {
+    const db = await source('lib/offline/db.ts');
+    const banner = await source('components/offline/SyncStatusBanner.tsx');
 
     expect(db).toContain('SERVER_RECONCILIATION_REQUIRED');
     expect(db).not.toContain("await localDb.offline_cache.delete(key)");
@@ -140,12 +140,12 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(banner).not.toContain('Apply Client Overwrite');
   });
 
-  test('P6A hospital read models are local-first and server-hydrated outside DEMO',async()=>{
-    const db=await source('lib/offline/db.ts');
-    const hydration=await source('lib/offline/hydration.ts');
-    const adapter=await source('lib/offline/read-model-adapter.ts');
-    const bootstrap=await source('app/api/offline/bootstrap/route.ts');
-    const hospital=await source('lib/context/hospital-context.tsx');
+  test('P6A hospital read models are local-first and server-hydrated outside DEMO', async () => {
+    const db = await source('lib/offline/db.ts');
+    const hydration = await source('lib/offline/hydration.ts');
+    const adapter = await source('lib/offline/read-model-adapter.ts');
+    const bootstrap = await source('app/api/offline/bootstrap/route.ts');
+    const hospital = await source('lib/context/hospital-context.tsx');
 
     expect(db).toContain("edge_entities");
     expect(db).toContain("entity_map");
@@ -177,10 +177,10 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(hospital).not.toContain("subscribeToPatients");
   });
 
-  test('clinical AI requires explicit activation and has no diagnostic fallback synthesis',async()=>{
-    const gateway=await source('lib/ai/gateway.ts');
-    const soap=await source('lib/ai/flows/soap-drafter.ts');
-    const icd=await source('lib/ai/flows/icn10-crosswalk.ts');
+  test('clinical AI requires explicit activation and has no diagnostic fallback synthesis', async () => {
+    const gateway = await source('lib/ai/gateway.ts');
+    const soap = await source('lib/ai/flows/soap-drafter.ts');
+    const icd = await source('lib/ai/flows/icn10-crosswalk.ts');
     expect(gateway).toContain("getServerIntegrationState('AI')");
     expect(gateway).toContain('GHIMS_AI_PROVIDER');
     expect(gateway).toContain('<UNTRUSTED_SOURCE_DATA>');
@@ -190,11 +190,11 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(icd).toContain('AIGateway.generateJson');
   });
 
-  test('AI provenance is durable and governed clinical acceptance is bound to reviewed signed evidence',async()=>{
-    const drafts=await source('server/ai/ai-draft-repository.ts');
-    const docs=await source('lib/backend/services/clinical-documentation-domain-service.ts');
-    const governed=await source('lib/backend/services/clinical-draft-domain-service.ts');
-    const tx=await source('lib/backend/transactions/transaction-manager.ts');
+  test('AI provenance is durable and governed clinical acceptance is bound to reviewed signed evidence', async () => {
+    const drafts = await source('server/ai/ai-draft-repository.ts');
+    const docs = await source('lib/backend/services/clinical-documentation-domain-service.ts');
+    const governed = await source('lib/backend/services/clinical-draft-domain-service.ts');
+    const tx = await source('lib/backend/transactions/transaction-manager.ts');
     expect(drafts).toContain('inputHash');
     expect(drafts).toContain('outputHash');
     expect(drafts).toContain('sourceEvidenceIds');
@@ -211,10 +211,10 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(tx).toContain("CLINICAL_DRAFT_REVISION: 'clinicalDraftRevisions'");
   });
 
-  test('DICOM, FHIR and telemetry never silently pretend external systems are live',async()=>{
-    const dicom=await source('lib/interop/dicomweb-client.ts');
-    const fhir=await source('lib/interop/fhir-r4-adapter.ts');
-    const telemetry=await source('lib/interop/device-telemetry-adapter.ts');
+  test('DICOM, FHIR and telemetry never silently pretend external systems are live', async () => {
+    const dicom = await source('lib/interop/dicomweb-client.ts');
+    const fhir = await source('lib/interop/fhir-r4-adapter.ts');
+    const telemetry = await source('lib/interop/device-telemetry-adapter.ts');
     expect(dicom).not.toContain('getMockStudies');
     expect(dicom).toContain('DICOM_SIMULATION_PROVIDER_REQUIRED');
     expect(fhir).toContain('FHIR_INTEGRATION_NOT_LIVE');
@@ -225,9 +225,9 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(telemetry).not.toContain('stElevationDetected');
   });
 
-  test('HL7 and EDI state their actual conformance boundary',async()=>{
-    const hl7=await source('app/api/interop/hl7/receive/route.ts');
-    const edi=await source('lib/interop/edi-837-generator.ts');
+  test('HL7 and EDI state their actual conformance boundary', async () => {
+    const hl7 = await source('app/api/interop/hl7/receive/route.ts');
+    const edi = await source('lib/interop/edi-837-generator.ts');
     expect(hl7).toContain("getServerIntegrationState('HL7')");
     expect(hl7).toContain("messageType !== 'ORU^R01'");
     expect(hl7).toContain('rawMessageSha256');
@@ -236,8 +236,8 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(edi).not.toContain('fully compliant');
   });
 
-  test('FHIR R4 adapter exposes standards-native primitives',async()=>{
-    const fhir=await source('lib/interop/fhir-r4-adapter.ts');
+  test('FHIR R4 adapter exposes standards-native primitives', async () => {
+    const fhir = await source('lib/interop/fhir-r4-adapter.ts');
     expect(fhir).toContain('readResource');
     expect(fhir).toContain('search<');
     expect(fhir).toContain('createResource');

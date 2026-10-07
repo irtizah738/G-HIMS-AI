@@ -218,6 +218,7 @@ describe('G-HIMS P0 Core Trust Boundary regression guards', () => {
       'deriveAuthoritativeContext',
       'verifyFirebaseToken',
       'GHIMS_HL7_INGEST_API_KEY',
+      'GHIMS_DEVICE_TELEMETRY_INGEST_API_KEY',
       'GHIMS_INTERNAL_WORKER_KEY',
       'isDemoRuntime',
       'LEGACY_MUTATION_ROUTE_RETIRED',

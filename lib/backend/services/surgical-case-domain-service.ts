@@ -16,6 +16,8 @@ import { DomainStateRepository } from '@/server/repositories/domain-state-reposi
 import type { HospitalRoom } from '@/types/resource-management';
 import type { PatientMPI } from '@/types/mpi';
 import type { SurgicalCase, SurgicalCaseStatus } from '@/types/inpatient-or';
+import type { ClinicalHandoff } from '@/types/clinical-coordination';
+import { normalizeCareSetting } from '@/lib/clinical/patient360/care-context';
 
 interface PersistedEncounter {
   encounterId?: string;
@@ -23,6 +25,8 @@ interface PersistedEncounter {
   tenantId?: string;
   patientId?: string;
   status?: string;
+  encounterType?: string;
+  type?: string;
 }
 
 interface OrScheduleSlot {
@@ -66,6 +70,17 @@ type GovernedSurgicalCase = SurgicalCase & {
   departmentId: string;
   encounterId: string;
   safetyChecklistEvidence?: SurgicalChecklistEvidence;
+  pacuRoomId?: string;
+  pacuHandoffId?: string;
+  pacuTransferStatus?: 'PENDING_ACCEPTANCE' | 'ACCEPTED' | 'RECOVERY_COMPLETED';
+  pacuTransferredAt?: string;
+  pacuTransferredBy?: string;
+  pacuAcceptedAt?: string;
+  pacuAcceptedBy?: string;
+  pacuRecoveryCompletedAt?: string;
+  pacuRecoveryCompletedBy?: string;
+  pacuRecoveryAssessment?: string;
+  pacuDisposition?: 'WARD' | 'ICU' | 'DISCHARGE';
   createdByActorId: string;
   updatedByActorId: string;
 };
@@ -97,6 +112,26 @@ export interface AdvanceSurgicalCasePayload {
     | 'intra_op'
     | 'post_op_pacu'
     | 'completed';
+}
+
+export interface TransferSurgicalCaseToPacuPayload {
+  caseId: string;
+  pacuRoomId: string;
+  handoffSummary: string;
+  activeRisks?: string[];
+  medicationConcerns?: string[];
+  expectedActions?: string[];
+}
+
+export interface AcceptPacuTransferPayload {
+  caseId: string;
+  handoffId: string;
+}
+
+export interface CompletePacuRecoveryPayload {
+  caseId: string;
+  recoveryAssessment: string;
+  disposition: 'WARD' | 'ICU' | 'DISCHARGE';
 }
 
 export interface CancelSurgicalCasePayload {
@@ -585,6 +620,15 @@ export class SurgicalCaseDomainService {
     idempotencyKey: string,
     payload: AdvanceSurgicalCasePayload
   ): Promise<CommandResult<GovernedSurgicalCase>> {
+    if (payload.targetStatus === 'post_op_pacu' || payload.targetStatus === 'completed') {
+      return reject(
+        commandId,
+        idempotencyKey,
+        'PACU_TRANSITION_COMMAND_REQUIRED',
+        'PACU entry and recovery completion must use the dedicated governed PACU transition commands.'
+      );
+    }
+
     const clinicalTargets = new Set([
       'intra_op',
       'post_op_pacu',
@@ -773,6 +817,492 @@ export class SurgicalCaseDomainService {
           error.message,
           error.details
         );
+      }
+      throw error;
+    }
+  }
+
+
+  public static async transferToPacu(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: TransferSurgicalCaseToPacuPayload
+  ): Promise<CommandResult<GovernedSurgicalCase>> {
+    const auth = requireClinicalProcedurePrivilege(context, [
+      'SURGEON',
+      'DOCTOR',
+      'CONSULTANT',
+      'ANESTHESIOLOGIST',
+      'SYSTEM_ADMIN',
+    ]);
+    if (!auth.authorized) {
+      return reject(
+        commandId,
+        idempotencyKey,
+        auth.code || 'UNAUTHORIZED',
+        auth.reason || 'PACU transfer authority required.'
+      );
+    }
+
+    const preflight = await DomainStateRepository.getById<GovernedSurgicalCase>(
+      context.tenantId,
+      'surgicalCases',
+      payload.caseId
+    );
+    if (!preflight) {
+      return reject(
+        commandId,
+        idempotencyKey,
+        'SURGICAL_CASE_NOT_FOUND',
+        'Surgical case does not exist.'
+      );
+    }
+    if (!preflight.encounterId) {
+      return reject(
+        commandId,
+        idempotencyKey,
+        'SURGICAL_ENCOUNTER_NOT_BOUND',
+        'Surgical case does not have an authoritative encounter binding.'
+      );
+    }
+
+    const handoffId = `handoff_pacu_${crypto.randomUUID()}`;
+    const nowMs = Date.now();
+    const now = new Date(nowMs).toISOString();
+
+    try {
+      const tx = await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.roles[0] || 'CLINICIAN',
+        aggregateType: 'SURGICAL_CASE',
+        aggregateId: payload.caseId,
+        eventType: 'SURGICAL_CASE_TRANSFERRED_TO_PACU',
+        auditAction: 'SURGICAL_CASE_TRANSFERRED_TO_PACU',
+        auditResourceType: 'SURGICAL_CASE',
+        auditResourceId: payload.caseId,
+        outboxTopic: 'g-hims-perioperative-events',
+        idempotencyKey,
+        commandId,
+        correlationId: context.correlationId,
+        readTargets: [
+          { key: 'case', entityType: 'SURGICAL_CASE', entityId: payload.caseId, required: true },
+          { key: 'room', entityType: 'HOSPITAL_ROOM', entityId: payload.pacuRoomId, required: true },
+          { key: 'encounter', entityType: 'ENCOUNTER', entityId: preflight.encounterId, required: true },
+        ],
+        prepare: (current) => {
+          const surgicalCase = current.case as unknown as GovernedSurgicalCase;
+          const room = current.room as unknown as HospitalRoom;
+          const encounter = current.encounter as unknown as PersistedEncounter;
+
+          assertFacilityScope(context, surgicalCase.facilityId);
+          if (String(surgicalCase.status || '') !== 'intra_op') {
+            throw new AtomicMutationRejectedError(
+              'PACU_TRANSFER_STATE_INVALID',
+              'Only an intra-operative case may transfer to PACU.'
+            );
+          }
+          const encounterCareSetting = normalizeCareSetting(
+            encounter.encounterType || encounter.type
+          );
+          if (
+            String(encounter.patientId || '') !== surgicalCase.patientId ||
+            encounterCareSetting === 'UNKNOWN' ||
+            ['COMPLETED', 'DISCHARGED', 'TRANSFERRED', 'CANCELLED', 'CLOSED'].includes(
+              String(encounter.status || '').trim().toUpperCase()
+            )
+          ) {
+            throw new AtomicMutationRejectedError(
+              'PACU_ENCOUNTER_SCOPE_INVALID',
+              'Surgical case must remain bound to an active authoritative clinical encounter before PACU transfer.'
+            );
+          }
+          if (!surgicalCase.safetyChecklistEvidence?.signOut?.completed) {
+            throw new AtomicMutationRejectedError(
+              'WHO_SIGN_OUT_INCOMPLETE',
+              'WHO Sign Out must be complete before PACU transfer.'
+            );
+          }
+          if (room.facilityId !== surgicalCase.facilityId || room.roomType !== 'recovery') {
+            throw new AtomicMutationRejectedError(
+              'PACU_ROOM_INVALID',
+              'PACU transfer requires a recovery room in the same facility.'
+            );
+          }
+          if (['OUT_OF_SERVICE', 'MAINTENANCE', 'LOST', 'RETIRED'].includes(room.status)) {
+            throw new AtomicMutationRejectedError(
+              'PACU_ROOM_UNAVAILABLE',
+              'Selected PACU recovery room is unavailable.'
+            );
+          }
+          if (Number(room.currentOccupancy || 0) >= Number(room.capacity || 0)) {
+            throw new AtomicMutationRejectedError(
+              'PACU_CAPACITY_EXHAUSTED',
+              'Selected PACU recovery room has no remaining capacity.'
+            );
+          }
+
+          const handoff: ClinicalHandoff = {
+            handoffId,
+            tenantId: context.tenantId,
+            patientId: surgicalCase.patientId,
+            encounterId: surgicalCase.encounterId,
+            sourceEncounterId: surgicalCase.encounterId,
+            episodeId: surgicalCase.id,
+            careSetting: encounterCareSetting,
+            fromClinicianId: context.actorId,
+            fromDepartmentId: surgicalCase.departmentId,
+            toDepartmentId: room.departmentId,
+            toRole: 'PACU_CLINICIAN',
+            currentProblemSummary: payload.handoffSummary.trim(),
+            activeRisks: (payload.activeRisks || []).map((item) => item.trim()).filter(Boolean),
+            pendingDiagnostics: [],
+            pendingProcedures: [],
+            pendingConsultations: [],
+            medicationConcerns: (payload.medicationConcerns || []).map((item) => item.trim()).filter(Boolean),
+            unresolvedItems: [],
+            expectedActions: (payload.expectedActions || []).map((item) => item.trim()).filter(Boolean),
+            sourceRefs: [surgicalCase.id],
+            sourceArtifactId: surgicalCase.id,
+            sourceArtifactType: 'SURGICAL_CASE',
+            status: 'PENDING_ACCEPTANCE',
+            createdAt: nowMs,
+            updatedAt: nowMs,
+          };
+
+          const next: GovernedSurgicalCase = {
+            ...surgicalCase,
+            status: 'post_op_pacu',
+            stage: 'post_op_pacu',
+            actualEndTime: surgicalCase.actualEndTime || now,
+            pacuRoomId: room.roomId,
+            pacuHandoffId: handoffId,
+            pacuTransferStatus: 'PENDING_ACCEPTANCE',
+            pacuTransferredAt: now,
+            pacuTransferredBy: context.actorId,
+            updatedByActorId: context.actorId,
+            updatedAt: now,
+          };
+
+          return {
+            domainState: next,
+            additionalStateWrites: [
+              {
+                entityType: 'HOSPITAL_ROOM',
+                entityId: room.roomId,
+                domainState: {
+                  ...room,
+                  currentOccupancy: Number(room.currentOccupancy || 0) + 1,
+                  status:
+                    Number(room.currentOccupancy || 0) + 1 >= Number(room.capacity || 0)
+                      ? 'IN_USE'
+                      : room.status,
+                  updatedAt: now,
+                },
+              },
+              {
+                entityType: 'CLINICAL_HANDOFF',
+                entityId: handoffId,
+                domainState: handoff,
+              },
+            ],
+            eventPayload: {
+              caseId: surgicalCase.id,
+              patientId: surgicalCase.patientId,
+              encounterId: surgicalCase.encounterId,
+              pacuRoomId: room.roomId,
+              handoffId,
+              receivingDepartmentId: room.departmentId,
+            },
+            auditReason: `Transferred surgical case ${surgicalCase.id} to PACU with handoff ${handoffId}.`,
+            resultData: next,
+          };
+        },
+      });
+
+      return {
+        success: true,
+        commandId,
+        idempotencyKey,
+        entityId: payload.caseId,
+        eventId: tx.eventId,
+        auditId: tx.auditId,
+        outboxId: tx.outboxId,
+        data: tx.resultData as GovernedSurgicalCase,
+      };
+    } catch (error) {
+      if (error instanceof AtomicMutationRejectedError) {
+        return reject(commandId, idempotencyKey, error.code, error.message, error.details);
+      }
+      throw error;
+    }
+  }
+
+  public static async acceptPacuTransfer(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: AcceptPacuTransferPayload
+  ): Promise<CommandResult<GovernedSurgicalCase>> {
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: [
+        'NURSE',
+        'HEAD_NURSE',
+        'ANESTHESIOLOGIST',
+        'DOCTOR',
+        'CONSULTANT',
+        'SYSTEM_ADMIN',
+      ],
+      allowBreakGlass: true,
+    });
+    if (!auth.authorized) {
+      return reject(commandId, idempotencyKey, auth.code || 'UNAUTHORIZED', auth.reason || 'PACU acceptance authority required.');
+    }
+
+    const nowMs = Date.now();
+    const now = new Date(nowMs).toISOString();
+    try {
+      const tx = await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.roles[0] || 'CLINICIAN',
+        aggregateType: 'SURGICAL_CASE',
+        aggregateId: payload.caseId,
+        eventType: 'PACU_TRANSFER_ACCEPTED',
+        auditAction: 'PACU_TRANSFER_ACCEPTED',
+        auditResourceType: 'SURGICAL_CASE',
+        auditResourceId: payload.caseId,
+        outboxTopic: 'g-hims-perioperative-events',
+        idempotencyKey,
+        commandId,
+        correlationId: context.correlationId,
+        readTargets: [
+          { key: 'case', entityType: 'SURGICAL_CASE', entityId: payload.caseId, required: true },
+          { key: 'handoff', entityType: 'CLINICAL_HANDOFF', entityId: payload.handoffId, required: true },
+        ],
+        prepare: (current) => {
+          const surgicalCase = current.case as unknown as GovernedSurgicalCase;
+          const handoff = current.handoff as unknown as ClinicalHandoff;
+
+          if (
+            surgicalCase.status !== 'post_op_pacu' ||
+            surgicalCase.pacuHandoffId !== handoff.handoffId ||
+            handoff.status !== 'PENDING_ACCEPTANCE'
+          ) {
+            throw new AtomicMutationRejectedError(
+              'PACU_HANDOFF_STATE_INVALID',
+              'PACU handoff is not pending acceptance for this surgical case.'
+            );
+          }
+          const actorDepartments = new Set(
+            [
+              ...(context.departmentIds || []),
+              ...(context.departmentId ? [context.departmentId] : []),
+            ]
+              .map((department) => String(department || '').trim().toUpperCase())
+              .filter(Boolean)
+          );
+          const targetDepartment = String(handoff.toDepartmentId || '').trim().toUpperCase();
+          if (
+            !context.roles.includes('SYSTEM_ADMIN') &&
+            (!targetDepartment || !actorDepartments.has(targetDepartment))
+          ) {
+            throw new AtomicMutationRejectedError(
+              'PACU_RECEIVER_DEPARTMENT_MISMATCH',
+              'PACU handoff may only be accepted by a clinician assigned to the receiving recovery department.'
+            );
+          }
+
+          const nextCase: GovernedSurgicalCase = {
+            ...surgicalCase,
+            pacuTransferStatus: 'ACCEPTED',
+            pacuAcceptedAt: now,
+            pacuAcceptedBy: context.actorId,
+            updatedByActorId: context.actorId,
+            updatedAt: now,
+          };
+          const nextHandoff: ClinicalHandoff = {
+            ...handoff,
+            status: 'ACCEPTED',
+            acceptedAt: nowMs,
+            acceptedBy: context.actorId,
+            updatedAt: nowMs,
+          };
+
+          return {
+            domainState: nextCase,
+            additionalStateWrites: [{
+              entityType: 'CLINICAL_HANDOFF',
+              entityId: nextHandoff.handoffId,
+              domainState: nextHandoff,
+            }],
+            eventPayload: {
+              caseId: nextCase.id,
+              handoffId: nextHandoff.handoffId,
+              acceptedBy: context.actorId,
+              acceptedAt: nowMs,
+            },
+            auditReason: `Accepted PACU handoff ${nextHandoff.handoffId} for surgical case ${nextCase.id}.`,
+            resultData: nextCase,
+          };
+        },
+      });
+
+      return {
+        success: true,
+        commandId,
+        idempotencyKey,
+        entityId: payload.caseId,
+        eventId: tx.eventId,
+        auditId: tx.auditId,
+        outboxId: tx.outboxId,
+        data: tx.resultData as GovernedSurgicalCase,
+      };
+    } catch (error) {
+      if (error instanceof AtomicMutationRejectedError) {
+        return reject(commandId, idempotencyKey, error.code, error.message, error.details);
+      }
+      throw error;
+    }
+  }
+
+  public static async completePacuRecovery(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: CompletePacuRecoveryPayload
+  ): Promise<CommandResult<GovernedSurgicalCase>> {
+    const auth = requireClinicalProcedurePrivilege(context, [
+      'ANESTHESIOLOGIST',
+      'DOCTOR',
+      'CONSULTANT',
+      'SURGEON',
+      'SYSTEM_ADMIN',
+    ]);
+    if (!auth.authorized) {
+      return reject(commandId, idempotencyKey, auth.code || 'UNAUTHORIZED', auth.reason || 'PACU recovery completion authority required.');
+    }
+
+    const preflight = await DomainStateRepository.getById<GovernedSurgicalCase>(
+      context.tenantId,
+      'surgicalCases',
+      payload.caseId
+    );
+    if (!preflight?.pacuRoomId) {
+      return reject(commandId, idempotencyKey, 'PACU_ROOM_NOT_BOUND', 'Surgical case does not have an authoritative PACU room assignment.');
+    }
+    if (!preflight.orRoomId) {
+      return reject(commandId, idempotencyKey, 'OPERATING_ROOM_NOT_BOUND', 'Surgical case does not have an authoritative operating-room assignment.');
+    }
+
+    const orRoomId = preflight.orRoomId;
+    const scheduleId = `or_schedule_${orRoomId}`;
+    const now = new Date().toISOString();
+    try {
+      const tx = await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.roles[0] || 'CLINICIAN',
+        aggregateType: 'SURGICAL_CASE',
+        aggregateId: payload.caseId,
+        eventType: 'PACU_RECOVERY_COMPLETED',
+        auditAction: 'PACU_RECOVERY_COMPLETED',
+        auditResourceType: 'SURGICAL_CASE',
+        auditResourceId: payload.caseId,
+        outboxTopic: 'g-hims-perioperative-events',
+        idempotencyKey,
+        commandId,
+        correlationId: context.correlationId,
+        readTargets: [
+          { key: 'case', entityType: 'SURGICAL_CASE', entityId: payload.caseId, required: true },
+          { key: 'room', entityType: 'HOSPITAL_ROOM', entityId: preflight.pacuRoomId, required: true },
+          { key: 'schedule', entityType: 'OR_ROOM_SCHEDULE', entityId: scheduleId, required: false },
+        ],
+        prepare: (current) => {
+          const surgicalCase = current.case as unknown as GovernedSurgicalCase;
+          const room = current.room as unknown as HospitalRoom;
+          const roomSchedule = current.schedule as unknown as OrRoomSchedule | null;
+
+          if (surgicalCase.status !== 'post_op_pacu' || surgicalCase.pacuTransferStatus !== 'ACCEPTED') {
+            throw new AtomicMutationRejectedError(
+              'PACU_RECOVERY_NOT_ACCEPTED',
+              'PACU recovery cannot complete until the receiving clinician accepts the transfer.'
+            );
+          }
+          if (room.roomId !== surgicalCase.pacuRoomId || room.roomType !== 'recovery') {
+            throw new AtomicMutationRejectedError(
+              'PACU_ROOM_CONCURRENCY_CONFLICT',
+              'PACU room binding changed during recovery completion.'
+            );
+          }
+
+          const nextCase: GovernedSurgicalCase = {
+            ...surgicalCase,
+            status: 'completed',
+            stage: 'completed',
+            pacuTransferStatus: 'RECOVERY_COMPLETED',
+            pacuRecoveryCompletedAt: now,
+            pacuRecoveryCompletedBy: context.actorId,
+            pacuRecoveryAssessment: payload.recoveryAssessment.trim(),
+            pacuDisposition: payload.disposition,
+            updatedByActorId: context.actorId,
+            updatedAt: now,
+          };
+
+          const nextRoom: HospitalRoom = {
+            ...room,
+            currentOccupancy: Math.max(0, Number(room.currentOccupancy || 0) - 1),
+            status:
+              Math.max(0, Number(room.currentOccupancy || 0) - 1) < Number(room.capacity || 0)
+                ? 'AVAILABLE'
+                : room.status,
+            updatedAt: now,
+          };
+
+          const nextSchedule: OrRoomSchedule = {
+            roomId: orRoomId,
+            tenantId: context.tenantId,
+            facilityId: surgicalCase.facilityId,
+            slots: (roomSchedule?.slots || []).map((slot) =>
+              slot.caseId === surgicalCase.id
+                ? { ...slot, status: 'COMPLETED' as const }
+                : slot
+            ),
+            updatedAt: now,
+          };
+
+          return {
+            domainState: nextCase,
+            additionalStateWrites: [
+              { entityType: 'HOSPITAL_ROOM', entityId: nextRoom.roomId, domainState: nextRoom },
+              { entityType: 'OR_ROOM_SCHEDULE', entityId: scheduleId, domainState: nextSchedule },
+            ],
+            eventPayload: {
+              caseId: nextCase.id,
+              pacuRoomId: nextRoom.roomId,
+              disposition: payload.disposition,
+              recoveryCompletedBy: context.actorId,
+            },
+            auditReason: `Completed PACU recovery for surgical case ${nextCase.id}; disposition ${payload.disposition}.`,
+            resultData: nextCase,
+          };
+        },
+      });
+
+      return {
+        success: true,
+        commandId,
+        idempotencyKey,
+        entityId: payload.caseId,
+        eventId: tx.eventId,
+        auditId: tx.auditId,
+        outboxId: tx.outboxId,
+        data: tx.resultData as GovernedSurgicalCase,
+      };
+    } catch (error) {
+      if (error instanceof AtomicMutationRejectedError) {
+        return reject(commandId, idempotencyKey, error.code, error.message, error.details);
       }
       throw error;
     }

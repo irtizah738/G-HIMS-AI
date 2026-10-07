@@ -2070,15 +2070,10 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     updates: Partial<TelehealthSession>
   ): Promise<void> => {
     const allowedUpdates = {
-      status: updates.status,
       connectionQuality: updates.connectionQuality,
       callDurationSeconds: updates.callDurationSeconds,
-      vitals: updates.vitals,
-      transcription: updates.transcription,
-      soapNote: updates.soapNote,
       isAudioMuted: updates.isAudioMuted,
       isVideoMuted: updates.isVideoMuted,
-      isRecording: updates.isRecording,
     };
 
     const result = await executeActiveTenantCommand<TelehealthSession>('UpdateTelehealthSessionCommand', {
@@ -2104,11 +2099,57 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     note?: Partial<TelehealthSoapNote>,
     prescriptions?: TelehealthPrescription[]
   ): Promise<void> => {
-    const result = await executeActiveTenantCommand<TelehealthSession>('CompleteTelehealthSessionCommand', {
-      sessionId,
-      soapNote: note || {},
-      prescriptions: prescriptions || [],
+    const session = telehealthSessions.find((item) => item.id === sessionId);
+    if (!session) throw new Error('TELEHEALTH_SESSION_NOT_FOUND');
+    if ((prescriptions || []).length > 0) {
+      throw new Error(
+        'TELEHEALTH_ERX_INTEGRATION_NOT_LIVE: use the governed medication-order workflow.'
+      );
+    }
+
+    const content = [
+      '[TELEHEALTH VIRTUAL CONSULTATION RECORD]',
+      'Encounter Type: ' + session.type,
+      'Chief Complaint: ' + session.chiefComplaint,
+      '',
+      '--- SUBJECTIVE ---',
+      note?.subjective || '',
+      '',
+      '--- OBJECTIVE ---',
+      note?.objective || '',
+      '',
+      '--- ASSESSMENT ---',
+      note?.assessment || '',
+      '',
+      '--- PLAN ---',
+      note?.plan || '',
+    ].join('\n');
+
+    const signed = await executeActiveTenantCommand<{
+      evidenceId: string;
+      canonicalDocumentId?: string;
+    }>('SignClinicalNoteCommand', {
+      encounterId: session.encounterId,
+      patientId: session.patientId,
+      category: 'SOAP',
+      content,
+      acceptedStructuredData: {
+        diagnoses: (note?.icd10Codes || []).map((item) => ({
+          code: item.code,
+          description: item.description,
+          verificationStatus: 'CONFIRMED',
+        })),
+      },
     });
+
+    if (!signed.success || !signed.entityId) {
+      throw new Error(signed.error?.message || 'Telehealth clinical note signing failed.');
+    }
+
+    const result = await executeActiveTenantCommand<TelehealthSession>(
+      'CompleteTelehealthSessionCommand',
+      { sessionId, signedEvidenceId: signed.entityId }
+    );
 
     if (!result.success || !result.data) {
       throw new Error(result.error?.message || 'Telehealth completion failed.');
@@ -2116,50 +2157,11 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
 
     const authoritative = result.data;
     setTelehealthSessions((previous) =>
-      previous.map((session) => session.id === sessionId ? authoritative : session)
+      previous.map((item) => item.id === sessionId ? authoritative : item)
     );
     if (activeTelehealthSession?.id === sessionId) {
       setActiveTelehealthSession(authoritative);
     }
-
-    // The signed clinical note remains a separate governed clinical command.
-    const finalNote = authoritative.soapNote;
-    const finalPrescriptions = authoritative.prescriptions || [];
-    const clinicalNoteContent = `[TELEHEALTH VIRTUAL CONSULTATION RECORD]
-Encounter Type: ${authoritative.type}
-Chief Complaint: ${authoritative.chiefComplaint}
-Attending: ${authoritative.attendingPhysician}
-
---- SUBJECTIVE ---
-${finalNote.subjective || ''}
-
---- OBJECTIVE ---
-${finalNote.objective || ''}
-
---- ASSESSMENT ---
-${finalNote.assessment || ''}
-
---- PLAN ---
-${finalNote.plan || ''}`;
-
-    addClinicalNote(authoritative.patientId, {
-      author: authoritative.attendingPhysician || 'Telehealth Clinician',
-      role: 'Telehealth Attending Physician',
-      category: 'SOAP',
-      content: clinicalNoteContent,
-      aiStructuredData: {
-        chiefComplaint: authoritative.chiefComplaint,
-        diagnoses: (finalNote.icd10Codes || []).map((item) => `${item.code}: ${item.description}`),
-        medicationsPrescribed: finalPrescriptions.map((item) => `${item.medication} ${item.dosage} ${item.frequency}`),
-        recommendedProcedures: [],
-        followUpDays: 0,
-        billingCodes: (finalNote.cptCodes || []).map((item) => ({
-          code: item.code,
-          description: item.description,
-          fee: item.fee || 0,
-        })),
-      },
-    });
   };
 
   return (

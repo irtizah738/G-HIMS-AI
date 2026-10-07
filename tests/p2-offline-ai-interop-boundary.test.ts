@@ -217,8 +217,9 @@ describe('G-HIMS P2 offline / AI / interoperability safety boundaries',()=>{
     expect(dicom).not.toContain('getMockStudies');
     expect(dicom).toContain('DICOM_SIMULATION_PROVIDER_REQUIRED');
     expect(fhir).toContain('FHIR_INTEGRATION_NOT_LIVE');
-    expect(telemetry).toContain('TELEMETRY_LIVE_VALIDATION_INCOMPLETE');
+    expect(telemetry).toContain('TELEMETRY_INTEGRATION_NOT_LIVE');
     expect(telemetry).toContain('SIMULATION_ONLY_NOT_COMMITTED');
+    expect(telemetry).toContain('ELIGIBLE_FOR_AUTHORITATIVE_COMMIT');
     expect(telemetry).not.toContain('TransactionManager');
     expect(telemetry).not.toContain('stElevationDetected');
   });

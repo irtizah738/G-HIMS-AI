@@ -935,6 +935,14 @@ export class ClinicalCoordinationDomainService {
     ) {
       return failure(commandId, idempotencyKey, 'HANDOFF_SCOPE_MISMATCH', 'Clinical handoff does not match the supplied patient encounter.');
     }
+    if (current.sourceArtifactType === 'SURGICAL_CASE') {
+      return failure(
+        commandId,
+        idempotencyKey,
+        'PACU_HANDOFF_COMMAND_REQUIRED',
+        'Perioperative PACU handoffs must use AcceptPacuTransferCommand so handoff and surgical-case state remain atomic.'
+      );
+    }
     if (current.status !== 'PENDING_ACCEPTANCE') {
       return failure(commandId, idempotencyKey, 'HANDOFF_NOT_PENDING', 'Only a pending handoff can be accepted.');
     }

@@ -114,6 +114,19 @@ A domain becomes qualified only when all applicable gates are green:
 - **Telehealth:** low-bandwidth fallback, session recovery and remote signing qualification.
 - **Clinical Intelligence:** continue specialty evaluation and Hospital-0 evidence; do not reintroduce generic autonomous “AI coding/diagnosis” behavior.
 
+#### Wave 3 completion contract
+
+Wave 3 is complete only when all of the following are true:
+
+- **3A IPD:** OPD/IPD/discharge transition evidence is authoritative and longitudinally linked.
+- **3B Emergency:** certified pre-arrival telemetry is authenticated, deduplicated and bound to an active emergency encounter; raw device data remains source evidence until clinician review.
+- **3C OR/PACU:** PACU entry cannot use generic case advancement; recovery-room capacity, postoperative handoff, receiving-clinician acceptance and recovery completion are atomic governed transitions.
+- **3D Telehealth:** low-bandwidth fallback and recovery are server-governed; final completion requires signed clinical evidence; no synthetic SOAP, eRx, biometric or certification claims remain on the production surface.
+- **Clinical Intelligence / Hospital-0:** CI-10I, Hospital-0 evidence and flagship-demo qualification remain green without expanding into autonomous diagnosis/coding authority.
+
+Release gate: `bun run validate:wave3`.
+
+
 ### Wave 4 — External interoperability
 
 - HL7 v2 live MLLP qualification.

@@ -432,6 +432,12 @@ service cloud.firestore {
       match /rehabilitationPlans/{id} { allow read, write: if false; }
       match /rehabilitationSessions/{id} { allow read, write: if false; }
 
+      // Wave 3B ambulance / pre-arrival telemetry is server-owned integration evidence.
+      // Clients never write device profiles, packet checkpoints, or raw device evidence.
+      match /telemetryDevices/{id} { allow read, write: if false; }
+      match /telemetryDeviceCheckpoints/{id} { allow read, write: if false; }
+      match /preArrivalTelemetryRecords/{id} { allow read, write: if false; }
+
       match /diagnosticResultAcknowledgements/{acknowledgementId} {
         allow read, write: if false;
       }

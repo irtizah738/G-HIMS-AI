@@ -393,6 +393,11 @@ export interface TelehealthSession {
   chiefComplaint: string;
   roomToken: string;
   connectionQuality: 'EXCELLENT' | 'GOOD' | 'DEGRADED';
+  connectionMode?: 'VIDEO' | 'AUDIO_ONLY' | 'TEXT_ONLY' | 'PAUSED_OFFLINE';
+  recoveryState?: 'ACTIVE' | 'INTERRUPTED' | 'RECOVERED';
+  recoveryCount?: number;
+  lastConnectivityChangeAt?: string;
+  signedEvidenceId?: string;
   callDurationSeconds: number;
   vitals: TelehealthVitals;
   transcription: TelehealthTranscriptEntry[];

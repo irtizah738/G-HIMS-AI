@@ -1,0 +1,54 @@
+name: Hospital-0 Qualification Contract
+
+on:
+  pull_request:
+    paths:
+      - 'docs/operations/HOSPITAL0_DEPLOYMENT_QUALIFICATION.md'
+      - 'scripts/ops/hospital0-qualification-manifest.ts'
+      - 'tests/hospital0-deployment-qualification.test.ts'
+      - 'package.json'
+      - '.github/workflows/hospital0-deployment-qualification.yml'
+      - '.github/workflows/staging-deploy.yml'
+      - 'vercel.json'
+      - 'lib/runtime/environment-contract.ts'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/operations/HOSPITAL0_DEPLOYMENT_QUALIFICATION.md'
+      - 'scripts/ops/hospital0-qualification-manifest.ts'
+      - 'tests/hospital0-deployment-qualification.test.ts'
+      - 'package.json'
+      - '.github/workflows/hospital0-deployment-qualification.yml'
+      - '.github/workflows/staging-deploy.yml'
+      - 'vercel.json'
+      - 'lib/runtime/environment-contract.ts'
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: Hospital-0 qualification contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: TypeScript
+        run: bun run typecheck
+      - name: Hospital-0 qualification tests
+        run: bun run test:hospital0-deployment
+      - name: Empty evidence remains incomplete
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf artifacts/hospital0-qualification
+          mkdir -p artifacts/hospital0-qualification
+          bun run ops:hospital0:qualification > hospital0-qualification-empty.json
+          node -e "const x=require('./hospital0-qualification-empty.json'); if(x.complete!==false || x.firstIncompleteGate!=='H0_1_STAGING_DEPLOYMENT') process.exit(1)"

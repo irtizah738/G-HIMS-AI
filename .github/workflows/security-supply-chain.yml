@@ -31,6 +31,9 @@ jobs:
       - name: Repository credential leak gate
         run: bun scripts/ops/repository-secret-scan.ts
 
+      - name: Runtime static application security testing
+        run: bun run security:sast
+
       - name: Security regression suite
         run: bun run test:security
 

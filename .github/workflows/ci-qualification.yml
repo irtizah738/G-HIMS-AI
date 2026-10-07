@@ -45,17 +45,7 @@ jobs:
           distribution: temurin
           java-version: "21"
       - name: Install Firebase emulator tooling without creating npm authority
-        shell: bash
-        run: |
-          set -euo pipefail
-          TOOL_DIR="$RUNNER_TEMP/ghims-firebase-tools"
-          mkdir -p "$TOOL_DIR"
-          npm install --prefix "$TOOL_DIR" --no-save --package-lock=false \
-            @firebase/rules-unit-testing@5.0.2 firebase-tools@15.30.2
-          mkdir -p node_modules/@firebase
-          ln -sfn "$TOOL_DIR/node_modules/@firebase/rules-unit-testing" \
-            node_modules/@firebase/rules-unit-testing
-          echo "$TOOL_DIR/node_modules/.bin" >> "$GITHUB_PATH"
+        run: npm install --no-save --package-lock=false @firebase/rules-unit-testing@5.0.2 firebase-tools@15.30.2
       - name: Firestore least-privilege suites
         run: bun run test:rules
       - name: Auth/IAM emulator

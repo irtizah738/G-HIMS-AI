@@ -249,6 +249,62 @@ describe('Wave 2 clinical domain completion', () => {
     expect(timeline.some((item) => item.summary.includes('Partogram escalation'))).toBe(true);
   });
 
+  test('Wave 2 read model is server-authorized and bounded by patient scope', async () => {
+    const [route, client, workspace] = await Promise.all([
+      source('app/api/clinical/wave2/workspace/route.ts'),
+      source('lib/clinical/wave2-client.ts'),
+      source('components/views/wave2-clinical-workspace.tsx'),
+    ]);
+
+    expect(route).toContain('deriveAuthoritativeContext');
+    expect(route).toContain('assertPatient360PatientAccess');
+    expect(route).toContain("where('patientId', '==', patientId)");
+    expect(route).toContain('.limit(251)');
+    expect(route).toContain('WAVE2_WORKSPACE_LIMIT_EXCEEDED');
+    expect(route).toContain('oncologyEvidenceSources');
+    expect(client).toContain('fetchWave2Workspace');
+    expect(workspace).toContain('Load authoritative workspace');
+    expect(workspace).toContain('RecordSelect');
+    expect(workspace).toContain('selectedPatientId');
+    expect(workspace).toContain('activeEncounterId');
+  });
+
+  test('oncology evidence resolves to authoritative patient-scoped records', async () => {
+    const [service, schemas] = await Promise.all([
+      source('lib/backend/services/oncology-domain-service.ts'),
+      source('lib/backend/commands/command-schema-registry.ts'),
+    ]);
+
+    expect(service).toContain('validateOncologyEvidenceRefs');
+    expect(service).toContain("'clinicalConditions'");
+    expect(service).toContain("'diagnosticReports'");
+    expect(service).toContain("'clinicalDocuments'");
+    expect(service).toContain("'clinicalObservations'");
+    expect(service).toContain("'diseaseIntakeArtifacts'");
+    expect(service).toContain("String(candidate.patientId || '') === patientId");
+    expect(schemas).toContain('evidenceRefs: z.array(nonEmpty.max(200)).min(1).max(20)');
+  });
+
+  test('create and secondary state writes use optimistic concurrency preconditions', async () => {
+    const [emar, renal, obstetric, oncology, rehabilitation] =
+      await Promise.all([
+        source('lib/backend/services/nursing-emar-domain-service.ts'),
+        source('lib/backend/services/renal-dialysis-domain-service.ts'),
+        source('lib/backend/services/obstetric-domain-service.ts'),
+        source('lib/backend/services/oncology-domain-service.ts'),
+        source('lib/backend/services/rehabilitation-domain-service.ts'),
+      ]);
+
+    expect(emar).toContain('expectedPrimaryServerVersion: 0');
+    expect(emar).toContain('expectedServerVersion: Number((slot as unknown as Record<string, unknown>)._serverVersion || 0)');
+    expect(renal).toContain('expectedPrimaryServerVersion: 0');
+    expect(renal).toContain('expectedServerVersion: Number((order as unknown as Record<string, unknown>)._serverVersion || 0)');
+    expect(obstetric).toContain('expectedPrimaryServerVersion: 0');
+    expect(obstetric).toContain('expectedServerVersion: Number((episode as unknown as Record<string, unknown>)._serverVersion || 0)');
+    expect(oncology).toContain('expectedPrimaryServerVersion: 0');
+    expect(rehabilitation).toContain('expectedPrimaryServerVersion: 0');
+  });
+
   test('production directory and dashboard expose the real Wave 2 workspaces', async () => {
     const [directory, dashboard, sidebar, rbac] = await Promise.all([
       source('components/views/all-modules-directory.tsx'),

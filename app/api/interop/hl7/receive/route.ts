@@ -8,6 +8,10 @@ import { CommandBus } from '@/lib/backend/commands/command-bus';
 import type { BaseCommand, CommandContext } from '@/lib/backend/types';
 import { TerminologyService } from '@/lib/clinical/terminology/terminology-service';
 import type { DocumentReference, Firestore } from 'firebase-admin/firestore';
+import {
+  parseHl7SourceRoutes,
+  resolveHl7TenantForSource,
+} from '@/lib/interop/hl7-source-routing';
 
 function safeEqual(provided: string, expected: string): boolean {
   const a = Buffer.from(provided);
@@ -271,6 +275,51 @@ export async function POST(req: NextRequest) {
 
     if (!oruData.messageControlId) {
       return NextResponse.json({ error: 'MSH-10 message control ID is required.' }, { status: 422 });
+    }
+
+    let sourceRoutes;
+    try {
+      sourceRoutes = parseHl7SourceRoutes(
+        process.env.GHIMS_HL7_SOURCE_ROUTES_JSON ||
+          process.env.GHIMS_HL7_MLLP_SOURCE_ROUTES_JSON
+      );
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : 'HL7 source routing is invalid.' },
+        { status: 503 }
+      );
+    }
+
+    if (sourceRoutes.length === 0) {
+      return NextResponse.json(
+        { error: 'HL7 source-to-tenant routing must be configured before LIVE ingestion.' },
+        { status: 503 }
+      );
+    }
+
+    const routedTenantId = resolveHl7TenantForSource(
+      sourceRoutes,
+      oruData.sendingApplication,
+      oruData.sendingFacility
+    );
+    if (!routedTenantId || routedTenantId !== tenantId) {
+      emitOperationalEvent({
+        event: 'interop.hl7_receive',
+        outcome: 'REJECTED',
+        tenantId,
+        correlationId,
+        requestId,
+        durationMs: elapsed(),
+        errorCode: 'HL7_SOURCE_TENANT_MISMATCH',
+        attributes: {
+          sendingApplication: oruData.sendingApplication,
+          sendingFacility: oruData.sendingFacility,
+        },
+      });
+      return NextResponse.json(
+        { error: 'HL7 source identity is not authorized for the requested tenant.' },
+        { status: 403 }
+      );
     }
 
     const inboxRef = db

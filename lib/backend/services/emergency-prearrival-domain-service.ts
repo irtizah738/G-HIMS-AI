@@ -5,6 +5,7 @@ import type { CommandContext, CommandResult } from '@/lib/backend/types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import { DeviceTelemetryAdapter, type RawTelemetryPacket } from '@/lib/interop/device-telemetry-adapter';
 import { getServerIntegrationState } from '@/lib/interop/integration-state';
+import { assertBiomedicalInteropReady } from '@/lib/interop/biomedical-device-authority';
 import { assertPatient360PatientAccess } from '@/lib/clinical/patient360/patient360-access';
 import type {
   EmergencyPrearrivalTelemetryRecord,
@@ -109,6 +110,26 @@ export class EmergencyPrearrivalDomainService {
         error: {
           code: 'TELEMETRY_DEVICE_NOT_CERTIFIED',
           message: 'Telemetry source is not an active, certified and currently calibrated hospital device.',
+        },
+      };
+    }
+
+    try {
+      await assertBiomedicalInteropReady({
+        tenantId: context.tenantId,
+        resourceId: profile.resourceId,
+        expectedModel: profile.deviceModel,
+        requiredThroughMs: rawPacket.deviceTimestamp,
+      });
+    } catch (error) {
+      return {
+        success: false,
+        error: {
+          code: 'TELEMETRY_BIOMEDICAL_LOCKOUT',
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Canonical biomedical resource authority rejected the telemetry source.',
         },
       };
     }

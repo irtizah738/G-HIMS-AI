@@ -903,6 +903,21 @@ export class SurgicalCaseDomainService {
               'Only an intra-operative case may transfer to PACU.'
             );
           }
+          const encounterCareSetting = normalizeCareSetting(
+            encounter.encounterType || encounter.type
+          );
+          if (
+            String(encounter.patientId || '') !== surgicalCase.patientId ||
+            encounterCareSetting === 'UNKNOWN' ||
+            ['COMPLETED', 'DISCHARGED', 'TRANSFERRED', 'CANCELLED', 'CLOSED'].includes(
+              String(encounter.status || '').trim().toUpperCase()
+            )
+          ) {
+            throw new AtomicMutationRejectedError(
+              'PACU_ENCOUNTER_SCOPE_INVALID',
+              'Surgical case must remain bound to an active authoritative clinical encounter before PACU transfer.'
+            );
+          }
           if (!surgicalCase.safetyChecklistEvidence?.signOut?.completed) {
             throw new AtomicMutationRejectedError(
               'WHO_SIGN_OUT_INCOMPLETE',
@@ -935,7 +950,7 @@ export class SurgicalCaseDomainService {
             encounterId: surgicalCase.encounterId,
             sourceEncounterId: surgicalCase.encounterId,
             episodeId: surgicalCase.id,
-            careSetting: normalizeCareSetting(encounter.encounterType || encounter.type),
+            careSetting: encounterCareSetting,
             fromClinicianId: context.actorId,
             fromDepartmentId: surgicalCase.departmentId,
             toDepartmentId: room.departmentId,

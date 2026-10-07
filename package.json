@@ -81,6 +81,7 @@
     "test:wave2": "bun test tests/wave2-clinical-domain-completion.test.ts",
     "validate:wave2": "bun run typecheck && bun run lint && bun run test:wave2 && bun run test:p8 && bun run test:cbe && bun run test:ci4 && bun run test:ci9 && bun run test:p6 && bun run test:security && bun run build",
     "test:e2e:wave2:staging": "playwright test --config=playwright.wave2-staging.config.ts",
+    "ops:wave2:evidence": "bun scripts/ops/wave2-evidence-manifest.ts",
     "validate:p8": "bun run typecheck && bun run lint && bun run test:p8 && bun run test:clinical-architecture && bun run test:ci7 && bun run test:ci8 && bun run test:p6 && bun run test:p7 && bun run test:security && bun run build",
     "test:scm1": "bun test tests/scm1-inventory-integrity.test.ts",
     "validate:scm1": "bun run typecheck && bun run lint && bun run test:scm1 && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",

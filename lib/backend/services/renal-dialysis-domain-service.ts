@@ -47,6 +47,47 @@ export interface CompleteDialysisSessionPayload {
   abortReason?: string;
 }
 
+async function validateDialysisClinicalRefs(
+  context: CommandContext,
+  patientId: string,
+  encounterId: string,
+  medicationOrderIds: string[],
+  diagnosticReportIds: string[]
+): Promise<{ code: string; message: string } | null> {
+  for (const medicationOrderId of medicationOrderIds) {
+    const medicationOrder = await DomainStateRepository.getById<Record<string, unknown>>(
+      context.tenantId,
+      'medicationOrders',
+      medicationOrderId
+    );
+    if (
+      !medicationOrder ||
+      String(medicationOrder.patientId || '') !== patientId ||
+      String(medicationOrder.encounterId || '') !== encounterId
+    ) {
+      return {
+        code: 'DIALYSIS_MEDICATION_ORDER_SCOPE_MISMATCH',
+        message: `Medication order ${medicationOrderId} does not belong to this patient encounter.`,
+      };
+    }
+  }
+
+  for (const diagnosticReportId of diagnosticReportIds) {
+    const report = await DomainStateRepository.getById<Record<string, unknown>>(
+      context.tenantId,
+      'diagnosticReports',
+      diagnosticReportId
+    );
+    if (!report || String(report.patientId || '') !== patientId) {
+      return {
+        code: 'DIALYSIS_DIAGNOSTIC_REPORT_SCOPE_MISMATCH',
+        message: `Diagnostic report ${diagnosticReportId} does not belong to this patient.`,
+      };
+    }
+  }
+  return null;
+}
+
 export class RenalDialysisDomainService {
   public static async createOrder(
     context: CommandContext,
@@ -70,6 +111,19 @@ export class RenalDialysisDomainService {
       return wave2Failure(commandId, idempotencyKey, 'DIALYSIS_ORDER_INVALID', 'Dialysis duration and vascular access plan are required and must be clinically bounded.');
     }
 
+    const medicationOrderIds = uniqueWave2Strings(payload.medicationOrderIds);
+    const diagnosticReportIds = uniqueWave2Strings(payload.diagnosticReportIds);
+    const referenceError = await validateDialysisClinicalRefs(
+      context,
+      payload.patientId,
+      payload.encounterId,
+      medicationOrderIds,
+      diagnosticReportIds
+    );
+    if (referenceError) {
+      return wave2Failure(commandId, idempotencyKey, referenceError.code, referenceError.message);
+    }
+
     const now = Date.now();
     const dialysisOrderId = `dial_ord_${crypto.randomUUID()}`;
     const order: RenalDialysisOrder = {
@@ -82,8 +136,8 @@ export class RenalDialysisDomainService {
       targetUltrafiltrationMl: payload.targetUltrafiltrationMl,
       anticoagulationPlan: String(payload.anticoagulationPlan || '').trim() || undefined,
       vascularAccessPlan: String(payload.vascularAccessPlan).trim(),
-      medicationOrderIds: uniqueWave2Strings(payload.medicationOrderIds),
-      diagnosticReportIds: uniqueWave2Strings(payload.diagnosticReportIds),
+      medicationOrderIds,
+      diagnosticReportIds,
       status: 'ACTIVE',
       orderedBy: context.actorId,
       orderedAt: now,
@@ -236,6 +290,19 @@ export class RenalDialysisDomainService {
       return wave2Failure(commandId, idempotencyKey, 'DIALYSIS_ORDER_NOT_ACTIVE', 'The source dialysis order is no longer active.');
     }
 
+    const appendedMedicationOrderIds = uniqueWave2Strings(payload.medicationOrderIds);
+    const appendedDiagnosticReportIds = uniqueWave2Strings(payload.diagnosticReportIds);
+    const referenceError = await validateDialysisClinicalRefs(
+      context,
+      payload.patientId,
+      payload.encounterId,
+      appendedMedicationOrderIds,
+      appendedDiagnosticReportIds
+    );
+    if (referenceError) {
+      return wave2Failure(commandId, idempotencyKey, referenceError.code, referenceError.message);
+    }
+
     const now = Date.now();
     const nextSession: RenalDialysisSession = {
       ...session,
@@ -248,11 +315,11 @@ export class RenalDialysisDomainService {
       ], 100),
       medicationOrderIds: uniqueWave2Strings([
         ...session.medicationOrderIds,
-        ...(payload.medicationOrderIds || []),
+        ...appendedMedicationOrderIds,
       ]),
       diagnosticReportIds: uniqueWave2Strings([
         ...session.diagnosticReportIds,
-        ...(payload.diagnosticReportIds || []),
+        ...appendedDiagnosticReportIds,
       ]),
       completedBy: context.actorId,
       completedAt: now,

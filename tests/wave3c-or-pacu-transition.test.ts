@@ -23,11 +23,12 @@ describe('Wave 3C governed OR/PACU transition automation', () => {
     expect(service).toContain("eventType: 'SURGICAL_CASE_TRANSFERRED_TO_PACU'");
   });
 
-  test('PACU acceptance is bound to designated receiving clinician', async () => {
+  test('PACU acceptance is bound to the authoritative recovery department', async () => {
     const service = await source('lib/backend/services/surgical-case-domain-service.ts');
     expect(service).toContain('acceptPacuTransfer');
-    expect(service).toContain("'PACU_RECEIVER_MISMATCH'");
-    expect(service).toContain("handoff.toClinicianId !== context.actorId");
+    expect(service).toContain("'PACU_RECEIVER_DEPARTMENT_MISMATCH'");
+    expect(service).toContain('actorDepartments.has(targetDepartment)');
+    expect(service).toContain('toDepartmentId: room.departmentId');
     expect(service).toContain("eventType: 'PACU_TRANSFER_ACCEPTED'");
   });
 

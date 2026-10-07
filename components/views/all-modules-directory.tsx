@@ -74,7 +74,7 @@ export interface DomainModuleItem {
   targetTab?: string;
   directHref?: string;
   standards: string[];
-  status: 'PRODUCTION' | 'ACTIVE' | 'INTEGRATED' | 'AUDIT_READY';
+  status: 'REGISTERED' | 'BUILDING';
 }
 
 export function AllModulesDirectory() {
@@ -108,7 +108,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'Active Identity Graph',
         targetTab: 'patients',
         standards: ['FHIR R4 Patient', 'HIPAA §164.312', 'SHA-256 Keying'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 2,
@@ -125,7 +125,7 @@ export function AllModulesDirectory() {
         isAiEnhanced: true,
         targetTab: 'opd',
         standards: ['SNOMED-CT', 'ICD-10-CM', 'Ambient Speech'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 3,
@@ -142,7 +142,7 @@ export function AllModulesDirectory() {
         isAiEnhanced: true,
         targetTab: 'disease-intake',
         standards: ['AHA/ACC', 'ESC Guidelines', 'NICE CG50'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 5,
@@ -158,7 +158,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: '5-Rights Verification',
         targetTab: 'beds',
         standards: ['5-Rights Verification', 'ANA Guidelines'],
-        status: 'ACTIVE',
+        status: 'BUILDING',
       },
       {
         domainNumber: 6,
@@ -175,7 +175,7 @@ export function AllModulesDirectory() {
         isAiEnhanced: true,
         targetTab: 'telehealth',
         standards: ['WebRTC', 'HL7 FHIR PHR', 'AES-256 E2EE'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 7,
@@ -192,7 +192,7 @@ export function AllModulesDirectory() {
         isAiEnhanced: true,
         targetTab: 'consultant-command',
         standards: ['NEWS2 Score', 'CDS Hooks', 'NICE Guidelines'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 8,
@@ -208,7 +208,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'Secure Patient Gate',
         targetTab: 'patient-portal',
         standards: ['ONC 21st Century Cures Act', 'FHIR R4 Patient'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
 
       // -------------------------------------------------------------
@@ -228,7 +228,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'Level 1 Trauma Ready',
         targetTab: 'emergency',
         standards: ['ESI Triage v4', 'AHA Code STEMI', 'ATLS Protocol'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 10,
@@ -244,7 +244,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'Radio Intercom & Lead II',
         targetTab: 'emergency',
         standards: ['NEMSIS v3.5', 'FCC Part 90 Public Safety'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 11,
@@ -261,7 +261,7 @@ export function AllModulesDirectory() {
         targetTab: 'beds',
         directHref: '/metro-health/inpatient/bed-board',
         standards: ['AHRQ Hospital Survey', 'Joint Commission EMR'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 12,
@@ -278,7 +278,7 @@ export function AllModulesDirectory() {
         targetTab: 'surgery',
         directHref: '/metro-health/or/schedule',
         standards: ['WHO Surgical Safety', 'AORN Perioperative'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 13,
@@ -294,7 +294,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'Discharge Readiness Score',
         targetTab: 'surgery',
         standards: ['ASA Physical Status', 'Modified Aldrete PACU'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 14,
@@ -310,7 +310,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'Ventilator & Art-Line Telemetry',
         targetTab: 'beds',
         standards: ['CLABSI / CAUTI Bundle', 'Surviving Sepsis'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 15,
@@ -326,7 +326,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'Negative-Pressure Verified',
         targetTab: 'beds',
         standards: ['CDC NHSN Protocol', 'WHO Infection Control'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
 
       // -------------------------------------------------------------
@@ -346,7 +346,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'Specimen Barcode Tracking',
         targetTab: 'ancillary',
         standards: ['CLIA 88', 'CAP Accredited', 'HL7 ORU^R01'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 17,
@@ -362,7 +362,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'Pre-Pay Diagnostic Lockout',
         targetTab: 'ancillary',
         standards: ['Double-Entry Lock', 'Pre-Auth Gate'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 18,
@@ -378,7 +378,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'CT, MRI & X-Ray Web PACS',
         targetTab: 'ancillary',
         standards: ['DICOM 3.0', 'HL7 ORM', 'IHE Scheduled Workflow'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 19,
@@ -394,7 +394,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'PRBC Reserve Ledger',
         targetTab: 'bloodbank',
         standards: ['AABB Standards', 'FDA 21 CFR 606', 'ISBT 128'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 20,
@@ -410,7 +410,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'Intra-Op Tissue Diagnosis',
         targetTab: 'ancillary',
         standards: ['CAP Histology Guidelines', 'TNM Staging 8th Ed'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 21,
@@ -426,7 +426,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'Docking Station Telemetry',
         targetTab: 'ancillary',
         standards: ['CLSI POCT1-A2', 'FDA Waived Testing'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 22,
@@ -442,7 +442,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'Automated Drug Allergy Screening',
         targetTab: 'ancillary',
         standards: ['USP 797 / 800', 'FDA NDC Formulary'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
 
       // -------------------------------------------------------------
@@ -463,7 +463,7 @@ export function AllModulesDirectory() {
         isAiEnhanced: true,
         targetTab: 'scm-pos',
         standards: ['GS1 Healthcare', 'EDI 850 / 810', '3-Way Match'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 24,
@@ -480,7 +480,7 @@ export function AllModulesDirectory() {
         targetTab: 'scm-pos',
         directHref: '/metro-health/scm/par-management',
         standards: ['Lean Hospital Logistics', 'Automated Reorder'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 25,
@@ -497,7 +497,7 @@ export function AllModulesDirectory() {
         targetTab: 'scm-pos',
         directHref: '/metro-health/scm/cssd',
         standards: ['AAMI ST79', 'ISO 11138 Sterilization'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 26,
@@ -514,7 +514,7 @@ export function AllModulesDirectory() {
         targetTab: 'resources',
         directHref: '/metro-health/hcm/resources',
         standards: ['NFPA 99', 'FDA 21 CFR 820 Quality System'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 27,
@@ -530,7 +530,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'Zero Recall Defect',
         targetTab: 'scm-pos',
         standards: ['FDA Unique Device ID (UDI)', 'GS1-128'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 28,
@@ -546,7 +546,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'Automated IoT Sensor Telemetry',
         targetTab: 'bloodbank',
         standards: ['CDC Vaccine Storage Guidelines', 'WHO PQS'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 29,
@@ -562,7 +562,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'Biohazard Manifest Tracking',
         targetTab: 'resources',
         standards: ['OSHA 1910.1030 Bloodborne Pathogens'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
 
       // -------------------------------------------------------------
@@ -583,7 +583,7 @@ export function AllModulesDirectory() {
         targetTab: 'billing',
         directHref: '/metro-health/erp/chart-of-accounts',
         standards: ['GAAP / IFRS', 'SAP FI/CO Alignment'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 31,
@@ -600,7 +600,7 @@ export function AllModulesDirectory() {
         targetTab: 'billing',
         directHref: '/metro-health/erp/journal-entries',
         standards: ['Double-Entry Invariance', 'Audit Trail Immutable'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 32,
@@ -617,7 +617,7 @@ export function AllModulesDirectory() {
         isAiEnhanced: true,
         targetTab: 'billing',
         standards: ['ICD-10 to CPT Crosswalk', 'OIG Compliance'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 33,
@@ -635,7 +635,7 @@ export function AllModulesDirectory() {
         targetTab: 'claims',
         directHref: '/metro-health/billing/claims',
         standards: ['ASC X12 EDI 837/835', 'CMS-1500 / UB-04'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 34,
@@ -652,7 +652,7 @@ export function AllModulesDirectory() {
         targetTab: 'billing',
         directHref: '/metro-health/billing/tariffs',
         standards: ['CMS RVU Base', 'Contract Pricing Engine'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 35,
@@ -669,7 +669,7 @@ export function AllModulesDirectory() {
         targetTab: 'billing',
         directHref: '/metro-health/billing/invoices/inv-enc-8092-441',
         standards: ['PCI-DSS Level 1', 'Itemized Patient Slip'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 36,
@@ -686,7 +686,7 @@ export function AllModulesDirectory() {
         targetTab: 'billing',
         directHref: '/metro-health/erp/fixed-assets',
         standards: ['IAS 16 Property & Equipment', 'MACRS Tables'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
 
       // -------------------------------------------------------------
@@ -707,7 +707,7 @@ export function AllModulesDirectory() {
         targetTab: 'hcm',
         directHref: '/metro-health/hcm',
         standards: ['EEOC Guidelines', 'Joint Commission HR Standards'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 38,
@@ -724,7 +724,7 @@ export function AllModulesDirectory() {
         targetTab: 'hcm',
         directHref: '/metro-health/hcm/credentials',
         standards: ['NPDB Querying', 'State Medical Board Sync'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 39,
@@ -740,7 +740,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'Verified Scope of Practice',
         targetTab: 'staff',
         standards: ['Medical Staff Bylaws', 'Joint Commission MS.06'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 40,
@@ -757,7 +757,7 @@ export function AllModulesDirectory() {
         targetTab: 'hcm',
         directHref: '/metro-health/hcm/roster',
         standards: ['ACGME Resident Duty Hours', 'European Working Time'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 41,
@@ -773,7 +773,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'Supervisory Time Audit Ledger',
         targetTab: 'staff',
         standards: ['FLSA Healthcare Provisions', 'Biometric Security'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 42,
@@ -790,7 +790,7 @@ export function AllModulesDirectory() {
         targetTab: 'hcm',
         directHref: '/metro-health/hcm/payroll',
         standards: ['IRS Section 125', 'Statutory Tax Withholding'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
 
       // -------------------------------------------------------------
@@ -810,7 +810,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'Vascular Access & Dialysis Run',
         targetTab: 'opd',
         standards: ['KDOQI Guidelines', 'CMS ESRD Conditions'],
-        status: 'ACTIVE',
+        status: 'BUILDING',
       },
       {
         domainNumber: 44,
@@ -826,7 +826,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'Door-to-Balloon STEMI Standard',
         targetTab: 'surgery',
         standards: ['ACC NCDR CathPCI Registry', 'AHA STEMI Protocol'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 45,
@@ -842,7 +842,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'Cervical Dilation & Fetal Heart',
         targetTab: 'beds',
         standards: ['WHO Labor Care Guide', 'ACOG Guidelines'],
-        status: 'ACTIVE',
+        status: 'BUILDING',
       },
       {
         domainNumber: 46,
@@ -858,7 +858,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'BSA Chemotherapy Calculator',
         targetTab: 'opd',
         standards: ['NCCN Clinical Guidelines', 'ASCO Oncology'],
-        status: 'ACTIVE',
+        status: 'BUILDING',
       },
       {
         domainNumber: 47,
@@ -874,7 +874,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'Functional Independence Tracker',
         targetTab: 'opd',
         standards: ['FIM Instrument', 'Barthel ADL Index'],
-        status: 'ACTIVE',
+        status: 'BUILDING',
       },
 
       // -------------------------------------------------------------
@@ -894,7 +894,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'FHIR R4 Schema Validator',
         targetTab: 'interop',
         standards: ['HL7 v2.5.1', 'FHIR R4 US-Core', 'SMART on FHIR'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 49,
@@ -911,7 +911,7 @@ export function AllModulesDirectory() {
         isAiEnhanced: true,
         targetTab: 'sheets',
         standards: ['Google Workspace API v4', 'OAuth 2.0 PKCE'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 50,
@@ -927,7 +927,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'Edge Consensus Engine',
         targetTab: 'audit',
         standards: ['Vector Clocks CRDT', 'IndexedDB Level 3'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 51,
@@ -943,7 +943,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'Zero-Tamper HIPAA Ledger',
         targetTab: 'audit',
         standards: ['HIPAA §164.312(b)', 'NIST SP 800-92 Audit'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
       {
         domainNumber: 52,
@@ -959,7 +959,7 @@ export function AllModulesDirectory() {
         primaryMetricLabel: 'Security & Governance Matrix',
         targetTab: 'settings',
         standards: ['NIST SP 800-207 Zero Trust', 'Emergency Break-Glass'],
-        status: 'PRODUCTION',
+        status: 'REGISTERED',
       },
     ],
     [patients.length, pendingLeakage, stats.occupancyRate, occupiedBeds, staff.length]
@@ -1028,11 +1028,11 @@ export function AllModulesDirectory() {
                   All 52 Enterprise Domains of G-HIMS OS
                 </h1>
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                  52 / 52 Active
+                  52 / 52 Registered
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Complete architectural registry spanning Clinical Care, Emergency & Trauma, Diagnostics, Supply Chain & CSSD, Universal ERP, HCM, Specialty Clinics & Interoperability.
+                Architectural registry of the 52 G-HIMS domains. Registry presence does not imply production readiness; qualification comes from executable CI and deployed evidence.
               </p>
             </div>
           </div>
@@ -1095,7 +1095,7 @@ export function AllModulesDirectory() {
           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Operational Pillars</div>
           <div className="text-xl font-black text-slate-900 dark:text-slate-100 mt-0.5">8 Pillars</div>
           <div className="text-[11px] text-blue-600 dark:text-blue-400 font-semibold mt-0.5">
-            Full-Stack Integrated
+            Development Unfrozen
           </div>
         </div>
         <div className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs">
@@ -1107,9 +1107,9 @@ export function AllModulesDirectory() {
         </div>
         <div className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs">
           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Automated Verification</div>
-          <div className="text-xl font-black text-slate-900 dark:text-slate-100 mt-0.5">52 Tests Pass</div>
+          <div className="text-xl font-black text-slate-900 dark:text-slate-100 mt-0.5">Evidence-Based</div>
           <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold mt-0.5 flex items-center gap-1">
-            <CheckCircle2 className="w-3 h-3" /> All Suites Green
+            <CheckCircle2 className="w-3 h-3" /> See CI / staging evidence
           </div>
         </div>
       </div>

@@ -35,7 +35,7 @@ export function OpdPatientSearchMpi({
   onInitiateMergeRequest,
 }: OpdPatientSearchMpiProps) {
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [searchField, setSearchField] = useState<'ALL' | 'MRN' | 'CNIC' | 'PHONE' | 'NAME' | 'APPT'>('ALL');
+  const [searchField, setSearchField] = useState<'ALL' | 'MRN' | 'CNIC' | 'PHONE' | 'NAME' | 'APPT'>('MRN');
   const [selectedForReview, setSelectedForReview] = useState<PatientDemographics | null>(null);
   const [mergeModalOpen, setMergeModalOpen] = useState<boolean>(false);
   const [targetMergePatientId, setTargetMergePatientId] = useState<string>('');
@@ -130,7 +130,7 @@ export function OpdPatientSearchMpi({
               Master Patient Index (MPI) Multi-Criteria Search
             </h2>
             <p className="text-xs text-slate-500">
-              Query tenant MPI by MRN, National ID / CNIC, Phone, Name, Barcode or Appointment token before initiating registration.
+              Use the permanent hospital Patient ID (MRN) or CNIC for exact MPI identity lookup. Name and phone remain secondary discovery aids.
             </p>
           </div>
 
@@ -159,7 +159,7 @@ export function OpdPatientSearchMpi({
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Search by Patient Full Name, MRN (e.g. MRN-20260901-8842), National ID/CNIC, Phone..."
+              placeholder="Enter Patient ID / MRN or CNIC..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-medium"
@@ -172,8 +172,8 @@ export function OpdPatientSearchMpi({
             className="px-3 py-2.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-semibold"
           >
             <option value="ALL">All Fields (Smart Search)</option>
-            <option value="MRN">Institutional MRN</option>
-            <option value="CNIC">National ID / CNIC</option>
+            <option value="MRN">Patient ID / MRN (Exact)</option>
+            <option value="CNIC">CNIC (Exact)</option>
             <option value="PHONE">Primary Contact Phone</option>
             <option value="NAME">Legal / Preferred Name</option>
           </select>

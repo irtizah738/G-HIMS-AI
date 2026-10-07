@@ -69,6 +69,7 @@
     "validate:clinical-architecture": "bun run typecheck && bun run lint && bun run test:clinical-architecture && bun run test:ci7 && bun run test:ci8 && bun run test:p6 && bun run test:p7 && bun run test:security && bun run build",
     "test:p8": "bun test tests/p8-main-baseline-hardening.test.ts",
     "test:clinical-rework": "bun test tests/clinical-identity-routing-intake-rework.test.ts",
+    "test:wave1-clinical-coordination": "bun test tests/wave1-clinical-coordination-closure.test.ts",
     "validate:p8": "bun run typecheck && bun run lint && bun run test:p8 && bun run test:clinical-architecture && bun run test:ci7 && bun run test:ci8 && bun run test:p6 && bun run test:p7 && bun run test:security && bun run build",
     "test:scm1": "bun test tests/scm1-inventory-integrity.test.ts",
     "validate:scm1": "bun run typecheck && bun run lint && bun run test:scm1 && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",

@@ -9,12 +9,10 @@ import {
 } from '@/lib/clinical/intake-templates-data';
 import {
   DiseaseIntakeTemplate,
-  SymptomTreeNode,
   GuidedQuestion,
   LocalizationConfig,
   HospitalTierConfig,
   AiOptimizationResult,
-  RiskSeverity,
 } from '@/lib/types/disease-intake';
 import {
   HeartPulse,
@@ -51,9 +49,11 @@ import {
 } from 'lucide-react';
 import { AuthClient } from '@/lib/auth/auth-client';
 import { PatientConsultantRoutingModal } from '@/components/clinical/patient-consultant-routing-modal';
+import { saveDiseaseIntakeArtifact } from '@/lib/clinical/intelligence/consultant-worklist-client';
+import { computeGovernedDiseaseIntakeRisk } from '@/lib/clinical/disease-intake/governed-risk-engine';
 
 export function DiseaseCentricIntakeView() {
-  const { patients, addClinicalNote, selectedPatientId, setSelectedPatientId } = useHospital();
+  const { patients, selectedPatientId, setSelectedPatientId } = useHospital();
   const [localPatientId, setLocalPatientId] = useState<string>(selectedPatientId || '');
 
   // Synchronize with global hospital context patient
@@ -109,6 +109,11 @@ export function DiseaseCentricIntakeView() {
   const [committedSuccess, setCommittedSuccess] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
   const [showRoutingModal, setShowRoutingModal] = useState(false);
+  const [savedIntakeArtifact, setSavedIntakeArtifact] = useState<{
+    intakeArtifactId: string;
+    patient360Revision: number;
+    patient360SourceCheckpoint: string;
+  } | null>(null);
 
   // Template Customization / Studio state
   const [customQuestions, setCustomQuestions] = useState<GuidedQuestion[]>([]);
@@ -125,78 +130,37 @@ export function DiseaseCentricIntakeView() {
     setAiResult(null);
     setCommittedSuccess(false);
     setCommitError(null);
+    setSavedIntakeArtifact(null);
   }, [selectedTemplateId, currentTemplate]);
 
-  // Real-time Risk Score & Active Signals Calculation
+  // Any clinician input change invalidates the previously finalized artifact.
+  // Routing must always reference the exact reviewed intake version.
+  useEffect(() => {
+    setSavedIntakeArtifact(null);
+  }, [guidedAnswers, specialtyHistoryAnswers, selectedTreeNodeIds]);
+
+  // Real-time display uses the exact governed calculator used by the server.
   const { totalRiskScore, activeRiskSignals, maxRiskSeverity } = useMemo(() => {
-    let score = 0;
-
-    // 1. Tree node weights. The template's governed risk weight is authoritative;
-    // merely selecting the root does not manufacture clinical risk.
-    const findNode = (
-      node: SymptomTreeNode,
-      nodeId: string
-    ): SymptomTreeNode | undefined => {
-      if (node.id === nodeId) return node;
-      for (const child of node.children || []) {
-        const found = findNode(child, nodeId);
-        if (found) return found;
-      }
-      return undefined;
-    };
-    selectedTreeNodeIds.forEach((nodeId) => {
-      if (nodeId === currentTemplate.symptomTree.id) return;
-      const node = findNode(currentTemplate.symptomTree, nodeId);
-      if (node) score += Math.max(0, node.riskWeight || 0);
-    });
-
-    // 2. Guided answers risk points
-    currentTemplate.guidedQuestions.forEach((q) => {
-      const val = guidedAnswers[q.id];
-      if (q.type === 'scale' || q.type === 'number') {
-        if (typeof val === 'number') {
-          score += Math.min(val, 10);
-        }
-      } else if (q.options && val) {
-        if (Array.isArray(val)) {
-          val.forEach((v) => {
-            const opt = q.options?.find((o) => o.value === v);
-            if (opt) score += opt.riskScore || 0;
-          });
-        } else {
-          const opt = q.options?.find((o) => o.value === val);
-          if (opt) score += opt.riskScore || 0;
-        }
-      }
-    });
-
-    // Apply custom multiplier
-    score = Math.round(score * customWeightMultiplier);
-
-    // 3. Evaluate Rule Signals
-    const activeSignals = currentTemplate.riskSignals.filter((signal) => {
-      try {
-        return signal.conditionChecker(guidedAnswers, specialtyHistoryAnswers, selectedTreeNodeIds);
-      } catch (e) {
-        return false;
-      }
-    });
-
-    let maxSeverity: RiskSeverity = 'LOW';
-    if (activeSignals.some((s) => s.severity === 'CRITICAL') || score >= 25) {
-      maxSeverity = 'CRITICAL';
-    } else if (activeSignals.some((s) => s.severity === 'HIGH') || score >= 16) {
-      maxSeverity = 'HIGH';
-    } else if (activeSignals.some((s) => s.severity === 'MODERATE') || score >= 8) {
-      maxSeverity = 'MODERATE';
-    }
-
+    const governed = computeGovernedDiseaseIntakeRisk(
+      currentTemplate,
+      guidedAnswers,
+      specialtyHistoryAnswers,
+      selectedTreeNodeIds
+    );
+    const signalIds = new Set(governed.signalIds);
     return {
-      totalRiskScore: score,
-      activeRiskSignals: activeSignals,
-      maxRiskSeverity: maxSeverity,
+      totalRiskScore: governed.score,
+      activeRiskSignals: currentTemplate.riskSignals.filter((signal) =>
+        signalIds.has(signal.id)
+      ),
+      maxRiskSeverity: governed.severity,
     };
-  }, [currentTemplate, guidedAnswers, specialtyHistoryAnswers, selectedTreeNodeIds, customWeightMultiplier]);
+  }, [
+    currentTemplate,
+    guidedAnswers,
+    specialtyHistoryAnswers,
+    selectedTreeNodeIds,
+  ]);
 
   // Handle Symptom Tree node toggle
   const handleTreeNodeToggle = (nodeId: string) => {
@@ -306,22 +270,85 @@ export function DiseaseCentricIntakeView() {
       return;
     }
 
+    const encounterId =
+      selectedPatient.activeEncounterId ||
+      selectedPatient.encounters.find((encounter) => encounter.status === 'active')?.id;
+    if (!encounterId) {
+      setCommitError('An active encounter is required before finalizing disease intake.');
+      return;
+    }
+
     setCommitError(null);
+    setSavedIntakeArtifact(null);
+
     try {
-      await addClinicalNote(selectedPatient.id, {
-        author: 'Authenticated clinician',
-        role: 'Specialist Intake',
-        category: 'Consultation',
-        content: `Disease-Centric Intake Completed: ${currentTemplate.name}\nRisk Level: ${maxRiskSeverity} (Score: ${totalRiskScore}). Protocol: ${currentTemplate.clinicalGuidelines}.\nObserved protocol signals: ${activeRiskSignals.map((signal) => signal.title).join('; ') || 'None recorded'}.\nSpecialist preparation target: ${currentTemplate.typicalSpecialists.join(', ')}.`,
+      const tenantId = await AuthClient.getActiveTenantId();
+      const patient360Response = await AuthClient.authorizedFetch(
+        `/api/clinical/patient360/${encodeURIComponent(selectedPatient.id)}?tenantId=${encodeURIComponent(tenantId)}&encounterId=${encodeURIComponent(encounterId)}`,
+        { method: 'GET', cache: 'no-store' },
+        tenantId
+      );
+      const patient360Payload = await patient360Response.json();
+      if (
+        !patient360Response.ok ||
+        !patient360Payload?.success ||
+        !patient360Payload?.projection
+      ) {
+        throw new Error(
+          patient360Payload?.error ||
+            'Patient 360 could not be loaded for clinician-reviewed intake finalization.'
+        );
+      }
+
+      const patient360Revision = Number(patient360Payload.projection.revision);
+      const patient360SourceCheckpoint = String(
+        patient360Payload.projection.sourceCheckpoint || ''
+      ).trim();
+      if (
+        !Number.isInteger(patient360Revision) ||
+        patient360Revision < 0 ||
+        !patient360SourceCheckpoint
+      ) {
+        throw new Error('Patient 360 did not return a valid review checkpoint.');
+      }
+
+      const result = await saveDiseaseIntakeArtifact(tenantId, {
+        patientId: selectedPatient.id,
+        encounterId,
+        templateId: currentTemplate.id,
+        templateName: currentTemplate.name,
+        clinicalGuidelines: currentTemplate.clinicalGuidelines,
+        guidedAnswers,
+        specialtyHistory: specialtyHistoryAnswers,
+        selectedTreeNodeIds,
+        observedRiskScore: totalRiskScore,
+        observedRiskSeverity: maxRiskSeverity,
+        observedRiskSignalIds: activeRiskSignals.map((signal) => signal.id),
+        observedRiskSignalTitles: activeRiskSignals.map((signal) => signal.title),
+        specialistTargets: currentTemplate.typicalSpecialists,
+        sourceRefs: [],
+        patient360Revision,
+        patient360SourceCheckpoint,
+        clinicianAttestation: true,
       });
 
+      const intakeArtifactId = String(result.entityId || '').trim();
+      if (!intakeArtifactId) {
+        throw new Error('Disease intake finalized without a canonical artifact identifier.');
+      }
+
+      setSavedIntakeArtifact({
+        intakeArtifactId,
+        patient360Revision,
+        patient360SourceCheckpoint,
+      });
       setCommittedSuccess(true);
       setTimeout(() => {
         setCommittedSuccess(false);
       }, 4000);
     } catch (error) {
       setCommitError(
-        error instanceof Error ? error.message : 'Intake could not be saved.'
+        error instanceof Error ? error.message : 'Intake could not be finalized.'
       );
     }
   };
@@ -354,7 +381,7 @@ export function DiseaseCentricIntakeView() {
               Disease-Centric Intake & Specialist Preparation Platform
             </h1>
             <p className="text-sm text-slate-300 font-normal leading-relaxed">
-              Structured specialty intake that captures explicit findings, surfaces governed protocol signals, prepares a source-limited handoff, and routes the patient to an eligible specialist.
+              Structured specialty intake that captures explicit findings, surfaces governed protocol signals, prepares a source-limited handoff, and lets the clinician explicitly route the case to an eligible specialist.
             </p>
           </div>
 
@@ -596,11 +623,11 @@ export function DiseaseCentricIntakeView() {
           <button
             id="btn-route-specialist"
             onClick={() => setShowRoutingModal(true)}
-            disabled={!selectedPatient || !activeEncounterId}
+            disabled={!selectedPatient || !activeEncounterId || !savedIntakeArtifact}
             className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Send className="w-4 h-4" />
-            <span>Route to Specialist</span>
+            <span>{savedIntakeArtifact ? 'Route Finalized Intake' : 'Finalize Intake First'}</span>
           </button>
         </div>
       </div>
@@ -610,7 +637,7 @@ export function DiseaseCentricIntakeView() {
         <div className="p-3 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 rounded-xl text-xs font-semibold flex items-center justify-between animate-in fade-in">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-            <span>Successfully recorded disease intake in patient longitudinal EHR & dispatched specialist notification!</span>
+            <span>Clinician-reviewed disease intake finalized as an immutable artifact and linked to Patient 360. It is now eligible for source-linked specialist routing.</span>
           </div>
         </div>
       )}
@@ -966,7 +993,7 @@ export function DiseaseCentricIntakeView() {
             <div className="bg-slate-50 dark:bg-slate-850 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 space-y-3">
               <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
                 <Workflow className="w-3.5 h-3.5 text-blue-600" />
-                Target Specialist Dispatch Routing
+                Suggested Specialist Destination
               </h4>
               <div className="flex flex-wrap gap-1.5">
                 {currentTemplate.typicalSpecialists.map((spec) => (
@@ -1145,7 +1172,7 @@ export function DiseaseCentricIntakeView() {
                 </h2>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Generates SBAR, Differential Diagnosis probability matrix, STAT diagnostic orders, and pre-specialist readiness checklists.
+                Generates a source-limited specialist brief from the reviewed intake, including SBAR context, observed protocol signals, missing information, and handoff preparation. It does not diagnose, prescribe, or place orders.
               </p>
             </div>
 
@@ -1481,6 +1508,11 @@ export function DiseaseCentricIntakeView() {
           }
           triageCategory={`${currentTemplate.specialty} / ${maxRiskSeverity}`}
           currentAttending={activeEncounter?.attendingPhysician || 'Unassigned'}
+          sourceRefs={
+            savedIntakeArtifact ? [savedIntakeArtifact.intakeArtifactId] : []
+          }
+          sourceArtifactId={savedIntakeArtifact?.intakeArtifactId}
+          sourceArtifactType={savedIntakeArtifact ? 'DISEASE_INTAKE' : undefined}
           onRoutedSuccess={() => setShowRoutingModal(false)}
         />
       )}

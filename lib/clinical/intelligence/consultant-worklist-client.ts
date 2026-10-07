@@ -99,13 +99,29 @@ export function requestClinicalConsultation(
     requestedSpecialty: string;
     requestedConsultantId?: string;
     clinicalQuestion: string;
-    priority?: 'ROUTINE' | 'URGENT' | 'STAT';
+    priority?: 'ROUTINE' | 'PRIORITY' | 'URGENT' | 'STAT';
     sourceRefs?: string[];
   }
 ) {
   return executeConsultantCommand(
     tenantId,
     'RequestConsultationCommand',
+    input
+  );
+}
+
+export function acknowledgeClinicalConsultation(
+  tenantId: string,
+  input: {
+    patientId: string;
+    encounterId: string;
+    consultationId: string;
+    note?: string;
+  }
+) {
+  return executeConsultantCommand(
+    tenantId,
+    'AcknowledgeConsultationCommand',
     input
   );
 }
@@ -160,6 +176,11 @@ export function createClinicalHandoff(
     medicationConcerns?: string[];
     unresolvedItems?: string[];
     expectedActions?: string[];
+    sourceRefs?: string[];
+    patient360Revision: number;
+    patient360SourceCheckpoint: string;
+    sourceArtifactId?: string;
+    sourceArtifactType?: 'DISEASE_INTAKE' | 'CLINICAL_DOCUMENT' | 'CONSULTATION' | 'OTHER';
   }
 ) {
   return executeConsultantCommand(
@@ -229,6 +250,37 @@ export function acknowledgeClinicalEscalation(
   return executeConsultantCommand(
     tenantId,
     'AcknowledgeClinicalEscalationCommand',
+    input
+  );
+}
+
+
+export function saveDiseaseIntakeArtifact(
+  tenantId: string,
+  input: {
+    patientId: string;
+    encounterId: string;
+    templateId: string;
+    templateName: string;
+    templateVersion?: string;
+    clinicalGuidelines: string;
+    guidedAnswers: Record<string, unknown>;
+    specialtyHistory: Record<string, unknown>;
+    selectedTreeNodeIds: string[];
+    observedRiskScore: number;
+    observedRiskSeverity: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL';
+    observedRiskSignalIds: string[];
+    observedRiskSignalTitles: string[];
+    specialistTargets: string[];
+    sourceRefs?: string[];
+    patient360Revision: number;
+    patient360SourceCheckpoint: string;
+    clinicianAttestation: true;
+  }
+) {
+  return executeConsultantCommand(
+    tenantId,
+    'SaveDiseaseIntakeArtifactCommand',
     input
   );
 }

@@ -58,6 +58,9 @@ jobs:
       - name: CBE consultant blindness guards
         run: bun run test:cbe
 
+      - name: Wave 1 clinical coordination closure
+        run: bun run test:wave1-clinical-coordination
+
       - name: Preserve Patient 360 and deterioration safety
         run: bun run test:ci7 && bun run test:ci8
 

@@ -8,6 +8,10 @@ import { ClinicalDeteriorationService } from '@/lib/clinical/intelligence/clinic
 import { DischargeReadinessService } from '@/lib/clinical/intelligence/discharge-readiness-service';
 import type { MedicationSafetyProjection } from '@/types/medication-safety';
 import { normalizeCareSetting } from '@/lib/clinical/patient360/care-context';
+import {
+  getConsultationSla,
+  getConsultationSlaState,
+} from '@/lib/clinical/coordination/consultation-sla';
 import type { CommandContext } from '@/lib/backend/types';
 import type { ClinicalOpenItemProjection } from '@/types/consultant-visibility';
 import type {
@@ -403,8 +407,33 @@ export class ConsultantAttentionProjectionService {
           String(candidate.status || '').toUpperCase()
         )
     )) {
-      const consultationOwner = consultation.assignedConsultantId ||
-        consultation.requestedConsultantId;
+      const consultationOwner =
+        consultation.assignedConsultantId || consultation.requestedConsultantId;
+      const policy = getConsultationSla(consultation.priority);
+      const acknowledgementDueAt =
+        consultation.acknowledgementDueAt ||
+        consultation.responseDueAt ||
+        consultation.requestedAt + policy.acknowledgementMinutes * 60_000;
+      const acceptanceDueAt =
+        consultation.acceptanceDueAt ||
+        consultation.requestedAt + policy.acceptanceMinutes * 60_000;
+      const awaitingAcknowledgement = ['REQUESTED', 'ASSIGNED'].includes(
+        String(consultation.status || '').toUpperCase()
+      );
+      const awaitingAcceptance =
+        String(consultation.status || '').toUpperCase() === 'ACKNOWLEDGED';
+      const slaPhase = awaitingAcknowledgement
+        ? 'ACKNOWLEDGEMENT' as const
+        : awaitingAcceptance
+          ? 'ACCEPTANCE' as const
+          : 'COMPLETE' as const;
+      const dueAt = awaitingAcknowledgement
+        ? acknowledgementDueAt
+        : awaitingAcceptance
+          ? acceptanceDueAt
+          : undefined;
+      const slaState = getConsultationSlaState(now, dueAt, slaPhase);
+
       active.push(
         item(
           {
@@ -419,24 +448,30 @@ export class ConsultantAttentionProjectionService {
             encounterId,
             careSetting,
             category: 'CONSULTATION',
-            description: `${consultation.priority} ${consultation.requestedSpecialty} consultation pending: ${consultation.clinicalQuestion}`,
+            description: awaitingAcknowledgement
+              ? `${consultation.priority} ${consultation.requestedSpecialty} consultation awaiting acknowledgement: ${consultation.clinicalQuestion}`
+              : awaitingAcceptance
+                ? `${consultation.priority} ${consultation.requestedSpecialty} consultation acknowledged and awaiting acceptance: ${consultation.clinicalQuestion}`
+                : `${consultation.priority} ${consultation.requestedSpecialty} consultation in consultant review: ${consultation.clinicalQuestion}`,
             clinicalPriority:
               consultation.priority === 'STAT'
                 ? 'CRITICAL_REVIEW_REQUIRED'
-                : consultation.priority === 'URGENT'
+                : slaState === 'BREACHED' || consultation.priority === 'URGENT'
                   ? 'ACTION_REQUIRED'
                   : 'REVIEW_REQUIRED',
             ownerType: consultationOwner ? 'CONSULTANT' : 'ROLE',
             ownerId: consultationOwner || 'CONSULTANT',
             ownerRole: consultationOwner ? undefined : 'CONSULTANT',
             createdAt: consultation.requestedAt,
-            dueAt:
-              consultation.priority === 'STAT'
-                ? consultation.requestedAt + 15 * 60_000
-                : consultation.priority === 'URGENT'
-                  ? consultation.requestedAt + 60 * 60_000
-                  : undefined,
-            sourceRefs: [consultation.consultationId],
+            dueAt,
+            slaPhase,
+            slaState,
+            sourceRefs: Array.from(
+              new Set([
+                consultation.consultationId,
+                ...(consultation.sourceRefs || []),
+              ])
+            ),
             lastSourceEventId: trigger?.eventId,
           },
           now
@@ -513,7 +548,9 @@ export class ConsultantAttentionProjectionService {
             clinicalPriority: 'ACTION_REQUIRED',
             ...targetOwner,
             createdAt: handoff.createdAt,
-            sourceRefs: [handoff.handoffId],
+            sourceRefs: Array.from(
+              new Set([handoff.handoffId, ...(handoff.sourceRefs || [])])
+            ),
             lastSourceEventId: trigger?.eventId,
           },
           now
@@ -965,6 +1002,8 @@ export class ConsultantAttentionProjectionService {
       status: entry.status,
       createdAt: entry.createdAt,
       dueAt: entry.dueAt,
+      slaPhase: entry.slaPhase,
+      slaState: entry.slaState,
       acknowledgedAt: entry.acknowledgedAt,
       sourceRefs: entry.sourceRefs,
     }));

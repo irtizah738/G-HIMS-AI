@@ -17,7 +17,9 @@ import { useRBAC } from '@/lib/auth/rbac-context';
 import {
   acceptClinicalConsultation,
   acceptClinicalHandoff,
+  acknowledgeClinicalConsultation,
   acknowledgeClinicalOpenItem,
+  completeClinicalConsultation,
   loadConsultantWorklist,
 } from '@/lib/clinical/intelligence/consultant-worklist-client';
 import type {
@@ -44,6 +46,9 @@ export function ConsultantCommandCenter() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actingItemId, setActingItemId] = useState<string | null>(null);
+  const [completionItem, setCompletionItem] = useState<ConsultantWorklistItem | null>(null);
+  const [completionAssessment, setCompletionAssessment] = useState('');
+  const [completionRecommendations, setCompletionRecommendations] = useState('');
 
   const load = useCallback(async () => {
     if (!tenantId || auth.isOffline) return;
@@ -101,8 +106,28 @@ export function ConsultantCommandCenter() {
     }
   };
 
+  const acknowledgeConsultation = async (item: ConsultantWorklistItem) => {
+    if (!tenantId || !item.encounterId || item.category !== 'CONSULTATION' || item.slaPhase !== 'ACKNOWLEDGEMENT') return;
+    const consultationId = item.sourceRefs[0];
+    if (!consultationId) return;
+    setActingItemId(item.openItemId);
+    setError(null);
+    try {
+      await acknowledgeClinicalConsultation(tenantId, {
+        patientId: item.patientId,
+        encounterId: item.encounterId,
+        consultationId,
+      });
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Consultation could not be acknowledged.');
+    } finally {
+      setActingItemId(null);
+    }
+  };
+
   const acceptCoordinationItem = async (item: ConsultantWorklistItem) => {
-    if (!tenantId || !item.encounterId || item.status !== 'OPEN') return;
+    if (!tenantId || !item.encounterId) return;
     const sourceId = item.sourceRefs[0];
     if (!sourceId || !['CONSULTATION', 'HANDOFF'].includes(item.category)) return;
 
@@ -128,6 +153,46 @@ export function ConsultantCommandCenter() {
         caught instanceof Error
           ? caught.message
           : 'Clinical coordination item could not be accepted.'
+      );
+    } finally {
+      setActingItemId(null);
+    }
+  };
+
+  const completeConsultation = async () => {
+    if (!tenantId || !completionItem?.encounterId) return;
+    const consultationId = completionItem.sourceRefs[0];
+    const assessment = completionAssessment.trim();
+    const recommendations = completionRecommendations
+      .split('\n')
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    if (!consultationId || !assessment || recommendations.length === 0) {
+      setError('Assessment and at least one recommendation are required to complete a consultation.');
+      return;
+    }
+
+    setActingItemId(completionItem.openItemId);
+    setError(null);
+    try {
+      await completeClinicalConsultation(tenantId, {
+        patientId: completionItem.patientId,
+        encounterId: completionItem.encounterId,
+        consultationId,
+        assessment,
+        recommendations,
+        primaryTeamReviewRequired: true,
+      });
+      setCompletionItem(null);
+      setCompletionAssessment('');
+      setCompletionRecommendations('');
+      await load();
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : 'Consultation could not be completed.'
       );
     } finally {
       setActingItemId(null);
@@ -260,6 +325,11 @@ export function ConsultantCommandCenter() {
                         <span className="text-[10px] text-slate-400">
                           {item.careSetting}
                         </span>
+                        {item.slaPhase && item.slaPhase !== 'COMPLETE' && (
+                          <span className="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700">
+                            {item.slaPhase === 'ACKNOWLEDGEMENT' ? 'Awaiting acknowledgement' : 'Awaiting acceptance'}
+                          </span>
+                        )}
                         {isOverdue && (
                           <span className="rounded-full bg-rose-50 px-2 py-1 text-[10px] font-bold text-rose-700">
                             SLA overdue
@@ -292,9 +362,22 @@ export function ConsultantCommandCenter() {
                       >
                         Open Patient 360
                       </button>
-                      {item.status === 'OPEN' &&
-                        item.encounterId &&
-                        ['CONSULTATION', 'HANDOFF'].includes(item.category) &&
+                      {item.encounterId &&
+                        item.category === 'CONSULTATION' &&
+                        item.slaPhase === 'ACKNOWLEDGEMENT' &&
+                        Boolean(item.sourceRefs[0]) && (
+                          <button
+                            type="button"
+                            onClick={() => void acknowledgeConsultation(item)}
+                            disabled={actingItemId === item.openItemId}
+                            className="rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-800 disabled:opacity-50"
+                          >
+                            {actingItemId === item.openItemId ? 'Acknowledging…' : 'Acknowledge consult'}
+                          </button>
+                        )}
+                      {item.encounterId &&
+                        ((item.category === 'CONSULTATION' && item.slaPhase === 'ACCEPTANCE') ||
+                          item.category === 'HANDOFF') &&
                         Boolean(item.sourceRefs[0]) && (
                           <button
                             type="button"
@@ -309,7 +392,25 @@ export function ConsultantCommandCenter() {
                                 : 'Accept handoff'}
                           </button>
                         )}
-                      {item.status === 'OPEN' && item.encounterId && (
+                      {item.category === 'CONSULTATION' &&
+                        item.slaPhase === 'COMPLETE' &&
+                        Boolean(item.sourceRefs[0]) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCompletionItem(item);
+                              setCompletionAssessment('');
+                              setCompletionRecommendations('');
+                            }}
+                            disabled={actingItemId === item.openItemId}
+                            className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800 disabled:opacity-50"
+                          >
+                            Complete consult
+                          </button>
+                        )}
+                      {item.status === 'OPEN' &&
+                        item.encounterId &&
+                        !['CONSULTATION', 'HANDOFF'].includes(item.category) && (
                         <button
                           type="button"
                           onClick={() => void acknowledge(item)}
@@ -329,6 +430,67 @@ export function ConsultantCommandCenter() {
           )}
         </div>
       </section>
+
+      {completionItem && (
+        <section className="rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm dark:border-emerald-900 dark:bg-slate-900">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-sm font-black text-slate-900 dark:text-slate-100">
+                Complete specialist consultation
+              </h2>
+              <p className="mt-1 text-xs text-slate-500">
+                Record the consultant assessment and explicit recommendations. The worklist closes only after the authoritative consultation completion event commits.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCompletionItem(null)}
+              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold"
+            >
+              Cancel
+            </button>
+          </div>
+          <div className="mt-4 grid gap-4">
+            <label className="grid gap-1 text-xs font-bold text-slate-700 dark:text-slate-200">
+              Assessment
+              <textarea
+                value={completionAssessment}
+                onChange={(event) => setCompletionAssessment(event.target.value)}
+                rows={4}
+                maxLength={12000}
+                className="rounded-xl border border-slate-200 bg-white p-3 text-sm font-normal dark:border-slate-700 dark:bg-slate-950"
+              />
+            </label>
+            <label className="grid gap-1 text-xs font-bold text-slate-700 dark:text-slate-200">
+              Recommendations
+              <textarea
+                value={completionRecommendations}
+                onChange={(event) => setCompletionRecommendations(event.target.value)}
+                rows={4}
+                maxLength={12000}
+                placeholder="One recommendation per line"
+                className="rounded-xl border border-slate-200 bg-white p-3 text-sm font-normal dark:border-slate-700 dark:bg-slate-950"
+              />
+            </label>
+            <div>
+              <button
+                type="button"
+                onClick={() => void completeConsultation()}
+                disabled={
+                  actingItemId === completionItem.openItemId ||
+                  !completionAssessment.trim() ||
+                  !completionRecommendations.trim()
+                }
+                className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-black text-white disabled:opacity-50"
+              >
+                {actingItemId === completionItem.openItemId
+                  ? 'Completing…'
+                  : 'Commit consultation completion'}
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

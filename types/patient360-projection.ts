@@ -1,4 +1,5 @@
 import type { ClinicalCareSetting } from '@/types/consultant-visibility';
+import type { DiseaseIntakeRiskSeverity } from '@/types/disease-intake-artifact';
 import type {
   ClinicalAllergy,
   ClinicalCondition,
@@ -110,6 +111,19 @@ export interface Patient360DocumentSummary {
   signedAt: number;
 }
 
+export interface Patient360DiseaseIntakeSummary {
+  intakeArtifactId: string;
+  encounterId: string;
+  templateId: string;
+  templateName: string;
+  riskSeverity: DiseaseIntakeRiskSeverity;
+  riskScore: number;
+  specialistTargets: string[];
+  authoredBy: string;
+  authoredAt: number;
+  sourceRefs: string[];
+}
+
 export interface Patient360DataQuality {
   allergyKnowledge: KnownStatus;
   problemListKnowledge: KnownStatus;
@@ -141,6 +155,7 @@ export interface Patient360Projection {
   latestVitals: Patient360ObservationSummary[];
   recentResults: Patient360ResultSummary[];
   recentDocuments: Patient360DocumentSummary[];
+  recentDiseaseIntakes: Patient360DiseaseIntakeSummary[];
   dataQuality: Patient360DataQuality;
   counts: {
     encounters: number;
@@ -150,6 +165,7 @@ export interface Patient360Projection {
     observations: number;
     diagnosticReports: number;
     documents: number;
+    diseaseIntakes: number;
   };
   /** Projection schema version. Increment only for a read-model contract change. */
   projectionVersion: number;

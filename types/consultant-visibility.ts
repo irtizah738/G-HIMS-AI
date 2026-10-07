@@ -97,6 +97,8 @@ export interface ClinicalOpenItemProjection {
   resolutionMode?: 'SOURCE_STATE' | 'MANUAL';
   createdAt: number;
   dueAt?: number;
+  slaPhase?: 'ACKNOWLEDGEMENT' | 'ACCEPTANCE' | 'COMPLETE';
+  slaState?: 'ON_TRACK' | 'DUE_SOON' | 'BREACHED' | 'COMPLETE';
   acknowledgedAt?: number;
   acknowledgedBy?: string;
   acknowledgementNote?: string;

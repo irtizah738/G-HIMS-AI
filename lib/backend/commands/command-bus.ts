@@ -48,6 +48,7 @@ import { PatientClinicalKnowledgeDomainService } from '../services/patient-clini
 import { DischargeReadinessReviewDomainService } from '../services/discharge-readiness-review-domain-service';
 import { ConsultantReviewDomainService } from '../services/consultant-review-domain-service';
 import { ClinicalCoordinationDomainService } from '../services/clinical-coordination-domain-service';
+import { DiseaseIntakeDomainService } from '../services/disease-intake-domain-service';
 import { IdempotencyService } from '../idempotency/idempotency-service';
 import { validateCommandPayload } from './command-schema-registry';
 import { emitOperationalEvent, operationalTimer } from '@/lib/observability/server-telemetry';
@@ -536,6 +537,12 @@ export class CommandBus {
           );
           break;
 
+        case 'AcknowledgeConsultationCommand':
+          result = await ClinicalCoordinationDomainService.acknowledgeConsultation(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
         case 'AcceptConsultationCommand':
           result = await ClinicalCoordinationDomainService.acceptConsultation(
             context, command.commandId, command.idempotencyKey, command.payload as any
@@ -550,6 +557,12 @@ export class CommandBus {
 
         case 'CreateClinicalHandoffCommand':
           result = await ClinicalCoordinationDomainService.createHandoff(
+            context, command.commandId, command.idempotencyKey, command.payload as any
+          );
+          break;
+
+        case 'SaveDiseaseIntakeArtifactCommand':
+          result = await DiseaseIntakeDomainService.finalize(
             context, command.commandId, command.idempotencyKey, command.payload as any
           );
           break;

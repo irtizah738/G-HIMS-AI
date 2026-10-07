@@ -3,6 +3,7 @@ import { TransactionManager } from '@/lib/backend/transactions/transaction-manag
 import type { CommandContext, CommandResult } from '@/lib/backend/types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import { assertPatient360PatientAccess } from '@/lib/clinical/patient360/patient360-access';
+import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
 import { normalizeCareSetting } from '@/lib/clinical/patient360/care-context';
 import type {
   ClinicalConsultationRequest,
@@ -10,6 +11,8 @@ import type {
   ClinicalEscalationProjection,
 } from '@/types/clinical-coordination';
 import type { ClinicalOpenItemProjection } from '@/types/consultant-visibility';
+import type { DiseaseIntakeArtifact } from '@/types/disease-intake-artifact';
+import { getConsultationSla } from '@/lib/clinical/coordination/consultation-sla';
 
 interface ScopedClinicalPayload {
   patientId: string;
@@ -20,8 +23,13 @@ export interface RequestConsultationPayload extends ScopedClinicalPayload {
   requestedSpecialty: string;
   requestedConsultantId?: string;
   clinicalQuestion: string;
-  priority?: 'ROUTINE' | 'URGENT' | 'STAT';
+  priority?: 'ROUTINE' | 'PRIORITY' | 'URGENT' | 'STAT';
   sourceRefs?: string[];
+}
+
+export interface AcknowledgeConsultationPayload extends ScopedClinicalPayload {
+  consultationId: string;
+  note?: string;
 }
 
 export interface AcceptConsultationPayload extends ScopedClinicalPayload {
@@ -48,6 +56,11 @@ export interface CreateClinicalHandoffPayload extends ScopedClinicalPayload {
   medicationConcerns?: string[];
   unresolvedItems?: string[];
   expectedActions?: string[];
+  sourceRefs?: string[];
+  patient360Revision: number;
+  patient360SourceCheckpoint: string;
+  sourceArtifactId?: string;
+  sourceArtifactType?: 'DISEASE_INTAKE' | 'CLINICAL_DOCUMENT' | 'CONSULTATION' | 'OTHER';
 }
 
 export interface AcceptClinicalHandoffPayload extends ScopedClinicalPayload {
@@ -241,6 +254,8 @@ export class ClinicalCoordinationDomainService {
     }
 
     const now = Date.now();
+    const priority = payload.priority || 'ROUTINE';
+    const sla = getConsultationSla(priority);
     const consultationId = `consult_${crypto.randomUUID()}`;
     const consultation: ClinicalConsultationRequest = {
       consultationId,
@@ -254,7 +269,13 @@ export class ClinicalCoordinationDomainService {
       requestedConsultantId: payload.requestedConsultantId?.trim() || undefined,
       assignedConsultantId: payload.requestedConsultantId?.trim() || undefined,
       clinicalQuestion,
-      priority: payload.priority || 'ROUTINE',
+      priority,
+      acknowledgementSlaMinutes: sla.acknowledgementMinutes,
+      acknowledgementDueAt: now + sla.acknowledgementMinutes * 60_000,
+      acceptanceSlaMinutes: sla.acceptanceMinutes,
+      acceptanceDueAt: now + sla.acceptanceMinutes * 60_000,
+      responseSlaMinutes: sla.acknowledgementMinutes,
+      responseDueAt: now + sla.acknowledgementMinutes * 60_000,
       status: payload.requestedConsultantId ? 'ASSIGNED' : 'REQUESTED',
       sourceRefs: Array.from(new Set(payload.sourceRefs || [])).slice(0, 100),
       requestedBy: context.actorId,
@@ -277,6 +298,10 @@ export class ClinicalCoordinationDomainService {
         requestedSpecialty,
         requestedConsultantId: consultation.requestedConsultantId,
         priority: consultation.priority,
+        acknowledgementSlaMinutes: consultation.acknowledgementSlaMinutes,
+        acknowledgementDueAt: consultation.acknowledgementDueAt,
+        acceptanceSlaMinutes: consultation.acceptanceSlaMinutes,
+        acceptanceDueAt: consultation.acceptanceDueAt,
         clinicalQuestion,
       },
       auditAction: 'REQUEST_CLINICAL_CONSULTATION',
@@ -299,6 +324,124 @@ export class ClinicalCoordinationDomainService {
       auditId: tx.auditId,
       outboxId: tx.outboxId,
       data: consultation,
+    };
+  }
+
+  public static async acknowledgeConsultation(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: AcknowledgeConsultationPayload
+  ): Promise<CommandResult> {
+    const auth = clinicalCoordinatorAuth(context);
+    if (!auth.authorized) {
+      return failure(
+        commandId,
+        idempotencyKey,
+        auth.code || 'UNAUTHORIZED',
+        auth.reason || 'Credentialed consultant authority is required.'
+      );
+    }
+
+    const scoped = await loadScopedPatientEncounter(context, payload);
+    if ('error' in scoped) {
+      return failure(commandId, idempotencyKey, scoped.error.code, scoped.error.message);
+    }
+
+    const current = await DomainStateRepository.getById<ClinicalConsultationRequest>(
+      context.tenantId,
+      'consultationRequests',
+      payload.consultationId
+    );
+    if (!current) {
+      return failure(commandId, idempotencyKey, 'CONSULTATION_NOT_FOUND', 'Consultation request was not found.');
+    }
+    if (
+      current.patientId !== payload.patientId ||
+      current.encounterId !== payload.encounterId
+    ) {
+      return failure(commandId, idempotencyKey, 'CONSULTATION_SCOPE_MISMATCH', 'Consultation does not match the patient encounter.');
+    }
+    if (!['REQUESTED', 'ASSIGNED'].includes(current.status)) {
+      return failure(
+        commandId,
+        idempotencyKey,
+        'CONSULTATION_NOT_ACKNOWLEDGEABLE',
+        'Only requested or assigned consultations can be acknowledged.'
+      );
+    }
+    if (
+      current.requestedConsultantId &&
+      current.requestedConsultantId !== context.actorId &&
+      !context.roles.some((role) => String(role).toUpperCase() === 'SYSTEM_ADMIN')
+    ) {
+      return failure(commandId, idempotencyKey, 'CONSULTATION_ASSIGNEE_MISMATCH', 'Consultation is assigned to another consultant.');
+    }
+
+    const now = Date.now();
+    const legacyPolicy = getConsultationSla(current.priority);
+    const acknowledgementDueAt =
+      current.acknowledgementDueAt ||
+      current.responseDueAt ||
+      current.requestedAt + legacyPolicy.acknowledgementMinutes * 60_000;
+    const acceptanceDueAt =
+      current.acceptanceDueAt ||
+      current.requestedAt + legacyPolicy.acceptanceMinutes * 60_000;
+    const next: ClinicalConsultationRequest = {
+      ...current,
+      acknowledgementSlaMinutes:
+        current.acknowledgementSlaMinutes ||
+        current.responseSlaMinutes ||
+        legacyPolicy.acknowledgementMinutes,
+      acknowledgementDueAt,
+      acceptanceSlaMinutes:
+        current.acceptanceSlaMinutes || legacyPolicy.acceptanceMinutes,
+      acceptanceDueAt,
+      assignedConsultantId: current.assignedConsultantId || context.actorId,
+      acknowledgedBy: context.actorId,
+      acknowledgedAt: now,
+      acknowledgementSlaBreached: now > acknowledgementDueAt,
+      status: 'ACKNOWLEDGED',
+      updatedAt: now,
+    };
+
+    const tx = await TransactionManager.executeAtomicMutation({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      actorRole: context.roles[0] || 'CONSULTANT',
+      aggregateType: 'CLINICAL_CONSULTATION_REQUEST',
+      aggregateId: current.consultationId,
+      eventType: 'CLINICAL_CONSULTATION_ACKNOWLEDGED',
+      eventPayload: {
+        consultationId: current.consultationId,
+        patientId: current.patientId,
+        encounterId: current.encounterId,
+        acknowledgedBy: context.actorId,
+        acknowledgedAt: now,
+        acknowledgementDueAt,
+        acknowledgementSlaBreached: next.acknowledgementSlaBreached,
+        note: String(payload.note || '').trim() || undefined,
+      },
+      auditAction: 'ACKNOWLEDGE_CLINICAL_CONSULTATION',
+      auditResourceType: 'ENCOUNTER',
+      auditResourceId: current.encounterId,
+      auditReason: `Consultant ${context.actorId} acknowledged consultation ${current.consultationId}.`,
+      outboxTopic: 'g-hims-clinical-events',
+      idempotencyKey,
+      commandId,
+      correlationId: context.correlationId,
+      domainState: next,
+    });
+
+    return {
+      success: true,
+      commandId,
+      idempotencyKey,
+      entityId: current.consultationId,
+      eventId: tx.eventId,
+      auditId: tx.auditId,
+      outboxId: tx.outboxId,
+      data: next,
     };
   }
 
@@ -337,8 +480,13 @@ export class ClinicalCoordinationDomainService {
     ) {
       return failure(commandId, idempotencyKey, 'CONSULTATION_SCOPE_MISMATCH', 'Consultation does not match the patient encounter.');
     }
-    if (!['REQUESTED', 'ASSIGNED'].includes(current.status)) {
-      return failure(commandId, idempotencyKey, 'CONSULTATION_NOT_ACCEPTABLE', 'Only requested or assigned consultations can be accepted.');
+    if (current.status !== 'ACKNOWLEDGED') {
+      return failure(
+        commandId,
+        idempotencyKey,
+        'CONSULTATION_ACKNOWLEDGEMENT_REQUIRED',
+        'Consultation must be explicitly acknowledged before it can be accepted.'
+      );
     }
     if (
       current.requestedConsultantId &&
@@ -347,13 +495,57 @@ export class ClinicalCoordinationDomainService {
     ) {
       return failure(commandId, idempotencyKey, 'CONSULTATION_ASSIGNEE_MISMATCH', 'Consultation is assigned to another consultant.');
     }
+    if (
+      current.assignedConsultantId &&
+      current.assignedConsultantId !== context.actorId &&
+      !context.roles.some((role) => ['SYSTEM_ADMIN'].includes(String(role).toUpperCase()))
+    ) {
+      return failure(
+        commandId,
+        idempotencyKey,
+        'CONSULTATION_ASSIGNEE_MISMATCH',
+        'Only the consultant who acknowledged this consultation may accept it.'
+      );
+    }
+    if (!current.acknowledgedBy || !current.acknowledgedAt) {
+      return failure(
+        commandId,
+        idempotencyKey,
+        'CONSULTATION_ACKNOWLEDGEMENT_PROVENANCE_MISSING',
+        'Consultation acknowledgement provenance is missing and must be repaired before acceptance.'
+      );
+    }
 
+    const acknowledgedBy = current.acknowledgedBy;
+    const acknowledgedAt = current.acknowledgedAt;
     const now = Date.now();
+    const legacyPolicy = getConsultationSla(current.priority);
+    const acknowledgementDueAt =
+      current.acknowledgementDueAt ||
+      current.responseDueAt ||
+      current.requestedAt + legacyPolicy.acknowledgementMinutes * 60_000;
+    const acceptanceDueAt =
+      current.acceptanceDueAt ||
+      current.requestedAt + legacyPolicy.acceptanceMinutes * 60_000;
     const next: ClinicalConsultationRequest = {
       ...current,
+      acknowledgementSlaMinutes:
+        current.acknowledgementSlaMinutes ||
+        current.responseSlaMinutes ||
+        legacyPolicy.acknowledgementMinutes,
+      acknowledgementDueAt,
+      acceptanceSlaMinutes:
+        current.acceptanceSlaMinutes || legacyPolicy.acceptanceMinutes,
+      acceptanceDueAt,
       assignedConsultantId: context.actorId,
+      acknowledgedBy,
+      acknowledgedAt,
+      acknowledgementSlaBreached:
+        current.acknowledgementSlaBreached ??
+        (acknowledgedAt > acknowledgementDueAt),
       acceptedBy: context.actorId,
       acceptedAt: now,
+      acceptanceSlaBreached: now > acceptanceDueAt,
       status: 'ACCEPTED',
       updatedAt: now,
     };
@@ -371,6 +563,8 @@ export class ClinicalCoordinationDomainService {
         encounterId: current.encounterId,
         assignedConsultantId: context.actorId,
         acceptedAt: now,
+        acceptanceDueAt,
+        acceptanceSlaBreached: next.acceptanceSlaBreached,
       },
       auditAction: 'ACCEPT_CLINICAL_CONSULTATION',
       auditResourceType: 'ENCOUNTER',
@@ -535,6 +729,101 @@ export class ClinicalCoordinationDomainService {
       );
     }
 
+    if (!Number.isInteger(payload.patient360Revision) || payload.patient360Revision < 0) {
+      return failure(
+        commandId,
+        idempotencyKey,
+        'HANDOFF_PATIENT360_REVISION_REQUIRED',
+        'Handoff requires the reviewed Patient 360 revision.'
+      );
+    }
+    const patient360SourceCheckpoint = String(payload.patient360SourceCheckpoint || '').trim();
+    if (!patient360SourceCheckpoint) {
+      return failure(
+        commandId,
+        idempotencyKey,
+        'HANDOFF_PATIENT360_CHECKPOINT_REQUIRED',
+        'Handoff requires the reviewed Patient 360 source checkpoint.'
+      );
+    }
+
+    const patient360 = await Patient360ProjectionService.getOrRebuildProjection(
+      context.tenantId,
+      payload.patientId
+    );
+    if (!patient360) {
+      return failure(
+        commandId,
+        idempotencyKey,
+        'HANDOFF_PATIENT360_UNAVAILABLE',
+        'Patient 360 could not be loaded for clinical handoff validation.'
+      );
+    }
+    if (
+      patient360.revision !== payload.patient360Revision ||
+      patient360.sourceCheckpoint !== patient360SourceCheckpoint
+    ) {
+      return failure(
+        commandId,
+        idempotencyKey,
+        'HANDOFF_PATIENT360_REVIEW_STALE',
+        'Patient 360 changed after handoff preparation. Refresh and review the chart before committing the handoff.'
+      );
+    }
+
+    const sourceArtifactId = payload.sourceArtifactId?.trim() || undefined;
+    const sourceArtifactType = payload.sourceArtifactType;
+    if (Boolean(sourceArtifactId) !== Boolean(sourceArtifactType)) {
+      return failure(
+        commandId,
+        idempotencyKey,
+        'HANDOFF_SOURCE_ARTIFACT_REFERENCE_INCOMPLETE',
+        'Source artifact ID and source artifact type must be supplied together.'
+      );
+    }
+
+    if (sourceArtifactId && sourceArtifactType === 'DISEASE_INTAKE') {
+      const sourceIntake = await DomainStateRepository.getById<DiseaseIntakeArtifact>(
+        context.tenantId,
+        'diseaseIntakeArtifacts',
+        sourceArtifactId
+      );
+      if (
+        !sourceIntake ||
+        sourceIntake.patientId !== payload.patientId ||
+        sourceIntake.encounterId !== payload.encounterId ||
+        sourceIntake.status !== 'FINAL'
+      ) {
+        return failure(
+          commandId,
+          idempotencyKey,
+          'HANDOFF_SOURCE_DISEASE_INTAKE_INVALID',
+          'Disease intake source artifact is missing, non-final, or outside the supplied patient encounter.'
+        );
+      }
+    }
+
+    if (sourceArtifactId && sourceArtifactType === 'CONSULTATION') {
+      const sourceConsultation =
+        await DomainStateRepository.getById<ClinicalConsultationRequest>(
+          context.tenantId,
+          'consultationRequests',
+          sourceArtifactId
+        );
+      if (
+        !sourceConsultation ||
+        sourceConsultation.patientId !== payload.patientId ||
+        sourceConsultation.encounterId !== payload.encounterId
+      ) {
+        return failure(
+          commandId,
+          idempotencyKey,
+          'HANDOFF_SOURCE_CONSULTATION_INVALID',
+          'Consultation source artifact is missing or outside the supplied patient encounter.'
+        );
+      }
+    }
+
     const now = Date.now();
     const handoffId = `handoff_${crypto.randomUUID()}`;
     const handoff: ClinicalHandoff = {
@@ -557,6 +846,11 @@ export class ClinicalCoordinationDomainService {
       medicationConcerns: (payload.medicationConcerns || []).map(String).map((v) => v.trim()).filter(Boolean).slice(0, 100),
       unresolvedItems: (payload.unresolvedItems || []).map(String).map((v) => v.trim()).filter(Boolean).slice(0, 200),
       expectedActions: (payload.expectedActions || []).map(String).map((v) => v.trim()).filter(Boolean).slice(0, 100),
+      sourceRefs: Array.from(new Set(payload.sourceRefs || [])).map(String).map((v) => v.trim()).filter(Boolean).slice(0, 200),
+      patient360Revision: payload.patient360Revision,
+      patient360SourceCheckpoint: String(payload.patient360SourceCheckpoint || '').trim(),
+      sourceArtifactId,
+      sourceArtifactType,
       status: 'PENDING_ACCEPTANCE',
       createdAt: now,
       updatedAt: now,
@@ -577,6 +871,11 @@ export class ClinicalCoordinationDomainService {
         toDepartmentId,
         toRole,
         expectedActions: handoff.expectedActions,
+        sourceRefs: handoff.sourceRefs,
+        patient360Revision: handoff.patient360Revision,
+        patient360SourceCheckpoint: handoff.patient360SourceCheckpoint,
+        sourceArtifactId: handoff.sourceArtifactId,
+        sourceArtifactType: handoff.sourceArtifactType,
       },
       auditAction: 'CREATE_CLINICAL_HANDOFF',
       auditResourceType: 'ENCOUNTER',
@@ -656,6 +955,20 @@ export class ClinicalCoordinationDomainService {
       !actorDepartments.has(current.toDepartmentId.toUpperCase())
     ) {
       return failure(commandId, idempotencyKey, 'HANDOFF_DEPARTMENT_MISMATCH', 'Receiving clinician is outside the targeted handoff department.');
+    }
+
+    const actorRoles = new Set(
+      context.roles
+        .map((role) => String(role || '').trim().toUpperCase())
+        .filter(Boolean)
+    );
+    if (current.toRole && !actorRoles.has(current.toRole.toUpperCase())) {
+      return failure(
+        commandId,
+        idempotencyKey,
+        'HANDOFF_ROLE_MISMATCH',
+        'Receiving clinician does not hold the role targeted by this handoff.'
+      );
     }
 
     const now = Date.now();

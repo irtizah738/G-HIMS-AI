@@ -27,9 +27,11 @@ import {
 import { useHospital } from '@/lib/context/hospital-context';
 import { useAuth } from '@/lib/auth/auth-context';
 import {
+  createClinicalHandoff,
   loadConsultantDirectory,
   requestClinicalConsultation,
 } from '@/lib/clinical/intelligence/consultant-worklist-client';
+import { AuthClient } from '@/lib/auth/auth-client';
 import type { EligibleConsultant } from '@/lib/clinical/intelligence/consultant-directory-service';
 
 const IS_DEMO_RUNTIME = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
@@ -278,6 +280,9 @@ interface PatientConsultantRoutingModalProps {
   chiefComplaint?: string;
   triageCategory?: string;
   currentAttending?: string;
+  sourceRefs?: string[];
+  sourceArtifactId?: string;
+  sourceArtifactType?: 'DISEASE_INTAKE' | 'CLINICAL_DOCUMENT' | 'CONSULTATION' | 'OTHER';
   onRoutedSuccess?: (consultant: ConsultantDoctor, routingDetails: any) => void;
 }
 
@@ -291,6 +296,9 @@ export function PatientConsultantRoutingModal({
   chiefComplaint = 'Acute retrosternal chest pain radiating to jaw, diaphoresis',
   triageCategory = 'Cardiology / Acute Coronary Syndrome',
   currentAttending = 'Triage Officer / Emergency MO',
+  sourceRefs = [],
+  sourceArtifactId,
+  sourceArtifactType,
   onRoutedSuccess,
 }: PatientConsultantRoutingModalProps) {
   const { addClinicalNote } = useHospital();
@@ -320,6 +328,15 @@ export function PatientConsultantRoutingModal({
 
   const [isDispatching, setIsDispatching] = useState<boolean>(false);
   const [dispatchedConfirmation, setDispatchedConfirmation] = useState<any | null>(null);
+  const [pendingHandoff, setPendingHandoff] = useState<{
+    consultationId: string;
+    consultantId: string;
+    patientId: string;
+    encounterId: string;
+    sourceArtifactId?: string;
+    patient360Revision: number;
+    patient360SourceCheckpoint: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -340,7 +357,8 @@ export function PatientConsultantRoutingModal({
       ct_scan: false,
     });
     setDispatchedConfirmation(null);
-  }, [isOpen, patientId, encounterId, chiefComplaint]);
+    setPendingHandoff(null);
+  }, [isOpen, patientId, encounterId, chiefComplaint, sourceArtifactId]);
 
   useEffect(() => {
     if (!isOpen || IS_DEMO_RUNTIME) return;
@@ -531,6 +549,16 @@ export function PatientConsultantRoutingModal({
   });
 
   const selectedDoctor = consultants.find((d) => d.id === selectedDoctorId);
+  const departmentFilters = [
+    'ALL',
+    ...Array.from(
+      new Set(
+        consultants
+          .map((doctor) => doctor.department.trim())
+          .filter(Boolean)
+      )
+    ).slice(0, 10),
+  ];
 
   const handleDispatchConsultant = async () => {
     if (!selectedDoctor) {
@@ -544,6 +572,7 @@ export function PatientConsultantRoutingModal({
     setIsDispatching(true);
     setDirectoryError(null);
 
+    let authoritativeConsultationId = '';
     const routingPayload = {
       routedAt: new Date().toISOString(),
       patientId,
@@ -582,29 +611,134 @@ export function PatientConsultantRoutingModal({
             'Authoritative consultant routing requires tenant, patient and encounter identity.'
           );
         }
-        await requestClinicalConsultation(tenantId, {
+        const patient360Response = await AuthClient.authorizedFetch(
+          `/api/clinical/patient360/${encodeURIComponent(patientId)}?tenantId=${encodeURIComponent(tenantId)}&encounterId=${encodeURIComponent(encounterId)}`,
+          { method: 'GET', cache: 'no-store' },
+          tenantId
+        );
+        const patient360Payload = await patient360Response.json();
+        if (
+          !patient360Response.ok ||
+          !patient360Payload?.success ||
+          !patient360Payload?.projection
+        ) {
+          throw new Error(
+            patient360Payload?.error ||
+              'Patient 360 evidence could not be loaded for specialist routing.'
+          );
+        }
+
+        const patient360Revision = Number(patient360Payload.projection.revision);
+        const patient360SourceCheckpoint = String(
+          patient360Payload.projection.sourceCheckpoint || ''
+        ).trim();
+        if (
+          !Number.isInteger(patient360Revision) ||
+          patient360Revision < 0 ||
+          !patient360SourceCheckpoint
+        ) {
+          throw new Error(
+            'Patient 360 did not provide a valid evidence checkpoint for routing.'
+          );
+        }
+
+        const canResumePendingHandoff =
+          pendingHandoff?.patientId === patientId &&
+          pendingHandoff.encounterId === encounterId &&
+          pendingHandoff.consultantId === selectedDoctor.id &&
+          pendingHandoff.sourceArtifactId === sourceArtifactId;
+
+        let consultationId = canResumePendingHandoff
+          ? pendingHandoff.consultationId
+          : '';
+
+        if (!consultationId) {
+          const consultation = await requestClinicalConsultation(tenantId, {
+            patientId,
+            encounterId,
+            requestedSpecialty: selectedDoctor.subSpecialty || selectedDoctor.department,
+            requestedConsultantId: selectedDoctor.id,
+            clinicalQuestion:
+              clinicalHandoffNote.trim() ||
+              `${chiefComplaint}. Specialist review requested from ${selectedDoctor.department}.`,
+            priority: routingUrgency,
+            sourceRefs,
+          });
+          consultationId = String(
+            consultation.entityId ||
+              (consultation.data as Record<string, unknown> | undefined)?.consultationId ||
+              ''
+          ).trim();
+          if (!consultationId) {
+            throw new Error(
+              'Consultation was created without a canonical consultation identifier.'
+            );
+          }
+
+          setPendingHandoff({
+            consultationId,
+            consultantId: selectedDoctor.id,
+            patientId,
+            encounterId,
+            sourceArtifactId,
+            patient360Revision,
+            patient360SourceCheckpoint,
+          });
+        }
+
+        authoritativeConsultationId = consultationId;
+
+        const handoffRevision = canResumePendingHandoff
+          ? pendingHandoff.patient360Revision
+          : patient360Revision;
+        const handoffCheckpoint = canResumePendingHandoff
+          ? pendingHandoff.patient360SourceCheckpoint
+          : patient360SourceCheckpoint;
+
+        await createClinicalHandoff(tenantId, {
           patientId,
           encounterId,
-          requestedSpecialty: selectedDoctor.subSpecialty || selectedDoctor.department,
-          requestedConsultantId: selectedDoctor.id,
-          clinicalQuestion:
+          toClinicianId: selectedDoctor.id,
+          currentProblemSummary:
             clinicalHandoffNote.trim() ||
             `${chiefComplaint}. Specialist review requested from ${selectedDoctor.department}.`,
-          priority:
-            routingUrgency === 'STAT'
-              ? 'STAT'
-              : routingUrgency === 'URGENT' || routingUrgency === 'PRIORITY'
-                ? 'URGENT'
-                : 'ROUTINE',
-          sourceRefs: [],
+          activeRisks: [triageCategory].filter(Boolean),
+          pendingConsultations: [consultationId],
+          expectedActions: [
+            'Acknowledge the consultation request.',
+            'Accept clinical responsibility for specialist review.',
+            'Review the linked Patient 360 evidence before completing the consultation.',
+          ],
+          sourceRefs: Array.from(
+            new Set([consultationId, ...sourceRefs].filter(Boolean))
+          ),
+          patient360Revision: handoffRevision,
+          patient360SourceCheckpoint: handoffCheckpoint,
+          sourceArtifactId,
+          sourceArtifactType,
+        });
+
+        setPendingHandoff(null);
+
+        Object.assign(routingPayload, {
+          consultationId,
+          patient360Revision,
+          patient360SourceCheckpoint,
+          sourceRefs: Array.from(
+            new Set([consultationId, ...sourceRefs].filter(Boolean))
+          ),
         });
       }
 
       setDispatchedConfirmation(routingPayload);
       if (onRoutedSuccess) onRoutedSuccess(selectedDoctor, routingPayload);
     } catch (error) {
+      const baseMessage =
+        error instanceof Error ? error.message : 'Specialist consultation request failed.';
       setDirectoryError(
-        error instanceof Error ? error.message : 'Specialist consultation request failed.'
+        authoritativeConsultationId
+          ? `Consultation ${authoritativeConsultationId} remains authoritative, but its clinical handoff is incomplete. Retry will resume the handoff without creating another consultation. ${baseMessage}`
+          : baseMessage
       );
     } finally {
       setIsDispatching(false);
@@ -687,9 +821,9 @@ export function PatientConsultantRoutingModal({
             </div>
 
             <div className="max-w-md mx-auto space-y-2">
-              <h3 className="text-xl font-black text-slate-900">Specialist Routing Confirmed!</h3>
+              <h3 className="text-xl font-black text-slate-900">Consultation Request Sent</h3>
               <p className="text-xs text-slate-600">
-                Patient <strong className="text-slate-900">{dispatchedConfirmation.patientName}</strong> has been directly dispatched to{' '}
+                Patient <strong className="text-slate-900">{dispatchedConfirmation.patientName}</strong> has been routed for acknowledgement by{' '}
                 <strong className="text-blue-700">{dispatchedConfirmation.consultant.name}</strong>.
               </p>
             </div>
@@ -708,9 +842,12 @@ export function PatientConsultantRoutingModal({
                 <span className="font-bold text-slate-900">{dispatchedConfirmation.assignedRoom}</span>
               </div>
               <div className="flex justify-between items-center pb-2 border-b border-slate-200">
-                <span className="text-slate-500 font-semibold">Urgency Protocol:</span>
+                <span className="text-slate-500 font-semibold">Response Target:</span>
                 <span className="px-2 py-0.5 rounded font-black text-[10px] bg-rose-600 text-white">
-                  {dispatchedConfirmation.urgency} ({dispatchedConfirmation.slaMinutes}m Response SLA)
+                  {dispatchedConfirmation.urgency}
+                  {dispatchedConfirmation.slaMinutes
+                    ? ` (acknowledgement target: ${dispatchedConfirmation.slaMinutes} min)`
+                    : ' (routine queue)'}
                 </span>
               </div>
               {dispatchedConfirmation.consultant.contactExtension && (
@@ -743,12 +880,12 @@ export function PatientConsultantRoutingModal({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
                   <UserCheck className="w-4 h-4 text-blue-600" />
-                  Select Eligible Consultant
+                  1. Select an eligible consultant
                 </h3>
 
                 {/* Filter Department Pills */}
                 <div className="flex items-center gap-1 flex-wrap text-[11px]">
-                  {['ALL', 'Cardiovascular', 'Neuro', 'Ortho', 'Endo', 'OB/GYN', 'Oncology', 'Pediatrics', 'Gastro', 'Radiology', 'Anesthesia', 'Critical Care'].map((dept) => (
+                  {departmentFilters.map((dept) => (
                     <button
                       key={dept}
                       onClick={() => setSelectedDepartment(dept)}
@@ -873,7 +1010,7 @@ export function PatientConsultantRoutingModal({
               <div className="space-y-4">
                 <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
                   <Zap className="w-4 h-4 text-amber-600" />
-                  Routing Parameters & Target
+                  Consultation Request
                 </h3>
 
                 {/* Urgency SLA Selection */}
@@ -934,7 +1071,7 @@ export function PatientConsultantRoutingModal({
                 {/* Staging Destination Room */}
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                    Destination Suite / Staging Bay
+                    Destination / Service Location (optional)
                   </label>
                   <input
                     type="text"
@@ -995,14 +1132,14 @@ export function PatientConsultantRoutingModal({
                 {/* Clinical Handoff SBAR Summary */}
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                    SBAR Clinical Handoff Summary
+                    Clinical Question / Handoff Summary
                   </label>
                   <textarea
                     rows={3}
                     value={clinicalHandoffNote}
                     onChange={(e) => setClinicalHandoffNote(e.target.value)}
                     className="w-full p-2 text-xs rounded-lg border border-slate-300 bg-white focus:ring-2 focus:ring-blue-500/20"
-                    placeholder="Brief handoff narrative for specialist review..."
+                    placeholder="State the clinical question and the context the specialist needs to review."
                   />
                 </div>
               </div>

@@ -37,7 +37,7 @@ export function PatientSearchAndRegistrationPanel({
   isLoading = false,
 }: PatientSearchAndRegistrationPanelProps) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchFilter, setSearchFilter] = useState<'ALL' | 'CNIC' | 'MRN' | 'PHONE'>('ALL');
+  const [searchFilter, setSearchFilter] = useState<'ALL' | 'CNIC' | 'MRN' | 'PHONE'>('MRN');
 
   // Form State
   const [fullName, setFullName] = useState('');
@@ -160,7 +160,7 @@ export function PatientSearchAndRegistrationPanel({
                 Master Patient Index (MPI) Lookup
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                One institutional MRN per patient • exact MRN/CNIC identity lookup
+                MRN is the permanent hospital Patient ID • exact MRN/CNIC lookup
               </p>
             </div>
           </div>
@@ -178,14 +178,14 @@ export function PatientSearchAndRegistrationPanel({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by Legal Name, MRN, CNIC or Phone..."
+              placeholder="Enter MRN or CNIC for exact patient lookup..."
               className="w-full pl-9 pr-4 py-2 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
             />
           </div>
 
           <div className="flex items-center gap-1 text-[11px]">
             <span className="text-slate-400 font-medium mr-1">Filter:</span>
-            {(['ALL', 'CNIC', 'MRN', 'PHONE'] as const).map((filter) => (
+            {(['MRN', 'CNIC', 'ALL', 'PHONE'] as const).map((filter) => (
               <button
                 key={filter}
                 type="button"

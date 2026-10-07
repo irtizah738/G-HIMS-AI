@@ -8,6 +8,7 @@ import type {
   MedicationOrder,
   PatientClinicalKnowledgeStatus,
 } from '@/types/clinical-canonical';
+import type { DiseaseIntakeArtifact } from '@/types/disease-intake-artifact';
 import {
   buildPatient360CareContexts,
   normalizeCareSetting,
@@ -17,6 +18,7 @@ import type {
   Patient360AllergySummary,
   Patient360ConditionSummary,
   Patient360DocumentSummary,
+  Patient360DiseaseIntakeSummary,
   Patient360EncounterSummary,
   Patient360MedicationSummary,
   Patient360ObservationSummary,
@@ -45,6 +47,7 @@ export interface Patient360ProjectionSources {
   observations: ClinicalObservation[];
   diagnosticReports: DiagnosticReport[];
   documents: ClinicalDocument[];
+  diseaseIntakeArtifacts?: DiseaseIntakeArtifact[];
   events: Patient360SourceEvent[];
   knowledgeStatus?: PatientClinicalKnowledgeStatus;
 }
@@ -195,6 +198,23 @@ function documentSummary(item: ClinicalDocument): Patient360DocumentSummary {
   };
 }
 
+function diseaseIntakeSummary(
+  item: DiseaseIntakeArtifact
+): Patient360DiseaseIntakeSummary {
+  return {
+    intakeArtifactId: item.intakeArtifactId,
+    encounterId: item.encounterId,
+    templateId: item.templateId,
+    templateName: item.templateName,
+    riskSeverity: item.risk.severity,
+    riskScore: item.risk.score,
+    specialistTargets: [...item.specialistTargets],
+    authoredBy: item.authoredBy,
+    authoredAt: item.authoredAt,
+    sourceRefs: [...item.sourceRefs],
+  };
+}
+
 function eventSummary(event: Patient360SourceEvent): string {
   const payload = event.payload || {};
   switch (event.eventType) {
@@ -204,6 +224,16 @@ function eventSummary(event: Patient360SourceEvent): string {
       return `Encounter started: ${asString(payload.encounterType, 'clinical encounter')}`;
     case 'VITALS_RECORDED':
       return 'Vital signs recorded';
+    case 'DISEASE_INTAKE_FINALIZED':
+      return `Disease intake finalized: ${asString(payload.templateName, 'specialist intake')}`;
+    case 'CLINICAL_CONSULTATION_ACKNOWLEDGED':
+      return 'Specialist consultation acknowledged';
+    case 'CLINICAL_CONSULTATION_ACCEPTED':
+      return 'Specialist consultation accepted';
+    case 'CLINICAL_HANDOFF_CREATED':
+      return 'Clinical handoff created';
+    case 'CLINICAL_HANDOFF_ACCEPTED':
+      return 'Clinical handoff accepted';
     case 'CLINICAL_NOTE_SIGNED':
     case 'CLINICAL_DRAFT_SIGNED':
       return 'Clinical document signed';
@@ -242,7 +272,7 @@ function sourceVersion(item: Record<string, unknown>): string {
   return [
     asString(item.id || item.encounterId || item.conditionId || item.allergyId ||
       item.medicationOrderId || item.observationId || item.diagnosticReportId ||
-      item.clinicalDocumentId),
+      item.clinicalDocumentId || item.intakeArtifactId),
     asString(item.version || item._serverVersion || 0),
     asString(item.updatedAt || item.recordedAt || item.createdAt || 0),
   ].join(':');
@@ -284,6 +314,7 @@ export class Patient360Projector {
     const observations = samePatient(sources.observations);
     const diagnosticReports = samePatient(sources.diagnosticReports);
     const documents = samePatient(sources.documents);
+    const diseaseIntakeArtifacts = samePatient(sources.diseaseIntakeArtifacts || []);
 
     const careContexts = buildPatient360CareContexts(encounters);
     const activeEncounter = preferredCompatibilityEncounter(careContexts);
@@ -343,6 +374,12 @@ export class Patient360Projector {
       .sort((a, b) => b.signedAt - a.signedAt)
       .slice(0, 20)
       .map(documentSummary);
+
+    const recentDiseaseIntakes = diseaseIntakeArtifacts
+      .filter((item) => item.status === 'FINAL')
+      .sort((a, b) => b.authoredAt - a.authoredAt)
+      .slice(0, 20)
+      .map(diseaseIntakeSummary);
 
     const patientEvents = sources.events
       .filter((event) => {
@@ -410,6 +447,9 @@ export class Patient360Projector {
       observations: observations.map((item) => sourceVersion(item as unknown as Record<string, unknown>)).sort(),
       diagnosticReports: diagnosticReports.map((item) => sourceVersion(item as unknown as Record<string, unknown>)).sort(),
       documents: documents.map((item) => sourceVersion(item as unknown as Record<string, unknown>)).sort(),
+      diseaseIntakeArtifacts: diseaseIntakeArtifacts
+        .map((item) => sourceVersion(item as unknown as Record<string, unknown>))
+        .sort(),
       knowledgeStatus: sources.knowledgeStatus || null,
       eventIds: patientEvents.map((event) => event.eventId).sort(),
     });
@@ -440,6 +480,7 @@ export class Patient360Projector {
       latestVitals,
       recentResults,
       recentDocuments,
+      recentDiseaseIntakes,
       dataQuality: {
         allergyKnowledge:
           allergies.length > 0
@@ -511,8 +552,9 @@ export class Patient360Projector {
         observations: observations.length,
         diagnosticReports: diagnosticReports.length,
         documents: documents.length,
+        diseaseIntakes: diseaseIntakeArtifacts.length,
       },
-      projectionVersion: 2,
+      projectionVersion: 3,
       revision: patientEvents.length,
       eventCheckpoint,
       sourceFingerprint,

@@ -315,6 +315,7 @@ function collectionForEntityType(entityType: string): string {
     CLINICAL_CONSULTATION_REQUEST: 'consultationRequests',
     DISEASE_INTAKE_ARTIFACT: 'diseaseIntakeArtifacts',
     CLINICAL_HANDOFF: 'clinicalHandoffs',
+    CARE_TRANSITION_EVIDENCE: 'careTransitionEvidence',
     CLINICAL_OPEN_ITEM: 'clinicalOpenItems',
     CLINICAL_ESCALATION: 'clinicalEscalations',
     BED_TRANSFER: 'bedTransfers',

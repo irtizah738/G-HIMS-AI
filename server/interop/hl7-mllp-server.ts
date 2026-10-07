@@ -62,7 +62,7 @@ function runtimeIsProduction(): boolean {
     .toUpperCase() === 'PRODUCTION';
 }
 
-function assertBridgeConfig(config: Hl7MllpServerConfig): void {
+export function validateHl7MllpConfig(config: Hl7MllpServerConfig): void {
   if (getServerIntegrationState('HL7') !== 'LIVE') {
     throw new Error('HL7_MLLP_NOT_LIVE: HL7 integration state must be LIVE.');
   }
@@ -192,7 +192,7 @@ function bindSocket(config: Hl7MllpServerConfig, socket: Socket | TLSSocket): vo
 }
 
 export function createHl7MllpServer(config: Hl7MllpServerConfig): NetServer | TlsServer {
-  assertBridgeConfig(config);
+  validateHl7MllpConfig(config);
 
   if (config.tls) {
     const options: tls.TlsOptions = {

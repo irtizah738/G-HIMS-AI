@@ -13,7 +13,7 @@
     "test:p0:rules": "firebase emulators:exec --only firestore --project ghims-p0-ci \"bun test emulator-security/firestore-rules.test.ts\"",
     "typecheck": "tsc --noEmit",
     "test:unit": "bun test tests/",
-    "test:security": "bun test tests/security-penetration.test.ts tests/p0-trust-boundary.test.ts tests/p1-durability-boundary.test.ts tests/p2-offline-ai-interop-boundary.test.ts tests/p3-operational-assurance.test.ts",
+    "test:security": "bun test tests/security-penetration.test.ts tests/p0-trust-boundary.test.ts tests/p1-durability-boundary.test.ts tests/p2-offline-ai-interop-boundary.test.ts tests/p3-operational-assurance.test.ts tests/h0-exact-closure.test.ts",
     "test:rules": "firebase emulators:exec --project ghims-p0-ci --only firestore \"bun test emulator-security/firestore-rules.test.ts\" && firebase emulators:exec --project ghims-p1-ci --only firestore \"bun test emulator-security/p1-durability.test.ts\"",
     "test:e2e": "playwright test",
     "test:opd-sq1:staging": "playwright test --config=playwright.opd-staging.config.ts",
@@ -188,7 +188,8 @@
     "ops:wave5:evidence": "bun scripts/ops/wave5-evidence-manifest.ts",
     "ops:wave5:projection-failure-injection": "bun scripts/ops/wave5-projection-failure-injection.ts",
     "test:hospital0-deployment": "bun test tests/hospital0-deployment-qualification.test.ts",
-    "ops:hospital0:qualification": "bun scripts/ops/hospital0-qualification-manifest.ts"
+    "ops:hospital0:qualification": "bun scripts/ops/hospital0-qualification-manifest.ts",
+    "security:sast": "bun scripts/ops/security-sast.ts"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

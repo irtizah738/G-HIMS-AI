@@ -1,4 +1,5 @@
 import { TransactionManager } from '@/lib/backend/transactions/transaction-manager';
+import type { AdditionalStateWrite } from '@/lib/backend/transactions/transaction-manager';
 import type { CommandContext, CommandResult } from '@/lib/backend/types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import type { MedicationOrder, CarePlan } from '@/types/clinical-canonical';
@@ -171,6 +172,7 @@ export class NursingEmarDomainService {
       commandId,
       correlationId: context.correlationId,
       domainState: slot,
+      expectedPrimaryServerVersion: 0,
     });
 
     return { success: true, commandId, idempotencyKey, entityId: emarSlotId, eventId: tx.eventId, auditId: tx.auditId, outboxId: tx.outboxId, data: slot };
@@ -315,20 +317,18 @@ export class NursingEmarDomainService {
       updatedAt: now,
     };
 
-    const additionalStateWrites: Array<{
-      entityType: string;
-      entityId: string;
-      domainState: unknown;
-    }> = [
+    const additionalStateWrites: AdditionalStateWrite[] = [
       {
         entityType: 'CANONICAL_MEDICATION_ADMINISTRATION',
         entityId: canonicalAdministration.medicationAdministrationId,
         domainState: canonicalAdministration,
+        expectedServerVersion: 0,
       },
       {
         entityType: 'EMAR_SCHEDULE_SLOT',
         entityId: slot.emarSlotId,
         domainState: nextSlot,
+        expectedServerVersion: Number((slot as unknown as Record<string, unknown>)._serverVersion || 0),
       },
     ];
 
@@ -361,6 +361,7 @@ export class NursingEmarDomainService {
         entityType: 'CLINICAL_OPEN_ITEM',
         entityId: openItemId,
         domainState: openItem,
+        expectedServerVersion: 0,
       });
     }
 
@@ -404,6 +405,7 @@ export class NursingEmarDomainService {
       commandId,
       correlationId: context.correlationId,
       domainState,
+      expectedPrimaryServerVersion: 0,
       additionalStateWrites,
     });
 
@@ -538,11 +540,13 @@ export class NursingEmarDomainService {
       commandId,
       correlationId: context.correlationId,
       domainState: record,
+      expectedPrimaryServerVersion: 0,
       additionalStateWrites: [
         {
           entityType: 'CARE_PLAN',
           entityId: carePlanId,
           domainState: canonical,
+          expectedServerVersion: 0,
         },
       ],
     });
@@ -652,6 +656,7 @@ export class NursingEmarDomainService {
         entityType: 'CARE_PLAN',
         entityId: canonical.carePlanId,
         domainState: nextCanonical,
+        expectedServerVersion: Number((canonical as unknown as Record<string, unknown>)._serverVersion || 0),
       }],
     });
 

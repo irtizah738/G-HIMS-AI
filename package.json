@@ -180,7 +180,13 @@
     "test:wave4": "bun test tests/wave4-external-interoperability.test.ts tests/claims-edi.test.ts",
     "validate:wave4": "bun run typecheck && bun run lint && bun run test:wave4 && bun run test:wave3 && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",
     "interop:hl7:mllp": "bun scripts/interop/run-hl7-mllp.ts",
-    "ops:wave4:live-qualification": "bun scripts/ops/wave4-live-qualification.ts"
+    "ops:wave4:live-qualification": "bun scripts/ops/wave4-live-qualification.ts",
+    "test:wave5": "bun test tests/wave5-enterprise-hardening.test.ts",
+    "validate:wave5": "bun run typecheck && bun run lint && bun run test:wave5 && bun run test:drp7-9 && bun run test:drp11 && bun run test:wave4 && bun run test:wave3 && bun run test:p8 && bun run test:p6 && bun run test:security && bun run build",
+    "ops:wave5:load": "bun scripts/ops/wave5-authenticated-load.ts",
+    "ops:wave5:governance": "bun scripts/ops/wave5-governance-preflight.ts",
+    "ops:wave5:evidence": "bun scripts/ops/wave5-evidence-manifest.ts",
+    "ops:wave5:projection-failure-injection": "bun scripts/ops/wave5-projection-failure-injection.ts"
   },
   "dependencies": {
     "@google/genai": "^0.2.0",

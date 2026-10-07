@@ -99,7 +99,7 @@ export class DicomWebClient {
   private readonly requireHttpsInProduction: boolean;
 
   constructor(config: DicomWebClientConfig = {}) {
-    this.baseUrl = (config.baseUrl || '/api/pacs/dicomweb').replace(//$/, '');
+    this.baseUrl = (config.baseUrl || '/api/pacs/dicomweb').replace(/\\/$/, '');
     this.authToken = config.authToken;
     this.state = config.state || 'DISABLED';
     this.simulationProvider = config.simulationProvider;

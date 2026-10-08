@@ -28,7 +28,7 @@ const IS_DEMO_RUNTIME = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
 
 interface OpdConsultationSpecialtiesProps {
   encounter: ComprehensiveOpdEncounter;
-  onSaveConsultation: (soap: SoapDocumentation) => void;
+  onSaveConsultation: (soap: SoapDocumentation) => Promise<void>;
   onPlaceDiagnosticOrders?: () => void;
   onPlacePrescriptions?: () => void;
   online?: boolean;
@@ -56,6 +56,10 @@ export function OpdConsultationSpecialties({
   onPlacePrescriptions,
   online = true,
 }: OpdConsultationSpecialtiesProps) {
+  const [commitBusy, setCommitBusy] = useState(false);
+  const [commitError, setCommitError] = useState<string | null>(null);
+  const [commitSuccess, setCommitSuccess] = useState<string | null>(null);
+
   const [selectedSpecialty, setSelectedSpecialty] = useState<OpdSpecialtyTemplate>(
     encounter.soap?.specialtyTemplate || (encounter.department as any) || 'GENERAL_MEDICINE'
   );
@@ -132,7 +136,11 @@ export function OpdConsultationSpecialties({
     );
   };
 
-  const handleCommitSoap = () => {
+  const handleCommitSoap = async () => {
+    if (commitBusy) return;
+    setCommitBusy(true);
+    setCommitError(null);
+    setCommitSuccess(null);
     const specialtyData: Record<string, any> = {};
     if (selectedSpecialty === 'CARDIOLOGY') {
       if (nyhaClass) specialtyData.nyhaClass = nyhaClass;
@@ -175,7 +183,18 @@ export function OpdConsultationSpecialties({
         : 'Authenticated clinician (server authoritative)',
     };
 
-    onSaveConsultation(soapDoc);
+    try {
+      await onSaveConsultation(soapDoc);
+      setCommitSuccess('Consultation documentation signed and committed.');
+    } catch (error) {
+      setCommitError(
+        error instanceof Error
+          ? error.message
+          : 'Consultation documentation could not be committed.'
+      );
+    } finally {
+      setCommitBusy(false);
+    }
   };
 
   return (
@@ -626,13 +645,32 @@ export function OpdConsultationSpecialties({
           </div>
 
           {/* Final Commit Button */}
+          {commitError && (
+            <div
+              role="alert"
+              data-testid="opd-consultation-commit-error"
+              className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800"
+            >
+              {commitError}
+            </div>
+          )}
+          {commitSuccess && (
+            <div
+              data-testid="opd-consultation-commit-success"
+              className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800"
+            >
+              {commitSuccess}
+            </div>
+          )}
           <button
             data-testid="opd-consultation-submit"
-            onClick={handleCommitSoap}
-            className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-all"
+            type="button"
+            disabled={commitBusy}
+            onClick={() => void handleCommitSoap()}
+            className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-all"
           >
             <CheckCircle2 className="w-4 h-4" />
-            Sign & Commit Consultation Documentation
+            {commitBusy ? 'Signing & committing consultation…' : 'Sign & Commit Consultation Documentation'}
           </button>
         </div>
       </div>

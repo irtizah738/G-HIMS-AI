@@ -15,6 +15,7 @@ import {
 import { useHospital } from '@/lib/context/hospital-context';
 import { executeActiveTenantCommand } from '@/lib/api/command-client';
 import type { TelehealthSession, TelehealthSoapNote } from '@/lib/types/ghims';
+import { TelehealthCallPanel } from '@/components/telehealth/TelehealthCallPanel';
 
 type ConnectivityMode = 'VIDEO' | 'AUDIO_ONLY' | 'TEXT_ONLY' | 'PAUSED_OFFLINE';
 
@@ -190,8 +191,8 @@ export function TelehealthView() {
               <h1 className="text-lg font-bold">Governed Telehealth</h1>
             </div>
             <p className="mt-1 max-w-3xl text-xs text-slate-500">
-              G-HIMS governs encounter continuity, low-bandwidth fallback, recovery and clinical signing.
-              Media transport and external prescribing integrations are not represented as live unless separately qualified.
+              G-HIMS governs encounter continuity, browser WebRTC media, low-bandwidth fallback, recovery and clinical signing.
+              Patient media is peer-to-peer; signaling remains server-governed and external prescribing is not implied.
             </p>
           </div>
           <div className="flex items-center gap-2 rounded-xl border px-3 py-2 text-xs">
@@ -302,6 +303,20 @@ export function TelehealthView() {
                   {selected.patientMrn} · {selected.status} · {modeLabel(selected.connectionMode)}
                 </p>
               </div>
+
+              {!['COMPLETED', 'CANCELLED'].includes(selected.status) && selected.tenantId && (
+                <TelehealthCallPanel
+                  key={`media:${selected.id}:${selected.roomToken}`}
+                  session={selected}
+                  tenantId={selected.tenantId}
+                  disabled={busy || networkMode === 'offline'}
+                  onConnected={async () => {
+                    if (selected.connectionMode !== 'VIDEO' || selected.status !== 'IN_CONSULTATION') {
+                      await changeMode('VIDEO', 'Patient and clinician WebRTC media connection established.');
+                    }
+                  }}
+                />
+              )}
 
               {!['COMPLETED', 'CANCELLED'].includes(selected.status) && (
                 <div className="rounded-xl border p-4">

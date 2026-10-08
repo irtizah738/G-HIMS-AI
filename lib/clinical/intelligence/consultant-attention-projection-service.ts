@@ -596,33 +596,35 @@ export class ConsultantAttentionProjectionService {
       );
     }
 
-    for (const code of patient360.dataQuality.missingCanonicalFacts) {
-      active.push(
-        item(
-          {
-            openItemId: stableId('open', [
+    if (patient360) {
+      for (const code of patient360.dataQuality.missingCanonicalFacts) {
+        active.push(
+          item(
+            {
+              openItemId: stableId('open', [
+                patientId,
+                encounterId,
+                'data-quality',
+                code,
+              ]),
+              tenantId,
               patientId,
               encounterId,
-              'data-quality',
-              code,
-            ]),
-            tenantId,
-            patientId,
-            encounterId,
-            careSetting,
-            category: 'DATA_QUALITY',
-            description: `Clinical knowledge incomplete: ${code
-              .replace(/_/g, ' ')
-              .toLowerCase()}`,
-            clinicalPriority: 'REVIEW_REQUIRED',
-            ...owner,
-            createdAt: patient360.projectedAt,
-            sourceRefs: [code],
-            lastSourceEventId: trigger?.eventId,
-          },
-          now
-        )
-      );
+              careSetting,
+              category: 'DATA_QUALITY',
+              description: `Clinical knowledge incomplete: ${code
+                .replace(/_/g, ' ')
+                .toLowerCase()}`,
+              clinicalPriority: 'REVIEW_REQUIRED',
+              ...owner,
+              createdAt: patient360.projectedAt,
+              sourceRefs: [code],
+              lastSourceEventId: trigger?.eventId,
+            },
+            now
+          )
+        );
+      }
     }
 
     const existing = new Map(

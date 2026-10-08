@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getAdminFirestore } from '@/server/firebase/admin';
+import { getDirectoryFirestore } from '@/server/firebase/directory-firestore';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,7 +11,7 @@ type FacilityDirectoryItem = {
 
 export async function GET() {
   try {
-    const db = getAdminFirestore();
+    const db = getDirectoryFirestore();
     if (!db) {
       return NextResponse.json(
         {

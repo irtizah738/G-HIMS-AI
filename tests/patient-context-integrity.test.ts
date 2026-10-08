@@ -12,11 +12,14 @@ describe('PCI — Patient Context Integrity Closure', () => {
     expect(hospital).toContain('export interface ClinicalContextBinding');
     expect(hospital).toContain('encounterId: string;');
     expect(hospital).toContain('patientId: string;');
+    expect(hospital).toContain('patientMrn: string;');
+    expect(hospital).toContain("status: 'VERIFIED' | 'UNRESOLVED' | 'MISMATCH';");
     expect(hospital).toContain('contextRevision: number;');
     expect(hospital).toContain('bindClinicalEncounter');
     expect(hospital).toContain('clinicalContextRevisionRef.current += 1');
     expect(hospital).toContain('setClinicalContext(next)');
     expect(hospital).toContain('setSelectedPatientId(patientId)');
+    expect(hospital).toContain("shellPatient.mrn !== patientMrn");
   });
 
   test('hospital shell never invents the first patient after hydration', async () => {
@@ -40,6 +43,8 @@ describe('PCI — Patient Context Integrity Closure', () => {
     expect(opd).toContain("source: 'OPD_MASTER'");
     expect(opd).toContain('patientIdentityMatchesEncounter');
     expect(opd).toContain('clinicalContextSynchronized');
+    expect(opd).toContain("clinicalContext.status === 'VERIFIED'");
+    expect(opd).toContain('clinicalContext.patientMrn === activeEncounter.mrn');
     expect(opd).toContain('patientContextReady');
     expect(opd).toContain('PatientContextSafetyBlock');
     expect(opd).toContain("code={");
@@ -56,6 +61,17 @@ describe('PCI — Patient Context Integrity Closure', () => {
     expect(desk).toContain('PATIENT_CONTEXT_MISMATCH');
   });
 
+  test('patient-bound editors remount when the encounter changes', async () => {
+    const opd = await source('components/opd/OpdMasterWorkspace.tsx');
+    const desk = await source('components/views/opd-encounters-view.tsx');
+
+    expect(opd).toContain("key={\`consultation:\${activeEncounter.id}:\${activeEncounter.patientId}\`}");
+    expect(opd).toContain("key={\`triage:\${activeEncounter.id}:\${activeEncounter.patientId}\`}");
+    expect(opd).toContain("key={\`pharmacy:\${activeEncounter.id}:\${activeEncounter.patientId}\`}");
+    expect(desk).toContain("Clear every transient clinical draft when the encounter changes");
+    expect(desk).toContain("}, [selectedTokenId]);");
+  });
+
   test('offline OPD queue projection preserves authoritative encounter identity', async () => {
     const adapter = await source('lib/offline/read-model-adapter.ts');
 
@@ -69,6 +85,8 @@ describe('PCI — Patient Context Integrity Closure', () => {
 
     expect(shell).toContain('clinicalContext?.patientId || null');
     expect(shell).toContain('PATIENT_CONTEXT_UNRESOLVED');
+    expect(shell).toContain('PATIENT_CONTEXT_MISMATCH');
+    expect(shell).toContain("clinicalContext?.status === 'VERIFIED'");
     expect(shell).toContain("clinicalContextActive");
   });
 

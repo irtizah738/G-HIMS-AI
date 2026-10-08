@@ -69,6 +69,10 @@ import {
   buildOpdWorkspaceReadModel,
 } from '@/lib/opd/workspace-read-model';
 import { fetchAuthoritativeOpdTimeline } from '@/lib/opd/timeline-client';
+import {
+  OPD_PATIENT_BOUND_TABS,
+  verifyPatientContextIdentity,
+} from '@/lib/clinical/patient-context-integrity';
 
 const IS_DEMO_RUNTIME = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
 
@@ -710,13 +714,6 @@ export function OpdMasterWorkspace() {
     return patients.find((patient) => patient.id === activeEncounter.patientId);
   }, [activeEncounter, patients]);
 
-  const patientIdentityMatchesEncounter = Boolean(
-    activeEncounter &&
-      activePatientRecord &&
-      activeEncounter.patientId === activePatientRecord.id &&
-      activeEncounter.mrn === activePatientRecord.mrn
-  );
-
   useEffect(() => {
     if (!activeEncounter) {
       clearClinicalContext();
@@ -739,38 +736,25 @@ export function OpdMasterWorkspace() {
     clearClinicalContext,
   ]);
 
-  const clinicalContextSynchronized = Boolean(
-    activeEncounter &&
-      clinicalContext &&
-      clinicalContext.encounterId === activeEncounter.id &&
-      clinicalContext.patientId === activeEncounter.patientId &&
-      clinicalContext.patientMrn === activeEncounter.mrn &&
-      clinicalContext.status === 'VERIFIED' &&
-      clinicalContext.tenantId ===
-        String(
-          activeEncounter.tenantId || auth.activeTenant?.tenantId || ''
-        )
-          .trim()
-          .toLowerCase()
+  const patientContextVerification = useMemo(
+    () =>
+      verifyPatientContextIdentity({
+        tenantId: auth.activeTenant?.tenantId || activeEncounter?.tenantId || '',
+        encounter: activeEncounter,
+        patient: activePatientRecord,
+        context: clinicalContext,
+      }),
+    [
+      activeEncounter,
+      activePatientRecord,
+      auth.activeTenant?.tenantId,
+      clinicalContext,
+    ]
   );
 
-  const patientBoundTab = [
-    'TRIAGE',
-    'CONSULTATION',
-    'DIAGNOSTICS',
-    'PHARMACY',
-    'BILLING',
-    'DISPOSITION',
-    'AUDIT',
-  ].includes(activeTab);
-
+  const patientBoundTab = OPD_PATIENT_BOUND_TABS.has(activeTab);
   const patientContextReady =
-    !patientBoundTab ||
-    Boolean(
-      activeEncounter &&
-        patientIdentityMatchesEncounter &&
-        clinicalContextSynchronized
-    );
+    !patientBoundTab || patientContextVerification.ok;
 
   const activeBillingInvoice = useMemo(() => {
     if (!activeEncounter) return undefined;
@@ -3128,20 +3112,16 @@ export function OpdMasterWorkspace() {
         <div data-testid="patient-context-safety-block-wrapper">
           <PatientContextSafetyBlock
             code={
-              !activeEncounter
-                ? 'CLINICAL_CONTEXT_REQUIRED'
-                : !patientIdentityMatchesEncounter
-                  ? 'PATIENT_CONTEXT_MISMATCH'
-                  : 'CLINICAL_CONTEXT_RESOLVING'
+              patientContextVerification.ok
+                ? 'CLINICAL_CONTEXT_RESOLVING'
+                : patientContextVerification.code
             }
             encounterId={activeEncounter?.id}
             patientId={activeEncounter?.patientId}
             detail={
-              !activeEncounter
-                ? 'Select an OPD encounter from MPI search, the dashboard, or the live queue before entering a patient-bound workflow.'
-                : !patientIdentityMatchesEncounter
-                  ? 'The encounter patient identifier or MRN does not match the canonical OPD patient projection. No clinical mutation is permitted.'
-                  : 'The hospital shell is being atomically rebound to the selected encounter.'
+              patientContextVerification.ok
+                ? 'The hospital shell is being atomically rebound to the selected encounter.'
+                : patientContextVerification.detail
             }
           />
         </div>

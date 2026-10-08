@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
   Bed,
   Patient,
@@ -940,6 +940,27 @@ const executiveThesisData: ExecutiveThesisModel = {
   },
 };
 
+export interface ClinicalContextBinding {
+  tenantId: string;
+  encounterId: string;
+  patientId: string;
+  contextRevision: number;
+  source:
+    | 'OPD_MASTER'
+    | 'OPD_CONSULTATION_DESK'
+    | 'OPD_QUEUE'
+    | 'REGISTRATION'
+    | 'OTHER';
+  boundAt: number;
+}
+
+interface BindClinicalEncounterInput {
+  tenantId?: string;
+  encounterId: string;
+  patientId: string;
+  source: ClinicalContextBinding['source'];
+}
+
 interface HospitalContextType {
   beds: Bed[];
   patients: Patient[];
@@ -961,6 +982,9 @@ interface HospitalContextType {
   setCopilotOpen: (open: boolean) => void;
   selectedPatientId: string | null;
   setSelectedPatientId: (id: string | null) => void;
+  clinicalContext: ClinicalContextBinding | null;
+  bindClinicalEncounter: (input: BindClinicalEncounterInput) => ClinicalContextBinding;
+  clearClinicalContext: () => void;
   
   // Permanent Discharged Census & Reconciliation Audit
   dischargedCensus: DischargedCensusRecord[];
@@ -1043,6 +1067,47 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
   const [networkMode, setNetworkMode] = useState<'online' | 'offline' | 'degraded_sync'>('online');
   const [copilotOpen, setCopilotOpen] = useState<boolean>(false);
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(() => isDemoRuntime ? 'p-1001' : null);
+  const [clinicalContext, setClinicalContext] = useState<ClinicalContextBinding | null>(null);
+  const clinicalContextRevisionRef = useRef(0);
+
+  const bindClinicalEncounter = useCallback((input: BindClinicalEncounterInput): ClinicalContextBinding => {
+    const authoritativeTenantId = String(
+      activeTenant?.tenantId || user?.tenantId || ''
+    ).trim().toLowerCase();
+    const requestedTenantId = String(input.tenantId || authoritativeTenantId)
+      .trim()
+      .toLowerCase();
+    const encounterId = String(input.encounterId || '').trim();
+    const patientId = String(input.patientId || '').trim();
+
+    if (!authoritativeTenantId || !encounterId || !patientId) {
+      throw new Error('CLINICAL_CONTEXT_INVALID: tenant, encounter and patient identifiers are required.');
+    }
+    if (requestedTenantId !== authoritativeTenantId) {
+      throw new Error('CLINICAL_CONTEXT_TENANT_MISMATCH');
+    }
+
+    clinicalContextRevisionRef.current += 1;
+    const next: ClinicalContextBinding = {
+      tenantId: authoritativeTenantId,
+      encounterId,
+      patientId,
+      contextRevision: clinicalContextRevisionRef.current,
+      source: input.source,
+      boundAt: Date.now(),
+    };
+
+    // One state transition binds the shell patient to the active encounter.
+    // The patient identifier is never independently inferred from display data.
+    setClinicalContext(next);
+    setSelectedPatientId(patientId);
+    return next;
+  }, [activeTenant?.tenantId, user?.tenantId]);
+
+  const clearClinicalContext = useCallback(() => {
+    clinicalContextRevisionRef.current += 1;
+    setClinicalContext(null);
+  }, []);
 
   useEffect(() => {
     if (isDemoRuntime || authLoading) return;
@@ -1055,6 +1120,8 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       setMismatches([]);
       setTelehealthSessions([]);
       setSelectedPatientId(null);
+      setClinicalContext(null);
+      clinicalContextRevisionRef.current += 1;
       return;
     }
 
@@ -1071,7 +1138,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       setSelectedPatientId((current) =>
         current && models.patients.some((patient) => patient.id === current)
           ? current
-          : models.patients[0]?.id || null
+          : null
       );
     };
 
@@ -1489,7 +1556,11 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       },
       ...previous.filter((token) => token.id !== registration.queueToken.id),
     ]);
-    setSelectedPatientId(newPatient.id);
+    bindClinicalEncounter({
+      encounterId: registration.encounter.id,
+      patientId: newPatient.id,
+      source: 'REGISTRATION',
+    });
     recordMutation('REGISTER_PATIENT', `Patient:${newPatient.id}`, {
       patientId: newPatient.id,
       mrn: newPatient.mrn,
@@ -1978,7 +2049,13 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     setOpdQueue((previous) => previous.map((item) =>
       item.id === tokenId ? { ...item, status: 'in_consultation' } : item
     ));
-    setSelectedPatientId(token.patientId);
+    if (token.encounterId) {
+      bindClinicalEncounter({
+        encounterId: token.encounterId,
+        patientId: token.patientId,
+        source: 'OPD_QUEUE',
+      });
+    }
   };
 
   const completeOpdToken = async (tokenId: string): Promise<void> => {
@@ -2187,6 +2264,9 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
         setCopilotOpen,
         selectedPatientId,
         setSelectedPatientId,
+        clinicalContext,
+        bindClinicalEncounter,
+        clearClinicalContext,
         dischargedCensus,
         reconcileCensus,
         updateBedStatus,

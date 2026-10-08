@@ -704,10 +704,17 @@ export function OpdMasterWorkspace() {
     setSelectedEncounterId(requestedEncounterId);
   }, [encounters, requestedEncounterId]);
 
-  const activeEncounter = useMemo(() => {
+  const resolvedActiveEncounter = useMemo(() => {
     if (!selectedEncounterId) return undefined;
     return encounters.find((e) => e.id === selectedEncounterId);
   }, [encounters, selectedEncounterId]);
+
+  // Deliberately no first-encounter fallback. Runtime value remains undefined
+  // until a specific encounter is selected; patient-bound UI is safety-locked
+  // unless verification succeeds. The narrow alias keeps existing handlers
+  // typed without reintroducing an implicit patient/encounter authority.
+  const activeEncounter =
+    resolvedActiveEncounter as ComprehensiveOpdEncounter;
 
   const activePatientRecord = useMemo(() => {
     if (!activeEncounter) return undefined;

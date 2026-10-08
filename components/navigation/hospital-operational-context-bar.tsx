@@ -90,6 +90,7 @@ export function HospitalOperationalContextBar({ onOpenPatientSearch }: Operation
           workflow: 'Manchester / NEWS2 Triage Protocol (Stage 1/3)',
           isClinical: true,
         };
+      case 'workflow-runtime':
       case 'opd':
         return {
           department: 'Outpatient Department (OPD)',

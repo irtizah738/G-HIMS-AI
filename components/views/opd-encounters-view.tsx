@@ -85,6 +85,7 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
       encounterId: token.encounterId,
       patientId: token.patientId,
       patientMrn: token.mrn,
+      patientName: token.patientName,
       source: 'OPD_CONSULTATION_DESK',
     });
     setSelectedTokenId(token.id);
@@ -156,6 +157,7 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
       encounterId: selectedToken.encounterId,
       patientId: selectedToken.patientId,
       patientMrn: selectedToken.mrn,
+      patientName: selectedToken.patientName,
       source: 'OPD_CONSULTATION_DESK',
     });
   }, [

@@ -1685,16 +1685,41 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     return consolidatedPrimary;
   };
 
+  const requireVerifiedClinicalContextForPatient = (
+    patientId: string,
+    operation: string
+  ): { patient: Patient; encounterId: string } => {
+    const normalizedPatientId = String(patientId || '').trim();
+    const patient = patients.find((item) => item.id === normalizedPatientId);
+
+    if (
+      !patient ||
+      !clinicalContext ||
+      clinicalContext.status !== 'VERIFIED' ||
+      clinicalContext.patientId !== normalizedPatientId ||
+      patient.mrn !== clinicalContext.patientMrn ||
+      String(patient.fullName || '').trim() !== clinicalContext.patientName
+    ) {
+      throw new Error(
+        `PATIENT_CONTEXT_MISMATCH: ${operation} requires a verified encounter-bound patient context.`
+      );
+    }
+
+    return {
+      patient,
+      encounterId: clinicalContext.encounterId,
+    };
+  };
+
   const addClinicalNote = async (
     patientId: string,
     note: Omit<ClinicalNote, 'id' | 'timestamp'>
   ): Promise<void> => {
-    const patient = patients.find((item) => item.id === patientId);
-    const encounterId = patient?.activeEncounterId || patient?.encounters?.[0]?.id;
-
-    if (!patient || !encounterId) {
-      throw new Error('CLINICAL_NOTE_REJECTED: active patient encounter is required.');
-    }
+    const { patient, encounterId } =
+      requireVerifiedClinicalContextForPatient(
+        patientId,
+        'Clinical note signing'
+      );
 
     const categoryMap: Record<
       ClinicalNote['category'],
@@ -1810,12 +1835,11 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     patientId: string,
     order: Omit<LabOrder, 'id' | 'orderedAt'>
   ): Promise<void> => {
-    const patient = patients.find((item) => item.id === patientId);
-    const encounterId = patient?.activeEncounterId || patient?.encounters?.[0]?.id;
-
-    if (!patient || !encounterId) {
-      throw new Error('DIAGNOSTIC_ORDER_REJECTED: active patient encounter is required.');
-    }
+    const { encounterId } =
+      requireVerifiedClinicalContextForPatient(
+        patientId,
+        'Diagnostic ordering'
+      );
 
     const orderType = order.category === 'Radiology' ? 'RADIOLOGY' : 'LAB';
     const offlineOrderId = `offline-order-${crypto.randomUUID()}`;
@@ -1880,12 +1904,11 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     patientId: string,
     vitals: Omit<Vitals, 'timestamp'>
   ): Promise<void> => {
-    const patient = patients.find((item) => item.id === patientId);
-    const encounterId = patient?.activeEncounterId || patient?.encounters?.[0]?.id;
-
-    if (!patient || !encounterId) {
-      throw new Error('VITALS_REJECTED: active patient encounter is required.');
-    }
+    const { encounterId } =
+      requireVerifiedClinicalContextForPatient(
+        patientId,
+        'Vitals recording'
+      );
 
     const offlineVitalsId = `offline-vitals-${crypto.randomUUID()}`;
     const result = await executeActiveTenantCommand(

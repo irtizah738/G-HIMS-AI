@@ -3411,6 +3411,7 @@ export function OpdMasterWorkspace() {
       {/* 6. Triage Vitals Station & Risk Scoring */}
       {activeTab === 'TRIAGE' && canAccessTab('TRIAGE') && patientContextReady && activeEncounter && (
         <OpdTriageVitals
+          key={`triage:${activeEncounter.id}:${activeEncounter.patientId}`}
           encounter={activeEncounter}
           onSaveVitals={(vitals) => handleSaveVitals(vitals)}
         />
@@ -3419,6 +3420,7 @@ export function OpdMasterWorkspace() {
       {/* 7. Specialist Consultation & SOAP */}
       {activeTab === 'CONSULTATION' && canAccessTab('CONSULTATION') && patientContextReady && activeEncounter && (
         <OpdConsultationSpecialties
+          key={`consultation:${activeEncounter.id}:${activeEncounter.patientId}`}
           encounter={activeEncounter}
           onSaveConsultation={(soap) => handleSaveConsultation(soap)}
           onPlaceDiagnosticOrders={() => setActiveTab('DIAGNOSTICS')}
@@ -3430,6 +3432,7 @@ export function OpdMasterWorkspace() {
       {/* 8. Laboratory (LIS), PACS Radiology & Procedures */}
       {activeTab === 'DIAGNOSTICS' && canAccessTab('DIAGNOSTICS') && patientContextReady && activeEncounter && (
         <OpdDiagnosticOrdersPacs
+          key={`diagnostics:${activeEncounter.id}:${activeEncounter.patientId}`}
           encounter={activeEncounter}
           orders={activeEncounter.diagnosticOrders}
           onAddOrder={(order) => handleAddDiagnosticOrder(order)}
@@ -3442,6 +3445,7 @@ export function OpdMasterWorkspace() {
       {/* 9. e-Prescriptions & Pharmacy FEFO Dispensing */}
       {activeTab === 'PHARMACY' && canAccessTab('PHARMACY') && patientContextReady && activeEncounter && (
         <OpdPharmacyPrescriptions
+          key={`pharmacy:${activeEncounter.id}:${activeEncounter.patientId}`}
           encounter={activeEncounter}
           prescriptions={activeEncounter.prescriptions}
           canPrescribe={canPrescribe}
@@ -3461,6 +3465,7 @@ export function OpdMasterWorkspace() {
         activeEncounter &&
         activeBillingInvoice && (
           <OpdBillingLedger
+            key={`billing:${activeEncounter.id}:${activeEncounter.patientId}`}
             encounter={activeEncounter}
             invoice={activeBillingInvoice}
             canSettlePayment={canSettlePayment}
@@ -3520,6 +3525,7 @@ export function OpdMasterWorkspace() {
       {/* 11. Disposition, Referrals & SBAR Handoff */}
       {activeTab === 'DISPOSITION' && canAccessTab('DISPOSITION') && patientContextReady && activeEncounter && (
         <OpdDispositionReferrals
+          key={`disposition:${activeEncounter.id}:${activeEncounter.patientId}`}
           encounter={activeEncounter}
           onCommitDisposition={(disposition) => handleCommitDisposition(disposition)}
         />

@@ -11,6 +11,29 @@ import { AuthError } from '@/lib/auth/auth-errors';
 import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
 import { issueOfflineCaptureCapability } from '@/server/auth/offline-capability';
 
+function errorResponse(
+  error: unknown,
+  fallbackCode: 'AUTHENTICATION_REQUIRED' | 'SESSION_EXPIRED' = 'AUTHENTICATION_REQUIRED'
+) {
+  const authError =
+    error instanceof AuthError
+      ? error
+      : new AuthError({
+          code: fallbackCode,
+          message: error instanceof Error ? error.message : 'Authentication failed',
+          statusCode: 401,
+        });
+
+  return NextResponse.json(
+    {
+      error: authError.message,
+      code: authError.code,
+      userMessage: authError.userMessage,
+    },
+    { status: authError.statusCode }
+  );
+}
+
 export async function POST(req: NextRequest) {
   const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || '127.0.0.1';
   const userAgent = req.headers.get('user-agent') || 'Unknown';

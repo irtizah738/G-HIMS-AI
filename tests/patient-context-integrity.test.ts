@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { verifyPatientContextIdentity } from '@/lib/clinical/patient-context-integrity';
 
 const source = (file: string) =>
   readFile(path.join(process.cwd(), file), 'utf8');
@@ -41,14 +42,81 @@ describe('PCI — Patient Context Integrity Closure', () => {
     const opd = await source('components/opd/OpdMasterWorkspace.tsx');
 
     expect(opd).toContain("source: 'OPD_MASTER'");
-    expect(opd).toContain('patientIdentityMatchesEncounter');
-    expect(opd).toContain('clinicalContextSynchronized');
-    expect(opd).toContain("clinicalContext.status === 'VERIFIED'");
-    expect(opd).toContain('clinicalContext.patientMrn === activeEncounter.mrn');
+    expect(opd).toContain('verifyPatientContextIdentity');
+    expect(opd).toContain('patientContextVerification');
     expect(opd).toContain('patientContextReady');
     expect(opd).toContain('PatientContextSafetyBlock');
-    expect(opd).toContain("code={");
-    expect(opd).toContain("'PATIENT_CONTEXT_MISMATCH'");
+  });
+
+  test('pure verifier reproduces and blocks the exact wrong-patient screenshot class', () => {
+    const patientA = { id: 'patient-a', mrn: 'MRN-A' };
+    const encounterB = {
+      id: 'encounter-b',
+      tenantId: 'tenant-1',
+      patientId: 'patient-b',
+      mrn: 'MRN-B',
+    };
+    const patientB = { id: 'patient-b', mrn: 'MRN-B' };
+    const staleHeaderContext = {
+      tenantId: 'tenant-1',
+      encounterId: 'encounter-a',
+      patientId: patientA.id,
+      patientMrn: patientA.mrn,
+      status: 'VERIFIED' as const,
+    };
+
+    const result = verifyPatientContextIdentity({
+      tenantId: 'tenant-1',
+      encounter: encounterB,
+      patient: patientB,
+      context: staleHeaderContext,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe('PATIENT_CONTEXT_MISMATCH');
+    }
+  });
+
+  test('pure verifier accepts only one encounter/patient/MRN/tenant identity', () => {
+    const result = verifyPatientContextIdentity({
+      tenantId: 'tenant-1',
+      encounter: {
+        id: 'encounter-1',
+        tenantId: 'tenant-1',
+        patientId: 'patient-1',
+        mrn: 'MRN-1',
+      },
+      patient: { id: 'patient-1', mrn: 'MRN-1' },
+      context: {
+        tenantId: 'tenant-1',
+        encounterId: 'encounter-1',
+        patientId: 'patient-1',
+        patientMrn: 'MRN-1',
+        status: 'VERIFIED',
+      },
+    });
+
+    expect(result).toEqual({ ok: true });
+  });
+
+  test('pure verifier rejects same patient ID with a different MRN', () => {
+    const result = verifyPatientContextIdentity({
+      tenantId: 'tenant-1',
+      encounter: {
+        id: 'encounter-1',
+        tenantId: 'tenant-1',
+        patientId: 'patient-1',
+        mrn: 'MRN-CANONICAL',
+      },
+      patient: { id: 'patient-1', mrn: 'MRN-STALE' },
+      context: null,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe('PATIENT_CONTEXT_MISMATCH');
+    }
   });
 
   test('consultation desk never substitutes the first queue token or patient', async () => {

@@ -19,7 +19,7 @@ import { PatientDemographics, ConsentCaptureDecision } from '@/types/opd-domain'
 interface OpdRegistrationConsentProps {
   initialData?: Partial<PatientDemographics>;
   authorizedFacilityIds?: string[];
-  onRegisterSuccess: (patient: PatientDemographics) => void;
+  onRegisterSuccess: (patient: PatientDemographics) => Promise<void>;
   onCancel?: () => void;
 }
 
@@ -83,6 +83,9 @@ export function OpdRegistrationConsent({
     'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-' | 'Unknown'
   >('Unknown');
   const [knownAllergies, setKnownAllergies] = useState<string>('');
+  const [registrationBusy, setRegistrationBusy] = useState(false);
+  const [registrationError, setRegistrationError] = useState<string | null>(null);
+  const [registrationSuccess, setRegistrationSuccess] = useState<string | null>(null);
 
   // Consent decisions are explicit and unselected by default. Procedure-specific
   // consent is intentionally not collected as a blanket registration consent.
@@ -114,8 +117,11 @@ export function OpdRegistrationConsent({
     setAge(Math.max(0, calculated));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (registrationBusy) return;
+    setRegistrationError(null);
+    setRegistrationSuccess(null);
 
     if (!gender || age === '' || !tariffPlan) {
       alert('Complete gender, date of birth and tariff class before registration.');
@@ -187,7 +193,19 @@ export function OpdRegistrationConsent({
       createdAt: 0,
     };
 
-    onRegisterSuccess(newPatient);
+    setRegistrationBusy(true);
+    try {
+      await onRegisterSuccess(newPatient);
+      setRegistrationSuccess('Registration committed and authoritative queue token issued.');
+    } catch (error) {
+      setRegistrationError(
+        error instanceof Error
+          ? error.message
+          : 'Registration could not be committed.'
+      );
+    } finally {
+      setRegistrationBusy(false);
+    }
   };
 
   return (
@@ -546,14 +564,32 @@ export function OpdRegistrationConsent({
         </div>
 
         {/* Form Submission Actions */}
+        {registrationError && (
+          <div
+            role="alert"
+            data-testid="opd-registration-error"
+            className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800"
+          >
+            {registrationError}
+          </div>
+        )}
+        {registrationSuccess && (
+          <div
+            data-testid="opd-registration-success"
+            className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800"
+          >
+            {registrationSuccess}
+          </div>
+        )}
         <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-3">
           <button
             data-testid="opd-registration-submit"
             type="submit"
-            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs transition-all cursor-pointer"
+            disabled={registrationBusy}
+            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs transition-all cursor-pointer"
           >
             <CheckCircle2 className="w-4 h-4" />
-            Commit Registration & Issue Queue Token
+            {registrationBusy ? 'Committing registration…' : 'Commit Registration & Issue Queue Token'}
           </button>
         </div>
       </form>

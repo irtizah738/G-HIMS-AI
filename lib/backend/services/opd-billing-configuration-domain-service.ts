@@ -198,6 +198,7 @@ export class OpdBillingConfigurationDomainService {
         taxRateBasisPoints: payload.taxRateBasisPoints,
         revenueAccountCode,
         effectiveFrom,
+        createdAt: nowIso,
         updatedAt: nowIso,
         updatedBy: context.actorId,
       };
@@ -253,6 +254,28 @@ export class OpdBillingConfigurationDomainService {
             entityId: periodId,
             required: true,
           },
+          {
+            key: 'revenueAccount',
+            entityType: 'GL_ACCOUNT',
+            entityId: String(revenue.accountId || revenue.id),
+            required: true,
+          },
+          {
+            key: 'arAccount',
+            entityType: 'GL_ACCOUNT',
+            entityId: String(ar.accountId || ar.id),
+            required: true,
+          },
+          ...(tax
+            ? [
+                {
+                  key: 'taxAccount',
+                  entityType: 'GL_ACCOUNT',
+                  entityId: String(tax.accountId || tax.id),
+                  required: true,
+                },
+              ]
+            : []),
         ],
         prepare: (current) => {
           const currentPeriod = current.period as unknown as FinancePeriodRecord;
@@ -263,8 +286,56 @@ export class OpdBillingConfigurationDomainService {
             );
           }
 
+          const currentRevenue = current.revenueAccount as unknown as FinanceAccountRecord;
+          const currentAr = current.arAccount as unknown as FinanceAccountRecord;
+          const currentTax = current.taxAccount as unknown as FinanceAccountRecord | null;
+
+          if (
+            !currentRevenue ||
+            currentRevenue.accountCode !== revenueAccountCode ||
+            currentRevenue.isActive !== true ||
+            currentRevenue.category !== 'revenue' ||
+            currentRevenue.currency.trim().toUpperCase() !== currency
+          ) {
+            throw new AtomicMutationRejectedError(
+              'OPD_REVENUE_ACCOUNT_INVALID',
+              `Revenue account ${revenueAccountCode} changed or is no longer valid.`
+            );
+          }
+          if (
+            !currentAr ||
+            currentAr.accountCode !== '1110' ||
+            currentAr.isActive !== true ||
+            currentAr.category !== 'asset' ||
+            currentAr.currency.trim().toUpperCase() !== currency
+          ) {
+            throw new AtomicMutationRejectedError(
+              'AR_CONTROL_ACCOUNT_INVALID',
+              'Accounts Receivable control account 1110 changed or is no longer valid.'
+            );
+          }
+          if (
+            payload.taxRateBasisPoints > 0 &&
+            (!currentTax ||
+              currentTax.accountCode !== '2040' ||
+              currentTax.isActive !== true ||
+              currentTax.category !== 'liability' ||
+              currentTax.currency.trim().toUpperCase() !== currency)
+          ) {
+            throw new AtomicMutationRejectedError(
+              'OUTPUT_TAX_ACCOUNT_INVALID',
+              'Output tax account 2040 changed or is no longer valid.'
+            );
+          }
+
           return {
-            domainState: serviceState,
+            domainState: {
+              ...(current.service || {}),
+              ...serviceState,
+              createdAt:
+                String((current.service as any)?.createdAt || '').trim() ||
+                nowIso,
+            },
             additionalStateWrites: [
               {
                 entityType: 'TARIFF',

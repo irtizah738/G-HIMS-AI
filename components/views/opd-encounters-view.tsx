@@ -106,6 +106,22 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
   const [respiratoryRate, setRespiratoryRate] = useState<number | ''>('');
   const [isSaving, setIsSaving] = useState(false);
 
+  // Clear every transient clinical draft when the encounter changes. This
+  // prevents Patient A's unsaved data from surviving into Patient B's chart.
+  useEffect(() => {
+    setChiefComplaint('');
+    setSoapSubjective('');
+    setSoapObjective('');
+    setSoapAssessment('');
+    setSoapPlan('');
+    setHr('');
+    setBp('');
+    setTemp('');
+    setSpo2('');
+    setRespiratoryRate('');
+    setIsConfirmModalOpen(false);
+  }, [selectedTokenId]);
+
   const selectedToken = selectedTokenId
     ? opdQueue.find((token) => token.id === selectedTokenId)
     : undefined;

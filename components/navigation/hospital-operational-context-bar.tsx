@@ -69,15 +69,17 @@ export function HospitalOperationalContextBar({ onOpenPatientSearch }: Operation
   ]);
   const clinicalContextActive = clinicalTabs.has(activeTab);
   const effectivePatientId = clinicalContextActive
-    ? clinicalContext?.patientId || null
+    ? clinicalContext?.status === 'VERIFIED'
+      ? clinicalContext.patientId
+      : null
     : selectedPatientId;
   const activePatient = effectivePatientId
     ? patients.find((patient) => patient.id === effectivePatientId) || null
     : null;
   const unresolvedClinicalContext =
     clinicalContextActive &&
-    Boolean(clinicalContext?.patientId) &&
-    !activePatient;
+    Boolean(clinicalContext) &&
+    (clinicalContext?.status !== 'VERIFIED' || !activePatient);
 
   // Resolve departmental and workflow context based on active tab
   const getDepartmentAndWorkflow = () => {
@@ -247,7 +249,9 @@ export function HospitalOperationalContextBar({ onOpenPatientSearch }: Operation
                   className="text-rose-300 font-bold"
                   data-testid="shell-patient-context-unresolved"
                 >
-                  PATIENT_CONTEXT_UNRESOLVED
+                  {clinicalContext?.status === 'MISMATCH'
+                    ? 'PATIENT_CONTEXT_MISMATCH'
+                    : 'PATIENT_CONTEXT_UNRESOLVED'}
                 </span>
               ) : (
                 <span className="text-amber-400 font-medium italic">No Patient Selected</span>

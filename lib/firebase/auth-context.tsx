@@ -79,18 +79,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const errorCode = error?.code || '';
       const errorMessage = error?.message || '';
       
-      // User closed the popup, cancelled, popup was blocked, or timed out in iframe sandbox
+      // User cancellation is benign. Browser-blocked or timed-out popups
+      // are actionable failures and must reach the login portal.
       if (
         errorCode === 'auth/popup-closed-by-user' ||
         errorCode === 'auth/cancelled-popup-request' ||
         errorCode === 'auth/user-cancelled' ||
-        errorCode === 'auth/popup-blocked' ||
         errorMessage.includes('popup-closed-by-user') ||
-        errorMessage.includes('cancelled-popup-request') ||
-        errorMessage.includes('popup-timeout') ||
-        errorMessage.includes('popup-blocked')
+        errorMessage.includes('cancelled-popup-request')
       ) {
-        console.info('Google Sign In popup was cancelled, blocked, or timed out in iframe.');
+        console.info('Google Sign In popup was cancelled by the user.');
         return null;
       }
 

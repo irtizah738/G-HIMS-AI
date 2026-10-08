@@ -59,6 +59,7 @@ import {
 import { OpdOfflineSyncManager } from './OpdOfflineSyncManager';
 import { executeActiveTenantCommand, registerActiveTenantPatient } from '@/lib/api/command-client';
 import { useAuth } from '@/lib/auth/auth-context';
+import { useHospital } from '@/lib/context/hospital-context';
 import { useOfflineStatus } from '@/hooks/useOfflineStatus';
 import { hydrateEdgeSnapshot } from '@/lib/offline/hydration';
 import {
@@ -440,6 +441,10 @@ const SEED_EVENTS: OpdTimelineEvent[] = [
 
 export function OpdMasterWorkspace() {
   const auth = useAuth();
+  const {
+    selectedPatientId: shellSelectedPatientId,
+    setSelectedPatientId: setShellSelectedPatientId,
+  } = useHospital();
   const searchParams = useSearchParams();
   const requestedEncounterId = String(
     searchParams.get('opdEncounterId') || ''
@@ -686,6 +691,19 @@ export function OpdMasterWorkspace() {
   const activeEncounter = useMemo(() => {
     return encounters.find((e) => e.id === selectedEncounterId) || encounters[0];
   }, [encounters, selectedEncounterId]);
+
+  // Patient-safety invariant: the hospital shell and the OPD chart must never
+  // display different patient identities. The selected OPD encounter is the
+  // authoritative patient context while this workspace is active.
+  useEffect(() => {
+    const patientId = String(activeEncounter?.patientId || '').trim();
+    if (!patientId || shellSelectedPatientId === patientId) return;
+    setShellSelectedPatientId(patientId);
+  }, [
+    activeEncounter?.patientId,
+    shellSelectedPatientId,
+    setShellSelectedPatientId,
+  ]);
 
   const activeBillingInvoice = useMemo(() => {
     if (!activeEncounter) return undefined;

@@ -40,6 +40,9 @@ describe('highlighted clinical button closure', () => {
       'lib/clinical/intelligence/consultant-attention-projection-service.ts'
     );
     const ui = await source('components/clinical/ConsultantCommandCenter.tsx');
+    const routing = await source(
+      'components/clinical/patient-consultant-routing-modal.tsx'
+    );
 
     expect(service).toContain(".collection('consultationRequests')");
     expect(service).toContain("'CONSULTATION_SOURCE_RECONCILIATION'");
@@ -47,6 +50,14 @@ describe('highlighted clinical button closure', () => {
     expect(ui).toContain('setSelectedPatientId(item.patientId)');
     expect(ui).toContain('patient.fullName');
     expect(ui).toContain('patient.mrn');
+
+    const requestIndex = routing.indexOf('await requestClinicalConsultation');
+    const patient360Index = routing.indexOf('/api/clinical/patient360/');
+    expect(requestIndex).toBeGreaterThan(-1);
+    expect(patient360Index).toBeGreaterThan(requestIndex);
+    expect(routing).toContain(
+      'Consultation is routed and visible to the consultant. Patient 360 handoff evidence is still projecting'
+    );
   });
 
   test('MPI excludes retired merged identities and treats same-target retries idempotently', async () => {

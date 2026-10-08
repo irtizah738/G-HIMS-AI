@@ -44,6 +44,7 @@ export function TelehealthCallPanel({
   const processedRef = useRef<Set<string>>(new Set());
   const lastSeenRef = useRef(0);
   const connectedReportedRef = useRef(false);
+  const pendingIceRef = useRef<RTCIceCandidateInit[]>([]);
 
   const [state, setState] = useState<'IDLE' | 'PREPARING' | 'WAITING' | 'CONNECTED' | 'ENDED'>('IDLE');
   const [error, setError] = useState<string | null>(null);
@@ -126,13 +127,15 @@ export function TelehealthCallPanel({
       if (message.type === 'ANSWER' && message.payload?.sdp) {
         if (!peer.currentRemoteDescription) {
           await peer.setRemoteDescription(new RTCSessionDescription(message.payload));
+          for (const candidate of pendingIceRef.current.splice(0)) {
+            await peer.addIceCandidate(new RTCIceCandidate(candidate));
+          }
         }
       } else if (message.type === 'ICE' && message.payload) {
-        try {
+        if (!peer.currentRemoteDescription) {
+          pendingIceRef.current.push(message.payload as RTCIceCandidateInit);
+        } else {
           await peer.addIceCandidate(new RTCIceCandidate(message.payload));
-        } catch {
-          // A candidate may race remote-description installation. The next ICE
-          // candidate/poll continues negotiation without mutating clinical state.
         }
       } else if (message.type === 'LEAVE') {
         setState('ENDED');
@@ -147,6 +150,7 @@ export function TelehealthCallPanel({
     setState('PREPARING');
     connectedReportedRef.current = false;
     processedRef.current.clear();
+    pendingIceRef.current = [];
     lastSeenRef.current = 0;
 
     try {

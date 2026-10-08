@@ -944,6 +944,8 @@ export interface ClinicalContextBinding {
   tenantId: string;
   encounterId: string;
   patientId: string;
+  patientMrn: string;
+  status: 'VERIFIED' | 'UNRESOLVED' | 'MISMATCH';
   contextRevision: number;
   source:
     | 'OPD_MASTER'
@@ -958,6 +960,7 @@ interface BindClinicalEncounterInput {
   tenantId?: string;
   encounterId: string;
   patientId: string;
+  patientMrn: string;
   source: ClinicalContextBinding['source'];
 }
 
@@ -1079,19 +1082,30 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       .toLowerCase();
     const encounterId = String(input.encounterId || '').trim();
     const patientId = String(input.patientId || '').trim();
+    const patientMrn = String(input.patientMrn || '').trim();
 
-    if (!authoritativeTenantId || !encounterId || !patientId) {
-      throw new Error('CLINICAL_CONTEXT_INVALID: tenant, encounter and patient identifiers are required.');
+    if (!authoritativeTenantId || !encounterId || !patientId || !patientMrn) {
+      throw new Error('CLINICAL_CONTEXT_INVALID: tenant, encounter, patient and MRN identifiers are required.');
     }
     if (requestedTenantId !== authoritativeTenantId) {
       throw new Error('CLINICAL_CONTEXT_TENANT_MISMATCH');
     }
+
+    const shellPatient = patients.find((patient) => patient.id === patientId);
+    const status: ClinicalContextBinding['status'] =
+      !shellPatient
+        ? 'UNRESOLVED'
+        : shellPatient.mrn !== patientMrn
+          ? 'MISMATCH'
+          : 'VERIFIED';
 
     clinicalContextRevisionRef.current += 1;
     const next: ClinicalContextBinding = {
       tenantId: authoritativeTenantId,
       encounterId,
       patientId,
+      patientMrn,
+      status,
       contextRevision: clinicalContextRevisionRef.current,
       source: input.source,
       boundAt: Date.now(),
@@ -1102,7 +1116,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     setClinicalContext(next);
     setSelectedPatientId(patientId);
     return next;
-  }, [activeTenant?.tenantId, user?.tenantId]);
+  }, [activeTenant?.tenantId, patients, user?.tenantId]);
 
   const clearClinicalContext = useCallback(() => {
     clinicalContextRevisionRef.current += 1;
@@ -1559,6 +1573,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     bindClinicalEncounter({
       encounterId: registration.encounter.id,
       patientId: newPatient.id,
+      patientMrn: newPatient.mrn,
       source: 'REGISTRATION',
     });
     recordMutation('REGISTER_PATIENT', `Patient:${newPatient.id}`, {
@@ -2053,6 +2068,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       bindClinicalEncounter({
         encounterId: token.encounterId,
         patientId: token.patientId,
+        patientMrn: token.mrn,
         source: 'OPD_QUEUE',
       });
     }

@@ -101,7 +101,10 @@ describe('DRP-5 identity and session closure', () => {
     const selection = await source('app/api/auth/tenant-selection/route.ts');
 
     expect(client).toContain("code: 'TENANT_SELECTION_REQUIRED'");
-    expect(client).toContain('activeTenants.length > 1');
+    expect(client).toContain(
+      'Explicit hospital facility selection is required before a G-HIMS session can be established.'
+    );
+    expect(client).not.toContain('activeTenants.length === 1');
     expect(selection).toContain('Authorization');
   });
 

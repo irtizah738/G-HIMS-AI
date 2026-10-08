@@ -11,7 +11,12 @@ describe('OPD-SQ1 deployed cross-role staging qualification contract', () => {
 
     expect(login).not.toContain('const TENANTS =');
     expect(login).toContain("const [tenantId, setTenantId] = useState('')");
-    expect(login).toContain('Leave blank to use your only authorized hospital');
+    expect(login).toContain('NEXT_PUBLIC_GHIMS_HOSPITAL0_TENANT_ID');
+    expect(login).toContain('NEXT_PUBLIC_GHIMS_HOSPITAL0_NAME');
+    expect(login).toContain('NEXT_PUBLIC_GHIMS_HOSPITAL0_FACILITY_CODE');
+    expect(login).toContain('Search or select your hospital facility');
+    expect(login).toContain('list="ghims-hospital-facilities"');
+    expect(login).toContain('required');
     expect(login).toContain('data-testid="login-tenant-id"');
     expect(login).toContain('data-testid="login-email"');
     expect(login).toContain('data-testid="login-password"');

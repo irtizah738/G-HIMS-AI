@@ -27,6 +27,31 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 
+const hospital0TenantId = String(process.env.NEXT_PUBLIC_GHIMS_HOSPITAL0_TENANT_ID || '').trim();
+const hospital0Name = String(process.env.NEXT_PUBLIC_GHIMS_HOSPITAL0_NAME || '').trim();
+const hospital0FacilityCode = String(process.env.NEXT_PUBLIC_GHIMS_HOSPITAL0_FACILITY_CODE || '').trim();
+
+const HOSPITAL_FACILITIES = hospital0TenantId
+  ? [
+      {
+        tenantId: hospital0TenantId,
+        name: hospital0Name || hospital0TenantId,
+        facilityCode: hospital0FacilityCode || hospital0TenantId,
+      },
+    ]
+  : [];
+
+function resolveFacilityTenantId(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  const match = HOSPITAL_FACILITIES.find(
+    (facility) =>
+      facility.tenantId.toLowerCase() === normalized ||
+      facility.name.toLowerCase() === normalized ||
+      facility.facilityCode.toLowerCase() === normalized
+  );
+  return match?.tenantId || '';
+}
+
 interface Persona {
   id: string;
   role: string;
@@ -133,6 +158,12 @@ export function LoginPortal() {
     e.preventDefault();
     setLocalError(null);
 
+    const selectedTenantId = resolveFacilityTenantId(tenantId);
+    if (!selectedTenantId) {
+      setLocalError('Select an authorized hospital facility before signing in.');
+      return;
+    }
+
     if (!email || !email.includes('@')) {
       setLocalError('Please enter a valid medical staff email address.');
       return;
@@ -146,7 +177,7 @@ export function LoginPortal() {
     setSubmitting(true);
     try {
       const result = await signIn(email, password, {
-        ...(tenantId.trim() ? { tenantId: tenantId.trim().toLowerCase() } : {}),
+        tenantId: selectedTenantId,
         rememberDevice,
       });
 
@@ -168,13 +199,18 @@ export function LoginPortal() {
 
   const handleGoogleSignIn = async () => {
     setLocalError(null);
+    const selectedTenantId = resolveFacilityTenantId(tenantId);
+    if (!selectedTenantId) {
+      setLocalError('Select an authorized hospital facility before signing in.');
+      return;
+    }
     setGoogleLoading(true);
     try {
       const googleToken = await signInWithGoogle();
       if (!googleToken) return;
 
       const result = await signInFederated({
-        ...(tenantId.trim() ? { tenantId: tenantId.trim().toLowerCase() } : {}),
+        tenantId: selectedTenantId,
         rememberDevice,
       });
 
@@ -203,8 +239,9 @@ export function LoginPortal() {
       return;
     }
 
-    if (!tenantId.trim()) {
-      setLocalError('Hospital tenant ID is required for enterprise SSO.');
+    const selectedTenantId = resolveFacilityTenantId(tenantId);
+    if (!selectedTenantId) {
+      setLocalError('Select an authorized hospital facility before enterprise SSO.');
       setSsoLoading(false);
       return;
     }
@@ -212,7 +249,7 @@ export function LoginPortal() {
     try {
       const result = await signInSSO(
         ssoEmail,
-        tenantId.trim().toLowerCase()
+        selectedTenantId
       );
       if (result?.authenticated) {
         setSsoModalOpen(false);
@@ -295,26 +332,37 @@ export function LoginPortal() {
             )}
 
             <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Facility Scope */}
+              {/* Required Facility Scope */}
               <div className="space-y-1.5">
                 <label className="block text-xs font-semibold text-slate-300">
-                  Hospital Tenant ID <span className="font-normal text-slate-500">(optional)</span>
+                  Hospital Facility <span className="text-red-400">*</span>
                 </label>
                 <div className="relative">
                   <input
                     data-testid="login-tenant-id"
                     type="text"
+                    list="ghims-hospital-facilities"
+                    required
                     value={tenantId}
                     onChange={(e) => setTenantId(e.target.value)}
-                    placeholder="Leave blank to use your only authorized hospital"
+                    placeholder="Search or select your hospital facility"
                     autoCapitalize="none"
                     autoCorrect="off"
                     className="w-full pl-10 pr-4 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-xs font-medium text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition placeholder:text-slate-600"
                   />
+                  <datalist id="ghims-hospital-facilities">
+                    {HOSPITAL_FACILITIES.map((facility) => (
+                      <option
+                        key={facility.tenantId}
+                        value={facility.tenantId}
+                        label={`${facility.name} · ${facility.facilityCode}`}
+                      />
+                    ))}
+                  </datalist>
                   <Building2 className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                 </div>
                 <p className="text-[10px] leading-relaxed text-slate-500">
-                  Single-hospital staff can leave this blank. Multi-hospital staff must enter the tenant ID assigned by hospital administration.
+                  Facility selection is required. Access is still verified against your active server-authoritative hospital membership.
                 </p>
               </div>
 

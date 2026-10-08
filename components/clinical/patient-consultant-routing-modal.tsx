@@ -611,37 +611,6 @@ export function PatientConsultantRoutingModal({
             'Authoritative consultant routing requires tenant, patient and encounter identity.'
           );
         }
-        const patient360Response = await AuthClient.authorizedFetch(
-          `/api/clinical/patient360/${encodeURIComponent(patientId)}?tenantId=${encodeURIComponent(tenantId)}&encounterId=${encodeURIComponent(encounterId)}`,
-          { method: 'GET', cache: 'no-store' },
-          tenantId
-        );
-        const patient360Payload = await patient360Response.json();
-        if (
-          !patient360Response.ok ||
-          !patient360Payload?.success ||
-          !patient360Payload?.projection
-        ) {
-          throw new Error(
-            patient360Payload?.error ||
-              'Patient 360 evidence could not be loaded for specialist routing.'
-          );
-        }
-
-        const patient360Revision = Number(patient360Payload.projection.revision);
-        const patient360SourceCheckpoint = String(
-          patient360Payload.projection.sourceCheckpoint || ''
-        ).trim();
-        if (
-          !Number.isInteger(patient360Revision) ||
-          patient360Revision < 0 ||
-          !patient360SourceCheckpoint
-        ) {
-          throw new Error(
-            'Patient 360 did not provide a valid evidence checkpoint for routing.'
-          );
-        }
-
         const canResumePendingHandoff =
           pendingHandoff?.patientId === patientId &&
           pendingHandoff.encounterId === encounterId &&
@@ -652,6 +621,8 @@ export function PatientConsultantRoutingModal({
           ? pendingHandoff.consultationId
           : '';
 
+        // Consultation routing is the primary authoritative action. It must not
+        // be blocked by an asynchronously lagging Patient 360 projection.
         if (!consultationId) {
           const consultation = await requestClinicalConsultation(tenantId, {
             patientId,
@@ -674,56 +645,105 @@ export function PatientConsultantRoutingModal({
               'Consultation was created without a canonical consultation identifier.'
             );
           }
-
-          setPendingHandoff({
-            consultationId,
-            consultantId: selectedDoctor.id,
-            patientId,
-            encounterId,
-            sourceArtifactId,
-            patient360Revision,
-            patient360SourceCheckpoint,
-          });
         }
 
         authoritativeConsultationId = consultationId;
 
-        const handoffRevision = canResumePendingHandoff
-          ? pendingHandoff.patient360Revision
-          : patient360Revision;
-        const handoffCheckpoint = canResumePendingHandoff
-          ? pendingHandoff.patient360SourceCheckpoint
-          : patient360SourceCheckpoint;
+        let coordinationWarning = '';
+        let patient360Revision: number | undefined;
+        let patient360SourceCheckpoint = '';
+        let handoffCompleted = false;
 
-        await createClinicalHandoff(tenantId, {
-          patientId,
-          encounterId,
-          toClinicianId: selectedDoctor.id,
-          currentProblemSummary:
-            clinicalHandoffNote.trim() ||
-            `${chiefComplaint}. Specialist review requested from ${selectedDoctor.department}.`,
-          activeRisks: [triageCategory].filter(Boolean),
-          pendingConsultations: [consultationId],
-          expectedActions: [
-            'Acknowledge the consultation request.',
-            'Accept clinical responsibility for specialist review.',
-            'Review the linked Patient 360 evidence before completing the consultation.',
-          ],
-          sourceRefs: Array.from(
-            new Set([consultationId, ...sourceRefs].filter(Boolean))
-          ),
-          patient360Revision: handoffRevision,
-          patient360SourceCheckpoint: handoffCheckpoint,
-          sourceArtifactId,
-          sourceArtifactType,
-        });
+        try {
+          const patient360Response = await AuthClient.authorizedFetch(
+            `/api/clinical/patient360/${encodeURIComponent(patientId)}?tenantId=${encodeURIComponent(tenantId)}&encounterId=${encodeURIComponent(encounterId)}`,
+            { method: 'GET', cache: 'no-store' },
+            tenantId
+          );
+          const patient360Payload = await patient360Response.json();
 
-        setPendingHandoff(null);
+          if (
+            patient360Response.ok &&
+            patient360Payload?.success &&
+            patient360Payload?.projection
+          ) {
+            patient360Revision = Number(patient360Payload.projection.revision);
+            patient360SourceCheckpoint = String(
+              patient360Payload.projection.sourceCheckpoint || ''
+            ).trim();
+          }
+
+          const validPatient360Checkpoint =
+            Number.isInteger(patient360Revision) &&
+            Number(patient360Revision) >= 0 &&
+            Boolean(patient360SourceCheckpoint);
+
+          if (!validPatient360Checkpoint) {
+            coordinationWarning =
+              'Consultation is routed and visible to the consultant. Patient 360 handoff evidence is still projecting and will require review before handoff completion.';
+          } else {
+            const handoffRevision = canResumePendingHandoff
+              ? pendingHandoff.patient360Revision
+              : Number(patient360Revision);
+            const handoffCheckpoint = canResumePendingHandoff
+              ? pendingHandoff.patient360SourceCheckpoint
+              : patient360SourceCheckpoint;
+
+            if (!canResumePendingHandoff) {
+              setPendingHandoff({
+                consultationId,
+                consultantId: selectedDoctor.id,
+                patientId,
+                encounterId,
+                sourceArtifactId,
+                patient360Revision: handoffRevision,
+                patient360SourceCheckpoint: handoffCheckpoint,
+              });
+            }
+
+            await createClinicalHandoff(tenantId, {
+              patientId,
+              encounterId,
+              toClinicianId: selectedDoctor.id,
+              currentProblemSummary:
+                clinicalHandoffNote.trim() ||
+                `${chiefComplaint}. Specialist review requested from ${selectedDoctor.department}.`,
+              activeRisks: [triageCategory].filter(Boolean),
+              pendingConsultations: [consultationId],
+              expectedActions: [
+                'Acknowledge the consultation request.',
+                'Accept clinical responsibility for specialist review.',
+                'Review the linked Patient 360 evidence before completing the consultation.',
+              ],
+              sourceRefs: Array.from(
+                new Set([consultationId, ...sourceRefs].filter(Boolean))
+              ),
+              patient360Revision: handoffRevision,
+              patient360SourceCheckpoint: handoffCheckpoint,
+              sourceArtifactId,
+              sourceArtifactType,
+            });
+
+            setPendingHandoff(null);
+            handoffCompleted = true;
+          }
+        } catch (handoffError) {
+          coordinationWarning =
+            `Consultation is routed and authoritative, but the governed handoff is pending: ${
+              handoffError instanceof Error
+                ? handoffError.message
+                : 'handoff preparation is unavailable'
+            }`;
+        }
 
         Object.assign(routingPayload, {
           consultationId,
-          patient360Revision,
-          patient360SourceCheckpoint,
+          handoffCompleted,
+          ...(patient360Revision !== undefined ? { patient360Revision } : {}),
+          ...(patient360SourceCheckpoint
+            ? { patient360SourceCheckpoint }
+            : {}),
+          ...(coordinationWarning ? { coordinationWarning } : {}),
           sourceRefs: Array.from(
             new Set([consultationId, ...sourceRefs].filter(Boolean))
           ),
@@ -826,6 +846,11 @@ export function PatientConsultantRoutingModal({
                 Patient <strong className="text-slate-900">{dispatchedConfirmation.patientName}</strong> has been routed for acknowledgement by{' '}
                 <strong className="text-blue-700">{dispatchedConfirmation.consultant.name}</strong>.
               </p>
+              {dispatchedConfirmation.coordinationWarning && (
+                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-left text-[11px] font-semibold text-amber-900">
+                  {dispatchedConfirmation.coordinationWarning}
+                </div>
+              )}
             </div>
 
             <div className="max-w-lg mx-auto bg-slate-50 border border-slate-200 rounded-2xl p-5 text-left text-xs space-y-3">

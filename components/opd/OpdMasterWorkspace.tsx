@@ -725,6 +725,7 @@ export function OpdMasterWorkspace() {
       encounterId: activeEncounter.id,
       patientId: activeEncounter.patientId,
       patientMrn: activeEncounter.mrn,
+      patientName: activeEncounter.patientName,
       source: 'OPD_MASTER',
     });
   }, [

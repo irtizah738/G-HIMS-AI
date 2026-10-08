@@ -11,47 +11,6 @@ import { AuthError } from '@/lib/auth/auth-errors';
 import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
 import { issueOfflineCaptureCapability } from '@/server/auth/offline-capability';
 
-function hospital0TenantId(): string | null {
-  const value = String(process.env.GHIMS_HOSPITAL0_TENANT_ID || '').trim().toLowerCase();
-  return value || null;
-}
-
-function assertHospital0TenantScope(tenantId: string): void {
-  const hospital0 = hospital0TenantId();
-  if (hospital0 && tenantId !== hospital0) {
-    throw new AuthError({
-      code: 'TENANT_ACCESS_DENIED',
-      message: 'This Hospital-0 runtime is restricted to its configured facility.',
-      statusCode: 403,
-      userMessage: 'Select the Hospital-0 facility configured for this environment.',
-    });
-  }
-}
-
-function filterHospital0Tenants<T extends { tenantId: string }>(tenants: T[]): T[] {
-  const hospital0 = hospital0TenantId();
-  return hospital0 ? tenants.filter((tenant) => tenant.tenantId === hospital0) : tenants;
-}
-
-function errorResponse(error: unknown, fallbackCode: 'AUTHENTICATION_REQUIRED' | 'SESSION_EXPIRED' = 'AUTHENTICATION_REQUIRED') {
-  const authError = error instanceof AuthError
-    ? error
-    : new AuthError({
-        code: fallbackCode,
-        message: error instanceof Error ? error.message : 'Authentication failed',
-        statusCode: 401,
-      });
-
-  return NextResponse.json(
-    {
-      error: authError.message,
-      code: authError.code,
-      userMessage: authError.userMessage,
-    },
-    { status: authError.statusCode }
-  );
-}
-
 export async function POST(req: NextRequest) {
   const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || '127.0.0.1';
   const userAgent = req.headers.get('user-agent') || 'Unknown';
@@ -69,8 +28,6 @@ export async function POST(req: NextRequest) {
     if (!requestedTenantId) {
       return NextResponse.json({ error: 'tenantId is required' }, { status: 400 });
     }
-
-    assertHospital0TenantScope(requestedTenantId);
 
     if (deviceBindingRequired && !String(deviceData.deviceId || '').trim()) {
       throw new AuthError({
@@ -114,8 +71,9 @@ export async function POST(req: NextRequest) {
       registeredDevice?.deviceId
     );
 
-    const accessibleTenants = filterHospital0Tenants(
-      await getUserAccessibleTenants(verifiedToken.uid, verifiedToken.email)
+    const accessibleTenants = await getUserAccessibleTenants(
+      verifiedToken.uid,
+      verifiedToken.email
     );
     const offlineCapability = await issueOfflineCaptureCapability(
       authContext,
@@ -203,7 +161,6 @@ export async function GET(req: NextRequest) {
     const token = extractBearerToken(req.headers.get('authorization'));
     const verifiedToken = await verifyFirebaseToken(token, true);
     const tenantId = String(req.headers.get('x-ghims-tenant-id') || verifiedToken.claims.tenantId || '').trim().toLowerCase();
-    assertHospital0TenantScope(tenantId);
     const sessionId = String(req.headers.get('x-ghims-session-id') || '').trim();
 
     if (!tenantId || !sessionId) {

@@ -12,7 +12,9 @@ describe('G-HIMS P5A identity and staging access boundary',()=>{
     expect(login).not.toContain('irtiza.haider007@gmail.com');
     expect(login).not.toContain('HospitalAdmin2026!');
     expect(login).not.toContain('handleInstantPersonaLogin');
-    expect(login).toContain("NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO'");
+    expect(login).not.toContain('DEMO_PERSONAS');
+    expect(login).not.toContain('handleSelectPersona');
+    expect(login).not.toContain('central-metro-hospital');
     expect(login).toContain('signInFederated');
   });
 

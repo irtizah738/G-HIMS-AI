@@ -25,6 +25,16 @@ describe('Hospital-0 login facility boundary', () => {
     );
   });
 
+  test('server auth routes enforce the configured Hospital-0 tenant boundary', async () => {
+    const sessionRoute = await source('app/api/auth/session/route.ts');
+    const selectionRoute = await source('app/api/auth/tenant-selection/route.ts');
+
+    expect(sessionRoute).toContain('GHIMS_HOSPITAL0_TENANT_ID');
+    expect(sessionRoute).toContain('assertHospital0TenantScope');
+    expect(selectionRoute).toContain('filterHospital0Tenants');
+    expect(selectionRoute).toContain('assertHospital0TenantScope');
+  });
+
   test('attached Firebase config names the Hospital-0 Firestore database', async () => {
     const config = JSON.parse(await source('firebase-applet-config.json'));
 

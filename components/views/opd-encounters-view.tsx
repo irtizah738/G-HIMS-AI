@@ -28,6 +28,7 @@ import { OpdMasterWorkspace } from '@/components/opd/OpdMasterWorkspace';
 import { PatientConsultantRoutingModal, ConsultantDoctor } from '@/components/clinical/patient-consultant-routing-modal';
 import { StandardPatientBanner } from '@/components/clinical/standard-patient-banner';
 import { ConfirmPatientModal } from '@/components/clinical/confirm-patient-modal';
+import { PatientContextSafetyBlock } from '@/components/clinical/patient-context-safety-block';
 
 export interface OpdEncountersViewProps {
   initialViewMode?: 'master_suite' | 'consultation_desk';
@@ -45,26 +46,47 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
     addVitals,
     selectedPatientId,
     setSelectedPatientId,
+    clinicalContext,
+    bindClinicalEncounter,
     setActiveTab,
   } = useHospital();
 
   const [selectedTokenId, setSelectedTokenId] = useState<string>('');
 
-  // Auto-focus on matching OPD token if global selected patient matches
+  // Auto-focus only when the shared patient/encounter context can be proven.
   useEffect(() => {
-    if (selectedPatientId) {
-      const match = opdQueue.find((t) => t.patientId === selectedPatientId);
-      if (match) {
-        setSelectedTokenId(match.id);
-      }
+    const contextPatientId = clinicalContext?.patientId || selectedPatientId;
+    if (!contextPatientId) return;
+
+    const match = opdQueue.find((token) =>
+      token.patientId === contextPatientId &&
+      (!clinicalContext?.encounterId ||
+        token.encounterId === clinicalContext.encounterId)
+    );
+    if (match) {
+      setSelectedTokenId(match.id);
     }
-  }, [selectedPatientId, opdQueue]);
+  }, [
+    clinicalContext?.encounterId,
+    clinicalContext?.patientId,
+    selectedPatientId,
+    opdQueue,
+  ]);
 
   const handleSelectToken = (token: OpdQueueToken) => {
-    setSelectedTokenId(token.id);
-    if (token.patientId) {
-      setSelectedPatientId(token.patientId);
+    if (!token.encounterId) {
+      setSuccessToast(
+        'PATIENT_CONTEXT_UNRESOLVED: this queue token has no authoritative encounter binding.'
+      );
+      setTimeout(() => setSuccessToast(null), 5000);
+      return;
     }
+    bindClinicalEncounter({
+      encounterId: token.encounterId,
+      patientId: token.patientId,
+      source: 'OPD_CONSULTATION_DESK',
+    });
+    setSelectedTokenId(token.id);
   };
   const [isRoutingModalOpen, setIsRoutingModalOpen] = useState<boolean>(false);
   const [routingPatientData, setRoutingPatientData] = useState<any>(null);
@@ -84,11 +106,55 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
   const [respiratoryRate, setRespiratoryRate] = useState<number | ''>('');
   const [isSaving, setIsSaving] = useState(false);
 
-  const selectedToken = opdQueue.find(t => t.id === selectedTokenId) || opdQueue[0];
-  const patient = patients.find(p => p.id === selectedToken?.patientId) || patients[0];
+  const selectedToken = selectedTokenId
+    ? opdQueue.find((token) => token.id === selectedTokenId)
+    : undefined;
+  const patient = selectedToken
+    ? patients.find((candidate) => candidate.id === selectedToken.patientId)
+    : undefined;
+  const patientContextReady = Boolean(
+    selectedToken &&
+      selectedToken.encounterId &&
+      patient &&
+      patient.id === selectedToken.patientId &&
+      patient.mrn === selectedToken.mrn &&
+      clinicalContext &&
+      clinicalContext.encounterId === selectedToken.encounterId &&
+      clinicalContext.patientId === patient.id
+  );
+
+  useEffect(() => {
+    if (
+      !selectedToken?.encounterId ||
+      !selectedToken.patientId ||
+      (clinicalContext?.encounterId === selectedToken.encounterId &&
+        clinicalContext?.patientId === selectedToken.patientId)
+    ) {
+      return;
+    }
+
+    bindClinicalEncounter({
+      encounterId: selectedToken.encounterId,
+      patientId: selectedToken.patientId,
+      source: 'OPD_CONSULTATION_DESK',
+    });
+  }, [
+    bindClinicalEncounter,
+    clinicalContext?.encounterId,
+    clinicalContext?.patientId,
+    selectedToken?.encounterId,
+    selectedToken?.patientId,
+  ]);
 
   const handleSaveConsultation = async () => {
     if (!patient || !selectedToken || isSaving) return;
+    if (!patientContextReady) {
+      setSuccessToast(
+        'PATIENT_CONTEXT_MISMATCH: consultation signing is blocked until patient and encounter identity are reconciled.'
+      );
+      setTimeout(() => setSuccessToast(null), 5000);
+      return;
+    }
 
     const hasNarrative =
       soapSubjective.trim() ||
@@ -393,8 +459,28 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
 
         {/* Right: Active Consultation Suite */}
         <div className="lg:col-span-8 space-y-4">
+          {!patientContextReady && (
+            <PatientContextSafetyBlock
+              code={
+                !selectedToken
+                  ? 'CLINICAL_CONTEXT_REQUIRED'
+                  : !patient ||
+                      patient.mrn !== selectedToken.mrn
+                    ? 'PATIENT_CONTEXT_MISMATCH'
+                    : 'CLINICAL_CONTEXT_RESOLVING'
+              }
+              encounterId={selectedToken?.encounterId}
+              patientId={selectedToken?.patientId}
+              detail={
+                !selectedToken
+                  ? 'Select an OPD queue token with an authoritative encounter before documenting a consultation.'
+                  : 'The consultation desk remains read-only until its patient identity matches the shared encounter-bound clinical context.'
+              }
+            />
+          )}
+
           {/* Standard Patient Safety Header Banner */}
-          {patient && (
+          {patientContextReady && patient && (
             <StandardPatientBanner
               patient={patient}
               encounterType="OPD"
@@ -405,6 +491,7 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
             />
           )}
 
+          {patientContextReady && (
           <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-xs space-y-5 transition-colors">
             {/* Consultation Header Controls */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800/80 pb-4">
@@ -570,6 +657,7 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
               Structured diagnoses, medications, procedures and charge codes are not inferred or accepted from this form. Use their governed catalog/order workflows and explicit clinician acceptance.
             </div>
           </div>
+          )}
         </div>
       </div>
         </>
@@ -595,7 +683,7 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
       )}
 
       {/* RULE 10: Explicit Clinical Safety Identity Confirmation Gate */}
-      {patient && (
+      {patientContextReady && patient && (
         <ConfirmPatientModal
           isOpen={isConfirmModalOpen}
           onClose={() => setIsConfirmModalOpen(false)}

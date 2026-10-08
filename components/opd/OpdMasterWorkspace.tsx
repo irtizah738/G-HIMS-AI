@@ -926,6 +926,7 @@ export function OpdMasterWorkspace() {
 
     const offlineRegistration = registration.queuedOffline === true;
     let consultationInvoice: OpdInvoice | undefined;
+    let consultationBillingFailure: string | null = null;
 
     if (!offlineRegistration) {
       const consultationBilling = await executeActiveTenantCommand<{
@@ -936,14 +937,17 @@ export function OpdMasterWorkspace() {
         { idempotencyKey: `opd-consultation-invoice:${newEncId}` }
       );
       if (!consultationBilling.success || !consultationBilling.data?.invoice) {
-        throw new Error(
+        // Registration and token issuance are already authoritative at this point.
+        // Never report the registration button as a total failure or hide the
+        // committed patient because a downstream billing setup is incomplete.
+        consultationBillingFailure =
           consultationBilling.error?.message ||
-            'Authoritative consultation invoice creation failed. The patient is registered, but OPD service remains blocked until billing configuration is corrected.'
+          'Consultation invoice creation failed. Registration and queue token were committed; billing must be recovered before queue release.';
+      } else {
+        consultationInvoice = adaptAuthoritativeConsultationInvoice(
+          consultationBilling.data.invoice
         );
       }
-      consultationInvoice = adaptAuthoritativeConsultationInvoice(
-        consultationBilling.data.invoice
-      );
     }
     const newEncounter: ComprehensiveOpdEncounter = {
       id: newEncId,
@@ -1005,7 +1009,18 @@ export function OpdMasterWorkspace() {
         ? `Patient ${authoritativePatient.fullName} captured offline. Registration and consultation billing are pending authoritative sync; token ${tokenNum} cannot enter the clinical queue until payment is cleared.`
         : `Patient ${authoritativePatient.fullName} registered. Token ${tokenNum} issued.`
     );
-    setActiveTab('DASHBOARD');
+
+    if (consultationBillingFailure) {
+      recordEvent(
+        'CONSULTATION_BILLING_BLOCKED',
+        `Registration and token issuance succeeded, but consultation billing requires recovery: ${consultationBillingFailure}`
+      );
+    }
+
+    // A newly registered patient must next satisfy the consultation payment gate.
+    // This also makes a successful registration visibly actionable instead of
+    // returning the operator to a generic dashboard.
+    setActiveTab(offlineRegistration ? 'DASHBOARD' : 'BILLING');
   };
 
   const handleBookAppointment = async (input: {

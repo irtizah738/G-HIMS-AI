@@ -47,7 +47,6 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
     patients,
     addClinicalNote,
     addVitals,
-    selectedPatientId,
     setSelectedPatientId,
     clinicalContext,
     bindClinicalEncounter,
@@ -56,23 +55,29 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
 
   const [selectedTokenId, setSelectedTokenId] = useState<string>('');
 
-  // Auto-focus only when the shared patient/encounter context can be proven.
+  // Auto-focus only from an already verified encounter-bound context.
+  // Generic MPI browsing selection is never promoted into consultation authority.
   useEffect(() => {
-    const contextPatientId = clinicalContext?.patientId || selectedPatientId;
-    if (!contextPatientId) return;
+    if (
+      clinicalContext?.status !== 'VERIFIED' ||
+      !clinicalContext.encounterId ||
+      !clinicalContext.patientId
+    ) {
+      return;
+    }
 
-    const match = opdQueue.find((token) =>
-      token.patientId === contextPatientId &&
-      (!clinicalContext?.encounterId ||
-        token.encounterId === clinicalContext.encounterId)
+    const match = opdQueue.find(
+      (token) =>
+        token.encounterId === clinicalContext.encounterId &&
+        token.patientId === clinicalContext.patientId
     );
     if (match) {
       setSelectedTokenId(match.id);
     }
   }, [
+    clinicalContext?.status,
     clinicalContext?.encounterId,
     clinicalContext?.patientId,
-    selectedPatientId,
     opdQueue,
   ]);
 

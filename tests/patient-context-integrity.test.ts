@@ -176,6 +176,13 @@ describe('PCI — Patient Context Integrity Closure', () => {
     expect(desk).toContain("}, [selectedTokenId]);");
   });
 
+  test('new registrations preserve encounter identity on the local queue', async () => {
+    const hospital = await source('lib/context/hospital-context.tsx');
+
+    expect(hospital).toContain('encounterId: registration.encounter.id');
+    expect(hospital).toContain("source: 'REGISTRATION'");
+  });
+
   test('offline OPD queue projection preserves authoritative encounter identity', async () => {
     const adapter = await source('lib/offline/read-model-adapter.ts');
 

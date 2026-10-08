@@ -74,6 +74,97 @@ function deriveClinicalPrivileges(roles: string[]): string[] {
   return Array.from(privileges);
 }
 
+
+function normalizeFacilityIds(values: unknown): string[] {
+  if (!Array.isArray(values)) return [];
+  return Array.from(
+    new Set(
+      values
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+/**
+ * Resolve staff facility scope without trusting the client.
+ *
+ * Authority order:
+ * 1. Explicit membership facilityIds (preferred).
+ * 2. Explicit single-facility tenant metadata (primary/default/facilityId).
+ * 3. Exactly one ACTIVE canonical facility document.
+ * 4. Legacy single-facility tenant facilityCode only when no canonical
+ *    facility documents exist and the tenant is not declared multi-facility.
+ *
+ * Ambiguous multi-facility tenants always fail closed with an empty scope.
+ */
+async function resolveAuthoritativeFacilityIds(params: {
+  db: NonNullable<ReturnType<typeof getAdminFirestore>>;
+  tenantId: string;
+  membershipFacilityIds: string[];
+}): Promise<string[]> {
+  const explicit = normalizeFacilityIds(params.membershipFacilityIds);
+  if (explicit.length > 0) return explicit;
+
+  const tenantRef = params.db.collection('tenants').doc(params.tenantId);
+  const tenantDoc = await tenantRef.get();
+  if (!tenantDoc.exists) {
+    throw new AuthError({
+      code: 'TENANT_ACCESS_DENIED',
+      message: `Tenant ${params.tenantId} does not exist`,
+      statusCode: 403,
+    });
+  }
+
+  const tenantData = (tenantDoc.data() || {}) as Record<string, unknown>;
+  const explicitTenantFacilityId = [
+    tenantData.primaryFacilityId,
+    tenantData.defaultFacilityId,
+    tenantData.facilityId,
+  ]
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .find(Boolean);
+
+  if (explicitTenantFacilityId) {
+    return [explicitTenantFacilityId];
+  }
+
+  const activeFacilities = await tenantRef
+    .collection('facilities')
+    .where('status', '==', 'ACTIVE')
+    .limit(2)
+    .get();
+
+  if (activeFacilities.size === 1) {
+    return [activeFacilities.docs[0].id];
+  }
+
+  if (activeFacilities.size > 1) {
+    return [];
+  }
+
+  // Compatibility for existing single-facility tenants that pre-date the
+  // canonical facilities subcollection. Never apply this to an explicitly
+  // multi-facility tenant and never apply it when facility documents exist.
+  const facilityProbe = await tenantRef.collection('facilities').limit(2).get();
+  const facilityMode = String(tenantData.facilityMode || '').trim().toUpperCase();
+  const multiFacility =
+    tenantData.multiFacility === true ||
+    facilityMode === 'MULTI' ||
+    facilityMode === 'MULTI_FACILITY';
+
+  const legacyFacilityCode =
+    typeof tenantData.facilityCode === 'string'
+      ? tenantData.facilityCode.trim()
+      : '';
+
+  if (!multiFacility && facilityProbe.empty && legacyFacilityCode) {
+    return [legacyFacilityCode];
+  }
+
+  return [];
+}
+
 function membershipFromDocument(tenantId: string, userId: string, data: Record<string, any>): TenantMembership {
   const rawRole = typeof data.role === 'string' ? data.role.toLowerCase() : '';
   const roles: string[] =
@@ -132,7 +223,7 @@ function membershipFromDocument(tenantId: string, userId: string, data: Record<s
       : data.department
         ? [String(data.department)]
         : [],
-    facilityIds: Array.isArray(data.facilityIds) ? data.facilityIds.map(String) : [],
+    facilityIds: normalizeFacilityIds(data.facilityIds),
     permissions,
     financialAuthorityMinorUnits,
     clinicalPrivileges,
@@ -197,7 +288,14 @@ export async function getTenantMembership(
     });
   }
 
-  return membershipFromDocument(normalizedTenantId, userId, rawData);
+  const membership = membershipFromDocument(normalizedTenantId, userId, rawData);
+  membership.facilityIds = await resolveAuthoritativeFacilityIds({
+    db,
+    tenantId: normalizedTenantId,
+    membershipFacilityIds: membership.facilityIds,
+  });
+
+  return membership;
 }
 
 export async function getUserAccessibleTenants(

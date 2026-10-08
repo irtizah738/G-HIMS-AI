@@ -14,6 +14,7 @@ describe('PCI — Patient Context Integrity Closure', () => {
     expect(hospital).toContain('encounterId: string;');
     expect(hospital).toContain('patientId: string;');
     expect(hospital).toContain('patientMrn: string;');
+    expect(hospital).toContain('patientName: string;');
     expect(hospital).toContain("status: 'VERIFIED' | 'UNRESOLVED' | 'MISMATCH';");
     expect(hospital).toContain('contextRevision: number;');
     expect(hospital).toContain('bindClinicalEncounter');
@@ -21,6 +22,7 @@ describe('PCI — Patient Context Integrity Closure', () => {
     expect(hospital).toContain('setClinicalContext(next)');
     expect(hospital).toContain('setSelectedPatientId(patientId)');
     expect(hospital).toContain("shellPatient.mrn !== patientMrn");
+    expect(hospital).toContain("String(shellPatient.fullName || '').trim() !== patientName");
   });
 
   test('hospital shell never invents the first patient after hydration', async () => {
@@ -119,14 +121,46 @@ describe('PCI — Patient Context Integrity Closure', () => {
     }
   });
 
+  test('pure verifier rejects same patient ID and MRN with a different visible name', () => {
+    const result = verifyPatientContextIdentity({
+      tenantId: 'tenant-1',
+      encounter: {
+        id: 'encounter-1',
+        tenantId: 'tenant-1',
+        patientId: 'patient-1',
+        mrn: 'MRN-1',
+        patientName: 'Patient One',
+      },
+      patient: {
+        id: 'patient-1',
+        mrn: 'MRN-1',
+        fullName: 'Different Patient Name',
+      },
+      context: {
+        tenantId: 'tenant-1',
+        encounterId: 'encounter-1',
+        patientId: 'patient-1',
+        patientMrn: 'MRN-1',
+        patientName: 'Patient One',
+        status: 'VERIFIED',
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe('PATIENT_CONTEXT_MISMATCH');
+    }
+  });
+
   test('consultation desk never substitutes the first queue token or patient', async () => {
     const desk = await source('components/views/opd-encounters-view.tsx');
 
     expect(desk).not.toContain('opdQueue.find(t => t.id === selectedTokenId) || opdQueue[0]');
     expect(desk).not.toContain('patients.find(p => p.id === selectedToken?.patientId) || patients[0]');
     expect(desk).toContain("source: 'OPD_CONSULTATION_DESK'");
+    expect(desk).toContain('verifyPatientContextIdentity');
+    expect(desk).toContain('patientContextVerification');
     expect(desk).toContain('patientContextReady');
-    expect(desk).toContain('PATIENT_CONTEXT_MISMATCH');
   });
 
   test('patient-bound editors remount when the encounter changes', async () => {

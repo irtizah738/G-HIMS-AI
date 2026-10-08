@@ -62,7 +62,11 @@ export function PatientMergeModal({
   if (!isOpen) return null;
 
   // Candidates for merging (excluding the primary patient itself)
-  const mergeCandidates = availablePatients.filter((p) => p.id !== primaryPatient.id);
+  const mergeCandidates = availablePatients.filter(
+    (patient) =>
+      patient.id !== primaryPatient.id &&
+      String(patient.status || 'ACTIVE').toUpperCase() !== 'MERGED'
+  );
   const secondaryPatient = mergeCandidates.find((p) => p.id === selectedSecondaryId);
 
   // Invariant validations

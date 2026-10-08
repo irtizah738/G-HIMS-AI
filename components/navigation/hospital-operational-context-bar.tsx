@@ -48,7 +48,6 @@ export function HospitalOperationalContextBar({ onOpenPatientSearch }: Operation
   const {
     patients,
     selectedPatientId,
-    setSelectedPatientId,
     clinicalContext,
     activeTab,
     setActiveTab,

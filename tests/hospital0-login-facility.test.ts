@@ -12,9 +12,30 @@ describe('Hospital-0 login facility boundary', () => {
     expect(portal).toContain('NEXT_PUBLIC_GHIMS_HOSPITAL0_TENANT_ID');
     expect(portal).toContain('NEXT_PUBLIC_GHIMS_HOSPITAL0_NAME');
     expect(portal).toContain('NEXT_PUBLIC_GHIMS_HOSPITAL0_FACILITY_CODE');
-    expect(portal).toContain('list="ghims-hospital-facilities"');
+    expect(portal).toContain('<select');
+    expect(portal).toContain('data-testid="login-tenant-id"');
+    expect(portal).toContain('Select hospital facility');
+    expect(portal).not.toContain('<datalist');
     expect(portal).toContain('Facility selection is required');
     expect(portal).toContain('resolveFacilityTenantId');
+  });
+
+  test('federated identity controls surface failures instead of silently doing nothing', async () => {
+    const portal = await source('components/auth/login-portal.tsx');
+    const firebaseAuth = await source('lib/firebase/auth-context.tsx');
+    const ssoRoute = await source('app/api/auth/sso/login/route.ts');
+
+    expect(portal).toContain('data-testid="login-google-identity"');
+    expect(portal).toContain('data-testid="login-hospital-sso"');
+    expect(portal).toContain('data-testid="login-sso-submit"');
+    expect(portal).toContain('data-testid="login-sso-error"');
+    expect(portal).toContain('mapAuthError(err)');
+    expect(portal).toContain('ssoProvider');
+    expect(firebaseAuth).not.toContain(
+      "errorCode === 'auth/popup-blocked' ||\n        errorMessage.includes('popup-closed-by-user')"
+    );
+    expect(ssoRoute).toContain("provider !== 'OKTA' && provider !== 'AZURE_AD'");
+    expect(ssoRoute).toContain('SSO_CONFIG_ERROR');
   });
 
   test('session establishment rejects missing facility selection', async () => {

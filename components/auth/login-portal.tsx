@@ -29,23 +29,15 @@ import {
 import Link from 'next/link';
 import { mapAuthError } from '@/lib/auth/auth-errors';
 
-const hospital0TenantId = String(process.env.NEXT_PUBLIC_GHIMS_HOSPITAL0_TENANT_ID || '').trim();
-const hospital0Name = String(process.env.NEXT_PUBLIC_GHIMS_HOSPITAL0_NAME || '').trim();
-const hospital0FacilityCode = String(process.env.NEXT_PUBLIC_GHIMS_HOSPITAL0_FACILITY_CODE || '').trim();
+interface LoginFacility {
+  tenantId: string;
+  name: string;
+  facilityCode: string;
+}
 
-const HOSPITAL_FACILITIES = hospital0TenantId
-  ? [
-      {
-        tenantId: hospital0TenantId,
-        name: hospital0Name || hospital0TenantId,
-        facilityCode: hospital0FacilityCode || hospital0TenantId,
-      },
-    ]
-  : [];
-
-function resolveFacilityTenantId(value: string): string {
+function resolveFacilityTenantId(value: string, facilities: LoginFacility[]): string {
   const normalized = value.trim().toLowerCase();
-  const match = HOSPITAL_FACILITIES.find(
+  const match = facilities.find(
     (facility) =>
       facility.tenantId.toLowerCase() === normalized ||
       facility.name.toLowerCase() === normalized ||
@@ -136,11 +128,54 @@ export function LoginPortal() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [tenantId, setTenantId] = useState('');
+  const [facilities, setFacilities] = useState<LoginFacility[]>([]);
+  const [facilitiesLoading, setFacilitiesLoading] = useState(true);
+  const [facilityDirectoryError, setFacilityDirectoryError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [rememberDevice, setRememberDevice] = useState(true);
   const [localError, setLocalError] = useState<string | null>(null);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const loadFacilities = async () => {
+      setFacilitiesLoading(true);
+      setFacilityDirectoryError(null);
+
+      try {
+        const response = await fetch('/api/auth/facilities', {
+          method: 'GET',
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        const data = await response.json().catch(() => ({ facilities: [] }));
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Unable to load hospital facility directory.');
+        }
+
+        const items = Array.isArray(data.facilities) ? data.facilities : [];
+        setFacilities(items);
+        setTenantId((current) =>
+          current && items.some((facility: LoginFacility) => facility.tenantId === current)
+            ? current
+            : ''
+        );
+      } catch (err: any) {
+        if (err?.name !== 'AbortError') {
+          setFacilities([]);
+          setFacilityDirectoryError(err?.message || 'Unable to load hospital facility directory.');
+        }
+      } finally {
+        if (!controller.signal.aborted) setFacilitiesLoading(false);
+      }
+    };
+
+    void loadFacilities();
+    return () => controller.abort();
+  }, []);
 
   // Auto-redirect if already authenticated
   useEffect(() => {
@@ -161,7 +196,7 @@ export function LoginPortal() {
     e.preventDefault();
     setLocalError(null);
 
-    const selectedTenantId = resolveFacilityTenantId(tenantId);
+    const selectedTenantId = resolveFacilityTenantId(tenantId, facilities);
     if (!selectedTenantId) {
       setLocalError('Select an authorized hospital facility before signing in.');
       return;
@@ -202,7 +237,7 @@ export function LoginPortal() {
 
   const handleGoogleSignIn = async () => {
     setLocalError(null);
-    const selectedTenantId = resolveFacilityTenantId(tenantId);
+    const selectedTenantId = resolveFacilityTenantId(tenantId, facilities);
     if (!selectedTenantId) {
       setLocalError('Select an authorized hospital facility before signing in.');
       return;
@@ -247,7 +282,7 @@ export function LoginPortal() {
       return;
     }
 
-    const selectedTenantId = resolveFacilityTenantId(tenantId);
+    const selectedTenantId = resolveFacilityTenantId(tenantId, facilities);
     if (!selectedTenantId) {
       setSsoError('Select an authorized hospital facility before enterprise SSO.');
       setSsoLoading(false);
@@ -360,18 +395,30 @@ export function LoginPortal() {
                     <option value="" disabled>
                       Select hospital facility
                     </option>
-                    {HOSPITAL_FACILITIES.map((facility) => (
-                      <option key={facility.tenantId} value={facility.tenantId}>
-                        {facility.name} · {facility.facilityCode}
-                      </option>
-                    ))}
+                    {facilitiesLoading ? (
+                      <option value="" disabled>Loading facilities…</option>
+                    ) : facilities.length === 0 ? (
+                      <option value="" disabled>No facilities available</option>
+                    ) : (
+                      facilities.map((facility) => (
+                        <option key={facility.tenantId} value={facility.tenantId}>
+                          {facility.name} · {facility.facilityCode}
+                        </option>
+                      ))
+                    )}
                   </select>
                   <Building2 className="w-4 h-4 text-slate-400 absolute left-3.5 top-3 pointer-events-none" />
                   <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3.5 top-3 pointer-events-none" />
                 </div>
-                <p className="text-[10px] leading-relaxed text-slate-500">
-                  Facility selection is required. Access is still verified against your active server-authoritative hospital membership.
-                </p>
+                {facilityDirectoryError ? (
+                  <p className="text-[10px] leading-relaxed text-red-400">
+                    {facilityDirectoryError}
+                  </p>
+                ) : (
+                  <p className="text-[10px] leading-relaxed text-slate-500">
+                    Facilities are loaded from the Firestore tenant directory. Selection does not grant access; your active membership is still verified server-side.
+                  </p>
+                )}
               </div>
 
               {/* Email Input */}

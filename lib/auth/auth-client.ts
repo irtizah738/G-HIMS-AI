@@ -56,40 +56,14 @@ export class AuthClient {
     const rememberDevice = options?.rememberDevice ?? true;
     const idToken = await currentUser.getIdToken(true);
 
-    let requestedTenantId = String(options?.tenantId || '').trim().toLowerCase();
+    const requestedTenantId = String(options?.tenantId || '').trim().toLowerCase();
     if (!requestedTenantId) {
-      const tenantResponse = await fetch('/api/auth/tenant-selection', {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${idToken}` },
+      throw new AuthError({
+        code: 'TENANT_SELECTION_REQUIRED',
+        message: 'Explicit hospital facility selection is required before a G-HIMS session can be established.',
+        statusCode: 400,
+        userMessage: 'Select your hospital facility before signing in.',
       });
-      const tenantData = await tenantResponse.json().catch(() => ({}));
-      if (!tenantResponse.ok) {
-        throw new AuthError({
-          code: tenantData.code || 'TENANT_ACCESS_DENIED',
-          message: tenantData.error || 'Unable to resolve hospital access.',
-          statusCode: tenantResponse.status,
-        });
-      }
-
-      const activeTenants = (Array.isArray(tenantData.tenants) ? tenantData.tenants : [])
-        .filter((tenant: TenantSelectionItem) => !tenant.status || tenant.status === 'ACTIVE');
-
-      if (activeTenants.length === 1) {
-        requestedTenantId = String(activeTenants[0].tenantId || '').trim().toLowerCase();
-      } else if (activeTenants.length > 1) {
-        throw new AuthError({
-          code: 'TENANT_SELECTION_REQUIRED',
-          message: 'Multiple active hospital memberships are available.',
-          statusCode: 409,
-          userMessage: 'Select the hospital you want to access.',
-        });
-      } else {
-        throw new AuthError({
-          code: 'TENANT_ACCESS_DENIED',
-          message: 'No active hospital membership is available for this identity.',
-          statusCode: 403,
-        });
-      }
     }
 
     const controller = new AbortController();

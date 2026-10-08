@@ -9,8 +9,9 @@ describe('Hospital-0 login facility boundary', () => {
   test('login requires explicit Central Metro facility selection', async () => {
     const portal = await source('components/auth/login-portal.tsx');
 
-    expect(portal).toContain("tenantId: 'central-metro-hospital'");
-    expect(portal).toContain("name: 'Central Metro General Hospital'");
+    expect(portal).toContain('NEXT_PUBLIC_GHIMS_HOSPITAL0_TENANT_ID');
+    expect(portal).toContain('NEXT_PUBLIC_GHIMS_HOSPITAL0_NAME');
+    expect(portal).toContain('NEXT_PUBLIC_GHIMS_HOSPITAL0_FACILITY_CODE');
     expect(portal).toContain('list="ghims-hospital-facilities"');
     expect(portal).toContain('Facility selection is required');
     expect(portal).toContain('resolveFacilityTenantId');

@@ -109,6 +109,14 @@ async function resolveAuthoritativeFacilityIds(params: {
   const tenantRef = params.db.collection('tenants').doc(params.tenantId);
   const tenantDoc = await tenantRef.get();
   if (!tenantDoc.exists) {
+    const runtimeMode = String(process.env.GHIMS_RUNTIME_MODE || '').trim().toUpperCase();
+    if (runtimeMode === 'TEST' || runtimeMode === 'DEMO') {
+      // Firestore permits subcollection membership documents without a parent
+      // document. Test/demo fixtures use this shape; never extend it to
+      // staging/production where tenant metadata must exist.
+      return [params.tenantId];
+    }
+
     throw new AuthError({
       code: 'TENANT_ACCESS_DENIED',
       message: `Tenant ${params.tenantId} does not exist`,

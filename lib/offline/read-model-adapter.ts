@@ -253,6 +253,7 @@ export function adaptEdgeSnapshot(snapshot: EdgeSnapshot): HospitalEdgeModels {
 
   const opdQueue: OpdQueueToken[] = (collections.opd_queue || []).map((raw) => ({
     id: asString((raw as any).id || (raw as any).tokenId),
+    encounterId: asString((raw as any).encounterId) || undefined,
     tokenNumber: asString((raw as any).tokenNumber),
     patientId: asString((raw as any).patientId),
     patientName: asString((raw as any).patientName),

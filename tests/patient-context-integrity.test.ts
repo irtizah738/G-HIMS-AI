@@ -83,7 +83,8 @@ describe('PCI — Patient Context Integrity Closure', () => {
       'components/navigation/hospital-operational-context-bar.tsx'
     );
 
-    expect(shell).toContain('clinicalContext?.patientId || null');
+    expect(shell).toContain("clinicalContext?.status === 'VERIFIED'");
+    expect(shell).toContain('clinicalContext.patientId');
     expect(shell).toContain('PATIENT_CONTEXT_UNRESOLVED');
     expect(shell).toContain('PATIENT_CONTEXT_MISMATCH');
     expect(shell).toContain("clinicalContext?.status === 'VERIFIED'");

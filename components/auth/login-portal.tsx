@@ -231,7 +231,6 @@ export function LoginPortal() {
     }
   };
 
-
   const displayError = localError || error;
 
   return (
@@ -346,7 +345,7 @@ export function LoginPortal() {
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="physician@centralmetro.health"
+                    placeholder="clinician@hospital.org"
                     className="w-full pl-10 pr-4 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-xs font-medium text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition placeholder:text-slate-600"
                   />
                   <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
@@ -584,7 +583,7 @@ export function LoginPortal() {
                     required
                     value={ssoEmail}
                     onChange={(e) => setSsoEmail(e.target.value)}
-                    placeholder="physician@centralmetro.health"
+                    placeholder="clinician@hospital.org"
                     className="w-full pl-10 pr-4 py-2.5 bg-slate-950/80 border border-slate-700/80 rounded-xl text-xs font-medium text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />

@@ -158,8 +158,11 @@ async function resolveAuthoritativeFacilityIds(params: {
       ? tenantData.facilityCode.trim()
       : '';
 
-  if (!multiFacility && facilityProbe.empty && legacyFacilityCode) {
-    return [legacyFacilityCode];
+  if (!multiFacility && facilityProbe.empty) {
+    // Legacy G-HIMS deployments modeled one hospital directly as one tenant.
+    // Using the tenant id here does not elevate cross-tenant access: membership
+    // in this exact tenant has already been verified server-side.
+    return [legacyFacilityCode || params.tenantId];
   }
 
   return [];

@@ -11,15 +11,9 @@ import {
   EyeOff,
   Building2,
   ShieldCheck,
-  Stethoscope,
-  HeartPulse,
-  DollarSign,
-  ClipboardList,
-  User,
   AlertCircle,
   Laptop,
   CheckCircle2,
-  HelpCircle,
   ActivitySquare,
   Key,
   Globe,
@@ -45,80 +39,6 @@ function resolveFacilityTenantId(value: string, facilities: LoginFacility[]): st
   );
   return match?.tenantId || '';
 }
-
-interface Persona {
-  id: string;
-  role: string;
-  name: string;
-  email: string;
-  tenantId: string;
-  department: string;
-  icon: React.ComponentType<{ className?: string }>;
-  color: string;
-}
-
-const DEMO_PERSONAS: Persona[] = [
-  {
-    id: 'admin',
-    role: 'Administrator',
-    name: 'Demo Administrator',
-    email: 'demo.admin@example.invalid',
-    tenantId: 'central-metro-hospital',
-    department: 'Hospital Administration',
-    icon: ShieldCheck,
-    color: 'text-purple-500 bg-purple-500/10 border-purple-500/20',
-  },
-  {
-    id: 'doctor',
-    role: 'Attending Cardiologist',
-    name: 'Demo Physician',
-    email: 'demo.doctor@example.invalid',
-    tenantId: 'central-metro-hospital',
-    department: 'Cardiology & Intensive Care',
-    icon: Stethoscope,
-    color: 'text-blue-500 bg-blue-500/10 border-blue-500/20',
-  },
-  {
-    id: 'nurse',
-    role: 'Head Nurse',
-    name: 'Demo Nurse',
-    email: 'demo.nurse@example.invalid',
-    tenantId: 'central-metro-hospital',
-    department: 'Inpatient Ward 4B',
-    icon: HeartPulse,
-    color: 'text-teal-500 bg-teal-500/10 border-teal-500/20',
-  },
-  {
-    id: 'reception',
-    role: 'Intake Officer',
-    name: 'Demo Receptionist',
-    email: 'demo.reception@example.invalid',
-    tenantId: 'central-metro-hospital',
-    department: 'Outpatient Patient Intake',
-    icon: ClipboardList,
-    color: 'text-amber-500 bg-amber-500/10 border-amber-500/20',
-  },
-  {
-    id: 'billing',
-    role: 'Revenue Auditor',
-    name: 'Demo Billing Officer',
-    email: 'demo.billing@example.invalid',
-    tenantId: 'central-metro-hospital',
-    department: 'Revenue Cycle & Claims',
-    icon: DollarSign,
-    color: 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20',
-  },
-  {
-    id: 'patient',
-    role: 'Patient Portal',
-    name: 'Demo Patient',
-    email: 'demo.patient@example.invalid',
-    tenantId: 'central-metro-hospital',
-    department: 'Consumer Health Portal',
-    icon: User,
-    color: 'text-indigo-500 bg-indigo-500/10 border-indigo-500/20',
-  },
-];
 
 export function LoginPortal() {
   const router = useRouter();
@@ -190,7 +110,6 @@ export function LoginPortal() {
   const [ssoProvider, setSsoProvider] = useState<'OKTA' | 'AZURE_AD'>('OKTA');
   const [ssoLoading, setSsoLoading] = useState(false);
   const [ssoError, setSsoError] = useState<string | null>(null);
-  const showDemoPersonas = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -312,12 +231,6 @@ export function LoginPortal() {
     }
   };
 
-  const handleSelectPersona = (persona: Persona) => {
-    setEmail(persona.email);
-    setPassword('');
-    setTenantId(persona.tenantId);
-    setLocalError(null);
-  };
 
   const displayError = localError || error;
 

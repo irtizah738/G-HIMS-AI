@@ -17,6 +17,10 @@ describe('Login facility directory boundary', () => {
     expect(portal).toContain('Facilities are loaded from the Firestore tenant directory');
     expect(portal).not.toContain('NEXT_PUBLIC_GHIMS_HOSPITAL0_TENANT_ID');
     expect(portal).not.toContain('HOSPITAL_FACILITIES');
+    expect(portal).not.toContain('DEMO_PERSONAS');
+    expect(portal).not.toContain('handleSelectPersona');
+    expect(portal).not.toContain('showDemoPersonas');
+    expect(portal).not.toContain('central-metro-hospital');
 
     expect(route).toContain("db.collection('tenants').get()");
     expect(route).toContain("headers: { 'Cache-Control': 'no-store' }");

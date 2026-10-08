@@ -21,6 +21,7 @@ describe('Login facility directory boundary', () => {
     expect(portal).not.toContain('handleSelectPersona');
     expect(portal).not.toContain('showDemoPersonas');
     expect(portal).not.toContain('central-metro-hospital');
+    expect(portal).not.toContain('centralmetro.health');
 
     expect(route).toContain("db.collection('tenants').get()");
     expect(route).toContain("headers: { 'Cache-Control': 'no-store' }");

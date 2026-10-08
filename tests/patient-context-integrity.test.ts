@@ -23,6 +23,8 @@ describe('PCI — Patient Context Integrity Closure', () => {
     expect(hospital).toContain('setSelectedPatientId(patientId)');
     expect(hospital).toContain("shellPatient.mrn !== patientMrn");
     expect(hospital).toContain("String(shellPatient.fullName || '').trim() !== patientName");
+    expect(hospital).toContain('Revalidation changes readiness only');
+    expect(hospital).toContain('current.contextRevision === clinicalContext.contextRevision');
   });
 
   test('hospital shell never invents the first patient after hydration', async () => {

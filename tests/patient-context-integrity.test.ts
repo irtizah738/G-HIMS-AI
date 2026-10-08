@@ -90,6 +90,22 @@ describe('PCI — Patient Context Integrity Closure', () => {
     expect(shell).toContain("clinicalContextActive");
   });
 
+  test('command bus rejects wrong-patient lineage before idempotency reservation', async () => {
+    const bus = await source('lib/backend/commands/command-bus.ts');
+    const guard = await source(
+      'lib/backend/commands/patient-context-integrity-guard.ts'
+    );
+
+    expect(bus).toContain('PatientContextIntegrityGuard.verify(context, command)');
+    expect(bus.indexOf('PatientContextIntegrityGuard.verify(context, command)')).toBeLessThan(
+      bus.indexOf('IdempotencyService.acquireExecution')
+    );
+    expect(guard).toContain("code: 'PATIENT_CONTEXT_MISMATCH'");
+    expect(guard).toContain('normalize(encounter.patientId) !== patientId');
+    expect(guard).toContain('PATIENT_CONTEXT_AUTHORITY_UNAVAILABLE');
+    expect(guard).toContain('isProductionLikeRuntime()');
+  });
+
   test('server clinical documentation rejects encounter and patient lineage mismatch', async () => {
     const service = await source(
       'lib/backend/services/clinical-documentation-domain-service.ts'

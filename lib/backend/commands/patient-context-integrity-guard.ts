@@ -79,8 +79,9 @@ export class PatientContextIntegrityGuard {
       };
     }
 
-    const tenantId = normalize(context.tenantId).toLowerCase();
-    if (!tenantId) {
+    const tenantDocumentId = normalize(context.tenantId);
+    const tenantId = tenantDocumentId.toLowerCase();
+    if (!tenantDocumentId) {
       return {
         ok: false,
         code: 'TENANT_CONTEXT_MISMATCH',
@@ -88,7 +89,7 @@ export class PatientContextIntegrityGuard {
       };
     }
 
-    const tenantRef = db.collection('tenants').doc(tenantId);
+    const tenantRef = db.collection('tenants').doc(tenantDocumentId);
     const [encounterSnapshot, patientSnapshot] = await Promise.all([
       tenantRef.collection('encounters').doc(encounterId).get(),
       tenantRef.collection('patients').doc(patientId).get(),

@@ -59,6 +59,8 @@ import {
 import { OpdOfflineSyncManager } from './OpdOfflineSyncManager';
 import { executeActiveTenantCommand, registerActiveTenantPatient } from '@/lib/api/command-client';
 import { useAuth } from '@/lib/auth/auth-context';
+import { useHospital } from '@/lib/context/hospital-context';
+import { PatientContextSafetyBlock } from '@/components/clinical/patient-context-safety-block';
 import { useOfflineStatus } from '@/hooks/useOfflineStatus';
 import { hydrateEdgeSnapshot } from '@/lib/offline/hydration';
 import {
@@ -67,6 +69,10 @@ import {
   buildOpdWorkspaceReadModel,
 } from '@/lib/opd/workspace-read-model';
 import { fetchAuthoritativeOpdTimeline } from '@/lib/opd/timeline-client';
+import {
+  OPD_PATIENT_BOUND_TABS,
+  verifyPatientContextIdentity,
+} from '@/lib/clinical/patient-context-integrity';
 
 const IS_DEMO_RUNTIME = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
 
@@ -440,6 +446,11 @@ const SEED_EVENTS: OpdTimelineEvent[] = [
 
 export function OpdMasterWorkspace() {
   const auth = useAuth();
+  const {
+    clinicalContext,
+    bindClinicalEncounter,
+    clearClinicalContext,
+  } = useHospital();
   const searchParams = useSearchParams();
   const requestedEncounterId = String(
     searchParams.get('opdEncounterId') || ''
@@ -546,12 +557,22 @@ export function OpdMasterWorkspace() {
       ) {
         return current;
       }
-      return readModel.encounters[0]?.id || '';
+      if (
+        requestedEncounterId &&
+        readModel.encounters.some(
+          (encounter) => encounter.id === requestedEncounterId
+        )
+      ) {
+        return requestedEncounterId;
+      }
+      // Production never silently selects the first clinical encounter.
+      return '';
     });
   }, [
     auth.activeTenant?.tenantId,
     auth.loading,
     auth.user?.uid,
+    requestedEncounterId,
   ]);
 
   const refreshAuthoritativeTimeline = useCallback(
@@ -683,9 +704,67 @@ export function OpdMasterWorkspace() {
     setSelectedEncounterId(requestedEncounterId);
   }, [encounters, requestedEncounterId]);
 
-  const activeEncounter = useMemo(() => {
-    return encounters.find((e) => e.id === selectedEncounterId) || encounters[0];
+  const resolvedActiveEncounter = useMemo(() => {
+    if (!selectedEncounterId) return undefined;
+    return encounters.find((e) => e.id === selectedEncounterId);
   }, [encounters, selectedEncounterId]);
+
+  // Deliberately no first-encounter fallback. Runtime value remains undefined
+  // until a specific encounter is selected; patient-bound UI is safety-locked
+  // unless verification succeeds. The narrow alias keeps existing handlers
+  // typed without reintroducing an implicit patient/encounter authority.
+  const activeEncounter =
+    resolvedActiveEncounter as ComprehensiveOpdEncounter;
+
+  const activePatientRecord = useMemo(() => {
+    if (!activeEncounter) return undefined;
+    return patients.find((patient) => patient.id === activeEncounter.patientId);
+  }, [activeEncounter, patients]);
+
+  useEffect(() => {
+    if (!activeEncounter) {
+      clearClinicalContext();
+      return;
+    }
+
+    bindClinicalEncounter({
+      tenantId: activeEncounter.tenantId || auth.activeTenant?.tenantId,
+      encounterId: activeEncounter.id,
+      patientId: activeEncounter.patientId,
+      patientMrn: activeEncounter.mrn,
+      patientName: activeEncounter.patientName,
+      source: 'OPD_MASTER',
+    });
+  }, [
+    activeEncounter?.id,
+    activeEncounter?.patientId,
+    activeEncounter?.mrn,
+    activeEncounter?.patientName,
+    activeEncounter?.tenantId,
+    auth.activeTenant?.tenantId,
+    bindClinicalEncounter,
+    clearClinicalContext,
+  ]);
+
+  const patientContextVerification = useMemo(
+    () =>
+      verifyPatientContextIdentity({
+        tenantId: auth.activeTenant?.tenantId || activeEncounter?.tenantId || '',
+        encounter: activeEncounter,
+        patient: activePatientRecord,
+        context: clinicalContext,
+      }),
+    [
+      activeEncounter,
+      activePatientRecord,
+      auth.activeTenant?.tenantId,
+      clinicalContext,
+    ]
+  );
+
+  const patientBoundTab = OPD_PATIENT_BOUND_TABS.has(activeTab);
+  const patientContextReady =
+    !patientBoundTab || patientContextVerification.ok;
 
   const activeBillingInvoice = useMemo(() => {
     if (!activeEncounter) return undefined;
@@ -3039,8 +3118,27 @@ export function OpdMasterWorkspace() {
         </div>
       </div>
 
+      {patientBoundTab && !patientContextReady && (
+        <div data-testid="patient-context-safety-block-wrapper">
+          <PatientContextSafetyBlock
+            code={
+              patientContextVerification.ok
+                ? 'CLINICAL_CONTEXT_RESOLVING'
+                : patientContextVerification.code
+            }
+            encounterId={activeEncounter?.id}
+            patientId={activeEncounter?.patientId}
+            detail={
+              patientContextVerification.ok
+                ? 'The hospital shell is being atomically rebound to the selected encounter.'
+                : patientContextVerification.detail
+            }
+          />
+        </div>
+      )}
+
       {/* Active Patient Quick Banner (if patient is selected) */}
-      {activeEncounter && activeTab !== 'DASHBOARD' && activeTab !== 'SEARCH_MPI' && (
+      {patientContextVerification.ok && activeEncounter && activeTab !== 'DASHBOARD' && activeTab !== 'SEARCH_MPI' && (
         <div
           data-testid="opd-active-patient-banner"
           data-encounter-id={activeEncounter.id}
@@ -3304,16 +3402,18 @@ export function OpdMasterWorkspace() {
       )}
 
       {/* 6. Triage Vitals Station & Risk Scoring */}
-      {activeTab === 'TRIAGE' && canAccessTab('TRIAGE') && activeEncounter && (
+      {activeTab === 'TRIAGE' && canAccessTab('TRIAGE') && patientContextReady && activeEncounter && (
         <OpdTriageVitals
+          key={`triage:${activeEncounter.id}:${activeEncounter.patientId}`}
           encounter={activeEncounter}
           onSaveVitals={(vitals) => handleSaveVitals(vitals)}
         />
       )}
 
       {/* 7. Specialist Consultation & SOAP */}
-      {activeTab === 'CONSULTATION' && canAccessTab('CONSULTATION') && activeEncounter && (
+      {activeTab === 'CONSULTATION' && canAccessTab('CONSULTATION') && patientContextReady && activeEncounter && (
         <OpdConsultationSpecialties
+          key={`consultation:${activeEncounter.id}:${activeEncounter.patientId}`}
           encounter={activeEncounter}
           onSaveConsultation={(soap) => handleSaveConsultation(soap)}
           onPlaceDiagnosticOrders={() => setActiveTab('DIAGNOSTICS')}
@@ -3323,8 +3423,9 @@ export function OpdMasterWorkspace() {
       )}
 
       {/* 8. Laboratory (LIS), PACS Radiology & Procedures */}
-      {activeTab === 'DIAGNOSTICS' && canAccessTab('DIAGNOSTICS') && activeEncounter && (
+      {activeTab === 'DIAGNOSTICS' && canAccessTab('DIAGNOSTICS') && patientContextReady && activeEncounter && (
         <OpdDiagnosticOrdersPacs
+          key={`diagnostics:${activeEncounter.id}:${activeEncounter.patientId}`}
           encounter={activeEncounter}
           orders={activeEncounter.diagnosticOrders}
           onAddOrder={(order) => handleAddDiagnosticOrder(order)}
@@ -3335,8 +3436,9 @@ export function OpdMasterWorkspace() {
       )}
 
       {/* 9. e-Prescriptions & Pharmacy FEFO Dispensing */}
-      {activeTab === 'PHARMACY' && canAccessTab('PHARMACY') && activeEncounter && (
+      {activeTab === 'PHARMACY' && canAccessTab('PHARMACY') && patientContextReady && activeEncounter && (
         <OpdPharmacyPrescriptions
+          key={`pharmacy:${activeEncounter.id}:${activeEncounter.patientId}`}
           encounter={activeEncounter}
           prescriptions={activeEncounter.prescriptions}
           canPrescribe={canPrescribe}
@@ -3352,9 +3454,11 @@ export function OpdMasterWorkspace() {
       {/* 10. Billing settlement + final reconciliation */}
       {activeTab === 'BILLING' &&
         canAccessTab('BILLING') &&
+        patientContextReady &&
         activeEncounter &&
         activeBillingInvoice && (
           <OpdBillingLedger
+            key={`billing:${activeEncounter.id}:${activeEncounter.patientId}`}
             encounter={activeEncounter}
             invoice={activeBillingInvoice}
             canSettlePayment={canSettlePayment}
@@ -3364,6 +3468,7 @@ export function OpdMasterWorkspace() {
 
       {activeTab === 'BILLING' &&
         canAccessTab('BILLING') &&
+        patientContextReady &&
         activeEncounter &&
         !activeBillingInvoice && (
           <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-xs dark:border-slate-800 dark:bg-slate-900">
@@ -3411,8 +3516,9 @@ export function OpdMasterWorkspace() {
         )}
 
       {/* 11. Disposition, Referrals & SBAR Handoff */}
-      {activeTab === 'DISPOSITION' && canAccessTab('DISPOSITION') && activeEncounter && (
+      {activeTab === 'DISPOSITION' && canAccessTab('DISPOSITION') && patientContextReady && activeEncounter && (
         <OpdDispositionReferrals
+          key={`disposition:${activeEncounter.id}:${activeEncounter.patientId}`}
           encounter={activeEncounter}
           onCommitDisposition={(disposition) => handleCommitDisposition(disposition)}
         />

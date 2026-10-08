@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
   Bed,
   Patient,
@@ -940,6 +940,32 @@ const executiveThesisData: ExecutiveThesisModel = {
   },
 };
 
+export interface ClinicalContextBinding {
+  tenantId: string;
+  encounterId: string;
+  patientId: string;
+  patientMrn: string;
+  patientName: string;
+  status: 'VERIFIED' | 'UNRESOLVED' | 'MISMATCH';
+  contextRevision: number;
+  source:
+    | 'OPD_MASTER'
+    | 'OPD_CONSULTATION_DESK'
+    | 'OPD_QUEUE'
+    | 'REGISTRATION'
+    | 'OTHER';
+  boundAt: number;
+}
+
+interface BindClinicalEncounterInput {
+  tenantId?: string;
+  encounterId: string;
+  patientId: string;
+  patientMrn: string;
+  patientName: string;
+  source: ClinicalContextBinding['source'];
+}
+
 interface HospitalContextType {
   beds: Bed[];
   patients: Patient[];
@@ -961,6 +987,9 @@ interface HospitalContextType {
   setCopilotOpen: (open: boolean) => void;
   selectedPatientId: string | null;
   setSelectedPatientId: (id: string | null) => void;
+  clinicalContext: ClinicalContextBinding | null;
+  bindClinicalEncounter: (input: BindClinicalEncounterInput) => ClinicalContextBinding;
+  clearClinicalContext: () => void;
   
   // Permanent Discharged Census & Reconciliation Audit
   dischargedCensus: DischargedCensusRecord[];
@@ -1043,6 +1072,95 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
   const [networkMode, setNetworkMode] = useState<'online' | 'offline' | 'degraded_sync'>('online');
   const [copilotOpen, setCopilotOpen] = useState<boolean>(false);
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(() => isDemoRuntime ? 'p-1001' : null);
+  const [clinicalContext, setClinicalContext] = useState<ClinicalContextBinding | null>(null);
+  const clinicalContextRevisionRef = useRef(0);
+
+  const bindClinicalEncounter = useCallback((input: BindClinicalEncounterInput): ClinicalContextBinding => {
+    const authoritativeTenantId = String(
+      activeTenant?.tenantId || user?.tenantId || ''
+    ).trim().toLowerCase();
+    const requestedTenantId = String(input.tenantId || authoritativeTenantId)
+      .trim()
+      .toLowerCase();
+    const encounterId = String(input.encounterId || '').trim();
+    const patientId = String(input.patientId || '').trim();
+    const patientMrn = String(input.patientMrn || '').trim();
+    const patientName = String(input.patientName || '').trim();
+
+    if (!authoritativeTenantId || !encounterId || !patientId || !patientMrn || !patientName) {
+      throw new Error('CLINICAL_CONTEXT_INVALID: tenant, encounter, patient, MRN and patient name are required.');
+    }
+    if (requestedTenantId !== authoritativeTenantId) {
+      throw new Error('CLINICAL_CONTEXT_TENANT_MISMATCH');
+    }
+
+    const shellPatient = patients.find((patient) => patient.id === patientId);
+    const status: ClinicalContextBinding['status'] =
+      !shellPatient
+        ? 'UNRESOLVED'
+        : shellPatient.mrn !== patientMrn ||
+            String(shellPatient.fullName || '').trim() !== patientName
+          ? 'MISMATCH'
+          : 'VERIFIED';
+
+    clinicalContextRevisionRef.current += 1;
+    const next: ClinicalContextBinding = {
+      tenantId: authoritativeTenantId,
+      encounterId,
+      patientId,
+      patientMrn,
+      patientName,
+      status,
+      contextRevision: clinicalContextRevisionRef.current,
+      source: input.source,
+      boundAt: Date.now(),
+    };
+
+    // One state transition binds the shell patient to the active encounter.
+    // The patient identifier is never independently inferred from display data.
+    setClinicalContext(next);
+    setSelectedPatientId(patientId);
+    return next;
+  }, [activeTenant?.tenantId, patients, user?.tenantId]);
+
+  const clearClinicalContext = useCallback(() => {
+    clinicalContextRevisionRef.current += 1;
+    setClinicalContext(null);
+  }, []);
+
+  useEffect(() => {
+    if (!clinicalContext) return;
+
+    const shellPatient = patients.find(
+      (patient) => patient.id === clinicalContext.patientId
+    );
+    const nextStatus: ClinicalContextBinding['status'] =
+      !shellPatient
+        ? 'UNRESOLVED'
+        : shellPatient.mrn !== clinicalContext.patientMrn ||
+            String(shellPatient.fullName || '').trim() !==
+              clinicalContext.patientName
+          ? 'MISMATCH'
+          : 'VERIFIED';
+
+    if (nextStatus === clinicalContext.status) return;
+
+    // Revalidation changes readiness only. It does not create a new clinical
+    // selection and therefore preserves the context revision.
+    setClinicalContext((current) =>
+      current &&
+      current.contextRevision === clinicalContext.contextRevision
+        ? { ...current, status: nextStatus }
+        : current
+    );
+  }, [
+    clinicalContext?.contextRevision,
+    clinicalContext?.patientId,
+    clinicalContext?.patientMrn,
+    clinicalContext?.patientName,
+    clinicalContext?.status,
+    patients,
+  ]);
 
   useEffect(() => {
     if (isDemoRuntime || authLoading) return;
@@ -1055,6 +1173,8 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       setMismatches([]);
       setTelehealthSessions([]);
       setSelectedPatientId(null);
+      setClinicalContext(null);
+      clinicalContextRevisionRef.current += 1;
       return;
     }
 
@@ -1071,7 +1191,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       setSelectedPatientId((current) =>
         current && models.patients.some((patient) => patient.id === current)
           ? current
-          : models.patients[0]?.id || null
+          : null
       );
     };
 
@@ -1469,6 +1589,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     setOpdQueue((previous) => [
       {
         id: registration.queueToken.id,
+        encounterId: registration.encounter.id,
         tokenNumber: registration.queueToken.tokenNumber,
         patientId: newPatient.id,
         patientName: newPatient.fullName,
@@ -1489,7 +1610,13 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       },
       ...previous.filter((token) => token.id !== registration.queueToken.id),
     ]);
-    setSelectedPatientId(newPatient.id);
+    bindClinicalEncounter({
+      encounterId: registration.encounter.id,
+      patientId: newPatient.id,
+      patientMrn: newPatient.mrn,
+      patientName: newPatient.fullName,
+      source: 'REGISTRATION',
+    });
     recordMutation('REGISTER_PATIENT', `Patient:${newPatient.id}`, {
       patientId: newPatient.id,
       mrn: newPatient.mrn,
@@ -1559,16 +1686,41 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     return consolidatedPrimary;
   };
 
+  const requireVerifiedClinicalContextForPatient = (
+    patientId: string,
+    operation: string
+  ): { patient: Patient; encounterId: string } => {
+    const normalizedPatientId = String(patientId || '').trim();
+    const patient = patients.find((item) => item.id === normalizedPatientId);
+
+    if (
+      !patient ||
+      !clinicalContext ||
+      clinicalContext.status !== 'VERIFIED' ||
+      clinicalContext.patientId !== normalizedPatientId ||
+      patient.mrn !== clinicalContext.patientMrn ||
+      String(patient.fullName || '').trim() !== clinicalContext.patientName
+    ) {
+      throw new Error(
+        `PATIENT_CONTEXT_MISMATCH: ${operation} requires a verified encounter-bound patient context.`
+      );
+    }
+
+    return {
+      patient,
+      encounterId: clinicalContext.encounterId,
+    };
+  };
+
   const addClinicalNote = async (
     patientId: string,
     note: Omit<ClinicalNote, 'id' | 'timestamp'>
   ): Promise<void> => {
-    const patient = patients.find((item) => item.id === patientId);
-    const encounterId = patient?.activeEncounterId || patient?.encounters?.[0]?.id;
-
-    if (!patient || !encounterId) {
-      throw new Error('CLINICAL_NOTE_REJECTED: active patient encounter is required.');
-    }
+    const { patient, encounterId } =
+      requireVerifiedClinicalContextForPatient(
+        patientId,
+        'Clinical note signing'
+      );
 
     const categoryMap: Record<
       ClinicalNote['category'],
@@ -1684,12 +1836,11 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     patientId: string,
     order: Omit<LabOrder, 'id' | 'orderedAt'>
   ): Promise<void> => {
-    const patient = patients.find((item) => item.id === patientId);
-    const encounterId = patient?.activeEncounterId || patient?.encounters?.[0]?.id;
-
-    if (!patient || !encounterId) {
-      throw new Error('DIAGNOSTIC_ORDER_REJECTED: active patient encounter is required.');
-    }
+    const { encounterId } =
+      requireVerifiedClinicalContextForPatient(
+        patientId,
+        'Diagnostic ordering'
+      );
 
     const orderType = order.category === 'Radiology' ? 'RADIOLOGY' : 'LAB';
     const offlineOrderId = `offline-order-${crypto.randomUUID()}`;
@@ -1754,12 +1905,11 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     patientId: string,
     vitals: Omit<Vitals, 'timestamp'>
   ): Promise<void> => {
-    const patient = patients.find((item) => item.id === patientId);
-    const encounterId = patient?.activeEncounterId || patient?.encounters?.[0]?.id;
-
-    if (!patient || !encounterId) {
-      throw new Error('VITALS_REJECTED: active patient encounter is required.');
-    }
+    const { encounterId } =
+      requireVerifiedClinicalContextForPatient(
+        patientId,
+        'Vitals recording'
+      );
 
     const offlineVitalsId = `offline-vitals-${crypto.randomUUID()}`;
     const result = await executeActiveTenantCommand(
@@ -1978,7 +2128,15 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     setOpdQueue((previous) => previous.map((item) =>
       item.id === tokenId ? { ...item, status: 'in_consultation' } : item
     ));
-    setSelectedPatientId(token.patientId);
+    if (token.encounterId) {
+      bindClinicalEncounter({
+        encounterId: token.encounterId,
+        patientId: token.patientId,
+        patientMrn: token.mrn,
+        patientName: token.patientName,
+        source: 'OPD_QUEUE',
+      });
+    }
   };
 
   const completeOpdToken = async (tokenId: string): Promise<void> => {
@@ -2187,6 +2345,9 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
         setCopilotOpen,
         selectedPatientId,
         setSelectedPatientId,
+        clinicalContext,
+        bindClinicalEncounter,
+        clearClinicalContext,
         dischargedCensus,
         reconcileCensus,
         updateBedStatus,

@@ -45,13 +45,40 @@ interface OperationalContextBarProps {
 export function HospitalOperationalContextBar({ onOpenPatientSearch }: OperationalContextBarProps) {
   const { currentTenant, userTenants, switchTenant } = useTenant();
   const availableTenants = userTenants || [];
-  const { patients, selectedPatientId, setSelectedPatientId, activeTab, setActiveTab } = useHospital();
+  const {
+    patients,
+    selectedPatientId,
+    clinicalContext,
+    activeTab,
+    setActiveTab,
+  } = useHospital();
   const { currentRole, roleDefinition } = useRBAC();
   const { user } = useAuth();
   const [facilityDropdownOpen, setFacilityDropdownOpen] = useState(false);
 
-  // Active patient resolution
-  const activePatient = selectedPatientId ? (patients.find((p) => p.id === selectedPatientId) || null) : null;
+  // Clinical views resolve identity from the encounter-bound context first.
+  // selectedPatientId remains available for non-clinical MPI browsing only.
+  const clinicalTabs = new Set([
+    'opd',
+    'workflow-runtime',
+    'emergency',
+    'beds',
+    'surgery',
+    'disease-intake',
+  ]);
+  const clinicalContextActive = clinicalTabs.has(activeTab);
+  const effectivePatientId = clinicalContextActive
+    ? clinicalContext?.status === 'VERIFIED'
+      ? clinicalContext.patientId
+      : null
+    : selectedPatientId;
+  const activePatient = effectivePatientId
+    ? patients.find((patient) => patient.id === effectivePatientId) || null
+    : null;
+  const unresolvedClinicalContext =
+    clinicalContextActive &&
+    Boolean(clinicalContext) &&
+    (clinicalContext?.status !== 'VERIFIED' || !activePatient);
 
   // Resolve departmental and workflow context based on active tab
   const getDepartmentAndWorkflow = () => {
@@ -63,6 +90,7 @@ export function HospitalOperationalContextBar({ onOpenPatientSearch }: Operation
           workflow: 'Manchester / NEWS2 Triage Protocol (Stage 1/3)',
           isClinical: true,
         };
+      case 'workflow-runtime':
       case 'opd':
         return {
           department: 'Outpatient Department (OPD)',
@@ -216,6 +244,15 @@ export function HospitalOperationalContextBar({ onOpenPatientSearch }: Operation
                     </span>
                   )}
                 </div>
+              ) : unresolvedClinicalContext ? (
+                <span
+                  className="text-rose-300 font-bold"
+                  data-testid="shell-patient-context-unresolved"
+                >
+                  {clinicalContext?.status === 'MISMATCH'
+                    ? 'PATIENT_CONTEXT_MISMATCH'
+                    : 'PATIENT_CONTEXT_UNRESOLVED'}
+                </span>
               ) : (
                 <span className="text-amber-400 font-medium italic">No Patient Selected</span>
               )}
@@ -230,7 +267,7 @@ export function HospitalOperationalContextBar({ onOpenPatientSearch }: Operation
               }}
               className="ml-1 text-[11px] text-blue-400 hover:text-blue-300 font-medium underline flex items-center gap-0.5 cursor-pointer"
             >
-              {activePatient ? 'Switch' : 'Select'}
+              {activePatient ? 'Switch encounter' : 'Select encounter'}
             </button>
           </div>
         )}

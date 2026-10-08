@@ -57,6 +57,7 @@ import { RehabilitationDomainService } from '../services/rehabilitation-domain-s
 import { EmergencyPrearrivalDomainService } from '../services/emergency-prearrival-domain-service';
 import { IdempotencyService } from '../idempotency/idempotency-service';
 import { validateCommandPayload } from './command-schema-registry';
+import { PatientContextIntegrityGuard } from './patient-context-integrity-guard';
 import { emitOperationalEvent, operationalTimer } from '@/lib/observability/server-telemetry';
 
 export class CommandBus {
@@ -150,6 +151,21 @@ export class CommandBus {
       }
 
       command.payload = schemaValidation.payload || command.payload;
+
+      const patientContextDecision =
+        await PatientContextIntegrityGuard.verify(context, command);
+      if (!patientContextDecision.ok) {
+        emit('REJECTED', patientContextDecision.code);
+        return {
+          success: false,
+          commandId: command.commandId,
+          idempotencyKey: command.idempotencyKey,
+          error: {
+            code: patientContextDecision.code,
+            message: patientContextDecision.message,
+          },
+        };
+      }
 
       // 1. Durable zero-duplicate idempotency reservation.
       const idempotencyCheck = await IdempotencyService.acquireExecution(

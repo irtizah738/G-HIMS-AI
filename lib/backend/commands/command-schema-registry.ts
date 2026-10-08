@@ -500,6 +500,17 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       reason: nonEmpty.max(4000),
     }).strict(),
   },
+  ConfigureOpdConsultationBillingCommand: {
+    1: z.object({
+      serviceCode: nonEmpty.max(100),
+      description: nonEmpty.max(500),
+      currency: z.string().trim().length(3),
+      unitPriceMinorUnits: z.number().int().safe().positive(),
+      taxRateBasisPoints: z.number().int().min(0).max(10000),
+      revenueAccountCode: nonEmpty.max(50),
+      effectiveFrom: z.string().trim().min(1).max(50).optional(),
+    }).strict(),
+  },
   CreateOpdConsultationInvoiceCommand: {
     1: z.object({
       encounterId: nonEmpty.max(150),

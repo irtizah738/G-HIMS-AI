@@ -27,6 +27,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import Link from 'next/link';
+import { mapAuthError } from '@/lib/auth/auth-errors';
 
 const hospital0TenantId = String(process.env.NEXT_PUBLIC_GHIMS_HOSPITAL0_TENANT_ID || '').trim();
 const hospital0Name = String(process.env.NEXT_PUBLIC_GHIMS_HOSPITAL0_NAME || '').trim();
@@ -151,7 +152,7 @@ export function LoginPortal() {
   // SSO Modal State
   const [ssoModalOpen, setSsoModalOpen] = useState(false);
   const [ssoEmail, setSsoEmail] = useState('');
-  const [ssoProvider, setSsoProvider] = useState<'OKTA' | 'AZURE_AD' | 'SAML' | 'GOOGLE'>('OKTA');
+  const [ssoProvider, setSsoProvider] = useState<'OKTA' | 'AZURE_AD'>('OKTA');
   const [ssoLoading, setSsoLoading] = useState(false);
   const [ssoError, setSsoError] = useState<string | null>(null);
   const showDemoPersonas = process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO';
@@ -227,7 +228,8 @@ export function LoginPortal() {
         }
       }
     } catch (err: any) {
-      setLocalError(err?.userMessage || err?.message || 'Google Identity sign in failed');
+      const mapped = mapAuthError(err);
+      setLocalError(mapped.userMessage || 'Google Identity sign in failed');
     } finally {
       setGoogleLoading(false);
     }
@@ -255,7 +257,8 @@ export function LoginPortal() {
     try {
       const result = await signInSSO(
         ssoEmail,
-        selectedTenantId
+        selectedTenantId,
+        ssoProvider
       );
       if (result?.authenticated) {
         setSsoModalOpen(false);

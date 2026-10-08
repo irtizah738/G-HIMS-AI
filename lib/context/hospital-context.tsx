@@ -945,6 +945,7 @@ export interface ClinicalContextBinding {
   encounterId: string;
   patientId: string;
   patientMrn: string;
+  patientName: string;
   status: 'VERIFIED' | 'UNRESOLVED' | 'MISMATCH';
   contextRevision: number;
   source:
@@ -961,6 +962,7 @@ interface BindClinicalEncounterInput {
   encounterId: string;
   patientId: string;
   patientMrn: string;
+  patientName: string;
   source: ClinicalContextBinding['source'];
 }
 
@@ -1083,9 +1085,10 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     const encounterId = String(input.encounterId || '').trim();
     const patientId = String(input.patientId || '').trim();
     const patientMrn = String(input.patientMrn || '').trim();
+    const patientName = String(input.patientName || '').trim();
 
-    if (!authoritativeTenantId || !encounterId || !patientId || !patientMrn) {
-      throw new Error('CLINICAL_CONTEXT_INVALID: tenant, encounter, patient and MRN identifiers are required.');
+    if (!authoritativeTenantId || !encounterId || !patientId || !patientMrn || !patientName) {
+      throw new Error('CLINICAL_CONTEXT_INVALID: tenant, encounter, patient, MRN and patient name are required.');
     }
     if (requestedTenantId !== authoritativeTenantId) {
       throw new Error('CLINICAL_CONTEXT_TENANT_MISMATCH');
@@ -1095,7 +1098,8 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     const status: ClinicalContextBinding['status'] =
       !shellPatient
         ? 'UNRESOLVED'
-        : shellPatient.mrn !== patientMrn
+        : shellPatient.mrn !== patientMrn ||
+            String(shellPatient.fullName || '').trim() !== patientName
           ? 'MISMATCH'
           : 'VERIFIED';
 
@@ -1105,6 +1109,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       encounterId,
       patientId,
       patientMrn,
+      patientName,
       status,
       contextRevision: clinicalContextRevisionRef.current,
       source: input.source,
@@ -1574,6 +1579,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       encounterId: registration.encounter.id,
       patientId: newPatient.id,
       patientMrn: newPatient.mrn,
+      patientName: newPatient.fullName,
       source: 'REGISTRATION',
     });
     recordMutation('REGISTER_PATIENT', `Patient:${newPatient.id}`, {
@@ -2069,6 +2075,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
         encounterId: token.encounterId,
         patientId: token.patientId,
         patientMrn: token.mrn,
+        patientName: token.patientName,
         source: 'OPD_QUEUE',
       });
     }

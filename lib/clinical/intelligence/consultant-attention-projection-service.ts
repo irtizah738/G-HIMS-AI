@@ -143,8 +143,9 @@ export class ConsultantAttentionProjectionService {
       tenantId,
       patientId
     );
-    if (!patient360) return [];
 
+    // Consultation and handoff source state remains actionable even when the
+    // longitudinal Patient 360 projection is temporarily unavailable.
     const careSetting = normalizeCareSetting(
       encounter.encounterType || encounter.type
     );
@@ -595,33 +596,35 @@ export class ConsultantAttentionProjectionService {
       );
     }
 
-    for (const code of patient360.dataQuality.missingCanonicalFacts) {
-      active.push(
-        item(
-          {
-            openItemId: stableId('open', [
+    if (patient360) {
+      for (const code of patient360.dataQuality.missingCanonicalFacts) {
+        active.push(
+          item(
+            {
+              openItemId: stableId('open', [
+                patientId,
+                encounterId,
+                'data-quality',
+                code,
+              ]),
+              tenantId,
               patientId,
               encounterId,
-              'data-quality',
-              code,
-            ]),
-            tenantId,
-            patientId,
-            encounterId,
-            careSetting,
-            category: 'DATA_QUALITY',
-            description: `Clinical knowledge incomplete: ${code
-              .replace(/_/g, ' ')
-              .toLowerCase()}`,
-            clinicalPriority: 'REVIEW_REQUIRED',
-            ...owner,
-            createdAt: patient360.projectedAt,
-            sourceRefs: [code],
-            lastSourceEventId: trigger?.eventId,
-          },
-          now
-        )
-      );
+              careSetting,
+              category: 'DATA_QUALITY',
+              description: `Clinical knowledge incomplete: ${code
+                .replace(/_/g, ' ')
+                .toLowerCase()}`,
+              clinicalPriority: 'REVIEW_REQUIRED',
+              ...owner,
+              createdAt: patient360.projectedAt,
+              sourceRefs: [code],
+              lastSourceEventId: trigger?.eventId,
+            },
+            now
+          )
+        );
+      }
     }
 
     const existing = new Map(
@@ -961,6 +964,111 @@ export class ConsultantAttentionProjectionService {
       }
       rawItems = [...byId.values()];
     }
+
+    // Consultation requests are authoritative source state. The command center
+    // must never depend on an asynchronous projection worker having already
+    // materialized clinicalOpenItems, otherwise a successfully routed patient
+    // can disappear from the consultant's queue. Reconcile active consultation
+    // source records into the read path on every load.
+    const consultationSourceSnapshot = await tenantRef
+      .collection('consultationRequests')
+      .where('status', 'in', [
+        'REQUESTED',
+        'ASSIGNED',
+        'ACKNOWLEDGED',
+        'ACCEPTED',
+        'IN_REVIEW',
+      ])
+      .limit(WORKLIST_MAX)
+      .get();
+
+    const byOpenItemId = new Map(
+      rawItems.map((entry) => [entry.openItemId, entry] as const)
+    );
+    const now = Date.now();
+
+    for (const document of consultationSourceSnapshot.docs) {
+      const consultation = document.data() as ClinicalConsultationRequest;
+      const consultationId = String(
+        consultation.consultationId || document.id
+      ).trim();
+      const ownerId = String(
+        consultation.assignedConsultantId ||
+          consultation.requestedConsultantId ||
+          ''
+      ).trim();
+      const isSystemAdmin = roles.has('SYSTEM_ADMIN');
+      const roleOwned = !ownerId && roles.has('CONSULTANT');
+      if (!isSystemAdmin && !roleOwned && ownerId !== context.actorId) continue;
+
+      const status = String(consultation.status || '').toUpperCase();
+      const policy = getConsultationSla(consultation.priority);
+      const acknowledgementDueAt =
+        consultation.acknowledgementDueAt ||
+        consultation.responseDueAt ||
+        consultation.requestedAt + policy.acknowledgementMinutes * 60_000;
+      const acceptanceDueAt =
+        consultation.acceptanceDueAt ||
+        consultation.requestedAt + policy.acceptanceMinutes * 60_000;
+      const slaPhase =
+        status === 'REQUESTED' || status === 'ASSIGNED'
+          ? 'ACKNOWLEDGEMENT' as const
+          : status === 'ACKNOWLEDGED'
+            ? 'ACCEPTANCE' as const
+            : 'COMPLETE' as const;
+      const dueAt =
+        slaPhase === 'ACKNOWLEDGEMENT'
+          ? acknowledgementDueAt
+          : slaPhase === 'ACCEPTANCE'
+            ? acceptanceDueAt
+            : undefined;
+      const slaState = getConsultationSlaState(now, dueAt, slaPhase);
+      const openItemId = stableId('open', [
+        consultation.patientId,
+        consultation.encounterId,
+        'consultation',
+        consultationId,
+      ]);
+
+      byOpenItemId.set(openItemId, {
+        openItemId,
+        tenantId: context.tenantId,
+        patientId: consultation.patientId,
+        encounterId: consultation.encounterId,
+        careSetting: consultation.careSetting,
+        category: 'CONSULTATION',
+        description:
+          slaPhase === 'ACKNOWLEDGEMENT'
+            ? `${consultation.priority} ${consultation.requestedSpecialty} consultation awaiting acknowledgement: ${consultation.clinicalQuestion}`
+            : slaPhase === 'ACCEPTANCE'
+              ? `${consultation.priority} ${consultation.requestedSpecialty} consultation acknowledged and awaiting acceptance: ${consultation.clinicalQuestion}`
+              : `${consultation.priority} ${consultation.requestedSpecialty} consultation in consultant review: ${consultation.clinicalQuestion}`,
+        clinicalPriority:
+          consultation.priority === 'STAT'
+            ? 'CRITICAL_REVIEW_REQUIRED'
+            : slaState === 'BREACHED' || consultation.priority === 'URGENT'
+              ? 'ACTION_REQUIRED'
+              : 'REVIEW_REQUIRED',
+        ownerType: ownerId ? 'CONSULTANT' : 'ROLE',
+        ownerId: ownerId || 'CONSULTANT',
+        ownerRole: ownerId ? undefined : 'CONSULTANT',
+        status: status === 'ACKNOWLEDGED' ? 'ACKNOWLEDGED' : 'OPEN',
+        resolutionMode: 'SOURCE_STATE',
+        createdAt: consultation.requestedAt,
+        dueAt,
+        slaPhase,
+        slaState,
+        acknowledgedAt: consultation.acknowledgedAt,
+        sourceRefs: [
+          consultationId,
+          ...(consultation.sourceRefs || []),
+        ],
+        generatedBy: 'CONSULTATION_SOURCE_RECONCILIATION',
+        updatedAt: consultation.updatedAt || now,
+      });
+    }
+
+    rawItems = [...byOpenItemId.values()];
 
     const items = rawItems
       .filter((entry) => {

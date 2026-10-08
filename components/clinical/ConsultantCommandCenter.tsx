@@ -38,7 +38,7 @@ function priorityLabel(item: ConsultantWorklistItem) {
 
 export function ConsultantCommandCenter() {
   const auth = useAuth();
-  const { setActiveTab } = useHospital();
+  const { patients, setSelectedPatientId, setActiveTab } = useHospital();
   const { setActivePatientId } = useRBAC();
   const tenantId = auth.activeTenant?.tenantId || auth.user?.tenantId || '';
 
@@ -80,6 +80,7 @@ export function ConsultantCommandCenter() {
   );
 
   const openPatient = (item: ConsultantWorklistItem) => {
+    setSelectedPatientId(item.patientId);
     setActivePatientId(item.patientId);
     setActiveTab('patients');
   };
@@ -303,6 +304,7 @@ export function ConsultantCommandCenter() {
           ) : (
             (worklist?.items || []).map((item) => {
               const isOverdue = Boolean(item.dueAt && item.dueAt < Date.now());
+              const patient = patients.find((candidate) => candidate.id === item.patientId);
               return (
                 <div key={item.openItemId} className="p-5">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -341,7 +343,16 @@ export function ConsultantCommandCenter() {
                         {item.description}
                       </div>
                       <div className="mt-1 text-[11px] text-slate-500">
-                        Patient {item.patientId}
+                        {patient ? (
+                          <>
+                            <span className="font-bold text-slate-700 dark:text-slate-200">
+                              {patient.fullName}
+                            </span>
+                            {patient.mrn ? ` · MRN ${patient.mrn}` : ''}
+                          </>
+                        ) : (
+                          <>Patient {item.patientId}</>
+                        )}
                         {item.encounterId ? ` · Encounter ${item.encounterId}` : ''}
                         {item.dueAt ? ` · Due ${formatTime(item.dueAt)}` : ''}
                       </div>

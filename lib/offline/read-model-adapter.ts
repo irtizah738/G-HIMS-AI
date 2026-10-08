@@ -230,6 +230,9 @@ export function adaptEdgeSnapshot(snapshot: EdgeSnapshot): HospitalEdgeModels {
         chronicConditions: Array.isArray((raw as any).chronicConditions) ? (raw as any).chronicConditions : [],
         activeBedId: asString((raw as any).activeBedId) || undefined,
         activeEncounterId: asString((raw as any).activeEncounterId) || undefined,
+        status: asString((raw as any).status, 'ACTIVE').toUpperCase() as Patient['status'],
+        mergedIntoPatientId:
+          asString((raw as any).mergedIntoPatientId) || undefined,
         encounters: encountersByPatient.get(id) || [],
         registeredAt: new Date(asNumber((raw as any).createdAt || (raw as any).registeredAt, Date.now())).toISOString(),
       };

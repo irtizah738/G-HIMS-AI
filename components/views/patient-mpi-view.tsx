@@ -92,11 +92,14 @@ export function PatientMpiView() {
   const detectedDuplicatePairs = useMemo(() => {
     const pairs: Array<{ primary: Patient; duplicate: Patient; matchReason: string }> = [];
     const checked = new Set<string>();
+    const activeIdentityPatients = scopedPatients.filter(
+      (patient) => String(patient.status || 'ACTIVE').toUpperCase() !== 'MERGED'
+    );
 
-    for (let i = 0; i < scopedPatients.length; i++) {
-      for (let j = i + 1; j < scopedPatients.length; j++) {
-        const p1 = scopedPatients[i];
-        const p2 = scopedPatients[j];
+    for (let i = 0; i < activeIdentityPatients.length; i++) {
+      for (let j = i + 1; j < activeIdentityPatients.length; j++) {
+        const p1 = activeIdentityPatients[i];
+        const p2 = activeIdentityPatients[j];
         const key = [p1.id, p2.id].sort().join(':');
         if (checked.has(key)) continue;
 

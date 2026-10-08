@@ -182,6 +182,8 @@ export interface Patient {
   activeEncounterId?: string;
   encounters: Encounter[];
   registeredAt: string;
+  status?: 'ACTIVE' | 'MERGED' | 'INACTIVE' | 'DECEASED';
+  mergedIntoPatientId?: string;
 }
 
 export interface StaffMember {

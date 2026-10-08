@@ -5,11 +5,13 @@ export interface EncounterIdentity {
   tenantId?: string;
   patientId: string;
   mrn: string;
+  patientName?: string;
 }
 
 export interface PatientIdentity {
   id: string;
   mrn: string;
+  fullName?: string;
 }
 
 export interface BoundClinicalIdentity {
@@ -17,6 +19,7 @@ export interface BoundClinicalIdentity {
   encounterId: string;
   patientId: string;
   patientMrn: string;
+  patientName?: string;
   status: ClinicalContextStatus;
 }
 
@@ -90,7 +93,12 @@ export function verifyPatientContextIdentity(input: {
 
   if (
     normalized(encounter.patientId) !== normalized(patient.id) ||
-    normalized(encounter.mrn) !== normalized(patient.mrn)
+    normalized(encounter.mrn) !== normalized(patient.mrn) ||
+    (
+      normalized(encounter.patientName) &&
+      normalized(patient.fullName) &&
+      normalized(encounter.patientName) !== normalized(patient.fullName)
+    )
   ) {
     return {
       ok: false,
@@ -134,7 +142,12 @@ export function verifyPatientContextIdentity(input: {
   if (
     normalized(context.encounterId) !== normalized(encounter.id) ||
     normalized(context.patientId) !== normalized(encounter.patientId) ||
-    normalized(context.patientMrn) !== normalized(encounter.mrn)
+    normalized(context.patientMrn) !== normalized(encounter.mrn) ||
+    (
+      normalized(encounter.patientName) &&
+      normalized(context.patientName) &&
+      normalized(context.patientName) !== normalized(encounter.patientName)
+    )
   ) {
     return {
       ok: false,

@@ -207,7 +207,6 @@ export function adaptEdgeSnapshot(snapshot: EdgeSnapshot): HospitalEdgeModels {
   }
 
   const patients: Patient[] = patientRows
-    .filter((raw) => asString((raw as any).status, 'ACTIVE').toUpperCase() !== 'MERGED')
     .map((raw) => {
       const id = asString((raw as any).id || (raw as any).patientId);
       const dob = asString((raw as any).dateOfBirth);

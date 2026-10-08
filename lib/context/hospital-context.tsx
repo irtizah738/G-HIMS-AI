@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
   Bed,
   Patient,
@@ -1070,7 +1070,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
   const [clinicalContext, setClinicalContext] = useState<ClinicalContextBinding | null>(null);
   const clinicalContextRevisionRef = useRef(0);
 
-  const bindClinicalEncounter = (input: BindClinicalEncounterInput): ClinicalContextBinding => {
+  const bindClinicalEncounter = useCallback((input: BindClinicalEncounterInput): ClinicalContextBinding => {
     const authoritativeTenantId = String(
       activeTenant?.tenantId || user?.tenantId || ''
     ).trim().toLowerCase();
@@ -1102,12 +1102,12 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     setClinicalContext(next);
     setSelectedPatientId(patientId);
     return next;
-  };
+  }, [activeTenant?.tenantId, user?.tenantId]);
 
-  const clearClinicalContext = () => {
+  const clearClinicalContext = useCallback(() => {
     clinicalContextRevisionRef.current += 1;
     setClinicalContext(null);
-  };
+  }, []);
 
   useEffect(() => {
     if (isDemoRuntime || authLoading) return;

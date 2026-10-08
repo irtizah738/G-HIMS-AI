@@ -68,10 +68,9 @@ export function HospitalOperationalContextBar({ onOpenPatientSearch }: Operation
     'disease-intake',
   ]);
   const clinicalContextActive = clinicalTabs.has(activeTab);
-  const effectivePatientId =
-    clinicalContextActive && clinicalContext?.patientId
-      ? clinicalContext.patientId
-      : selectedPatientId;
+  const effectivePatientId = clinicalContextActive
+    ? clinicalContext?.patientId || null
+    : selectedPatientId;
   const activePatient = effectivePatientId
     ? patients.find((patient) => patient.id === effectivePatientId) || null
     : null;

@@ -42,7 +42,7 @@ interface AuthContextType {
   accessibleTenants: TenantSelectionItem[];
   signIn: (email: string, pass: string, options?: SignInOptions) => Promise<LoginResponsePayload>;
   signInFederated: (options?: SignInOptions) => Promise<LoginResponsePayload>;
-  signInSSO: (email: string, tenantId?: string) => Promise<LoginResponsePayload>;
+  signInSSO: (email: string, tenantId: string, provider: 'OKTA' | 'AZURE_AD') => Promise<LoginResponsePayload>;
   signOut: () => Promise<void>;
   switchTenant: (tenantId: string) => Promise<void>;
   sendPasswordReset: (email: string) => Promise<{ success: boolean; message: string }>;
@@ -278,7 +278,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Enterprise Single Sign-On (SSO) Action
   const signInSSO = useCallback(
-    async (email: string, tenantId: string = 'central-metro-hospital'): Promise<LoginResponsePayload> => {
+    async (
+      email: string,
+      tenantId: string,
+      provider: 'OKTA' | 'AZURE_AD'
+    ): Promise<LoginResponsePayload> => {
       setLoading(true);
       setLoadingStatus('AUTHENTICATING');
       setError(null);
@@ -289,7 +293,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         );
 
         const payload = await Promise.race([
-          AuthClient.signInSSO(email, tenantId),
+          AuthClient.signInSSO(email, tenantId, provider),
           timeoutPromise,
         ]);
 

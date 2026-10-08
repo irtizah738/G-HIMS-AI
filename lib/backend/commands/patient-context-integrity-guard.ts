@@ -62,19 +62,21 @@ export class PatientContextIntegrityGuard {
       return { ok: true };
     }
 
+    // TEST/DEMO domain services already perform their own lineage checks and
+    // may intentionally use ephemeral repositories. The central Firestore
+    // preflight is a staging/production defense-in-depth boundary.
+    if (!isProductionLikeRuntime()) {
+      return { ok: true };
+    }
+
     const db = getAdminFirestore();
     if (!db) {
-      if (isProductionLikeRuntime()) {
-        return {
-          ok: false,
-          code: 'PATIENT_CONTEXT_AUTHORITY_UNAVAILABLE',
-          message:
-            'Authoritative patient/encounter lineage cannot be verified because the durable clinical store is unavailable.',
-        };
-      }
-      // TEST/DEMO may intentionally use ephemeral repositories. Domain service
-      // lineage checks remain active there.
-      return { ok: true };
+      return {
+        ok: false,
+        code: 'PATIENT_CONTEXT_AUTHORITY_UNAVAILABLE',
+        message:
+          'Authoritative patient/encounter lineage cannot be verified because the durable clinical store is unavailable.',
+      };
     }
 
     const tenantId = normalize(context.tenantId).toLowerCase();

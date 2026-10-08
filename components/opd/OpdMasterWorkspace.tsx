@@ -727,6 +727,7 @@ export function OpdMasterWorkspace() {
       tenantId: activeEncounter.tenantId || auth.activeTenant?.tenantId,
       encounterId: activeEncounter.id,
       patientId: activeEncounter.patientId,
+      patientMrn: activeEncounter.mrn,
       source: 'OPD_MASTER',
     });
   }, [
@@ -743,6 +744,8 @@ export function OpdMasterWorkspace() {
       clinicalContext &&
       clinicalContext.encounterId === activeEncounter.id &&
       clinicalContext.patientId === activeEncounter.patientId &&
+      clinicalContext.patientMrn === activeEncounter.mrn &&
+      clinicalContext.status === 'VERIFIED' &&
       clinicalContext.tenantId ===
         String(
           activeEncounter.tenantId || auth.activeTenant?.tenantId || ''

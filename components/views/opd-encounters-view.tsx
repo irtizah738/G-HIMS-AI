@@ -84,6 +84,7 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
     bindClinicalEncounter({
       encounterId: token.encounterId,
       patientId: token.patientId,
+      patientMrn: token.mrn,
       source: 'OPD_CONSULTATION_DESK',
     });
     setSelectedTokenId(token.id);
@@ -136,7 +137,9 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
       patient.mrn === selectedToken.mrn &&
       clinicalContext &&
       clinicalContext.encounterId === selectedToken.encounterId &&
-      clinicalContext.patientId === patient.id
+      clinicalContext.patientId === patient.id &&
+      clinicalContext.patientMrn === patient.mrn &&
+      clinicalContext.status === 'VERIFIED'
   );
 
   useEffect(() => {
@@ -152,6 +155,7 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
     bindClinicalEncounter({
       encounterId: selectedToken.encounterId,
       patientId: selectedToken.patientId,
+      patientMrn: selectedToken.mrn,
       source: 'OPD_CONSULTATION_DESK',
     });
   }, [

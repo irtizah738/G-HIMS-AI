@@ -1589,6 +1589,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     setOpdQueue((previous) => [
       {
         id: registration.queueToken.id,
+        encounterId: registration.encounter.id,
         tokenNumber: registration.queueToken.tokenNumber,
         patientId: newPatient.id,
         patientName: newPatient.fullName,

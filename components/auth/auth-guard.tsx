@@ -3,8 +3,6 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth/auth-context';
-import { getSSOConfiguration } from '@/lib/auth/sso-service';
-import { SSOConfiguration } from '@/lib/auth/sso-types';
 import { ShieldAlert, Lock, AlertCircle, RefreshCw, LogOut, Key, ArrowRight, ShieldCheck } from 'lucide-react';
 import { SessionLockModal } from './session-lock-modal';
 import { LoginPortal } from './login-portal';
@@ -42,47 +40,14 @@ export function AuthGuard({
     switchTenant,
     signOut,
     refreshAuth,
-    signInSSO,
   } = useAuth();
 
-  const [ssoConfig, setSsoConfig] = useState<SSOConfiguration | null>(null);
-  const [ssoAuthenticating, setSsoAuthenticating] = useState(false);
-  const [ssoError, setSsoError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // Check for active SSO config on tenant
-  useEffect(() => {
-    let isMounted = true;
-    if (!user) {
-      getSSOConfiguration(activeTenant?.tenantId || 'central-metro-hospital')
-        .then((cfg) => {
-          if (isMounted && cfg && cfg.enabled) {
-            setSsoConfig(cfg);
-          }
-        })
-        .catch(() => {});
-    }
-    return () => {
-      isMounted = false;
-    };
-  }, [user, activeTenant]);
-
-  const handleQuickSSOBypass = async (email?: string) => {
-    setSsoAuthenticating(true);
-    setSsoError(null);
-    try {
-      const targetEmail = email || 'doctor.sarah@centralmetro.health';
-      await signInSSO(targetEmail, activeTenant?.tenantId || 'central-metro-hospital');
-    } catch (err: any) {
-      setSsoError(err?.message || 'SSO Identity Provider authentication failed');
-    } finally {
-      setSsoAuthenticating(false);
-    }
-  };
 
   if (!mounted || (loading && loadingStatus === 'RESTORING_SESSION' && !user)) {
     return (

@@ -160,6 +160,24 @@ describe('G-HIMS Production Authentication & Authorization Engine', () => {
       expect(mapped.userMessage).toContain('Hospital IT Security Officer');
     });
 
+    test('Google unauthorized-domain maps to an actionable provider configuration error', () => {
+      const mapped = mapAuthError({
+        code: 'auth/unauthorized-domain',
+        message: 'Unauthorized domain',
+      });
+      expect(mapped.code).toBe('INTERNAL_AUTH_ERROR');
+      expect(mapped.userMessage).toContain('Firebase Authentication authorized domains');
+    });
+
+    test('Google popup blocked maps to an actionable browser error', () => {
+      const mapped = mapAuthError({
+        code: 'auth/popup-blocked',
+        message: 'Popup blocked',
+      });
+      expect(mapped.code).toBe('INTERNAL_AUTH_ERROR');
+      expect(mapped.userMessage).toContain('Allow pop-ups');
+    });
+
     test('Rate limit maps to RATE_LIMITED', () => {
       const mapped = mapAuthError({ code: 'auth/too-many-requests', message: 'Too many attempts' });
       expect(mapped.code).toBe('RATE_LIMITED');

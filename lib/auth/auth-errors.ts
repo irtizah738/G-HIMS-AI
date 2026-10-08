@@ -136,6 +136,50 @@ export function mapAuthError(err: unknown): AuthError {
     });
   }
 
+  if (rawCode === 'auth/unauthorized-domain') {
+    return new AuthError({
+      code: 'INTERNAL_AUTH_ERROR',
+      message: 'Google Identity is not authorized for this application domain',
+      statusCode: 503,
+      userMessage:
+        'Google Identity is not authorized for this G-HIMS domain. Hospital IT must add this domain to Firebase Authentication authorized domains.',
+      originalError: err,
+    });
+  }
+
+  if (rawCode === 'auth/operation-not-allowed') {
+    return new AuthError({
+      code: 'INTERNAL_AUTH_ERROR',
+      message: 'Google Identity provider is disabled for this Firebase project',
+      statusCode: 503,
+      userMessage:
+        'Google Identity is not enabled for this G-HIMS Firebase project. Hospital IT must enable the Google sign-in provider.',
+      originalError: err,
+    });
+  }
+
+  if (rawCode === 'auth/popup-blocked' || rawMessage.includes('popup-blocked')) {
+    return new AuthError({
+      code: 'INTERNAL_AUTH_ERROR',
+      message: 'Browser blocked the Google Identity popup',
+      statusCode: 400,
+      userMessage:
+        'Your browser blocked the Google Identity window. Allow pop-ups for G-HIMS and try again.',
+      originalError: err,
+    });
+  }
+
+  if (rawMessage.includes('popup-timeout')) {
+    return new AuthError({
+      code: 'INTERNAL_AUTH_ERROR',
+      message: 'Google Identity popup timed out',
+      statusCode: 408,
+      userMessage:
+        'Google Identity did not complete within 30 seconds. Check pop-up permissions and try again.',
+      originalError: err,
+    });
+  }
+
   if (rawCode === 'auth/too-many-requests') {
     return new AuthError({
       code: 'RATE_LIMITED',

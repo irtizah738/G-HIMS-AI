@@ -8,37 +8,13 @@ import { getAdminAuth } from '@/server/firebase/admin';
 import { LoginResponsePayload } from '@/lib/auth/auth-types';
 import { AuthError } from '@/lib/auth/auth-errors';
 
-function hospital0TenantId(): string | null {
-  const value = String(process.env.GHIMS_HOSPITAL0_TENANT_ID || '').trim().toLowerCase();
-  return value || null;
-}
-
-function assertHospital0TenantScope(tenantId: string): void {
-  const hospital0 = hospital0TenantId();
-  if (hospital0 && tenantId !== hospital0) {
-    throw new AuthError({
-      code: 'TENANT_ACCESS_DENIED',
-      message: 'This Hospital-0 runtime is restricted to its configured facility.',
-      statusCode: 403,
-      userMessage: 'Select the Hospital-0 facility configured for this environment.',
-    });
-  }
-}
-
-function filterHospital0Tenants<T extends { tenantId: string }>(tenants: T[]): T[] {
-  const hospital0 = hospital0TenantId();
-  return hospital0 ? tenants.filter((tenant) => tenant.tenantId === hospital0) : tenants;
-}
-
 export async function GET(req: NextRequest) {
   try {
     const authHeader = req.headers.get('authorization');
     const token = extractBearerToken(authHeader);
     const verifiedToken = await verifyFirebaseToken(token, false);
 
-    const tenants = filterHospital0Tenants(
-      await getUserAccessibleTenants(verifiedToken.uid, verifiedToken.email)
-    );
+    const tenants = await getUserAccessibleTenants(verifiedToken.uid, verifiedToken.email);
     return NextResponse.json({ tenants });
   } catch (err: any) {
     return NextResponse.json(
@@ -63,8 +39,6 @@ export async function POST(req: NextRequest) {
     if (!targetTenantId) {
       return NextResponse.json({ error: 'tenantId is required' }, { status: 400 });
     }
-
-    assertHospital0TenantScope(targetTenantId);
 
     // 1. Verify membership in target tenant
     const membership = await getTenantMembership(targetTenantId, verifiedToken.uid, verifiedToken.email, verifiedToken.name);
@@ -95,12 +69,10 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const accessibleTenantsBeforeSwitch = filterHospital0Tenants(
-      await getUserAccessibleTenants(
+    const accessibleTenantsBeforeSwitch = await getUserAccessibleTenants(
         verifiedToken.uid,
         verifiedToken.email
-      )
-    );
+      );
 
     await adminAuth.setCustomUserClaims(verifiedToken.uid, {
       tenantId: targetTenantId,
@@ -127,9 +99,7 @@ export async function POST(req: NextRequest) {
       session.sessionId
     );
 
-    const accessibleTenants = filterHospital0Tenants(
-      await getUserAccessibleTenants(verifiedToken.uid, verifiedToken.email)
-    );
+    const accessibleTenants = await getUserAccessibleTenants(verifiedToken.uid, verifiedToken.email);
 
     await logAuthEvent({
       eventType: 'TENANT_SWITCHED',

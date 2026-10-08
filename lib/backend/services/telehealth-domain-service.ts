@@ -75,7 +75,7 @@ export class TelehealthDomainService {
     const now = new Date().toISOString();
     const sessionId = `th_${crypto.randomUUID()}`;
     const encounterId = `enc_th_${crypto.randomUUID()}`;
-    const roomToken = `ROOM-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+    const roomToken = `ROOM-${crypto.randomUUID().toUpperCase()}`;
 
     const session: TelehealthSession = {
       id: sessionId,

@@ -166,7 +166,9 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
       !selectedToken?.encounterId ||
       !selectedToken.patientId ||
       (clinicalContext?.encounterId === selectedToken.encounterId &&
-        clinicalContext?.patientId === selectedToken.patientId)
+        clinicalContext?.patientId === selectedToken.patientId &&
+        clinicalContext?.patientMrn === selectedToken.mrn &&
+        clinicalContext?.patientName === selectedToken.patientName)
     ) {
       return;
     }
@@ -182,8 +184,12 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
     bindClinicalEncounter,
     clinicalContext?.encounterId,
     clinicalContext?.patientId,
+    clinicalContext?.patientMrn,
+    clinicalContext?.patientName,
     selectedToken?.encounterId,
     selectedToken?.patientId,
+    selectedToken?.mrn,
+    selectedToken?.patientName,
   ]);
 
   const handleSaveConsultation = async () => {

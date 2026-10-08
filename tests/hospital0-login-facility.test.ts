@@ -47,6 +47,22 @@ describe('Login facility directory boundary', () => {
     expect(membership).toContain("code: 'TENANT_ACCESS_DENIED'");
   });
 
+  test('missing membership facility scope is resolved only from unambiguous server-owned tenant metadata', async () => {
+    const membership = await source('server/auth/tenant-membership.ts');
+
+    expect(membership).toContain('resolveAuthoritativeFacilityIds');
+    expect(membership).toContain('membershipFacilityIds');
+    expect(membership).toContain('primaryFacilityId');
+    expect(membership).toContain('defaultFacilityId');
+    expect(membership).toContain("collection('facilities')");
+    expect(membership).toContain("where('status', '==', 'ACTIVE')");
+    expect(membership).toContain('activeFacilities.size > 1');
+    expect(membership).toContain("facilityMode === 'MULTI'");
+    expect(membership).toContain("facilityMode === 'MULTI_FACILITY'");
+    expect(membership).toContain('return [legacyFacilityCode || params.tenantId]');
+    expect(membership).toContain('membership.facilityIds = await resolveAuthoritativeFacilityIds');
+  });
+
   test('federated identity controls surface failures instead of silently doing nothing', async () => {
     const portal = await source('components/auth/login-portal.tsx');
     const firebaseAuth = await source('lib/firebase/auth-context.tsx');

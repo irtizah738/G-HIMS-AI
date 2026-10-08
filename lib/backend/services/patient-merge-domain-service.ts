@@ -97,11 +97,43 @@ export class PatientMergeDomainService {
     }
 
     if (String(secondary.status || 'ACTIVE').toUpperCase() === 'MERGED') {
+      const mergedIntoPatientId = String(
+        (secondary as PatientMPI & { mergedIntoPatientId?: string }).mergedIntoPatientId || ''
+      ).trim();
+
+      // A stale UI/retry may repeat a merge that already succeeded. Treat the
+      // same-target retry as an idempotent success instead of presenting a red
+      // error, while still rejecting attempts to redirect a retired identity
+      // into a different survivor.
+      if (mergedIntoPatientId === payload.primaryPatientId) {
+        return {
+          success: true,
+          commandId,
+          idempotencyKey,
+          entityId: payload.primaryPatientId,
+          data: {
+            primaryPatientId: payload.primaryPatientId,
+            secondaryPatientId: payload.secondaryPatientId,
+            status: 'MERGED',
+            alreadyMerged: true,
+            allergies: Array.isArray(primary.allergies) ? primary.allergies : [],
+            chronicConditions: Array.isArray(primary.chronicConditions)
+              ? primary.chronicConditions
+              : [],
+          },
+        };
+      }
+
       return {
         success: false,
         commandId,
         idempotencyKey,
-        error: { code: 'SECONDARY_ALREADY_MERGED', message: 'Secondary patient has already been merged.' },
+        error: {
+          code: 'SECONDARY_ALREADY_MERGED',
+          message: mergedIntoPatientId
+            ? `Secondary patient is already merged into ${mergedIntoPatientId}.`
+            : 'Secondary patient has already been merged.',
+        },
       };
     }
 

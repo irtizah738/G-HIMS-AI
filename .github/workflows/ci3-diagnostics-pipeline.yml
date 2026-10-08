@@ -1,0 +1,97 @@
+name: Clinical Intelligence CI-3 Diagnostics Pipeline
+
+on:
+  push:
+    branches:
+      - ci/patient360-ci3-diagnostics
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci3-diagnostics-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci3:
+    name: CI-3 authoritative diagnostics pipeline
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-ci3
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-ci3
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-ci3
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-ci3
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      GHIMS_INTEGRATION_HL7_STATE: DISABLED
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_INTEGRATION_DICOMWEB_STATE: DISABLED
+      GHIMS_INTEGRATION_DEVICE_TELEMETRY_STATE: DISABLED
+      GHIMS_INTEGRATION_EDI_X12_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: TypeScript
+        run: bun run typecheck
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Preserve CI-0 authority boundary
+        run: bun run test:ci-foundation
+
+      - name: Preserve CI-1 canonical model
+        run: bun run test:ci1
+
+      - name: Preserve CI-2 terminology foundation
+        run: bun run test:ci2
+
+      - name: CI-3 diagnostics guards
+        run: bun run test:ci3
+
+      - name: Preserve P6 offline-first guarantees
+        run: bun run test:p6
+
+      - name: Preserve P7 qualification guarantees
+        run: bun run test:p7
+
+      - name: Security regression
+        run: bun run test:security
+
+      - name: Production build
+        run: bun run build
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "## G-HIMS Clinical Intelligence — CI-3"
+            echo ""
+            echo "- Diagnostic result command: PASS"
+            echo "- Patient/order/encounter traceability: PASS"
+            echo "- Observation + DiagnosticReport atomic write: PASS"
+            echo "- HL7 ORU reconciliation gate: PASS"
+            echo "- Unknown-unit safety: PASS"
+            echo "- Authenticated result read API: PASS"
+            echo "- Hard-coded diagnostic result UI removed: PASS"
+            echo "- CI-0/CI-1/CI-2/P6/P7/security regression: PASS"
+            echo "- Production build: PASS"
+          } >> "$GITHUB_STEP_SUMMARY"

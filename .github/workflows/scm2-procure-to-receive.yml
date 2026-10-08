@@ -1,0 +1,92 @@
+name: SCM-2 Procure-to-Receive Integrity
+
+on:
+  push:
+    branches:
+      - scm/scm2-procure-to-receive
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scm2-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scm2:
+    name: SCM-2 procurement integrity gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-scm2-ci
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-scm2-ci
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-scm2-ci
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-scm2-ci
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      GHIMS_INTEGRATION_HL7_STATE: DISABLED
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_INTEGRATION_DICOMWEB_STATE: DISABLED
+      GHIMS_INTEGRATION_DEVICE_TELEMETRY_STATE: DISABLED
+      GHIMS_INTEGRATION_EDI_X12_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: TypeScript
+        run: bun run typecheck
+
+      - name: Lint
+        run: bun run lint
+
+      - name: SCM-1 inventory integrity
+        run: bun run test:scm1
+
+      - name: SCM-2 procure-to-receive
+        run: bun run test:scm2
+
+      - name: P8 baseline regression
+        run: bun run test:p8
+
+      - name: Offline regression
+        run: bun run test:p6
+
+      - name: Security regression
+        run: bun run test:security
+
+      - name: Production build
+        run: bun run build
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "## G-HIMS SCM-2 Procure-to-Receive Integrity"
+            echo ""
+            echo "- PR approval and segregation of duties: PASS"
+            echo "- Approved PR -> PO derivation: PASS"
+            echo "- Active supplier and destination validation: PASS"
+            echo "- Independent PO approval: PASS"
+            echo "- PO-bound GRN receiving: PASS"
+            echo "- Inspection/batch/expiry/temperature gates: PASS"
+            echo "- Existing balance read-modify-write: PASS"
+            echo "- Authoritative PO cost and UOM normalization: PASS"
+            echo "- Atomic GRN + PO + batch + balance + stock ledger: PASS"
+            echo "- SCM-1/P8/P6/security/build regressions: PASS"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,92 @@
+name: SCM-3 Tenant Boundary Hardening
+
+on:
+  push:
+    branches:
+      - hardening/scm3-tenant-boundary
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scm3-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scm3:
+    name: SCM-3 tenant isolation gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-scm3-ci
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-scm3-ci
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-scm3-ci
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-scm3-ci
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      GHIMS_INTEGRATION_HL7_STATE: DISABLED
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_INTEGRATION_DICOMWEB_STATE: DISABLED
+      GHIMS_INTEGRATION_DEVICE_TELEMETRY_STATE: DISABLED
+      GHIMS_INTEGRATION_EDI_X12_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: TypeScript
+        run: bun run typecheck
+
+      - name: Lint
+        run: bun run lint
+
+      - name: SCM-1 inventory integrity
+        run: bun run test:scm1
+
+      - name: SCM-2 procure-to-receive
+        run: bun run test:scm2
+
+      - name: SCM-3 tenant boundary
+        run: bun run test:scm3
+
+      - name: P8 baseline regression
+        run: bun run test:p8
+
+      - name: Offline regression
+        run: bun run test:p6
+
+      - name: Security regression
+        run: bun run test:security
+
+      - name: Production build
+        run: bun run build
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "## G-HIMS SCM-3 Tenant Boundary Hardening"
+            echo ""
+            echo "- Explicit tenant route context: PASS"
+            echo "- No demo tenant fallback: PASS"
+            echo "- Mandatory SCM view tenant contract: PASS"
+            echo "- Active-tenant command routing: PASS"
+            echo "- Offline tenant mismatch rejection: PASS"
+            echo "- Server-side tenant canonicalization: PASS"
+            echo "- SCM-1/SCM-2/P8/P6/security/build regressions: PASS"
+          } >> "$GITHUB_STEP_SUMMARY"

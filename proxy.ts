@@ -49,7 +49,7 @@ function buildContentSecurityPolicy(nonce: string): string {
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
-    "frame-ancestors 'none'",
+    "frame-ancestors 'self' https://*.google.com https://*.aistudio.google.com https://*.run.app",
     'upgrade-insecure-requests',
   ].join('; ');
 }
@@ -127,14 +127,13 @@ export function proxy(request: NextRequest) {
 
   response.headers.set('Content-Security-Policy', contentSecurityPolicy);
   response.headers.set('X-Content-Type-Options', 'nosniff');
-  response.headers.set('X-Frame-Options', 'DENY');
   response.headers.set('Referrer-Policy', 'no-referrer');
   response.headers.set(
     'Permissions-Policy',
     'camera=(self), microphone=(self), geolocation=(), payment=(), usb=()'
   );
   response.headers.set('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
-  response.headers.set('Cross-Origin-Resource-Policy', 'same-origin');
+  response.headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
 
   const mode = runtimeMode();
   if (mode === 'STAGING' || mode === 'PRODUCTION') {

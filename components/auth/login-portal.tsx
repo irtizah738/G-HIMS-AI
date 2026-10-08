@@ -29,27 +29,36 @@ import {
 import Link from 'next/link';
 import { mapAuthError } from '@/lib/auth/auth-errors';
 
+interface FacilityDirectoryItem {
+  tenantId: string;
+  name: string;
+  facilityCode?: string;
+}
+
 const hospital0TenantId = String(process.env.NEXT_PUBLIC_GHIMS_HOSPITAL0_TENANT_ID || '').trim();
 const hospital0Name = String(process.env.NEXT_PUBLIC_GHIMS_HOSPITAL0_NAME || '').trim();
 const hospital0FacilityCode = String(process.env.NEXT_PUBLIC_GHIMS_HOSPITAL0_FACILITY_CODE || '').trim();
 
-const HOSPITAL_FACILITIES = hospital0TenantId
+const HOSPITAL0_FALLBACK_FACILITIES: FacilityDirectoryItem[] = hospital0TenantId
   ? [
       {
         tenantId: hospital0TenantId,
         name: hospital0Name || hospital0TenantId,
-        facilityCode: hospital0FacilityCode || hospital0TenantId,
+        facilityCode: hospital0FacilityCode || undefined,
       },
     ]
   : [];
 
-function resolveFacilityTenantId(value: string): string {
+function resolveFacilityTenantId(
+  value: string,
+  facilities: FacilityDirectoryItem[]
+): string {
   const normalized = value.trim().toLowerCase();
-  const match = HOSPITAL_FACILITIES.find(
+  const match = facilities.find(
     (facility) =>
       facility.tenantId.toLowerCase() === normalized ||
       facility.name.toLowerCase() === normalized ||
-      facility.facilityCode.toLowerCase() === normalized
+      String(facility.facilityCode || '').toLowerCase() === normalized
   );
   return match?.tenantId || '';
 }
@@ -141,6 +150,75 @@ export function LoginPortal() {
   const [localError, setLocalError] = useState<string | null>(null);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [facilities, setFacilities] = useState<FacilityDirectoryItem[]>(
+    HOSPITAL0_FALLBACK_FACILITIES
+  );
+  const [facilitiesLoading, setFacilitiesLoading] = useState(true);
+  const [facilityLoadError, setFacilityLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadFacilities = async () => {
+      setFacilitiesLoading(true);
+      setFacilityLoadError(null);
+
+      try {
+        const response = await fetch('/api/auth/facilities', {
+          method: 'GET',
+          cache: 'no-store',
+        });
+        const payload = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(payload.error || 'Unable to load hospital facilities.');
+        }
+
+        const nextFacilities = Array.isArray(payload.facilities)
+          ? payload.facilities
+              .map((facility: any) => ({
+                tenantId: String(facility?.tenantId || '').trim().toLowerCase(),
+                name: String(facility?.name || facility?.tenantId || '').trim(),
+                facilityCode: facility?.facilityCode
+                  ? String(facility.facilityCode).trim()
+                  : undefined,
+              }))
+              .filter(
+                (facility: FacilityDirectoryItem) =>
+                  Boolean(facility.tenantId) && Boolean(facility.name)
+              )
+          : [];
+
+        if (!cancelled) {
+          setFacilities(
+            nextFacilities.length > 0
+              ? nextFacilities
+              : HOSPITAL0_FALLBACK_FACILITIES
+          );
+          if (nextFacilities.length === 0) {
+            setFacilityLoadError('No hospital facilities were returned by Firestore.');
+          }
+        }
+      } catch (facilityError) {
+        if (!cancelled) {
+          setFacilities(HOSPITAL0_FALLBACK_FACILITIES);
+          setFacilityLoadError(
+            facilityError instanceof Error
+              ? facilityError.message
+              : 'Unable to load hospital facilities.'
+          );
+        }
+      } finally {
+        if (!cancelled) setFacilitiesLoading(false);
+      }
+    };
+
+    void loadFacilities();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Auto-redirect if already authenticated
   useEffect(() => {
@@ -161,7 +239,7 @@ export function LoginPortal() {
     e.preventDefault();
     setLocalError(null);
 
-    const selectedTenantId = resolveFacilityTenantId(tenantId);
+    const selectedTenantId = resolveFacilityTenantId(tenantId, facilities);
     if (!selectedTenantId) {
       setLocalError('Select an authorized hospital facility before signing in.');
       return;
@@ -202,7 +280,7 @@ export function LoginPortal() {
 
   const handleGoogleSignIn = async () => {
     setLocalError(null);
-    const selectedTenantId = resolveFacilityTenantId(tenantId);
+    const selectedTenantId = resolveFacilityTenantId(tenantId, facilities);
     if (!selectedTenantId) {
       setLocalError('Select an authorized hospital facility before signing in.');
       return;
@@ -247,7 +325,7 @@ export function LoginPortal() {
       return;
     }
 
-    const selectedTenantId = resolveFacilityTenantId(tenantId);
+    const selectedTenantId = resolveFacilityTenantId(tenantId, facilities);
     if (!selectedTenantId) {
       setSsoError('Select an authorized hospital facility before enterprise SSO.');
       setSsoLoading(false);
@@ -358,11 +436,16 @@ export function LoginPortal() {
                     className="w-full appearance-none pl-10 pr-10 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-xs font-medium text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition cursor-pointer"
                   >
                     <option value="" disabled>
-                      Select hospital facility
+                      {facilitiesLoading
+                        ? 'Loading hospital facilities...'
+                        : 'Select hospital facility'}
                     </option>
-                    {HOSPITAL_FACILITIES.map((facility) => (
+                    {facilities.map((facility) => (
                       <option key={facility.tenantId} value={facility.tenantId}>
-                        {facility.name} · {facility.facilityCode}
+                        {facility.name}
+                        {facility.facilityCode
+                          ? ` · ${facility.facilityCode}`
+                          : ''}
                       </option>
                     ))}
                   </select>
@@ -370,8 +453,16 @@ export function LoginPortal() {
                   <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3.5 top-3 pointer-events-none" />
                 </div>
                 <p className="text-[10px] leading-relaxed text-slate-500">
-                  Facility selection is required. Access is still verified against your active server-authoritative hospital membership.
+                  Facility selection is required. Facilities are loaded from the configured Firestore tenant directory; access is still verified against your active server-authoritative hospital membership.
                 </p>
+                {facilityLoadError && (
+                  <p
+                    data-testid="login-facility-directory-error"
+                    className="text-[10px] leading-relaxed text-amber-400"
+                  >
+                    {facilityLoadError}
+                  </p>
+                )}
               </div>
 
               {/* Email Input */}

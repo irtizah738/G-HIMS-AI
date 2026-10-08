@@ -731,6 +731,8 @@ export function OpdMasterWorkspace() {
   }, [
     activeEncounter?.id,
     activeEncounter?.patientId,
+    activeEncounter?.mrn,
+    activeEncounter?.patientName,
     activeEncounter?.tenantId,
     auth.activeTenant?.tenantId,
     bindClinicalEncounter,

@@ -152,10 +152,13 @@ describe('OPD-RP22 obsolete and demo authority removal', () => {
       source('app/[tenantId]/billing/claims/page.tsx'),
     ]);
 
-    expect(tariffs).toContain('Fail-closed production boundary');
-    expect(tariffs).toContain('Browser-side tariff creation');
+    expect(tariffs).toContain('Governed server-authoritative billing configuration');
+    expect(tariffs).toContain("'ConfigureOpdConsultationBillingCommand'");
+    expect(tariffs).toContain('executeCommand');
+    expect(tariffs).not.toContain("from 'firebase/firestore'");
+    expect(tariffs).not.toContain('setDoc(');
+    expect(tariffs).not.toContain('updateDoc(');
     expect(tariffs).not.toContain('setTariffs');
-    expect(tariffs).not.toContain('handleCreateTariff');
     expect(tariffs).not.toContain('BlueCross');
 
     expect(claims).toContain('Insurance Claims / EDI Is Not Enabled');

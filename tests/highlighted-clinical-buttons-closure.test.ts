@@ -55,12 +55,15 @@ describe('highlighted clinical button closure', () => {
     const service = await source(
       'lib/backend/services/patient-merge-domain-service.ts'
     );
+    const adapter = await source('lib/offline/read-model-adapter.ts');
 
     expect(view).toContain('activeIdentityPatients');
     expect(view).toContain("String(patient.status || 'ACTIVE').toUpperCase() !== 'MERGED'");
     expect(modal).toContain("String(patient.status || 'ACTIVE').toUpperCase() !== 'MERGED'");
     expect(service).toContain('mergedIntoPatientId === payload.primaryPatientId');
     expect(service).toContain('alreadyMerged: true');
+    expect(adapter).toContain("status: asString((raw as any).status, 'ACTIVE').toUpperCase()");
+    expect(adapter).toContain('mergedIntoPatientId');
   });
 
   test('governed telehealth has real browser media, server signaling and a patient join surface', async () => {

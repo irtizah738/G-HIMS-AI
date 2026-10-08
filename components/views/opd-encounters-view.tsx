@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useHospital } from '@/lib/context/hospital-context';
+import { useTenant } from '@/lib/tenant/context';
 import {
   Users,
   Stethoscope,
@@ -29,12 +30,14 @@ import { PatientConsultantRoutingModal, ConsultantDoctor } from '@/components/cl
 import { StandardPatientBanner } from '@/components/clinical/standard-patient-banner';
 import { ConfirmPatientModal } from '@/components/clinical/confirm-patient-modal';
 import { PatientContextSafetyBlock } from '@/components/clinical/patient-context-safety-block';
+import { verifyPatientContextIdentity } from '@/lib/clinical/patient-context-integrity';
 
 export interface OpdEncountersViewProps {
   initialViewMode?: 'master_suite' | 'consultation_desk';
 }
 
 export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncountersViewProps = {}) {
+  const { currentTenant } = useTenant();
   const [viewMode, setViewMode] = useState<'master_suite' | 'consultation_desk'>(initialViewMode);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const {
@@ -130,18 +133,33 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
   const patient = selectedToken
     ? patients.find((candidate) => candidate.id === selectedToken.patientId)
     : undefined;
-  const patientContextReady = Boolean(
-    selectedToken &&
-      selectedToken.encounterId &&
-      patient &&
-      patient.id === selectedToken.patientId &&
-      patient.mrn === selectedToken.mrn &&
-      clinicalContext &&
-      clinicalContext.encounterId === selectedToken.encounterId &&
-      clinicalContext.patientId === patient.id &&
-      clinicalContext.patientMrn === patient.mrn &&
-      clinicalContext.status === 'VERIFIED'
+
+  const patientContextVerification = useMemo(
+    () =>
+      verifyPatientContextIdentity({
+        tenantId: currentTenant?.id || clinicalContext?.tenantId || '',
+        encounter: selectedToken?.encounterId
+          ? {
+              id: selectedToken.encounterId,
+              tenantId: currentTenant?.id || clinicalContext?.tenantId,
+              patientId: selectedToken.patientId,
+              mrn: selectedToken.mrn,
+              patientName: selectedToken.patientName,
+            }
+          : null,
+        patient: patient
+          ? {
+              id: patient.id,
+              mrn: patient.mrn,
+              fullName: patient.fullName,
+            }
+          : null,
+        context: clinicalContext,
+      }),
+    [clinicalContext, currentTenant?.id, patient, selectedToken]
   );
+
+  const patientContextReady = patientContextVerification.ok;
 
   useEffect(() => {
     if (
@@ -484,19 +502,16 @@ export function OpdEncountersView({ initialViewMode = 'master_suite' }: OpdEncou
           {!patientContextReady && (
             <PatientContextSafetyBlock
               code={
-                !selectedToken
-                  ? 'CLINICAL_CONTEXT_REQUIRED'
-                  : !patient ||
-                      patient.mrn !== selectedToken.mrn
-                    ? 'PATIENT_CONTEXT_MISMATCH'
-                    : 'CLINICAL_CONTEXT_RESOLVING'
+                patientContextVerification.ok
+                  ? 'CLINICAL_CONTEXT_RESOLVING'
+                  : patientContextVerification.code
               }
               encounterId={selectedToken?.encounterId}
               patientId={selectedToken?.patientId}
               detail={
-                !selectedToken
-                  ? 'Select an OPD queue token with an authoritative encounter before documenting a consultation.'
-                  : 'The consultation desk remains read-only until its patient identity matches the shared encounter-bound clinical context.'
+                patientContextVerification.ok
+                  ? 'The consultation desk is resolving its verified clinical context.'
+                  : patientContextVerification.detail
               }
             />
           )}

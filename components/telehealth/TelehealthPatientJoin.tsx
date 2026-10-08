@@ -35,6 +35,7 @@ export function TelehealthPatientJoin({
   const pollRef = useRef<number | null>(null);
   const processedRef = useRef<Set<string>>(new Set());
   const lastSeenRef = useRef(0);
+  const pendingIceRef = useRef<RTCIceCandidateInit[]>([]);
 
   const [state, setState] = useState<'READY' | 'JOINING' | 'WAITING' | 'CONNECTED' | 'ENDED'>('READY');
   const [error, setError] = useState<string | null>(null);
@@ -102,6 +103,9 @@ export function TelehealthPatientJoin({
       if (message.type === 'OFFER' && message.payload?.sdp) {
         if (!peer.currentRemoteDescription) {
           await peer.setRemoteDescription(new RTCSessionDescription(message.payload));
+          for (const candidate of pendingIceRef.current.splice(0)) {
+            await peer.addIceCandidate(new RTCIceCandidate(candidate));
+          }
           const answer = await peer.createAnswer();
           await peer.setLocalDescription(answer);
           await patientSignal('ANSWER', {
@@ -110,10 +114,10 @@ export function TelehealthPatientJoin({
           });
         }
       } else if (message.type === 'ICE' && message.payload) {
-        try {
+        if (!peer.currentRemoteDescription) {
+          pendingIceRef.current.push(message.payload as RTCIceCandidateInit);
+        } else {
           await peer.addIceCandidate(new RTCIceCandidate(message.payload));
-        } catch {
-          // Negotiation may receive an ICE candidate before the remote offer.
         }
       } else if (message.type === 'LEAVE') {
         setState('ENDED');
@@ -127,6 +131,7 @@ export function TelehealthPatientJoin({
     setState('JOINING');
     setError(null);
     processedRef.current.clear();
+    pendingIceRef.current = [];
     lastSeenRef.current = 0;
 
     try {

@@ -195,6 +195,17 @@ describe('PCI — Patient Context Integrity Closure', () => {
     expect(shell).toContain("clinicalContextActive");
   });
 
+  test('legacy HospitalContext mutations cannot infer an encounter from patient state', async () => {
+    const hospital = await source('lib/context/hospital-context.tsx');
+
+    expect(hospital).toContain('requireVerifiedClinicalContextForPatient');
+    expect(hospital).not.toContain("patient?.activeEncounterId || patient?.encounters?.[0]?.id");
+    expect(hospital).toContain("'Clinical note signing'");
+    expect(hospital).toContain("'Diagnostic ordering'");
+    expect(hospital).toContain("'Vitals recording'");
+    expect(hospital).toContain('clinicalContext.encounterId');
+  });
+
   test('command bus rejects wrong-patient lineage before idempotency reservation', async () => {
     const bus = await source('lib/backend/commands/command-bus.ts');
     const guard = await source(

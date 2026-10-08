@@ -5,19 +5,23 @@ import path from 'node:path';
 const source = (file: string) =>
   readFile(path.join(process.cwd(), file), 'utf8');
 
-describe('Hospital-0 login facility boundary', () => {
-  test('login requires explicit Central Metro facility selection', async () => {
+describe('G-HIMS login facility directory', () => {
+  test('login requires an explicit facility selected from the Firestore tenant directory', async () => {
     const portal = await source('components/auth/login-portal.tsx');
+    const directoryRoute = await source('app/api/auth/facilities/route.ts');
 
-    expect(portal).toContain('NEXT_PUBLIC_GHIMS_HOSPITAL0_TENANT_ID');
-    expect(portal).toContain('NEXT_PUBLIC_GHIMS_HOSPITAL0_NAME');
-    expect(portal).toContain('NEXT_PUBLIC_GHIMS_HOSPITAL0_FACILITY_CODE');
     expect(portal).toContain('<select');
     expect(portal).toContain('data-testid="login-tenant-id"');
     expect(portal).toContain('Select hospital facility');
-    expect(portal).not.toContain('<datalist');
+    expect(portal).toContain("fetch('/api/auth/facilities'");
+    expect(portal).toContain('facilities.map((facility)');
+    expect(portal).toContain('resolveFacilityTenantId(tenantId, facilities)');
     expect(portal).toContain('Facility selection is required');
-    expect(portal).toContain('resolveFacilityTenantId');
+
+    expect(directoryRoute).toContain("db.collection('tenants').get()");
+    expect(directoryRoute).toContain('document.id');
+    expect(directoryRoute).toContain('facilityCode');
+    expect(directoryRoute).toContain("'Cache-Control': 'no-store'");
   });
 
   test('federated identity controls surface failures instead of silently doing nothing', async () => {
@@ -47,17 +51,18 @@ describe('Hospital-0 login facility boundary', () => {
     );
   });
 
-  test('server auth routes enforce the configured Hospital-0 tenant boundary', async () => {
+  test('tenant access remains membership-governed rather than hard-restricted to Hospital-0', async () => {
     const sessionRoute = await source('app/api/auth/session/route.ts');
     const selectionRoute = await source('app/api/auth/tenant-selection/route.ts');
 
-    expect(sessionRoute).toContain('GHIMS_HOSPITAL0_TENANT_ID');
-    expect(sessionRoute).toContain('assertHospital0TenantScope');
-    expect(selectionRoute).toContain('filterHospital0Tenants');
-    expect(selectionRoute).toContain('assertHospital0TenantScope');
+    expect(sessionRoute).toContain('resolveAuthorizationContext(verifiedToken, requestedTenantId)');
+    expect(sessionRoute).toContain('getUserAccessibleTenants');
+    expect(sessionRoute).not.toContain('assertHospital0TenantScope');
+    expect(selectionRoute).toContain('getTenantMembership');
+    expect(selectionRoute).not.toContain('filterHospital0Tenants');
   });
 
-  test('attached Firebase config names the Hospital-0 Firestore database', async () => {
+  test('attached Firebase config names the Hospital-0 Firestore database used by the directory', async () => {
     const config = JSON.parse(await source('firebase-applet-config.json'));
 
     expect(config.projectId).toBe('g-hims-ai');

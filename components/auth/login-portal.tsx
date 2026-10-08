@@ -27,13 +27,19 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 
-const HOSPITAL_FACILITIES = [
-  {
-    tenantId: 'central-metro-hospital',
-    name: 'Central Metro General Hospital',
-    facilityCode: 'CMGH-01',
-  },
-] as const;
+const hospital0TenantId = String(process.env.NEXT_PUBLIC_GHIMS_HOSPITAL0_TENANT_ID || '').trim();
+const hospital0Name = String(process.env.NEXT_PUBLIC_GHIMS_HOSPITAL0_NAME || '').trim();
+const hospital0FacilityCode = String(process.env.NEXT_PUBLIC_GHIMS_HOSPITAL0_FACILITY_CODE || '').trim();
+
+const HOSPITAL_FACILITIES = hospital0TenantId
+  ? [
+      {
+        tenantId: hospital0TenantId,
+        name: hospital0Name || hospital0TenantId,
+        facilityCode: hospital0FacilityCode || hospital0TenantId,
+      },
+    ]
+  : [];
 
 function resolveFacilityTenantId(value: string): string {
   const normalized = value.trim().toLowerCase();

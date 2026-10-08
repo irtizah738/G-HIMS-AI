@@ -219,7 +219,8 @@ export class AuthClient {
    */
   public static async signInSSO(
     email: string,
-    tenantId: string
+    tenantId: string,
+    provider: 'OKTA' | 'AZURE_AD'
   ): Promise<LoginResponsePayload> {
     if (!String(tenantId || '').trim()) {
       throw new AuthError({
@@ -233,14 +234,14 @@ export class AuthClient {
       const response = await fetch('/api/auth/sso/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail, tenantId }),
+        body: JSON.stringify({ email: cleanEmail, tenantId, provider }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
         throw new AuthError({
-          code: 'SSO_AUTH_FAILED',
+          code: data.code === 'SSO_CONFIG_ERROR' ? 'SSO_CONFIG_ERROR' : 'SSO_AUTH_FAILED',
           message: data.error || 'Enterprise SSO authentication failed',
           statusCode: response.status,
           userMessage: data.error || 'Failed to authenticate via hospital Identity Provider',

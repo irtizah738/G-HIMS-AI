@@ -1129,6 +1129,40 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (!clinicalContext) return;
+
+    const shellPatient = patients.find(
+      (patient) => patient.id === clinicalContext.patientId
+    );
+    const nextStatus: ClinicalContextBinding['status'] =
+      !shellPatient
+        ? 'UNRESOLVED'
+        : shellPatient.mrn !== clinicalContext.patientMrn ||
+            String(shellPatient.fullName || '').trim() !==
+              clinicalContext.patientName
+          ? 'MISMATCH'
+          : 'VERIFIED';
+
+    if (nextStatus === clinicalContext.status) return;
+
+    // Revalidation changes readiness only. It does not create a new clinical
+    // selection and therefore preserves the context revision.
+    setClinicalContext((current) =>
+      current &&
+      current.contextRevision === clinicalContext.contextRevision
+        ? { ...current, status: nextStatus }
+        : current
+    );
+  }, [
+    clinicalContext?.contextRevision,
+    clinicalContext?.patientId,
+    clinicalContext?.patientMrn,
+    clinicalContext?.patientName,
+    clinicalContext?.status,
+    patients,
+  ]);
+
+  useEffect(() => {
     if (isDemoRuntime || authLoading) return;
 
     const tenantId = String(activeTenant?.tenantId || user?.tenantId || '').trim().toLowerCase();

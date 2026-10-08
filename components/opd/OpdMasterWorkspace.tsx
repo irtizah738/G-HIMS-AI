@@ -3131,7 +3131,7 @@ export function OpdMasterWorkspace() {
       )}
 
       {/* Active Patient Quick Banner (if patient is selected) */}
-      {patientContextReady && activeEncounter && activeTab !== 'DASHBOARD' && activeTab !== 'SEARCH_MPI' && (
+      {patientContextVerification.ok && activeEncounter && activeTab !== 'DASHBOARD' && activeTab !== 'SEARCH_MPI' && (
         <div
           data-testid="opd-active-patient-banner"
           data-encounter-id={activeEncounter.id}

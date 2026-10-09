@@ -20,6 +20,7 @@ export interface EdgeSnapshot {
   snapshotVersion: string;
   collections: Record<string, Array<Record<string, unknown>>>;
   source: 'LOCAL' | 'SERVER';
+  freshness?: 'CURRENT' | 'STALE' | 'UNHYDRATED';
 }
 
 export async function loadLocalEdgeSnapshot(
@@ -29,6 +30,10 @@ export async function loadLocalEdgeSnapshot(
   const surface = requireEdgeHydrationSurface(requestedSurface);
   const cached = await getCachedAuthSession();
   const actorId = cached?.user?.uid || '';
+  const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
+  if (cached && cached.user.tenantId.trim().toLowerCase() !== normalizedTenantId) {
+    throw new Error('EDGE_HYDRATION_TENANT_MISMATCH');
+  }
   if (!actorId) {
     return {
       tenantId,
@@ -36,6 +41,7 @@ export async function loadLocalEdgeSnapshot(
       snapshotVersion: 'local-locked',
       collections: {},
       source: 'LOCAL',
+      freshness: 'UNHYDRATED',
     };
   }
 
@@ -106,6 +112,7 @@ export async function loadLocalEdgeSnapshot(
     snapshotVersion: metadata?.snapshotVersion || 'local-unhydrated',
     collections: Object.fromEntries(entries),
     source: 'LOCAL',
+    freshness: metadata?.snapshotVersion ? 'STALE' : 'UNHYDRATED',
   };
 }
 
@@ -118,11 +125,18 @@ export async function hydrateEdgeSnapshot(
   const currentUser = auth.currentUser;
   const cached = await getCachedAuthSession();
 
-  if (!normalizedTenantId || !currentUser || !cached) {
+  if (!normalizedTenantId) {
+    throw new Error('EDGE_HYDRATION_TENANT_REQUIRED');
+  }
+  if (!currentUser || !cached) {
     return loadLocalEdgeSnapshot(normalizedTenantId, surface);
   }
-
-  if (cached.user.tenantId.trim().toLowerCase() !== normalizedTenantId) {
+  if (
+    cached.user.tenantId.trim().toLowerCase() !== normalizedTenantId ||
+    cached.session.tenantId.trim().toLowerCase() !== normalizedTenantId ||
+    cached.user.uid !== currentUser.uid ||
+    cached.session.userId !== currentUser.uid
+  ) {
     throw new Error('EDGE_HYDRATION_TENANT_MISMATCH');
   }
 
@@ -160,12 +174,37 @@ export async function hydrateEdgeSnapshot(
       if ([401, 403].includes(response.status)) {
         throw new Error('EDGE_HYDRATION_AUTHORIZATION_FAILED');
       }
+      if (response.status >= 400 && response.status < 500) {
+        throw new Error('EDGE_HYDRATION_BAD_REQUEST');
+      }
       return loadLocalEdgeSnapshot(normalizedTenantId, surface);
     }
 
     const payload = await response.json();
-    if (!payload?.success || payload.tenantId !== normalizedTenantId) {
+    if (
+      !payload?.success ||
+      payload.tenantId !== normalizedTenantId ||
+      payload.surface !== surface ||
+      !payload.snapshotVersion ||
+      !payload.collections ||
+      typeof payload.collections !== 'object' ||
+      Array.isArray(payload.collections)
+    ) {
       throw new Error('EDGE_HYDRATION_INVALID_SNAPSHOT');
+    }
+
+    // In-flight bootstrap requests must not write to another user's or
+    // tenant's cache after a switch, logout or session replacement.
+    const latest = await getCachedAuthSession();
+    if (
+      !latest ||
+      auth.currentUser?.uid !== currentUser.uid ||
+      latest.user.uid !== currentUser.uid ||
+      latest.user.tenantId.trim().toLowerCase() !== normalizedTenantId ||
+      latest.session.tenantId.trim().toLowerCase() !== normalizedTenantId ||
+      latest.session.sessionId !== cached.session.sessionId
+    ) {
+      throw new Error('EDGE_HYDRATION_SESSION_CHANGED');
     }
 
     await replaceSecureTenantEdgeSnapshot(
@@ -186,10 +225,17 @@ export async function hydrateEdgeSnapshot(
       snapshotVersion: String(payload.snapshotVersion),
       collections: payload.collections || {},
       source: 'SERVER',
+      freshness: 'CURRENT',
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : '';
-    if (message.includes('AUTHORIZATION') || message.includes('TENANT_MISMATCH')) throw error;
+    if (
+      message.includes('AUTHORIZATION') ||
+      message.includes('TENANT_MISMATCH') ||
+      message.includes('SESSION_CHANGED') ||
+      message.includes('INVALID_SNAPSHOT') ||
+      message.includes('BAD_REQUEST')
+    ) throw error;
     return loadLocalEdgeSnapshot(normalizedTenantId, surface);
   }
 }

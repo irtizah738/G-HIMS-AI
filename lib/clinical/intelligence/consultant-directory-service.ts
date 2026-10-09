@@ -44,7 +44,7 @@ function normalizedRoles(membership: Membership): Set<string> {
   );
 }
 
-function isClinicalConsultantMembership(membership: Membership): boolean {
+export function isClinicalConsultantMembership(membership: Membership): boolean {
   const roles = normalizedRoles(membership);
   return (
     String(membership.status || '').toUpperCase() === 'ACTIVE' &&
@@ -55,22 +55,31 @@ function isClinicalConsultantMembership(membership: Membership): boolean {
   );
 }
 
-function isoDayActive(from: string | undefined, until: string | undefined, now: number): boolean {
-  const start = from ? Date.parse(`${from}T00:00:00.000Z`) : Number.NEGATIVE_INFINITY;
-  const end = until ? Date.parse(`${until}T23:59:59.999Z`) : Number.POSITIVE_INFINITY;
-  return now >= start && now <= end;
+/**
+ * Authorization dates are explicitly bounded. Missing, malformed, reversed,
+ * or future-effective HCM records never grant clinical access.
+ */
+export function isoDayActive(from: string | undefined, until: string | undefined, now: number): boolean {
+  if (!Number.isFinite(now)) return false;
+  const datePattern = /^\\d{4}-\\d{2}-\\d{2}$/;
+  if (!from || !until || !datePattern.test(from) || !datePattern.test(until) || from > until) {
+    return false;
+  }
+  const start = Date.parse(`${from}T00:00:00.000Z`);
+  const end = Date.parse(`${until}T23:59:59.999Z`);
+  return Number.isFinite(start) && Number.isFinite(end) && now >= start && now <= end;
 }
 
-function credentialsValid(credentials: EmployeeCredential[], now: number): boolean {
+export function credentialsValid(credentials: EmployeeCredential[], now: number): boolean {
   const mandatory = credentials.filter((item) => item.isMandatoryForPractice);
   if (!mandatory.length) return false;
-  return mandatory.every((credential) => {
-    const expiry = Date.parse(`${credential.expiryDate}T23:59:59.999Z`);
-    return credential.verificationStatus === 'VERIFIED' && Number.isFinite(expiry) && expiry >= now;
-  });
+  return mandatory.every((credential) =>
+    credential.verificationStatus === 'VERIFIED' &&
+    isoDayActive(credential.issueDate, credential.expiryDate, now)
+  );
 }
 
-function activePrivileges(privileges: ClinicalPrivilege[], now: number): ClinicalPrivilege[] {
+export function activePrivileges(privileges: ClinicalPrivilege[], now: number): ClinicalPrivilege[] {
   return privileges.filter(
     (privilege) =>
       privilege.status === 'GRANTED' &&

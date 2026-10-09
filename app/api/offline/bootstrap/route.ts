@@ -193,6 +193,9 @@ function authorizedCollections(roles: string[]): string[] {
   // by facility/department/care relationship before leaving the server.
   if (['DOCTOR', 'CONSULTANT', 'NURSE'].some((role) => normalized.has(role))) {
     add(...CLINICAL_COLLECTIONS);
+    // ORC-1B: Clinicians need facility-scoped bed/room data for assignments and census.
+    // beds is already in CLINICAL_COLLECTIONS; rooms was missing for all non-admin roles.
+    add('rooms');
   }
 
   // Front desk/admissions should not receive notes, prescriptions or results.
@@ -203,8 +206,20 @@ function authorizedCollections(roles: string[]): string[] {
       'opd_queue',
       'opdAppointments',
       'opdWaitlist',
-      'beds'
+      'beds',
+      // ORC-1B: Front desk needs room data for patient room assignments.
+      'rooms'
     );
+  }
+
+  // ORC-1B: ER / emergency roles need full bed and room census for triage assignments.
+  // These roles were entirely missing from the authorizedCollections predicate.
+  if (
+    ['EMERGENCY_NURSE', 'EMERGENCY_DOCTOR', 'ER_NURSE', 'TRIAGE_NURSE', 'ER_DOCTOR']
+      .some((role) => normalized.has(role))
+  ) {
+    add(...CLINICAL_COLLECTIONS);
+    add('beds', 'rooms', 'resourceReservations');
   }
 
   // Ancillary roles never hydrate the complete patient identity/chart set.

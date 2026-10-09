@@ -203,11 +203,22 @@ export interface TenantSelectionItem {
   primaryRole?: string;
 }
 
-export type AuthStateLoadingStatus = 
+export type AuthStateLoadingStatus =
   | 'IDLE'
   | 'AUTHENTICATING'
   | 'RESTORING_SESSION'
   | 'RESOLVING_TENANT'
+  /**
+   * ORC-1A: Active tenant switch in progress. All new tenant-scoped commands
+   * must be suspended until the state advances to VERIFYING or ERROR.
+   * The prior tenant's subscriptions are invalidated at this point.
+   */
+  | 'SWITCHING'
+  /**
+   * ORC-1A: New authenticated tenant context received; verifying server-side
+   * authorization before publishing the new active tenant to child views.
+   */
+  | 'VERIFYING'
   | 'LOADING_AUTHORIZATION'
   | 'READY'
   | 'LOCKED'

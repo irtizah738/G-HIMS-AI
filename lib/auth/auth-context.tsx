@@ -335,16 +335,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [session?.sessionId]);
 
-  // Tenant Switching Action
+  // Tenant Switching Action — ORC-1A: explicit suspension state machine
+  // READY → SWITCHING (invalidate prior) → VERIFYING (new token received) → READY
+  // On failure: restore prior verified tenant context instead of leaving it empty.
   const switchTenant = useCallback(
     async (tenantId: string) => {
       setLoading(true);
-      setLoadingStatus('RESOLVING_TENANT');
+      // ORC-1A: Enter SWITCHING to signal guards to block child mounts
+      setLoadingStatus('SWITCHING');
+      // Capture prior verified tenant so we can restore it on failure
+      const priorTenant = activeTenant;
+      const priorRoles = roles;
+      const priorPermissions = permissions;
+      const priorPrivileges = clinicalPrivileges;
       try {
         const payload = await AuthClient.switchTenant(tenantId);
+        // ORC-1A: Invalidate prior tenant subscriptions BEFORE publishing the new context.
+        // This prevents child components from reading patient/financial data from the old tenant
+        // while the new context is being applied.
+        setActiveTenant(null);
+        setRoles([]);
+        setPermissions([]);
+        setClinicalPrivileges([]);
+        setLoadingStatus('VERIFYING');
         applyLoginPayload(payload);
         setLoadingStatus('READY');
       } catch (err: any) {
+        // ORC-1A: Restore the prior verified state rather than leaving context empty.
+        // An empty context would cause every tenant-scoped query to fail with no
+        // indication of what went wrong, and could expose an unauthenticated UI.
+        if (priorTenant) {
+          setActiveTenant(priorTenant);
+          setRoles(priorRoles);
+          setPermissions(priorPermissions);
+          setClinicalPrivileges(priorPrivileges);
+        }
         setError(err?.userMessage || err?.message || 'Failed to switch tenant');
         setLoadingStatus('ERROR');
         throw err;
@@ -352,7 +377,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLoading(false);
       }
     },
-    [applyLoginPayload]
+    [applyLoginPayload, activeTenant, roles, permissions, clinicalPrivileges]
   );
 
   // Password Reset Action

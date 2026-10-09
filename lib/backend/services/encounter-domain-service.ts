@@ -40,6 +40,12 @@ export interface CreateOpdEncounterPayload {
   departmentId: string;
   priority?: 'STAT' | 'URGENT' | 'ROUTINE';
   assignedDoctor?: string;
+  /**
+   * ORC-3A: Explicit facility targeting for OPD encounter creation.
+   * When supplied, takes precedence over the actor's default facilityIds[0].
+   * Value is server-validated; never used as an authority claim.
+   */
+  facilityId?: string;
 }
 
 export interface CommitEncounterDispositionPayload {
@@ -551,6 +557,11 @@ export class EncounterDomainService {
     const encounterState: EncounterState = {
       encounterId,
       tenantId: context.tenantId,
+      // ORC-3A: facilityId was missing, causing facility-scoped queries (ER census,
+      // department worklists, bed assignment) to exclude newly created encounters.
+      // Prefer explicit payload.facilityId (now a typed field on CreateOpdEncounterPayload),
+      // then fall back to the actor's authoritative facilityIds[0].
+      facilityId: String(payload.facilityId || context.facilityIds?.[0] || '').trim(),
       patientId: payload.patientId,
       encounterType: 'OPD',
       chiefComplaint: payload.chiefComplaint,

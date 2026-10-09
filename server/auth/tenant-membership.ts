@@ -34,7 +34,7 @@ function deriveDefaultPermissions(roles: string[]): string[] {
   return Array.from(permissions);
 }
 
-function deriveClinicalPrivileges(roles: string[]): string[] {
+export function deriveClinicalPrivileges(roles: string[]): string[] {
   const normalized = roles.map((role) => role.toLowerCase());
   const privileges = new Set<string>();
 
@@ -49,6 +49,10 @@ function deriveClinicalPrivileges(roles: string[]): string[] {
       'PERFORM_PROCEDURES',
       'SIGN_CLINICAL_NOTES',
       'SIGN_PRESCRIPTIONS',
+      // ORC-2A: RECORD_VITALS added to align with the HCM-backed credentialGatedRoleBaseline
+      // in authorization-context.ts (L90). Doctors must be able to record vitals through the
+      // legacy membership path as well as through the canonical HCM employee path.
+      'RECORD_VITALS',
     ].forEach((privilege) => privileges.add(privilege));
   }
 

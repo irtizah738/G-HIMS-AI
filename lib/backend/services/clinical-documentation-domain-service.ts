@@ -539,6 +539,16 @@ export class ClinicalDocumentationDomainService {
       typeof payload.onSupplementalOxygen === 'boolean' &&
       (!!payload.consciousness || typeof payload.gcsScore === 'number');
 
+    /**
+     * ORC-4A: Surface NEWS2 input completeness rather than silently committing
+     * a null score. The UI MUST display news2Status === 'INCOMPLETE_INPUTS' as
+     * a visible, actionable clinical warning. A missing score must never be
+     * presented to the clinician as a verified complete assessment.
+     */
+    const news2Status: 'CALCULATED' | 'INCOMPLETE_INPUTS' = canCalculateNews2
+      ? 'CALCULATED'
+      : 'INCOMPLETE_INPUTS';
+
     const news2 = canCalculateNews2
       ? calculateNEWS2({
           respirationRate: payload.respiratoryRate,
@@ -571,7 +581,7 @@ export class ClinicalDocumentationDomainService {
       news2Score: news2?.score,
       news2Risk: news2?.riskLevel,
       news2RedTriggerParameters: news2?.redTriggerParameters,
-      news2Status: news2 ? 'VERIFIED' : 'INCOMPLETE_INPUT',
+      news2Status,  // ORC-4A: 'CALCULATED' | 'INCOMPLETE_INPUTS' — UI must render INCOMPLETE_INPUTS as a clinical warning
       measuredAt,
       recordedBy: context.actorId,
       createdAt: Date.now(),

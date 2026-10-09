@@ -453,6 +453,15 @@ export class CashReceiptDomainService {
                   consultationClearedByReceiptId: payload.receiptId,
                   consultationClearedAt: payload.collectedAt,
                   operationalState: 'QUEUED',
+                  // ORC-5A: Advance to BILLING_SETTLEMENT so ReconcileOpdBillingCommand
+                  // can proceed immediately. Previously the two services were disconnected:
+                  // financialClearanceState was set here, but currentStage was never
+                  // advanced, causing every reconciliation attempt to reject with
+                  // OPD_BILLING_STAGE_REQUIRED. Both fields are written atomically in
+                  // the same Firestore transaction to prevent a partial-update window.
+                  currentStage: 'BILLING_SETTLEMENT',
+                  billingSettlementEnteredAt: payload.collectedAt,
+                  billingSettlementEnteredByReceiptId: payload.receiptId,
                   updatedAt: Date.now(),
                 }
               : encounter;
@@ -563,6 +572,10 @@ export class CashReceiptDomainService {
               arOpenItemId: patientOpenItemId,
               arOutstandingMinorUnits: nextArOutstanding,
               consultationClearanceGranted:
+                isConsultationInvoice && newBalanceMinorUnits === 0,
+              // ORC-5A: Signals outbox consumers that currentStage was atomically
+              // advanced to BILLING_SETTLEMENT as part of this cash receipt.
+              billingSettlementAdvanced:
                 isConsultationInvoice && newBalanceMinorUnits === 0,
               queueReleased:
                 isConsultationInvoice && newBalanceMinorUnits === 0,

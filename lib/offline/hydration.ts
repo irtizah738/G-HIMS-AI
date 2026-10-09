@@ -20,7 +20,18 @@ export interface EdgeSnapshot {
   snapshotVersion: string;
   collections: Record<string, Array<Record<string, unknown>>>;
   source: 'LOCAL' | 'SERVER';
-  freshness?: 'CURRENT' | 'STALE' | 'UNHYDRATED';
+  /**
+   * ORC-1C: Extended freshness states.
+   * CURRENT   — server snapshot verified and usable.
+   * STALE     — previously valid snapshot, currently offline or outdated.
+   * PARTIAL   — some authorized dependencies unavailable.
+   * UNHYDRATED — no authorized snapshot obtained.
+   * DENIED    — server rejected the hydration request (401/403). Must not fall
+   *             through to STALE — this is an explicit authorization failure.
+   * FAILED    — hydration failed for an operational reason (5xx / timeout).
+   * NOT_APPLICABLE — this domain is unavailable to the actor by policy.
+   */
+  freshness?: 'CURRENT' | 'STALE' | 'PARTIAL' | 'UNHYDRATED' | 'DENIED' | 'FAILED' | 'NOT_APPLICABLE';
 }
 
 export async function loadLocalEdgeSnapshot(
@@ -236,6 +247,26 @@ export async function hydrateEdgeSnapshot(
       message.includes('INVALID_SNAPSHOT') ||
       message.includes('BAD_REQUEST')
     ) throw error;
-    return loadLocalEdgeSnapshot(normalizedTenantId, surface);
+    // ORC-1C: Distinguish authorization denials from operational failures.
+    // Previously all errors fell back to loadLocalEdgeSnapshot() → freshness: 'STALE',
+    // hiding auth failures as stale data and masking security regressions.
+    if (
+      message.includes('AUTHORIZATION_FAILED') ||
+      message.includes('EDGE_HYDRATION_AUTHORIZATION')
+    ) {
+      return {
+        tenantId: normalizedTenantId,
+        generatedAt: 0,
+        snapshotVersion: 'denied',
+        collections: {},
+        source: 'LOCAL',
+        freshness: 'DENIED',
+      };
+    }
+    const local = await loadLocalEdgeSnapshot(normalizedTenantId, surface);
+    return {
+      ...local,
+      freshness: local.freshness === 'UNHYDRATED' ? 'FAILED' : 'STALE',
+    };
   }
 }

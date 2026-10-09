@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { activePrivileges, availabilityFor } from '@/lib/clinical/intelligence/consultant-directory-service';
-import type { ClinicalPrivilege, RosterShiftEntry } from '@/types/hcm-advanced';
+import { activePrivileges, availabilityFor, credentialsValid } from '@/lib/clinical/intelligence/consultant-directory-service';
+import type { ClinicalPrivilege, EmployeeCredential, RosterShiftEntry } from '@/types/hcm-advanced';
 
 const now = Date.parse('2026-10-09T12:00:00.000Z');
 
@@ -40,6 +40,21 @@ describe('HCM consultant qualification behavior', () => {
     expect(activePrivileges(data, now, 'hospital-a', 'medicine').map(p => p.privilegeId)).toEqual(['p1']);
     expect(activePrivileges(data, now, 'hospital-b', 'medicine').map(p => p.privilegeId)).toEqual(['p2']);
     expect(activePrivileges(data, now, 'hospital-c', 'medicine')).toEqual([]);
+  });
+
+  test('requires an active independently verified mandatory credential', () => {
+    const credential = {
+      employeeId: 'e1', isMandatoryForPractice: true, verificationStatus: 'VERIFIED',
+      verifiedByActorId: 'credential-reviewer', verifiedAt: '2026-01-01T09:00:00Z',
+      expiryDate: '2027-01-01',
+    } as EmployeeCredential;
+    expect(credentialsValid([], now)).toBe(false);
+    expect(credentialsValid([credential], now)).toBe(true);
+    expect(credentialsValid([{ ...credential, verifiedByActorId: undefined }], now)).toBe(false);
+    expect(credentialsValid([{ ...credential, verifiedAt: undefined }], now)).toBe(false);
+    expect(credentialsValid([{ ...credential, verificationStatus: 'PENDING' as EmployeeCredential['verificationStatus'] }], now)).toBe(false);
+    expect(credentialsValid([{ ...credential, expiryDate: '2026-10-08' }], now)).toBe(false);
+    expect(credentialsValid([credential, { ...credential, expiryDate: '2026-10-08' }], now)).toBe(false);
   });
 
   test('availability is derived only from a correctly scoped roster', () => {

@@ -10,7 +10,7 @@ describe('Consultant HCM membership identity guard', () => {
     const directory = await source('lib/clinical/intelligence/consultant-directory-service.ts');
     expect(repository).toContain('listWithDocumentIds<T extends object>');
     expect(repository).toContain('documentId: document.id');
-    expect(directory).toContain("listWithDocumentIds<Membership>(context.tenantId, 'users', 1000)");
+    expect(directory).toContain("listAllWithDocumentIds<Membership>(context.tenantId, 'users')");
     expect(directory).toContain('!embeddedId || embeddedId === documentId');
     expect(directory).toContain('String(membership.documentId), membership');
     expect(directory).not.toContain('.filter((membership) => membership.userId)');

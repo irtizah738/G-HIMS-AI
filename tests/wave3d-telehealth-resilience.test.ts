@@ -55,7 +55,7 @@ describe('Wave 3D telehealth resilience and remote signing qualification', () =>
     const context = await source('lib/context/hospital-context.tsx');
     expect(context).toContain("'SignClinicalNoteCommand'");
     expect(context).toContain("'CompleteTelehealthSessionCommand'");
-    expect(context).toContain('signedEvidenceId: signed.entityId');
+    expect(context).toContain('signedEvidenceId: pending.signedEvidenceId');
     expect(context).toContain('TELEHEALTH_ERX_INTEGRATION_NOT_LIVE');
   });
   test('unused encounter cancellation is wired to governed command validation and dispatch', async () => {

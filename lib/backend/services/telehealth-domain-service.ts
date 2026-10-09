@@ -455,9 +455,11 @@ export class TelehealthDomainService {
           const isSystemAdmin = context.roles.some(role => String(role).toUpperCase() === 'SYSTEM_ADMIN');
           if (!encounter ||
               String(encounter.encounterId || encounter.id || '') !== session.encounterId ||
+              String(encounter.patientId || '') !== session.patientId ||
               String(encounter.encounterType || encounter.type || '').toUpperCase() !== 'TELEHEALTH' ||
               (encounter.tenantId && encounter.tenantId !== context.tenantId) ||
-              !assignedProviderId && !isSystemAdmin ||
+              ['COMPLETED','CANCELLED','CLOSED'].includes(String(encounter.status || '').toUpperCase()) ||
+              (!assignedProviderId && !isSystemAdmin) ||
               (assignedProviderId !== context.actorId && !isSystemAdmin)) {
             throw new Error('TELEHEALTH_ROOM_REPAIR_ASSIGNMENT_MISMATCH: only assigned clinician or system administrator may repair.');
           }

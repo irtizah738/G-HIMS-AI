@@ -47,6 +47,44 @@ export interface CompleteTelehealthSessionPayload {
   signedEvidenceId: string;
 }
 
+/** Cancellation is a no-care administrative disposition, NEVER a substitute for signing or discharge. */
+export interface CancelUnusedTelehealthEncounterPayload {
+  sessionId: string;
+  expectedUpdatedAt: string;
+  reason: string;
+}
+
+function hasTelehealthClinicalActivity(session: TelehealthSession): boolean {
+  const note = session.soapNote as unknown;
+  if (!note || typeof note !== 'object' || Array.isArray(note)) return true;
+  const fields = note as Record<string, unknown>;
+  if (Object.values(fields).some(value =>
+    Array.isArray(value) ? value.length > 0 :
+    typeof value === 'string' ? value.trim().length > 0 :
+    value !== null && value !== undefined && value !== false
+  )) return true;
+  if (!Array.isArray(session.prescriptions) || !Array.isArray(session.transcription)) return true;
+  if (session.prescriptions.length || session.transcription.length) return true;
+  const duration = Number(session.callDurationSeconds);
+  if (!Number.isFinite(duration) || duration !== 0 || session.isRecording !== false) return true;
+  const vital = session.vitals as unknown;
+  if (!vital || typeof vital !== 'object' || Array.isArray(vital)) return true;
+  const v = vital as Record<string, unknown>;
+  return Boolean(session.signedEvidenceId) ||
+    Boolean(String(v.bp || '').trim()) ||
+    ['hr', 'spo2', 'temp', 'glucose', 'respiratoryRate', 'rhythm', 'connectedDevice'].some(field =>
+      typeof v[field] === 'number' ? v[field] !== 0 : Boolean(String(v[field] || '').trim())
+    );
+}
+
+/** Transactionally require that no clinical, financial or media-room evidence references the encounter. */
+const CANCELLATION_REFERENCE_COLLECTIONS = [
+  'encounterEvidence', 'clinicalDocuments', 'clinicalObservations',
+  'medicationOrders', 'prescriptions', 'orders', 'diagnosticReports',
+  'clinicalConditions', 'clinicalAllergies', 'canonicalDiagnosticOrders',
+  'invoices', 'encounterCharges', 'payments', 'cashReceipts', 'invoiceSettlements',
+] as const;
+
 export class TelehealthDomainService {
   public static async create(
     context: CommandContext,
@@ -372,6 +410,145 @@ export class TelehealthDomainService {
     });
 
     return { success:true, commandId, idempotencyKey, entityId:session.id, eventId:tx.eventId, auditId:tx.auditId, outboxId:tx.outboxId, data:next };
+  }
+
+
+  public static async cancelUnused(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: CancelUnusedTelehealthEncounterPayload
+  ): Promise<CommandResult<TelehealthSession>> {
+    // Administrative cancellation has no signing side effect. It is restricted to
+    // authorized actors and verified zero-care episodes; non-empty episodes fail closed.
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: ['DOCTOR', 'CONSULTANT', 'SYSTEM_ADMIN', 'ADMIN', 'ADMINISTRATOR'],
+    });
+    if (!auth.authorized) {
+      return { success: false, commandId, idempotencyKey,
+        error: { code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Authorized telehealth cancellation role required.' } };
+    }
+    const reason = String(payload.reason || '').trim();
+    if (reason.length < 20 || reason.length > 1000) {
+      return { success: false, commandId, idempotencyKey,
+        error: { code: 'TELEHEALTH_CANCELLATION_REASON_REQUIRED',
+          message: 'Explain why no consultation occurred (20–1000 characters).' } };
+    }
+    const preflight = await DomainStateRepository.getById<TelehealthSession>(
+      context.tenantId, 'telehealthSessions', payload.sessionId
+    );
+    if (!preflight) {
+      return { success: false, commandId, idempotencyKey,
+        error: { code: 'TELEHEALTH_SESSION_NOT_FOUND', message: 'Session was not found.' } };
+    }
+    if (!preflight.encounterId || !preflight.patientId || !preflight.roomToken) {
+      return { success: false, commandId, idempotencyKey,
+        error: { code: 'TELEHEALTH_CANCELLATION_IDENTITY_INVALID',
+          message: 'Encounter, patient or room identity missing. Manual review required.' } };
+    }
+    const nowMs = Date.now();
+    const now = new Date(nowMs).toISOString();
+    try {
+      const tx = await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.roles[0] || 'CLINICIAN',
+        aggregateType: 'TELEHEALTH_SESSION',
+        aggregateId: payload.sessionId,
+        eventType: 'TELEHEALTH_UNUSED_ENCOUNTER_CANCELLED',
+        auditAction: 'TELEHEALTH_UNUSED_ENCOUNTER_CANCELLED',
+        auditResourceType: 'TELEHEALTH_SESSION',
+        auditResourceId: payload.sessionId,
+        outboxTopic: 'g-hims-telehealth-events',
+        idempotencyKey, commandId, correlationId: context.correlationId,
+        readTargets: [
+          { key: 'session', entityType: 'TELEHEALTH_SESSION', entityId: payload.sessionId, required: true },
+          { key: 'encounter', entityType: 'ENCOUNTER', entityId: preflight.encounterId, required: true },
+          { key: 'patient', entityType: 'PATIENT_MPI', entityId: preflight.patientId, required: true },
+        ],
+        // Each query executes INSIDE the Firestore write transaction, not as a
+        // stale preflight. New referenced evidence makes cancellation fail.
+        emptyQueryGuards: [
+          ...CANCELLATION_REFERENCE_COLLECTIONS.map(collectionName => ({
+            collectionName, field: 'encounterId', value: preflight.encounterId,
+          })),
+          { collectionName: 'telehealthSignaling', field: 'roomToken', value: preflight.roomToken },
+        ],
+        prepare: current => {
+          const session = current.session as unknown as TelehealthSession;
+          const encounter = current.encounter as Record<string, unknown>;
+          const patient = current.patient as unknown as PatientMPI;
+          if (!session || !encounter || !patient ||
+              (session.tenantId && session.tenantId !== context.tenantId) ||
+              (patient.tenantId && patient.tenantId !== context.tenantId) ||
+              (encounter.tenantId && encounter.tenantId !== context.tenantId) ||
+              session.id !== payload.sessionId ||
+              session.patientId !== preflight.patientId ||
+              session.encounterId !== preflight.encounterId ||
+              session.roomToken !== preflight.roomToken ||
+              String(encounter.patientId || '') !== session.patientId ||
+              String(encounter.encounterId || encounter.id || '') !== session.encounterId ||
+              String(encounter.encounterType || encounter.type || '').toUpperCase() !== 'TELEHEALTH') {
+            throw new Error('TELEHEALTH_CANCELLATION_SCOPE_MISMATCH: encounter identity changed. Refresh and review.');
+          }
+          if (!['WAITING_ROOM', 'IN_CONSULTATION', 'DOCUMENTING'].includes(session.status) ||
+              ['COMPLETED','CANCELLED','CLOSED'].includes(String(encounter.status || '').toUpperCase())) {
+            throw new Error('TELEHEALTH_SESSION_FINAL: only unresolved telehealth encounters can be cancelled.');
+          }
+          if (session.updatedAt !== payload.expectedUpdatedAt ||
+              session.updatedAt !== preflight.updatedAt) {
+            throw new Error('TELEHEALTH_CANCELLATION_VERSION_CONFLICT: session changed. Refresh before retrying.');
+          }
+          if (hasTelehealthClinicalActivity(session)) {
+            throw new Error('TELEHEALTH_CANCELLATION_CLINICAL_ACTIVITY: activity exists. Use clinician review and clinical completion.');
+          }
+          const pointers = patient.activeCareContexts?.activeTelehealthEncounterIds;
+          if (!Array.isArray(pointers) || !pointers.includes(session.encounterId)) {
+            throw new Error('TELEHEALTH_CANCELLATION_POINTER_MISMATCH: patient care pointers require reconciliation.');
+          }
+          const nextCareContexts = closeCareContext(
+            patient.activeCareContexts, 'TELEHEALTH', session.encounterId, nowMs
+          );
+          const nextSession: TelehealthSession = {
+            ...session, status: 'CANCELLED', updatedAt: now,
+          };
+          const nextEncounter = {
+            ...encounter, status: 'CANCELLED',
+            currentStage: 'CANCELLED', clinicalState: 'CANCELLED',
+            operationalState: 'CANCELLED', resourceAssignmentState: 'RELEASED',
+            cancelledAt: nowMs, cancellationReason: reason, updatedAt: nowMs,
+          };
+          const nextPatient: PatientMPI = {
+            ...patient, activeCareContexts: nextCareContexts,
+            activeEncounterId: compatibilityEncounterId(nextCareContexts), updatedAt: nowMs,
+          };
+          return {
+            domainState: nextSession,
+            additionalStateWrites: [
+              { entityType: 'ENCOUNTER', entityId: session.encounterId, domainState: nextEncounter },
+              { entityType: 'PATIENT_MPI', entityId: session.patientId, domainState: nextPatient },
+            ],
+            eventPayload: { sessionId: session.id, encounterId: session.encounterId,
+              patientId: session.patientId, disposition: 'UNUSED_NO_CARE' },
+            auditReason: reason,
+            auditMetadata: { disposition: 'UNUSED_NO_CARE', noClinicalDischarge: true },
+            resultData: nextSession,
+          };
+        },
+      });
+      return {
+        success: true, commandId, idempotencyKey, entityId: payload.sessionId,
+        eventId: tx.eventId, auditId: tx.auditId, outboxId: tx.outboxId,
+        data: tx.resultData as TelehealthSession,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Cancellation could not be verified.';
+      const code = error instanceof Error && 'code' in error
+        ? String((error as Error & { code: string }).code)
+        : message.includes(':') ? message.split(':')[0] : 'TELEHEALTH_CANCELLATION_REJECTED';
+      return { success: false, commandId, idempotencyKey, error: { code, message } };
+    }
   }
 
   public static async complete(

@@ -35,7 +35,7 @@ function modeLabel(mode?: ConnectivityMode): string {
 }
 
 export function TelehealthView() {
-  const { hasRole, hasPrivilege, refreshAuth } = useAuth();
+  const { user, hasRole, hasPrivilege, refreshAuth } = useAuth();
   const canSignTelehealth = hasPrivilege('SIGN_CLINICAL_NOTES') &&
     (hasRole('DOCTOR') || hasRole('CONSULTANT'));
   const {
@@ -45,6 +45,7 @@ export function TelehealthView() {
     completeTelehealthSession,
     cancelUnusedTelehealthSession,
     repairTelehealthRoomToken,
+    claimTelehealthEncounter,
     networkMode,
   } = useHospital();
 
@@ -83,6 +84,9 @@ export function TelehealthView() {
     setPlan('');
     setCancellationReason('');
   }, [selected?.id]);
+
+  const assignedToMe = Boolean(selected?.assignedProviderId &&
+    selected.assignedProviderId === user?.uid);
 
   const roomTokenValid = selected
     ? /^ROOM-[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/.test(selected.roomToken || '')
@@ -166,6 +170,14 @@ export function TelehealthView() {
       }
       return result.data;
     }, 'Interrupted telehealth session recovered from the last authoritative state.');
+  };
+
+  const acceptConsultation = async () => {
+    if (!selected) return;
+    await run(
+      () => claimTelehealthEncounter(selected.id, selected.updatedAt),
+      'Consultation accepted under your verified clinical credentials.'
+    );
   };
 
   const repairLegacyRoom = async () => {
@@ -350,6 +362,22 @@ export function TelehealthView() {
                 </p>
               </div>
 
+              {!['COMPLETED', 'CANCELLED'].includes(selected.status) && !selected.assignedProviderId && (
+                <div className="space-y-2 rounded-xl border border-indigo-300 p-4 text-xs dark:border-indigo-800">
+                  <p className="font-bold">Consultant not assigned</p>
+                  <p>Scheduling an encounter does not confer clinical privileges.
+                    An HCM-verified clinician must accept the unassigned consultation
+                    before its media room can be opened or the note signed.</p>
+                  <button
+                    type="button"
+                    data-testid="telehealth-accept-consultation"
+                    disabled={!canSignTelehealth || busy || networkMode === 'offline'}
+                    onClick={() => void acceptConsultation()}
+                    className="rounded-lg border px-3 py-2 font-semibold disabled:opacity-50"
+                  >Accept consultation as verified clinician</button>
+                </div>
+              )}
+
               {!['COMPLETED', 'CANCELLED'].includes(selected.status) && !roomTokenValid && (
                 <div role="alert" className="space-y-2 rounded-xl border border-amber-300 bg-amber-50 p-4 text-xs dark:border-amber-900 dark:bg-amber-950/20">
                   <p className="font-semibold">Legacy media-room credential cannot start a secure call.</p>
@@ -367,7 +395,7 @@ export function TelehealthView() {
                 </div>
               )}
 
-              {!['COMPLETED', 'CANCELLED'].includes(selected.status) && selected.tenantId && roomTokenValid && (
+              {!['COMPLETED', 'CANCELLED'].includes(selected.status) && assignedToMe && selected.tenantId && roomTokenValid && (
                 <TelehealthCallPanel
                   key={`media:${selected.id}:${selected.roomToken}`}
                   session={selected}
@@ -420,6 +448,13 @@ export function TelehealthView() {
                   <textarea value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="Objective" className="min-h-20 w-full rounded-xl border bg-transparent p-2 text-sm" />
                   <textarea value={assessment} onChange={(event) => setAssessment(event.target.value)} placeholder="Assessment" className="min-h-20 w-full rounded-xl border bg-transparent p-2 text-sm" />
                   <textarea value={plan} onChange={(event) => setPlan(event.target.value)} placeholder="Plan" className="min-h-20 w-full rounded-xl border bg-transparent p-2 text-sm" />
+                  {canSignTelehealth && !assignedToMe && (
+                    <p role="alert" className="text-xs text-amber-700 dark:text-amber-300">
+                      Complete encounter unavailable until your verified clinician assignment
+                      is bound to this encounter. Accept an unassigned consultation or
+                      request authorized reassignment through HCM.
+                    </p>
+                  )}
                   {!canSignTelehealth && (
                     <div role="alert" className="space-y-2 text-xs text-amber-700 dark:text-amber-300">
                       <p>Signing is unavailable: your HCM-verified DOCTOR/CONSULTANT role and
@@ -438,7 +473,7 @@ export function TelehealthView() {
                   <button
                     type="button"
                     data-testid="telehealth-sign-and-complete"
-                    disabled={busy || networkMode === 'offline' || !canSignTelehealth}
+                    disabled={busy || networkMode === 'offline' || !canSignTelehealth || !assignedToMe}
                     onClick={() => void signAndComplete()}
                     className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >

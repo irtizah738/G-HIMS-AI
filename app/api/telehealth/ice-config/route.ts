@@ -36,7 +36,8 @@ export async function POST(req: NextRequest) {
       .where('roomToken', '==', roomToken).limit(2).get();
     if (sessions.size !== 1) return reject('TELEHEALTH_SESSION_NOT_FOUND_OR_AMBIGUOUS', 404);
     const session = sessions.docs[0].data() as TelehealthSession;
-    if (!session.encounterId || !session.patientId || session.tenantId !== tenantId ||
+    if (!session.id || !session.encounterId || !session.patientId ||
+        (session.tenantId && session.tenantId !== tenantId) ||
         ['CANCELLED', 'COMPLETED'].includes(session.status)) {
       return reject('TELEHEALTH_SESSION_NOT_ACTIVE', 409);
     }

@@ -8,6 +8,7 @@ describe('ORC-5 cash receipt retry and encounter context', () => {
     const invoice = await source('app/[tenantId]/billing/invoices/[invoiceId]/page.tsx');
     expect(invoice).toContain('receiptAttempt.current = attempt');
     expect(invoice).toContain('const receiptId = attempt.receiptId');
+    expect(invoice).toContain('collectedAt: attempt.collectedAt');
     expect(invoice).toContain('idempotencyKey: `billing-cash-receipt:${receiptId}`');
     expect(invoice).toContain('CASH_RECEIPT_UNCONFIRMED');
     expect(invoice).toContain('receiptAttempt.current = null');

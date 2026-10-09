@@ -87,6 +87,19 @@ export class PatientMergeDomainService {
       };
     }
 
+    if (String(primary.status || 'ACTIVE').toUpperCase() === 'REMOVED' ||
+        String(secondary.status || 'ACTIVE').toUpperCase() === 'REMOVED') {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'PATIENT_REMOVED_FROM_ACTIVE_MPI',
+          message: 'Removed identities cannot be merged or reactivated through the merge command.',
+        },
+      };
+    }
+
     if (String(primary.status || 'ACTIVE').toUpperCase() === 'MERGED') {
       return {
         success: false,

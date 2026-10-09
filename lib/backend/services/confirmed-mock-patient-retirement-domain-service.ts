@@ -413,6 +413,43 @@ export class ConfirmedMockPatientRetirementDomainService {
             };
           });
 
+          for (let i = 0; i < sessions.length; i++) {
+            const state = current[`session_${i}`] as Record<string, unknown> | null;
+            const snapshot = sessions[i];
+            const id = String(snapshot.id);
+            if (!state || String(state.id) !== id ||
+                String(state.patientId) !== patientId ||
+                String(state.encounterId) !== String(snapshot.encounterId) ||
+                String(state.status) !== String(snapshot.status) ||
+                JSON.stringify(state.soapNote || {}) !== JSON.stringify(snapshot.soapNote || {}) ||
+                JSON.stringify(state.prescriptions || []) !== JSON.stringify(snapshot.prescriptions || []) ||
+                JSON.stringify(state.transcription || []) !== JSON.stringify(snapshot.transcription || []) ||
+                String(state.signedEvidenceId || '') !== String(snapshot.signedEvidenceId || '') ||
+                Number(state.callDurationSeconds || 0) !== Number(snapshot.callDurationSeconds || 0) ||
+                state.isRecording !== snapshot.isRecording ||
+                hasTelehealthClinicalActivity(state)) {
+              throw new AtomicMutationRejectedError(
+                'MOCK_CLEANUP_TELEHEALTH_CHANGED',
+                'Telehealth session changed since empty-session verification. No changes committed.'
+              );
+            }
+            const priorStatus = String(state.status);
+            writes.push({
+              entityType: 'TELEHEALTH_SESSION',
+              entityId: id,
+              domainState: {
+                ...state,
+                status: 'CANCELLED',
+                administrativeDisposition: 'CONFIRMED_SYNTHETIC_TEST_RETIREMENT',
+                syntheticCleanup: {
+                  actorId: context.actorId, commandId, reason, retiredAt: now,
+                  previousStatus: priorStatus,
+                },
+                updatedAt: new Date(now).toISOString(),
+              },
+            });
+          }
+
           for (let i = 0; i < queueTokens.length; i++) {
             const state = current[`queue_${i}`] as Record<string, unknown> | null;
             const id = String(queueTokens[i].tokenId || queueTokens[i].id || queueTokens[i].queueTokenId);

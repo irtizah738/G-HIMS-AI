@@ -90,7 +90,9 @@ export interface HospitalEdgeModels {
 
 export function adaptEdgeSnapshot(snapshot: EdgeSnapshot): HospitalEdgeModels {
   const collections = snapshot.collections || {};
-  const patientRows = collections.patients || [];
+  const patientRows = (collections.patients || []).filter(
+    (row) => asString(row.status, 'ACTIVE').toUpperCase() !== 'REMOVED'
+  );
   const encounterRows = collections.encounters || [];
   const evidenceRows = collections.encounterEvidence || [];
   const orderRows = collections.orders || [];

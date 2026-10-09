@@ -1,12 +1,12 @@
 {
   "projectId": "g-hims-ai",
-  "appId": "1:437970767365:web:7034714535d531e490966c",
+  "appId": "1:437970767365:web:29a17ca6afe5e5f990966c",
   "apiKey": "AIzaSyDStZ-zlI6kAP_oZu7fr3GYSw3drz9PqT0",
   "authDomain": "g-hims-ai.firebaseapp.com",
   "firestoreDatabaseId": "ai-studio-ghimsos-8d860f4b-3a80-47b3-bf97-15b9dc0d7fa7",
   "storageBucket": "g-hims-ai.firebasestorage.app",
   "messagingSenderId": "437970767365",
-  "measurementId": "",
+  "measurementId": "G-ZFY6J598G4",
   "oAuthClientId": "437970767365-9pn3le2j2ursbd979gjaqs2cbsu9h9pe.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

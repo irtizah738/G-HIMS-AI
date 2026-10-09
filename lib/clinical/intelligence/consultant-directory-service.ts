@@ -9,6 +9,7 @@ import type {
 
 type Membership = {
   userId?: string;
+  documentId?: string;
   role?: string;
   roles?: string[];
   status?: string;
@@ -46,7 +47,7 @@ function normalizedRoles(membership: Membership): Set<string> {
 function isClinicalConsultantMembership(membership: Membership): boolean {
   const roles = normalizedRoles(membership);
   return (
-    String(membership.status || 'ACTIVE').toUpperCase() === 'ACTIVE' &&
+    String(membership.status || '').toUpperCase() === 'ACTIVE' &&
     (roles.has('DOCTOR') ||
       roles.has('CONSULTANT') ||
       roles.has('ATTENDING_PHYSICIAN') ||
@@ -110,16 +111,23 @@ export class ConsultantDirectoryService {
     const now = Date.now();
     const [employees, memberships, credentials, privileges, shifts] = await Promise.all([
       DomainStateRepository.list<EmployeeMaster>(context.tenantId, 'employees', 1000),
-      DomainStateRepository.list<Membership>(context.tenantId, 'users', 1000),
+      DomainStateRepository.listWithDocumentIds<Membership>(context.tenantId, 'users', 1000),
       DomainStateRepository.list<EmployeeCredential>(context.tenantId, 'clinicalCredentials', 5000),
       DomainStateRepository.list<ClinicalPrivilege>(context.tenantId, 'clinicalPrivileges', 5000),
       DomainStateRepository.list<RosterShiftEntry>(context.tenantId, 'rosterAssignments', 5000),
     ]);
 
+    // Membership documents are canonically keyed by Auth UID. A duplicated
+    // userId field may be absent, but if present it must agree with the key.
+    // Ambiguous/corrupt memberships fail closed; never join on an alias.
     const membershipByUser = new Map(
       memberships
-        .filter((membership) => membership.userId)
-        .map((membership) => [String(membership.userId), membership])
+        .filter((membership) => {
+          const documentId = String(membership.documentId || '').trim();
+          const embeddedId = String(membership.userId || '').trim();
+          return Boolean(documentId) && (!embeddedId || embeddedId === documentId);
+        })
+        .map((membership) => [String(membership.documentId), membership])
     );
     const credentialsByEmployee = new Map<string, EmployeeCredential[]>();
     const privilegesByEmployee = new Map<string, ClinicalPrivilege[]>();

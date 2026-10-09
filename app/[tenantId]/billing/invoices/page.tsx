@@ -68,6 +68,10 @@ export default function InvoicesDirectoryPage({ params }: PageProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  useEffect(() => {
+    const encounterId = new URLSearchParams(window.location.search).get('encounterId');
+    if (encounterId) setSearch(encounterId);
+  }, []);
   const [statusFilter, setStatusFilter] = useState<'all' | InvoicePaymentStatus>(
     'all'
   );

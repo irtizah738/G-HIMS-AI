@@ -14,6 +14,7 @@ const prior = {
   GHIMS_FIREBASE_PROJECT_ID_TEST: process.env.GHIMS_FIREBASE_PROJECT_ID_TEST,
   NODE_ENV: process.env.NODE_ENV,
   GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION,
+  GHIMS_MOCK_CLEANUP_DEV_PROJECT_ACK: process.env.GHIMS_MOCK_CLEANUP_DEV_PROJECT_ACK,
 };
 const tenant = 'tenant_02bb76e3';
 const patientId = 'mock-eleanor-001';
@@ -204,6 +205,118 @@ describe('explicitly confirmed development-only mock retirement', () => {
     expect(result.error?.code).toBe('MOCK_CLEANUP_FINANCIAL_RECONCILIATION_REQUIRED');
     expect(TransactionManager.getEphemeralStateForTesting(tenant, 'PATIENT_MPI', patientId)?.status).toBe('ACTIVE');
     expect(TransactionManager.getEphemeralStateForTesting(tenant, 'ENCOUNTER', 'opd-mock-1')?.status).toBe('ACTIVE');
+  });
+
+  function seedEmptyTelehealth(options: Record<string, unknown> = {}) {
+    seedPatient({
+      activeEncounterId: 'tele-mock-1',
+      activeCareContexts: {
+        activeOpdEncounterIds: [],
+        activeTelehealthEncounterIds: ['tele-mock-1'],
+      },
+    });
+    seedEncounter({ status: 'IN_PROGRESS' });
+    TransactionManager.seedEphemeralStateForTesting(tenant, 'ENCOUNTER', 'tele-mock-1', {
+      id: 'tele-mock-1', encounterId: 'tele-mock-1', tenantId: tenant, patientId,
+      encounterType: 'TELEHEALTH', status: 'ACTIVE',
+    });
+    TransactionManager.seedEphemeralStateForTesting(tenant, 'TELEHEALTH_SESSION', 'th-mock-1', {
+      id: 'th-mock-1', encounterId: 'tele-mock-1', tenantId: tenant, patientId,
+      status: 'IN_CONSULTATION',
+      soapNote: { subjective: '', objective: '', assessment: '', plan: '', icd10Codes: [], cptCodes: [] },
+      prescriptions: [], transcription: [], callDurationSeconds: 0, isRecording: false,
+      vitals: { bp: '', hr: 0, spo2: 0, temp: 0, lastSync: 'Not yet captured' },
+      ...options,
+    });
+  }
+
+  test('retirement atomically cancels zero-activity synthetic telehealth and OPD with audit', async () => {
+    seedEmptyTelehealth();
+    const r = await ConfirmedMockPatientRetirementDomainService.retire(
+      context(), 'cmd-empty-tele', 'idem-empty-tele', payload()
+    );
+    expect(r.success).toBe(true);
+    expect(r.auditId).toBeTruthy();
+    const patient = TransactionManager.getEphemeralStateForTesting(tenant, 'PATIENT_MPI', patientId);
+    const opd = TransactionManager.getEphemeralStateForTesting(tenant, 'ENCOUNTER', 'opd-mock-1');
+    const encounter = TransactionManager.getEphemeralStateForTesting(tenant, 'ENCOUNTER', 'tele-mock-1');
+    const session = TransactionManager.getEphemeralStateForTesting(tenant, 'TELEHEALTH_SESSION', 'th-mock-1');
+    expect(patient?.status).toBe('REMOVED');
+    expect(patient?.activeEncounterId).toBe('');
+    expect((patient?.activeCareContexts as any).activeTelehealthEncounterIds).toEqual([]);
+    expect(opd?.status).toBe('CANCELLED');
+    expect(encounter?.status).toBe('CANCELLED');
+    expect(session?.status).toBe('CANCELLED');
+    expect((session?.syntheticCleanup as any).previousStatus).toBe('IN_CONSULTATION');
+    expect((r.data as any).retiredTelehealthSessions).toEqual(['th-mock-1']);
+    expect((await TransactionManager.getEvents(tenant))[0].eventType).toBe('CONFIRMED_MOCK_PATIENT_RETIRED');
+    expect(await TransactionManager.getAudits(tenant)).toHaveLength(1);
+  });
+
+  test('telehealth signed note or call activity blocks retirement without side effects', async () => {
+    for (const activity of [
+      { signedEvidenceId: 'signed-test-note' },
+      { soapNote: { subjective: 'real clinical history' } },
+      { callDurationSeconds: 8 },
+      { transcription: [{ role: 'clinician', text: 'clinical finding' }] },
+      { soapNote: { icd10Codes: ['E11.9'] } },
+      { vitals: { hr: 72 } },
+    ]) {
+      TransactionManager.resetEphemeralStateForTesting();
+      seedEmptyTelehealth(activity);
+      const r = await ConfirmedMockPatientRetirementDomainService.retire(
+        context(), 'cmd-tele-block', 'idem-tele-block', payload()
+      );
+      expect(r.error?.code).toBe('MOCK_CLEANUP_TELEHEALTH_REVIEW_REQUIRED');
+      expect(TransactionManager.getEphemeralStateForTesting(tenant, 'PATIENT_MPI', patientId)?.status).toBe('ACTIVE');
+      expect(await TransactionManager.getEvents(tenant)).toHaveLength(0);
+    }
+  });
+
+  test('telehealth missing session, clinical evidence, and bed links fail closed', async () => {
+    seedEmptyTelehealth();
+    TransactionManager.seedEphemeralStateForTesting(tenant, 'ENCOUNTER_EVIDENCE', 'test-signed-evidence', {
+      id: 'test-signed-evidence', patientId, tenantId: tenant, encounterId: 'tele-mock-1',
+      status: 'FINAL', evidenceType: 'SIGNED_CLINICAL_NOTE',
+    });
+    const r = await ConfirmedMockPatientRetirementDomainService.retire(
+      context(), 'cmd-evidence-block', 'idem-evidence-block', payload()
+    );
+    expect(r.error?.code).toBe('MOCK_CLEANUP_CLINICAL_REVIEW_REQUIRED');
+    TransactionManager.resetEphemeralStateForTesting();
+    seedPatient({
+      activeEncounterId: 'tele-mock-1',
+      activeCareContexts: {
+        activeOpdEncounterIds: [], activeTelehealthEncounterIds: ['tele-mock-1'],
+      },
+    });
+    seedEncounter();
+    TransactionManager.seedEphemeralStateForTesting(tenant, 'ENCOUNTER', 'tele-mock-1', {
+      id: 'tele-mock-1', encounterId: 'tele-mock-1', tenantId: tenant,
+      patientId, encounterType: 'TELEHEALTH', status: 'ACTIVE',
+    });
+    const missing = await ConfirmedMockPatientRetirementDomainService.retire(
+      context(), 'cmd-missing-session', 'idem-missing-session', payload()
+    );
+    expect(missing.error?.code).toBe('MOCK_CLEANUP_TELEHEALTH_SESSION_MISSING');
+    expect(await TransactionManager.getEvents(tenant)).toHaveLength(0);
+  });
+
+  test('single explicitly confirmed development project never permits cleanup without separate acknowledgement', () => {
+    process.env.FIREBASE_PROJECT_ID = 'g-hims-ai';
+    process.env.GHIMS_FIREBASE_PROJECT_ID_TEST = 'g-hims-ai';
+    process.env.GHIMS_MOCK_CLEANUP_CONFIRM_PROJECT = 'g-hims-ai';
+    process.env.NODE_ENV = 'development';
+    delete process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION;
+    delete process.env.GHIMS_MOCK_CLEANUP_DEV_PROJECT_ACK;
+    expect(() => assertMockCleanupEnvironment(tenant)).toThrow();
+    process.env.GHIMS_MOCK_CLEANUP_DEV_PROJECT_ACK = 'I_CONFIRM_G_HIMS_AI_IS_SYNTHETIC_ONLY';
+    expect(() => assertMockCleanupEnvironment(tenant)).not.toThrow();
+    process.env.GHIMS_RUNTIME_MODE = 'PRODUCTION';
+    expect(() => assertMockCleanupEnvironment(tenant)).toThrow();
+    process.env.GHIMS_RUNTIME_MODE = 'TEST';
+    process.env.GHIMS_FIREBASE_PROJECT_ID_TEST = 'another-project';
+    expect(() => assertMockCleanupEnvironment(tenant)).toThrow();
   });
 
   test('non-OPD encounters and dangling active encounter pointers block cleanup', async () => {

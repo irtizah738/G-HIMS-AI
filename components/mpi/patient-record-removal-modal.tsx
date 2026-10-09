@@ -122,6 +122,7 @@ export function PatientRecordRemovalModal({
         status: 'REMOVED';
         retiredEncounters: string[];
         retiredQueueTokens: string[];
+        retiredTelehealthSessions?: string[];
       }>('RetireConfirmedMockPatientCommand', {
         patientId: patient.id,
         expectedMrn: confirmationMrn.trim(),
@@ -217,7 +218,7 @@ export function PatientRecordRemovalModal({
                 <p className="mt-1">
                   Ordinary removal is blocked while care is active or unresolved.
                   {isConfirmedMock
-                    ? ' The special synthetic OPD retirement below requires independent server verification; it never records a clinical discharge.'
+                    ? ' The special synthetic retirement below requires independent server verification; it never records a clinical discharge.'
                     : ' Complete the appropriate clinical disposition or discharge before requesting removal.'}
                 </p>
               </div>
@@ -228,11 +229,11 @@ export function PatientRecordRemovalModal({
                 data-testid="mpi-mock-retirement-options"
                 className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
               >
-                <p className="font-bold">Development-only: retire confirmed mock patient and OPD encounters</p>
+                <p className="font-bold">Development-only: retire confirmed mock patient and eligible test encounters</p>
                 <p>
                   Only the two specifically allowlisted mock identities can use this action.
                   It requires an isolated TEST/DEMO development server and explicit cleanup authorization.
-                  The server rejects non-OPD care, linked financial records, and production requests.
+                  The server rejects IPD/emergency care, linked finance or clinical evidence, telehealth sessions with activity, and production requests.
                   Encounter cancellation and the operator's reason are retained in the audit trail.
                 </p>
                 <label className="flex items-start gap-2">
@@ -332,7 +333,7 @@ export function PatientRecordRemovalModal({
                   disabled={!valid || !syntheticConfirmed}
                   className="min-h-10 max-w-full rounded-lg bg-amber-800 px-3 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {pending ? 'Committing audited mock cleanup…' : 'Retire verified mock OPD record'}
+                  {pending ? 'Committing audited mock cleanup…' : 'Retire verified mock test record'}
                 </button>
               ) : (
                 <button

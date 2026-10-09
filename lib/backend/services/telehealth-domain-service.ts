@@ -438,12 +438,24 @@ export class TelehealthDomainService {
         idempotencyKey, commandId, correlationId: context.correlationId,
         readTargets: [
           { key: 'session', entityType: 'TELEHEALTH_SESSION', entityId: payload.sessionId, required: true },
+          { key: 'encounter', entityType: 'ENCOUNTER', entityId: preflight.encounterId, required: true },
         ],
         emptyQueryGuards: preflight.roomToken
           ? [{ collectionName: 'telehealthSignaling', field: 'roomToken', value: preflight.roomToken }]
           : [],
         prepare: current => {
           const session = current.session as unknown as TelehealthSession;
+          const encounter = current.encounter as Record<string, unknown>;
+          const assignedProviderId = String(encounter?.assignedProviderId || '');
+          const isSystemAdmin = context.roles.some(role => String(role).toUpperCase() === 'SYSTEM_ADMIN');
+          if (!encounter ||
+              String(encounter.encounterId || encounter.id || '') !== session.encounterId ||
+              String(encounter.encounterType || encounter.type || '').toUpperCase() !== 'TELEHEALTH' ||
+              (encounter.tenantId && encounter.tenantId !== context.tenantId) ||
+              !assignedProviderId && !isSystemAdmin ||
+              (assignedProviderId !== context.actorId && !isSystemAdmin)) {
+            throw new Error('TELEHEALTH_ROOM_REPAIR_ASSIGNMENT_MISMATCH: only assigned clinician or system administrator may repair.');
+          }
           if (session.id !== payload.sessionId ||
               (session.tenantId && session.tenantId !== context.tenantId) ||
               session.roomToken !== preflight.roomToken ||
@@ -561,6 +573,13 @@ export class TelehealthDomainService {
           if (!['WAITING_ROOM', 'IN_CONSULTATION', 'DOCUMENTING'].includes(session.status) ||
               ['COMPLETED','CANCELLED','CLOSED'].includes(String(encounter.status || '').toUpperCase())) {
             throw new Error('TELEHEALTH_SESSION_FINAL: only unresolved telehealth encounters can be cancelled.');
+          }
+          const assignedProviderId = String(encounter.assignedProviderId || '');
+          const administrativeActor = context.roles.some(role =>
+            ['SYSTEM_ADMIN', 'ADMIN', 'ADMINISTRATOR'].includes(String(role).toUpperCase())
+          );
+          if (!administrativeActor && (!assignedProviderId || assignedProviderId !== context.actorId)) {
+            throw new Error('TELEHEALTH_CANCELLATION_ASSIGNMENT_MISMATCH: assigned clinician or authorized administrator required.');
           }
           if (session.updatedAt !== payload.expectedUpdatedAt ||
               session.updatedAt !== preflight.updatedAt) {

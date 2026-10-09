@@ -43,6 +43,30 @@ function normalized(value: unknown): string {
   return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+function hasTelehealthClinicalActivity(session: Record<string, unknown>): boolean {
+  const soap = session.soapNote;
+  if (soap !== undefined && (typeof soap !== 'object' || !soap || Array.isArray(soap))) return true;
+  const fields = (soap || {}) as Record<string, unknown>;
+  if (Object.values(fields).some(value =>
+    Array.isArray(value) ? value.length > 0 :
+    typeof value === 'string' ? value.trim().length > 0 :
+    value !== null && value !== undefined && value !== false
+  )) return true;
+  if (session.prescriptions !== undefined && !Array.isArray(session.prescriptions)) return true;
+  if (session.transcription !== undefined && !Array.isArray(session.transcription)) return true;
+  const duration = Number(session.callDurationSeconds || 0);
+  const vitals = session.vitals as Record<string, unknown> | null | undefined;
+  const hasVitals = vitals && (
+    Boolean(String(vitals.bp || '').trim()) ||
+    ['hr', 'spo2', 'temp'].some(field => Number(vitals[field] || 0) !== 0)
+  );
+  return Boolean(session.signedEvidenceId) ||
+    (Array.isArray(session.prescriptions) && session.prescriptions.length > 0) ||
+    (Array.isArray(session.transcription) && session.transcription.length > 0) ||
+    !Number.isFinite(duration) || duration !== 0 ||
+    session.isRecording === true || Boolean(hasVitals);
+}
+
 function reject(commandId: string, idempotencyKey: string, code: string, message: string): CommandResult {
   return { success: false, commandId, idempotencyKey, error: { code, message } };
 }
@@ -219,15 +243,7 @@ export class ConfirmedMockPatientRetirementDomainService {
       const sessionId = String(session.id || '').trim();
       const encounterId = String(session.encounterId || '').trim();
       const status = String(session.status || '').toUpperCase();
-      const soap = session.soapNote && typeof session.soapNote === 'object' &&
-        !Array.isArray(session.soapNote)
-        ? session.soapNote as Record<string, unknown> : {};
-      const hasClinicalActivity = Boolean(session.signedEvidenceId) ||
-        ['subjective', 'objective', 'assessment', 'plan'].some(field =>
-          String(soap[field] || '').trim().length > 0) ||
-        (Array.isArray(session.prescriptions) && session.prescriptions.length > 0) ||
-        (Array.isArray(session.transcription) && session.transcription.length > 0) ||
-        Number(session.callDurationSeconds || 0) > 0 || session.isRecording === true;
+      const hasClinicalActivity = hasTelehealthClinicalActivity(session);
       if (!sessionId || seenSessionIds.has(sessionId) ||
           !telehealthEncounterIds.has(encounterId) ||
           matchedEncounterIds.has(encounterId) ||

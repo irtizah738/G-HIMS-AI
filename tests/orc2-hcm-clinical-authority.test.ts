@@ -1,0 +1,28 @@
+import { describe, expect, test } from 'bun:test';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
+const source = (path: string) => readFile(join(process.cwd(), path), 'utf8');
+
+describe('ORC-2 HCM clinical privilege authority', () => {
+  test('only exact employee-linked HCM privileges authorize clinical commands', async () => {
+    const auth = await source('server/auth/authorization-context.ts');
+    expect(auth).toContain('employee.userId !== params.userId');
+    expect(auth).toContain('const effective = new Set<string>();');
+    expect(auth).toContain('facilityScope.size === 0');
+    expect(auth).toContain('departmentScope.size === 0');
+    expect(auth).toContain('employeeFacilities.has(privFacility)');
+    expect(auth).toContain('employeeDepartments.has(privDept)');
+    expect(auth).not.toContain('credentialGatedRoleBaseline');
+    expect(auth).not.toContain("where('personalInfo.contactEmail'");
+    expect(auth).not.toContain(': membership.clinicalPrivileges;');
+  });
+  test('routine privileges are explicitly typed and mapped from granted HCM records', async () => {
+    const auth = await source('server/auth/authorization-context.ts');
+    const hcm = await source('types/hcm-advanced.ts');
+    for (const privilege of ['RECORD_VITALS', 'TRIAGE_PATIENTS', 'ADMIT_INPATIENT', 'DISCHARGE_INPATIENT']) {
+      expect(hcm).toContain("| '"+privilege+"'");
+      expect(auth).toContain(privilege+":['"+privilege+"']");
+    }
+  });
+});

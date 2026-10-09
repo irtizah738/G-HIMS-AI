@@ -233,6 +233,8 @@ function collectionForEntityType(entityType: string): string {
     EMPLOYEE_ASSIGNMENT: 'employeeAssignments',
     WORKFORCE_IDENTITY: 'workforceIdentities',
     EMPLOYEE_CREDENTIAL: 'clinicalCredentials',
+    USER: 'users',
+    TENANT_MEMBERSHIP: 'users',
     CREDENTIAL_IDENTITY: 'credentialIdentities',
     CLINICAL_PRIVILEGE: 'clinicalPrivileges',
     CLINICAL_PRIVILEGE_SLOT: 'clinicalPrivilegeSlots',

@@ -20,6 +20,7 @@ describe('ORC-4 vitals/NEWS2 input authority', () => {
     expect(validateCommandPayload(vitals()).success).toBe(true);
     expect(validateCommandPayload(vitals({heartRate:275})).success).toBe(false);
     expect(validateCommandPayload(vitals({temperature:26})).success).toBe(false);
+    expect(validateCommandPayload(vitals({bloodPressure:'70/120'})).success).toBe(false);
     expect(validateCommandPayload(vitals({spO2Scale:3})).success).toBe(false);
     expect(validateCommandPayload(vitals({spO2Scale:2, onSupplementalOxygen:false, consciousness:'Alert'})).success).toBe(true);
   });

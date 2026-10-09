@@ -2262,6 +2262,27 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const repairTelehealthRoomToken = async (
+    sessionId: string,
+    expectedUpdatedAt: string
+  ): Promise<TelehealthSession> => {
+    const result = await executeActiveTenantCommand<TelehealthSession>(
+      'RepairTelehealthRoomTokenCommand',
+      { sessionId, expectedUpdatedAt }
+    );
+    if (!result.success || !result.data) {
+      throw new Error(result.error?.message || 'Legacy telehealth room repair was rejected.');
+    }
+    const authoritative = result.data;
+    setTelehealthSessions((previous) =>
+      previous.map((item) => item.id === sessionId ? authoritative : item)
+    );
+    if (activeTelehealthSession?.id === sessionId) {
+      setActiveTelehealthSession(authoritative);
+    }
+    return authoritative;
+  };
+
   const cancelUnusedTelehealthSession = async (
     sessionId: string,
     expectedUpdatedAt: string,
@@ -2405,6 +2426,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
         updateTelehealthSession,
         completeTelehealthSession,
         cancelUnusedTelehealthSession,
+        repairTelehealthRoomToken,
       }}
     >
       {children}

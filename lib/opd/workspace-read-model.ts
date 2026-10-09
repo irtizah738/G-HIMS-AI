@@ -260,7 +260,9 @@ export function buildOpdWorkspaceReadModel(
   const rawOrders = snapshot.collections.orders || [];
   const rawPrescriptions = snapshot.collections.prescriptions || [];
 
-  const patients: PatientDemographics[] = rawPatients.map((row) => {
+  const patients: PatientDemographics[] = rawPatients
+    .filter((row) => String(asRecord(row).status || 'ACTIVE').toUpperCase() !== 'REMOVED')
+    .map((row) => {
     const patient = asRecord(row);
     const identifiers = Array.isArray(patient.identifiers)
       ? patient.identifiers.map(asRecord)
@@ -272,6 +274,7 @@ export function buildOpdWorkspaceReadModel(
 
     return {
       id: String(patient.id || patient.patientId || ''),
+      status: String(patient.status || 'ACTIVE').toUpperCase() as PatientDemographics['status'],
       mrn: String(patient.mrn || ''),
       fullName: String(patient.fullName || ''),
       gender: normalizeGender(patient.gender),

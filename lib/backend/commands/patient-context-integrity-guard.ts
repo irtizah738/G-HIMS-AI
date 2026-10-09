@@ -11,7 +11,8 @@ export type PatientContextIntegrityDecision =
         | 'ENCOUNTER_NOT_FOUND'
         | 'PATIENT_NOT_FOUND'
         | 'TENANT_CONTEXT_MISMATCH'
-        | 'PATIENT_CONTEXT_MISMATCH';
+        | 'PATIENT_CONTEXT_MISMATCH'
+        | 'PATIENT_REMOVED_FROM_ACTIVE_MPI';
       message: string;
     };
 

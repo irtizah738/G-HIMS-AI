@@ -128,6 +128,11 @@ export class ConfirmedMockPatientRetirementDomainService {
       return reject(
         commandId, idempotencyKey, 'MOCK_CLEANUP_NON_OPD_ACTIVE_CARE',
         'Synthetic retirement blocked by ' + nonOpdPointers.join(', ') +
+        '. Read source: ' +
+        (['TEST', 'DEMO'].includes(getRuntimeMode()) &&
+        TransactionManager.hasEphemeralState(context.tenantId)
+          ? 'in-process TEST/DEMO state'
+          : 'Firestore') +
         '. Inspect the authoritative encounter or bed evidence. No records were changed.'
       );
     }

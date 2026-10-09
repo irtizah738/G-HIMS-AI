@@ -178,7 +178,7 @@ export class PatientMergeDomainService {
       ...primary,
       id: payload.primaryPatientId,
       tenantId: context.tenantId,
-      status: 'ACTIVE',
+      status: primary.status || 'ACTIVE',
       allergies,
       chronicConditions,
       updatedAt: now,

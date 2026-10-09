@@ -380,6 +380,7 @@ export interface TelehealthPrescription {
 export interface TelehealthSession {
   id: string;
   tenantId?: string;
+  facilityId?: string;
   encounterId: string;
   patientId: string;
   patientName: string;

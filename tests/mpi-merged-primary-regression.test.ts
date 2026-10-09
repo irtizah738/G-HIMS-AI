@@ -74,6 +74,15 @@ describe('MPI already-merged primary regression', () => {
     expect(await TransactionManager.getEvents(tenantId)).toHaveLength(0);
   });
 
+  test('surviving patient keeps pre-existing DECEASED status after merge', async () => {
+    seed(primaryId, { status: 'DECEASED' });
+    seed(duplicateId);
+    const result = await merge();
+    expect(result.success).toBe(true);
+    expect(TransactionManager.getEphemeralStateForTesting(tenantId, 'PATIENT_MPI', primaryId)?.status).toBe('DECEASED');
+    expect(TransactionManager.getEphemeralStateForTesting(tenantId, 'PATIENT_MPI', duplicateId)?.status).toBe('MERGED');
+  });
+
   test('valid merge retains the secondary MRN and immutable audit history', async () => {
     seed(primaryId, { allergies: ['Penicillin'] });
     seed(duplicateId, { chronicConditions: ['Asthma'] });

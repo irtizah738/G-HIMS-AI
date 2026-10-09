@@ -494,6 +494,7 @@ export class ConfirmedMockPatientRetirementDomainService {
               syntheticCleanup: {
                 confirmedMock: true,
                 encounterCount: encounters.length,
+                telehealthSessionCount: sessions.length,
                 queueTokenCount: queueTokens.length,
                 retiredAt: now,
               },
@@ -505,6 +506,7 @@ export class ConfirmedMockPatientRetirementDomainService {
               patientId, mrn, reason, synthetic: true,
               encounterTransitions: transitions,
               queueTokenIds: [...queueIds],
+              telehealthSessionIds: [...seenSessionIds],
             },
             auditReason: reason,
             auditMetadata: {
@@ -512,12 +514,14 @@ export class ConfirmedMockPatientRetirementDomainService {
               synthetic: true,
               encounterTransitions: transitions,
               queueTokenIds: [...queueIds],
+              telehealthSessionIds: [...seenSessionIds],
               patientDataDeleted: false,
             },
             resultData: {
               patientId, mrn, status: 'REMOVED',
               retiredEncounters: transitions.map(x => x.encounterId),
               retiredQueueTokens: [...queueIds],
+              retiredTelehealthSessions: [...seenSessionIds],
             },
           };
         },

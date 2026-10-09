@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { TransactionManager } from '@/lib/backend/transactions/transaction-manager';
+import { getLogSeverity } from '@/lib/audit/logger';
 import { PatientRecordRemovalDomainService } from '@/lib/backend/services/patient-record-removal-domain-service';
 import type { CommandContext } from '@/lib/backend/types';
 
@@ -81,6 +82,7 @@ describe('Governed patient removal from active MPI', () => {
     expect(audit?.newValue).toBeUndefined();
     expect(audit?.metadata?.recordRetention).toBe('CLINICAL_AND_FINANCIAL_HISTORY_RETAINED');
     expect(audit?.recordedAt).toBeGreaterThan(0);
+    expect(getLogSeverity({ action: 'PATIENT_RECORD_REMOVED', status: 'SUCCESS' })).toBe('CRITICAL');
     expect(outbox.some(o => o.eventType === 'PATIENT_RECORD_REMOVED_FROM_ACTIVE_MPI')).toBe(true);
   });
 

@@ -417,6 +417,11 @@ export class TelehealthDomainService {
       return { success: false, commandId, idempotencyKey,
         error: { code: 'TELEHEALTH_SESSION_NOT_FOUND', message: 'Session not found.' } };
     }
+    if (!preflight.encounterId || !preflight.patientId) {
+      return { success: false, commandId, idempotencyKey,
+        error: { code: 'TELEHEALTH_ROOM_REPAIR_IDENTITY_INVALID',
+          message: 'Session is missing authoritative encounter or patient identity.' } };
+    }
     const governedRoom = /^ROOM-[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/;
     if (governedRoom.test(preflight.roomToken || '')) {
       return { success: false, commandId, idempotencyKey,

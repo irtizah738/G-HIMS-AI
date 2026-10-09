@@ -31,6 +31,7 @@ import {
   UserCheck,
   GitMerge,
   Trash2,
+  Siren,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { PatientConsultantRoutingModal, ConsultantDoctor } from '@/components/clinical/patient-consultant-routing-modal';
@@ -597,6 +598,19 @@ export function PatientMpiView() {
                     title="Merge duplicate patient record"
                   >
                     <GitMerge className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" /> Merge Record
+                  </button>
+                  <button
+                    id="btn-direct-er-admission"
+                    type="button"
+                    onClick={() => {
+                      const tenant = auth.activeTenant?.tenantId || auth.user?.tenantId;
+                      if (!tenant || !currentPatient?.id) return;
+                      router.push(`/${encodeURIComponent(tenant)}/clinical/emergency?patientId=${encodeURIComponent(currentPatient.id)}`);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-rose-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-800"
+                    title="Open governed emergency department intake for this patient"
+                  >
+                    <Siren className="h-3.5 w-3.5" /> Admit to ER
                   </button>
                   <button
                     id="btn-open-patient360"

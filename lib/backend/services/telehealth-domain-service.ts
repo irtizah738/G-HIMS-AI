@@ -742,7 +742,8 @@ export class TelehealthDomainService {
             String(signedEvidence.patientId || '') !== session.patientId ||
             String(signedEvidence.encounterId || '') !== session.encounterId ||
             String(signedEvidence.status || '').toUpperCase() !== 'FINAL' ||
-            String(signedEvidence.evidenceType || '') !== 'SIGNED_CLINICAL_NOTE'
+            String(signedEvidence.evidenceType || '') !== 'SIGNED_CLINICAL_NOTE' ||
+            String(signedEvidence.signedBy || '') !== context.actorId
           ) {
             throw new Error(
               'TELEHEALTH_SIGNED_EVIDENCE_REQUIRED: completion requires a final signed clinical note from the same patient encounter.'

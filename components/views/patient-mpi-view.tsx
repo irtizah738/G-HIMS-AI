@@ -1403,7 +1403,9 @@ export function PatientMpiView() {
             // The modal commits authoritatively; shell projection is refreshed
             // locally only after its server acknowledgement.
             setSelectedPatientId(null);
-            window.dispatchEvent(new Event('ghims:edge-sync-complete'));
+            window.dispatchEvent(new CustomEvent('ghims:edge-sync-complete', {
+              detail: { tenantId: auth.activeTenant?.tenantId },
+            }));
           }}
         />
       )}

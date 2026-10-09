@@ -13,6 +13,7 @@ import {
   Video,
 } from 'lucide-react';
 import { useHospital } from '@/lib/context/hospital-context';
+import { useAuth } from '@/lib/auth/auth-context';
 import { executeActiveTenantCommand } from '@/lib/api/command-client';
 import type { TelehealthSession, TelehealthSoapNote } from '@/lib/types/ghims';
 import { TelehealthCallPanel } from '@/components/telehealth/TelehealthCallPanel';
@@ -34,6 +35,9 @@ function modeLabel(mode?: ConnectivityMode): string {
 }
 
 export function TelehealthView() {
+  const { hasRole, hasPrivilege } = useAuth();
+  const canSignTelehealth = hasPrivilege('SIGN_CLINICAL_NOTES') &&
+    (hasRole('DOCTOR') || hasRole('CONSULTANT'));
   const {
     telehealthSessions,
     patients,
@@ -411,7 +415,20 @@ export function TelehealthView() {
                   <textarea value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="Objective" className="min-h-20 w-full rounded-xl border bg-transparent p-2 text-sm" />
                   <textarea value={assessment} onChange={(event) => setAssessment(event.target.value)} placeholder="Assessment" className="min-h-20 w-full rounded-xl border bg-transparent p-2 text-sm" />
                   <textarea value={plan} onChange={(event) => setPlan(event.target.value)} placeholder="Plan" className="min-h-20 w-full rounded-xl border bg-transparent p-2 text-sm" />
-                  <button disabled={busy} onClick={() => void signAndComplete()} className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white">
+                  {!canSignTelehealth && (
+                    <p role="alert" className="text-xs text-amber-700 dark:text-amber-300">
+                      Signing is unavailable: you need an active HCM-verified DOCTOR/CONSULTANT
+                      role with SIGN_CLINICAL_NOTES privilege. Use the credentialing workflow;
+                      an administrator cannot fabricate a clinical signature.
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    data-testid="telehealth-sign-and-complete"
+                    disabled={busy || networkMode === 'offline' || !canSignTelehealth}
+                    onClick={() => void signAndComplete()}
+                    className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
                     Sign note & complete encounter
                   </button>
                 </div>

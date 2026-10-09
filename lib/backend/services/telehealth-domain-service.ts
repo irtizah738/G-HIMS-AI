@@ -8,6 +8,7 @@ import { TransactionManager } from '../transactions/transaction-manager';
 import { CommandContext, CommandResult } from '../types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import { TelehealthSession } from '@/lib/types/ghims';
+import { hasTelehealthClinicalActivity } from '@/lib/clinical/telehealth-unused-care-policy';
 import { PatientMPI } from '@/types/mpi';
 import {
   activateCareContext,
@@ -17,6 +18,7 @@ import {
 
 export interface CreateTelehealthSessionPayload {
   patientId: string;
+  facilityId?: string;
   type: TelehealthSession['type'];
   scheduledTime?: string;
   chiefComplaint: string;
@@ -47,6 +49,31 @@ export interface CompleteTelehealthSessionPayload {
   signedEvidenceId: string;
 }
 
+/** Cancellation is a no-care administrative disposition, NEVER a substitute for signing or discharge. */
+export interface ClaimTelehealthEncounterPayload {
+  sessionId: string;
+  expectedUpdatedAt: string;
+}
+
+export interface RepairTelehealthRoomTokenPayload {
+  sessionId: string;
+  expectedUpdatedAt: string;
+}
+
+export interface CancelUnusedTelehealthEncounterPayload {
+  sessionId: string;
+  expectedUpdatedAt: string;
+  reason: string;
+}
+
+/** Transactionally require that no clinical, financial or media-room evidence references the encounter. */
+const CANCELLATION_REFERENCE_COLLECTIONS = [
+  'encounterEvidence', 'clinicalDocuments', 'clinicalObservations',
+  'medicationOrders', 'prescriptions', 'orders', 'diagnosticReports',
+  'clinicalConditions', 'clinicalAllergies', 'canonicalDiagnosticOrders',
+  'invoices', 'encounterCharges', 'payments', 'cashReceipts', 'invoiceSettlements',
+] as const;
+
 export class TelehealthDomainService {
   public static async create(
     context: CommandContext,
@@ -72,14 +99,32 @@ export class TelehealthDomainService {
       return { success:false, commandId, idempotencyKey, error:{ code:'STALE_MERGED_PATIENT_CONTEXT', message:'Telehealth cannot start from a merged patient identity.' } };
     }
 
+    const availableFacilities = (context.facilityIds || []).filter(Boolean);
+    const facilityId = String(payload.facilityId || (availableFacilities.length === 1 ? availableFacilities[0] : '')).trim();
+    if (!facilityId || !availableFacilities.includes(facilityId) ||
+        (String((patient as PatientMPI & { facilityId?: string }).facilityId || '') &&
+         String((patient as PatientMPI & { facilityId?: string }).facilityId) !== facilityId)) {
+      return { success: false, commandId, idempotencyKey,
+        error: { code: 'TELEHEALTH_FACILITY_SCOPE_REQUIRED',
+          message: 'Select an authorized facility for this patient before scheduling telehealth.' } };
+    }
     const now = new Date().toISOString();
     const sessionId = `th_${crypto.randomUUID()}`;
     const encounterId = `enc_th_${crypto.randomUUID()}`;
     const roomToken = `ROOM-${crypto.randomUUID().toUpperCase()}`;
+    // The scheduler is NOT implicitly the attending provider. Only the
+    // current credentialed clinician may self-assign a consultation.
+    const clinicianCanSign = context.roles.some(role =>
+      ['DOCTOR', 'CONSULTANT'].includes(String(role).toUpperCase())
+    ) && (context.clinicalPrivileges || []).some(privilege =>
+      ['SIGN_CLINICAL_NOTES', 'UNRESTRICTED_CLINICAL_CHIEF'].includes(String(privilege).toUpperCase())
+    );
+    const initialAssignedProviderId = clinicianCanSign ? context.actorId : '';
 
     const session: TelehealthSession = {
       id: sessionId,
       tenantId: context.tenantId,
+      facilityId,
       encounterId,
       patientId: patient.id,
       patientName: patient.fullName,
@@ -96,6 +141,7 @@ export class TelehealthDomainService {
             : 'Other',
       scheduledTime: payload.scheduledTime || now,
       status: 'WAITING_ROOM',
+      assignedProviderId: initialAssignedProviderId,
       type: payload.type || 'Telehealth Consultation',
       attendingPhysician: payload.attendingPhysician || '',
       clinicianNpi: '',
@@ -149,13 +195,14 @@ export class TelehealthDomainService {
       encounterId,
       tenantId: context.tenantId,
       patientId: patient.id,
+      facilityId,
       encounterType: 'TELEHEALTH',
       chiefComplaint: payload.chiefComplaint.trim(),
       departmentId: 'TELEHEALTH',
       status: 'ACTIVE',
       currentStage: 'CONSULTATION',
       priority: 'ROUTINE',
-      assignedProviderId: context.actorId,
+      assignedProviderId: initialAssignedProviderId,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -374,6 +421,351 @@ export class TelehealthDomainService {
     return { success:true, commandId, idempotencyKey, entityId:session.id, eventId:tx.eventId, auditId:tx.auditId, outboxId:tx.outboxId, data:next };
   }
 
+
+  public static async claimEncounter(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: ClaimTelehealthEncounterPayload
+  ): Promise<CommandResult<TelehealthSession>> {
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: ['DOCTOR', 'CONSULTANT'],
+      requiredPrivilege: 'SIGN_CLINICAL_NOTES',
+    });
+    if (!auth.authorized) {
+      return { success: false, commandId, idempotencyKey,
+        error: { code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Active HCM signing privilege is needed to accept a telehealth consultation.' } };
+    }
+    const preflight = await DomainStateRepository.getById<TelehealthSession>(
+      context.tenantId, 'telehealthSessions', payload.sessionId
+    );
+    if (!preflight || !preflight.encounterId || !preflight.patientId) {
+      return { success: false, commandId, idempotencyKey,
+        error: { code: 'TELEHEALTH_SESSION_NOT_FOUND', message: 'Authoritative session or encounter identity missing.' } };
+    }
+    const now = new Date().toISOString();
+    try {
+      const tx = await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.roles[0] || 'CLINICIAN',
+        aggregateType: 'TELEHEALTH_SESSION',
+        aggregateId: payload.sessionId,
+        eventType: 'TELEHEALTH_CONSULTATION_ACCEPTED',
+        auditAction: 'TELEHEALTH_CONSULTATION_ACCEPTED',
+        auditResourceType: 'TELEHEALTH_SESSION',
+        auditResourceId: payload.sessionId,
+        outboxTopic: 'g-hims-telehealth-events',
+        idempotencyKey, commandId, correlationId: context.correlationId,
+        readTargets: [
+          { key: 'session', entityType: 'TELEHEALTH_SESSION', entityId: payload.sessionId, required: true },
+          { key: 'encounter', entityType: 'ENCOUNTER', entityId: preflight.encounterId, required: true },
+        ],
+        prepare: current => {
+          const session = current.session as unknown as TelehealthSession;
+          const encounter = current.encounter as Record<string, unknown>;
+          if (!session || !encounter ||
+              (session.tenantId && session.tenantId !== context.tenantId) ||
+              (encounter.tenantId && encounter.tenantId !== context.tenantId) ||
+              session.patientId !== preflight.patientId ||
+              session.encounterId !== preflight.encounterId ||
+              String(encounter.encounterId || encounter.id || '') !== session.encounterId ||
+              String(encounter.patientId || '') !== session.patientId ||
+              String(encounter.facilityId || '') !== String(session.facilityId || '') ||
+              !context.facilityIds?.includes(String(encounter.facilityId || '')) ||
+              String(encounter.encounterType || encounter.type || '').toUpperCase() !== 'TELEHEALTH') {
+            throw new Error('TELEHEALTH_CLAIM_SCOPE_MISMATCH: session, facility or encounter identity mismatch.');
+          }
+          if (!['WAITING_ROOM','IN_CONSULTATION','DOCUMENTING'].includes(session.status) ||
+              ['CANCELLED','COMPLETED','CLOSED'].includes(String(encounter.status || '').toUpperCase())) {
+            throw new Error('TELEHEALTH_CLAIM_FINAL: terminal encounters cannot be accepted.');
+          }
+          if (session.updatedAt !== payload.expectedUpdatedAt ||
+              session.updatedAt !== preflight.updatedAt) {
+            throw new Error('TELEHEALTH_CLAIM_VERSION_CONFLICT: refresh before accepting.');
+          }
+          const assigned = String(encounter.assignedProviderId || '');
+          if (assigned || session.assignedProviderId) {
+            throw new Error('TELEHEALTH_ALREADY_ASSIGNED: existing provider assignment requires authorized routing review.');
+          }
+          const nextSession: TelehealthSession = {
+            ...session, assignedProviderId: context.actorId, updatedAt: now,
+          };
+          const nextEncounter = { ...encounter, assignedProviderId: context.actorId, updatedAt: Date.now() };
+          return {
+            domainState: nextSession,
+            additionalStateWrites: [
+              { entityType: 'ENCOUNTER', entityId: session.encounterId, domainState: nextEncounter },
+            ],
+            eventPayload: { sessionId: session.id, encounterId: session.encounterId,
+              patientId: session.patientId, assignedProviderId: context.actorId },
+            auditReason: 'Verified clinician accepted the unassigned telehealth encounter.',
+            resultData: nextSession,
+          };
+        },
+      });
+      return { success: true, commandId, idempotencyKey, entityId: payload.sessionId,
+        eventId: tx.eventId, auditId: tx.auditId, outboxId: tx.outboxId,
+        data: tx.resultData as TelehealthSession };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Telehealth consultation acceptance failed.';
+      const code = error instanceof Error && 'code' in error
+        ? String((error as Error & { code: string }).code)
+        : message.includes(':') ? message.split(':')[0] : 'TELEHEALTH_CLAIM_REJECTED';
+      return { success: false, commandId, idempotencyKey, error: { code, message } };
+    }
+  }
+
+  public static async repairLegacyRoomToken(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: RepairTelehealthRoomTokenPayload
+  ): Promise<CommandResult<TelehealthSession>> {
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: ['DOCTOR', 'CONSULTANT', 'NURSE', 'SYSTEM_ADMIN'],
+    });
+    if (!auth.authorized) {
+      return { success: false, commandId, idempotencyKey,
+        error: { code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Clinician media-room authority required.' } };
+    }
+    const preflight = await DomainStateRepository.getById<TelehealthSession>(
+      context.tenantId, 'telehealthSessions', payload.sessionId
+    );
+    if (!preflight) {
+      return { success: false, commandId, idempotencyKey,
+        error: { code: 'TELEHEALTH_SESSION_NOT_FOUND', message: 'Session not found.' } };
+    }
+    if (!preflight.encounterId || !preflight.patientId) {
+      return { success: false, commandId, idempotencyKey,
+        error: { code: 'TELEHEALTH_ROOM_REPAIR_IDENTITY_INVALID',
+          message: 'Session is missing authoritative encounter or patient identity.' } };
+    }
+    const governedRoom = /^ROOM-[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/;
+    if (governedRoom.test(preflight.roomToken || '')) {
+      return { success: false, commandId, idempotencyKey,
+        error: { code: 'TELEHEALTH_ROOM_ALREADY_VALID', message: 'Room credential is already in the supported format.' } };
+    }
+    const replacementToken = `ROOM-${crypto.randomUUID().toUpperCase()}`;
+    try {
+      const tx = await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.roles[0] || 'CLINICIAN',
+        aggregateType: 'TELEHEALTH_SESSION',
+        aggregateId: payload.sessionId,
+        eventType: 'TELEHEALTH_MEDIA_ROOM_TOKEN_REPAIRED',
+        auditAction: 'TELEHEALTH_MEDIA_ROOM_TOKEN_REPAIRED',
+        auditResourceType: 'TELEHEALTH_SESSION',
+        auditResourceId: payload.sessionId,
+        outboxTopic: 'g-hims-telehealth-events',
+        idempotencyKey, commandId, correlationId: context.correlationId,
+        readTargets: [
+          { key: 'session', entityType: 'TELEHEALTH_SESSION', entityId: payload.sessionId, required: true },
+          { key: 'encounter', entityType: 'ENCOUNTER', entityId: preflight.encounterId, required: true },
+        ],
+        emptyQueryGuards: preflight.roomToken
+          ? [{ collectionName: 'telehealthSignaling', field: 'roomToken', value: preflight.roomToken }]
+          : [],
+        prepare: current => {
+          const session = current.session as unknown as TelehealthSession;
+          const encounter = current.encounter as Record<string, unknown>;
+          const assignedProviderId = String(encounter?.assignedProviderId || '');
+          const facilityAllowed = Boolean(context.facilityIds?.includes(String(encounter?.facilityId || '')));
+          const isSystemAdmin = context.roles.some(role => String(role).toUpperCase() === 'SYSTEM_ADMIN');
+          if (!encounter ||
+              String(encounter.encounterId || encounter.id || '') !== session.encounterId ||
+              String(encounter.patientId || '') !== session.patientId ||
+              String(encounter.encounterType || encounter.type || '').toUpperCase() !== 'TELEHEALTH' ||
+              (encounter.tenantId && encounter.tenantId !== context.tenantId) ||
+              (!isSystemAdmin && !facilityAllowed) ||
+              ['COMPLETED','CANCELLED','CLOSED'].includes(String(encounter.status || '').toUpperCase()) ||
+              (!assignedProviderId && !isSystemAdmin) ||
+              (assignedProviderId !== context.actorId && !isSystemAdmin)) {
+            throw new Error('TELEHEALTH_ROOM_REPAIR_ASSIGNMENT_MISMATCH: only assigned clinician or system administrator may repair.');
+          }
+          if (session.id !== payload.sessionId ||
+              (session.tenantId && session.tenantId !== context.tenantId) ||
+              session.roomToken !== preflight.roomToken ||
+              session.updatedAt !== preflight.updatedAt ||
+              session.updatedAt !== payload.expectedUpdatedAt) {
+            throw new Error('TELEHEALTH_ROOM_REPAIR_VERSION_CONFLICT: refresh before retrying.');
+          }
+          if (!['WAITING_ROOM', 'IN_CONSULTATION', 'DOCUMENTING'].includes(session.status) ||
+              governedRoom.test(session.roomToken || '')) {
+            throw new Error('TELEHEALTH_ROOM_REPAIR_NOT_ELIGIBLE: only unresolved legacy rooms qualify.');
+          }
+          const nextSession = { ...session, roomToken: replacementToken, updatedAt: new Date().toISOString() };
+          return {
+            domainState: nextSession,
+            eventPayload: {
+              sessionId: session.id, encounterId: session.encounterId,
+              action: 'REPLACED_LEGACY_INVALID_MEDIA_CREDENTIAL',
+            },
+            auditReason: 'Replaced unusable legacy media-room capability after verifying no room was established.',
+            resultData: nextSession,
+          };
+        },
+      });
+      return { success: true, commandId, idempotencyKey, entityId: payload.sessionId,
+        eventId: tx.eventId, auditId: tx.auditId, outboxId: tx.outboxId,
+        data: tx.resultData as TelehealthSession };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Room repair was rejected.';
+      const code = error instanceof Error && 'code' in error
+        ? String((error as Error & { code: string }).code)
+        : message.includes(':') ? message.split(':')[0] : 'TELEHEALTH_ROOM_REPAIR_REJECTED';
+      return { success: false, commandId, idempotencyKey, error: { code, message } };
+    }
+  }
+
+  public static async cancelUnused(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: CancelUnusedTelehealthEncounterPayload
+  ): Promise<CommandResult<TelehealthSession>> {
+    // Administrative cancellation has no signing side effect. It is restricted to
+    // authorized actors and verified zero-care episodes; non-empty episodes fail closed.
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: ['DOCTOR', 'CONSULTANT', 'SYSTEM_ADMIN', 'ADMIN', 'ADMINISTRATOR'],
+    });
+    if (!auth.authorized) {
+      return { success: false, commandId, idempotencyKey,
+        error: { code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Authorized telehealth cancellation role required.' } };
+    }
+    const reason = String(payload.reason || '').trim();
+    if (reason.length < 20 || reason.length > 1000) {
+      return { success: false, commandId, idempotencyKey,
+        error: { code: 'TELEHEALTH_CANCELLATION_REASON_REQUIRED',
+          message: 'Explain why no consultation occurred (20–1000 characters).' } };
+    }
+    const preflight = await DomainStateRepository.getById<TelehealthSession>(
+      context.tenantId, 'telehealthSessions', payload.sessionId
+    );
+    if (!preflight) {
+      return { success: false, commandId, idempotencyKey,
+        error: { code: 'TELEHEALTH_SESSION_NOT_FOUND', message: 'Session was not found.' } };
+    }
+    if (!preflight.encounterId || !preflight.patientId || !preflight.roomToken) {
+      return { success: false, commandId, idempotencyKey,
+        error: { code: 'TELEHEALTH_CANCELLATION_IDENTITY_INVALID',
+          message: 'Encounter, patient or room identity missing. Manual review required.' } };
+    }
+    const nowMs = Date.now();
+    const now = new Date(nowMs).toISOString();
+    try {
+      const tx = await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.roles[0] || 'CLINICIAN',
+        aggregateType: 'TELEHEALTH_SESSION',
+        aggregateId: payload.sessionId,
+        eventType: 'TELEHEALTH_UNUSED_ENCOUNTER_CANCELLED',
+        auditAction: 'TELEHEALTH_UNUSED_ENCOUNTER_CANCELLED',
+        auditResourceType: 'TELEHEALTH_SESSION',
+        auditResourceId: payload.sessionId,
+        outboxTopic: 'g-hims-telehealth-events',
+        idempotencyKey, commandId, correlationId: context.correlationId,
+        readTargets: [
+          { key: 'session', entityType: 'TELEHEALTH_SESSION', entityId: payload.sessionId, required: true },
+          { key: 'encounter', entityType: 'ENCOUNTER', entityId: preflight.encounterId, required: true },
+          { key: 'patient', entityType: 'PATIENT_MPI', entityId: preflight.patientId, required: true },
+        ],
+        // Each query executes INSIDE the Firestore write transaction, not as a
+        // stale preflight. New referenced evidence makes cancellation fail.
+        emptyQueryGuards: [
+          ...CANCELLATION_REFERENCE_COLLECTIONS.map(collectionName => ({
+            collectionName, field: 'encounterId', value: preflight.encounterId,
+          })),
+          { collectionName: 'telehealthSignaling', field: 'roomToken', value: preflight.roomToken },
+        ],
+        prepare: current => {
+          const session = current.session as unknown as TelehealthSession;
+          const encounter = current.encounter as Record<string, unknown>;
+          const patient = current.patient as unknown as PatientMPI;
+          if (!session || !encounter || !patient ||
+              (session.tenantId && session.tenantId !== context.tenantId) ||
+              (patient.tenantId && patient.tenantId !== context.tenantId) ||
+              (encounter.tenantId && encounter.tenantId !== context.tenantId) ||
+              session.id !== payload.sessionId ||
+              session.patientId !== preflight.patientId ||
+              session.encounterId !== preflight.encounterId ||
+              session.roomToken !== preflight.roomToken ||
+              String(encounter.patientId || '') !== session.patientId ||
+              String(encounter.encounterId || encounter.id || '') !== session.encounterId ||
+              String(encounter.encounterType || encounter.type || '').toUpperCase() !== 'TELEHEALTH') {
+            throw new Error('TELEHEALTH_CANCELLATION_SCOPE_MISMATCH: encounter identity changed. Refresh and review.');
+          }
+          if (!['WAITING_ROOM', 'IN_CONSULTATION', 'DOCUMENTING'].includes(session.status) ||
+              ['COMPLETED','CANCELLED','CLOSED'].includes(String(encounter.status || '').toUpperCase())) {
+            throw new Error('TELEHEALTH_SESSION_FINAL: only unresolved telehealth encounters can be cancelled.');
+          }
+          const assignedProviderId = String(encounter.assignedProviderId || '');
+          const administrativeActor = context.roles.some(role =>
+            ['SYSTEM_ADMIN', 'ADMIN', 'ADMINISTRATOR'].includes(String(role).toUpperCase())
+          );
+          if (!administrativeActor && (!assignedProviderId || assignedProviderId !== context.actorId)) {
+            throw new Error('TELEHEALTH_CANCELLATION_ASSIGNMENT_MISMATCH: assigned clinician or authorized administrator required.');
+          }
+          if (session.updatedAt !== payload.expectedUpdatedAt ||
+              session.updatedAt !== preflight.updatedAt) {
+            throw new Error('TELEHEALTH_CANCELLATION_VERSION_CONFLICT: session changed. Refresh before retrying.');
+          }
+          if (hasTelehealthClinicalActivity(session)) {
+            throw new Error('TELEHEALTH_CANCELLATION_CLINICAL_ACTIVITY: activity exists. Use clinician review and clinical completion.');
+          }
+          const pointers = patient.activeCareContexts?.activeTelehealthEncounterIds;
+          if (!Array.isArray(pointers) || !pointers.includes(session.encounterId)) {
+            throw new Error('TELEHEALTH_CANCELLATION_POINTER_MISMATCH: patient care pointers require reconciliation.');
+          }
+          const nextCareContexts = closeCareContext(
+            patient.activeCareContexts, 'TELEHEALTH', session.encounterId, nowMs
+          );
+          const nextSession: TelehealthSession = {
+            ...session, status: 'CANCELLED', updatedAt: now,
+          };
+          const nextEncounter = {
+            ...encounter, status: 'CANCELLED',
+            currentStage: 'CANCELLED', clinicalState: 'CANCELLED',
+            operationalState: 'CANCELLED', resourceAssignmentState: 'RELEASED',
+            cancelledAt: nowMs, cancellationReason: reason, updatedAt: nowMs,
+          };
+          const nextPatient: PatientMPI = {
+            ...patient, activeCareContexts: nextCareContexts,
+            activeEncounterId: compatibilityEncounterId(nextCareContexts), updatedAt: nowMs,
+          };
+          return {
+            domainState: nextSession,
+            additionalStateWrites: [
+              { entityType: 'ENCOUNTER', entityId: session.encounterId, domainState: nextEncounter },
+              { entityType: 'PATIENT_MPI', entityId: session.patientId, domainState: nextPatient },
+            ],
+            eventPayload: { sessionId: session.id, encounterId: session.encounterId,
+              patientId: session.patientId, disposition: 'UNUSED_NO_CARE' },
+            auditReason: reason,
+            auditMetadata: { disposition: 'UNUSED_NO_CARE', noClinicalDischarge: true },
+            resultData: nextSession,
+          };
+        },
+      });
+      return {
+        success: true, commandId, idempotencyKey, entityId: payload.sessionId,
+        eventId: tx.eventId, auditId: tx.auditId, outboxId: tx.outboxId,
+        data: tx.resultData as TelehealthSession,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Cancellation could not be verified.';
+      const code = error instanceof Error && 'code' in error
+        ? String((error as Error & { code: string }).code)
+        : message.includes(':') ? message.split(':')[0] : 'TELEHEALTH_CANCELLATION_REJECTED';
+      return { success: false, commandId, idempotencyKey, error: { code, message } };
+    }
+  }
+
   public static async complete(
     context: CommandContext,
     commandId: string,
@@ -473,7 +865,8 @@ export class TelehealthDomainService {
             String(signedEvidence.patientId || '') !== session.patientId ||
             String(signedEvidence.encounterId || '') !== session.encounterId ||
             String(signedEvidence.status || '').toUpperCase() !== 'FINAL' ||
-            String(signedEvidence.evidenceType || '') !== 'SIGNED_CLINICAL_NOTE'
+            String(signedEvidence.evidenceType || '') !== 'SIGNED_CLINICAL_NOTE' ||
+            String(signedEvidence.signedBy || '') !== context.actorId
           ) {
             throw new Error(
               'TELEHEALTH_SIGNED_EVIDENCE_REQUIRED: completion requires a final signed clinical note from the same patient encounter.'
@@ -481,7 +874,9 @@ export class TelehealthDomainService {
           }
           if (
             String(encounter.patientId || '') !== session.patientId ||
-            String(encounter.encounterType || encounter.type || '').toUpperCase() !== 'TELEHEALTH'
+            String(encounter.encounterType || encounter.type || '').toUpperCase() !== 'TELEHEALTH' ||
+            String(encounter.assignedProviderId || '') !== context.actorId ||
+            !context.facilityIds?.includes(String(encounter.facilityId || ''))
           ) {
             throw new Error(
               'TELEHEALTH_ENCOUNTER_SCOPE_INVALID: session is not bound to the authoritative telehealth encounter.'

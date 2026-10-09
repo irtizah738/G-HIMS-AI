@@ -13,6 +13,7 @@ import {
   Video,
 } from 'lucide-react';
 import { useHospital } from '@/lib/context/hospital-context';
+import { useAuth } from '@/lib/auth/auth-context';
 import { executeActiveTenantCommand } from '@/lib/api/command-client';
 import type { TelehealthSession, TelehealthSoapNote } from '@/lib/types/ghims';
 import { TelehealthCallPanel } from '@/components/telehealth/TelehealthCallPanel';
@@ -34,11 +35,17 @@ function modeLabel(mode?: ConnectivityMode): string {
 }
 
 export function TelehealthView() {
+  const { user, hasRole, hasPrivilege, refreshAuth } = useAuth();
+  const canSignTelehealth = hasPrivilege('SIGN_CLINICAL_NOTES') &&
+    (hasRole('DOCTOR') || hasRole('CONSULTANT'));
   const {
     telehealthSessions,
     patients,
     createTelehealthSession,
     completeTelehealthSession,
+    cancelUnusedTelehealthSession,
+    repairTelehealthRoomToken,
+    claimTelehealthEncounter,
     networkMode,
   } = useHospital();
 
@@ -49,6 +56,12 @@ export function TelehealthView() {
   const [busy, setBusy] = useState(false);
 
   const [patientId, setPatientId] = useState(patients[0]?.id || '');
+  const [facilityId, setFacilityId] = useState(user?.facilityIds?.[0] || '');
+  useEffect(() => {
+    const authorized = user?.facilityIds || [];
+    if (!authorized.includes(facilityId)) setFacilityId(authorized[0] || '');
+  }, [facilityId, user?.facilityIds]);
+
   const [chiefComplaint, setChiefComplaint] = useState('');
   const [visitType, setVisitType] = useState<TelehealthSession['type']>('Telehealth Consultation');
 
@@ -56,6 +69,7 @@ export function TelehealthView() {
   const [objective, setObjective] = useState('');
   const [assessment, setAssessment] = useState('');
   const [plan, setPlan] = useState('');
+  const [cancellationReason, setCancellationReason] = useState('');
 
   useEffect(() => {
     setSessions(telehealthSessions);
@@ -74,7 +88,15 @@ export function TelehealthView() {
     setObjective('');
     setAssessment('');
     setPlan('');
+    setCancellationReason('');
   }, [selected?.id]);
+
+  const assignedToMe = Boolean(selected?.assignedProviderId &&
+    selected.assignedProviderId === user?.uid);
+
+  const roomTokenValid = selected
+    ? /^ROOM-[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/.test(selected.roomToken || '')
+    : false;
 
   const replaceSession = (next: TelehealthSession) => {
     setSessions((current) =>
@@ -93,8 +115,10 @@ export function TelehealthView() {
       const next = await work();
       replaceSession(next);
       setMessage(success);
+      return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Telehealth command failed.');
+      return false;
     } finally {
       setBusy(false);
     }
@@ -102,8 +126,8 @@ export function TelehealthView() {
 
   const schedule = async (event: FormEvent) => {
     event.preventDefault();
-    if (!patientId || !chiefComplaint.trim()) {
-      setError('Select an authoritative patient and enter the clinical reason for the virtual visit.');
+    if (!patientId || !facilityId || !chiefComplaint.trim()) {
+      setError('Select an authoritative patient, an authorized facility and a clinical reason for the virtual visit.');
       return;
     }
 
@@ -111,6 +135,7 @@ export function TelehealthView() {
       () =>
         createTelehealthSession({
           patientId,
+          facilityId,
           type: visitType,
           chiefComplaint: chiefComplaint.trim(),
         }),
@@ -154,6 +179,36 @@ export function TelehealthView() {
     }, 'Interrupted telehealth session recovered from the last authoritative state.');
   };
 
+  const acceptConsultation = async () => {
+    if (!selected) return;
+    await run(
+      () => claimTelehealthEncounter(selected.id, selected.updatedAt),
+      'Consultation accepted under your verified clinical credentials.'
+    );
+  };
+
+  const repairLegacyRoom = async () => {
+    if (!selected) return;
+    await run(
+      () => repairTelehealthRoomToken(selected.id, selected.updatedAt),
+      'The obsolete media-room link was replaced. Share the new private join link with the intended patient.'
+    );
+  };
+
+  const cancelUnusedEncounter = async () => {
+    if (!selected) return;
+    const reason = cancellationReason.trim();
+    if (reason.length < 20) {
+      setError('Provide at least 20 characters explaining why the consultation never occurred.');
+      return;
+    }
+    const cancelled = await run(
+      () => cancelUnusedTelehealthSession(selected.id, selected.updatedAt, reason),
+      'Unused telehealth encounter cancelled. Patient care references reconciled.'
+    );
+    if (cancelled) setCancellationReason('');
+  };
+
   const signAndComplete = async () => {
     if (!selected) return;
     const note: Partial<TelehealthSoapNote> = {
@@ -173,9 +228,19 @@ export function TelehealthView() {
     setMessage('');
     try {
       await completeTelehealthSession(selected.id, note, []);
+      // The authoritative command succeeded: reflect completion immediately,
+      // while the hospital context continues hydrating server-owned state.
+      setSessions((previous) => previous.map((item) =>
+        item.id === selected.id ? { ...item, status: 'COMPLETED' } : item
+      ));
       setMessage('Clinical note signed and telehealth encounter completed.');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Telehealth signing failed.');
+      const failure = cause instanceof Error ? cause.message : 'Telehealth signing failed.';
+      setError(failure.includes('SIGN_CLINICAL_NOTES') || failure.includes('CLINICAL_PRIVILEGE_DENIED')
+        ? 'Clinical signing is blocked by HCM: the authenticated clinician lacks a current verified SIGN_CLINICAL_NOTES grant. An authorized credentialing officer must verify appointment, facility privileges and active roster, then refresh authorization. No administrative bypass is permitted.'
+        : failure.includes('TELEHEALTH_SIGNED_EVIDENCE_REVIEW_REQUIRED')
+          ? 'An existing signed telehealth note requires clinician review. Do not sign again. Reconcile the signed evidence with this encounter before completion.'
+          : failure);
     } finally {
       setBusy(false);
     }
@@ -235,6 +300,17 @@ export function TelehealthView() {
             ))}
           </select>
           <select
+            aria-label="Authorized telehealth facility"
+            value={facilityId}
+            onChange={(event) => setFacilityId(event.target.value)}
+            className="rounded-xl border bg-transparent p-2 text-sm"
+          >
+            <option value="">Select authorized facility</option>
+            {(user?.facilityIds || []).map((id) => (
+              <option key={id} value={id}>{id}</option>
+            ))}
+          </select>
+          <select
             value={visitType}
             onChange={(event) => setVisitType(event.target.value as TelehealthSession['type'])}
             className="rounded-xl border bg-transparent p-2 text-sm"
@@ -252,7 +328,7 @@ export function TelehealthView() {
           />
           <button
             type="submit"
-            disabled={busy}
+            disabled={busy || networkMode === 'offline' || !facilityId}
             className="rounded-xl bg-teal-600 px-4 py-2 text-xs font-bold text-white md:col-span-3 md:w-fit"
           >
             Schedule telehealth encounter
@@ -304,7 +380,40 @@ export function TelehealthView() {
                 </p>
               </div>
 
-              {!['COMPLETED', 'CANCELLED'].includes(selected.status) && selected.tenantId && (
+              {!['COMPLETED', 'CANCELLED'].includes(selected.status) && !selected.assignedProviderId && (
+                <div className="space-y-2 rounded-xl border border-indigo-300 p-4 text-xs dark:border-indigo-800">
+                  <p className="font-bold">Consultant not assigned</p>
+                  <p>Scheduling an encounter does not confer clinical privileges.
+                    An HCM-verified clinician must accept the unassigned consultation
+                    before its media room can be opened or the note signed.</p>
+                  <button
+                    type="button"
+                    data-testid="telehealth-accept-consultation"
+                    disabled={!canSignTelehealth || busy || networkMode === 'offline'}
+                    onClick={() => void acceptConsultation()}
+                    className="rounded-lg border px-3 py-2 font-semibold disabled:opacity-50"
+                  >Accept consultation as verified clinician</button>
+                </div>
+              )}
+
+              {!['COMPLETED', 'CANCELLED'].includes(selected.status) && !roomTokenValid && (
+                <div role="alert" className="space-y-2 rounded-xl border border-amber-300 bg-amber-50 p-4 text-xs dark:border-amber-900 dark:bg-amber-950/20">
+                  <p className="font-semibold">Legacy media-room credential cannot start a secure call.</p>
+                  <p>Repair the obsolete room link or cancel the unused consultation below.
+                    A media error never authorizes clinical signing or patient deletion.</p>
+                  <button
+                    type="button"
+                    data-testid="telehealth-repair-media-room"
+                    disabled={busy || networkMode === 'offline'}
+                    onClick={() => void repairLegacyRoom()}
+                    className="rounded-lg border border-amber-600 px-3 py-2 font-bold disabled:opacity-50"
+                  >
+                    Repair secure room link (audited)
+                  </button>
+                </div>
+              )}
+
+              {!['COMPLETED', 'CANCELLED'].includes(selected.status) && assignedToMe && selected.tenantId && roomTokenValid && (
                 <TelehealthCallPanel
                   key={`media:${selected.id}:${selected.roomToken}`}
                   session={selected}
@@ -347,7 +456,7 @@ export function TelehealthView() {
                 </div>
               )}
 
-              {selected.status !== 'COMPLETED' && (
+              {!['COMPLETED', 'CANCELLED'].includes(selected.status) && (
                 <div className="space-y-3 rounded-xl border p-4">
                   <div className="flex items-center gap-2 text-xs font-bold">
                     <FileSignature className="h-4 w-4" />
@@ -357,8 +466,64 @@ export function TelehealthView() {
                   <textarea value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="Objective" className="min-h-20 w-full rounded-xl border bg-transparent p-2 text-sm" />
                   <textarea value={assessment} onChange={(event) => setAssessment(event.target.value)} placeholder="Assessment" className="min-h-20 w-full rounded-xl border bg-transparent p-2 text-sm" />
                   <textarea value={plan} onChange={(event) => setPlan(event.target.value)} placeholder="Plan" className="min-h-20 w-full rounded-xl border bg-transparent p-2 text-sm" />
-                  <button disabled={busy} onClick={() => void signAndComplete()} className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white">
+                  {canSignTelehealth && !assignedToMe && (
+                    <p role="alert" className="text-xs text-amber-700 dark:text-amber-300">
+                      Complete encounter unavailable until your verified clinician assignment
+                      is bound to this encounter. Accept an unassigned consultation or
+                      request authorized reassignment through HCM.
+                    </p>
+                  )}
+                  {!canSignTelehealth && (
+                    <div role="alert" className="space-y-2 text-xs text-amber-700 dark:text-amber-300">
+                      <p>Signing is unavailable: your HCM-verified DOCTOR/CONSULTANT role and
+                        SIGN_CLINICAL_NOTES privilege must both be active. A credentialing officer
+                        must confirm the employee, license, facility assignment and privilege grant.</p>
+                      <button type="button" disabled={busy || networkMode === 'offline'}
+                        onClick={() => void refreshAuth().then(
+                          () => setMessage('Authorization refreshed. Clinical signing still requires server-side privilege verification.'),
+                          (err: unknown) => setError(err instanceof Error ? err.message : 'Authorization refresh failed.')
+                        )}
+                        className="rounded-lg border px-3 py-2 font-semibold disabled:opacity-50">
+                        Refresh my clinical authorization
+                      </button>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    data-testid="telehealth-sign-and-complete"
+                    disabled={busy || networkMode === 'offline' || !canSignTelehealth || !assignedToMe}
+                    onClick={() => void signAndComplete()}
+                    className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
                     Sign note & complete encounter
+                  </button>
+                </div>
+              )}
+
+              {!['COMPLETED', 'CANCELLED'].includes(selected.status) && (
+                <div className="space-y-3 rounded-xl border border-amber-300 bg-amber-50/50 p-4 dark:border-amber-900 dark:bg-amber-950/20">
+                  <div className="text-xs font-bold">Cancel unused encounter — no consultation occurred</div>
+                  <p className="text-xs text-slate-600 dark:text-slate-300">
+                    This is not “End call” or clinical discharge. The server refuses cancellation
+                    when it finds signed notes, recorded care, medication/orders, billing,
+                    or a started media room. If care occurred, complete the clinical record instead.
+                  </p>
+                  <textarea
+                    aria-label="Reason for cancelling unused telehealth encounter"
+                    value={cancellationReason}
+                    onChange={(event) => setCancellationReason(event.target.value)}
+                    placeholder="Explain why the consultation never occurred (at least 20 characters)."
+                    maxLength={1000}
+                    className="min-h-20 w-full rounded-xl border bg-white p-2 text-sm dark:bg-slate-900"
+                  />
+                  <button
+                    type="button"
+                    data-testid="telehealth-cancel-unused-encounter"
+                    disabled={busy || networkMode === 'offline' || cancellationReason.trim().length < 20}
+                    onClick={() => void cancelUnusedEncounter()}
+                    className="rounded-xl border border-amber-500 px-4 py-2 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Cancel unused encounter (audited)
                   </button>
                 </div>
               )}

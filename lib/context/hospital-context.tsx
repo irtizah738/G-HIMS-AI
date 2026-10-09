@@ -31,6 +31,7 @@ import { DischargedCensusRecord, initialDischargedCensus } from '@/lib/clinical/
 import { executeActiveTenantCommand, registerActiveTenantPatient } from '@/lib/api/command-client';
 import { syncEngine } from '@/lib/offline/sync-engine';
 import { useAuth } from '@/lib/auth/auth-context';
+import { AuthClient } from '@/lib/auth/auth-client';
 import { hydrateEdgeSnapshot, loadLocalEdgeSnapshot } from '@/lib/offline/hydration';
 import { adaptEdgeSnapshot } from '@/lib/offline/read-model-adapter';
 
@@ -1040,6 +1041,7 @@ interface HospitalContextType {
   setActiveTelehealthSession: (session: TelehealthSession | null) => void;
   createTelehealthSession: (data: {
     patientId: string;
+    facilityId?: string;
     type: TelehealthSession['type'];
     scheduledTime?: string;
     chiefComplaint: string;
@@ -1047,6 +1049,9 @@ interface HospitalContextType {
   }) => Promise<TelehealthSession>;
   updateTelehealthSession: (sessionId: string, updates: Partial<TelehealthSession>) => Promise<void>;
   completeTelehealthSession: (sessionId: string, note?: Partial<TelehealthSoapNote>, prescriptions?: TelehealthPrescription[]) => Promise<void>;
+  cancelUnusedTelehealthSession: (sessionId: string, expectedUpdatedAt: string, reason: string) => Promise<TelehealthSession>;
+  repairTelehealthRoomToken: (sessionId: string, expectedUpdatedAt: string) => Promise<TelehealthSession>;
+  claimTelehealthEncounter: (sessionId: string, expectedUpdatedAt: string) => Promise<TelehealthSession>;
 }
 
 const HospitalContext = createContext<HospitalContextType | undefined>(undefined);
@@ -1067,6 +1072,20 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
   const [telehealthSessions, setTelehealthSessions] = useState<TelehealthSession[]>(() => isDemoRuntime ? initialTelehealthSessions : []);
   const [dischargedCensus, setDischargedCensus] = useState<DischargedCensusRecord[]>(() => isDemoRuntime ? initialDischargedCensus : []);
   const [activeTelehealthSession, setActiveTelehealthSession] = useState<TelehealthSession | null>(null);
+  // Preserve the exact command identifiers across retries within this authenticated
+  // session. Never sign a second note after a completion timeout or rejection.
+  const pendingTelehealthSigningRef = useRef(new Map<string, {
+    content: string;
+    signCommandId: string;
+    signIdempotencyKey: string;
+    signedEvidenceId?: string;
+    completionCommandId: string;
+    completionIdempotencyKey: string;
+  }>());
+  useEffect(() => {
+    pendingTelehealthSigningRef.current.clear();
+  }, [activeTenant?.tenantId, user?.uid]);
+
   const [activeTab, setActiveTab] = useState<string>('command');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [networkMode, setNetworkMode] = useState<'online' | 'offline' | 'degraded_sync'>('online');
@@ -2208,6 +2227,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
 
   const createTelehealthSession = async (data: {
     patientId: string;
+    facilityId?: string;
     type: TelehealthSession['type'];
     scheduledTime?: string;
     chiefComplaint: string;
@@ -2215,6 +2235,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
   }): Promise<TelehealthSession> => {
     const result = await executeActiveTenantCommand<TelehealthSession>('CreateTelehealthSessionCommand', {
       patientId: data.patientId,
+      facilityId: data.facilityId,
       type: data.type,
       scheduledTime: data.scheduledTime,
       chiefComplaint: data.chiefComplaint,
@@ -2260,6 +2281,67 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const claimTelehealthEncounter = async (
+    sessionId: string,
+    expectedUpdatedAt: string
+  ): Promise<TelehealthSession> => {
+    const result = await executeActiveTenantCommand<TelehealthSession>(
+      'ClaimTelehealthEncounterCommand',
+      { sessionId, expectedUpdatedAt }
+    );
+    if (!result.success || !result.data) {
+      throw new Error(result.error?.message || 'Encounter acceptance was rejected.');
+    }
+    const authoritative = result.data;
+    setTelehealthSessions((current) =>
+      current.map((item) => item.id === sessionId ? authoritative : item)
+    );
+    return authoritative;
+  };
+
+  const repairTelehealthRoomToken = async (
+    sessionId: string,
+    expectedUpdatedAt: string
+  ): Promise<TelehealthSession> => {
+    const result = await executeActiveTenantCommand<TelehealthSession>(
+      'RepairTelehealthRoomTokenCommand',
+      { sessionId, expectedUpdatedAt }
+    );
+    if (!result.success || !result.data) {
+      throw new Error(result.error?.message || 'Legacy telehealth room repair was rejected.');
+    }
+    const authoritative = result.data;
+    setTelehealthSessions((previous) =>
+      previous.map((item) => item.id === sessionId ? authoritative : item)
+    );
+    if (activeTelehealthSession?.id === sessionId) {
+      setActiveTelehealthSession(authoritative);
+    }
+    return authoritative;
+  };
+
+  const cancelUnusedTelehealthSession = async (
+    sessionId: string,
+    expectedUpdatedAt: string,
+    reason: string
+  ): Promise<TelehealthSession> => {
+    const result = await executeActiveTenantCommand<TelehealthSession>(
+      'CancelUnusedTelehealthEncounterCommand',
+      { sessionId, expectedUpdatedAt, reason }
+    );
+    if (!result.success || !result.data) {
+      throw new Error(result.error?.message || 'Unused encounter cancellation was rejected.');
+    }
+    const authoritative = result.data;
+    setTelehealthSessions((previous) =>
+      previous.map((item) => item.id === sessionId ? authoritative : item)
+    );
+    if (activeTelehealthSession?.id === sessionId) {
+      setActiveTelehealthSession(authoritative);
+    }
+    return authoritative;
+  };
+
   const completeTelehealthSession = async (
     sessionId: string,
     note?: Partial<TelehealthSoapNote>,
@@ -2291,36 +2373,85 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       note?.plan || '',
     ].join('\n');
 
-    const signed = await executeActiveTenantCommand<{
-      evidenceId: string;
-      canonicalDocumentId?: string;
-    }>('SignClinicalNoteCommand', {
-      encounterId: session.encounterId,
-      patientId: session.patientId,
-      category: 'SOAP',
-      content,
-      acceptedStructuredData: {
-        diagnoses: (note?.icd10Codes || []).map((item) => ({
-          code: item.code,
-          description: item.description,
-          verificationStatus: 'CONFIRMED',
-        })),
-      },
-    });
+    const tenantScope = String(activeTenant?.tenantId || user?.tenantId || session.tenantId || '');
+    if (!tenantScope) throw new Error('TELEHEALTH_TENANT_CONTEXT_REQUIRED');
+    const key = `${tenantScope}:${sessionId}`;
+    let pending = pendingTelehealthSigningRef.current.get(key);
+    if (pending && pending.content !== content) {
+      throw new Error(
+        'TELEHEALTH_SIGNED_NOTE_PENDING_COMPLETION: note content changed after signing began. ' +
+        'Do not sign a second note; complete or reconcile the existing signed evidence first.'
+      );
+    }
+    if (!pending) {
+      pending = {
+        content,
+        signCommandId: `cmd_${crypto.randomUUID()}`,
+        signIdempotencyKey: `idem_${crypto.randomUUID()}`,
+        completionCommandId: `cmd_${crypto.randomUUID()}`,
+        completionIdempotencyKey: `idem_${crypto.randomUUID()}`,
+      };
+      pendingTelehealthSigningRef.current.set(key, pending);
+    }
+    if (!pending.signedEvidenceId) {
+      // Durable read-only recovery survives a browser reload and prevents
+      // a second signature after the previous request committed remotely.
+      const preflight = await AuthClient.authorizedFetch(
+        '/api/telehealth/signed-evidence',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          cache: 'no-store',
+          body: JSON.stringify({ tenantId: tenantScope, sessionId, content }),
+        },
+        tenantScope
+      );
+      const existing = await preflight.json().catch(() => ({}));
+      if (!preflight.ok) {
+        throw new Error(existing.error || 'TELEHEALTH_COMPLETION_PREFLIGHT_FAILED');
+      }
+      if (typeof existing.signedEvidenceId === 'string' && existing.signedEvidenceId) {
+        pending.signedEvidenceId = existing.signedEvidenceId;
+      }
+    }
+    if (!pending.signedEvidenceId) {
+      const signed = await executeActiveTenantCommand<{
+        evidenceId: string;
+        canonicalDocumentId?: string;
+      }>('SignClinicalNoteCommand', {
+        encounterId: session.encounterId,
+        patientId: session.patientId,
+        category: 'SOAP',
+        content,
+        acceptedStructuredData: {
+          diagnoses: (note?.icd10Codes || []).map((item) => ({
+            code: item.code,
+            description: item.description,
+            verificationStatus: 'CONFIRMED',
+          })),
+        },
+      }, {
+        commandId: pending.signCommandId,
+        idempotencyKey: pending.signIdempotencyKey,
+      });
 
-    if (!signed.success || !signed.entityId) {
-      throw new Error(signed.error?.message || 'Telehealth clinical note signing failed.');
+      if (!signed.success || !signed.entityId) {
+        throw new Error(signed.error?.message || 'Telehealth clinical note signing failed.');
+      }
+      pending.signedEvidenceId = signed.entityId;
     }
 
     const result = await executeActiveTenantCommand<TelehealthSession>(
       'CompleteTelehealthSessionCommand',
-      { sessionId, signedEvidenceId: signed.entityId }
+      { sessionId, signedEvidenceId: pending.signedEvidenceId },
+      { commandId: pending.completionCommandId, idempotencyKey: pending.completionIdempotencyKey }
     );
 
     if (!result.success || !result.data) {
       throw new Error(result.error?.message || 'Telehealth completion failed.');
     }
 
+    pendingTelehealthSigningRef.current.delete(key);
     const authoritative = result.data;
     setTelehealthSessions((previous) =>
       previous.map((item) => item.id === sessionId ? authoritative : item)
@@ -2380,6 +2511,9 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
         createTelehealthSession,
         updateTelehealthSession,
         completeTelehealthSession,
+        cancelUnusedTelehealthSession,
+        repairTelehealthRoomToken,
+        claimTelehealthEncounter,
       }}
     >
       {children}

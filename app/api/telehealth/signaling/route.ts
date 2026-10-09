@@ -27,7 +27,7 @@ function assertTenant(tenantId: string): void {
 function assertRoomToken(roomToken: string): void {
   // New governed media rooms use a full UUID-backed token. Short historical
   // demo tokens are intentionally not accepted as patient join capabilities.
-  if (!roomToken.startsWith('ROOM-') || roomToken.length < 35) {
+  if (!/^ROOM-[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/.test(roomToken)) {
     throw new Error('TELEHEALTH_MEDIA_ROOM_TOKEN_INVALID');
   }
 }
@@ -58,7 +58,7 @@ async function authorizeClinician(
 ): Promise<string> {
   const { context } = await deriveAuthoritativeContext(req, tenantId);
   const clinicalRole = context.roles.some((role) =>
-    ['DOCTOR', 'CONSULTANT', 'NURSE', 'SYSTEM_ADMIN'].includes(
+    ['DOCTOR', 'CONSULTANT'].includes(
       String(role || '').toUpperCase()
     )
   );
@@ -75,11 +75,8 @@ async function authorizeClinician(
 
   if (!encounter.exists) throw new Error('TELEHEALTH_ENCOUNTER_NOT_FOUND');
   const assignedProviderId = clean(encounter.data()?.assignedProviderId);
-  if (
-    assignedProviderId &&
-    assignedProviderId !== context.actorId &&
-    !context.roles.includes('SYSTEM_ADMIN')
-  ) {
+  if (!assignedProviderId || assignedProviderId !== context.actorId ||
+      !context.facilityIds?.includes(clean(encounter.data()?.facilityId))) {
     throw new Error('TELEHEALTH_CLINICIAN_ASSIGNMENT_MISMATCH');
   }
   return context.actorId;

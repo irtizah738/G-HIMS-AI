@@ -47,6 +47,12 @@ export class PatientContextIntegrityGuard {
     context: CommandContext,
     command: BaseCommand
   ): Promise<PatientContextIntegrityDecision> {
+    // The removal service enforces patient status transactionally. Allow the
+    // command bus to replay its completed idempotency reservation on retry.
+    if (command.commandType === 'RemovePatientRecordCommand') {
+      return { ok: true };
+    }
+
     const payload = asRecord(command.payload);
     const patientId = normalize(payload.patientId);
     const encounterId = normalize(

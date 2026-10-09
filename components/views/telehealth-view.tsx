@@ -40,6 +40,7 @@ export function TelehealthView() {
     createTelehealthSession,
     completeTelehealthSession,
     cancelUnusedTelehealthSession,
+    repairTelehealthRoomToken,
     networkMode,
   } = useHospital();
 
@@ -78,6 +79,10 @@ export function TelehealthView() {
     setPlan('');
     setCancellationReason('');
   }, [selected?.id]);
+
+  const roomTokenValid = selected
+    ? /^ROOM-[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/.test(selected.roomToken || '')
+    : false;
 
   const replaceSession = (next: TelehealthSession) => {
     setSessions((current) =>
@@ -155,6 +160,14 @@ export function TelehealthView() {
       }
       return result.data;
     }, 'Interrupted telehealth session recovered from the last authoritative state.');
+  };
+
+  const repairLegacyRoom = async () => {
+    if (!selected) return;
+    await run(
+      () => repairTelehealthRoomToken(selected.id, selected.updatedAt),
+      'The obsolete media-room link was replaced. Share the new private join link with the intended patient.'
+    );
   };
 
   const cancelUnusedEncounter = async () => {
@@ -326,7 +339,24 @@ export function TelehealthView() {
                 </p>
               </div>
 
-              {!['COMPLETED', 'CANCELLED'].includes(selected.status) && selected.tenantId && (
+              {!['COMPLETED', 'CANCELLED'].includes(selected.status) && !roomTokenValid && (
+                <div role="alert" className="space-y-2 rounded-xl border border-amber-300 bg-amber-50 p-4 text-xs dark:border-amber-900 dark:bg-amber-950/20">
+                  <p className="font-semibold">Legacy media-room credential cannot start a secure call.</p>
+                  <p>Repair the obsolete room link or cancel the unused consultation below.
+                    A media error never authorizes clinical signing or patient deletion.</p>
+                  <button
+                    type="button"
+                    data-testid="telehealth-repair-media-room"
+                    disabled={busy || networkMode === 'offline'}
+                    onClick={() => void repairLegacyRoom()}
+                    className="rounded-lg border border-amber-600 px-3 py-2 font-bold disabled:opacity-50"
+                  >
+                    Repair secure room link (audited)
+                  </button>
+                </div>
+              )}
+
+              {!['COMPLETED', 'CANCELLED'].includes(selected.status) && selected.tenantId && roomTokenValid && (
                 <TelehealthCallPanel
                   key={`media:${selected.id}:${selected.roomToken}`}
                   session={selected}

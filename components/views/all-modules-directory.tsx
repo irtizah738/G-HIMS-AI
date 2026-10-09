@@ -145,6 +145,22 @@ export function AllModulesDirectory() {
         status: 'REGISTERED',
       },
       {
+        domainNumber: 4,
+        id: 'inpatient-admission-transitions',
+        name: 'Inpatient Admissions & Governed Care Transitions',
+        category: 'Clinical & Patient Care',
+        badge: 'Admission Authority',
+        description:
+          'Governed IPD admissions, OPD-to-IPD continuity, bed/census assignment and receiving-clinician handoff. Production qualification pending.',
+        icon: BedDouble,
+        accentColor: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 border-indigo-200 dark:border-indigo-800',
+        primaryMetric: 'Unverified',
+        primaryMetricLabel: 'Staging admission qualification required',
+        targetTab: 'beds',
+        standards: ['Encounter continuity', 'Auditable clinical handoff'],
+        status: 'BUILDING',
+      },
+      {
         domainNumber: 5,
         id: 'nursing-emar',
         name: 'Inpatient Nursing Care Plans & eMAR Administration',

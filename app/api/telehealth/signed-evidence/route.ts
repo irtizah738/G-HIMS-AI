@@ -49,7 +49,8 @@ export async function POST(req: NextRequest) {
       return fail('TELEHEALTH_ENCOUNTER_SCOPE_INVALID', 409);
     }
     const assigned = String(encounter.data()?.assignedProviderId || '');
-    if (!assigned || assigned !== context.actorId) {
+    if (!assigned || assigned !== context.actorId ||
+        !context.facilityIds?.includes(String(encounter.data()?.facilityId || ''))) {
       return fail('TELEHEALTH_SIGNING_ASSIGNMENT_MISMATCH', 403);
     }
     // Bounded single-field query avoids requiring an unregistered composite

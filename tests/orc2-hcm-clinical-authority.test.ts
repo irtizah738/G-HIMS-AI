@@ -37,7 +37,9 @@ describe('ORC-2 HCM clinical privilege authority', () => {
   test('directory pagination and clinical availability are facility-scoped', async () => {
     const directory = await source('lib/clinical/intelligence/consultant-directory-service.ts');
     const repo = await source('server/repositories/domain-state-repository.ts');
-    expect(directory).toContain('authorizedFacilities.has(');
+    expect(directory).toContain('effectiveFacilityIds.has(');
+    expect(directory).toContain('if (effectiveFacilityIds.size === 0) return [];');
+    expect(directory).not.toContain('authorizedFacilities.has(');
     expect(directory).toContain('memberFacilities.includes(facilityId)');
     expect(directory).toContain('memberDepartments.includes(departmentScopeId)');
     expect(directory).toContain("privilege.privilegeType === 'CONSULT_OPD'");

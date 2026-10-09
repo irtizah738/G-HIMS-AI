@@ -17,8 +17,6 @@ export interface TransactionPayload<TState = unknown> {
   eventPayload: Record<string, unknown>;
   auditReason?: string;
   auditMetadata?: Record<string, unknown>;
-  /** Sensitive aggregates may persist audit metadata without copying full PHI state. */
-  omitDomainStateFromAudit?: boolean;
   outboxTopic?: string;
   source?: DomainEventEnvelope['source'];
 }
@@ -60,6 +58,8 @@ export interface AtomicMutationParams {
   auditResourceId?: string;
   auditReason?: string;
   auditMetadata?: Record<string, unknown>;
+  /** Do not duplicate sensitive domain-state data in the audit record. */
+  omitDomainStateFromAudit?: boolean;
   outboxTopic?: string;
   source?: DomainEventEnvelope['source'];
   idempotencyKey?: string;

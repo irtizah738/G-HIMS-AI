@@ -1047,6 +1047,7 @@ interface HospitalContextType {
   }) => Promise<TelehealthSession>;
   updateTelehealthSession: (sessionId: string, updates: Partial<TelehealthSession>) => Promise<void>;
   completeTelehealthSession: (sessionId: string, note?: Partial<TelehealthSoapNote>, prescriptions?: TelehealthPrescription[]) => Promise<void>;
+  cancelUnusedTelehealthSession: (sessionId: string, expectedUpdatedAt: string, reason: string) => Promise<TelehealthSession>;
 }
 
 const HospitalContext = createContext<HospitalContextType | undefined>(undefined);
@@ -2260,6 +2261,28 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const cancelUnusedTelehealthSession = async (
+    sessionId: string,
+    expectedUpdatedAt: string,
+    reason: string
+  ): Promise<TelehealthSession> => {
+    const result = await executeActiveTenantCommand<TelehealthSession>(
+      'CancelUnusedTelehealthEncounterCommand',
+      { sessionId, expectedUpdatedAt, reason }
+    );
+    if (!result.success || !result.data) {
+      throw new Error(result.error?.message || 'Unused encounter cancellation was rejected.');
+    }
+    const authoritative = result.data;
+    setTelehealthSessions((previous) =>
+      previous.map((item) => item.id === sessionId ? authoritative : item)
+    );
+    if (activeTelehealthSession?.id === sessionId) {
+      setActiveTelehealthSession(authoritative);
+    }
+    return authoritative;
+  };
+
   const completeTelehealthSession = async (
     sessionId: string,
     note?: Partial<TelehealthSoapNote>,
@@ -2380,6 +2403,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
         createTelehealthSession,
         updateTelehealthSession,
         completeTelehealthSession,
+        cancelUnusedTelehealthSession,
       }}
     >
       {children}

@@ -35,7 +35,7 @@ function modeLabel(mode?: ConnectivityMode): string {
 }
 
 export function TelehealthView() {
-  const { hasRole, hasPrivilege } = useAuth();
+  const { hasRole, hasPrivilege, refreshAuth } = useAuth();
   const canSignTelehealth = hasPrivilege('SIGN_CLINICAL_NOTES') &&
     (hasRole('DOCTOR') || hasRole('CONSULTANT'));
   const {
@@ -216,7 +216,12 @@ export function TelehealthView() {
       ));
       setMessage('Clinical note signed and telehealth encounter completed.');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Telehealth signing failed.');
+      const failure = cause instanceof Error ? cause.message : 'Telehealth signing failed.';
+      setError(failure.includes('SIGN_CLINICAL_NOTES') || failure.includes('CLINICAL_PRIVILEGE_DENIED')
+        ? 'Clinical signing is blocked by HCM: the authenticated clinician lacks a current verified SIGN_CLINICAL_NOTES grant. An authorized credentialing officer must verify appointment, facility privileges and active roster, then refresh authorization. No administrative bypass is permitted.'
+        : failure.includes('TELEHEALTH_SIGNED_EVIDENCE_REVIEW_REQUIRED')
+          ? 'An existing signed telehealth note requires clinician review. Do not sign again. Reconcile the signed evidence with this encounter before completion.'
+          : failure);
     } finally {
       setBusy(false);
     }
@@ -416,11 +421,19 @@ export function TelehealthView() {
                   <textarea value={assessment} onChange={(event) => setAssessment(event.target.value)} placeholder="Assessment" className="min-h-20 w-full rounded-xl border bg-transparent p-2 text-sm" />
                   <textarea value={plan} onChange={(event) => setPlan(event.target.value)} placeholder="Plan" className="min-h-20 w-full rounded-xl border bg-transparent p-2 text-sm" />
                   {!canSignTelehealth && (
-                    <p role="alert" className="text-xs text-amber-700 dark:text-amber-300">
-                      Signing is unavailable: you need an active HCM-verified DOCTOR/CONSULTANT
-                      role with SIGN_CLINICAL_NOTES privilege. Use the credentialing workflow;
-                      an administrator cannot fabricate a clinical signature.
-                    </p>
+                    <div role="alert" className="space-y-2 text-xs text-amber-700 dark:text-amber-300">
+                      <p>Signing is unavailable: your HCM-verified DOCTOR/CONSULTANT role and
+                        SIGN_CLINICAL_NOTES privilege must both be active. A credentialing officer
+                        must confirm the employee, license, facility assignment and privilege grant.</p>
+                      <button type="button" disabled={busy || networkMode === 'offline'}
+                        onClick={() => void refreshAuth().then(
+                          () => setMessage('Authorization refreshed. Clinical signing still requires server-side privilege verification.'),
+                          (err: unknown) => setError(err instanceof Error ? err.message : 'Authorization refresh failed.')
+                        )}
+                        className="rounded-lg border px-3 py-2 font-semibold disabled:opacity-50">
+                        Refresh my clinical authorization
+                      </button>
+                    </div>
                   )}
                   <button
                     type="button"

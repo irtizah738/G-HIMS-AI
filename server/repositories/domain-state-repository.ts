@@ -62,6 +62,41 @@ export class DomainStateRepository {
     return snapshot.docs.map((document) => document.data() as T);
   }
 
+  /**
+   * Read tenant-scoped rows with their canonical Firestore document identity.
+   * Authorization and identity joins must not depend on duplicated ID fields
+   * in document bodies, which are optional in existing membership records.
+   */
+  public static async listWithDocumentIds<T extends object>(
+    tenantId: string,
+    collectionName: string,
+    limit = 500
+  ): Promise<Array<T & { documentId: string }>> {
+    const db = getAdminFirestore();
+    if (!db) {
+      if (!canReadEphemeralRepository()) return [];
+      return TransactionManager.getEphemeralCollectionForTesting(
+        tenantId,
+        collectionName
+      ).slice(0, limit).map((row) => ({
+        ...row,
+        documentId: String(row.userId || row.id || row.documentId || ''),
+      })) as Array<T & { documentId: string }>;
+    }
+
+    const snapshot = await db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection(collectionName)
+      .limit(limit)
+      .get();
+
+    return snapshot.docs.map((document) => ({
+      ...(document.data() as T),
+      documentId: document.id,
+    }));
+  }
+
   public static async queryEqual<T>(
     tenantId: string,
     collectionName: string,

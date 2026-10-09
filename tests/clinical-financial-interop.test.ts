@@ -22,6 +22,7 @@ describe('G-HIMS Clinical Safety, Financial & Interoperability Engine', () => {
     roles: ['DOCTOR'],
     permissions: ['CLINICAL_WRITE', 'PATIENT_READ'],
     clinicalPrivileges: ['PRESCRIBE', 'ORDER_LAB', 'ORDER_RADIOLOGY'],
+    facilityIds: ['facility-emergency-test'],
     correlationId: 'corr_doc_sarah',
     requestId: 'req_doc_sarah',
   };
@@ -153,6 +154,7 @@ describe('G-HIMS Clinical Safety, Financial & Interoperability Engine', () => {
 
       const encResult = await CommandBus.dispatch(doctorContext, createCmd);
       expect(encResult.success).toBe(true);
+      expect((encResult.data as any)?.encounter?.facilityId).toBe('facility-emergency-test');
       expect(encResult.entityId).toBeDefined();
       const encounterId = encResult.entityId!;
 

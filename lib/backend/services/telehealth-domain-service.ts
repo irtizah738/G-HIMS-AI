@@ -8,6 +8,7 @@ import { TransactionManager } from '../transactions/transaction-manager';
 import { CommandContext, CommandResult } from '../types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import { TelehealthSession } from '@/lib/types/ghims';
+import { hasTelehealthClinicalActivity } from '@/lib/clinical/telehealth-unused-care-policy';
 import { PatientMPI } from '@/types/mpi';
 import {
   activateCareContext,
@@ -57,29 +58,6 @@ export interface CancelUnusedTelehealthEncounterPayload {
   sessionId: string;
   expectedUpdatedAt: string;
   reason: string;
-}
-
-function hasTelehealthClinicalActivity(session: TelehealthSession): boolean {
-  const note = session.soapNote as unknown;
-  if (!note || typeof note !== 'object' || Array.isArray(note)) return true;
-  const fields = note as Record<string, unknown>;
-  if (Object.values(fields).some(value =>
-    Array.isArray(value) ? value.length > 0 :
-    typeof value === 'string' ? value.trim().length > 0 :
-    value !== null && value !== undefined && value !== false
-  )) return true;
-  if (!Array.isArray(session.prescriptions) || !Array.isArray(session.transcription)) return true;
-  if (session.prescriptions.length || session.transcription.length) return true;
-  const duration = Number(session.callDurationSeconds);
-  if (!Number.isFinite(duration) || duration !== 0 || session.isRecording !== false) return true;
-  const vital = session.vitals as unknown;
-  if (!vital || typeof vital !== 'object' || Array.isArray(vital)) return true;
-  const v = vital as Record<string, unknown>;
-  return Boolean(session.signedEvidenceId) ||
-    Boolean(String(v.bp || '').trim()) ||
-    ['hr', 'spo2', 'temp', 'glucose', 'respiratoryRate', 'rhythm', 'connectedDevice'].some(field =>
-      typeof v[field] === 'number' ? v[field] !== 0 : Boolean(String(v[field] || '').trim())
-    );
 }
 
 /** Transactionally require that no clinical, financial or media-room evidence references the encounter. */

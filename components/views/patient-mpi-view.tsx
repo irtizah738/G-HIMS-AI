@@ -290,7 +290,7 @@ export function PatientMpiView() {
       setVitalsStatus('Select a specific active encounter before recording vitals. If there is no encounter, create an OPD visit or open an ER encounter first.');
       return;
     }
-    const bp = /^(\\d{2,3})\\s*\\/\\s*(\\d{2,3})$/.exec(newBp.trim());
+    const bp = /^([0-9]{2,3}) *[/] *([0-9]{2,3})$/.exec(newBp.trim());
     if (
       typeof newHeartRate !== 'number' || newHeartRate < 20 || newHeartRate > 300 ||
       !bp || Number(bp[1]) < Number(bp[2]) ||

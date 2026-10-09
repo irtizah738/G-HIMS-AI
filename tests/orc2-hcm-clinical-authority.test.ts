@@ -25,4 +25,16 @@ describe('ORC-2 HCM clinical privilege authority', () => {
       expect(auth).toContain(privilege+":['"+privilege+"']");
     }
   });
+  test('directory pagination and clinical availability are facility-scoped', async () => {
+    const directory = await source('lib/clinical/intelligence/consultant-directory-service.ts');
+    const repo = await source('server/repositories/domain-state-repository.ts');
+    expect(directory).toContain('authorizedFacilities.has(');
+    expect(directory).toContain('listAllWithDocumentIds<EmployeeMaster>');
+    expect(directory).toContain('listAllWithDocumentIds<Membership>');
+    expect(directory).toContain('String(privilege.facilityId ||');
+    expect(directory).toContain('String(shift.facilityId ||');
+    expect(repo).toContain('DOMAIN_DIRECTORY_LIMIT_EXCEEDED');
+    expect(repo).toContain('orderBy(FieldPath.documentId())');
+  });
+
 });

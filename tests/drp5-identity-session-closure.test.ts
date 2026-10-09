@@ -64,8 +64,8 @@ describe('DRP-5 identity and session closure', () => {
     expect(authz).toContain("membership.status === 'SUSPENDED'");
     expect(authz).toContain("membership.status === 'PENDING'");
     expect(authz).toContain('resolveCredentialGatedPrivileges');
-    expect(authz).toContain("credential.expiryDate<today");
-    expect(authz).toContain("privilege.effectiveUntil<today");
+    expect(authz).toContain('hcmDateWindowActive(credential.issueDate, credential.expiryDate, today)');
+    expect(authz).toContain('hcmDateWindowActive(privilege.effectiveFrom, privilege.effectiveUntil, today)');
 
     expect(membership).toContain("return 'PENDING'");
   });

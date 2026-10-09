@@ -5,6 +5,8 @@
  */
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { FieldPath, type DocumentReference, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
+import { credentialsValid } from '@/lib/clinical/intelligence/consultant-directory-service';
+import type { EmployeeCredential } from '@/types/hcm-advanced';
 
 type RecordRow = { documentId: string; [key: string]: unknown };
 
@@ -55,9 +57,21 @@ export function calculateOrcIntegrityCounts(input: {
 }): Record<string, number> {
   const userIds = new Set(input.users.filter(u=>active(u.status)).map(u=>u.documentId));
   const employeeIds = new Set(input.employees.map(e=>str(e.employeeId)).filter(Boolean));
+  // Mirror the live server's mandatory credential policy: a VERIFIED label
+  // without independent verification provenance or valid dates is insufficient.
+  const groupedCredentials = new Map<string, EmployeeCredential[]>();
+  for (const row of input.credentials) {
+    const employeeId = str(row.employeeId);
+    if (!employeeId) continue;
+    const bucket = groupedCredentials.get(employeeId) || [];
+    bucket.push(row as unknown as EmployeeCredential);
+    groupedCredentials.set(employeeId, bucket);
+  }
+  const now = Date.now();
   const credentialsByEmployee = new Set(
-    input.credentials.filter(c=>c.isMandatoryForPractice === true && str(c.verificationStatus)==='VERIFIED')
-      .map(c=>str(c.employeeId)).filter(Boolean)
+    [...groupedCredentials.entries()]
+      .filter(([, records]) => credentialsValid(records, now))
+      .map(([employeeId]) => employeeId)
   );
   const cleared = new Set(input.encounters.filter(e=>
     str(e.financialClearanceState)==='FINAL_BILLING_CLEARED'

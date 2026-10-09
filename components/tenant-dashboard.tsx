@@ -130,10 +130,10 @@ export function TenantDashboard() {
   const pendingLeakageCount = mismatches.filter((m) => m.status === 'pending_review').length;
 
   return (
-    <div className="min-h-screen bg-slate-100/60 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors">
+    <div data-ghims-shell="dashboard" className="min-h-dvh min-w-0 bg-slate-100/60 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors">
       {/* Top Main Navigation Bar */}
       <header className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 sticky top-0 z-30 shadow-xs transition-colors">
-        <div className="w-full px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3">
+        <div className="w-full px-3 sm:px-5 lg:px-6 h-14 flex items-center justify-between gap-2 sm:gap-3">
           {/* Left Brand and Mobile Toggle */}
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             {/* Mobile / Tablet Hamburger Drawer Button */}
@@ -216,14 +216,14 @@ export function TenantDashboard() {
         {/* Content View with dynamic margin offset for persistent sidebar */}
         <div
           className={`flex-1 min-w-0 flex flex-col transition-all duration-300 ease-in-out ${
-            isSidebarCollapsed ? 'lg:ml-20' : 'lg:ml-64'
+            isSidebarCollapsed ? 'lg:ml-16' : 'lg:ml-60'
           }`}
         >
           {/* Global Hospital Operational Context Bar (Facility, Unit, User, Role, Active Patient, Workflow) */}
           <HospitalOperationalContextBar onOpenPatientSearch={() => setCommandPaletteOpen(true)} />
 
-          <main className="flex-1 min-w-0 p-3 sm:p-5 lg:p-8 pb-28">
-            <div className="max-w-7xl mx-auto w-full">
+          <main id="hospital-main-content" tabIndex={-1} className="flex-1 min-w-0 px-3 py-4 sm:px-5 lg:px-6 lg:py-5 pb-20">
+            <div className="w-full min-w-0 max-w-[1600px] mx-auto">
             {activeTab === 'patient-portal' && <PatientPortalView />}
             {activeTab === 'directory' && (
               <RbacModuleGate moduleId="directory" moduleName="All Modules Directory">

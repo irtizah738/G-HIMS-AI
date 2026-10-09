@@ -22,7 +22,7 @@ export default async function TenantLayout({ children, params }: TenantLayoutPro
     <TenantProvider initialTenantId={tenantId}>
       <TenantRouteAuthorityGuard routeTenantId={tenantId}>
       <RbacProvider>
-        <div className="min-h-screen bg-slate-100/60 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors">
+        <div data-ghims-shell="tenant" className="min-h-dvh min-w-0 bg-slate-100/60 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors">
           {/* Top Tenant Navigation Bar */}
           <TenantShellHeader />
 
@@ -30,7 +30,7 @@ export default async function TenantLayout({ children, params }: TenantLayoutPro
           <SyncStatusBanner tenantId={tenantId} />
 
           {/* Dynamic Route Content */}
-          <main className="flex-1 w-full max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+          <main id="tenant-main-content" className="flex-1 w-full min-w-0 max-w-[1600px] mx-auto px-3 py-4 sm:px-5 lg:px-6 lg:py-5">
             {children}
           </main>
         </div>

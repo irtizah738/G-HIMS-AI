@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTenant } from '@/lib/tenant/context';
@@ -17,6 +17,18 @@ export function TenantShellHeader() {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const router = useRouter();
 
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setDropdownOpen(false);
+        document.getElementById('tenant-switcher-dropdown')?.focus();
+      }
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [dropdownOpen]);
+
   const handleSelectTenant = async (newTenantId: string) => {
     setDropdownOpen(false);
     await switchTenant(newTenantId);
@@ -25,7 +37,7 @@ export function TenantShellHeader() {
 
   return (
     <header className="sticky top-0 z-40 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 shadow-xs transition-colors">
-      <div className="w-full px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3">
+      <div className="w-full px-3 sm:px-5 lg:px-6 h-14 flex items-center justify-between gap-2 sm:gap-3">
         {/* Left: Brand & Hospital Switcher */}
         <div className="flex items-center gap-2 sm:gap-3">
           <Link
@@ -44,6 +56,8 @@ export function TenantShellHeader() {
             <button
               id="tenant-switcher-dropdown"
               type="button"
+              aria-expanded={dropdownOpen}
+              aria-controls="tenant-switcher-options"
               onClick={() => setDropdownOpen(!dropdownOpen)}
               className="h-9 flex items-center gap-2 px-2.5 sm:px-3 rounded-xl border border-slate-200/90 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 bg-slate-50/90 dark:bg-slate-850 hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition-all cursor-pointer shadow-2xs"
             >
@@ -71,7 +85,7 @@ export function TenantShellHeader() {
                   className="fixed inset-0 z-40 bg-transparent"
                   onClick={() => setDropdownOpen(false)}
                 />
-                <div className="absolute top-full left-0 mt-1.5 w-80 bg-white dark:bg-slate-850 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-2 z-50 space-y-1 animate-in fade-in zoom-in-95 duration-150">
+                <div id="tenant-switcher-options" role="group" aria-label="Hospital tenants" className="absolute top-full left-0 mt-1.5 w-[min(20rem,calc(100vw-1.5rem))] bg-white dark:bg-slate-850 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 p-2 z-50 space-y-1 animate-in fade-in duration-150">
                   <div className="px-3 py-2 text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
                     <span>Hospital Tenants</span>
                     <span className="text-blue-600 dark:text-blue-400 font-bold">Multi-Tenant</span>
@@ -84,6 +98,7 @@ export function TenantShellHeader() {
                           key={t.id}
                           type="button"
                           onClick={() => handleSelectTenant(t.id)}
+                          aria-current={isSelected ? "true" : undefined}
                           className={`w-full text-left px-3 py-2.5 rounded-xl text-xs flex items-center justify-between transition-colors cursor-pointer ${
                             isSelected
                               ? 'bg-blue-50 dark:bg-blue-950/50 text-blue-900 dark:text-blue-300 font-bold border border-blue-200 dark:border-blue-800'

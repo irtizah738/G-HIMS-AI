@@ -28,6 +28,7 @@ import { HcmIntelligenceDomainService } from '../services/hcm-intelligence-domai
 import { ResourceCapacityDomainService } from '../services/resource-capacity-domain-service';
 import { PatientIdentityDomainService } from '../services/patient-identity-domain-service';
 import { PatientMergeDomainService } from '../services/patient-merge-domain-service';
+import { PatientRecordRemovalDomainService } from '../services/patient-record-removal-domain-service';
 import { InpatientClinicalDomainService } from '../services/inpatient-clinical-domain-service';
 import { CareTransitionDomainService } from '../services/care-transition-domain-service';
 import { SurgicalCaseDomainService } from '../services/surgical-case-domain-service';
@@ -980,6 +981,15 @@ export class CommandBus {
               message: 'Patient registration must use the atomic patient+encounter registration endpoint.',
             },
           };
+          break;
+
+        case 'RemovePatientRecordCommand':
+          result = await PatientRecordRemovalDomainService.remove(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
           break;
 
         case 'MergePatientCommand':

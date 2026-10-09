@@ -105,7 +105,7 @@ export class PatientMergeDomainService {
         success: false,
         commandId,
         idempotencyKey,
-        error: { code: 'PRIMARY_ALREADY_MERGED', message: 'Primary patient is not an active authoritative record.' },
+        error: { code: 'PRIMARY_ALREADY_MERGED', message: primary.mergedIntoPatientId ? `Primary record was previously merged. Review surviving patient ${primary.mergedIntoPatientId} and select an active record before merging.` : 'Primary was previously merged; ask Health Information Management to verify the surviving identity.' },
       };
     }
 
@@ -214,15 +214,18 @@ export class PatientMergeDomainService {
       auditResourceType: 'PATIENT',
       auditResourceId: payload.primaryPatientId,
       auditReason: payload.mergeReason.trim(),
+      omitDomainStateFromAudit: true,
       outboxTopic: 'g-hims-patient-identity-events',
       idempotencyKey,
       commandId,
       correlationId: context.correlationId,
       domainState: primaryState,
+      expectedPrimaryServerVersion: Number((primary as PatientMPI & { _serverVersion?: number })._serverVersion || 0),
       additionalStateWrites: [{
         entityType: 'PATIENT_MPI',
         entityId: payload.secondaryPatientId,
         domainState: secondaryState,
+        expectedServerVersion: Number((secondary as PatientMPI & { _serverVersion?: number })._serverVersion || 0),
       }],
     });
 

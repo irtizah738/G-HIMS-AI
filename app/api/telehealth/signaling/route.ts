@@ -58,7 +58,7 @@ async function authorizeClinician(
 ): Promise<string> {
   const { context } = await deriveAuthoritativeContext(req, tenantId);
   const clinicalRole = context.roles.some((role) =>
-    ['DOCTOR', 'CONSULTANT', 'NURSE', 'SYSTEM_ADMIN'].includes(
+    ['DOCTOR', 'CONSULTANT'].includes(
       String(role || '').toUpperCase()
     )
   );

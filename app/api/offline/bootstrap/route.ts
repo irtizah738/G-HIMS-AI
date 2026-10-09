@@ -181,6 +181,7 @@ function authorizedCollections(roles: string[]): string[] {
       ...ADMIN_COLLECTIONS,
       ...SCM_COLLECTIONS,
       ...HCM_COLLECTIONS,
+      ...FACILITIES_COLLECTIONS,
     ];
   }
 

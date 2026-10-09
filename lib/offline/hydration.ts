@@ -32,6 +32,22 @@ export interface EdgeSnapshot {
    * NOT_APPLICABLE — this domain is unavailable to the actor by policy.
    */
   freshness?: 'CURRENT' | 'STALE' | 'PARTIAL' | 'UNHYDRATED' | 'DENIED' | 'FAILED' | 'NOT_APPLICABLE';
+  errorCode?: string;
+}
+
+/** Deterministic, private cache scope identity for session and HCM authorization revision. */
+async function secureAuthorityEpoch(
+  actorId: string,
+  sessionId: string,
+  authorizationRevision: string
+): Promise<string> {
+  const value = new TextEncoder().encode(
+    JSON.stringify({ actorId, sessionId, authorizationRevision })
+  );
+  const digest = await crypto.subtle.digest('SHA-256', value);
+  return Array.from(new Uint8Array(digest))
+    .map(byte => byte.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 export async function loadLocalEdgeSnapshot(

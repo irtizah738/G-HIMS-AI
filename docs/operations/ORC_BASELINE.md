@@ -14,10 +14,14 @@ Baseline: 2026-10-09. Source: G-HIMS-AI `main` PR #132 (`3836102b8`) and PR #133
 ## Evidence requirements
 Per ORC change: source SHA, test names, branch checks, staging deployment SHA, authenticated tenant/role/facility, sanitized command/event/audit identifiers, offline/failure injection evidence, and clinical/finance approvals as relevant.
 
-## Known unresolved checks
+## Source integration completed; operational checks outstanding
+
+As of October 9, ORC integrated PR #145 and Firebase staging preparation PR #146 are merged into `main` (baseline merge SHA `af9812c97290633159fedf538abd7be28dfe0e06`). This supersedes the earlier branch-level source concerns listed below. Full Hospital-0 operational acceptance remains 0/15 until deployed evidence exists.
+
+## Historical pre-integration blockers (retain for traceability)
 - PR #133 code merged after passing 73 CI checks; live consultant directory remains unverified.
-- Role-derived clinical privilege baseline in tenant membership is still subject to HCM clinical authorization review.
-- Tenant route and session race previously admitted cross-session bootstrap writes; ORC-1 branch addresses this.
+- **Addressed in merged code:** HCM credential and privilege authority was tightened in PR #145; deployed cross-role authority tests are still pending.
+- **Addressed in merged code:** ORC-1 and ORC-1B tenant/session cache guards were integrated; deployed tenant switch/recovery qualification remains outstanding.
 - Direct ER admission still requires deployed facility-scoped census, provisional identity and ER-to-IPD transfer qualification.
 - Recording vitals requires correct credential/privilege grant and explicit NEWS2 completeness.
 - Billing must pass collection -> GL/AR -> final reconciliation, including contention and network failure.

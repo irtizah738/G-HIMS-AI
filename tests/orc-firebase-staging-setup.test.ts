@@ -36,4 +36,46 @@ describe('ORC Firebase STAGING project and deployment isolation', () => {
     expect(guide).toContain('GHIMS_FIREBASE_PROJECT_ID_PRODUCTION');
     expect(guide).toContain('STAGING_PROJECT_ID.iam.gserviceaccount.com');
   });
+  test('preflight behavior rejects project collision and wrong-project Admin service accounts', () => {
+    const environment: Record<string,string> = {
+      PATH: process.env.PATH || '',
+      GHIMS_RUNTIME_MODE: 'STAGING',
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: 'STAGING',
+      GHIMS_FIREBASE_PROJECT_ID_STAGING: 'ghims-staging-isolated-test',
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING: 'ghims-staging-isolated-test',
+      GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'ghims-production-isolated-test',
+      FIREBASE_PROJECT_ID: 'ghims-staging-isolated-test',
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: 'ghims-staging-isolated-test',
+      FIRESTORE_DATABASE_ID: '(default)',
+      FIREBASE_CLIENT_EMAIL: 'test-admin@ghims-staging-isolated-test.iam.gserviceaccount.com',
+      FIREBASE_PRIVATE_KEY: 'fake-credential-for-preflight-only',
+    };
+    const run = (changes: Record<string,string> = {}) => {
+      const result = Bun.spawnSync(
+        [process.execPath, 'scripts/ops/drp-staging-preflight.ts'],
+        { cwd: process.cwd(), env: { ...environment, ...changes }, stdout: 'pipe', stderr: 'pipe' }
+      );
+      return {
+        exitCode: result.exitCode,
+        stdout: new TextDecoder().decode(result.stdout),
+        stderr: new TextDecoder().decode(result.stderr),
+      };
+    };
+    const valid = run();
+    expect(valid.exitCode).toBe(0);
+    expect(JSON.parse(valid.stdout).success).toBe(true);
+
+    const collision = run({ GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'ghims-staging-isolated-test' });
+    expect(collision.exitCode).not.toBe(0);
+    expect(JSON.parse(collision.stderr).code).toBe('STAGING_PROJECT_COLLISION');
+
+    const missingComparison = run({ GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: '' });
+    expect(missingComparison.exitCode).not.toBe(0);
+    expect(JSON.parse(missingComparison.stderr).code).toBe('STAGING_PRODUCTION_REFERENCE_REQUIRED');
+
+    const wrongAdmin = run({ FIREBASE_CLIENT_EMAIL: 'prod-admin@ghims-production-isolated-test.iam.gserviceaccount.com' });
+    expect(wrongAdmin.exitCode).not.toBe(0);
+    expect(JSON.parse(wrongAdmin.stderr).code).toBe('STAGING_SERVICE_ACCOUNT_PROJECT_MISMATCH');
+  });
+
 });

@@ -17,6 +17,7 @@ import type {
 function isClinicalRole(roles:string[]):boolean{
   const clinical=new Set([
     'doctor','physician','surgeon','nurse','pharmacist','radiologist',
+    'consultant','attending_physician','medical_officer','medical_director',
     'anesthesiologist','lab_tech','labtechnician'
   ]);
   return roles.some(role=>clinical.has(role.toLowerCase()));
@@ -25,6 +26,12 @@ function isClinicalRole(roles:string[]):boolean{
 function mapHcmPrivilegeToAuthorization(privilege: ClinicalPrivilege['privilegeType'] | string): string[] {
   const map: Record<string, string[]> = {
     CONSULT_OPD:['CONSULT_OPD'],
+    RECORD_VITALS:['RECORD_VITALS'],
+    TRIAGE_PATIENTS:['TRIAGE_PATIENTS'],
+    ADMIT_INPATIENT:['ADMIT_INPATIENT'],
+    DISCHARGE_INPATIENT:['DISCHARGE_INPATIENT'],
+    ADMINISTER_MEDICATIONS:['ADMINISTER_MEDICATIONS'],
+    EXECUTE_NURSING_CARE_PLAN:['EXECUTE_NURSING_CARE_PLAN'],
     PRESCRIBE_MEDICATION:['PRESCRIBE_MEDICATION','PRESCRIBE','ORDER_MEDICATIONS','SIGN_PRESCRIPTIONS'],
     PERFORM_GENERAL_SURGERY:['PERFORM_GENERAL_SURGERY','PERFORM_PROCEDURES'],
     PERFORM_CARDIOTHORACIC_SURGERY:['PERFORM_CARDIOTHORACIC_SURGERY','PERFORM_PROCEDURES'],
@@ -56,8 +63,7 @@ async function resolveCredentialGatedPrivileges(params:{
   roles:string[];
   facilityIds:string[];
   departmentIds:string[];
-  declaredClinicalPrivileges:string[];
-}):Promise<string[]>{
+ }):Promise<string[]>{
   if(!isClinicalRole(params.roles)) return [];
   const db=getAdminFirestore();
   if(!db) return [];
@@ -73,37 +79,9 @@ async function resolveCredentialGatedPrivileges(params:{
     return [];
   }
 
-  if(!employee && params.email){
-    const normalizedEmail=params.email.trim().toLowerCase();
-    const byEmail=await tenantRef.collection('employees')
-      .where('personalInfo.contactEmail','==',normalizedEmail).limit(2).get();
-    if(byEmail.size===1){
-      employee=byEmail.docs[0].data() as EmployeeMaster;
-    }else if(byEmail.size>1){
-      return [];
-    }
-  }
-
-  const credentialGatedRoleBaseline = new Set([
-    'ADMIT_INPATIENT',
-    'DISCHARGE_INPATIENT',
-    'RECORD_VITALS',
-    'TRIAGE_PATIENTS',
-    'UPDATE_BED_OCCUPANCY',
-    'EXECUTE_NURSING_CARE_PLAN',
-    'SIGN_CLINICAL_NOTES',
-    'SIGN_CLINICAL_NOTE',
-    'SIGN_SOAP_CLINICAL_NOTE',
-    'CONSULT_OPD',
-    'ORDER_LAB',
-    'ORDER_RADIOLOGY',
-    'ORDER_DIAGNOSTICS',
-    'ORDER_MEDICATIONS',
-    'SIGN_PRESCRIPTIONS',
-    'PRESCRIBE',
-    'PRESCRIBE_MEDICATION',
-    'ACKNOWLEDGE_CRITICAL_RESULT',
-  ]);
+  // Never infer clinical identity from email, which can be renamed or reused.
+  // HCM personnel authority must explicitly bind the authenticated Firebase UID.
+  if (!employee || employee.userId !== params.userId) return [];
 
   // Clinical authority has exactly one source of truth: the canonical HCM
   // employee -> mandatory credentials -> scoped ClinicalPrivilege chain.
@@ -137,16 +115,22 @@ async function resolveCredentialGatedPrivileges(params:{
   const departmentScope = new Set(
     params.departmentIds.map((id) => String(id || '').trim().toUpperCase()).filter(Boolean)
   );
-
-  // These are role-baseline clinical capabilities, not specialty privileges.
-  // They remain unavailable until the HCM employee has a valid mandatory
-  // credential. Specialty/high-risk capabilities are added only from explicit
-  // active HCM ClinicalPrivilege grants below.
-  const effective=new Set<string>(
-    params.declaredClinicalPrivileges.filter((value)=>
-      credentialGatedRoleBaseline.has(String(value).toUpperCase())
-    )
+  const employeeFacilities = new Set(
+    (employee.facilityIds || []).map((id) => String(id || '').trim().toUpperCase()).filter(Boolean)
   );
+  const employeeDepartments = new Set(
+    (employee.departmentIds || []).map((id) => String(id || '').trim().toUpperCase()).filter(Boolean)
+  );
+  if (
+    facilityScope.size === 0 ||
+    departmentScope.size === 0 ||
+    ![...facilityScope].some((id) => employeeFacilities.has(id)) ||
+    ![...departmentScope].some((id) => employeeDepartments.has(id))
+  ) return [];
+
+  // Role and membership metadata are descriptive only. Every clinical
+  // capability must come from a current HCM privilege grant.
+  const effective = new Set<string>();
   for(const privilege of privileges){
     if(
       privilege.status!=='GRANTED' ||
@@ -155,8 +139,9 @@ async function resolveCredentialGatedPrivileges(params:{
     ) continue;
     const privFacility = String(privilege.facilityId || '').trim().toUpperCase();
     const privDept = String(privilege.departmentId || '').trim().toUpperCase();
-    if(facilityScope.size>0 && privFacility && privFacility !== '*' && privFacility !== 'ALL' && !facilityScope.has(privFacility)) continue;
-    if(departmentScope.size>0 && privDept && privDept !== '*' && privDept !== 'ALL' && !departmentScope.has(privDept)) continue;
+    if (!privFacility || !privDept || !facilityScope.has(privFacility) ||
+        !departmentScope.has(privDept) || !employeeFacilities.has(privFacility) ||
+        !employeeDepartments.has(privDept)) continue;
     mapHcmPrivilegeToAuthorization(privilege.privilegeType)
       .forEach(value=>effective.add(value));
   }
@@ -221,9 +206,8 @@ export async function resolveAuthorizationContext(
         roles:membership.roles,
         facilityIds:membership.facilityIds,
         departmentIds:membership.departmentIds,
-        declaredClinicalPrivileges:membership.clinicalPrivileges,
-      })
-    : membership.clinicalPrivileges;
+       })
+    : [];
 
   return {
     uid: verifiedToken.uid,

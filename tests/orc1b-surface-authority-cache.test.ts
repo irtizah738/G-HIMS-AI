@@ -13,6 +13,17 @@ describe('ORC-1B safe multi-surface encrypted hydration',()=>{
     expect(secure).toContain('scope: snapshotScope');
     expect(secure).toContain("EDGE_SNAPSHOT_AUTHORITY_REQUIRED");
   });
+  test('unauthorized surfaces and failed server refreshes are not labelled CURRENT', async () => {
+    const server = await source('app/api/offline/bootstrap/route.ts');
+    const client = await source('lib/offline/hydration.ts');
+    const er = await source('components/emergency/governed-emergency-console.tsx');
+    expect(server).toContain("collections.length === 0 ? 'NOT_APPLICABLE' : 'CURRENT'");
+    expect(client).toContain("freshness: 'NOT_APPLICABLE'");
+    expect(client).toContain("freshness: 'FAILED'");
+    expect(client).toContain("errorCode: `EDGE_BOOTSTRAP_HTTP_${response.status}`");
+    expect(er).toContain('Projection: {source} · {hydrationStatus}');
+  });
+
   test('server revisions reflect verified roles, privileges, facility and department scope',async()=>{
     const server=await source('app/api/offline/bootstrap/route.ts');
     const client=await source('lib/offline/hydration.ts');

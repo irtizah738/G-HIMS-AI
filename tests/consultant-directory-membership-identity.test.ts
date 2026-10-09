@@ -20,8 +20,8 @@ describe('Consultant HCM membership identity guard', () => {
     const directory = await source('lib/clinical/intelligence/consultant-directory-service.ts');
     expect(directory).toContain('privilege.facilityId === facilityId');
     expect(directory).toContain('privilege.departmentId === departmentId');
-    expect(directory).toContain('memberFacilities.includes(facilityId)');
-    expect(directory).toContain('memberDepartments.includes(departmentScopeId)');
+    expect(directory).toContain('memberFacilityScope.includes(normalizedFacilityForMembership)');
+    expect(directory).toContain('MEMBERSHIP_DEPARTMENT_SCOPE_MISMATCH');
     expect(directory).toContain('shift.tenantId === context.tenantId');
     expect(directory).toContain('Boolean(credential.verifiedByActorId)');
   });

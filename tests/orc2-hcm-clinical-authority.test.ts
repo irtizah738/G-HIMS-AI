@@ -40,12 +40,12 @@ describe('ORC-2 HCM clinical privilege authority', () => {
     expect(directory).toContain('effectiveFacilityIds.has(');
     expect(directory).toContain('if (effectiveFacilityIds.size === 0) return [];');
     expect(directory).not.toContain('authorizedFacilities.has(');
-    expect(directory).toContain('memberFacilities.includes(facilityId)');
-    expect(directory).toContain('memberDepartments.includes(departmentScopeId)');
-    expect(directory).toContain("privilege.privilegeType === 'CONSULT_OPD'");
+    expect(directory).toContain('memberFacilityScope.includes(normalizedFacilityForMembership)');
+    expect(directory).toContain('MEMBERSHIP_DEPARTMENT_SCOPE_MISMATCH');
+    expect(directory).toContain("p.privilegeType === 'CONSULT_OPD'");
     expect(directory).toContain('listAllWithDocumentIds<EmployeeMaster>');
     expect(directory).toContain('listAllWithDocumentIds<Membership>');
-    expect(directory).toContain('String(privilege.facilityId ||');
+    expect(directory).toContain('String(p.facilityId ||');
     expect(directory).toContain('String(shift.facilityId ||');
     expect(repo).toContain('DOMAIN_DIRECTORY_LIMIT_EXCEEDED');
     expect(repo).toContain('orderBy(FieldPath.documentId())');

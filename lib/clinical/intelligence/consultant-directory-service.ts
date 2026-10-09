@@ -351,7 +351,7 @@ export class ConsultantDirectoryService {
           membership,
           credentials: credentialsByEmployee.get(employee.employeeId) || [],
           privileges: privilegesByEmployee.get(employee.employeeId) || [],
-          shifts: shiftsByEmployee.get(employee.employeeId) || [],
+          shifts: (shiftsByEmployee.get(employee.employeeId) || []).filter(shift => shift.tenantId === context.tenantId),
           facilityId: primaryFacilityId,
           departmentId: options.departmentId,
           now,

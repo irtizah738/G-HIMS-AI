@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import Image from 'next/image';
 import { useHospital } from '@/lib/context/hospital-context';
 import { useAuth as useFirebaseAuth } from '@/lib/firebase/auth-context';
@@ -88,6 +88,18 @@ export function CollapsibleSidebar({
   }
 
   const [searchTerm, setSearchTerm] = useState('');
+  // A desktop collapsed sidebar must still open as a readable mobile drawer.
+  const isNavigationCollapsed = isCollapsed && !mobileOpen;
+
+  // Mobile navigation behaves as a dismissible drawer, including keyboard use.
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileOpen(false);
+    };
+    window.addEventListener('keydown', dismissOnEscape);
+    return () => window.removeEventListener('keydown', dismissOnEscape);
+  }, [mobileOpen, setMobileOpen]);
 
   // Unified identity resolution adhering strictly to G-HIMS authentication and RBAC protocol
   const activeUser = useMemo(() => {
@@ -435,8 +447,9 @@ export function CollapsibleSidebar({
       {/* Sidebar Container */}
       <aside
         id="collapsible-main-sidebar"
-        className={`fixed top-0 lg:top-16 bottom-0 left-0 z-50 lg:z-20 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col transition-all duration-300 ease-in-out ${
-          isCollapsed ? 'w-20' : 'w-72 sm:w-80 lg:w-64 max-w-[85vw]'
+        aria-label="Hospital subsystem navigation"
+        className={`fixed top-0 lg:top-14 bottom-0 left-0 z-50 lg:z-20 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col transition-all duration-300 ease-in-out ${
+          isNavigationCollapsed ? 'w-72 sm:w-72 lg:w-16' : 'w-72 sm:w-72 lg:w-60 max-w-[85vw]'
         } ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         } shadow-2xl lg:shadow-none select-none`}
@@ -464,13 +477,14 @@ export function CollapsibleSidebar({
         </div>
 
         {/* Search / Collapse Toggle */}
-        <div className="p-3 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
-          {!isCollapsed ? (
+        <div className="p-2.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
+          {!isNavigationCollapsed ? (
             <div className="flex-1 relative">
               <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 pointer-events-none" />
               <input
                 type="text"
-                placeholder="Filter subsystems..."
+                placeholder="Find a module..." 
+                aria-label="Filter hospital modules"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-8 pr-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:bg-white dark:focus:bg-slate-750 focus:outline-hidden focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
@@ -506,15 +520,20 @@ export function CollapsibleSidebar({
         </div>
 
         {/* Scrollable Navigation List */}
-        <div className="flex-1 overflow-y-auto px-2 py-3 space-y-4 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto px-2 py-2.5 space-y-3 custom-scrollbar">
+          {filteredSections.length === 0 && !isNavigationCollapsed && (
+            <p role="status" className="px-3 py-4 text-sm text-slate-500 dark:text-slate-400">
+              No matching modules. Try another search.
+            </p>
+          )}
           {filteredSections.map((section, idx) => (
             <div key={section.title || idx} className="space-y-1">
-              {!isCollapsed && (
-                <div className="px-2 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+              {!isNavigationCollapsed && (
+                <div className="px-2 text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   {section.title}
                 </div>
               )}
-              {isCollapsed && idx > 0 && (
+              {isNavigationCollapsed && idx > 0 && (
                 <div className="my-2 border-t border-slate-100 dark:border-slate-800" />
               )}
 
@@ -528,14 +547,16 @@ export function CollapsibleSidebar({
                       key={item.id}
                       id={`sidebar-nav-${item.id}`}
                       onClick={() => handleSelectTab(item)}
-                      className={`w-full group relative flex items-center gap-3 rounded-xl transition-all cursor-pointer min-h-[42px] ${
-                        isCollapsed ? 'justify-center p-2.5' : 'px-2.5 py-2'
+                      aria-label={item.name}
+                      aria-pressed={isActive}
+                      className={`w-full group relative flex items-center gap-2.5 rounded-lg transition-colors cursor-pointer min-h-[44px] lg:min-h-[38px] ${
+                        isNavigationCollapsed ? 'justify-center px-2 py-1.5' : 'px-2.5 py-1.5'
                       } ${
                         isActive
                           ? 'bg-blue-600 text-white font-bold shadow-xs'
                           : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100/80 dark:hover:bg-slate-800/80 hover:text-slate-900 dark:hover:text-white font-medium'
                       }`}
-                      title={isCollapsed ? item.name : undefined}
+                      title={isNavigationCollapsed ? item.name : undefined}
                     >
                       <Icon
                         className={`w-4 h-4 shrink-0 transition-transform group-hover:scale-110 ${
@@ -543,9 +564,9 @@ export function CollapsibleSidebar({
                         }`}
                       />
 
-                      {!isCollapsed && (
+                      {!isNavigationCollapsed && (
                         <div className="flex-1 flex items-center justify-between text-left truncate gap-1.5">
-                          <span className="text-xs truncate">{item.name}</span>
+                          <span className="text-[13px] leading-snug truncate">{item.name}</span>
                           {(item as { badge?: string }).badge && (
                             <span
                               className={`px-1.5 py-0.5 rounded-full text-[10px] font-black shrink-0 ${
@@ -561,7 +582,7 @@ export function CollapsibleSidebar({
                       )}
 
                       {/* Tooltip on Collapsed */}
-                      {isCollapsed && (
+                      {isNavigationCollapsed && (
                         <div className="absolute left-full ml-2 px-2.5 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-800 text-white text-xs font-semibold whitespace-nowrap shadow-xl border border-slate-700 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 flex items-center">
                           <span>{item.name}</span>
                         </div>
@@ -576,7 +597,7 @@ export function CollapsibleSidebar({
 
         {/* User Name, Designation & Day/Night Mode Switcher Footer */}
         <div className="border-t border-slate-200/80 dark:border-slate-800 p-2 bg-slate-50/90 dark:bg-slate-900/90 backdrop-blur-xs mt-auto shrink-0">
-          {!isCollapsed ? (
+          {!isNavigationCollapsed ? (
             <div className="flex items-center justify-between gap-2 p-1.5 rounded-xl bg-white dark:bg-slate-850 border border-slate-200/80 dark:border-slate-750 shadow-2xs">
               {/* User Avatar + Name + Designation (Click to switch demo role) */}
               <div

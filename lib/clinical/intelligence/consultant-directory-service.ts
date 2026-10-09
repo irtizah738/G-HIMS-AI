@@ -280,6 +280,9 @@ export class ConsultantDirectoryService {
           ? new Set() // requested a facility the actor cannot access — return empty
           : actorFacilityIds; // no explicit request: use all authorized facilities
 
+    // An actor with no authorized facility must never enumerate HCM records.
+    if (effectiveFacilityIds.size === 0) return [];
+
     const [employees, memberships, credentials, privileges, shifts] = await Promise.all([
       DomainStateRepository.listAllWithDocumentIds<EmployeeMaster>(context.tenantId, 'employees'),
       DomainStateRepository.listAllWithDocumentIds<Membership>(context.tenantId, 'users'),
@@ -327,8 +330,7 @@ export class ConsultantDirectoryService {
       .filter((employee) =>
         employee.employmentStatus === 'ACTIVE' &&
         Boolean(employee.userId) &&
-        authorizedFacilities.has(String(employee.primaryFacilityId || '').trim().toUpperCase()) &&
-        (!requestedFacility || String(employee.primaryFacilityId || '').trim().toUpperCase() === requestedFacility)
+        effectiveFacilityIds.has(String(employee.primaryFacilityId || '').trim())
       )
       .map((employee): EligibleConsultant | null => {
         const membership = membershipByUser.get(String(employee.userId));
@@ -342,14 +344,14 @@ export class ConsultantDirectoryService {
 
         // ORC-2B: Facility-scope filter — actor can only see consultants at
         // their own authorized facilities.
-        if (effectiveFacilityIds.size > 0 && !effectiveFacilityIds.has(primaryFacilityId)) return null;
+        if (!effectiveFacilityIds.has(primaryFacilityId)) return null;
 
         const eligibility = ConsultantDirectoryService.assertConsultantEligibility({
           employee,
           membership,
           credentials: credentialsByEmployee.get(employee.employeeId) || [],
           privileges: privilegesByEmployee.get(employee.employeeId) || [],
-          shifts: shiftsByEmployee.get(employee.employeeId) || [],
+          shifts: (shiftsByEmployee.get(employee.employeeId) || []).filter(shift => shift.tenantId === context.tenantId),
           facilityId: primaryFacilityId,
           departmentId: options.departmentId,
           now,

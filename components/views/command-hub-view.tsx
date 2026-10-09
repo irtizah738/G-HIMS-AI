@@ -43,9 +43,9 @@ export function CommandHubView() {
   const waitingPatients = opdQueue.filter((q) => q.status === 'waiting').length;
 
   return (
-    <div className="space-y-6 pb-12">
+    <div className="space-y-4 pb-8">
       {/* Top Welcome & System Status Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
         <div>
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-blue-600/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold">
@@ -88,11 +88,11 @@ export function CommandHubView() {
       </div>
 
       {/* 4 Core Primary Metric Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
         {/* Bed Occupancy */}
         <div 
           onClick={() => setActiveTab('beds')}
-          className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs hover:border-blue-400 dark:hover:border-blue-600 transition-all cursor-pointer group"
+          className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs hover:border-blue-400 dark:hover:border-blue-600 transition-all cursor-pointer group"
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Bed Occupancy</span>
@@ -115,7 +115,7 @@ export function CommandHubView() {
         {/* Emergency Triage */}
         <div 
           onClick={() => setActiveTab('emergency')}
-          className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs hover:border-rose-400 dark:hover:border-rose-600 transition-all cursor-pointer group"
+          className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs hover:border-rose-400 dark:hover:border-rose-600 transition-all cursor-pointer group"
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Emergency & Trauma</span>
@@ -135,7 +135,7 @@ export function CommandHubView() {
         {/* OPD Clinic Queue */}
         <div 
           onClick={() => setActiveTab('opd')}
-          className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs hover:border-indigo-400 dark:hover:border-indigo-600 transition-all cursor-pointer group"
+          className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs hover:border-indigo-400 dark:hover:border-indigo-600 transition-all cursor-pointer group"
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Outpatient Clinic</span>
@@ -155,7 +155,7 @@ export function CommandHubView() {
         {/* Revenue Leakage Safeguard */}
         <div 
           onClick={() => setActiveTab('billing')}
-          className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs hover:border-emerald-400 dark:hover:border-emerald-600 transition-all cursor-pointer group"
+          className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs hover:border-emerald-400 dark:hover:border-emerald-600 transition-all cursor-pointer group"
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Revenue Catchment</span>
@@ -175,11 +175,11 @@ export function CommandHubView() {
       </div>
 
       {/* Main Operations Grid: Left Clinical & Revenue Alerts, Right Department Status */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 lg:gap-5">
         {/* Left Column: Point of Care Alerts & Quick Audits (7 Cols) */}
-        <div className="lg:col-span-7 space-y-6">
+        <div className="xl:col-span-7 space-y-4">
           {/* Revenue Leakage Catchment Section */}
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+          <div className="bg-white dark:bg-slate-900 rounded-xl p-4 sm:p-5 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/80 pb-3">
               <div>
                 <div className="flex items-center gap-2">
@@ -239,7 +239,7 @@ export function CommandHubView() {
           </div>
 
           {/* Clinical Protocol Workflows & DAG Runtime */}
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+          <div className="bg-white dark:bg-slate-900 rounded-xl p-4 sm:p-5 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/80 pb-3">
               <div>
                 <h2 className="text-base font-bold text-slate-900 dark:text-slate-100">
@@ -294,8 +294,8 @@ export function CommandHubView() {
         </div>
 
         {/* Right Column: Department Health & Quick Navigation (5 Cols) */}
-        <div className="lg:col-span-5 space-y-6">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+        <div className="xl:col-span-5 space-y-4">
+          <div className="bg-white dark:bg-slate-900 rounded-xl p-4 sm:p-5 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/80 pb-3">
               <h2 className="text-base font-bold text-slate-900 dark:text-slate-100">
                 Department Operations

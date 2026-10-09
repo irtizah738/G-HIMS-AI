@@ -158,7 +158,7 @@ export function HospitalOperationalContextBar({ onOpenPatientSearch }: Operation
       id="hospital-operational-context-bar"
       className="w-full bg-slate-900 text-slate-100 border-b border-slate-800 shadow-md transition-all select-none"
     >
-      <div className="w-full px-3 sm:px-6 lg:px-8 py-2 flex flex-wrap items-center justify-between gap-2.5 text-xs">
+      <div className="w-full px-3 sm:px-5 lg:px-6 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs">
         {/* SECTION 1: HOSPITAL / FACILITY & DEPARTMENT */}
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           {/* Facility with dropdown */}

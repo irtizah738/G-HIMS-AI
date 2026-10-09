@@ -16,6 +16,16 @@ describe('Consultant HCM membership identity guard', () => {
     expect(directory).not.toContain('.filter((membership) => membership.userId)');
   });
 
+  test('enforces matching facility and department for privileges, membership and roster', async () => {
+    const directory = await source('lib/clinical/intelligence/consultant-directory-service.ts');
+    expect(directory).toContain('privilege.facilityId === facilityId');
+    expect(directory).toContain('privilege.departmentId === departmentId');
+    expect(directory).toContain('membership.facilityIds.includes(facilityId)');
+    expect(directory).toContain('membership.departmentIds.includes(departmentId)');
+    expect(directory).toContain('shift.facilityId === facilityId && shift.departmentId === departmentId');
+    expect(directory).toContain('shift.tenantId === context.tenantId');
+  });
+
   test('rejects missing active membership and retains clinical gates', async () => {
     const directory = await source('lib/clinical/intelligence/consultant-directory-service.ts');
     expect(directory).toContain("String(membership.status || '').toUpperCase() === 'ACTIVE'");

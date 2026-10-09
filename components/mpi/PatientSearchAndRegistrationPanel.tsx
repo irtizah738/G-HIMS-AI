@@ -59,6 +59,8 @@ export function PatientSearchAndRegistrationPanel({
   // Filter existing patients. MRN and CNIC are exact identity lookups;
   // name/phone remain broader convenience searches.
   const filteredPatients = existingPatients.filter((p) => {
+    // Merged MRNs are retained as history, never as new registration targets.
+    if (['MERGED', 'REMOVED'].includes(String(p.status || 'ACTIVE').toUpperCase())) return false;
     if (!searchQuery.trim()) return true;
 
     const q = searchQuery.trim();

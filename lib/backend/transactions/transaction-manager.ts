@@ -58,6 +58,8 @@ export interface AtomicMutationParams {
   auditResourceId?: string;
   auditReason?: string;
   auditMetadata?: Record<string, unknown>;
+  /** Do not duplicate sensitive domain-state data in the audit record. */
+  omitDomainStateFromAudit?: boolean;
   outboxTopic?: string;
   source?: DomainEventEnvelope['source'];
   idempotencyKey?: string;
@@ -470,6 +472,7 @@ export class TransactionManager {
     auditResourceId?: string;
     auditReason?: string;
     auditMetadata?: Record<string, unknown>;
+    omitDomainStateFromAudit?: boolean;
     outboxTopic?: string;
     idempotencyKey: string;
     commandId: string;
@@ -523,7 +526,9 @@ export class TransactionManager {
       recordedAt: timestamp,
       reason: params.auditReason || `Executed ${params.eventType}`,
       metadata: params.auditMetadata || {},
-      ...(params.domainState !== undefined ? { newValue: params.domainState } : {}),
+      ...(!params.omitDomainStateFromAudit && params.domainState !== undefined
+        ? { newValue: params.domainState }
+        : {}),
     };
 
     const outbox: OutboxRecord = {

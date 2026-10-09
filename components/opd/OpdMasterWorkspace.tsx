@@ -3234,6 +3234,10 @@ export function OpdMasterWorkspace() {
           onInitiateNewRegistration={(initial) => {
             setActiveTab('REGISTRATION');
           }}
+          onPatientRemoved={(patientId) => {
+            setPatients((previous) => previous.filter((patient) => patient.id !== patientId));
+            void refreshAuthoritativeWorkspace();
+          }}
           onInitiateMergeRequest={(source, target, reason) => {
             recordEvent('MPI_MERGE_REQUESTED', `Merge request from ${source} to ${target}. Reason: ${reason}`);
             alert('MPI duplicate merge request submitted for Medical Records Administrator authorization.');

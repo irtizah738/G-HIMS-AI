@@ -34,12 +34,18 @@ import {
 import { formatCurrency } from '@/lib/utils';
 import { PatientConsultantRoutingModal, ConsultantDoctor } from '@/components/clinical/patient-consultant-routing-modal';
 import { PatientMergeModal } from '@/components/mpi/patient-merge-modal';
+import { PatientRecordRemovalModal } from '@/components/mpi/patient-record-removal-modal';
+import { useAuth } from '@/lib/auth/auth-context';
 import { useRBAC } from '@/lib/auth/rbac-context';
 import { AuthClient } from '@/lib/auth/auth-client';
 
 export function PatientMpiView() {
   const router = useRouter();
   const { patients, selectedPatientId, setSelectedPatientId, registerNewPatient, mergePatients, addClinicalNote, addVitals, beds } = useHospital();
+  const auth = useAuth();
+  const canRemove = auth.roles.some((role) =>
+    ['ADMIN', 'ADMINISTRATOR', 'SYSTEM_ADMIN', 'SUPER_ADMIN'].includes(String(role).toUpperCase())
+  );
   const { currentRole, hasPermission, activePatientId, roleDefinition } = useRBAC();
   
   const [searchFilter, setSearchFilter] = useState('');
@@ -47,6 +53,7 @@ export function PatientMpiView() {
   const [showWristbandModal, setShowWristbandModal] = useState(false);
   const [showRoutingModal, setShowRoutingModal] = useState(false);
   const [showMergeModal, setShowMergeModal] = useState(false);
+  const [removalCandidate, setRemovalCandidate] = useState<Patient | null>(null);
   const [mergeCandidateSecondaryId, setMergeCandidateSecondaryId] = useState<string | undefined>(undefined);
   const [duplicateWarningPatient, setDuplicateWarningPatient] = useState<Patient | null>(null);
   const [overrideDuplicateRegistration, setOverrideDuplicateRegistration] = useState(false);
@@ -135,6 +142,7 @@ export function PatientMpiView() {
   }, [scopedPatients]);
 
   const filteredPatients = scopedPatients.filter((p) => {
+    if (String(p.status || 'ACTIVE').toUpperCase() === 'REMOVED') return false;
     const q = searchFilter.toLowerCase();
     return (
       p.fullName.toLowerCase().includes(q) ||
@@ -144,7 +152,8 @@ export function PatientMpiView() {
     );
   });
 
-  const currentPatient = scopedPatients.find((p) => p.id === selectedPatientId) || scopedPatients[0];
+  const activePatients = scopedPatients.filter(p => String(p.status || 'ACTIVE').toUpperCase() !== 'REMOVED');
+  const currentPatient = activePatients.find((p) => p.id === selectedPatientId) || activePatients[0];
   const activeEncounter = currentPatient?.encounters?.[0];
   const assignedBed = beds.find((b) => b.id === currentPatient?.activeBedId);
 
@@ -1382,6 +1391,21 @@ export function PatientMpiView() {
           currentAttending="Unassigned"
           onRoutedSuccess={(consultant, details) => {
             setShowRoutingModal(false);
+          }}
+        />
+      )}
+
+      {removalCandidate && (
+        <PatientRecordRemovalModal
+          patient={removalCandidate}
+          onClose={() => setRemovalCandidate(null)}
+          onRemoved={(patientId) => {
+            // The modal commits authoritatively; shell projection is refreshed
+            // locally only after its server acknowledgement.
+            setSelectedPatientId(null);
+            window.dispatchEvent(new CustomEvent('ghims:edge-sync-complete', {
+              detail: { tenantId: auth.activeTenant?.tenantId },
+            }));
           }}
         />
       )}

@@ -105,6 +105,7 @@ export interface ConsentRecord {
 }
 
 export interface PatientDemographics {
+  status?: 'ACTIVE' | 'INACTIVE' | 'DECEASED' | 'MERGED' | 'REMOVED';
   id: string;
   mrn: string;
   fullName: string;

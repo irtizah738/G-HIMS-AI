@@ -11,7 +11,8 @@ export type PatientContextIntegrityDecision =
         | 'ENCOUNTER_NOT_FOUND'
         | 'PATIENT_NOT_FOUND'
         | 'TENANT_CONTEXT_MISMATCH'
-        | 'PATIENT_CONTEXT_MISMATCH';
+        | 'PATIENT_CONTEXT_MISMATCH'
+        | 'PATIENT_REMOVED_FROM_ACTIVE_MPI';
       message: string;
     };
 
@@ -46,7 +47,9 @@ export class PatientContextIntegrityGuard {
     context: CommandContext,
     command: BaseCommand
   ): Promise<PatientContextIntegrityDecision> {
-    if (ENCOUNTER_CREATION_COMMANDS.has(command.commandType)) {
+    // The removal service enforces patient status transactionally. Allow the
+    // command bus to replay its completed idempotency reservation on retry.
+    if (command.commandType === 'RemovePatientRecordCommand') {
       return { ok: true };
     }
 
@@ -56,9 +59,10 @@ export class PatientContextIntegrityGuard {
       payload.encounterId || payload.sourceEncounterId
     );
 
-    // Commands without both identifiers remain the responsibility of their
-    // domain service. This guard never invents patient identity from UI state.
-    if (!patientId || !encounterId) {
+    // Prevent stale clients from using a removed identity even when the command
+    // has not yet been tied to an encounter. Other domain-level validations
+    // remain mandatory.
+    if (!patientId) {
       return { ok: true };
     }
 
@@ -90,10 +94,23 @@ export class PatientContextIntegrityGuard {
     }
 
     const tenantRef = db.collection('tenants').doc(tenantDocumentId);
-    const [encounterSnapshot, patientSnapshot] = await Promise.all([
-      tenantRef.collection('encounters').doc(encounterId).get(),
-      tenantRef.collection('patients').doc(patientId).get(),
-    ]);
+    const patientSnapshot = await tenantRef.collection('patients').doc(patientId).get();
+    const patient = patientSnapshot.data() || {};
+    if (normalize(patient.status).toUpperCase() === 'REMOVED') {
+      return {
+        ok: false,
+        code: 'PATIENT_REMOVED_FROM_ACTIVE_MPI',
+        message: 'Patient record is removed from active care. Do not create new clinical activity against this identity.',
+      };
+    }
+
+    // Creation and patient-only commands do not yet have an encounter to bind.
+    // They are still checked for removed patient status above.
+    if (!encounterId || ENCOUNTER_CREATION_COMMANDS.has(command.commandType)) {
+      return { ok: true };
+    }
+
+    const encounterSnapshot = await tenantRef.collection('encounters').doc(encounterId).get();
 
     if (!encounterSnapshot.exists) {
       return {
@@ -130,7 +147,6 @@ export class PatientContextIntegrityGuard {
       };
     }
 
-    const patient = patientSnapshot.data() || {};
     const patientTenantId = normalize(patient.tenantId).toLowerCase();
     if (patientTenantId && patientTenantId !== tenantId) {
       return {

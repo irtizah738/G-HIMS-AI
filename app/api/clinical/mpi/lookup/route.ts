@@ -130,6 +130,13 @@ export async function GET(req: NextRequest) {
     }
 
     const patient = patientSnapshot.data() as PatientMPI;
+    if (patient.status === 'REMOVED') {
+      return NextResponse.json(
+        { success: false, error: 'PATIENT_REMOVED_FROM_ACTIVE_MPI',
+          message: 'This MRN is retained for audit and must not be reissued. Contact Health Information Management for historical access.' },
+        { status: 410, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
     return NextResponse.json({
       success: true,
       matchType:

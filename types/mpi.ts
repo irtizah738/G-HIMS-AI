@@ -37,7 +37,14 @@ export interface PatientMPI {
   updatedAt: number;
   createdById: string;
   version: number;
-  status?: 'ACTIVE' | 'MERGED' | 'DECEASED' | 'INACTIVE';
+  status?: 'ACTIVE' | 'MERGED' | 'DECEASED' | 'INACTIVE' | 'REMOVED';
+  removal?: {
+    removedBy: string;
+    removedAt: number;
+    reason: string;
+    previousStatus: string;
+    commandId: string;
+  };
   mergedIntoPatientId?: string;
   /**
    * Compatibility pointer for legacy consumers. New care-setting logic must use

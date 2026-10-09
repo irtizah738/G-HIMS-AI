@@ -20,12 +20,15 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { PatientDemographics, MpiMatchResult } from '@/types/opd-domain';
+import { PatientRecordRemovalModal } from '@/components/mpi/patient-record-removal-modal';
+import { useAuth } from '@/lib/auth/auth-context';
 
 interface OpdPatientSearchMpiProps {
   patients: PatientDemographics[];
   onSelectPatient: (patient: PatientDemographics) => void;
   onInitiateNewRegistration: (initialData?: Partial<PatientDemographics>) => void;
   onInitiateMergeRequest: (sourcePatientId: string, targetPatientId: string, reason: string) => void;
+  onPatientRemoved: (patientId: string) => void;
 }
 
 export function OpdPatientSearchMpi({
@@ -33,7 +36,11 @@ export function OpdPatientSearchMpi({
   onSelectPatient,
   onInitiateNewRegistration,
   onInitiateMergeRequest,
+  onPatientRemoved,
 }: OpdPatientSearchMpiProps) {
+  const { roles } = useAuth();
+  const canRemove = roles.some(role => ['ADMIN', 'ADMINISTRATOR', 'SYSTEM_ADMIN', 'SUPER_ADMIN'].includes(String(role).toUpperCase()));
+  const [removalCandidate, setRemovalCandidate] = useState<PatientDemographics | null>(null);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [searchField, setSearchField] = useState<'ALL' | 'MRN' | 'CNIC' | 'PHONE' | 'NAME' | 'APPT'>('MRN');
   const [selectedForReview, setSelectedForReview] = useState<PatientDemographics | null>(null);
@@ -45,7 +52,7 @@ export function OpdPatientSearchMpi({
   // Filtered patients based on search
   const searchResults = useMemo(() => {
     if (!searchTerm.trim()) {
-      return patients;
+      return patients.filter(p => p.status !== 'REMOVED');
     }
 
     const q = searchTerm.trim();
@@ -54,6 +61,7 @@ export function OpdPatientSearchMpi({
     const normalizedCnic = normalizeCnic(q);
 
     return patients.filter((p) => {
+      if (p.status === 'REMOVED') return false;
       if (searchField === 'MRN') return normalizeMrn(p.mrn) === normalizedMrn;
       if (searchField === 'CNIC') {
         return Boolean(normalizedCnic) && normalizeCnic(p.nationalId) === normalizedCnic;
@@ -303,12 +311,24 @@ export function OpdPatientSearchMpi({
                       </span>
                     </td>
                     <td className="p-3 text-right">
-                      <button
-                        onClick={() => onSelectPatient(p)}
-                        className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
-                      >
-                        Start OPD Visit
-                      </button>
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => onSelectPatient(p)}
+                          className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                        >
+                          Start OPD Visit
+                        </button>
+                        {canRemove && (
+                          <button
+                            type="button"
+                            data-testid={`mpi-remove-${p.id}`}
+                            onClick={() => setRemovalCandidate(p)}
+                            className="rounded-lg border border-rose-300 px-3 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-50"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -317,6 +337,14 @@ export function OpdPatientSearchMpi({
           </div>
         )}
       </div>
+
+      {removalCandidate && (
+        <PatientRecordRemovalModal
+          patient={removalCandidate}
+          onClose={() => setRemovalCandidate(null)}
+          onRemoved={onPatientRemoved}
+        />
+      )}
 
       {/* MPI Duplicate Merge Request Modal */}
       {mergeModalOpen && selectedForReview && (

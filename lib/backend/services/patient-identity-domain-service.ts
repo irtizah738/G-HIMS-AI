@@ -61,6 +61,18 @@ export class PatientIdentityDomainService {
       };
     }
 
+    if (patient.status === 'REMOVED') {
+      return {
+        success: false,
+        commandId,
+        idempotencyKey,
+        error: {
+          code: 'PATIENT_REMOVED_FROM_ACTIVE_MPI',
+          message: 'Removed patient identity cannot be used for new clinical identity confirmation.',
+        },
+      };
+    }
+
     if (patient.status === 'MERGED') {
       return {
         success: false,

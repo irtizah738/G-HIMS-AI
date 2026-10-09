@@ -135,7 +135,9 @@ export async function replaceSecureTenantEdgeSnapshot(
 ): Promise<void> {
   const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
   if (!normalizedTenantId || !actorId) throw new Error('EDGE_CRYPTO_CONTEXT_REQUIRED');
-  if (!metadata.scope || !metadata.authorityEpoch) {
+  const snapshotScope = metadata.scope;
+  const authorityEpoch = metadata.authorityEpoch;
+  if (!snapshotScope || !authorityEpoch) {
     throw new Error('EDGE_SNAPSHOT_AUTHORITY_REQUIRED');
   }
 
@@ -196,7 +198,7 @@ export async function replaceSecureTenantEdgeSnapshot(
       const previousAuthority = await localDb.sync_metadata.get(authorityKey);
       const changedAuthority =
         previousAuthority?.actorId !== actorId ||
-        previousAuthority?.authorityEpoch !== metadata.authorityEpoch;
+        previousAuthority?.authorityEpoch !== authorityEpoch;
       const requestedCollections = new Set(Object.keys(collections || {}));
       const staleKeys = await localDb.edge_entities
         .where('tenantId')
@@ -219,21 +221,21 @@ export async function replaceSecureTenantEdgeSnapshot(
         actorId,
         sessionId: metadata.sessionId,
         authorizationRevision: metadata.authorizationRevision,
-        authorityEpoch: metadata.authorityEpoch,
-        snapshotVersion: `authority:${metadata.authorityEpoch}`,
+        authorityEpoch,
+        snapshotVersion: `authority:${authorityEpoch}`,
         lastHydratedAt: metadata.lastHydratedAt,
         serverGeneratedAt: metadata.serverGeneratedAt,
       });
       // Refresh only collections delivered by this named surface. Other
       // authorized surfaces remain available for legitimate offline reads.
       await localDb.sync_metadata.put({
-        key: `${normalizedTenantId}:${metadata.scope}`,
+        key: `${normalizedTenantId}:${snapshotScope}`,
         tenantId: normalizedTenantId,
-        scope: metadata.scope,
+        scope: snapshotScope,
         actorId,
         sessionId: metadata.sessionId,
         authorizationRevision: metadata.authorizationRevision,
-        authorityEpoch: metadata.authorityEpoch,
+        authorityEpoch,
         snapshotVersion: metadata.snapshotVersion,
         lastHydratedAt: metadata.lastHydratedAt,
         serverGeneratedAt: metadata.serverGeneratedAt,

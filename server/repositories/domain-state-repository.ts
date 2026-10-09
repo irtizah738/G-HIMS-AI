@@ -18,14 +18,19 @@ export class DomainStateRepository {
     collectionName: string,
     documentId: string
   ): Promise<T | null> {
-    const db = getAdminFirestore();
-    if (!db) {
-      if (!canReadEphemeralRepository()) return null;
-      return TransactionManager.getEphemeralStateByCollectionForTesting(
+    if (canReadEphemeralRepository()) {
+      const ephemeral = TransactionManager.getEphemeralStateByCollectionForTesting(
         tenantId,
         collectionName,
         documentId
-      ) as T | null;
+      );
+      if (ephemeral) return ephemeral as T;
+      if (TransactionManager.hasEphemeralState(tenantId)) return null;
+    }
+
+    const db = getAdminFirestore();
+    if (!db) {
+      return null;
     }
 
     const snapshot = await db
@@ -43,13 +48,19 @@ export class DomainStateRepository {
     collectionName: string,
     limit = 500
   ): Promise<T[]> {
-    const db = getAdminFirestore();
-    if (!db) {
-      if (!canReadEphemeralRepository()) return [];
-      return TransactionManager.getEphemeralCollectionForTesting(
+    if (canReadEphemeralRepository()) {
+      const ephemeral = TransactionManager.getEphemeralCollectionForTesting(
         tenantId,
         collectionName
-      ).slice(0, limit) as T[];
+      );
+      if (ephemeral.length > 0 || TransactionManager.hasEphemeralState(tenantId)) {
+        return ephemeral.slice(0, limit) as T[];
+      }
+    }
+
+    const db = getAdminFirestore();
+    if (!db) {
+      return [];
     }
 
     const snapshot = await db
@@ -104,15 +115,19 @@ export class DomainStateRepository {
     value: unknown,
     limit = 100
   ): Promise<T[]> {
-    const db = getAdminFirestore();
-    if (!db) {
-      if (!canReadEphemeralRepository()) return [];
-      return TransactionManager.getEphemeralCollectionForTesting(
+    if (canReadEphemeralRepository()) {
+      const ephemeral = TransactionManager.getEphemeralCollectionForTesting(
         tenantId,
         collectionName
-      )
-        .filter((row) => row[field] === value)
-        .slice(0, limit) as T[];
+      ).filter((row) => row[field] === value);
+      if (ephemeral.length > 0 || TransactionManager.hasEphemeralState(tenantId)) {
+        return ephemeral.slice(0, limit) as T[];
+      }
+    }
+
+    const db = getAdminFirestore();
+    if (!db) {
+      return [];
     }
 
     const snapshot = await db
@@ -133,20 +148,25 @@ export class DomainStateRepository {
     value: unknown,
     options: { pageSize?: number; maxRows?: number } = {}
   ): Promise<T[]> {
-    const db = getAdminFirestore();
-    if (!db) {
-      if (!canReadEphemeralRepository()) return [];
-      const maxRows = Math.max(1, options.maxRows || 50000);
-      const rows = TransactionManager.getEphemeralCollectionForTesting(
+    if (canReadEphemeralRepository()) {
+      const ephemeral = TransactionManager.getEphemeralCollectionForTesting(
         tenantId,
         collectionName
       ).filter((row) => row[field] === value);
-      if (rows.length > maxRows) {
-        throw new Error(
-          `DOMAIN_QUERY_LIMIT_EXCEEDED:${collectionName}:${field}:${maxRows}`
-        );
+      if (ephemeral.length > 0 || TransactionManager.hasEphemeralState(tenantId)) {
+        const maxRows = Math.max(1, options.maxRows || 50000);
+        if (ephemeral.length > maxRows) {
+          throw new Error(
+            `DOMAIN_QUERY_LIMIT_EXCEEDED:${collectionName}:${field}:${maxRows}`
+          );
+        }
+        return ephemeral as T[];
       }
-      return rows as T[];
+    }
+
+    const db = getAdminFirestore();
+    if (!db) {
+      return [];
     }
 
     const pageSize = Math.max(1, Math.min(500, options.pageSize || 500));

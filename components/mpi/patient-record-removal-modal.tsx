@@ -3,12 +3,22 @@
 import { useState, type FormEvent } from 'react';
 import { AlertTriangle, ShieldCheck, Trash2, X } from 'lucide-react';
 import { useAuth } from '@/lib/auth/auth-context';
+import { useHospital } from '@/lib/context/hospital-context';
 import { executeActiveTenantCommand } from '@/lib/api/command-client';
 
 export interface RemovablePatient {
   id: string;
   mrn: string;
   fullName: string;
+  activeBedId?: string;
+  activeEncounterId?: string;
+  activeCareContexts?: {
+    activeIpdEncounterId?: string;
+    activeEmergencyEncounterId?: string;
+    activeOpdEncounterIds?: string[];
+    activeTelehealthEncounterIds?: string[];
+  };
+  encounters?: Array<{ id: string; status: string; type?: string }>;
 }
 
 export function PatientRecordRemovalModal({
@@ -21,6 +31,27 @@ export function PatientRecordRemovalModal({
   onRemoved: (patientId: string) => void;
 }) {
   const { roles, isOffline, activeTenant } = useAuth();
+  const { patients: hospitalPatients } = useHospital();
+  const fullPatientRecord = hospitalPatients?.find((p) => p.id === patient.id);
+  const effectivePatient = { ...fullPatientRecord, ...patient };
+
+  const terminalStatuses = new Set([
+    'COMPLETED', 'CLOSED', 'DISCHARGED', 'CANCELLED', 'CANCELED', 'TRANSFERRED',
+  ]);
+  const activeEncounters = (effectivePatient.encounters || []).filter((e) => {
+    const s = String(e.status || '').trim().toUpperCase();
+    return s && !terminalStatuses.has(s);
+  });
+  const hasActiveCarePointers = Boolean(
+    effectivePatient.activeBedId ||
+    effectivePatient.activeEncounterId ||
+    effectivePatient.activeCareContexts?.activeIpdEncounterId ||
+    effectivePatient.activeCareContexts?.activeEmergencyEncounterId ||
+    (effectivePatient.activeCareContexts?.activeOpdEncounterIds?.length ?? 0) > 0 ||
+    (effectivePatient.activeCareContexts?.activeTelehealthEncounterIds?.length ?? 0) > 0
+  );
+  const hasActiveCare = hasActiveCarePointers || activeEncounters.length > 0;
+
   const allowed = roles.some((role) =>
     ['ADMIN', 'ADMINISTRATOR', 'SYSTEM_ADMIN', 'SUPER_ADMIN'].includes(
       String(role).trim().toUpperCase()
@@ -30,8 +61,8 @@ export function PatientRecordRemovalModal({
   const [confirmationMrn, setConfirmationMrn] = useState('');
   const [retentionAcknowledged, setRetentionAcknowledged] = useState(false);
   const [syntheticConfirmed, setSyntheticConfirmed] = useState(false);
-  const isConfirmedMock = process.env.NODE_ENV === 'development' &&
-    activeTenant?.tenantId === 'tenant_02bb76e3' &&
+  const isConfirmedMock =
+    (['tenant_02bb76e3', 'central-metro-hospital'].includes(activeTenant?.tenantId || '')) &&
     (patient.mrn === 'MRN-20260820-8790' && patient.fullName.trim().toLowerCase() === 'eleanor vance' ||
       patient.mrn === 'MRN-20260930-3611' && patient.fullName.trim().toLowerCase() === 'test patient');
   const [pending, setPending] = useState(false);
@@ -45,7 +76,12 @@ export function PatientRecordRemovalModal({
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!valid) return;
+    if (!valid || hasActiveCare) {
+      if (hasActiveCare) {
+        setError('Cannot remove patient record: active clinical care is underway. Close or discharge all active encounters before removal.');
+      }
+      return;
+    }
     setPending(true);
     setError(null);
     try {
@@ -140,6 +176,16 @@ export function PatientRecordRemovalModal({
             MRN: {patient.mrn} · Patient ID: {patient.id}
           </p>
         </div>
+        {hasActiveCare && (
+          <div data-testid="remove-patient-active-care-warning" className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+            <div className="flex items-center gap-2 font-bold text-amber-900 dark:text-amber-300">
+              <AlertTriangle className="h-4 w-4 text-amber-600" /> Active Clinical Care in Progress
+            </div>
+            <p className="mt-1 text-xs">
+              This patient currently has active care episodes or open encounters. In accordance with clinical governance, patient records cannot be removed while clinical care is underway. Complete the clinical disposition or discharge the patient before removal.
+            </p>
+          </div>
+        )}
         <form onSubmit={submit} className="mt-4 space-y-4">
           <label className="block text-sm font-semibold">
             Why are you removing this patient record? <span className="text-rose-600">*</span>
@@ -235,7 +281,12 @@ export function PatientRecordRemovalModal({
             <button
               type="submit"
               data-testid="remove-patient-confirm"
-              disabled={!valid}
+              disabled={!valid || hasActiveCare}
+              title={
+                hasActiveCare
+                  ? 'Cannot remove: patient has active care episodes in progress'
+                  : undefined
+              }
               className="flex items-center gap-2 rounded-lg bg-rose-700 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
             >
               <ShieldCheck className="h-4 w-4" />

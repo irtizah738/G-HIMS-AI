@@ -14,7 +14,7 @@ import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
 import type { CommandContext, CommandResult } from '../types';
 import type { PatientMPI } from '@/types/mpi';
 
-const TARGET_TENANT = 'tenant_02bb76e3';
+const TARGET_TENANTS = new Set(['tenant_02bb76e3', 'central-metro-hospital']);
 const ALLOWED_PATIENTS: Readonly<Record<string, string>> = Object.freeze({
   'MRN-20260820-8790': 'eleanor vance',
   'MRN-20260930-3611': 'test patient',
@@ -50,7 +50,7 @@ export function assertMockCleanupEnvironment(tenantId: string): void {
   const permittedNode = ['development', 'test'].includes(String(process.env.NODE_ENV || '').toLowerCase());
 
   if (
-    tenantId !== TARGET_TENANT ||
+    !TARGET_TENANTS.has(tenantId) ||
     !['TEST', 'DEMO'].includes(mode) ||
     !permittedNode ||
     process.env.GHIMS_ENABLE_CONFIRMED_MOCK_CLEANUP !== 'true' ||

@@ -8,6 +8,7 @@ import { IdempotencyRecord, CommandResult } from '../types';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
 import { sanitizeForFirestore } from '@/lib/firestore/sanitize';
+import { TransactionManager } from '../transactions/transaction-manager';
 
 export type IdempotencyAcquireStatus = 'NEW' | 'CACHED' | 'CONFLICT' | 'IN_PROGRESS';
 
@@ -19,6 +20,10 @@ export interface IdempotencyAcquireResult {
 export class IdempotencyService {
   private static localMemoryCache = new Map<string, IdempotencyRecord>();
   private static readonly LEASE_MS = 2 * 60 * 1000;
+
+  public static resetLocalMemoryForTesting(): void {
+    this.localMemoryCache.clear();
+  }
 
   private static canUseEphemeralStore(): boolean {
     const mode = getRuntimeMode();
@@ -61,7 +66,7 @@ export class IdempotencyService {
     const requestHash = this.computeHash(commandType, payload);
     const db = getAdminFirestore();
 
-    if (!db) {
+    if (!db || (this.canUseEphemeralStore() && TransactionManager.hasEphemeralState(tenantId))) {
       if (!this.canUseEphemeralStore()) {
         throw new Error('IDEMPOTENCY_STORE_UNAVAILABLE: durable idempotency registry is required.');
       }
@@ -161,7 +166,7 @@ export class IdempotencyService {
     const requestHash = this.computeHash(commandType, payload);
     const db = getAdminFirestore();
 
-    if (!db) {
+    if (!db || (this.canUseEphemeralStore() && TransactionManager.hasEphemeralState(tenantId))) {
       if (!this.canUseEphemeralStore()) {
         throw new Error('IDEMPOTENCY_STORE_UNAVAILABLE: durable idempotency registry is required.');
       }

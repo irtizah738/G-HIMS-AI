@@ -380,6 +380,7 @@ export class TransactionManager {
     this.inMemoryEventStore=[];
     this.inMemoryAuditStore=[];
     this.inMemoryOutboxStore=[];
+    IdempotencyService.resetLocalMemoryForTesting();
   }
 
   public static seedEphemeralStateForTesting(
@@ -428,6 +429,14 @@ export class TransactionManager {
       }
     }
     return rows;
+  }
+
+  public static hasEphemeralState(tenantId: string): boolean {
+    const prefix = `${tenantId}\u0000`;
+    for (const key of this.inMemoryDomainState.keys()) {
+      if (key.startsWith(prefix)) return true;
+    }
+    return false;
   }
 
   public static getEphemeralStateByCollectionForTesting(
@@ -560,7 +569,7 @@ export class TransactionManager {
     });
 
     const db = getAdminFirestore();
-    if (!db) {
+    if (!db || (canUseEphemeralPersistence() && this.hasEphemeralState(params.tenantId))) {
       if (!canUseEphemeralPersistence()) {
         throw new Error('TRANSACTION_STORE_UNAVAILABLE: durable Firestore transaction store is required.');
       }
@@ -746,7 +755,7 @@ export class TransactionManager {
     const outboxId = generateUuid('obx');
 
     const db = getAdminFirestore();
-    if (!db) {
+    if (!db || (canUseEphemeralPersistence() && this.hasEphemeralState(params.tenantId))) {
       if (!canUseEphemeralPersistence()) {
         throw new Error('TRANSACTION_STORE_UNAVAILABLE: durable Firestore transaction store is required.');
       }
@@ -1110,6 +1119,10 @@ export class TransactionManager {
   }
 
   public static async getEvents(tenantId: string): Promise<DomainEventEnvelope[]> {
+    if (canUseEphemeralPersistence() && (this.hasEphemeralState(tenantId) || this.inMemoryEventStore.some((event) => event.tenantId === tenantId))) {
+      return this.inMemoryEventStore.filter((event) => event.tenantId === tenantId);
+    }
+
     const db = getAdminFirestore();
     if (!db) {
       return canUseEphemeralPersistence() ? this.inMemoryEventStore.filter((event) => event.tenantId === tenantId) : [];
@@ -1120,6 +1133,10 @@ export class TransactionManager {
   }
 
   public static async getAudits(tenantId: string): Promise<AuditRecord[]> {
+    if (canUseEphemeralPersistence() && (this.hasEphemeralState(tenantId) || this.inMemoryAuditStore.some((audit) => audit.tenantId === tenantId))) {
+      return this.inMemoryAuditStore.filter((audit) => audit.tenantId === tenantId);
+    }
+
     const db = getAdminFirestore();
     if (!db) {
       return canUseEphemeralPersistence() ? this.inMemoryAuditStore.filter((audit) => audit.tenantId === tenantId) : [];
@@ -1130,6 +1147,17 @@ export class TransactionManager {
   }
 
   public static async getPendingOutbox(tenantId: string): Promise<OutboxRecord[]> {
+    if (canUseEphemeralPersistence() && (this.hasEphemeralState(tenantId) || this.inMemoryOutboxStore.some((record) => record.tenantId === tenantId))) {
+      const now = Date.now();
+      return this.inMemoryOutboxStore.filter((record) =>
+        record.tenantId === tenantId &&
+        (
+          ((record.status === 'PENDING' || record.status === 'FAILED') && record.nextAttemptAt <= now) ||
+          (record.status === 'PROCESSING' && (record.leaseExpiresAt || 0) <= now)
+        )
+      );
+    }
+
     const db = getAdminFirestore();
     if (!db) {
       const now = Date.now();

@@ -11,6 +11,7 @@ const prior = {
   GHIMS_ENABLE_CONFIRMED_MOCK_CLEANUP: process.env.GHIMS_ENABLE_CONFIRMED_MOCK_CLEANUP,
   GHIMS_MOCK_CLEANUP_CONFIRM_PROJECT: process.env.GHIMS_MOCK_CLEANUP_CONFIRM_PROJECT,
   FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID,
+  GHIMS_FIREBASE_PROJECT_ID_TEST: process.env.GHIMS_FIREBASE_PROJECT_ID_TEST,
   NODE_ENV: process.env.NODE_ENV,
   GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION,
 };
@@ -21,6 +22,7 @@ function configureTestEnvironment() {
   process.env.GHIMS_RUNTIME_MODE = 'TEST';
   process.env.NODE_ENV = 'test';
   process.env.FIREBASE_PROJECT_ID = 'ghims-mock-retirement-test';
+  process.env.GHIMS_FIREBASE_PROJECT_ID_TEST = 'ghims-mock-retirement-test';
   process.env.GHIMS_MOCK_CLEANUP_CONFIRM_PROJECT = 'ghims-mock-retirement-test';
   process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION = 'ghims-production-separate';
   process.env.GHIMS_ENABLE_CONFIRMED_MOCK_CLEANUP = 'true';

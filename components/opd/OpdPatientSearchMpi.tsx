@@ -52,7 +52,7 @@ export function OpdPatientSearchMpi({
   // Filtered patients based on search
   const searchResults = useMemo(() => {
     if (!searchTerm.trim()) {
-      return patients.filter(p => p.status !== 'REMOVED');
+      return patients.filter(p => !['MERGED', 'REMOVED'].includes(String(p.status || 'ACTIVE').toUpperCase()));
     }
 
     const q = searchTerm.trim();
@@ -61,7 +61,7 @@ export function OpdPatientSearchMpi({
     const normalizedCnic = normalizeCnic(q);
 
     return patients.filter((p) => {
-      if (p.status === 'REMOVED') return false;
+      if (['MERGED', 'REMOVED'].includes(String(p.status || 'ACTIVE').toUpperCase())) return false;
       if (searchField === 'MRN') return normalizeMrn(p.mrn) === normalizedMrn;
       if (searchField === 'CNIC') {
         return Boolean(normalizedCnic) && normalizeCnic(p.nationalId) === normalizedCnic;
@@ -84,7 +84,7 @@ export function OpdPatientSearchMpi({
     if (!searchTerm.trim() || searchTerm.length < 3) return [];
     const q = searchTerm.toLowerCase().trim();
 
-    return patients.map((candidate) => {
+    return patients.filter((candidate) => !['MERGED', 'REMOVED'].includes(String(candidate.status || 'ACTIVE').toUpperCase())).map((candidate) => {
       let score = 0;
       const matchReasons: string[] = [];
 
@@ -374,7 +374,7 @@ export function OpdPatientSearchMpi({
                 >
                   <option value="">Select target verified record...</option>
                   {patients
-                    .filter((p) => p.id !== selectedForReview.id)
+                    .filter((p) => p.id !== selectedForReview.id && !['MERGED', 'REMOVED'].includes(String(p.status || 'ACTIVE').toUpperCase()))
                     .map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.fullName} — {p.mrn} (CNIC: {p.nationalId})

@@ -225,6 +225,9 @@ export interface EdgeSyncMetadata {
   key: string;
   tenantId: string;
   scope: string;
+  /** Authenticated actor and hashed authority epoch for protected read cache. */
+  actorId?: string;
+  authorityEpoch?: string;
   snapshotVersion: string;
   lastHydratedAt: number;
   serverGeneratedAt?: number;

@@ -40,19 +40,28 @@ function assertReadOnlyInspectionScope(): { projectId: string; tenantId: string;
   const confirmation = text(process.env.GHIMS_MOCK_INSPECTION_CONFIRM_PROJECT);
   const nodeEnv = text(process.env.NODE_ENV).toLowerCase();
 
-  if (
-    !['TEST', 'DEMO'].includes(mode) ||
-    !['development', 'test'].includes(nodeEnv) ||
-    !projectId || !expectedProject || projectId !== expectedProject ||
-    !productionProject || productionProject === projectId ||
-    confirmation !== projectId ||
-    !TARGET_TENANTS.has(tenantId) ||
-    !CONFIRMED_MOCKS.has(mrn)
-  ) {
-    throw new Error(
-      'MOCK_INSPECTION_SCOPE_DENIED: requires isolated TEST/DEMO, a verified non-production project, ' +
-      'explicit project confirmation, exact allowlisted tenant and MRN.'
-    );
+  // Report only safe configuration check names, never tenant, project or
+  // credential values. Every original guard remains mandatory and fail-closed.
+  const failedChecks: string[] = [];
+  if (!['TEST', 'DEMO'].includes(mode)) failedChecks.push('RUNTIME_NOT_TEST_OR_DEMO');
+  if (!['development', 'test'].includes(nodeEnv)) failedChecks.push('NODE_ENV_NOT_DEVELOPMENT_OR_TEST');
+  if (!projectId) failedChecks.push('FIREBASE_PROJECT_ID_MISSING');
+  if (!expectedProject) failedChecks.push('TEST_OR_DEMO_PROJECT_ID_MISSING');
+  if (projectId && expectedProject && projectId !== expectedProject) {
+    failedChecks.push('FIREBASE_PROJECT_MISMATCH');
+  }
+  if (!productionProject) failedChecks.push('PRODUCTION_PROJECT_ID_MISSING');
+  if (projectId && productionProject && productionProject === projectId) {
+    failedChecks.push('TEST_PROJECT_EQUALS_PRODUCTION');
+  }
+  if (!confirmation) failedChecks.push('EXPLICIT_PROJECT_CONFIRMATION_MISSING');
+  else if (confirmation !== projectId) failedChecks.push('PROJECT_CONFIRMATION_MISMATCH');
+  if (!tenantId) failedChecks.push('INSPECTION_TENANT_ID_MISSING');
+  else if (!TARGET_TENANTS.has(tenantId)) failedChecks.push('TENANT_NOT_ALLOWLISTED');
+  if (!CONFIRMED_MOCKS.has(mrn)) failedChecks.push('MRN_NOT_ALLOWLISTED');
+
+  if (failedChecks.length) {
+    throw new Error('MOCK_INSPECTION_SCOPE_DENIED: ' + failedChecks.join(', '));
   }
   return { projectId, tenantId, mrn };
 }

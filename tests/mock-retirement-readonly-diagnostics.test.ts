@@ -62,6 +62,18 @@ describe('mock MPI retirement read-only reconciliation', () => {
       join(process.cwd(), 'scripts/ops/inspect-mock-retirement.ts'), 'utf8'
     );
     expect(file).toContain('GHIMS_MOCK_INSPECTION_CONFIRM_PROJECT');
+    expect(file).toContain('RUNTIME_NOT_TEST_OR_DEMO');
+    expect(file).toContain('NODE_ENV_NOT_DEVELOPMENT_OR_TEST');
+    expect(file).toContain('FIREBASE_PROJECT_ID_MISSING');
+    expect(file).toContain('TEST_OR_DEMO_PROJECT_ID_MISSING');
+    expect(file).toContain('PRODUCTION_PROJECT_ID_MISSING');
+    expect(file).toContain('TEST_PROJECT_EQUALS_PRODUCTION');
+    expect(file).toContain('PROJECT_CONFIRMATION_MISMATCH');
+    expect(file).toContain('INSPECTION_TENANT_ID_MISSING');
+    expect(file).toContain('TENANT_NOT_ALLOWLISTED');
+    expect(file).toContain('MOCK_INSPECTION_SCOPE_DENIED: ');
+    expect(file).not.toContain('console.log(process.env)');
+
     expect(file).toContain('GHIMS_FIREBASE_PROJECT_ID_PRODUCTION');
     expect(file).toContain('GHIMS_MOCK_INSPECTION_TENANT_ID');
     expect(file).toContain('GHIMS_MOCK_INSPECTION_MRN');

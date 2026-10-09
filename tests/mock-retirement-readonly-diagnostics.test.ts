@@ -62,6 +62,21 @@ describe('mock MPI retirement read-only reconciliation', () => {
       join(process.cwd(), 'scripts/ops/inspect-mock-retirement.ts'), 'utf8'
     );
     expect(file).toContain('GHIMS_MOCK_INSPECTION_CONFIRM_PROJECT');
+    expect(file).toContain('GHIMS_MOCK_READ_ONLY_ACK');
+    expect(file).toContain('READ_ONLY_INSPECTION_NO_RETIREMENT');
+    expect(file).toContain("projectId === 'g-hims-ai'");
+    expect(file).toContain("nodeEnv === 'development'");
+    expect(file).toContain('retirementPermitted: false');
+    for (const collection of [
+      'telehealthSessions', 'encounterEvidence', 'clinicalDocuments',
+      'medicationOrders', 'prescriptions',
+    ]) {
+      expect(file).toContain("query('" + collection + "', 'patientId', doc.id)");
+    }
+    expect(file).toContain('TELEHEALTH_SESSION_HAS_CLINICAL_OR_CALL_ACTIVITY');
+    expect(file).toContain('TELEHEALTH_ENCOUNTER_SESSION_MISSING');
+    expect(file).toContain('CLINICAL_EVIDENCE_OR_ORDERS_REQUIRE_REVIEW');
+
     expect(file).toContain('RUNTIME_NOT_TEST_OR_DEMO');
     expect(file).toContain('NODE_ENV_NOT_DEVELOPMENT_OR_TEST');
     expect(file).toContain('FIREBASE_PROJECT_ID_MISSING');

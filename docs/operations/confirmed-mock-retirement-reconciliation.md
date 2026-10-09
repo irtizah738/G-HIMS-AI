@@ -9,10 +9,41 @@ This runbook applies only to the two explicitly confirmed development mock ident
 
 The inspector does **not** change Firestore, clinical state, invoices, beds, queues, audit history, or projections. It must be executed by an authorized operator against an isolated **TEST/DEMO** Firebase project. Do not run against production, staging, a database containing real patients, or shared hospital environments.
 
+## Development-only single-project inspection
+
+When the production project ID is not configured, the **read-only inspector only**
+permits a narrow exception for the verified development project `g-hims-ai`.
+It requires `GHIMS_RUNTIME_MODE=TEST`, `NODE_ENV=development`,
+`FIREBASE_PROJECT_ID=GHIMS_FIREBASE_PROJECT_ID_TEST=g-hims-ai`,
+the exact project confirmation, the allowlisted tenant and mock MRN, and
+`GHIMS_MOCK_READ_ONLY_ACK=READ_ONLY_INSPECTION_NO_RETIREMENT`.
+
+This exception applies only to inspection. It **does not** authorize the
+`RetireConfirmedMockPatientCommand`, cancel encounters or change Firestore.
+
+~~~powershell
+$env:GHIMS_RUNTIME_MODE = 'TEST'
+$env:NODE_ENV = 'development'
+$env:GHIMS_MOCK_READ_ONLY_ACK = 'READ_ONLY_INSPECTION_NO_RETIREMENT'
+$env:GHIMS_MOCK_INSPECTION_TENANT_ID = 'central-metro-hospital'
+$env:GHIMS_MOCK_INSPECTION_CONFIRM_PROJECT = 'g-hims-ai'
+$env:GHIMS_MOCK_INSPECTION_MRN = 'MRN-20260820-8790'
+bun scripts/ops/inspect-mock-retirement.ts
+~~~
+
+**Additional telehealth qualification:** the report now lists
+`linked.telehealthSessions` with clinical-activity indicators and
+`linked.encounterEvidence`, `linked.clinicalDocuments`,
+`linked.medicationOrders`, and `linked.prescriptions`. Any evidence,
+signed note, clinical activity, missing telehealth session or truncated query
+blocks automatic qualification. Do not fabricate a signed clinical note or
+manually edit care pointers. A separate version-checked, auditable cancellation
+workflow must be designed from the verified report.
+
 ## Before inspecting
 
 1. Verify \`FIREBASE_PROJECT_ID\` and \`GHIMS_FIREBASE_PROJECT_ID_TEST\` (or DEMO), and confirm they are the same intended isolated test project.
-2. Verify \`GHIMS_FIREBASE_PROJECT_ID_PRODUCTION\` is set to the **different** production project ID.
+2. For the standard inspection path, verify \`GHIMS_FIREBASE_PROJECT_ID_PRODUCTION\` is set to the **different** production project ID; otherwise use the narrow **read-only** single-project path above.
 3. Verify the correct tenant ID from authenticated hospital context.
 4. Ensure the local server credentials belong to the selected test project. Do not paste private keys, service account JSON, Firebase tokens or patient data into tickets or chats.
 5. Do **not** enable \`GHIMS_ENABLE_CONFIRMED_MOCK_CLEANUP\` simply to inspect records.

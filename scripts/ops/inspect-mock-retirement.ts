@@ -2,7 +2,7 @@
  * READ-ONLY operational inspection of the two explicitly confirmed mock MPI identities.
  *
  * No patient/encounter mutation, projection rebuild, inferred discharge, or synthetic
- * data seeding. All reads are bounded and scoped to one isolated TEST/DEMO tenant.
+ * data seeding. All reads are bounded and scoped to a verified TEST/DEMO tenant.
  *
  * Usage:
  *   GHIMS_MOCK_INSPECTION_TENANT_ID=... GHIMS_MOCK_INSPECTION_MRN=... \
@@ -20,7 +20,8 @@ const CONFIRMED_MOCKS = new Map([
 ]);
 const PER_COLLECTION_LIMIT = 26;
 type Row = Record<string, unknown>;
-type QueryName = 'encounters' | 'beds' | 'opd_queue' | 'invoices' | 'encounterCharges' | 'payments';
+type QueryName = 'encounters' | 'beds' | 'opd_queue' | 'invoices' | 'encounterCharges' | 'payments' |
+  'telehealthSessions' | 'encounterEvidence' | 'clinicalDocuments' | 'medicationOrders' | 'prescriptions';
 
 function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -39,6 +40,11 @@ function assertReadOnlyInspectionScope(): { projectId: string; tenantId: string;
   const mrn = text(process.env.GHIMS_MOCK_INSPECTION_MRN).toUpperCase();
   const confirmation = text(process.env.GHIMS_MOCK_INSPECTION_CONFIRM_PROJECT);
   const nodeEnv = text(process.env.NODE_ENV).toLowerCase();
+  // No production project is configured in this known development-only Firebase project.
+  // This narrow read-only exception never applies to retirement or mutation.
+  const unclassifiedReadOnly = !productionProject && projectId === 'g-hims-ai' &&
+    expectedProject === projectId && mode === 'TEST' && nodeEnv === 'development' &&
+    process.env.GHIMS_MOCK_READ_ONLY_ACK === 'READ_ONLY_INSPECTION_NO_RETIREMENT';
 
   // Report only safe configuration check names, never tenant, project or
   // credential values. Every original guard remains mandatory and fail-closed.
@@ -50,7 +56,7 @@ function assertReadOnlyInspectionScope(): { projectId: string; tenantId: string;
   if (projectId && expectedProject && projectId !== expectedProject) {
     failedChecks.push('FIREBASE_PROJECT_MISMATCH');
   }
-  if (!productionProject) failedChecks.push('PRODUCTION_PROJECT_ID_MISSING');
+  if (!productionProject && !unclassifiedReadOnly) failedChecks.push('PRODUCTION_PROJECT_ID_MISSING');
   if (projectId && productionProject && productionProject === projectId) {
     failedChecks.push('TEST_PROJECT_EQUALS_PRODUCTION');
   }
@@ -83,6 +89,28 @@ function summarize(collection: QueryName, id: string, row: Row): Row {
       return { id, patientId: row.patientId, type: row.encounterType || row.type || 'UNKNOWN', status };
     case 'beds':
       return { id, patientId: row.patientId || null, currentPatientId: row.currentPatientId || null, status };
+    case 'telehealthSessions': {
+      const soap = row.soapNote && typeof row.soapNote === 'object'
+        ? row.soapNote as Row : {};
+      return {
+        id, encounterId: row.encounterId || null, status,
+        hasSignedEvidenceId: Boolean(text(row.signedEvidenceId)),
+        hasSoapNoteContent: ['subjective', 'objective', 'assessment', 'plan']
+          .some(field => Boolean(text(soap[field]))),
+        hasPrescriptions: Array.isArray(row.prescriptions) && row.prescriptions.length > 0,
+        hasTranscription: Array.isArray(row.transcription) && row.transcription.length > 0,
+        callDurationSeconds: Number(row.callDurationSeconds || 0),
+        isRecording: row.isRecording === true,
+      };
+    }
+    case 'encounterEvidence':
+    case 'clinicalDocuments':
+    case 'medicationOrders':
+    case 'prescriptions':
+      return {
+        id, encounterId: row.encounterId || null, status,
+        type: row.evidenceType || row.documentType || row.orderType || null,
+      };
     case 'opd_queue':
       return { id, encounterId: row.encounterId || null, status };
     default:
@@ -175,8 +203,16 @@ async function run() {
     query('invoices', 'patientId', doc.id),
     query('encounterCharges', 'patientId', doc.id),
     query('payments', 'patientId', doc.id),
+    query('telehealthSessions', 'patientId', doc.id),
+    query('encounterEvidence', 'patientId', doc.id),
+    query('clinicalDocuments', 'patientId', doc.id),
+    query('medicationOrders', 'patientId', doc.id),
+    query('prescriptions', 'patientId', doc.id),
   ]);
-  const [encounters, bedsByPatient, bedsByCurrent, queue, invoices, charges, payments] = entries;
+  const [
+    encounters, bedsByPatient, bedsByCurrent, queue, invoices, charges, payments,
+    telehealthSessions, encounterEvidence, clinicalDocuments, medicationOrders, prescriptions,
+  ] = entries;
   const beds = [...new Map(
     [...bedsByPatient.rows, ...bedsByCurrent.rows]
       .map(row => [text(row.id), row] as const)
@@ -190,10 +226,38 @@ async function run() {
     ['invoices', invoices],
     ['encounterCharges', charges],
     ['payments', payments],
+    ['telehealthSessions', telehealthSessions],
+    ['encounterEvidence', encounterEvidence],
+    ['clinicalDocuments', clinicalDocuments],
+    ['medicationOrders', medicationOrders],
+    ['prescriptions', prescriptions],
   ] as const) {
     if (entry.truncated) blockers.push('BOUNDED_QUERY_EXCEEDED:' + name);
   }
   if (beds.length) blockers.push('BED_BACK_REFERENCE_PRESENT');
+  if (encounterEvidence.rows.length || clinicalDocuments.rows.length ||
+      medicationOrders.rows.length || prescriptions.rows.length) {
+    blockers.push('CLINICAL_EVIDENCE_OR_ORDERS_REQUIRE_REVIEW');
+  }
+  const telehealthEncounterIds = new Set(
+    encounters.rows.filter(row => row.type === 'TELEHEALTH').map(row => text(row.id))
+  );
+  for (const session of telehealthSessions.rows) {
+    const linkedEncounterId = text(session.encounterId);
+    if (!telehealthEncounterIds.has(linkedEncounterId)) {
+      blockers.push('TELEHEALTH_SESSION_ENCOUNTER_MISMATCH');
+    }
+    if (session.hasSignedEvidenceId || session.hasSoapNoteContent ||
+        session.hasPrescriptions || session.hasTranscription ||
+        Number(session.callDurationSeconds || 0) > 0 || session.isRecording) {
+      blockers.push('TELEHEALTH_SESSION_HAS_CLINICAL_OR_CALL_ACTIVITY');
+    }
+  }
+  for (const encounterId of telehealthEncounterIds) {
+    if (!telehealthSessions.rows.some(row => text(row.encounterId) === encounterId)) {
+      blockers.push('TELEHEALTH_ENCOUNTER_SESSION_MISSING');
+    }
+  }
   if (encounters.rows.some(row => row.type !== 'OPD')) blockers.push('NON_OPD_ENCOUNTER_PRESENT');
   if (invoices.rows.length || charges.rows.length || payments.rows.length) {
     blockers.push('FINANCIAL_RECORDS_REQUIRE_RECONCILIATION');
@@ -228,6 +292,10 @@ async function run() {
     success: true,
     mode: getRuntimeMode(),
     readOnly: true,
+    retirementPermitted: false,
+    projectClassification: !text(process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION)
+      ? 'UNCLASSIFIED_NO_PRODUCTION_PROJECT_ID'
+      : 'TEST_PROJECT_CONFIGURED_SEPARATELY',
     projectId: scope.projectId,
     tenantId: scope.tenantId,
     mrn: scope.mrn,
@@ -242,11 +310,16 @@ async function run() {
       invoices: invoices.rows,
       encounterCharges: charges.rows,
       payments: payments.rows,
+      telehealthSessions: telehealthSessions.rows,
+      encounterEvidence: encounterEvidence.rows,
+      clinicalDocuments: clinicalDocuments.rows,
+      medicationOrders: medicationOrders.rows,
+      prescriptions: prescriptions.rows,
       deterministicInvoiceIds: foundDeterministicInvoices,
     },
     blockers: [...new Set(blockers)],
     decision: blockers.length === 0
-      ? 'NO_OBVIOUS_BLOCKERS_REVIEW_BEFORE_GOVERNED_COMMAND'
+      ? 'DIAGNOSTIC_ONLY_REVIEW_REQUIRED'
       : 'RECONCILIATION_REQUIRED_NO_CHANGES_MADE',
     limitation: 'This is a direct Firestore read, not an in-process ephemeral repository snapshot. ' +
       'No patient identity or care lifecycle is modified.',

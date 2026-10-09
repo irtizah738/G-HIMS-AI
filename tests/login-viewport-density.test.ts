@@ -7,10 +7,13 @@ describe('Login portal viewport density', () => {
     const source = await readFile(join(process.cwd(), 'components/auth/login-portal.tsx'), 'utf8');
     expect(source).toContain('min-h-dvh bg-slate-950');
     expect(source).toContain('max-w-[480px]');
-    expect(source).toContain('sm:py-5 relative');
+    expect(source).toContain('sm:py-4 relative');
     expect(source).toContain('p-4 sm:p-5 shadow-2xl');
     expect(source).toContain('min-h-11 py-2.5');
     expect(source).toContain('min-h-10 py-2');
+    expect(source).toContain('data-testid="login-card"');
+    expect(source).toContain('data-testid="login-footer"');
+    expect(source).toContain('How facility access works');
     expect(source).not.toMatch(/\bzoom\s*:/);
     expect(source).not.toContain('overflow-hidden');
     for (const testId of ['login-tenant-id', 'login-email', 'login-password', 'login-submit', 'login-google-identity', 'login-hospital-sso']) {

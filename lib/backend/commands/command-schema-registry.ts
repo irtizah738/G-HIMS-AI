@@ -909,6 +909,13 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       expectedUpdatedAt: nonEmpty.max(100),
     }).strict(),
   },
+  CancelUnusedTelehealthEncounterCommand: {
+    1: z.object({
+      sessionId: nonEmpty.max(150),
+      expectedUpdatedAt: nonEmpty.max(100),
+      reason: z.string().trim().min(20).max(1000),
+    }).strict(),
+  },
   CompleteTelehealthSessionCommand: {
     1: z.object({
       sessionId: nonEmpty.max(150),

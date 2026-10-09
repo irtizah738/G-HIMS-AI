@@ -17,6 +17,7 @@ describe('ORC-3 emergency facility authority', () => {
   test('rejects malformed facility ID in the command schema', () => {
     expect(validateCommandPayload(command('')).success).toBe(false);
     expect(validateCommandPayload(command('facility-a')).success).toBe(true);
+    expect(validateCommandPayload(command(undefined)).success).toBe(false);
   });
   test('encounter service enforces actor facility scope server-side', async () => {
     const service = await source('lib/backend/services/encounter-domain-service.ts');

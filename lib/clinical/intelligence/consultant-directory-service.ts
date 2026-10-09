@@ -70,10 +70,17 @@ function credentialsValid(credentials: EmployeeCredential[], now: number): boole
   });
 }
 
-function activePrivileges(privileges: ClinicalPrivilege[], now: number): ClinicalPrivilege[] {
+function activePrivileges(
+  privileges: ClinicalPrivilege[],
+  now: number,
+  facilityId: string,
+  departmentId: string
+): ClinicalPrivilege[] {
   return privileges.filter(
     (privilege) =>
       privilege.status === 'GRANTED' &&
+      privilege.facilityId === facilityId &&
+      privilege.departmentId === departmentId &&
       isoDayActive(privilege.effectiveFrom, privilege.effectiveUntil, now)
   );
 }
@@ -157,12 +164,20 @@ export class ConsultantDirectoryService {
       .map((employee): EligibleConsultant | null => {
         const membership = membershipByUser.get(String(employee.userId));
         if (!membership || !isClinicalConsultantMembership(membership)) return null;
+        const facilityId = String(employee.primaryFacilityId || '').trim();
+        const departmentId = String(employee.primaryDepartmentId || '').trim();
+        if (!facilityId || !departmentId) return null;
+        if (Array.isArray(employee.facilityIds) && !employee.facilityIds.includes(facilityId)) return null;
+        if (Array.isArray(employee.departmentIds) && !employee.departmentIds.includes(departmentId)) return null;
+        if (Array.isArray(membership.facilityIds) && !membership.facilityIds.includes(facilityId)) return null;
+        if (Array.isArray(membership.departmentIds) && !membership.departmentIds.includes(departmentId)) return null;
         if (!credentialsValid(credentialsByEmployee.get(employee.employeeId) || [], now)) return null;
 
-        const granted = activePrivileges(privilegesByEmployee.get(employee.employeeId) || [], now);
+        const granted = activePrivileges(
+          privilegesByEmployee.get(employee.employeeId) || [], now, facilityId, departmentId
+        );
         if (!granted.length) return null;
 
-        const departmentId = String(employee.primaryDepartmentId || '').trim();
         const departmentName = String(employee.primaryDepartmentName || departmentId).trim();
         const specialty = String(employee.specialty || employee.positionTitle || departmentName).trim();
         const searchableSpecialty = [
@@ -195,7 +210,11 @@ export class ConsultantDirectoryService {
           departmentId,
           departmentName,
           facilityId: employee.primaryFacilityId,
-          ...availabilityFor(shiftsByEmployee.get(employee.employeeId) || [], now),
+          ...availabilityFor(
+            (shiftsByEmployee.get(employee.employeeId) || []).filter(
+              (shift) => shift.facilityId === facilityId && shift.departmentId === departmentId && shift.tenantId === context.tenantId
+            ), now
+          ),
           activePrivilegeTypes: Array.from(new Set(granted.map((item) => item.privilegeType))).sort(),
           credentialVerified: true,
         };

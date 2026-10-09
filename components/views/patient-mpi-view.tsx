@@ -77,6 +77,9 @@ export function PatientMpiView() {
   const [newResp, setNewResp] = useState<number | ''>('');
   const [newO2, setNewO2] = useState<number | ''>('');
   const [vitalsEncounterId, setVitalsEncounterId] = useState('');
+  const [news2Scale, setNews2Scale] = useState<'' | 1 | 2>('');
+  const [news2SupplementalOxygen, setNews2SupplementalOxygen] = useState<'' | 'YES' | 'NO'>('');
+  const [news2Consciousness, setNews2Consciousness] = useState<'' | 'Alert' | 'Voice' | 'Pain' | 'Unresponsive' | 'NewConfusion'>('');
   const [vitalsStatus, setVitalsStatus] = useState<string | null>(null);
   const [vitalsSaving, setVitalsSaving] = useState(false);
 
@@ -292,13 +295,13 @@ export function PatientMpiView() {
     }
     const bp = /^([0-9]{2,3}) *[/] *([0-9]{2,3})$/.exec(newBp.trim());
     if (
-      typeof newHeartRate !== 'number' || newHeartRate < 20 || newHeartRate > 300 ||
-      !bp || Number(bp[1]) < Number(bp[2]) ||
-      typeof newTemp !== 'number' || newTemp < 25 || newTemp > 45 ||
+      typeof newHeartRate !== 'number' || newHeartRate < 20 || newHeartRate > 250 ||
+      !bp || Number(bp[1]) <= Number(bp[2]) ||
+      typeof newTemp !== 'number' || newTemp < 30 || newTemp > 45 ||
       typeof newResp !== 'number' || newResp < 4 || newResp > 80 ||
       typeof newO2 !== 'number' || newO2 < 50 || newO2 > 100
     ) {
-      setVitalsStatus('Enter measured HR (20–300), BP as systolic/diastolic, temperature (25–45 °C), respiratory rate (4–80), and SpO₂ (50–100). Do not invent values.');
+      setVitalsStatus('Enter measured HR (20–250), systolic BP above diastolic, temperature (30–45 °C), respiratory rate (4–80), and SpO₂ (50–100). Do not invent values.');
       return;
     }
 
@@ -314,18 +317,30 @@ export function PatientMpiView() {
           temperature: newTemp,
           respiratoryRate: newResp,
           oxygenSaturation: newO2,
+          ...(news2Scale ? { spO2Scale: news2Scale } : {}),
+          ...(news2SupplementalOxygen
+            ? { onSupplementalOxygen: news2SupplementalOxygen === 'YES' }
+            : {}),
+          ...(news2Consciousness ? { consciousness: news2Consciousness } : {}),
           measuredAt: Date.now(),
         }
       );
       if (!result.success || result.queuedOffline) {
         throw new Error(result.error?.message || 'The authoritative server did not commit vitals.');
       }
-      setVitalsStatus('Vitals committed to the selected encounter. Open Patient 360 to inspect the authoritative clinical evidence.');
+      setVitalsStatus(
+        news2Scale && news2SupplementalOxygen && news2Consciousness
+          ? 'Vitals committed with NEWS2 assessment inputs. Inspect the authoritative Patient 360 record.'
+          : 'Vitals committed. NEWS2 is INCOMPLETE_INPUT because scale, oxygen support, or consciousness was not documented.'
+      );
       setNewHeartRate('');
       setNewBp('');
       setNewTemp('');
       setNewResp('');
       setNewO2('');
+      setNews2Scale('');
+      setNews2SupplementalOxygen('');
+      setNews2Consciousness('');
       window.dispatchEvent(new CustomEvent('ghims:edge-sync-complete', {
         detail: { tenantId: auth.activeTenant?.tenantId },
       }));
@@ -994,6 +1009,41 @@ export function PatientMpiView() {
                       />
                     </div>
                   </div>
+                  <fieldset className="grid gap-3 rounded-lg border border-slate-200 p-3 sm:grid-cols-3">
+                    <legend className="px-1 text-xs font-semibold text-slate-700">
+                      NEWS2 clinical inputs — leave unknown values blank
+                    </legend>
+                    <label className="text-xs font-medium text-slate-600">
+                      SpO₂ scale
+                      <select value={news2Scale} onChange={(e) => setNews2Scale(e.target.value ? Number(e.target.value) as 1 | 2 : '')}
+                        className="mt-1 w-full rounded-lg border border-slate-300 p-2 text-xs">
+                        <option value="">Not documented</option>
+                        <option value="1">Scale 1</option>
+                        <option value="2">Scale 2 (qualified clinical indication)</option>
+                      </select>
+                    </label>
+                    <label className="text-xs font-medium text-slate-600">
+                      Supplemental oxygen
+                      <select value={news2SupplementalOxygen} onChange={(e) => setNews2SupplementalOxygen(e.target.value as '' | 'YES' | 'NO')}
+                        className="mt-1 w-full rounded-lg border border-slate-300 p-2 text-xs">
+                        <option value="">Not documented</option>
+                        <option value="YES">Yes</option>
+                        <option value="NO">No</option>
+                      </select>
+                    </label>
+                    <label className="text-xs font-medium text-slate-600">
+                      Consciousness (ACVPU)
+                      <select value={news2Consciousness} onChange={(e) => setNews2Consciousness(e.target.value as typeof news2Consciousness)}
+                        className="mt-1 w-full rounded-lg border border-slate-300 p-2 text-xs">
+                        <option value="">Not documented</option>
+                        <option value="Alert">Alert</option>
+                        <option value="NewConfusion">New confusion</option>
+                        <option value="Voice">Responds to voice</option>
+                        <option value="Pain">Responds to pain</option>
+                        <option value="Unresponsive">Unresponsive</option>
+                      </select>
+                    </label>
+                  </fieldset>
                   <div className="flex justify-end">
                     <button
                       id="btn-submit-vitals"

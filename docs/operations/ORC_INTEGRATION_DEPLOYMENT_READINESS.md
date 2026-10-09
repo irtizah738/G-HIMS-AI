@@ -26,3 +26,6 @@ No source-code CI pass, Preview build, or green feature flag alone may convert a
 
 ## Stage 4: release
 Run ORC-7 read-only staging integrity audit, ORC-8 deployed authenticated workflows, and ORC-9 rollback / audit / clinical and financial sign-off. Production deployment requires all 15 evidence-backed acceptance gates.
+
+## Current staging isolation defect
+The connected Vercel Preview and Production Firebase project IDs were verified equal at the ORC integration audit. A non-secret `GHIMS_FIREBASE_PROJECT_ID_PRODUCTION` reference is present in Preview so preflight can reject the collision. Do not disable this guard. Provision a separate STAGING Firebase project and dedicated Firebase Admin credentials, then verify both the runtime identity and read-only permissions before any synthetic provisioning.

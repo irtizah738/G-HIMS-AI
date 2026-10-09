@@ -17,6 +17,8 @@ export interface TransactionPayload<TState = unknown> {
   eventPayload: Record<string, unknown>;
   auditReason?: string;
   auditMetadata?: Record<string, unknown>;
+  /** Sensitive aggregates may persist audit metadata without copying full PHI state. */
+  omitDomainStateFromAudit?: boolean;
   outboxTopic?: string;
   source?: DomainEventEnvelope['source'];
 }
@@ -470,6 +472,7 @@ export class TransactionManager {
     auditResourceId?: string;
     auditReason?: string;
     auditMetadata?: Record<string, unknown>;
+    omitDomainStateFromAudit?: boolean;
     outboxTopic?: string;
     idempotencyKey: string;
     commandId: string;
@@ -523,7 +526,9 @@ export class TransactionManager {
       recordedAt: timestamp,
       reason: params.auditReason || `Executed ${params.eventType}`,
       metadata: params.auditMetadata || {},
-      ...(params.domainState !== undefined ? { newValue: params.domainState } : {}),
+      ...(!params.omitDomainStateFromAudit && params.domainState !== undefined
+        ? { newValue: params.domainState }
+        : {}),
     };
 
     const outbox: OutboxRecord = {

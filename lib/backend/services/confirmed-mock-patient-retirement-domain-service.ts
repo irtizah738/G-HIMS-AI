@@ -152,6 +152,18 @@ export class ConfirmedMockPatientRetirementDomainService {
       encounterIds.add(id);
     }
 
+    const activeOpdIds = patient.activeCareContexts?.activeOpdEncounterIds || [];
+    const stalePointers = [
+      ...(patient.activeEncounterId ? [patient.activeEncounterId] : []),
+      ...activeOpdIds,
+    ].filter(id => !encounterIds.has(id));
+    if (stalePointers.length) {
+      return reject(
+        commandId, idempotencyKey, 'MOCK_CLEANUP_ORPHANED_CARE_POINTER',
+        `Cannot retire patient while an active care pointer references unverified encounter ${stalePointers[0]}.`
+      );
+    }
+
     // No automatic invoice voids, reversals, or payment destruction. If finance
     // data exists, its own governed reversal/retirement must happen first.
     for (const collection of ['invoices', 'encounterCharges', 'payments']) {

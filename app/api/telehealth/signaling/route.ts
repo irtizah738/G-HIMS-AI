@@ -27,7 +27,7 @@ function assertTenant(tenantId: string): void {
 function assertRoomToken(roomToken: string): void {
   // New governed media rooms use a full UUID-backed token. Short historical
   // demo tokens are intentionally not accepted as patient join capabilities.
-  if (!roomToken.startsWith('ROOM-') || roomToken.length < 35) {
+  if (!/^ROOM-[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/.test(roomToken)) {
     throw new Error('TELEHEALTH_MEDIA_ROOM_TOKEN_INVALID');
   }
 }

@@ -1041,6 +1041,7 @@ interface HospitalContextType {
   setActiveTelehealthSession: (session: TelehealthSession | null) => void;
   createTelehealthSession: (data: {
     patientId: string;
+    facilityId?: string;
     type: TelehealthSession['type'];
     scheduledTime?: string;
     chiefComplaint: string;
@@ -2226,6 +2227,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
 
   const createTelehealthSession = async (data: {
     patientId: string;
+    facilityId?: string;
     type: TelehealthSession['type'];
     scheduledTime?: string;
     chiefComplaint: string;
@@ -2233,6 +2235,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
   }): Promise<TelehealthSession> => {
     const result = await executeActiveTenantCommand<TelehealthSession>('CreateTelehealthSessionCommand', {
       patientId: data.patientId,
+      facilityId: data.facilityId,
       type: data.type,
       scheduledTime: data.scheduledTime,
       chiefComplaint: data.chiefComplaint,

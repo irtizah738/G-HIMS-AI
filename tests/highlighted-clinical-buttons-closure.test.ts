@@ -69,8 +69,9 @@ describe('highlighted clinical button closure', () => {
     const adapter = await source('lib/offline/read-model-adapter.ts');
 
     expect(view).toContain('activeIdentityPatients');
-    expect(view).toContain("String(patient.status || 'ACTIVE').toUpperCase() !== 'MERGED'");
-    expect(modal).toContain("String(patient.status || 'ACTIVE').toUpperCase() !== 'MERGED'");
+    expect(view).toContain("!['MERGED', 'REMOVED'].includes(String(patient.status || 'ACTIVE').toUpperCase())");
+    expect(modal).toContain("!['MERGED', 'REMOVED'].includes(");
+    expect(modal).toContain('primaryUnavailable');
     expect(service).toContain('mergedIntoPatientId === payload.primaryPatientId');
     expect(service).toContain('alreadyMerged: true');
     expect(adapter).toContain("status: asString((raw as any).status, 'ACTIVE').toUpperCase()");

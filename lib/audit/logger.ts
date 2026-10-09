@@ -15,6 +15,7 @@ export type AuditAction =
   | 'AUTH_LOGIN'
   | 'AUTH_LOGOUT'
   | 'PATIENT_MERGE'
+  | 'PATIENT_RECORD_REMOVED'
   | 'MAR_ADMINISTRATION'
   | 'SOAP_RECONCILE';
 
@@ -90,7 +91,8 @@ export function getLogSeverity(log: {
     log.action === 'DELETE' ||
     log.status === 'SECURITY_ALERT' ||
     log.status === 'FAILURE' ||
-    log.action === 'PATIENT_MERGE'
+    log.action === 'PATIENT_MERGE' ||
+    log.action === 'PATIENT_RECORD_REMOVED'
   ) return 'CRITICAL';
 
   if (

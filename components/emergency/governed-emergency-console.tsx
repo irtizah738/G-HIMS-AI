@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
@@ -91,6 +91,8 @@ function priorityClass(priority: string): string {
  */
 export function GovernedEmergencyConsole() {
   const params = useParams<{ tenantId: string }>();
+  const searchParams = useSearchParams();
+  const preselectedPatientId = String(searchParams.get('patientId') || '').trim();
   const tenantId = String(params?.tenantId || '').trim().toLowerCase();
 
   const [encounters, setEncounters] = useState<EmergencyEncounterProjection[]>([]);
@@ -135,7 +137,7 @@ export function GovernedEmergencyConsole() {
         .filter(
           (patient) =>
             patient.id &&
-            !['MERGED', 'DECEASED', 'INACTIVE'].includes(
+            !['MERGED', 'REMOVED', 'DECEASED', 'INACTIVE'].includes(
               String(patient.status || 'ACTIVE').toUpperCase()
             )
         )
@@ -143,6 +145,11 @@ export function GovernedEmergencyConsole() {
 
       setEncounters(allEncounters);
       setPatients(activePatients);
+      // A deep link selects only an identity returned by the authoritative
+      // tenant-scoped projection; foreign/stale IDs never become eligible.
+      if (preselectedPatientId && activePatients.some(p => p.id === preselectedPatientId)) {
+        setPatientId(preselectedPatientId);
+      }
     },
     []
   );
@@ -377,8 +384,7 @@ export function GovernedEmergencyConsole() {
           <div>
             <h2 className="font-black">Open emergency encounter</h2>
             <p className="mt-1 text-xs text-slate-500">
-              Existing authoritative patient identities only. New identities must be
-              registered through MPI first.
+              Admit directly to Emergency using a verified patient identity. If the patient is new, register them in MPI first; emergency stabilization must not await billing.
             </p>
           </div>
 

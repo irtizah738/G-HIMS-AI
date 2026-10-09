@@ -18,6 +18,7 @@ import {
 
 export interface CreateTelehealthSessionPayload {
   patientId: string;
+  facilityId?: string;
   type: TelehealthSession['type'];
   scheduledTime?: string;
   chiefComplaint: string;
@@ -98,6 +99,15 @@ export class TelehealthDomainService {
       return { success:false, commandId, idempotencyKey, error:{ code:'STALE_MERGED_PATIENT_CONTEXT', message:'Telehealth cannot start from a merged patient identity.' } };
     }
 
+    const availableFacilities = (context.facilityIds || []).filter(Boolean);
+    const facilityId = String(payload.facilityId || (availableFacilities.length === 1 ? availableFacilities[0] : '')).trim();
+    if (!facilityId || !availableFacilities.includes(facilityId) ||
+        (String((patient as PatientMPI & { facilityId?: string }).facilityId || '') &&
+         String((patient as PatientMPI & { facilityId?: string }).facilityId) !== facilityId)) {
+      return { success: false, commandId, idempotencyKey,
+        error: { code: 'TELEHEALTH_FACILITY_SCOPE_REQUIRED',
+          message: 'Select an authorized facility for this patient before scheduling telehealth.' } };
+    }
     const now = new Date().toISOString();
     const sessionId = `th_${crypto.randomUUID()}`;
     const encounterId = `enc_th_${crypto.randomUUID()}`;
@@ -114,6 +124,7 @@ export class TelehealthDomainService {
     const session: TelehealthSession = {
       id: sessionId,
       tenantId: context.tenantId,
+      facilityId,
       encounterId,
       patientId: patient.id,
       patientName: patient.fullName,
@@ -184,6 +195,7 @@ export class TelehealthDomainService {
       encounterId,
       tenantId: context.tenantId,
       patientId: patient.id,
+      facilityId,
       encounterType: 'TELEHEALTH',
       chiefComplaint: payload.chiefComplaint.trim(),
       departmentId: 'TELEHEALTH',
@@ -460,8 +472,10 @@ export class TelehealthDomainService {
               session.encounterId !== preflight.encounterId ||
               String(encounter.encounterId || encounter.id || '') !== session.encounterId ||
               String(encounter.patientId || '') !== session.patientId ||
+              String(encounter.facilityId || '') !== String(session.facilityId || '') ||
+              !context.facilityIds?.includes(String(encounter.facilityId || '')) ||
               String(encounter.encounterType || encounter.type || '').toUpperCase() !== 'TELEHEALTH') {
-            throw new Error('TELEHEALTH_CLAIM_SCOPE_MISMATCH: session or encounter identity mismatch.');
+            throw new Error('TELEHEALTH_CLAIM_SCOPE_MISMATCH: session, facility or encounter identity mismatch.');
           }
           if (!['WAITING_ROOM','IN_CONSULTATION','DOCUMENTING'].includes(session.status) ||
               ['CANCELLED','COMPLETED','CLOSED'].includes(String(encounter.status || '').toUpperCase())) {

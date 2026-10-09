@@ -78,6 +78,8 @@ describe('Governed patient removal from active MPI', () => {
     expect(audit?.actorId).toBe('admin-uid-001');
     expect(audit?.resourceId).toBe(patientId);
     expect(audit?.reason).toBe(payload().reason);
+    expect(audit?.newValue).toBeUndefined();
+    expect(audit?.metadata?.recordRetention).toBe('CLINICAL_AND_FINANCIAL_HISTORY_RETAINED');
     expect(audit?.recordedAt).toBeGreaterThan(0);
     expect(outbox.some(o => o.eventType === 'PATIENT_RECORD_REMOVED_FROM_ACTIVE_MPI')).toBe(true);
   });

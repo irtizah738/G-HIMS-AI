@@ -93,3 +93,27 @@ within the tenant encounter, reuses its ID if uniquely matched, and rejects any
 conflicting existing telehealth SOAP note for human review. This prevents common
 duplicate-signature retries after a page reload. A concurrent two-tab signature
 race still needs server-authoritative single-note uniqueness qualification.
+
+## Provider assignment and facility isolation
+
+New sessions must be explicitly scoped to a facility in the authenticated
+user's authoritative `facilityIds`. A receptionist or scheduler never becomes
+`assignedProviderId` by virtue of creating the encounter.
+A verified DOCTOR/CONSULTANT holding `SIGN_CLINICAL_NOTES` can accept an
+unassigned encounter using `ClaimTelehealthEncounterCommand`; the acceptance
+atomically updates session + encounter and emits an immutable event and audit.
+The actor must have the exact encounter facility in their server-derived grants.
+An existing assignment cannot be stolen via the claim endpoint: refer the case
+to governed HCM routing review. Clinician WebRTC signaling, TURN issuance,
+signed-note recovery and final completion all require the assigned provider and
+facility match. Older encounters lacking a canonical facility/assignment
+require authorized migration or review, never automatic self-privileging.
+
+### Additional qualification
+- A receptionist with scheduling authority creates a scoped unassigned episode;
+  their user ID must not appear as the treating clinician.
+- A credentialed assigned doctor can accept once, and then join and sign.
+- A second clinician, another facility, or an account without HCM clinical
+  privilege cannot claim, join, mint TURN credentials or complete this episode.
+- Sessions with ambiguous or legacy assignments must surface a routing error
+  and must not silently clear clinical authority.

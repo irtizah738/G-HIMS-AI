@@ -39,6 +39,7 @@ export function TelehealthView() {
     patients,
     createTelehealthSession,
     completeTelehealthSession,
+    cancelUnusedTelehealthSession,
     networkMode,
   } = useHospital();
 
@@ -56,6 +57,7 @@ export function TelehealthView() {
   const [objective, setObjective] = useState('');
   const [assessment, setAssessment] = useState('');
   const [plan, setPlan] = useState('');
+  const [cancellationReason, setCancellationReason] = useState('');
 
   useEffect(() => {
     setSessions(telehealthSessions);
@@ -74,6 +76,7 @@ export function TelehealthView() {
     setObjective('');
     setAssessment('');
     setPlan('');
+    setCancellationReason('');
   }, [selected?.id]);
 
   const replaceSession = (next: TelehealthSession) => {
@@ -154,6 +157,20 @@ export function TelehealthView() {
     }, 'Interrupted telehealth session recovered from the last authoritative state.');
   };
 
+  const cancelUnusedEncounter = async () => {
+    if (!selected) return;
+    const reason = cancellationReason.trim();
+    if (reason.length < 20) {
+      setError('Provide at least 20 characters explaining why the consultation never occurred.');
+      return;
+    }
+    await run(
+      () => cancelUnusedTelehealthSession(selected.id, selected.updatedAt, reason),
+      'Unused telehealth encounter cancelled. Patient care references reconciled.'
+    );
+    setCancellationReason('');
+  };
+
   const signAndComplete = async () => {
     if (!selected) return;
     const note: Partial<TelehealthSoapNote> = {
@@ -173,6 +190,11 @@ export function TelehealthView() {
     setMessage('');
     try {
       await completeTelehealthSession(selected.id, note, []);
+      // The authoritative command succeeded: reflect completion immediately,
+      // while the hospital context continues hydrating server-owned state.
+      setSessions((previous) => previous.map((item) =>
+        item.id === selected.id ? { ...item, status: 'COMPLETED' } : item
+      ));
       setMessage('Clinical note signed and telehealth encounter completed.');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Telehealth signing failed.');
@@ -347,7 +369,7 @@ export function TelehealthView() {
                 </div>
               )}
 
-              {selected.status !== 'COMPLETED' && (
+              {!['COMPLETED', 'CANCELLED'].includes(selected.status) && (
                 <div className="space-y-3 rounded-xl border p-4">
                   <div className="flex items-center gap-2 text-xs font-bold">
                     <FileSignature className="h-4 w-4" />
@@ -359,6 +381,34 @@ export function TelehealthView() {
                   <textarea value={plan} onChange={(event) => setPlan(event.target.value)} placeholder="Plan" className="min-h-20 w-full rounded-xl border bg-transparent p-2 text-sm" />
                   <button disabled={busy} onClick={() => void signAndComplete()} className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white">
                     Sign note & complete encounter
+                  </button>
+                </div>
+              )}
+
+              {!['COMPLETED', 'CANCELLED'].includes(selected.status) && (
+                <div className="space-y-3 rounded-xl border border-amber-300 bg-amber-50/50 p-4 dark:border-amber-900 dark:bg-amber-950/20">
+                  <div className="text-xs font-bold">Cancel unused encounter — no consultation occurred</div>
+                  <p className="text-xs text-slate-600 dark:text-slate-300">
+                    This is not “End call” or clinical discharge. The server refuses cancellation
+                    when it finds signed notes, recorded care, medication/orders, billing,
+                    or a started media room. If care occurred, complete the clinical record instead.
+                  </p>
+                  <textarea
+                    aria-label="Reason for cancelling unused telehealth encounter"
+                    value={cancellationReason}
+                    onChange={(event) => setCancellationReason(event.target.value)}
+                    placeholder="Explain why the consultation never occurred (at least 20 characters)."
+                    maxLength={1000}
+                    className="min-h-20 w-full rounded-xl border bg-white p-2 text-sm dark:bg-slate-900"
+                  />
+                  <button
+                    type="button"
+                    data-testid="telehealth-cancel-unused-encounter"
+                    disabled={busy || networkMode === 'offline' || cancellationReason.trim().length < 20}
+                    onClick={() => void cancelUnusedEncounter()}
+                    className="rounded-xl border border-amber-500 px-4 py-2 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Cancel unused encounter (audited)
                   </button>
                 </div>
               )}

@@ -3494,7 +3494,7 @@ export function OpdMasterWorkspace() {
           (
             activeBillingInvoice.balanceDueMinorUnits === 0 &&
             !activeBillingInvoice.payments.some(
-              payment => payment.status === 'PENDING' && !payment.glJournalEntryId
+              (payment: PaymentTransaction) => payment.status === 'PENDING' && !payment.glJournalEntryId
             )
           )
         ) && (

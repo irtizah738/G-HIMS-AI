@@ -30,6 +30,7 @@ import {
   Send,
   UserCheck,
   GitMerge,
+  Trash2,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { PatientConsultantRoutingModal, ConsultantDoctor } from '@/components/clinical/patient-consultant-routing-modal';
@@ -44,7 +45,7 @@ export function PatientMpiView() {
   const { patients, selectedPatientId, setSelectedPatientId, registerNewPatient, mergePatients, addClinicalNote, addVitals, beds } = useHospital();
   const auth = useAuth();
   const canRemove = auth.roles.some((role) =>
-    ['ADMIN', 'ADMINISTRATOR', 'SYSTEM_ADMIN', 'SUPER_ADMIN'].includes(String(role).toUpperCase())
+    ['ADMIN', 'ADMINISTRATOR', 'SYSTEM_ADMIN', 'SUPER_ADMIN'].includes(String(role).trim().toUpperCase())
   );
   const { currentRole, hasPermission, activePatientId, roleDefinition } = useRBAC();
   
@@ -561,7 +562,33 @@ export function PatientMpiView() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-col items-start gap-1">
+                    <button
+                      id="btn-remove-patient-record"
+                      data-testid="mpi-remove-patient-record"
+                      type="button"
+                      disabled={!canRemove || auth.loading || auth.isOffline}
+                      aria-label={`Remove patient record ${currentPatient.mrn} from the active MPI`}
+                      title={
+                        !canRemove
+                          ? 'Hospital administrator role required. Contact your system administrator for verified membership access.'
+                          : auth.isOffline
+                            ? 'Patient removal requires an online authoritative session.'
+                            : 'Remove this record from the active patient registry with a mandatory reason and immutable audit trail.'
+                      }
+                      onClick={() => setRemovalCandidate(currentPatient)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-800 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-rose-800 dark:bg-rose-950/60 dark:text-rose-200"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Remove Record
+                    </button>
+                    {!canRemove && !auth.loading && (
+                      <span className="max-w-44 text-[10px] leading-tight text-amber-700 dark:text-amber-300">
+                        Admin authorization required
+                      </span>
+                    )}
+                  </div>
                   <button
                     id="btn-merge-duplicate-record"
                     type="button"

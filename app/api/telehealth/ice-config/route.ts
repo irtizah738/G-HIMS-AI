@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
     }
     if (role === 'CLINICIAN') {
       const { context } = await deriveAuthoritativeContext(req, tenantId);
-      if (!context.roles.some(r => ['DOCTOR', 'CONSULTANT', 'NURSE', 'SYSTEM_ADMIN'].includes(String(r).toUpperCase()))) {
+      if (!context.roles.some(r => ['DOCTOR', 'CONSULTANT'].includes(String(r).toUpperCase()))) {
         return reject('TELEHEALTH_CLINICIAN_AUTHORITY_REQUIRED', 403);
       }
       const assignedProvider = String(encounter.data()?.assignedProviderId || '');

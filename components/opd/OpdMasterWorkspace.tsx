@@ -3489,7 +3489,15 @@ export function OpdMasterWorkspace() {
         canAccessTab('BILLING') &&
         patientContextReady &&
         activeEncounter &&
-        !activeBillingInvoice && (
+        (
+          !activeBillingInvoice ||
+          (
+            activeBillingInvoice.balanceDueMinorUnits === 0 &&
+            !activeBillingInvoice.payments.some(
+              (payment: PaymentTransaction) => payment.status === 'PENDING' && !payment.glJournalEntryId
+            )
+          )
+        ) && (
           <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-xs dark:border-slate-800 dark:bg-slate-900">
             <div className="flex items-start gap-3">
               <ShieldCheck className="mt-0.5 h-5 w-5 text-teal-600" />
@@ -3498,10 +3506,9 @@ export function OpdMasterWorkspace() {
                   Final OPD billing reconciliation
                 </h3>
                 <p className="mt-1 text-xs text-slate-500">
-                  No open point-of-service invoice is visible. The server must
-                  now prove every encounter charge is invoiced, every patient AR
-                  item is settled, and every diagnostic/pharmacy service is
-                  finalized before disposition can open.
+                  {activeBillingInvoice
+                    ? 'The point-of-service invoice is settled. Run final server reconciliation to verify all charges, AR, diagnostics, and pharmacy before disposition.'
+                    : 'No open point-of-service invoice is visible. Run final server reconciliation to verify all charges, AR, diagnostics, and pharmacy before disposition.'}
                 </p>
               </div>
             </div>

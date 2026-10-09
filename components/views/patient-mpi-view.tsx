@@ -31,6 +31,7 @@ import {
   UserCheck,
   GitMerge,
   Trash2,
+  Siren,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { PatientConsultantRoutingModal, ConsultantDoctor } from '@/components/clinical/patient-consultant-routing-modal';
@@ -39,6 +40,7 @@ import { PatientRecordRemovalModal } from '@/components/mpi/patient-record-remov
 import { useAuth } from '@/lib/auth/auth-context';
 import { useRBAC } from '@/lib/auth/rbac-context';
 import { AuthClient } from '@/lib/auth/auth-client';
+import { executeActiveTenantCommand } from '@/lib/api/command-client';
 
 export function PatientMpiView() {
   const router = useRouter();
@@ -74,6 +76,9 @@ export function PatientMpiView() {
   const [newTemp, setNewTemp] = useState<number | ''>('');
   const [newResp, setNewResp] = useState<number | ''>('');
   const [newO2, setNewO2] = useState<number | ''>('');
+  const [vitalsEncounterId, setVitalsEncounterId] = useState('');
+  const [vitalsStatus, setVitalsStatus] = useState<string | null>(null);
+  const [vitalsSaving, setVitalsSaving] = useState(false);
 
   // New patient registration state
   const [newFullName, setNewFullName] = useState('');
@@ -278,38 +283,56 @@ export function PatientMpiView() {
 
   const handleAddVitals = async (e: React.FormEvent) => {
     e.preventDefault();
+    setVitalsStatus(null);
     if (!currentPatient) return;
-
+    const encounter = currentPatient.encounters.find(item => item.id === vitalsEncounterId);
+    if (!encounter) {
+      setVitalsStatus('Select a specific active encounter before recording vitals. If there is no encounter, create an OPD visit or open an ER encounter first.');
+      return;
+    }
+    const bp = /^([0-9]{2,3}) *[/] *([0-9]{2,3})$/.exec(newBp.trim());
     if (
-      typeof newHeartRate !== 'number' ||
-      !newBp.trim() ||
-      typeof newTemp !== 'number' ||
-      typeof newResp !== 'number' ||
-      typeof newO2 !== 'number'
+      typeof newHeartRate !== 'number' || newHeartRate < 20 || newHeartRate > 300 ||
+      !bp || Number(bp[1]) < Number(bp[2]) ||
+      typeof newTemp !== 'number' || newTemp < 25 || newTemp > 45 ||
+      typeof newResp !== 'number' || newResp < 4 || newResp > 80 ||
+      typeof newO2 !== 'number' || newO2 < 50 || newO2 > 100
     ) {
-      setAiParseError(
-        'Complete all vital-sign fields before recording a new observation.'
-      );
+      setVitalsStatus('Enter measured HR (20–300), BP as systolic/diastolic, temperature (25–45 °C), respiratory rate (4–80), and SpO₂ (50–100). Do not invent values.');
       return;
     }
 
+    setVitalsSaving(true);
     try {
-      await addVitals(currentPatient.id, {
-        heartRate: newHeartRate,
-        bloodPressure: newBp.trim(),
-        temperature: newTemp,
-        respiratoryRate: newResp,
-        oxygenSaturation: newO2,
-      });
+      const result = await executeActiveTenantCommand(
+        'RecordVitalsCommand',
+        {
+          encounterId: encounter.id,
+          patientId: currentPatient.id,
+          heartRate: newHeartRate,
+          bloodPressure: `${Number(bp[1])}/${Number(bp[2])}`,
+          temperature: newTemp,
+          respiratoryRate: newResp,
+          oxygenSaturation: newO2,
+          measuredAt: Date.now(),
+        }
+      );
+      if (!result.success || result.queuedOffline) {
+        throw new Error(result.error?.message || 'The authoritative server did not commit vitals.');
+      }
+      setVitalsStatus('Vitals committed to the selected encounter. Open Patient 360 to inspect the authoritative clinical evidence.');
       setNewHeartRate('');
       setNewBp('');
       setNewTemp('');
       setNewResp('');
       setNewO2('');
+      window.dispatchEvent(new CustomEvent('ghims:edge-sync-complete', {
+        detail: { tenantId: auth.activeTenant?.tenantId },
+      }));
     } catch (error) {
-      setAiParseError(
-        error instanceof Error ? error.message : 'Vitals could not be recorded.'
-      );
+      setVitalsStatus(error instanceof Error ? error.message : 'Vitals could not be committed.');
+    } finally {
+      setVitalsSaving(false);
     }
   };
 
@@ -599,6 +622,19 @@ export function PatientMpiView() {
                     <GitMerge className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" /> Merge Record
                   </button>
                   <button
+                    id="btn-direct-er-admission"
+                    type="button"
+                    onClick={() => {
+                      const tenant = auth.activeTenant?.tenantId || auth.user?.tenantId;
+                      if (!tenant || !currentPatient?.id) return;
+                      router.push(`/${encodeURIComponent(tenant)}/clinical/emergency?patientId=${encodeURIComponent(currentPatient.id)}`);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-rose-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-800"
+                    title="Open governed emergency department intake for this patient"
+                  >
+                    <Siren className="h-3.5 w-3.5" /> Admit to ER
+                  </button>
+                  <button
                     id="btn-open-patient360"
                     type="button"
                     onClick={() => void handleOpenPatient360()}
@@ -886,6 +922,25 @@ export function PatientMpiView() {
                 {/* Log new vitals */}
                 <form onSubmit={handleAddVitals} className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-sm space-y-3">
                   <h4 className="text-xs font-bold text-slate-900">Record Live Patient Vitals</h4>
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Verified encounter for these observations
+                    <select
+                      data-testid="mpi-vitals-encounter"
+                      value={vitalsEncounterId}
+                      onChange={(event) => { setVitalsEncounterId(event.target.value); setVitalsStatus(null); }}
+                      className="mt-1 w-full rounded-lg border border-slate-300 p-2 text-xs"
+                    >
+                      <option value="">Select patient's active encounter</option>
+                      {(currentPatient.encounters || [])
+                        .filter(item => !['COMPLETED', 'CLOSED', 'CANCELLED', 'DISCHARGED', 'TRANSFERRED'].includes(String(item.status || '').toUpperCase()))
+                        .map(item => (
+                          <option key={item.id} value={item.id}>
+                            {item.id} · {item.status || 'Unresolved'}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  {vitalsStatus && <p role="status" className="rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">{vitalsStatus}</p>}
                   <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                     <div>
                       <label className="block text-[11px] font-medium text-slate-500 mb-1">Heart Rate (bpm)</label>
@@ -943,9 +998,10 @@ export function PatientMpiView() {
                     <button
                       id="btn-submit-vitals"
                       type="submit"
+                      disabled={!vitalsEncounterId || vitalsSaving}
                       className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-xs"
                     >
-                      Record Vitals
+                      {vitalsSaving ? 'Recording…' : 'Record Vitals'}
                     </button>
                   </div>
                 </form>
@@ -1070,6 +1126,17 @@ export function PatientMpiView() {
                   <span className="px-2.5 py-1 text-xs font-semibold rounded bg-amber-50 text-amber-700 border border-amber-200">
                     Status: {activeEncounter?.billing.paymentStatus.toUpperCase() || 'PENDING'}
                   </span>
+                  <button
+                    id="btn-open-authoritative-billing"
+                    type="button"
+                    onClick={() => {
+                      const tenant = auth.activeTenant?.tenantId || auth.user?.tenantId;
+                      if (tenant) router.push(`/${encodeURIComponent(tenant)}/billing/invoices`);
+                    }}
+                    className="rounded-lg bg-teal-700 px-3 py-2 text-xs font-bold text-white hover:bg-teal-800"
+                  >
+                    Open cashier / clear billing
+                  </button>
                 </div>
 
                 <div className="overflow-x-auto">

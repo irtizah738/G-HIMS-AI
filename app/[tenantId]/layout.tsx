@@ -2,6 +2,7 @@ import React from 'react';
 import { TenantProvider } from '@/lib/tenant/context';
 import { RbacProvider } from '@/lib/auth/rbac-context';
 import { TenantShellHeader } from '@/components/tenant/tenant-shell-header';
+import { TenantRouteAuthorityGuard } from '@/components/tenant/tenant-route-authority-guard';
 import { SyncStatusBanner } from '@/components/offline/SyncStatusBanner';
 
 interface TenantLayoutProps {
@@ -19,6 +20,7 @@ export default async function TenantLayout({ children, params }: TenantLayoutPro
 
   return (
     <TenantProvider initialTenantId={tenantId}>
+      <TenantRouteAuthorityGuard routeTenantId={tenantId}>
       <RbacProvider>
         <div className="min-h-screen bg-slate-100/60 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors">
           {/* Top Tenant Navigation Bar */}
@@ -33,6 +35,7 @@ export default async function TenantLayout({ children, params }: TenantLayoutPro
           </main>
         </div>
       </RbacProvider>
+      </TenantRouteAuthorityGuard>
     </TenantProvider>
   );
 }

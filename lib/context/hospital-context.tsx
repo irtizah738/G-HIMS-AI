@@ -1641,6 +1641,14 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     if (primary.id === secondary.id) {
       throw new Error('Cannot merge a patient record into itself.');
     }
+    if (['MERGED', 'REMOVED'].includes(String(primary.status || 'ACTIVE').toUpperCase())) {
+      throw new Error(primary.mergedIntoPatientId
+        ? `This primary MRN has been merged. Review the surviving record ${primary.mergedIntoPatientId} before continuing.`
+        : 'This primary MRN is retired. Refresh MPI and contact the Records Officer.');
+    }
+    if (['MERGED', 'REMOVED'].includes(String(secondary.status || 'ACTIVE').toUpperCase())) {
+      throw new Error('The secondary record is retired. Refresh MPI and inspect the existing merge history.');
+    }
     if (!mergeReason.trim()) {
       throw new Error('A governed patient-merge reason is required.');
     }

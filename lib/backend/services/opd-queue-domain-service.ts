@@ -8,11 +8,11 @@ import { AtomicMutationRejectedError, TransactionManager } from '../transactions
 import { CommandContext, CommandResult } from '../types';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 
-export type OpdQueueStatus = 'payment_pending' | 'waiting' | 'called' | 'in_consultation' | 'completed' | 'no_show' | 'transferred';
+export type OpdQueueStatus = 'payment_pending' | 'waiting' | 'called' | 'in_consultation' | 'completed' | 'no_show' | 'transferred' | 'cancelled';
 
 export interface UpdateOpdQueueStatusPayload {
   tokenId: string;
-  targetStatus: Exclude<OpdQueueStatus, 'waiting'>;
+  targetStatus: Exclude<OpdQueueStatus, 'waiting' | 'cancelled'>;
   targetDepartment?: string;
   assignedDoctorName?: string;
   assignedRoomOrBay?: string;
@@ -41,6 +41,7 @@ const ALLOWED_TRANSITIONS: Record<OpdQueueStatus, OpdQueueStatus[]> = {
   completed: [],
   no_show: [],
   transferred: [],
+  cancelled: [],
 };
 
 export class OpdQueueDomainService {

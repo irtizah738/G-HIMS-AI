@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { TransactionManager } from '@/lib/backend/transactions/transaction-manager';
 import { getLogSeverity } from '@/lib/audit/logger';
-import { PatientRecordRemovalDomainService } from '@/lib/backend/services/patient-record-removal-domain-service';
+import { PatientRecordRemovalDomainService, unresolvedRemovalEncounter } from '@/lib/backend/services/patient-record-removal-domain-service';
 import type { CommandContext } from '@/lib/backend/types';
 
 const tenantId = 'patient-record-removal-tenant';
@@ -142,12 +142,75 @@ describe('Governed patient removal from active MPI', () => {
     expect(await TransactionManager.getEvents(tenantId)).toHaveLength(0);
   });
 
+  test('terminal encounter.status authoritatively permits removal despite stale operational queue state', async () => {
+    seedPatient();
+    TransactionManager.seedEphemeralStateForTesting(tenantId, 'ENCOUNTER', 'enc-completed-queue-stale', {
+      id: 'enc-completed-queue-stale',
+      tenantId,
+      patientId,
+      type: 'OPD',
+      status: 'COMPLETED',
+      operationalState: 'QUEUED',
+      clinicalState: 'TRIAGE',
+    });
+    const result = await PatientRecordRemovalDomainService.remove(
+      context(), 'cmd-completed-stale-queue', 'idem-completed-stale-queue', payload()
+    );
+    expect(result.success).toBe(true);
+    expect(TransactionManager.getEphemeralStateForTesting(tenantId, 'PATIENT_MPI', patientId)?.status).toBe('REMOVED');
+  });
+
+  test('ACTIVE status blocks removal even if operational queue says completed', async () => {
+    seedPatient();
+    TransactionManager.seedEphemeralStateForTesting(tenantId, 'ENCOUNTER', 'enc-ongoing', {
+      id: 'enc-ongoing',
+      tenantId,
+      patientId,
+      type: 'OPD',
+      status: 'ACTIVE',
+      operationalState: 'COMPLETED',
+      clinicalState: 'COMPLETED',
+    });
+    const result = await PatientRecordRemovalDomainService.remove(
+      context(), 'cmd-active-lifecycle', 'idem-active-lifecycle', payload()
+    );
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('PATIENT_HAS_ACTIVE_CARE');
+    expect(result.error?.message).toContain('enc-ongoing');
+    expect(result.error?.message).toContain('ACTIVE');
+    expect(result.error?.details).toEqual({
+      blockingEncounterId: 'enc-ongoing',
+      encounterStatus: 'ACTIVE',
+      encounterType: 'OPD',
+    });
+    expect(TransactionManager.getEphemeralStateForTesting(tenantId, 'PATIENT_MPI', patientId)?.status).toBe('ACTIVE');
+  });
+
+  test('encounter without authoritative status remains unresolved even if other states are terminal', () => {
+    expect(unresolvedRemovalEncounter({
+      id: 'enc-missing-status',
+      type: 'IPD',
+      operationalState: 'COMPLETED',
+      clinicalState: 'COMPLETED',
+    })).toEqual({
+      encounterId: 'enc-missing-status',
+      status: 'UNKNOWN',
+      encounterType: 'IPD',
+    });
+    expect(unresolvedRemovalEncounter({
+      id: 'enc-terminal',
+      status: 'DISCHARGED',
+      operationalState: 'IN_SERVICE',
+    })).toBeNull();
+  });
+
   test('active care pointers also block removal, even without an encounter query hit', async () => {
     seedPatient({ activeCareContexts: { activeIpdEncounterId: 'ipd-123', activeOpdEncounterIds: [] } });
     const result = await PatientRecordRemovalDomainService.remove(
       context(), 'cmd-active-pointer', 'idem-active-pointer', payload()
     );
     expect(result.error?.code).toBe('PATIENT_HAS_ACTIVE_CARE');
+    expect(result.error?.message).toContain('IPD encounter ipd-123');
     expect((await TransactionManager.getAudits(tenantId))).toHaveLength(0);
   });
 

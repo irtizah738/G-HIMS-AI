@@ -29,6 +29,11 @@ export function PatientRecordRemovalModal({
   const [reason, setReason] = useState('');
   const [confirmationMrn, setConfirmationMrn] = useState('');
   const [retentionAcknowledged, setRetentionAcknowledged] = useState(false);
+  const [syntheticConfirmed, setSyntheticConfirmed] = useState(false);
+  const isConfirmedMock = process.env.NODE_ENV === 'development' &&
+    activeTenant?.tenantId === 'tenant_02bb76e3' &&
+    (patient.mrn === 'MRN-20260820-8790' && patient.fullName.trim().toLowerCase() === 'eleanor vance' ||
+      patient.mrn === 'MRN-20260930-3611' && patient.fullName.trim().toLowerCase() === 'test patient');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -66,6 +71,34 @@ export function PatientRecordRemovalModal({
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to remove patient record.');
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const retireMock = async () => {
+    if (!valid || !syntheticConfirmed || !isConfirmedMock) return;
+    setPending(true);
+    setError(null);
+    try {
+      const result = await executeActiveTenantCommand<{
+        patientId: string;
+        status: 'REMOVED';
+        retiredEncounters: string[];
+        retiredQueueTokens: string[];
+      }>('RetireConfirmedMockPatientCommand', {
+        patientId: patient.id,
+        expectedMrn: confirmationMrn.trim(),
+        reason: reason.trim(),
+        confirmedSynthetic: true,
+      });
+      if (!result.success || result.queuedOffline || result.data?.status !== 'REMOVED') {
+        throw new Error(result.error?.message || 'Synthetic patient retirement was not committed.');
+      }
+      onRemoved(patient.id);
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Synthetic patient retirement failed.');
     } finally {
       setPending(false);
     }
@@ -149,6 +182,36 @@ export function PatientRecordRemovalModal({
               a permanent destruction of clinical, audit, identity or financial records.
             </span>
           </label>
+          {isConfirmedMock && (
+            <div className="space-y-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+              <p className="font-bold">Development-only: retire confirmed mock patient and OPD encounters</p>
+              <p>
+                This option handles an unresolved OPD test encounter without pretending clinical
+                care was completed. It preserves the original records and records the administrative
+                cancellation, operator, time and reason. The server rejects production, non-OPD care,
+                other MRNs and patients with linked financial records.
+              </p>
+              <label className="flex items-start gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={syntheticConfirmed}
+                  onChange={(e) => setSyntheticConfirmed(e.target.checked)}
+                  data-testid="retire-mock-synthetic-confirmation"
+                  className="mt-0.5"
+                />
+                <span>I confirm all care episodes in this patient record are synthetic and belong to development testing.</span>
+              </label>
+              <button
+                type="button"
+                data-testid="retire-confirmed-mock-patient"
+                disabled={!valid || !syntheticConfirmed}
+                onClick={retireMock}
+                className="rounded-lg bg-amber-800 px-3 py-2 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {pending ? 'Committing audited mock cleanup…' : 'Retire mock record and linked OPD test encounters'}
+              </button>
+            </div>
+          )}
           {!allowed && (
             <p className="text-sm text-rose-700">Hospital administrator authority is required.</p>
           )}

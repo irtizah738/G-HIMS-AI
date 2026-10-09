@@ -36,8 +36,17 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       encounterType: z.enum(['OPD','IPD','EMERGENCY','TELEHEALTH']),
       chiefComplaint: nonEmpty.max(4000),
       departmentId: nonEmpty.max(150),
+      facilityId: nonEmpty.max(150).optional(),
       priority: z.enum(['STAT','URGENT','ROUTINE']).optional(),
-    }).strict(),
+    }).strict().superRefine((value, ctx) => {
+      if (value.encounterType === 'EMERGENCY' && !value.facilityId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['facilityId'],
+          message: 'Direct emergency admission requires an explicit authorized facility.',
+        });
+      }
+    }),
   },
   CreateOpdEncounterCommand: {
     1: z.object({

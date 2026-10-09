@@ -27,6 +27,8 @@ import {
 export interface CreateEncounterPayload {
   patientId: string;
   encounterType: 'OPD' | 'IPD' | 'EMERGENCY' | 'TELEHEALTH';
+  /** Selected authorized facility for emergency care; never trust as authority. */
+  facilityId?: string;
   chiefComplaint: string;
   departmentId: string;
   priority?: 'STAT' | 'URGENT' | 'ROUTINE';
@@ -98,6 +100,7 @@ interface EncounterState {
   encounterType: CreateEncounterPayload['encounterType'];
   chiefComplaint: string;
   departmentId: string;
+  facilityId?: string;
   status: string;
   currentStage: string;
   clinicalState: ClinicalEncounterState;
@@ -273,6 +276,29 @@ export class EncounterDomainService {
       };
     }
 
+    // Emergency intake must identify the verified hospital facility. Never
+    // fabricate a location or mistake the intake clerk for the attending.
+    const authorizedFacilities = Array.from(new Set(
+      (context.facilityIds || []).map((id) => String(id || '').trim()).filter(Boolean)
+    ));
+    const requestedFacilityId = String(payload.facilityId || '').trim();
+    let emergencyFacilityId = '';
+    if (payload.encounterType === 'EMERGENCY') {
+      emergencyFacilityId = requestedFacilityId ||
+        (authorizedFacilities.length === 1 ? authorizedFacilities[0] : '');
+      if (!emergencyFacilityId || !authorizedFacilities.includes(emergencyFacilityId)) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'EMERGENCY_FACILITY_SCOPE_REQUIRED',
+            message: 'Choose an authorized emergency facility before creating an encounter.',
+          },
+        };
+      }
+    }
+
     // 3. Authoritative patient precondition and state initialization.
     const patient = DomainStateRepository.isAvailable()
       ? await DomainStateRepository.getById<Record<string, unknown>>(
@@ -322,6 +348,7 @@ export class EncounterDomainService {
       encounterType: payload.encounterType,
       chiefComplaint: payload.chiefComplaint,
       departmentId: payload.departmentId,
+      ...(emergencyFacilityId ? { facilityId: emergencyFacilityId } : {}),
       status: 'ACTIVE',
       currentStage: payload.encounterType === 'TELEHEALTH' ? 'CONSULTATION' : 'TRIAGE',
       clinicalState: payload.encounterType === 'TELEHEALTH' ? 'CONSULTATION' : 'TRIAGE',
@@ -332,7 +359,10 @@ export class EncounterDomainService {
           : 'CONSULTATION_PAYMENT_PENDING',
       resourceAssignmentState: 'NONE',
       priority: payload.priority || 'ROUTINE',
-      assignedProviderId: context.actorId,
+      assignedProviderId:
+        (context.roles || []).some((role) =>
+          ['DOCTOR', 'CONSULTANT'].includes(String(role).trim().toUpperCase())
+        ) ? context.actorId : '',
       createdAt: now,
       updatedAt: now,
     };
@@ -362,6 +392,7 @@ export class EncounterDomainService {
         encounterId,
         patientId: payload.patientId,
         encounterType: payload.encounterType,
+        facilityId: emergencyFacilityId || undefined,
         careSetting: normalizeCareSetting(payload.encounterType),
         chiefComplaint: payload.chiefComplaint,
       },

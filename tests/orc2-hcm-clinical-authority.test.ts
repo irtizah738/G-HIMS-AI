@@ -29,6 +29,9 @@ describe('ORC-2 HCM clinical privilege authority', () => {
     const directory = await source('lib/clinical/intelligence/consultant-directory-service.ts');
     const repo = await source('server/repositories/domain-state-repository.ts');
     expect(directory).toContain('authorizedFacilities.has(');
+    expect(directory).toContain('memberFacilities.includes(facilityId)');
+    expect(directory).toContain('memberDepartments.includes(departmentScopeId)');
+    expect(directory).toContain("privilege.privilegeType === 'CONSULT_OPD'");
     expect(directory).toContain('listAllWithDocumentIds<EmployeeMaster>');
     expect(directory).toContain('listAllWithDocumentIds<Membership>');
     expect(directory).toContain('String(privilege.facilityId ||');

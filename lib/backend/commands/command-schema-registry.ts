@@ -906,6 +906,14 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       signedEvidenceId: nonEmpty.max(200),
     }).strict(),
   },
+  RetireConfirmedMockPatientCommand: {
+    1: z.object({
+      patientId: nonEmpty.max(150),
+      expectedMrn: nonEmpty.max(150),
+      reason: z.string().trim().min(20).max(1000),
+      confirmedSynthetic: z.literal(true),
+    }).strict(),
+  },
   RemovePatientRecordCommand: {
     1: z.object({
       patientId: nonEmpty.max(150),

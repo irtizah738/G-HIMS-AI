@@ -227,6 +227,8 @@ export interface EdgeSyncMetadata {
   scope: string;
   /** Authenticated actor and hashed authority epoch for protected read cache. */
   actorId?: string;
+  sessionId?: string;
+  authorizationRevision?: string;
   authorityEpoch?: string;
   snapshotVersion: string;
   lastHydratedAt: number;

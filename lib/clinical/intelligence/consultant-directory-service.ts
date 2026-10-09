@@ -56,7 +56,7 @@ function normalizedRoles(membership: Membership): Set<string> {
   );
 }
 
-function isClinicalConsultantMembership(membership: Membership): boolean {
+export function isClinicalConsultantMembership(membership: Membership): boolean {
   const roles = normalizedRoles(membership);
   return (
     String(membership.status || '').toUpperCase() === 'ACTIVE' &&
@@ -67,30 +67,61 @@ function isClinicalConsultantMembership(membership: Membership): boolean {
   );
 }
 
-function isoDayActive(from: string | undefined, until: string | undefined, now: number): boolean {
-  const start = from ? Date.parse(`${from}T00:00:00.000Z`) : Number.NEGATIVE_INFINITY;
-  const end = until ? Date.parse(`${until}T23:59:59.999Z`) : Number.POSITIVE_INFINITY;
-  return now >= start && now <= end;
+/**
+ * Authorization dates are explicitly bounded. Missing, malformed, reversed,
+ * or future-effective HCM records never grant clinical access.
+ */
+export function isoDayActive(from: string | undefined, until: string | undefined, now: number): boolean {
+  if (!Number.isFinite(now)) return false;
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+  if (!from || !until || !datePattern.test(from) || !datePattern.test(until) || from > until) {
+    return false;
+  }
+  const start = Date.parse(`${from}T00:00:00.000Z`);
+  const end = Date.parse(`${until}T23:59:59.999Z`);
+  return Number.isFinite(start) && Number.isFinite(end) &&
+    new Date(start).toISOString().slice(0, 10) === from &&
+    new Date(end).toISOString().slice(0, 10) === until &&
+    now >= start && now <= end;
 }
 
-function credentialsValid(credentials: EmployeeCredential[], now: number): boolean {
+export function credentialsValid(credentials: EmployeeCredential[], now: number): boolean {
   const mandatory = credentials.filter((item) => item.isMandatoryForPractice);
   if (!mandatory.length) return false;
-  return mandatory.every((credential) => {
-    const expiry = Date.parse(`${credential.expiryDate}T23:59:59.999Z`);
-    return credential.verificationStatus === 'VERIFIED' && Number.isFinite(expiry) && expiry >= now;
-  });
+  return mandatory.every((credential) =>
+    credential.verificationStatus === 'VERIFIED' &&
+    Boolean(credential.verifiedByActorId) &&
+    Boolean(credential.verifiedAt) &&
+    isoDayActive(credential.issueDate, credential.expiryDate, now)
+  );
 }
 
-function activePrivileges(privileges: ClinicalPrivilege[], now: number): ClinicalPrivilege[] {
+export function activePrivileges(privileges: ClinicalPrivilege[], now: number, facilityId?: string, departmentId?: string): ClinicalPrivilege[] {
   return privileges.filter(
     (privilege) =>
       privilege.status === 'GRANTED' &&
+      (!facilityId || privilege.facilityId === facilityId) &&
+      (!departmentId || privilege.departmentId === departmentId) &&
       isoDayActive(privilege.effectiveFrom, privilege.effectiveUntil, now)
   );
 }
 
-function availabilityFor(
+/** Only roster-confirmed, credentialed and scoped consultants may receive a direct assignment. */
+export function isRoutableConsultant(
+  consultant: EligibleConsultant | undefined,
+  encounterFacilityId: string
+): boolean {
+  const facilityId = String(encounterFacilityId || '').trim().toUpperCase();
+  return Boolean(
+    consultant && facilityId &&
+    String(consultant.facilityId || '').trim().toUpperCase() === facilityId &&
+    consultant.credentialVerified === true &&
+    consultant.activePrivilegeTypes.includes('CONSULT_OPD') &&
+    (consultant.availability === 'ON_DUTY' || consultant.availability === 'ON_CALL')
+  );
+}
+
+export function availabilityFor(
   shifts: RosterShiftEntry[],
   now: number
 ): Pick<EligibleConsultant, 'availability' | 'shiftEndsAt'> {
@@ -217,27 +248,12 @@ export class ConsultantDirectoryService {
     } = {}
   ): Promise<EligibleConsultant[]> {
     const now = Date.now();
-
-    // ORC-2B: Determine the authoritative facility scope for this request.
-    // The actor can only see consultants at facilities they are authorized for.
-    // An explicit facilityId option narrows further; it cannot expand scope.
-    const actorFacilityIds = new Set(
-      (context.facilityIds || []).map((id) => String(id).trim()).filter(Boolean)
-    );
-    const requestedFacilityId = String(options.facilityId || '').trim();
-    const effectiveFacilityIds: Set<string> =
-      requestedFacilityId && actorFacilityIds.has(requestedFacilityId)
-        ? new Set([requestedFacilityId])
-        : requestedFacilityId && actorFacilityIds.size > 0
-        ? new Set() // requested a facility the actor cannot access — return empty
-        : actorFacilityIds; // no explicit request: use all authorized facilities
-
     const [employees, memberships, credentials, privileges, shifts] = await Promise.all([
-      DomainStateRepository.list<EmployeeMaster>(context.tenantId, 'employees', 1000),
-      DomainStateRepository.listWithDocumentIds<Membership>(context.tenantId, 'users', 1000),
-      DomainStateRepository.list<EmployeeCredential>(context.tenantId, 'clinicalCredentials', 5000),
-      DomainStateRepository.list<ClinicalPrivilege>(context.tenantId, 'clinicalPrivileges', 5000),
-      DomainStateRepository.list<RosterShiftEntry>(context.tenantId, 'rosterAssignments', 5000),
+      DomainStateRepository.listAllWithDocumentIds<EmployeeMaster>(context.tenantId, 'employees'),
+      DomainStateRepository.listAllWithDocumentIds<Membership>(context.tenantId, 'users'),
+      DomainStateRepository.listAllWithDocumentIds<EmployeeCredential>(context.tenantId, 'clinicalCredentials'),
+      DomainStateRepository.listAllWithDocumentIds<ClinicalPrivilege>(context.tenantId, 'clinicalPrivileges'),
+      DomainStateRepository.listAllWithDocumentIds<RosterShiftEntry>(context.tenantId, 'rosterAssignments'),
     ]);
 
     // Membership documents are canonically keyed by Auth UID. A duplicated
@@ -276,32 +292,18 @@ export class ConsultantDirectoryService {
     const requestedSpecialty = String(options.specialty || '').trim().toLowerCase();
 
     return employees
-      .filter((employee) => employee.employmentStatus === 'ACTIVE' && Boolean(employee.userId))
+      .filter((employee) =>
+        employee.employmentStatus === 'ACTIVE' &&
+        Boolean(employee.userId) &&
+        authorizedFacilities.has(String(employee.primaryFacilityId || '').trim().toUpperCase())
+      )
       .map((employee): EligibleConsultant | null => {
         const membership = membershipByUser.get(String(employee.userId));
+        if (!membership || !isClinicalConsultantMembership(membership)) return null;
+        if (!credentialsValid(credentialsByEmployee.get(employee.employeeId) || [], now)) return null;
 
-        // ORC-2B: Use the authoritative eligibility predicate rather than
-        // duplicating the credential + privilege + facility logic inline.
-        // facilityId from primaryFacilityId is the canonical facility scope;
-        // if the employee has no primaryFacilityId, they are not placeable.
-        const primaryFacilityId = String(employee.primaryFacilityId || '').trim();
-        if (!primaryFacilityId) return null;
-
-        // ORC-2B: Facility-scope filter — actor can only see consultants at
-        // their own authorized facilities.
-        if (effectiveFacilityIds.size > 0 && !effectiveFacilityIds.has(primaryFacilityId)) return null;
-
-        const eligibility = ConsultantDirectoryService.assertConsultantEligibility({
-          employee,
-          membership,
-          credentials: credentialsByEmployee.get(employee.employeeId) || [],
-          privileges: privilegesByEmployee.get(employee.employeeId) || [],
-          shifts: shiftsByEmployee.get(employee.employeeId) || [],
-          facilityId: primaryFacilityId,
-          departmentId: options.departmentId,
-          now,
-        });
-        if (!eligibility.eligible) return null;
+        const granted = activePrivileges(privilegesByEmployee.get(employee.employeeId) || [], now);
+        if (!granted.length) return null;
 
         const departmentId = String(employee.primaryDepartmentId || '').trim();
         const departmentName = String(employee.primaryDepartmentName || departmentId).trim();
@@ -335,11 +337,9 @@ export class ConsultantDirectoryService {
           subSpecialties: employee.subSpecialties || [],
           departmentId,
           departmentName,
-          facilityId: primaryFacilityId,
-          // ORC-2B: Use availability computed by the eligibility predicate.
-          availability: eligibility.availability ?? 'UNKNOWN',
-          shiftEndsAt: eligibility.shiftEndsAt,
-          activePrivilegeTypes: eligibility.activePrivilegeTypes || [],
+          facilityId: employee.primaryFacilityId,
+          ...availabilityFor(shiftsByEmployee.get(employee.employeeId) || [], now),
+          activePrivilegeTypes: Array.from(new Set(granted.map((item) => item.privilegeType))).sort(),
           credentialVerified: true,
         };
       })

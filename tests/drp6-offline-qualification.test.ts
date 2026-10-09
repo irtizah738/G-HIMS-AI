@@ -113,7 +113,9 @@ describe('DRP-6 offline qualification contracts', () => {
     expect(bootstrap).toContain('requireEdgeHydrationSurface');
     expect(bootstrap).toContain('There is no generic tenant cache fallback');
     expect(bootstrap).not.toContain("'GENERIC'");
-    expect(secureStore).toContain('Purge stale collections from older/broader surfaces');
+    expect(secureStore).toContain('changedAuthority ||');
+    expect(secureStore).toContain('requestedCollections.has(row.collection)');
+    expect(secureStore).toContain("scope: 'edge-authority'");
     expect(secureStore).toContain('.primaryKeys()');
   });
 

@@ -162,7 +162,7 @@ describe('P8 main baseline hardening', () => {
     const authorization = await source('server/auth/authorization-context.ts');
     expect(authorization).toContain('Clinical authority has exactly one source of truth');
     expect(authorization).not.toContain("tenantRef.collection('users').doc(params.userId)");
-    expect(authorization).toContain("mandatory.length===0");
+    expect(authorization).toContain('credentialsValid(credentials, Date.now())');
     expect(authorization).toContain("privilege.status!=='GRANTED'");
   });
 

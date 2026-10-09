@@ -566,8 +566,8 @@ export function PatientConsultantRoutingModal({
       setDirectoryError('Select an eligible consultant before routing.');
       return;
     }
-    if (selectedDoctor.status === 'OFF_DUTY') {
-      setDirectoryError('The selected consultant is off duty. Select an on-duty or on-call consultant.');
+    if (!['ON_DUTY_AVAILABLE', 'ON_CALL_PAGER'].includes(selectedDoctor.status)) {
+      setDirectoryError('The selected consultant has no verified active duty or on-call roster. Select an available consultant.');
       return;
     }
     setIsDispatching(true);

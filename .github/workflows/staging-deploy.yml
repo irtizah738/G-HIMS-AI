@@ -67,6 +67,9 @@ jobs:
         with:
           bun-version: 1.4.2
 
+      - name: Verify frozen Bun dependencies
+        run: bun install --frozen-lockfile
+
       - name: Install pinned Vercel CLI
         run: npm install --global vercel@59.19.1
 
@@ -78,18 +81,19 @@ jobs:
             echo "VERCEL_TOKEN GitHub secret is required." >&2
             exit 1
           fi
+          vercel whoami --scope "$VERCEL_ORG_ID" >/dev/null
 
       - name: Pull Preview configuration for G-HIMS STAGING
         shell: bash
         run: |
           set -euo pipefail
-          vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
+          vercel pull --yes --environment=preview
 
       - name: Pull STAGING environment for fail-closed preflight
         shell: bash
         run: |
           set -euo pipefail
-          vercel env pull .env.staging --yes --environment=preview --token="$VERCEL_TOKEN"
+          vercel env pull .env.staging --yes --environment=preview
 
       - name: Validate isolated STAGING runtime contract
         shell: bash
@@ -105,14 +109,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          vercel build --token="$VERCEL_TOKEN"
+          vercel build
 
       - name: Deploy prebuilt artifact as guarded Preview
         id: deploy
         shell: bash
         run: |
           set -euo pipefail
-          vercel deploy --prebuilt --yes --token="$VERCEL_TOKEN" 2>&1 | tee /tmp/vercel-staging-deploy.log
+          vercel deploy --prebuilt --yes 2>&1 | tee /tmp/vercel-staging-deploy.log
           DEPLOY_URL="$(grep -Eo 'https://[A-Za-z0-9.-]+\.vercel\.app' /tmp/vercel-staging-deploy.log | tail -n 1 || true)"
           if [ -z "$DEPLOY_URL" ]; then
             echo "Could not resolve the guarded STAGING Preview URL from Vercel output." >&2
@@ -132,7 +136,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          vercel env pull .env.drp10 --yes --environment=preview --token="$VERCEL_TOKEN"
+          vercel env pull .env.drp10 --yes --environment=preview
           chmod 600 .env.drp10
 
       - name: Provision isolated synthetic qualification tenant

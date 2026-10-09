@@ -96,8 +96,9 @@ export function GovernedEmergencyConsole() {
   const auth = useAuth();
   const authorizedFacilityIds = auth.user?.facilityIds || [];
   const [selectedFacilityId, setSelectedFacilityId] = useState('');
-  const emergencyFacilityId = selectedFacilityId ||
-    (authorizedFacilityIds.length === 1 ? authorizedFacilityIds[0] : '');
+  const emergencyFacilityId = selectedFacilityId && authorizedFacilityIds.includes(selectedFacilityId)
+    ? selectedFacilityId
+    : (authorizedFacilityIds.length === 1 ? authorizedFacilityIds[0] : '');
   const params = useParams<{ tenantId: string }>();
   const searchParams = useSearchParams();
   const preselectedPatientId = String(searchParams.get('patientId') || '').trim();
@@ -106,6 +107,7 @@ export function GovernedEmergencyConsole() {
   const [encounters, setEncounters] = useState<EmergencyEncounterProjection[]>([]);
   const [patients, setPatients] = useState<PatientProjection[]>([]);
   const [source, setSource] = useState<ProjectionSource>('LOCAL_EDGE');
+  const [hydrationStatus, setHydrationStatus] = useState('UNHYDRATED');
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
 
@@ -153,6 +155,7 @@ export function GovernedEmergencyConsole() {
 
       setEncounters(allEncounters);
       setPatients(activePatients);
+      setHydrationStatus(snapshot.freshness || 'UNHYDRATED');
       // A deep link selects only an identity returned by the authoritative
       // tenant-scoped projection; foreign/stale IDs never become eligible.
       if (preselectedPatientId && activePatients.some(p => p.id === preselectedPatientId)) {
@@ -217,6 +220,8 @@ export function GovernedEmergencyConsole() {
     if (
       !patientId ||
       !emergencyFacilityId ||
+      !authorizedFacilityIds.includes(emergencyFacilityId) ||
+      !patientsById[patientId] ||
       !chiefComplaint.trim() ||
       !departmentId.trim() ||
       creating
@@ -276,8 +281,8 @@ export function GovernedEmergencyConsole() {
   const recordVitals = async (event: FormEvent) => {
     event.preventDefault();
 
-    if (!selectedEncounter) {
-      setMessage('Select an emergency encounter before recording vitals.');
+    if (!selectedEncounter || !authorizedFacilityIds.includes(selectedEncounter.facilityId || '')) {
+      setMessage('Select an active emergency encounter in an authorized facility before recording vitals.');
       return;
     }
 
@@ -363,7 +368,7 @@ export function GovernedEmergencyConsole() {
                 CommandBus mutations
               </span>
               <span className="rounded-full border border-slate-200 px-2 py-1 font-semibold dark:border-slate-700">
-                Projection: {source}
+                Projection: {source} · {hydrationStatus}
               </span>
             </div>
           </div>

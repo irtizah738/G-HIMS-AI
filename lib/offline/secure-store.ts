@@ -135,6 +135,11 @@ export async function replaceSecureTenantEdgeSnapshot(
 ): Promise<void> {
   const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
   if (!normalizedTenantId || !actorId) throw new Error('EDGE_CRYPTO_CONTEXT_REQUIRED');
+  const snapshotScope = metadata.scope;
+  const authorityEpoch = metadata.authorityEpoch;
+  if (!snapshotScope || !authorityEpoch) {
+    throw new Error('EDGE_SNAPSHOT_AUTHORITY_REQUIRED');
+  }
 
   const records: EdgeEntityRecord[] = [];
   for (const [collection, entities] of Object.entries(collections || {})) {
@@ -187,22 +192,50 @@ export async function replaceSecureTenantEdgeSnapshot(
     localDb.edge_entities,
     localDb.sync_metadata,
     async () => {
-      // One actor/device retains one current minimum-necessary read snapshot.
-      // Purge stale collections from older/broader surfaces before replacing it.
+      // A changed actor, authorization or session invalidates all prior
+      // server-derived read models, but NEVER the encrypted command outbox.
+      const authorityKey = `${normalizedTenantId}:edge-authority`;
+      const previousAuthority = await localDb.sync_metadata.get(authorityKey);
+      const changedAuthority =
+        previousAuthority?.actorId !== actorId ||
+        previousAuthority?.authorityEpoch !== authorityEpoch;
+      const requestedCollections = new Set(Object.keys(collections || {}));
       const staleKeys = await localDb.edge_entities
         .where('tenantId')
         .equals(normalizedTenantId)
-        .filter((row) => !row.actorId || row.actorId === actorId)
+        .filter((row) =>
+          changedAuthority ||
+          ((!row.actorId || row.actorId === actorId) &&
+            requestedCollections.has(row.collection))
+        )
         .primaryKeys();
-      if (staleKeys.length > 0) {
-        await localDb.edge_entities.bulkDelete(staleKeys as string[]);
+      if (staleKeys.length) await localDb.edge_entities.bulkDelete(staleKeys as string[]);
+      if (changedAuthority) {
+        await localDb.sync_metadata.where('tenantId').equals(normalizedTenantId).delete();
       }
       if (records.length) await localDb.edge_entities.bulkPut(records);
-      const scope = metadata.scope || 'clinical-core';
       await localDb.sync_metadata.put({
-        key: `${normalizedTenantId}:${scope}`,
+        key: authorityKey,
         tenantId: normalizedTenantId,
-        scope,
+        scope: 'edge-authority',
+        actorId,
+        sessionId: metadata.sessionId,
+        authorizationRevision: metadata.authorizationRevision,
+        authorityEpoch,
+        snapshotVersion: `authority:${authorityEpoch}`,
+        lastHydratedAt: metadata.lastHydratedAt,
+        serverGeneratedAt: metadata.serverGeneratedAt,
+      });
+      // Refresh only collections delivered by this named surface. Other
+      // authorized surfaces remain available for legitimate offline reads.
+      await localDb.sync_metadata.put({
+        key: `${normalizedTenantId}:${snapshotScope}`,
+        tenantId: normalizedTenantId,
+        scope: snapshotScope,
+        actorId,
+        sessionId: metadata.sessionId,
+        authorizationRevision: metadata.authorizationRevision,
+        authorityEpoch,
         snapshotVersion: metadata.snapshotVersion,
         lastHydratedAt: metadata.lastHydratedAt,
         serverGeneratedAt: metadata.serverGeneratedAt,

@@ -29,6 +29,16 @@ if (projectId !== publicProjectId) {
   fail('STAGING_CLIENT_SERVER_PROJECT_MISMATCH');
 }
 
+// The non-secret production project reference is mandatory in Preview:
+// without it, an accidentally production-bound staging build can evade comparison.
+const productionProject = String(process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION || '').trim();
+if (!productionProject) {
+  fail('STAGING_PRODUCTION_REFERENCE_REQUIRED');
+}
+if (productionProject === stagingProject) {
+  fail('STAGING_PROJECT_COLLISION');
+}
+
 const forbiddenProjects = [
   process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO,
   process.env.GHIMS_FIREBASE_PROJECT_ID_TEST,
@@ -63,9 +73,19 @@ for (const [name, state] of Object.entries(integrationStates)) {
   }
 }
 
+const adminClientEmail = String(process.env.FIREBASE_CLIENT_EMAIL || '').trim().toLowerCase();
 const firebaseCredentialsPresent =
-  Boolean(String(process.env.FIREBASE_CLIENT_EMAIL || '').trim()) &&
+  Boolean(adminClientEmail) &&
   Boolean(String(process.env.FIREBASE_PRIVATE_KEY || '').trim());
+
+// An Admin SDK credential may authenticate a service account belonging to
+// another Firebase project. A staging deployment must never reuse a production
+// project service account, even when the configured client project ID is safe.
+if (adminClientEmail && !adminClientEmail.endsWith(
+  `@${stagingProject.toLowerCase()}.iam.gserviceaccount.com`
+)) {
+  fail('STAGING_SERVICE_ACCOUNT_PROJECT_MISMATCH');
+}
 
 if (!firebaseCredentialsPresent && !String(process.env.GOOGLE_APPLICATION_CREDENTIALS || '').trim()) {
   fail('STAGING_FIREBASE_ADMIN_CREDENTIALS_REQUIRED');

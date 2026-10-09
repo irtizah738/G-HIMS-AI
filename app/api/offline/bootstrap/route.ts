@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createHash } from 'node:crypto';
 import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import {
@@ -925,6 +926,18 @@ export async function GET(req: NextRequest) {
     const snapshotVersion = `${context.tenantId}:${
       requestedSurface.toLowerCase() + ':'
     }${generatedAt}`;
+    // A revised role, privilege or facility scope invalidates every previously
+    // cached read surface for this session. Never use client-supplied claims.
+    const sorted = (values: string[] | undefined) =>
+      [...(values || [])].map(String).sort();
+    const authorizationRevision = createHash('sha256').update(JSON.stringify({
+      actorId: context.actorId,
+      roles: sorted(context.roles),
+      permissions: sorted(context.permissions),
+      facilities: sorted(context.facilityIds),
+      departments: sorted(context.departmentIds),
+      clinicalPrivileges: sorted(context.clinicalPrivileges),
+    })).digest('hex');
 
     return NextResponse.json(
       {
@@ -932,7 +945,11 @@ export async function GET(req: NextRequest) {
         tenantId: context.tenantId,
         generatedAt,
         snapshotVersion,
+        authorizationRevision,
         surface: requestedSurface,
+        hydrationStatus: collections.length === 0 ? 'NOT_APPLICABLE' : 'CURRENT',
+        authorizedCollectionCount: collections.length,
+        requestedCollectionCount: new Set(requestedCollections).size,
         collections: scopedCollections,
       },
       {

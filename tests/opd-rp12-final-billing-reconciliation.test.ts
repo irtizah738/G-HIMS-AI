@@ -29,6 +29,8 @@ describe('OPD-RP12 final billing reconciliation', () => {
     expect(service).toContain("'OPD_OUTSTANDING_INVOICE'");
     expect(service).toContain("'OPD_AR_NOT_SETTLED'");
     expect(service).toContain("'OPD_CHARGE_INVOICE_CARDINALITY_INVALID'");
+    expect(service).toContain("'OPD_CHARGE_IDENTITY_CONFLICT'");
+    expect(service).toContain("seenChargeIds.has(chargeId)");
     expect(service).toContain("'OPD_INVOICE_CHARGE_ORPHANED'");
     expect(service).toContain("'OPD_CHARGE_INVOICE_MONETARY_MISMATCH'");
     expect(service).toContain("'OPD_INVOICE_LINE_TOTAL_MISMATCH'");

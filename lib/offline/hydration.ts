@@ -42,12 +42,25 @@ export async function loadLocalEdgeSnapshot(
   const cached = await getCachedAuthSession();
   const actorId = cached?.user?.uid || '';
   const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
-  if (cached && cached.user.tenantId.trim().toLowerCase() !== normalizedTenantId) {
+  if (cached && (
+    cached.user.tenantId.trim().toLowerCase() !== normalizedTenantId ||
+    cached.session.tenantId.trim().toLowerCase() !== normalizedTenantId ||
+    cached.session.userId !== cached.user.uid
+  )) {
     throw new Error('EDGE_HYDRATION_TENANT_MISMATCH');
   }
-  if (!actorId) {
+  const authority = await getEdgeSyncMetadata(normalizedTenantId, 'edge-authority');
+  if (
+    !actorId ||
+    !cached ||
+    !authority ||
+    authority.actorId !== actorId ||
+    authority.sessionId !== cached.session.sessionId ||
+    !authority.authorityEpoch
+  ) {
+    // Never expose legacy cache from a previous session or privilege scope.
     return {
-      tenantId,
+      tenantId: normalizedTenantId,
       generatedAt: 0,
       snapshotVersion: 'local-locked',
       collections: {},
@@ -115,7 +128,7 @@ export async function loadLocalEdgeSnapshot(
       await listSecureEdgeEntities(tenantId, actorId, collection),
     ] as const)
   );
-  const metadata = await getEdgeSyncMetadata(tenantId);
+  const metadata = await getEdgeSyncMetadata(normalizedTenantId, surface);
 
   return {
     tenantId,
@@ -188,7 +201,10 @@ export async function hydrateEdgeSnapshot(
       if (response.status >= 400 && response.status < 500) {
         throw new Error('EDGE_HYDRATION_BAD_REQUEST');
       }
-      return loadLocalEdgeSnapshot(normalizedTenantId, surface);
+      // An HTTP 5xx is a failed server refresh, not evidence of a current,
+      // verified empty clinical/financial read model.
+      const local = await loadLocalEdgeSnapshot(normalizedTenantId, surface);
+      return { ...local, freshness: 'FAILED', errorCode: `EDGE_BOOTSTRAP_HTTP_${response.status}` };
     }
 
     const payload = await response.json();
@@ -197,10 +213,25 @@ export async function hydrateEdgeSnapshot(
       payload.tenantId !== normalizedTenantId ||
       payload.surface !== surface ||
       !payload.snapshotVersion ||
+      !/^[a-f0-9]{64}$/.test(String(payload.authorizationRevision || '')) ||
       !payload.collections ||
       typeof payload.collections !== 'object' ||
       Array.isArray(payload.collections)
     ) {
+      throw new Error('EDGE_HYDRATION_INVALID_SNAPSHOT');
+    }
+
+    if (payload.hydrationStatus === 'NOT_APPLICABLE') {
+      return {
+        tenantId: normalizedTenantId,
+        generatedAt: Number(payload.generatedAt || Date.now()),
+        snapshotVersion: String(payload.snapshotVersion),
+        collections: {},
+        source: 'SERVER',
+        freshness: 'NOT_APPLICABLE',
+      };
+    }
+    if (payload.hydrationStatus && payload.hydrationStatus !== 'CURRENT') {
       throw new Error('EDGE_HYDRATION_INVALID_SNAPSHOT');
     }
 
@@ -218,17 +249,27 @@ export async function hydrateEdgeSnapshot(
       throw new Error('EDGE_HYDRATION_SESSION_CHANGED');
     }
 
+    const authorityEpoch = await secureAuthorityEpoch(
+      latest.user.uid,
+      latest.session.sessionId,
+      payload.authorizationRevision
+    );
     await replaceSecureTenantEdgeSnapshot(
       normalizedTenantId,
       cached.user.uid,
       payload.collections || {},
       {
+        scope: surface,
+        actorId: latest.user.uid,
+        sessionId: latest.session.sessionId,
+        authorizationRevision: payload.authorizationRevision,
+        authorityEpoch,
         snapshotVersion: String(payload.snapshotVersion || `${normalizedTenantId}:${Date.now()}`),
         lastHydratedAt: Date.now(),
         serverGeneratedAt: Number(payload.generatedAt || Date.now()),
       }
     );
-    await enforceEdgeStorageBudget(normalizedTenantId).catch(() => {});
+    await enforceEdgeStorageBudget(normalizedTenantId).catch(() => { });
 
     return {
       tenantId: normalizedTenantId,

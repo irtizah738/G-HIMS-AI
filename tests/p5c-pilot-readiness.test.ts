@@ -77,8 +77,11 @@ describe('G-HIMS P5C pilot readiness guards', () => {
     expect(workflow).toContain('ref: main');
     expect(workflow).toContain('git rev-parse origin/main');
     expect(workflow).toContain('vercel pull --yes --environment=preview');
-    expect(workflow).toContain('vercel build --token="$VERCEL_TOKEN"');
-    expect(workflow).toContain('vercel deploy --prebuilt --yes --token="$VERCEL_TOKEN"');
+    expect(workflow).toContain('VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}');
+    expect(workflow).toContain('vercel whoami --scope "$VERCEL_ORG_ID"');
+    expect(workflow).toContain('vercel build');
+    expect(workflow).toContain('vercel deploy --prebuilt --yes');
+    expect(workflow).not.toContain('--token="$VERCEL_TOKEN"');
     expect(workflow).toContain('bun run ops:staging-smoke');
     expect(workflow).toContain('G-HIMS runtime: STAGING');
     expect(workflow).toContain('VERCEL_TOKEN');

@@ -57,6 +57,6 @@ describe('Tenant, consultant, ER, vitals and billing workflow entry regressions'
     expect(modal).toContain('/hcm/roster');
     expect(directory).toContain('credentialsValid(');
     expect(directory).toContain('activePrivileges(');
-    expect(directory).toContain('DomainStateRepository.list<EmployeeMaster>');
+    expect(directory).toContain('DomainStateRepository.listAllWithDocumentIds<EmployeeMaster>');
   });
 });

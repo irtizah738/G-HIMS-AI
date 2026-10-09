@@ -397,6 +397,7 @@ export class OpdBillingReconciliationDomainService {
     }
 
     const chargeIds: string[] = [];
+    const seenChargeIds = new Set<string>();
     for (const charge of charges) {
       const chargeId = String(charge.chargeId || '').trim();
       if (!chargeId) {
@@ -407,6 +408,15 @@ export class OpdBillingReconciliationDomainService {
           'An encounter charge is missing charge identity.'
         );
       }
+      if (seenChargeIds.has(chargeId)) {
+        return reject(
+          commandId,
+          idempotencyKey,
+          'OPD_CHARGE_IDENTITY_CONFLICT',
+          `Duplicate authoritative charge identity ${chargeId} prevents billing clearance.`
+        );
+      }
+      seenChargeIds.add(chargeId);
       const status = String(charge.status || '').toUpperCase();
       if (
         status === 'PENDING_INVOICE' &&

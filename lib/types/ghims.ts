@@ -388,6 +388,7 @@ export interface TelehealthSession {
   gender: string;
   scheduledTime: string;
   status: 'WAITING_ROOM' | 'IN_CONSULTATION' | 'DOCUMENTING' | 'COMPLETED' | 'CANCELLED';
+  assignedProviderId?: string;
   type: 'Telehealth Consultation' | 'Remote Post-Op Follow-up' | 'RPM Chronic Care Review' | 'Urgent Tele-Triage';
   attendingPhysician: string;
   clinicianNpi: string;

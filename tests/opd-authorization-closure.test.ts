@@ -13,7 +13,7 @@ describe('OPD authorization closure', () => {
     expect(documentation).toContain("requiredPrivilege: 'SIGN_CLINICAL_NOTES'");
     expect(auth).toContain("SIGN_CLINICAL_NOTE:['SIGN_CLINICAL_NOTE','SIGN_CLINICAL_NOTES']");
     expect(auth).toContain("SIGN_SOAP_CLINICAL_NOTE:['SIGN_SOAP_CLINICAL_NOTE','SIGN_CLINICAL_NOTES']");
-    expect(auth).toContain("credential.verificationStatus!=='VERIFIED'");
+    expect(auth).toContain('credentialsValid(credentials, Date.now())');
   });
 
   test('diagnostic order privileges are distinct for lab radiology and procedures', async () => {

@@ -67,7 +67,10 @@ export function isoDayActive(from: string | undefined, until: string | undefined
   }
   const start = Date.parse(`${from}T00:00:00.000Z`);
   const end = Date.parse(`${until}T23:59:59.999Z`);
-  return Number.isFinite(start) && Number.isFinite(end) && now >= start && now <= end;
+  return Number.isFinite(start) && Number.isFinite(end) &&
+    new Date(start).toISOString().slice(0, 10) === from &&
+    new Date(end).toISOString().slice(0, 10) === until &&
+    now >= start && now <= end;
 }
 
 export function credentialsValid(credentials: EmployeeCredential[], now: number): boolean {

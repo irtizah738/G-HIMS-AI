@@ -236,7 +236,7 @@ export function LoginPortal() {
   return (
     <div className="min-h-dvh bg-slate-950 text-slate-100 flex flex-col selection:bg-blue-600 selection:text-white">
       {/* Header Bar */}
-      <header className="border-b border-slate-800/80 bg-slate-900/40 backdrop-blur px-4 sm:px-6 py-3 flex items-center justify-between">
+      <header className="border-b border-slate-800/80 bg-slate-900/40 backdrop-blur px-4 sm:px-6 py-2 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
             <ActivitySquare className="w-5 h-5 text-white" />
@@ -263,11 +263,11 @@ export function LoginPortal() {
       </header>
 
       {/* Main Login Workspace */}
-      <main className="flex-1 flex flex-col items-center justify-center px-4 py-5 sm:px-6 sm:py-6 relative">
-        <div className="w-full max-w-lg space-y-3">
+      <main data-testid="login-workspace" className="flex-1 flex flex-col items-center justify-center px-4 py-3 sm:px-6 sm:py-4 relative">
+        <div className="w-full max-w-[480px]">
           {/* Main Card: Login Form */}
-          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-2xl backdrop-blur-md">
-            <div className="mb-4 space-y-1 text-center sm:text-left">
+          <div data-testid="login-card" className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-2xl backdrop-blur-md">
+            <div className="mb-3 space-y-1 text-center sm:text-left">
               <div className="flex items-center justify-center sm:justify-start gap-2 text-xs font-semibold text-blue-400">
                 <ShieldCheck className="w-4 h-4" />
                 <span>Clinical & Operational Authentication</span>
@@ -276,7 +276,7 @@ export function LoginPortal() {
                 Hospital Personnel Sign In
               </h1>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Authenticate with authorized institutional credentials to access the EHR & clinical runtime.
+                Sign in with your hospital account to access your clinical workspace.
               </p>
             </div>
 
@@ -287,7 +287,7 @@ export function LoginPortal() {
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="space-y-3">
+            <form onSubmit={handleSubmit} className="space-y-2.5">
               {/* Required Facility Scope */}
               <div className="space-y-1.5">
                 <label className="block text-xs font-semibold text-slate-300">
@@ -302,7 +302,7 @@ export function LoginPortal() {
                       setTenantId(e.target.value);
                       setLocalError(null);
                     }}
-                    className="w-full appearance-none pl-10 pr-10 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-xs font-medium text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition cursor-pointer"
+                    className="w-full min-h-10 appearance-none pl-10 pr-10 py-2 bg-slate-950/70 border border-slate-700/80 rounded-xl text-xs font-medium text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition cursor-pointer"
                   >
                     <option value="" disabled>
                       Select hospital facility
@@ -327,9 +327,14 @@ export function LoginPortal() {
                     {facilityDirectoryError}
                   </p>
                 ) : (
-                  <p className="text-[10px] leading-relaxed text-slate-500">
-                    Facilities are loaded from the Firestore tenant directory. Selection does not grant access; your active membership is still verified server-side.
-                  </p>
+                  <details className="text-[11px] leading-relaxed text-slate-400">
+                    <summary className="w-fit cursor-pointer text-blue-300 hover:text-blue-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400">
+                      How facility access works
+                    </summary>
+                    <p className="mt-1 text-slate-400">
+                      Facilities are loaded from the Firestore tenant directory. Selection does not grant access; your active membership is still verified server-side.
+                    </p>
+                  </details>
                 )}
               </div>
 
@@ -346,7 +351,7 @@ export function LoginPortal() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="clinician@hospital.org"
-                    className="w-full pl-10 pr-4 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-xs font-medium text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition placeholder:text-slate-600"
+                    className="w-full min-h-10 pl-10 pr-4 py-2 bg-slate-950/70 border border-slate-700/80 rounded-xl text-xs font-medium text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition placeholder:text-slate-600"
                   />
                   <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                 </div>
@@ -373,7 +378,7 @@ export function LoginPortal() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••••••"
-                    className="w-full pl-10 pr-10 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-xs font-medium text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition placeholder:text-slate-600 font-mono"
+                    className="w-full min-h-10 pl-10 pr-10 py-2 bg-slate-950/70 border border-slate-700/80 rounded-xl text-xs font-medium text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition placeholder:text-slate-600 font-mono"
                   />
                   <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                   <button
@@ -407,7 +412,7 @@ export function LoginPortal() {
                 data-testid="login-submit"
                 type="submit"
                 disabled={submitting || ssoLoading}
-                className="w-full min-h-11 py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold text-xs shadow-lg shadow-blue-600/25 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed mt-2 cursor-pointer"
+                className="w-full min-h-11 py-2 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold text-xs shadow-lg shadow-blue-600/25 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed mt-2 cursor-pointer"
               >
                 {submitting ? (
                   <span className="flex items-center gap-2">
@@ -461,7 +466,7 @@ export function LoginPortal() {
                     setSsoError(null);
                     setSsoModalOpen(true);
                   }}
-                  className="w-full py-2.5 px-3 rounded-xl border border-slate-700/80 bg-slate-950/60 hover:bg-slate-800/80 text-slate-300 font-semibold text-xs transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                  className="w-full min-h-10 py-2 px-3 rounded-xl border border-slate-700/80 bg-slate-950/60 hover:bg-slate-800/80 text-slate-300 font-semibold text-xs transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
                 >
                   <Key className="w-3.5 h-3.5 text-slate-400" />
                   <span>Hospital SSO</span>
@@ -469,7 +474,7 @@ export function LoginPortal() {
               </div>
             </form>
 
-            <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-500">
+            <div className="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-500">
               <span className="flex items-center gap-1.5">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                 Firebase identity + server session
@@ -480,19 +485,12 @@ export function LoginPortal() {
             </div>
           </div>
 
-          {/* Offline & Architecture Assurance Banner */}
-          <div className="bg-slate-900/40 border border-slate-800/60 rounded-xl p-3 flex items-center gap-3 text-xs text-slate-400">
-            <Laptop className="w-4 h-4 text-blue-400 shrink-0" />
-            <div className="text-[11px] leading-tight">
-              <span className="font-semibold text-slate-200">Offline-Ready Architecture:</span> Offline continuity is bounded by cached authenticated sessions; protected mutations synchronize automatically upon reconnection.
-            </div>
-          </div>
         </div>
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-slate-800/80 bg-slate-900/30 px-4 py-2 text-center text-xs text-slate-400">
-        G-HIMS Production Identity & Access Governance System &bull; Strictly Confidential Clinical Data
+      <footer data-testid="login-footer" className="border-t border-slate-800/80 bg-slate-900/30 px-4 py-2 text-center text-[11px] text-slate-400">
+        Confidential clinical data · Offline continuity requires a cached authenticated session.
       </footer>
 
       {/* Enterprise Single Sign-On (SSO) Modal */}

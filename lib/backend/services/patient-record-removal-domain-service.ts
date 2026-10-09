@@ -22,33 +22,54 @@ export interface RemovePatientRecordPayload {
 
 const ADMIN_ROLES = ['ADMIN', 'ADMINISTRATOR', 'SYSTEM_ADMIN', 'SUPER_ADMIN'];
 
-function isLiveEncounter(encounter: Record<string, unknown>): boolean {
-  const state = String(
-    encounter.operationalState || encounter.status || encounter.clinicalState || ''
-  ).trim().toUpperCase();
-  // Unknown or partially specified encounter states remain blocking.
-  return !['COMPLETED', 'CLOSED', 'DISCHARGED', 'CANCELLED', 'CANCELED', 'TRANSFERRED'].includes(state);
+/**
+ * Encounter.status is the canonical lifecycle authority. operationalState is
+ * queue state (e.g. QUEUED/NOT_QUEUED) and clinicalState is clinical progress;
+ * neither can overrule a terminal encounter.status.
+ *
+ * Missing/unknown lifecycle states remain blockers: guessing that an
+ * unresolved encounter has ended is not safe.
+ */
+const TERMINAL_ENCOUNTER_STATUSES = new Set([
+  'COMPLETED', 'CLOSED', 'DISCHARGED', 'CANCELLED', 'CANCELED', 'TRANSFERRED',
+]);
+
+export function unresolvedRemovalEncounter(
+  encounter: Record<string, unknown>
+): { encounterId: string; status: string; encounterType: string } | null {
+  const status = String(encounter.status || '').trim().toUpperCase();
+  if (TERMINAL_ENCOUNTER_STATUSES.has(status)) return null;
+  return {
+    encounterId: String(encounter.encounterId || encounter.id || 'UNKNOWN').trim(),
+    status: status || 'UNKNOWN',
+    encounterType: String(encounter.encounterType || encounter.type || 'UNKNOWN').trim().toUpperCase(),
+  };
+}
+
+function activePointerSummary(patient: PatientMPI): string[] {
+  const p = patient.activeCareContexts;
+  return [
+    ...(patient.activeBedId ? [`Bed ${patient.activeBedId}`] : []),
+    ...(patient.activeEncounterId ? [`Legacy encounter ${patient.activeEncounterId}`] : []),
+    ...(p?.activeIpdEncounterId ? [`IPD encounter ${p.activeIpdEncounterId}`] : []),
+    ...(p?.activeEmergencyEncounterId ? [`Emergency encounter ${p.activeEmergencyEncounterId}`] : []),
+    ...(p?.activeOpdEncounterIds || []).map(id => `OPD encounter ${id}`),
+    ...(p?.activeTelehealthEncounterIds || []).map(id => `Telehealth encounter ${id}`),
+  ];
 }
 
 function hasActivePointers(patient: PatientMPI): boolean {
-  const pointers = patient.activeCareContexts;
-  return Boolean(
-    patient.activeBedId ||
-    patient.activeEncounterId ||
-    pointers?.activeIpdEncounterId ||
-    pointers?.activeEmergencyEncounterId ||
-    pointers?.activeOpdEncounterIds?.length ||
-    pointers?.activeTelehealthEncounterIds?.length
-  );
+  return activePointerSummary(patient).length > 0;
 }
 
 function rejected(
   commandId: string,
   idempotencyKey: string,
   code: string,
-  message: string
+  message: string,
+  details?: unknown
 ): CommandResult {
-  return { success: false, commandId, idempotencyKey, error: { code, message } };
+  return { success: false, commandId, idempotencyKey, error: { code, message, details } };
 }
 
 export class PatientRecordRemovalDomainService {
@@ -97,10 +118,18 @@ export class PatientRecordRemovalDomainService {
       context.tenantId, 'encounters', 'patientId', patientId,
       { pageSize: 250, maxRows: 5000 }
     );
-    if (encounters.some(isLiveEncounter)) {
+    const blocker = encounters.map(unresolvedRemovalEncounter).find(
+      (value): value is NonNullable<typeof value> => value !== null
+    );
+    if (blocker) {
       return rejected(
         commandId, idempotencyKey, 'PATIENT_HAS_ACTIVE_CARE',
-        'Patient has an active or unresolved encounter. Close or reconcile care episodes before removal.'
+        `Encounter ${blocker.encounterId} (${blocker.encounterType}) is ${blocker.status}. Complete its governed clinical disposition or reconcile the encounter lifecycle before removing this patient.`,
+        {
+          blockingEncounterId: blocker.encounterId,
+          encounterStatus: blocker.status,
+          encounterType: blocker.encounterType,
+        }
       );
     }
 
@@ -146,7 +175,7 @@ export class PatientRecordRemovalDomainService {
           if (hasActivePointers(current)) {
             throw new AtomicMutationRejectedError(
               'PATIENT_HAS_ACTIVE_CARE',
-              'Active patient care pointers must be closed before removal.'
+              `Patient retains active care pointers: ${activePointerSummary(current).join(', ')}. Close the linked care episodes and reconcile these pointers before removal.`
             );
           }
 

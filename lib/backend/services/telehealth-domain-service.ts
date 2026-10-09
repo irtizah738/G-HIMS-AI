@@ -573,12 +573,14 @@ export class TelehealthDomainService {
           const session = current.session as unknown as TelehealthSession;
           const encounter = current.encounter as Record<string, unknown>;
           const assignedProviderId = String(encounter?.assignedProviderId || '');
+          const facilityAllowed = Boolean(context.facilityIds?.includes(String(encounter?.facilityId || '')));
           const isSystemAdmin = context.roles.some(role => String(role).toUpperCase() === 'SYSTEM_ADMIN');
           if (!encounter ||
               String(encounter.encounterId || encounter.id || '') !== session.encounterId ||
               String(encounter.patientId || '') !== session.patientId ||
               String(encounter.encounterType || encounter.type || '').toUpperCase() !== 'TELEHEALTH' ||
               (encounter.tenantId && encounter.tenantId !== context.tenantId) ||
+              (!isSystemAdmin && !facilityAllowed) ||
               ['COMPLETED','CANCELLED','CLOSED'].includes(String(encounter.status || '').toUpperCase()) ||
               (!assignedProviderId && !isSystemAdmin) ||
               (assignedProviderId !== context.actorId && !isSystemAdmin)) {
@@ -873,7 +875,8 @@ export class TelehealthDomainService {
           if (
             String(encounter.patientId || '') !== session.patientId ||
             String(encounter.encounterType || encounter.type || '').toUpperCase() !== 'TELEHEALTH' ||
-            String(encounter.assignedProviderId || '') !== context.actorId
+            String(encounter.assignedProviderId || '') !== context.actorId ||
+            !context.facilityIds?.includes(String(encounter.facilityId || ''))
           ) {
             throw new Error(
               'TELEHEALTH_ENCOUNTER_SCOPE_INVALID: session is not bound to the authoritative telehealth encounter.'

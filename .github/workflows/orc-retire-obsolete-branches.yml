@@ -1,0 +1,119 @@
+name: ORC audited obsolete branch retirement
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/operations/orc-branch-retirement.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: orc-audited-branch-retirement
+  cancel-in-progress: false
+
+jobs:
+  retire:
+    if: github.repository == 'irtizah738/G-HIMS-AI' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Retire only the audited, unchanged ORC branch refs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const data = JSON.parse(fs.readFileSync('docs/operations/orc-branch-retirement.json', 'utf8'));
+            const { owner, repo } = context.repo;
+            const expected = 'ghims.orc.branch-retirement.v1';
+            if (data.schema !== expected || data.branches.length !== 15) {
+              core.setFailed('Unrecognized or incomplete fixed ORC branch inventory.');
+              return;
+            }
+            const [release, infrastructure] = await Promise.all([
+              github.rest.pulls.get({ owner, repo, pull_number: 145 }),
+              github.rest.pulls.get({ owner, repo, pull_number: 146 }),
+            ]);
+            if (!release.data.merged || !infrastructure.data.merged) {
+              core.setFailed('Integrated ORC PR #145 and staging safeguard PR #146 must both be merged.');
+              return;
+            }
+            const open = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', per_page: 100 });
+            const openHeads = new Set(open.map(pr => pr.head.ref));
+            const uniqueNames = new Set();
+            let deleted = 0, alreadyGone = 0;
+            for (const entry of data.branches) {
+              if (
+                typeof entry.name !== 'string' ||
+                !/^(fix|infra|integration)\/[a-z0-9-]+$/.test(entry.name) ||
+                entry.name === 'main' ||
+                uniqueNames.has(entry.name) ||
+                !/^[a-f0-9]{40}$/.test(entry.sha) ||
+                !Number.isInteger(entry.pr)
+              ) {
+                core.setFailed('Unsafe branch inventory entry: ' + String(entry.name));
+                return;
+              }
+              uniqueNames.add(entry.name);
+              const trackedPR = await github.rest.pulls.get({owner, repo, pull_number: entry.pr});
+              if (trackedPR.data.state !== 'closed' || trackedPR.data.head.ref !== entry.name) {
+                core.setFailed('Branch still has an unclosed or unexpected PR: ' + entry.name);
+                return;
+              }
+              if (!trackedPR.data.merged && entry.supersededBy !== 145) {
+                core.setFailed('Unmerged branch is not explicitly superseded by integrated PR #145: ' + entry.name);
+                return;
+              }
+              if (openHeads.has(entry.name)) {
+                core.setFailed('An open PR still references ' + entry.name);
+                return;
+              }
+              let current;
+              try {
+                current = await github.rest.repos.getBranch({ owner, repo, branch: entry.name });
+              } catch (error) {
+                if (error.status === 404) {
+                  alreadyGone++;
+                  continue;
+                }
+                throw error;
+              }
+              if (current.data.protected || current.data.commit.sha !== entry.sha) {
+                core.setFailed('Branch changed or protected since audit: ' + entry.name + ' — refusing deletion.');
+                return;
+              }
+              await github.rest.git.deleteRef({ owner, repo, ref: 'heads/' + entry.name });
+              core.info('Retired verified obsolete branch: ' + entry.name);
+              deleted++;
+            }
+            // The cleanup PR branch is also obsolete after its merge. Never
+            // delete it before PR #147 is merged, and only at its exact PR head.
+            const cleanupBranch = 'chore/orc-retire-merged-branches-20261009';
+            const cleanupPR = await github.rest.pulls.get({ owner, repo, pull_number: 147 });
+            if (cleanupPR.data.merged && cleanupPR.data.head.ref === cleanupBranch &&
+                !openHeads.has(cleanupBranch)) {
+              try {
+                const cleanupHead = await github.rest.repos.getBranch({ owner, repo, branch: cleanupBranch });
+                if (cleanupHead.data.protected || cleanupHead.data.commit.sha !== cleanupPR.data.head.sha) {
+                  core.setFailed('Cleanup branch moved or protected; preserving it.');
+                  return;
+                }
+                await github.rest.git.deleteRef({owner, repo, ref: 'heads/' + cleanupBranch});
+                core.info('Retired merged cleanup PR branch: ' + cleanupBranch);
+                deleted++;
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                alreadyGone++;
+              }
+            }
+            await core.summary.addHeading('ORC branch retirement')
+              .addRaw('Deleted: ' + deleted + '; already absent: ' + alreadyGone + '.')
+              .addBreak()
+              .addRaw('main and PR history preserved. No clinical application data touched.')
+              .write();

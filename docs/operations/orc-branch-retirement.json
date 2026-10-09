@@ -1,0 +1,88 @@
+{
+  "schema": "ghims.orc.branch-retirement.v1",
+  "preparedAgainst": "af9812c97290633159fedf538abd7be28dfe0e06",
+  "description": "One-time, fixed-SHA branch retirement; all PRs closed, changes merged or superseded by PR #145/#146. Retain PR and Git history, never rewrite main.",
+  "branches": [
+    {
+      "name": "fix/dev-confirmed-mock-patient-retirement",
+      "sha": "41bc37e633a73372b21dd300f37b5b56e3679fbe",
+      "pr": 131
+    },
+    {
+      "name": "fix/hcm-consultant-membership-document-id",
+      "sha": "cf71eb6270be082400b3fa7964a418f3070942a5",
+      "pr": 133
+    },
+    {
+      "name": "fix/hcm-consultant-scope-qualification-20261009",
+      "sha": "7303fd9a30f1c0e704a95f8209b4f6b285bf0dc0",
+      "pr": 144,
+      "supersededBy": 145
+    },
+    {
+      "name": "fix/opd-er-hcm-hydration-workflow-entry",
+      "sha": "47406d9a205c5f7b0733d2b4ec80ca9cdc6a946d",
+      "pr": 132
+    },
+    {
+      "name": "fix/orc-1-tenant-hydration-authority",
+      "sha": "e83449cc6e3ef549d7923f0ab0de1d089e8c7817",
+      "pr": 134
+    },
+    {
+      "name": "fix/orc-1b-surface-safe-encrypted-edge-cache",
+      "sha": "55706a628ebbb5eeaddaeb34a4bbaf00490ec08d",
+      "pr": 141,
+      "supersededBy": 145
+    },
+    {
+      "name": "fix/orc-2-hcm-explicit-clinical-privileges",
+      "sha": "dd932aa391b2b970adf8862a3b34ce7d0b1f2088",
+      "pr": 135,
+      "supersededBy": 145
+    },
+    {
+      "name": "fix/orc-3-emergency-facility-authority",
+      "sha": "0c247fd351b726f3926bd19d0b8d4523fca0ba3e",
+      "pr": 136
+    },
+    {
+      "name": "fix/orc-4-vitals-news2-clean-fixtures",
+      "sha": "b53c01007262c98fc0a393d1644e2b8f9b3d96a7",
+      "pr": 142,
+      "supersededBy": 145
+    },
+    {
+      "name": "fix/orc-4-vitals-news2-completeness",
+      "sha": "237d78f341f0572b3f3326b97ff4933d4ab7566e",
+      "pr": 137,
+      "supersededBy": 145
+    },
+    {
+      "name": "fix/orc-5-cashier-idempotent-retry-and-context",
+      "sha": "44e9ca4f9f1f58bc1bb36d04b926ac86f7566b67",
+      "pr": 138,
+      "supersededBy": 145
+    },
+    {
+      "name": "fix/orc-6-domain-evidence-inventory",
+      "sha": "d38a2a667a3541bf8f2861098501a39859f639a4",
+      "pr": 139
+    },
+    {
+      "name": "fix/orc-7-staging-reconciliation-dry-run",
+      "sha": "a7182fe8e50d268cbd32fd31c0914701db714bcc",
+      "pr": 140
+    },
+    {
+      "name": "infra/orc-firebase-staging-isolation-20261009",
+      "sha": "fe7b475d2da3960c399cfc5859972b62f4185592",
+      "pr": 146
+    },
+    {
+      "name": "integration/orc-deploy-ready-20261009",
+      "sha": "8f2ad96d5871506a99ca5b3d3118e8f37f0775eb",
+      "pr": 145
+    }
+  ]
+}

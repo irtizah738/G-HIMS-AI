@@ -1,6 +1,6 @@
 # ORC Integrated Release Candidate — Deployment Preconditions
 
-The release branch is `integration/orc-deploy-ready-20261009`. It consolidates ORC PRs #135, #138, #141, #142, #144. Only the exact qualified merge SHA may be deployed.
+The integrated release branch `integration/orc-deploy-ready-20261009` was merged as PR #145; Firebase staging safeguards merged as PR #146. The merged Firebase setup checkpoint was `af9812c97290633159fedf538abd7be28dfe0e06`; subsequent `main` changes require their own CI verification. The integrated branch will be retired following guarded branch reconciliation. Always deploy only the **current** CI-qualified `main` SHA, not an obsolete source branch.
 
 ## Stage 1: source qualification
 - Require Bun frozen dependency install, TypeScript, all clinical, financial, offline, HCM and security GitHub Actions checks on the combined commit.
@@ -12,7 +12,7 @@ The release branch is `integration/orc-deploy-ready-20261009`. It consolidates O
 - In GitHub **repository Settings → Secrets and variables → Actions**, configure `VERCEL_TOKEN` as a repository secret. Create it for the correct Vercel account/team with access to G-HIMS, and do not paste it into logs or tickets.
 - In the same protected secret store configure `VERCEL_AUTOMATION_BYPASS_SECRET` and `GHIMS_P7_BOOTSTRAP_PASSWORD` according to the STAGING security runbook.
 - Vercel scope must match team `team_0S9QQkyN4yTIj7QUZ9BVKsVV` and project `prj_a0TEuNNMAE61UziOoLNTok6Wbp1v`. Vercel Preview environment must be isolated from PRODUCTION Firebase.
-- The `STAGING Deployment` workflow deploys **current main**, not an arbitrary PR. Merge the fully green integrated PR before invoking it with `confirm=STAGING`.
+- The `STAGING Deployment` workflow deploys **current main**, not an arbitrary PR. Ensure current `main` is CI-green before invoking it with `confirm=STAGING`.
 - Retain exact `MAIN_SHA`, staging URL, smoke response, provisioned *synthetic* tenant IDs, audit and cross-role qualification artifacts.
 
 ## Stage 3: operational acceptance (15 requirements)

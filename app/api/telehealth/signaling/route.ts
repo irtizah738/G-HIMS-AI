@@ -75,11 +75,7 @@ async function authorizeClinician(
 
   if (!encounter.exists) throw new Error('TELEHEALTH_ENCOUNTER_NOT_FOUND');
   const assignedProviderId = clean(encounter.data()?.assignedProviderId);
-  if (
-    assignedProviderId &&
-    assignedProviderId !== context.actorId &&
-    !context.roles.includes('SYSTEM_ADMIN')
-  ) {
+  if (!assignedProviderId || assignedProviderId !== context.actorId) {
     throw new Error('TELEHEALTH_CLINICIAN_ASSIGNMENT_MISMATCH');
   }
   return context.actorId;

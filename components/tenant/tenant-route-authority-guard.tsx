@@ -20,6 +20,8 @@ export function TenantRouteAuthorityGuard({
   const router = useRouter();
   const sessionTenant = String(activeTenant?.tenantId || user?.tenantId || '').trim().toLowerCase();
   const routeTenant = String(routeTenantId || '').trim().toLowerCase();
+  // Absence of verified scope is not an authorization grant.
+  const unresolved = !sessionTenant || !routeTenant;
   const mismatched = Boolean(sessionTenant && routeTenant && sessionTenant !== routeTenant);
 
   useEffect(() => {
@@ -31,7 +33,7 @@ export function TenantRouteAuthorityGuard({
     router.replace(segments.join('/') || `/${encodeURIComponent(sessionTenant)}`);
   }, [loading, mismatched, pathname, routeTenant, router, sessionTenant]);
 
-  if (loading) {
+  if (loading || unresolved) {
     return <div role="status" className="p-6 text-sm">Resolving authenticated hospital context…</div>;
   }
   if (mismatched) {

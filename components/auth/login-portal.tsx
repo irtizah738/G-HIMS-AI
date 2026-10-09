@@ -234,9 +234,9 @@ export function LoginPortal() {
   const displayError = localError || error;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between selection:bg-blue-600 selection:text-white">
+    <div className="min-h-dvh bg-slate-950 text-slate-100 flex flex-col selection:bg-blue-600 selection:text-white">
       {/* Header Bar */}
-      <header className="border-b border-slate-800/80 bg-slate-900/40 backdrop-blur px-6 py-4 flex items-center justify-between">
+      <header className="border-b border-slate-800/80 bg-slate-900/40 backdrop-blur px-4 sm:px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
             <ActivitySquare className="w-5 h-5 text-white" />
@@ -263,16 +263,16 @@ export function LoginPortal() {
       </header>
 
       {/* Main Login Workspace */}
-      <main className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 lg:p-12 relative">
-        <div className="w-full max-w-xl space-y-4">
+      <main className="flex-1 flex flex-col items-center justify-center px-4 py-5 sm:px-6 sm:py-6 relative">
+        <div className="w-full max-w-lg space-y-3">
           {/* Main Card: Login Form */}
-          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl backdrop-blur-md">
-            <div className="mb-6 space-y-1.5 text-center sm:text-left">
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-2xl backdrop-blur-md">
+            <div className="mb-4 space-y-1 text-center sm:text-left">
               <div className="flex items-center justify-center sm:justify-start gap-2 text-xs font-semibold text-blue-400">
                 <ShieldCheck className="w-4 h-4" />
                 <span>Clinical & Operational Authentication</span>
               </div>
-              <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+              <h1 className="text-xl sm:text-[22px] font-bold text-white tracking-tight">
                 Hospital Personnel Sign In
               </h1>
               <p className="text-xs text-slate-400 leading-relaxed">
@@ -281,13 +281,13 @@ export function LoginPortal() {
             </div>
 
             {displayError && (
-              <div className="mb-6 p-3.5 bg-red-500/10 border border-red-500/30 rounded-xl flex items-start gap-3 text-xs text-red-300 animate-in fade-in">
+              <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl flex items-start gap-3 text-xs text-red-300 animate-in fade-in">
                 <AlertCircle className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
                 <div className="flex-1 leading-relaxed">{displayError}</div>
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-3">
               {/* Required Facility Scope */}
               <div className="space-y-1.5">
                 <label className="block text-xs font-semibold text-slate-300">
@@ -407,7 +407,7 @@ export function LoginPortal() {
                 data-testid="login-submit"
                 type="submit"
                 disabled={submitting || ssoLoading}
-                className="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold text-xs shadow-lg shadow-blue-600/25 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed mt-2 cursor-pointer"
+                className="w-full min-h-11 py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold text-xs shadow-lg shadow-blue-600/25 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed mt-2 cursor-pointer"
               >
                 {submitting ? (
                   <span className="flex items-center gap-2">
@@ -423,7 +423,7 @@ export function LoginPortal() {
               </button>
 
               {/* SSO & Federated Identity Divider */}
-              <div className="relative my-3 flex items-center justify-center">
+              <div className="relative my-2 flex items-center justify-center">
                 <div className="border-t border-slate-800 w-full" />
                 <span className="bg-slate-900/90 px-2 text-[10px] uppercase font-mono font-bold text-slate-500 shrink-0">
                   or Federated Identity
@@ -438,7 +438,7 @@ export function LoginPortal() {
                   data-testid="login-google-identity"
                   onClick={handleGoogleSignIn}
                   disabled={submitting || googleLoading}
-                  className="w-full py-2.5 px-3 rounded-xl border border-slate-700/80 bg-slate-950/70 hover:bg-slate-800 text-slate-200 font-semibold text-xs transition flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
+                  className="w-full min-h-10 py-2 px-3 rounded-xl border border-slate-700/80 bg-slate-950/70 hover:bg-slate-800 text-slate-200 font-semibold text-xs transition flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
                 >
                   {googleLoading ? (
                     <span className="flex items-center gap-1.5">
@@ -469,7 +469,7 @@ export function LoginPortal() {
               </div>
             </form>
 
-            <div className="mt-6 pt-4 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-500">
+            <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-500">
               <span className="flex items-center gap-1.5">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                 Firebase identity + server session
@@ -481,7 +481,7 @@ export function LoginPortal() {
           </div>
 
           {/* Offline & Architecture Assurance Banner */}
-          <div className="bg-slate-900/40 border border-slate-800/60 rounded-xl p-3.5 flex items-center gap-3 text-xs text-slate-400">
+          <div className="bg-slate-900/40 border border-slate-800/60 rounded-xl p-3 flex items-center gap-3 text-xs text-slate-400">
             <Laptop className="w-4 h-4 text-blue-400 shrink-0" />
             <div className="text-[11px] leading-tight">
               <span className="font-semibold text-slate-200">Offline-Ready Architecture:</span> Offline continuity is bounded by cached authenticated sessions; protected mutations synchronize automatically upon reconnection.
@@ -491,7 +491,7 @@ export function LoginPortal() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-slate-800/80 bg-slate-900/30 px-6 py-3 text-center text-xs text-slate-400">
+      <footer className="border-t border-slate-800/80 bg-slate-900/30 px-4 py-2 text-center text-xs text-slate-400">
         G-HIMS Production Identity & Access Governance System &bull; Strictly Confidential Clinical Data
       </footer>
 

@@ -962,6 +962,15 @@ export class CommandBus {
           );
           break;
 
+        case 'CancelUnusedTelehealthEncounterCommand':
+          result = await TelehealthDomainService.cancelUnused(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
         case 'CompleteTelehealthSessionCommand':
           result = await TelehealthDomainService.complete(
             context,

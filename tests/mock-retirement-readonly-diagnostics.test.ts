@@ -50,6 +50,8 @@ describe('mock MPI retirement read-only reconciliation', () => {
     ), 'utf8');
     expect(service).toContain('mockRetirementNonOpdPointerBlockers(patient)');
     expect(service).toContain('mockRetirementNonOpdPointerBlockers(latest)');
+    expect(service).toContain('TransactionManager.hasEphemeralState(context.tenantId)');
+    expect(service).toContain('Read source: ');
     expect(service).toContain('MOCK_CLEANUP_NON_OPD_ACTIVE_CARE');
     expect(service).toContain('MOCK_CLEANUP_FINANCIAL_RECONCILIATION_REQUIRED');
     expect(service).toContain("['TEST', 'DEMO'].includes(mode)");

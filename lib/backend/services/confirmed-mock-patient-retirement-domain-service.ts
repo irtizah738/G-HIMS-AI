@@ -384,7 +384,7 @@ export class ConfirmedMockPatientRetirementDomainService {
 
           const now = Date.now();
           const transitions: Array<{ encounterId: string; previousStatus: string; resultingStatus: string }> = [];
-          const writes = encounters.map((encounter, i) => {
+          const writes: Array<{ entityType: string; entityId: string; domainState: Record<string, unknown> }> = encounters.map((encounter, i) => {
             const state = current[`encounter_${i}`] as Record<string, unknown> | null;
             const id = String(encounter.encounterId || encounter.id);
             if (!state || String(state.patientId) !== patientId ||

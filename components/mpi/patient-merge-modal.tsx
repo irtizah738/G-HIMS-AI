@@ -9,7 +9,7 @@
  *   * Detects conflicting demographic mismatches (e.g. conflicting blood group or sex)
  *   * Flags active inpatient bed or surgical conflicts
  * - Requires explicit supervisor authorization & reason for merge
- * - Re-indexes all longitudinal encounters, allergies, and clinical notes to surviving MRN
+ * - Retains original encounter provenance; does not rewrite clinical history
  */
 
 'use client';
@@ -54,18 +54,29 @@ export function PatientMergeModal({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   React.useEffect(() => {
-    if (initialSecondaryId) {
-      setSelectedSecondaryId(initialSecondaryId);
+    if (isOpen) {
+      setSelectedSecondaryId(initialSecondaryId || '');
+      setConfirmedCheck(false);
+      setErrorMessage(null);
     }
   }, [initialSecondaryId, isOpen]);
 
   if (!isOpen) return null;
 
   // Candidates for merging (excluding the primary patient itself)
+  const primaryStatus = String(primaryPatient.status || 'ACTIVE').toUpperCase();
+  const primaryMerged = primaryStatus === 'MERGED';
+  const primaryUnavailable = primaryMerged || primaryStatus === 'REMOVED';
+  const survivor = primaryPatient.mergedIntoPatientId
+    ? availablePatients.find((record) => record.id === primaryPatient.mergedIntoPatientId)
+    : undefined;
+
   const mergeCandidates = availablePatients.filter(
     (patient) =>
       patient.id !== primaryPatient.id &&
-      String(patient.status || 'ACTIVE').toUpperCase() !== 'MERGED'
+      !['MERGED', 'REMOVED'].includes(
+        String(patient.status || 'ACTIVE').toUpperCase()
+      )
   );
   const secondaryPatient = mergeCandidates.find((p) => p.id === selectedSecondaryId);
 
@@ -76,6 +87,14 @@ export function PatientMergeModal({
   );
 
   const handleMergeSubmit = async () => {
+    if (primaryUnavailable) {
+      setErrorMessage('The chosen primary identity is retired. Select and verify the authoritative surviving patient before merging.');
+      return;
+    }
+    if (!mergeReason.trim()) {
+      setErrorMessage('A specific merge reason is required for the audit trail.');
+      return;
+    }
     if (!secondaryPatient) {
       setErrorMessage('Please select a secondary duplicate record to merge.');
       return;
@@ -130,6 +149,19 @@ export function PatientMergeModal({
             </div>
           )}
 
+          {primaryUnavailable && (
+            <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+              <strong>Primary record cannot be used for a new merge.</strong>
+              <p className="mt-1">
+                This MRN is {primaryStatus.toLowerCase()}. {survivor
+                  ? `The recorded survivor is ${survivor.fullName} (MRN ${survivor.mrn}). Close this dialog, select that patient and verify both charts.`
+                  : primaryPatient.mergedIntoPatientId
+                    ? `Survivor record ID: ${primaryPatient.mergedIntoPatientId}. Reopen the authoritative MPI and verify that record before continuing.`
+                    : 'The survivor is unknown. Contact Health Information Management for identity reconciliation.'}
+              </p>
+            </div>
+          )}
+
           {/* Secondary Record Selection */}
           <div className="space-y-1.5">
             <label className="font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider text-[10px]">
@@ -162,7 +194,7 @@ export function PatientMergeModal({
                     <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" /> Surviving Primary Record
                   </span>
                   <span className="text-[10px] font-mono font-bold bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 px-1.5 py-0.2 rounded">
-                    ACTIVE
+                    {primaryStatus}
                   </span>
                 </div>
                 <div>
@@ -207,7 +239,7 @@ export function PatientMergeModal({
               <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
               <div>
                 <strong className="font-bold">Demographic Conflict Detected: </strong>
-                <span>The gender or blood group between these records does not match. Merging will preserve the primary record&apos;s demographics and link the secondary notes to the primary MRN. Please verify before proceeding.</span>
+                <span>The gender or blood group between these records does not match. Merging retains the originating record and its evidence. It does not automatically rewrite encounter or note ownership. Please verify before proceeding.</span>
               </div>
             </div>
           )}
@@ -253,7 +285,7 @@ export function PatientMergeModal({
           <button
             type="button"
             id="btn-confirm-execute-merge"
-            disabled={!secondaryPatient || !confirmedCheck || isSubmitting}
+            disabled={primaryUnavailable || !secondaryPatient || !confirmedCheck || !mergeReason.trim() || isSubmitting}
             onClick={handleMergeSubmit}
             className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
           >

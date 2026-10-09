@@ -34,7 +34,6 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
     1: z.object({
       patientId: nonEmpty.max(150),
       encounterType: z.enum(['OPD','IPD','EMERGENCY','TELEHEALTH']),
-      facilityId: nonEmpty.max(150).optional(),
       chiefComplaint: nonEmpty.max(4000),
       departmentId: nonEmpty.max(150),
       priority: z.enum(['STAT','URGENT','ROUTINE']).optional(),
@@ -2559,7 +2558,11 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       patientId: nonEmpty.max(150),
       encounterId: nonEmpty.max(150),
       heartRate: z.number().finite().min(20).max(250),
-      bloodPressure: z.string().trim().regex(/^\d{2,3}\/\d{2,3}$/).max(7),
+      bloodPressure: z.string().trim().regex(/^\d{2,3}\/\d{2,3}$/).max(7).refine((bp) => {
+        const [systolic, diastolic] = bp.split('/').map(Number);
+        return Number.isFinite(systolic) && Number.isFinite(diastolic) &&
+          systolic > diastolic;
+      }, 'Systolic blood pressure must exceed diastolic pressure.'),
       temperature: z.number().finite().min(30).max(45),
       respiratoryRate: z.number().finite().min(4).max(80),
       oxygenSaturation: z.number().finite().min(50).max(100),

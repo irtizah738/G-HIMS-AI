@@ -96,8 +96,9 @@ export function GovernedEmergencyConsole() {
   const auth = useAuth();
   const authorizedFacilityIds = auth.user?.facilityIds || [];
   const [selectedFacilityId, setSelectedFacilityId] = useState('');
-  const emergencyFacilityId = selectedFacilityId ||
-    (authorizedFacilityIds.length === 1 ? authorizedFacilityIds[0] : '');
+  const emergencyFacilityId = selectedFacilityId && authorizedFacilityIds.includes(selectedFacilityId)
+    ? selectedFacilityId
+    : (authorizedFacilityIds.length === 1 ? authorizedFacilityIds[0] : '');
   const params = useParams<{ tenantId: string }>();
   const searchParams = useSearchParams();
   const preselectedPatientId = String(searchParams.get('patientId') || '').trim();
@@ -217,6 +218,8 @@ export function GovernedEmergencyConsole() {
     if (
       !patientId ||
       !emergencyFacilityId ||
+      !authorizedFacilityIds.includes(emergencyFacilityId) ||
+      !patientsById[patientId] ||
       !chiefComplaint.trim() ||
       !departmentId.trim() ||
       creating
@@ -276,8 +279,8 @@ export function GovernedEmergencyConsole() {
   const recordVitals = async (event: FormEvent) => {
     event.preventDefault();
 
-    if (!selectedEncounter) {
-      setMessage('Select an emergency encounter before recording vitals.');
+    if (!selectedEncounter || !authorizedFacilityIds.includes(selectedEncounter.facilityId || '')) {
+      setMessage('Select an active emergency encounter in an authorized facility before recording vitals.');
       return;
     }
 

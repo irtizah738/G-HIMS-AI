@@ -23,6 +23,7 @@ describe('ORC-1 tenant hydration authority', () => {
     const guard = await source('components/tenant/tenant-route-authority-guard.tsx');
     expect(client).toContain('cached.session.tenantId.trim().toLowerCase() !== normalizedTenantId');
     expect(client).toContain('cached.session.userId !== currentUser.uid');
+    expect(client).toContain('cached.session.userId !== cached.user.uid');
     expect(client).toContain("latest.session.sessionId !== cached.session.sessionId");
     expect(client).toContain('EDGE_HYDRATION_SESSION_CHANGED');
     expect(client).toContain('payload.surface !== surface');

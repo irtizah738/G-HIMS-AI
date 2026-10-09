@@ -31,5 +31,9 @@ describe('ORC-3 emergency facility authority', () => {
     expect(ui).toContain('authorizedFacilityIds = auth.user?.facilityIds || []');
     expect(ui).toContain('facilityId: emergencyFacilityId');
     expect(ui).toContain('Select authorized facility');
+    expect(ui).toContain('authorizedFacilityIds.includes(selectedFacilityId)');
+    expect(ui).toContain('authorizedFacilityIds.includes(emergencyFacilityId)');
+    expect(ui).toContain('!patientsById[patientId]');
+    expect(ui).toContain("authorizedFacilityIds.includes(selectedEncounter.facilityId || '')");
   });
 });

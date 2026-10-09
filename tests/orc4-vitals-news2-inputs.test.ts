@@ -32,8 +32,8 @@ describe('ORC-4 vitals/NEWS2 input authority', () => {
     expect(mpi).toContain('spO2Scale: news2Scale');
     expect(mpi).toContain('onSupplementalOxygen:');
     expect(mpi).toContain('consciousness: news2Consciousness');
-    expect(mpi).toContain('NEWS2 is INCOMPLETE_INPUT');
-    expect(service).toContain("news2Status: news2 ? 'VERIFIED' : 'INCOMPLETE_INPUT'");
+    expect(mpi).toContain('NEWS2 is INCOMPLETE_INPUTS');
+    expect(service).toContain("const news2Status: 'CALCULATED' | 'INCOMPLETE_INPUTS'");
     expect(service).toContain("eventType: 'VITALS_RECORDED'");
     expect(service).toContain("entityType: 'CLINICAL_OBSERVATION'");
   });

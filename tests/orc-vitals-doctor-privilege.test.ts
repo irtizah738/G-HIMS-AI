@@ -18,16 +18,13 @@ describe('ORC-8 Matrix: Doctor Vitals Recording Privilege', () => {
     expect(nursePrivileges).toContain('RECORD_VITALS');
   });
 
-  test('authorization-context defines RECORD_VITALS in credentialGatedRoleBaseline', async () => {
+  test('authoritative RECORD_VITALS requires canonical HCM privileges, never a role fallback', async () => {
     const authContext = await source('server/auth/authorization-context.ts');
 
-    expect(authContext).toContain('RECORD_VITALS');
-    // Ensure both doctor and nurse baselines contain RECORD_VITALS
-    const baselineSection = authContext.slice(
-      authContext.indexOf('credentialGatedRoleBaseline'),
-      authContext.indexOf('function deriveCredentialsFromHcm')
-    );
-    expect(baselineSection).toContain("'RECORD_VITALS'");
+    expect(authContext).toContain("RECORD_VITALS:['RECORD_VITALS']");
+    expect(authContext).toContain("if (!credentialsValid(credentials, Date.now())) return [];");
+    expect(authContext).toContain("privilege.status!=='GRANTED'");
+    expect(authContext).not.toContain('credentialGatedRoleBaseline');
   });
 
   test('RecordVitalsCommand schema validates standard physiological observations', () => {

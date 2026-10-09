@@ -88,7 +88,7 @@ describe('G-HIMS Clinical Intelligence Patient 360 foundation', () => {
   test('medication reconciliation and NEWS2 evidence are server-side clinical documentation', async () => {
     const documentation = await source('lib/backend/services/clinical-documentation-domain-service.ts');
     expect(documentation).toContain('calculateNEWS2');
-    expect(documentation).toContain("news2Status: news2 ? 'VERIFIED' : 'INCOMPLETE_INPUT'");
+    expect(documentation).toContain("const news2Status: 'CALCULATED' | 'INCOMPLETE_INPUTS'");
     expect(documentation).toContain('completeMedicationReconciliation');
     expect(documentation).toContain("evidenceType: 'MEDICATION_RECONCILIATION'");
     expect(documentation).toContain("status: 'FINAL'");

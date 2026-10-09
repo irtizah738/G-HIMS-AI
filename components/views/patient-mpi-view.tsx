@@ -331,7 +331,7 @@ export function PatientMpiView() {
       setVitalsStatus(
         news2Scale && news2SupplementalOxygen && news2Consciousness
           ? 'Vitals committed with NEWS2 assessment inputs. Inspect the authoritative Patient 360 record.'
-          : 'Vitals committed. NEWS2 is INCOMPLETE_INPUT because scale, oxygen support, or consciousness was not documented.'
+          : 'Vitals committed. NEWS2 is INCOMPLETE_INPUTS because scale, oxygen support, or consciousness was not documented.'
       );
       setNewHeartRate('');
       setNewBp('');

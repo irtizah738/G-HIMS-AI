@@ -73,11 +73,58 @@ Repeat using \`MRN-20260930-3611\` only after checking the first report. Project
 
 The inspector reads **directly from Firestore**. A TEST/DEMO server can have an in-process ephemeral state overlay that takes precedence over Firestore for the same tenant. If Firestore is clean but the retirement command still rejects, note the updated error's \`Read source\` and exact blocking field names. In-process ephemeral state cannot be examined from a different process; resolve the active process, verify the session/tenant/project, and investigate its original test seed rather than modifying Firestore.
 
+## Confirmed synthetic telehealth qualification and operator authorization
+
+For the known test-only patient, the initial read-only report established one
+`ACTIVE` telehealth encounter and one `IN_PROGRESS` OPD encounter, and a
+matching `IN_CONSULTATION` telehealth session. No clinical activity or financial
+links were detected in the queried collections. **This evidence is not a
+retirement command**.
+
+The existing admin-only `RetireConfirmedMockPatientCommand` now permits
+synthetic telehealth only when each encounter has exactly one linked session,
+with empty SOAP content and codes, no signed note, prescriptions,
+transcription, call duration, recording, or recorded vital signs. It denies
+clinical evidence, orders, bed back-references and financial references.
+The patient, encounters, queue and telehealth session are re-read inside a
+version-checked atomic write before the synthetic administrative retirement;
+immutable event, audit and outbox records are created with the update.
+This is **not** a clinical discharge and does not delete the historical data.
+
+On the single explicitly verified development-only project `g-hims-ai`,
+where there is no separate production project ID, retirement requires all of
+the usual server-side authorizations, plus independent explicit settings on
+the **server runtime** (not only a local PowerShell shell):
+
+~~~text
+GHIMS_RUNTIME_MODE=TEST
+NODE_ENV=development
+FIREBASE_PROJECT_ID=g-hims-ai
+GHIMS_FIREBASE_PROJECT_ID_TEST=g-hims-ai
+GHIMS_MOCK_CLEANUP_CONFIRM_PROJECT=g-hims-ai
+GHIMS_ENABLE_CONFIRMED_MOCK_CLEANUP=true
+GHIMS_MOCK_CLEANUP_DEV_PROJECT_ACK=I_CONFIRM_G_HIMS_AI_IS_SYNTHETIC_ONLY
+~~~
+
+The acknowledgment is not inferred from the read-only inspection.
+The command remains limited to the exact two allowlisted MRNs and two
+tenants, requires verified hospital-admin authorization, explicit synthetic
+confirmation and a substantive reason. No one should set these flags until
+a new read-only report is reviewed and they explicitly intend to retire the
+specific patient. **Do not enable these settings in any shared, clinical,
+staging or production deployment.** Restart the test-only application server
+after setting them, execute the command through its existing MPI modal, then
+unset the cleanup flags. Confirm the resulting event/audit, session and
+encounter states and re-inspect; if any verification fails, stop.
+
+There is no bulk cleanup or manual Firestore deletion path. A patient with
+unexpected linked records must instead go through manual reconciliation.
+
 ## Reconciliation decision
 
 1. **Non-OPD clinical encounter or active bed:** do not retire. Use authorized clinical/bed workflows and verify actual lifecycle evidence.
 2. **Orphaned pointer:** investigate event and audit provenance, source encounter, and version. Design a version-checked audited repair only after confirming there is no active clinical care.
 3. **Financial links:** use financial reconciliation, never delete or overwrite receipts/invoices to make cleanup pass.
-4. **Eligible confirmed mock OPD-only care:** the existing \`RetireConfirmedMockPatientCommand\` is the only administrative retirement path. It still requires all its server-side gates and an explicit operator reason/confirmation. It does not fabricate clinical discharge.
+4. **Eligible confirmed mock OPD or zero-activity telehealth:** the existing \`RetireConfirmedMockPatientCommand\` is the only administrative retirement path. It still requires all its server-side gates and an explicit operator reason/confirmation. It does not fabricate clinical discharge.
 
 Keep the raw report in a restricted operational evidence location. Share only its non-sensitive blockers and scope metadata for support.

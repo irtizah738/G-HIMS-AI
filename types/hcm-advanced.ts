@@ -65,6 +65,12 @@ export type CredentialVerificationStatus =
   | 'REVOKED';
 
 export type ClinicalPrivilegeType =
+  | 'RECORD_VITALS'
+  | 'TRIAGE_PATIENTS'
+  | 'ADMIT_INPATIENT'
+  | 'DISCHARGE_INPATIENT'
+  | 'ADMINISTER_MEDICATIONS'
+  | 'EXECUTE_NURSING_CARE_PLAN'
   | 'CONSULT_OPD'
   | 'PRESCRIBE_MEDICATION'
   | 'PERFORM_GENERAL_SURGERY'

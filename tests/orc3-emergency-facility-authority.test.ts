@@ -17,6 +17,7 @@ describe('ORC-3 emergency facility authority', () => {
   test('rejects malformed facility ID in the command schema', () => {
     expect(validateCommandPayload(command('')).success).toBe(false);
     expect(validateCommandPayload(command('facility-a')).success).toBe(true);
+    expect(validateCommandPayload(command(undefined)).success).toBe(false);
   });
   test('encounter service enforces actor facility scope server-side', async () => {
     const service = await source('lib/backend/services/encounter-domain-service.ts');
@@ -31,5 +32,9 @@ describe('ORC-3 emergency facility authority', () => {
     expect(ui).toContain('authorizedFacilityIds = auth.user?.facilityIds || []');
     expect(ui).toContain('facilityId: emergencyFacilityId');
     expect(ui).toContain('Select authorized facility');
+    expect(ui).toContain('authorizedFacilityIds.includes(selectedFacilityId)');
+    expect(ui).toContain('authorizedFacilityIds.includes(emergencyFacilityId)');
+    expect(ui).toContain('!patientsById[patientId]');
+    expect(ui).toContain("authorizedFacilityIds.includes(selectedEncounter.facilityId || '')");
   });
 });

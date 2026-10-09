@@ -543,8 +543,10 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
       'vercel pull --yes --environment=preview'
     );
     expect(workflow).toContain(
-      'vercel deploy --prebuilt --yes --token="$VERCEL_TOKEN"'
+      'vercel deploy --prebuilt --yes'
     );
+    expect(workflow).toContain('VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}');
+    expect(workflow).not.toContain('--token="$VERCEL_TOKEN"');
     expect(workflow).not.toContain('--target=staging');
     expect(workflow).toContain('G-HIMS runtime: STAGING');
   });

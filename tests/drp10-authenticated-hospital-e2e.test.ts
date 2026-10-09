@@ -103,9 +103,9 @@ describe('DRP-10 authenticated hospital E2E staging qualification', () => {
     const provision = await source('scripts/ops/p7-provision-staging-identities.ts');
 
     expect(auth).toContain("PRESCRIBE_MEDICATION:['PRESCRIBE_MEDICATION','PRESCRIBE'");
-    expect(auth).toContain('credentialGatedRoleBaseline');
-    expect(auth).toContain("'ADMIT_INPATIENT'");
-    expect(auth).toContain("'DISCHARGE_INPATIENT'");
+    expect(auth).not.toContain('credentialGatedRoleBaseline');
+    expect(auth).toContain("ADMIT_INPATIENT:['ADMIT_INPATIENT']");
+    expect(auth).toContain("DISCHARGE_INPATIENT:['DISCHARGE_INPATIENT']");
     expect(provision).toContain("collection('clinicalCredentials')");
     expect(provision).toContain("collection('clinicalPrivileges')");
     expect(provision).toContain("collection('employees')");

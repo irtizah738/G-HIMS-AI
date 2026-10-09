@@ -29,6 +29,16 @@ if (projectId !== publicProjectId) {
   fail('STAGING_CLIENT_SERVER_PROJECT_MISMATCH');
 }
 
+// The non-secret production project reference is mandatory in Preview:
+// without it, an accidentally production-bound staging build can evade comparison.
+const productionProject = String(process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION || '').trim();
+if (!productionProject) {
+  fail('STAGING_PRODUCTION_REFERENCE_REQUIRED');
+}
+if (productionProject === stagingProject) {
+  fail('STAGING_PROJECT_COLLISION');
+}
+
 const forbiddenProjects = [
   process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO,
   process.env.GHIMS_FIREBASE_PROJECT_ID_TEST,

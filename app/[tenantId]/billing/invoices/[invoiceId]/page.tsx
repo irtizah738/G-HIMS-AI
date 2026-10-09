@@ -1,6 +1,6 @@
 'use client';
 
-import React, { use, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { use, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle,
@@ -46,6 +46,16 @@ export default function InvoiceCashCollectionPage({ params }: PageProps) {
   const [success, setSuccess] = useState<string | null>(null);
   const [amount, setAmount] = useState('');
   const [referenceNumber, setReferenceNumber] = useState('');
+  // Preserve the same receipt identity across ambiguous server/network failures.
+  // Do not generate another cash receipt for a retry of the same collection.
+  const receiptAttempt = useRef<{
+    receiptId: string;
+    collectedAt: number;
+    invoiceId: string;
+    amountMinorUnits: number;
+    referenceNumber: string;
+  } | null>(null);
+  const [unconfirmedReceiptId, setUnconfirmedReceiptId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!tenantId || !invoiceId) {
@@ -122,11 +132,33 @@ export default function InvoiceCashCollectionPage({ params }: PageProps) {
       return;
     }
 
+    const existingAttempt = receiptAttempt.current;
+    if (
+      existingAttempt &&
+      (existingAttempt.invoiceId !== invoice.id ||
+       existingAttempt.amountMinorUnits !== amountMinorUnits ||
+       existingAttempt.referenceNumber !== referenceNumber.trim())
+    ) {
+      setError(
+        'CASH_RECEIPT_UNCONFIRMED: resolve the previous receipt attempt before changing the amount or reference.'
+      );
+      return;
+    }
+    const attempt = existingAttempt || {
+      receiptId: `receipt_${crypto.randomUUID()}`,
+      collectedAt: Date.now(),
+      invoiceId: invoice.id,
+      amountMinorUnits,
+      referenceNumber: referenceNumber.trim(),
+    };
+    receiptAttempt.current = attempt;
+    setUnconfirmedReceiptId(attempt.receiptId);
+
     setCollecting(true);
     setError(null);
     setSuccess(null);
     try {
-      const receiptId = `receipt_${crypto.randomUUID()}`;
+      const receiptId = attempt.receiptId;
       const result = await executeActiveTenantCommand<{
         receipt?: { receiptId?: string; journalId?: string };
         invoice?: Record<string, unknown>;
@@ -139,10 +171,10 @@ export default function InvoiceCashCollectionPage({ params }: PageProps) {
           patientId: invoice.patientId,
           amountMinorUnits,
           currency: invoice.currency,
-          ...(referenceNumber.trim()
-            ? { referenceNumber: referenceNumber.trim() }
+          ...(attempt.referenceNumber
+            ? { referenceNumber: attempt.referenceNumber }
             : {}),
-          collectedAt: Date.now(),
+          collectedAt: attempt.collectedAt,
         },
         {
           idempotencyKey: `billing-cash-receipt:${receiptId}`,
@@ -158,13 +190,16 @@ export default function InvoiceCashCollectionPage({ params }: PageProps) {
       setSuccess(
         `Cash receipt ${result.data?.receipt?.receiptId || receiptId} was committed by the finance authority.`
       );
+      receiptAttempt.current = null;
+      setUnconfirmedReceiptId(null);
       setReferenceNumber('');
       await refresh();
     } catch (cause) {
       setError(
-        cause instanceof Error
+        (cause instanceof Error
           ? cause.message
-          : 'Unable to commit authoritative cash receipt.'
+          : 'Unable to commit authoritative cash receipt.') +
+          ' Verify the receipt and invoice ledger before another collection. Retrying here reuses the same receipt ID and idempotency key.'
       );
     } finally {
       setCollecting(false);
@@ -210,6 +245,13 @@ export default function InvoiceCashCollectionPage({ params }: PageProps) {
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{error}</span>
         </div>
+      )}
+
+      {unconfirmedReceiptId && (
+        <p role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+          Receipt attempt {unconfirmedReceiptId} has not been confirmed in this session.
+          Do not change its amount or initiate another collection until its posting is resolved.
+        </p>
       )}
 
       {success && (

@@ -108,6 +108,48 @@ export class DomainStateRepository {
     }));
   }
 
+  /**
+   * Explicitly bounded paginated read. Never silently report a partial staff
+   * directory as a complete set of eligible clinical consultants.
+   */
+  public static async listAllWithDocumentIds<T extends object>(
+    tenantId: string,
+    collectionName: string,
+    options: { pageSize?: number; maxRows?: number } = {}
+  ): Promise<Array<T & { documentId: string }>> {
+    const pageSize = Math.max(1, Math.min(options.pageSize || 500, 500));
+    const maxRows = Math.max(pageSize, options.maxRows || 50000);
+    const db = getAdminFirestore();
+    if (!db) {
+      if (!canReadEphemeralRepository()) return [];
+      const rows = TransactionManager.getEphemeralCollectionForTesting(
+        tenantId, collectionName
+      );
+      if (rows.length > maxRows) throw new Error('DOMAIN_DIRECTORY_LIMIT_EXCEEDED:' + collectionName);
+      return rows.map((row) => ({
+        ...row,
+        documentId: String(row.documentId || row.userId || row.id ||
+          row.employeeId || row.credentialId || row.privilegeId || row.rosterId || ''),
+      })) as Array<T & { documentId: string }>;
+    }
+
+    const collection = db.collection('tenants').doc(tenantId).collection(collectionName);
+    const rows: Array<T & { documentId: string }> = [];
+    let cursor: QueryDocumentSnapshot | null = null;
+    for (;;) {
+      let query = collection.orderBy(FieldPath.documentId()).limit(pageSize);
+      if (cursor) query = query.startAfter(cursor);
+      const page = await query.get();
+      for (const document of page.docs) {
+        rows.push({ ...(document.data() as T), documentId: document.id });
+      }
+      if (rows.length > maxRows) throw new Error('DOMAIN_DIRECTORY_LIMIT_EXCEEDED:' + collectionName);
+      if (page.size < pageSize) return rows;
+      cursor = page.docs[page.docs.length - 1] || null;
+      if (!cursor) return rows;
+    }
+  }
+
   public static async queryEqual<T>(
     tenantId: string,
     collectionName: string,

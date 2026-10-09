@@ -44,7 +44,7 @@ function normalizedRoles(membership: Membership): Set<string> {
   );
 }
 
-function isClinicalConsultantMembership(membership: Membership): boolean {
+export function isClinicalConsultantMembership(membership: Membership): boolean {
   const roles = normalizedRoles(membership);
   return (
     String(membership.status || '').toUpperCase() === 'ACTIVE' &&
@@ -55,30 +55,61 @@ function isClinicalConsultantMembership(membership: Membership): boolean {
   );
 }
 
-function isoDayActive(from: string | undefined, until: string | undefined, now: number): boolean {
-  const start = from ? Date.parse(`${from}T00:00:00.000Z`) : Number.NEGATIVE_INFINITY;
-  const end = until ? Date.parse(`${until}T23:59:59.999Z`) : Number.POSITIVE_INFINITY;
-  return now >= start && now <= end;
+/**
+ * Authorization dates are explicitly bounded. Missing, malformed, reversed,
+ * or future-effective HCM records never grant clinical access.
+ */
+export function isoDayActive(from: string | undefined, until: string | undefined, now: number): boolean {
+  if (!Number.isFinite(now)) return false;
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+  if (!from || !until || !datePattern.test(from) || !datePattern.test(until) || from > until) {
+    return false;
+  }
+  const start = Date.parse(`${from}T00:00:00.000Z`);
+  const end = Date.parse(`${until}T23:59:59.999Z`);
+  return Number.isFinite(start) && Number.isFinite(end) &&
+    new Date(start).toISOString().slice(0, 10) === from &&
+    new Date(end).toISOString().slice(0, 10) === until &&
+    now >= start && now <= end;
 }
 
-function credentialsValid(credentials: EmployeeCredential[], now: number): boolean {
+export function credentialsValid(credentials: EmployeeCredential[], now: number): boolean {
   const mandatory = credentials.filter((item) => item.isMandatoryForPractice);
   if (!mandatory.length) return false;
-  return mandatory.every((credential) => {
-    const expiry = Date.parse(`${credential.expiryDate}T23:59:59.999Z`);
-    return credential.verificationStatus === 'VERIFIED' && Number.isFinite(expiry) && expiry >= now;
-  });
+  return mandatory.every((credential) =>
+    credential.verificationStatus === 'VERIFIED' &&
+    Boolean(credential.verifiedByActorId) &&
+    Boolean(credential.verifiedAt) &&
+    isoDayActive(credential.issueDate, credential.expiryDate, now)
+  );
 }
 
-function activePrivileges(privileges: ClinicalPrivilege[], now: number): ClinicalPrivilege[] {
+export function activePrivileges(privileges: ClinicalPrivilege[], now: number, facilityId?: string, departmentId?: string): ClinicalPrivilege[] {
   return privileges.filter(
     (privilege) =>
       privilege.status === 'GRANTED' &&
+      (!facilityId || privilege.facilityId === facilityId) &&
+      (!departmentId || privilege.departmentId === departmentId) &&
       isoDayActive(privilege.effectiveFrom, privilege.effectiveUntil, now)
   );
 }
 
-function availabilityFor(
+/** Only roster-confirmed, credentialed and scoped consultants may receive a direct assignment. */
+export function isRoutableConsultant(
+  consultant: EligibleConsultant | undefined,
+  encounterFacilityId: string
+): boolean {
+  const facilityId = String(encounterFacilityId || '').trim().toUpperCase();
+  return Boolean(
+    consultant && facilityId &&
+    String(consultant.facilityId || '').trim().toUpperCase() === facilityId &&
+    consultant.credentialVerified === true &&
+    consultant.activePrivilegeTypes.includes('CONSULT_OPD') &&
+    (consultant.availability === 'ON_DUTY' || consultant.availability === 'ON_CALL')
+  );
+}
+
+export function availabilityFor(
   shifts: RosterShiftEntry[],
   now: number
 ): Pick<EligibleConsultant, 'availability' | 'shiftEndsAt'> {
@@ -109,12 +140,18 @@ export class ConsultantDirectoryService {
     options: { departmentId?: string; specialty?: string } = {}
   ): Promise<EligibleConsultant[]> {
     const now = Date.now();
+    const authorizedFacilities = new Set(
+      (context.facilityIds || [])
+        .map((id) => String(id || '').trim().toUpperCase())
+        .filter(Boolean)
+    );
+    if (authorizedFacilities.size === 0) return [];
     const [employees, memberships, credentials, privileges, shifts] = await Promise.all([
-      DomainStateRepository.list<EmployeeMaster>(context.tenantId, 'employees', 1000),
-      DomainStateRepository.listWithDocumentIds<Membership>(context.tenantId, 'users', 1000),
-      DomainStateRepository.list<EmployeeCredential>(context.tenantId, 'clinicalCredentials', 5000),
-      DomainStateRepository.list<ClinicalPrivilege>(context.tenantId, 'clinicalPrivileges', 5000),
-      DomainStateRepository.list<RosterShiftEntry>(context.tenantId, 'rosterAssignments', 5000),
+      DomainStateRepository.listAllWithDocumentIds<EmployeeMaster>(context.tenantId, 'employees'),
+      DomainStateRepository.listAllWithDocumentIds<Membership>(context.tenantId, 'users'),
+      DomainStateRepository.listAllWithDocumentIds<EmployeeCredential>(context.tenantId, 'clinicalCredentials'),
+      DomainStateRepository.listAllWithDocumentIds<ClinicalPrivilege>(context.tenantId, 'clinicalPrivileges'),
+      DomainStateRepository.listAllWithDocumentIds<RosterShiftEntry>(context.tenantId, 'rosterAssignments'),
     ]);
 
     // Membership documents are canonically keyed by Auth UID. A duplicated
@@ -153,14 +190,34 @@ export class ConsultantDirectoryService {
     const requestedSpecialty = String(options.specialty || '').trim().toLowerCase();
 
     return employees
-      .filter((employee) => employee.employmentStatus === 'ACTIVE' && Boolean(employee.userId))
+      .filter((employee) =>
+        employee.employmentStatus === 'ACTIVE' &&
+        Boolean(employee.userId) &&
+        authorizedFacilities.has(String(employee.primaryFacilityId || '').trim().toUpperCase())
+      )
       .map((employee): EligibleConsultant | null => {
         const membership = membershipByUser.get(String(employee.userId));
         if (!membership || !isClinicalConsultantMembership(membership)) return null;
+        const facilityId = String(employee.primaryFacilityId || '').trim().toUpperCase();
+        const departmentScopeId = String(employee.primaryDepartmentId || '').trim().toUpperCase();
+        const memberFacilities = (membership.facilityIds || [])
+          .map((id) => String(id || '').trim().toUpperCase());
+        const memberDepartments = (membership.departmentIds || [])
+          .map((id) => String(id || '').trim().toUpperCase());
+        if (!memberFacilities.includes(facilityId) ||
+            !memberDepartments.includes(departmentScopeId)) return null;
         if (!credentialsValid(credentialsByEmployee.get(employee.employeeId) || [], now)) return null;
 
-        const granted = activePrivileges(privilegesByEmployee.get(employee.employeeId) || [], now);
-        if (!granted.length) return null;
+        const granted = activePrivileges(privilegesByEmployee.get(employee.employeeId) || [], now)
+          .filter((privilege) =>
+            String(privilege.facilityId || '').trim().toUpperCase() ===
+              String(employee.primaryFacilityId || '').trim().toUpperCase() &&
+            String(privilege.departmentId || '').trim().toUpperCase() ===
+              String(employee.primaryDepartmentId || '').trim().toUpperCase()
+          );
+        if (!granted.some((privilege) => privilege.privilegeType === 'CONSULT_OPD')) {
+          return null;
+        }
 
         const departmentId = String(employee.primaryDepartmentId || '').trim();
         const departmentName = String(employee.primaryDepartmentName || departmentId).trim();
@@ -195,7 +252,16 @@ export class ConsultantDirectoryService {
           departmentId,
           departmentName,
           facilityId: employee.primaryFacilityId,
-          ...availabilityFor(shiftsByEmployee.get(employee.employeeId) || [], now),
+          ...availabilityFor(
+            (shiftsByEmployee.get(employee.employeeId) || []).filter((shift) =>
+              shift.tenantId === context.tenantId &&
+              String(shift.facilityId || '').trim().toUpperCase() ===
+                String(employee.primaryFacilityId || '').trim().toUpperCase() &&
+              String(shift.departmentId || '').trim().toUpperCase() ===
+                String(employee.primaryDepartmentId || '').trim().toUpperCase()
+            ),
+            now
+          ),
           activePrivilegeTypes: Array.from(new Set(granted.map((item) => item.privilegeType))).sort(),
           credentialVerified: true,
         };

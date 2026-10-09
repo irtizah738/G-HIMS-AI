@@ -12,6 +12,17 @@ describe('ORC-7 staging-only integrity inventory', () => {
       GHIMS_RUNTIME_MODE:'STAGING', GHIMS_ORC_AUDIT_TENANT_ID:'TENANT-A',
     })).toBe('tenant-a');
   });
+  test('a VERIFIED label without independent HCM verifier evidence does not count as qualified', () => {
+    const counts = calculateOrcIntegrityCounts({
+      users: [{documentId:'uid-1',status:'ACTIVE'}],
+      employees: [{documentId:'e-1',employeeId:'e-1',userId:'uid-1',employmentStatus:'ACTIVE'}],
+      credentials: [{documentId:'cred-1',employeeId:'e-1',isMandatoryForPractice:true,
+        verificationStatus:'VERIFIED',issueDate:'2026-01-01',expiryDate:'2028-01-01'}],
+      privileges: [], encounters: [], invoices: [],
+    });
+    expect(counts.activeEmployeeWithoutVerifiedMandatoryCredential).toBe(1);
+  });
+
   test('identifies missing workforce authority and unsafe financial clearance without modifying records', () => {
     const counts = calculateOrcIntegrityCounts({
       users:[{documentId:'uid-a',status:'ACTIVE'}],
@@ -19,7 +30,7 @@ describe('ORC-7 staging-only integrity inventory', () => {
         {documentId:'employee-1',employeeId:'employee-1',userId:'uid-a',employmentStatus:'ACTIVE'},
         {documentId:'employee-2',employeeId:'employee-2',userId:'uid-missing',employmentStatus:'ACTIVE'},
       ],
-      credentials:[{documentId:'cred-1',employeeId:'employee-1',isMandatoryForPractice:true,verificationStatus:'VERIFIED'}],
+      credentials:[{documentId:'cred-1',employeeId:'employee-1',isMandatoryForPractice:true,verificationStatus:'VERIFIED',issueDate:'2026-01-01',expiryDate:'2028-01-01',verifiedByActorId:'reviewer',verifiedAt:'2026-01-05T10:00:00Z'}],
       privileges:[{documentId:'priv-missing',employeeId:'employee-missing'}],
       encounters:[
         {documentId:'enc-1',encounterId:'enc-1',encounterType:'EMERGENCY'},

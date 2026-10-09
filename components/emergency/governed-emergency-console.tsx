@@ -107,6 +107,7 @@ export function GovernedEmergencyConsole() {
   const [encounters, setEncounters] = useState<EmergencyEncounterProjection[]>([]);
   const [patients, setPatients] = useState<PatientProjection[]>([]);
   const [source, setSource] = useState<ProjectionSource>('LOCAL_EDGE');
+  const [hydrationStatus, setHydrationStatus] = useState('UNHYDRATED');
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
 
@@ -154,6 +155,7 @@ export function GovernedEmergencyConsole() {
 
       setEncounters(allEncounters);
       setPatients(activePatients);
+      setHydrationStatus(snapshot.freshness || 'UNHYDRATED');
       // A deep link selects only an identity returned by the authoritative
       // tenant-scoped projection; foreign/stale IDs never become eligible.
       if (preselectedPatientId && activePatients.some(p => p.id === preselectedPatientId)) {
@@ -366,7 +368,7 @@ export function GovernedEmergencyConsole() {
                 CommandBus mutations
               </span>
               <span className="rounded-full border border-slate-200 px-2 py-1 font-semibold dark:border-slate-700">
-                Projection: {source}
+                Projection: {source} · {hydrationStatus}
               </span>
             </div>
           </div>

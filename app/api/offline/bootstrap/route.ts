@@ -932,6 +932,9 @@ export async function GET(req: NextRequest) {
         snapshotVersion,
         authorizationRevision,
         surface: requestedSurface,
+        hydrationStatus: collections.length === 0 ? 'NOT_APPLICABLE' : 'CURRENT',
+        authorizedCollectionCount: collections.length,
+        requestedCollectionCount: new Set(requestedCollections).size,
         collections: scopedCollections,
       },
       {

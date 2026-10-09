@@ -20,7 +20,8 @@ export interface EdgeSnapshot {
   snapshotVersion: string;
   collections: Record<string, Array<Record<string, unknown>>>;
   source: 'LOCAL' | 'SERVER';
-  freshness?: 'CURRENT' | 'STALE' | 'UNHYDRATED';
+  freshness?: 'CURRENT' | 'STALE' | 'PARTIAL' | 'UNHYDRATED' | 'DENIED' | 'FAILED' | 'NOT_APPLICABLE';
+  errorCode?: string;
 }
 
 async function secureAuthorityEpoch(
@@ -204,7 +205,10 @@ export async function hydrateEdgeSnapshot(
       if (response.status >= 400 && response.status < 500) {
         throw new Error('EDGE_HYDRATION_BAD_REQUEST');
       }
-      return loadLocalEdgeSnapshot(normalizedTenantId, surface);
+      // An HTTP 5xx is a failed server refresh, not evidence of a current,
+      // verified empty clinical/financial read model.
+      const local = await loadLocalEdgeSnapshot(normalizedTenantId, surface);
+      return { ...local, freshness: 'FAILED', errorCode: `EDGE_BOOTSTRAP_HTTP_${response.status}` };
     }
 
     const payload = await response.json();
@@ -218,6 +222,20 @@ export async function hydrateEdgeSnapshot(
       typeof payload.collections !== 'object' ||
       Array.isArray(payload.collections)
     ) {
+      throw new Error('EDGE_HYDRATION_INVALID_SNAPSHOT');
+    }
+
+    if (payload.hydrationStatus === 'NOT_APPLICABLE') {
+      return {
+        tenantId: normalizedTenantId,
+        generatedAt: Number(payload.generatedAt || Date.now()),
+        snapshotVersion: String(payload.snapshotVersion),
+        collections: {},
+        source: 'SERVER',
+        freshness: 'NOT_APPLICABLE',
+      };
+    }
+    if (payload.hydrationStatus && payload.hydrationStatus !== 'CURRENT') {
       throw new Error('EDGE_HYDRATION_INVALID_SNAPSHOT');
     }
 

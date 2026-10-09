@@ -31,7 +31,11 @@ export async function loadLocalEdgeSnapshot(
   const cached = await getCachedAuthSession();
   const actorId = cached?.user?.uid || '';
   const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
-  if (cached && cached.user.tenantId.trim().toLowerCase() !== normalizedTenantId) {
+  if (cached && (
+    cached.user.tenantId.trim().toLowerCase() !== normalizedTenantId ||
+    cached.session.tenantId.trim().toLowerCase() !== normalizedTenantId ||
+    cached.session.userId !== cached.user.uid
+  )) {
     throw new Error('EDGE_HYDRATION_TENANT_MISMATCH');
   }
   if (!actorId) {

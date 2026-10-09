@@ -44,6 +44,17 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
       );
     }
 
+    if (String(patient.status || '').toUpperCase() === 'REMOVED') {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'PATIENT_REMOVED_FROM_ACTIVE_MPI',
+          message: 'This record is retained for audit and is not available through the routine clinical workspace.',
+        },
+        { status: 410, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
     const requestedCareSettingRaw = String(
       req.nextUrl.searchParams.get('careSetting') || ''
     ).trim();

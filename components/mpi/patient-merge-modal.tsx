@@ -48,7 +48,7 @@ export function PatientMergeModal({
   onExecuteMerge,
 }: PatientMergeModalProps) {
   const [selectedSecondaryId, setSelectedSecondaryId] = useState<string>(initialSecondaryId || '');
-  const [mergeReason, setMergeReason] = useState<string>('Duplicate registration during emergency admission');
+  const [mergeReason, setMergeReason] = useState<string>('');
   const [confirmedCheck, setConfirmedCheck] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -227,7 +227,7 @@ export function PatientMergeModal({
                   <div>Demographics: {secondaryPatient.gender}, {secondaryPatient.age} years old</div>
                   <div>Blood Group: <strong className="text-red-600 font-bold">{secondaryPatient.bloodGroup || 'O+'}</strong></div>
                   <div>Allergies: {secondaryPatient.allergies?.join(', ') || 'None recorded'}</div>
-                  <div>Encounters: {secondaryPatient.encounters?.length || 1} will transfer</div>
+                  <div>Original encounter history remains linked to this MRN</div>
                 </div>
               </div>
             </div>
@@ -290,7 +290,7 @@ export function PatientMergeModal({
             className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
           >
             {isSubmitting ? (
-              <span>Executing Atomic Merge...</span>
+              <span>Verifying and merging...</span>
             ) : (
               <>
                 <GitMerge className="w-4 h-4" />

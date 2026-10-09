@@ -1131,7 +1131,7 @@ export function PatientMpiView() {
                     type="button"
                     onClick={() => {
                       const tenant = auth.activeTenant?.tenantId || auth.user?.tenantId;
-                      if (tenant) router.push(`/${encodeURIComponent(tenant)}/billing/invoices`);
+                      if (tenant) router.push(`/${encodeURIComponent(tenant)}/billing/invoices${activeEncounter?.id ? `?encounterId=${encodeURIComponent(activeEncounter.id)}` : ''}`);
                     }}
                     className="rounded-lg bg-teal-700 px-3 py-2 text-xs font-bold text-white hover:bg-teal-800"
                   >

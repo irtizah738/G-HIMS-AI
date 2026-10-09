@@ -101,8 +101,10 @@ export function TelehealthView() {
       const next = await work();
       replaceSession(next);
       setMessage(success);
+      return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Telehealth command failed.');
+      return false;
     } finally {
       setBusy(false);
     }
@@ -177,11 +179,11 @@ export function TelehealthView() {
       setError('Provide at least 20 characters explaining why the consultation never occurred.');
       return;
     }
-    await run(
+    const cancelled = await run(
       () => cancelUnusedTelehealthSession(selected.id, selected.updatedAt, reason),
       'Unused telehealth encounter cancelled. Patient care references reconciled.'
     );
-    setCancellationReason('');
+    if (cancelled) setCancellationReason('');
   };
 
   const signAndComplete = async () => {

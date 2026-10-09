@@ -1048,6 +1048,7 @@ interface HospitalContextType {
   updateTelehealthSession: (sessionId: string, updates: Partial<TelehealthSession>) => Promise<void>;
   completeTelehealthSession: (sessionId: string, note?: Partial<TelehealthSoapNote>, prescriptions?: TelehealthPrescription[]) => Promise<void>;
   cancelUnusedTelehealthSession: (sessionId: string, expectedUpdatedAt: string, reason: string) => Promise<TelehealthSession>;
+  repairTelehealthRoomToken: (sessionId: string, expectedUpdatedAt: string) => Promise<TelehealthSession>;
 }
 
 const HospitalContext = createContext<HospitalContextType | undefined>(undefined);

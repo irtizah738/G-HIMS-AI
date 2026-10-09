@@ -70,7 +70,7 @@ function credentialsValid(credentials: EmployeeCredential[], now: number): boole
   });
 }
 
-function activePrivileges(
+export function activePrivileges(
   privileges: ClinicalPrivilege[],
   now: number,
   facilityId: string,
@@ -85,7 +85,7 @@ function activePrivileges(
   );
 }
 
-function availabilityFor(
+export function availabilityFor(
   shifts: RosterShiftEntry[],
   now: number
 ): Pick<EligibleConsultant, 'availability' | 'shiftEndsAt'> {

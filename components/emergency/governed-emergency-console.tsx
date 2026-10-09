@@ -11,6 +11,7 @@ import {
   Stethoscope,
 } from 'lucide-react';
 import { executeActiveTenantCommand } from '@/lib/api/command-client';
+import { useAuth } from '@/lib/auth/auth-context';
 import {
   hydrateEdgeSnapshot,
   loadLocalEdgeSnapshot,
@@ -25,6 +26,7 @@ interface EmergencyEncounterProjection {
   currentStage: string;
   clinicalState: string;
   departmentId: string;
+  facilityId?: string;
   chiefComplaint: string;
   priority: string;
   assignedProviderId?: string;
@@ -51,6 +53,7 @@ function normalizeEncounter(row: Record<string, unknown>): EmergencyEncounterPro
     currentStage: String(row.currentStage || row.currentStageId || ''),
     clinicalState: String(row.clinicalState || row.currentStage || row.currentStageId || ''),
     departmentId: String(row.departmentId || row.department || ''),
+    facilityId: String(row.facilityId || ''),
     chiefComplaint: String(row.chiefComplaint || ''),
     priority: String(row.priority || 'ROUTINE').toUpperCase(),
     assignedProviderId: row.assignedProviderId
@@ -90,6 +93,11 @@ function priorityClass(priority: string): string {
  * the authoritative command boundary.
  */
 export function GovernedEmergencyConsole() {
+  const auth = useAuth();
+  const authorizedFacilityIds = auth.user?.facilityIds || [];
+  const [selectedFacilityId, setSelectedFacilityId] = useState('');
+  const emergencyFacilityId = selectedFacilityId ||
+    (authorizedFacilityIds.length === 1 ? authorizedFacilityIds[0] : '');
   const params = useParams<{ tenantId: string }>();
   const searchParams = useSearchParams();
   const preselectedPatientId = String(searchParams.get('patientId') || '').trim();
@@ -208,12 +216,13 @@ export function GovernedEmergencyConsole() {
 
     if (
       !patientId ||
+      !emergencyFacilityId ||
       !chiefComplaint.trim() ||
       !departmentId.trim() ||
       creating
     ) {
       setMessage(
-        'Select an authoritative patient and provide the emergency department/service and chief complaint.'
+        'Select a patient, an authorized facility, an emergency department and a chief complaint.'
       );
       return;
     }
@@ -226,6 +235,7 @@ export function GovernedEmergencyConsole() {
         {
           patientId,
           encounterType: 'EMERGENCY',
+          facilityId: emergencyFacilityId,
           chiefComplaint: chiefComplaint.trim(),
           departmentId: departmentId.trim(),
           priority,
@@ -401,6 +411,21 @@ export function GovernedEmergencyConsole() {
               </option>
             ))}
           </select>
+
+          <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200">
+            Verified emergency facility
+            <select
+              value={emergencyFacilityId}
+              onChange={(event) => setSelectedFacilityId(event.target.value)}
+              required
+              className="mt-1 w-full rounded-xl border border-slate-300 p-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+            >
+              <option value="">Select authorized facility</option>
+              {authorizedFacilityIds.map((id) => (
+                <option value={id} key={id}>{id}</option>
+              ))}
+            </select>
+          </label>
 
           <input
             value={departmentId}

@@ -61,7 +61,7 @@ export function isClinicalConsultantMembership(membership: Membership): boolean 
  */
 export function isoDayActive(from: string | undefined, until: string | undefined, now: number): boolean {
   if (!Number.isFinite(now)) return false;
-  const datePattern = /^\\d{4}-\\d{2}-\\d{2}$/;
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
   if (!from || !until || !datePattern.test(from) || !datePattern.test(until) || from > until) {
     return false;
   }

@@ -31,6 +31,7 @@ import { DischargedCensusRecord, initialDischargedCensus } from '@/lib/clinical/
 import { executeActiveTenantCommand, registerActiveTenantPatient } from '@/lib/api/command-client';
 import { syncEngine } from '@/lib/offline/sync-engine';
 import { useAuth } from '@/lib/auth/auth-context';
+import { AuthClient } from '@/lib/auth/auth-client';
 import { hydrateEdgeSnapshot, loadLocalEdgeSnapshot } from '@/lib/offline/hydration';
 import { adaptEdgeSnapshot } from '@/lib/offline/read-model-adapter';
 
@@ -2369,6 +2370,27 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
         completionIdempotencyKey: `idem_${crypto.randomUUID()}`,
       };
       pendingTelehealthSigningRef.current.set(key, pending);
+    }
+    if (!pending.signedEvidenceId) {
+      // Durable read-only recovery survives a browser reload and prevents
+      // a second signature after the previous request committed remotely.
+      const preflight = await AuthClient.authorizedFetch(
+        '/api/telehealth/signed-evidence',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          cache: 'no-store',
+          body: JSON.stringify({ tenantId: tenantScope, sessionId, content }),
+        },
+        tenantScope
+      );
+      const existing = await preflight.json().catch(() => ({}));
+      if (!preflight.ok) {
+        throw new Error(existing.error || 'TELEHEALTH_COMPLETION_PREFLIGHT_FAILED');
+      }
+      if (typeof existing.signedEvidenceId === 'string' && existing.signedEvidenceId) {
+        pending.signedEvidenceId = existing.signedEvidenceId;
+      }
     }
     if (!pending.signedEvidenceId) {
       const signed = await executeActiveTenantCommand<{

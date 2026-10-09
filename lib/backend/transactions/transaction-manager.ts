@@ -80,6 +80,13 @@ export interface AtomicMutationResult {
   committedAt: number;
 }
 
+/** Zero-reference predicates verified inside the same Firestore transaction as lifecycle closure. */
+export interface AtomicEmptyQueryGuard {
+  collectionName: string;
+  field: string;
+  value: string;
+}
+
 export interface AtomicReadTarget {
   key: string;
   entityType: string;
@@ -102,6 +109,7 @@ export interface AtomicReadModifyMutationParams
     'domainState' | 'additionalStateWrites' | 'eventPayload' | 'auditReason' | 'auditMetadata'
   > {
   readTargets: AtomicReadTarget[];
+  emptyQueryGuards?: AtomicEmptyQueryGuard[];
   prepare: (
     current: Record<string, Record<string, unknown> | null>
   ) => PreparedAtomicMutation;
@@ -774,6 +782,16 @@ export class TransactionManager {
         }
         current[target.key]=value;
       }
+      for (const guard of params.emptyQueryGuards || []) {
+        const matches = this.getEphemeralCollectionForTesting(params.tenantId, guard.collectionName)
+          .some((row) => row[guard.field] === guard.value);
+        if (matches) {
+          throw new AtomicMutationRejectedError(
+            'DOMAIN_REFERENCED_STATE_PRESENT',
+            `Encounter cancellation requires review: ${guard.collectionName} has linked evidence or activity.`
+          );
+        }
+      }
       const prepared = params.prepare(current);
 
       const primaryExisting = this.getEphemeralState(
@@ -896,6 +914,20 @@ export class TransactionManager {
         current[item.target.key] = snapshot.exists
           ? (snapshot.data() as Record<string, unknown>)
           : null;
+      }
+
+      for (const guard of params.emptyQueryGuards || []) {
+        const matched = await transaction.get(
+          tenantRef.collection(guard.collectionName)
+            .where(guard.field, '==', guard.value)
+            .limit(1)
+        );
+        if (!matched.empty) {
+          throw new AtomicMutationRejectedError(
+            'DOMAIN_REFERENCED_STATE_PRESENT',
+            `Encounter cancellation requires review: ${guard.collectionName} has linked evidence or activity.`
+          );
+        }
       }
 
       const prepared = params.prepare(current);

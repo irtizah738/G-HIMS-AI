@@ -167,6 +167,14 @@ export class ConsultantDirectoryService {
       .map((employee): EligibleConsultant | null => {
         const membership = membershipByUser.get(String(employee.userId));
         if (!membership || !isClinicalConsultantMembership(membership)) return null;
+        const facilityId = String(employee.primaryFacilityId || '').trim().toUpperCase();
+        const departmentScopeId = String(employee.primaryDepartmentId || '').trim().toUpperCase();
+        const memberFacilities = (membership.facilityIds || [])
+          .map((id) => String(id || '').trim().toUpperCase());
+        const memberDepartments = (membership.departmentIds || [])
+          .map((id) => String(id || '').trim().toUpperCase());
+        if (!memberFacilities.includes(facilityId) ||
+            !memberDepartments.includes(departmentScopeId)) return null;
         if (!credentialsValid(credentialsByEmployee.get(employee.employeeId) || [], now)) return null;
 
         const granted = activePrivileges(privilegesByEmployee.get(employee.employeeId) || [], now)
@@ -176,7 +184,9 @@ export class ConsultantDirectoryService {
             String(privilege.departmentId || '').trim().toUpperCase() ===
               String(employee.primaryDepartmentId || '').trim().toUpperCase()
           );
-        if (!granted.length) return null;
+        if (!granted.some((privilege) => privilege.privilegeType === 'CONSULT_OPD')) {
+          return null;
+        }
 
         const departmentId = String(employee.primaryDepartmentId || '').trim();
         const departmentName = String(employee.primaryDepartmentName || departmentId).trim();

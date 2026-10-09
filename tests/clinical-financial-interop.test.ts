@@ -148,6 +148,7 @@ describe('G-HIMS Clinical Safety, Financial & Interoperability Engine', () => {
           encounterType: 'EMERGENCY',
           chiefComplaint: 'Sudden collapse, unresponsive, pulseless',
           departmentId: 'dept_emergency',
+          facilityId: 'facility-emergency-test',
           priority: 'STAT',
         },
       };
@@ -197,6 +198,7 @@ describe('G-HIMS Clinical Safety, Financial & Interoperability Engine', () => {
           encounterType: 'EMERGENCY',
           chiefComplaint: 'Suspected acute transmural myocardial infarction',
           departmentId: 'dept_emergency',
+          facilityId: 'facility-emergency-test',
           priority: 'STAT',
         },
       });

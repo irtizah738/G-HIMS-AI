@@ -54,7 +54,25 @@ describe('Telehealth media authority and durable completion recovery', () => {
     const view = await read('components/views/telehealth-view.tsx');
     expect(view).toContain("hasPrivilege('SIGN_CLINICAL_NOTES')");
     expect(view).toContain('refreshAuth()');
-    expect(view).toContain('disabled={busy || networkMode === \'offline\' || !canSignTelehealth}');
+    expect(view).toContain('disabled={busy || networkMode === \'offline\' || !canSignTelehealth || !assignedToMe}');
     expect(view).toContain('TELEHEALTH_SIGNED_EVIDENCE_REVIEW_REQUIRED');
   });
+  test('scheduler cannot silently become a treating consultant', async () => {
+    const service = await read('lib/backend/services/telehealth-domain-service.ts');
+    const view = await read('components/views/telehealth-view.tsx');
+    const schema = await read('lib/backend/commands/command-schema-registry.ts');
+    const bus = await read('lib/backend/commands/command-bus.ts');
+    expect(service).toContain('const clinicianCanSign = context.roles.some(role =>');
+    expect(service).toContain('const initialAssignedProviderId = clinicianCanSign ? context.actorId');
+    expect(service).toContain("requiredPrivilege: 'SIGN_CLINICAL_NOTES'");
+    expect(service).toContain('TELEHEALTH_CONSULTATION_ACCEPTED');
+    expect(service).toContain('TELEHEALTH_ALREADY_ASSIGNED');
+    expect(schema).toContain('ClaimTelehealthEncounterCommand');
+    expect(bus).toContain('TelehealthDomainService.claimEncounter(');
+    expect(view).toContain('telehealth-accept-consultation');
+    expect(view).toContain('assignedToMe');
+    const signaling = await read('app/api/telehealth/signaling/route.ts');
+    expect(signaling).toContain('!assignedProviderId || assignedProviderId !== context.actorId');
+  });
+
 });

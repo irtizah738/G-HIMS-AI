@@ -34,6 +34,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
     1: z.object({
       patientId: nonEmpty.max(150),
       encounterType: z.enum(['OPD','IPD','EMERGENCY','TELEHEALTH']),
+      facilityId: nonEmpty.max(150).optional(),
       chiefComplaint: nonEmpty.max(4000),
       departmentId: nonEmpty.max(150),
       priority: z.enum(['STAT','URGENT','ROUTINE']).optional(),

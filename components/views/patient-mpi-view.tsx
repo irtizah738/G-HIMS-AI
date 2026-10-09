@@ -100,7 +100,7 @@ export function PatientMpiView() {
     const pairs: Array<{ primary: Patient; duplicate: Patient; matchReason: string }> = [];
     const checked = new Set<string>();
     const activeIdentityPatients = scopedPatients.filter(
-      (patient) => String(patient.status || 'ACTIVE').toUpperCase() !== 'MERGED'
+      (patient) => !['MERGED', 'REMOVED'].includes(String(patient.status || 'ACTIVE').toUpperCase())
     );
 
     for (let i = 0; i < activeIdentityPatients.length; i++) {
@@ -142,7 +142,7 @@ export function PatientMpiView() {
   }, [scopedPatients]);
 
   const filteredPatients = scopedPatients.filter((p) => {
-    if (String(p.status || 'ACTIVE').toUpperCase() === 'REMOVED') return false;
+    if (['MERGED', 'REMOVED'].includes(String(p.status || 'ACTIVE').toUpperCase())) return false;
     const q = searchFilter.toLowerCase();
     return (
       p.fullName.toLowerCase().includes(q) ||
@@ -152,7 +152,7 @@ export function PatientMpiView() {
     );
   });
 
-  const activePatients = scopedPatients.filter(p => String(p.status || 'ACTIVE').toUpperCase() !== 'REMOVED');
+  const activePatients = scopedPatients.filter(p => !['MERGED', 'REMOVED'].includes(String(p.status || 'ACTIVE').toUpperCase()));
   const currentPatient = activePatients.find((p) => p.id === selectedPatientId) || activePatients[0];
   const activeEncounter = currentPatient?.encounters?.[0];
   const assignedBed = beds.find((b) => b.id === currentPatient?.activeBedId);

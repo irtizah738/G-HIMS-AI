@@ -105,7 +105,7 @@ export class PatientMergeDomainService {
         success: false,
         commandId,
         idempotencyKey,
-        error: { code: 'PRIMARY_ALREADY_MERGED', message: 'Primary patient is not an active authoritative record.' },
+        error: { code: 'PRIMARY_ALREADY_MERGED', message: primary.mergedIntoPatientId ? `Primary record was previously merged. Review surviving patient ${primary.mergedIntoPatientId} and select an active record before merging.` : 'Primary was previously merged; ask Health Information Management to verify the surviving identity.' },
       };
     }
 
@@ -178,7 +178,7 @@ export class PatientMergeDomainService {
       ...primary,
       id: payload.primaryPatientId,
       tenantId: context.tenantId,
-      status: 'ACTIVE',
+      status: primary.status || 'ACTIVE',
       allergies,
       chronicConditions,
       updatedAt: now,
@@ -198,7 +198,9 @@ export class PatientMergeDomainService {
       version: Number(secondary.version || 0) + 1,
     };
 
-    const tx = await TransactionManager.executeAtomicMutation({
+    let tx: Awaited<ReturnType<typeof TransactionManager.executeAtomicMutation>>;
+    try {
+      tx = await TransactionManager.executeAtomicMutation({
       tenantId: context.tenantId,
       actorId: context.actorId,
       actorRole: context.roles[0] || 'MEDICAL_DIRECTOR',
@@ -214,17 +216,34 @@ export class PatientMergeDomainService {
       auditResourceType: 'PATIENT',
       auditResourceId: payload.primaryPatientId,
       auditReason: payload.mergeReason.trim(),
+      omitDomainStateFromAudit: true,
       outboxTopic: 'g-hims-patient-identity-events',
       idempotencyKey,
       commandId,
       correlationId: context.correlationId,
       domainState: primaryState,
+      expectedPrimaryServerVersion: Number((primary as PatientMPI & { _serverVersion?: number })._serverVersion || 0),
       additionalStateWrites: [{
         entityType: 'PATIENT_MPI',
         entityId: payload.secondaryPatientId,
         domainState: secondaryState,
+        expectedServerVersion: Number((secondary as PatientMPI & { _serverVersion?: number })._serverVersion || 0),
       }],
-    });
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('DOMAIN_STATE_VERSION_CONFLICT')) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'PATIENT_MERGE_CONCURRENT_UPDATE',
+            message: 'Another operation changed a patient identity while merging. Refresh MPI, verify the surviving MRN and retry with a new command.',
+          },
+        };
+      }
+      throw error;
+    }
 
     return {
       success: true,

@@ -23,6 +23,21 @@ function isClinicalRole(roles:string[]):boolean{
   return roles.some(role=>clinical.has(role.toLowerCase()));
 }
 
+/** Clinical credential and privilege windows must never be open-ended or malformed. */
+function hcmDateWindowActive(
+  from: string | undefined,
+  until: string | undefined,
+  today: string
+): boolean {
+  const canonicalDate = (value: string | undefined): value is string => {
+    if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const parsed = Date.parse(`${value}T00:00:00.000Z`);
+    return Number.isFinite(parsed) && new Date(parsed).toISOString().slice(0, 10) === value;
+  };
+  return canonicalDate(from) && canonicalDate(until) &&
+    from <= today && today <= until;
+}
+
 function mapHcmPrivilegeToAuthorization(privilege: ClinicalPrivilege['privilegeType'] | string): string[] {
   const map: Record<string, string[]> = {
     CONSULT_OPD:['CONSULT_OPD'],
@@ -104,8 +119,7 @@ async function resolveCredentialGatedPrivileges(params:{
     mandatory.length===0 ||
     mandatory.some(credential=>
       credential.verificationStatus!=='VERIFIED' ||
-      !credential.expiryDate ||
-      credential.expiryDate<today
+      !hcmDateWindowActive(credential.issueDate, credential.expiryDate, today)
     )
   ) return [];
 
@@ -134,8 +148,7 @@ async function resolveCredentialGatedPrivileges(params:{
   for(const privilege of privileges){
     if(
       privilege.status!=='GRANTED' ||
-      privilege.effectiveFrom>today ||
-      privilege.effectiveUntil<today
+      !hcmDateWindowActive(privilege.effectiveFrom, privilege.effectiveUntil, today)
     ) continue;
     const privFacility = String(privilege.facilityId || '').trim().toUpperCase();
     const privDept = String(privilege.departmentId || '').trim().toUpperCase();

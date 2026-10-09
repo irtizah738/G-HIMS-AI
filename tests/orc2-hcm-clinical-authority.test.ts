@@ -14,6 +14,7 @@ describe('ORC-2 HCM clinical privilege authority', () => {
     expect(auth).toContain('employeeFacilities.has(privFacility)');
     expect(auth).toContain('employeeDepartments.has(privDept)');
     expect(auth).not.toContain('credentialGatedRoleBaseline');
+    expect(auth).toContain('credentialsValid(credentials, Date.now())');
     expect(auth).not.toContain("where('personalInfo.contactEmail'");
     expect(auth).not.toContain(': membership.clinicalPrivileges;');
   });
@@ -24,6 +25,14 @@ describe('ORC-2 HCM clinical privilege authority', () => {
       expect(hcm).toContain("| '"+privilege+"'");
       expect(auth).toContain(privilege+":['"+privilege+"']");
     }
+  });
+  test('direct consultation assignment revalidates current HCM roster and facility', async () => {
+    const command = await source('lib/backend/services/clinical-coordination-domain-service.ts');
+    const ui = await source('components/clinical/patient-consultant-routing-modal.tsx');
+    expect(command).toContain('ConsultantDirectoryService.listEligible(context)');
+    expect(command).toContain('isRoutableConsultant(selected, encounterFacilityId)');
+    expect(command).toContain('CONSULTANT_NOT_ELIGIBLE_OR_AVAILABLE');
+    expect(ui).toContain("['ON_DUTY_AVAILABLE', 'ON_CALL_PAGER'].includes(selectedDoctor.status)");
   });
   test('directory pagination and clinical availability are facility-scoped', async () => {
     const directory = await source('lib/clinical/intelligence/consultant-directory-service.ts');

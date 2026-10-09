@@ -7,6 +7,7 @@ import { AuthorizationContext } from '@/lib/auth/auth-types';
 import { AuthError } from '@/lib/auth/auth-errors';
 import { VerifiedTokenResult } from './verify-token';
 import { getTenantMembership } from './tenant-membership';
+import { credentialsValid } from '@/lib/clinical/intelligence/consultant-directory-service';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import type {
   ClinicalPrivilege,
@@ -114,14 +115,9 @@ async function resolveCredentialGatedPrivileges(params:{
   const privileges=privilegeSnap.docs.map(doc=>doc.data() as ClinicalPrivilege);
   const today=new Date().toISOString().slice(0,10);
 
-  const mandatory=credentials.filter(credential=>credential.isMandatoryForPractice);
-  if(
-    mandatory.length===0 ||
-    mandatory.some(credential=>
-      credential.verificationStatus!=='VERIFIED' ||
-      !hcmDateWindowActive(credential.issueDate, credential.expiryDate, today)
-    )
-  ) return [];
+  // Reuse directory's mandatory credential policy; VERIFIED without
+  // independent verifier and timestamp does not grant clinical authority.
+  if (!credentialsValid(credentials, Date.now())) return [];
 
   const facilityScope = new Set(
     params.facilityIds.map((id) => String(id || '').trim().toUpperCase()).filter(Boolean)

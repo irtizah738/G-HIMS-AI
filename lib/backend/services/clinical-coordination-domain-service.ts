@@ -13,6 +13,7 @@ import type {
 import type { ClinicalOpenItemProjection } from '@/types/consultant-visibility';
 import type { DiseaseIntakeArtifact } from '@/types/disease-intake-artifact';
 import { getConsultationSla } from '@/lib/clinical/coordination/consultation-sla';
+import { ConsultantDirectoryService, isRoutableConsultant } from '@/lib/clinical/intelligence/consultant-directory-service';
 
 interface ScopedClinicalPayload {
   patientId: string;
@@ -253,6 +254,23 @@ export class ClinicalCoordinationDomainService {
       );
     }
 
+    // The directory is advisory: repeat current HCM/roster validation at the
+    // mutation boundary, including calls made directly through the API.
+    const selectedConsultantId = String(payload.requestedConsultantId || '').trim();
+    if (selectedConsultantId) {
+      const encounterFacilityId = String(scoped.encounter.facilityId || '').trim();
+      if (!encounterFacilityId) {
+        return failure(commandId, idempotencyKey, 'CONSULTATION_FACILITY_REQUIRED',
+          'The encounter requires an authoritative facility for direct consultant assignment.');
+      }
+      const eligible = await ConsultantDirectoryService.listEligible(context);
+      const selected = eligible.find((item) => item.consultantId === selectedConsultantId);
+      if (!isRoutableConsultant(selected, encounterFacilityId)) {
+        return failure(commandId, idempotencyKey, 'CONSULTANT_NOT_ELIGIBLE_OR_AVAILABLE',
+          'Selected consultant is not verified and roster-available for the encounter facility.');
+      }
+    }
+
     const now = Date.now();
     const priority = payload.priority || 'ROUTINE';
     const sla = getConsultationSla(priority);
@@ -266,8 +284,8 @@ export class ClinicalCoordinationDomainService {
         scoped.encounter.encounterType || scoped.encounter.type
       ),
       requestedSpecialty,
-      requestedConsultantId: payload.requestedConsultantId?.trim() || undefined,
-      assignedConsultantId: payload.requestedConsultantId?.trim() || undefined,
+      requestedConsultantId: selectedConsultantId || undefined,
+      assignedConsultantId: selectedConsultantId || undefined,
       clinicalQuestion,
       priority,
       acknowledgementSlaMinutes: sla.acknowledgementMinutes,
@@ -276,7 +294,7 @@ export class ClinicalCoordinationDomainService {
       acceptanceDueAt: now + sla.acceptanceMinutes * 60_000,
       responseSlaMinutes: sla.acknowledgementMinutes,
       responseDueAt: now + sla.acknowledgementMinutes * 60_000,
-      status: payload.requestedConsultantId ? 'ASSIGNED' : 'REQUESTED',
+      status: selectedConsultantId ? 'ASSIGNED' : 'REQUESTED',
       sourceRefs: Array.from(new Set(payload.sourceRefs || [])).slice(0, 100),
       requestedBy: context.actorId,
       requestedAt: now,

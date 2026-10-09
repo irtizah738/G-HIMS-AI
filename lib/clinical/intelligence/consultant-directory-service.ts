@@ -94,6 +94,21 @@ export function activePrivileges(privileges: ClinicalPrivilege[], now: number, f
   );
 }
 
+/** Only roster-confirmed, credentialed and scoped consultants may receive a direct assignment. */
+export function isRoutableConsultant(
+  consultant: EligibleConsultant | undefined,
+  encounterFacilityId: string
+): boolean {
+  const facilityId = String(encounterFacilityId || '').trim().toUpperCase();
+  return Boolean(
+    consultant && facilityId &&
+    String(consultant.facilityId || '').trim().toUpperCase() === facilityId &&
+    consultant.credentialVerified === true &&
+    consultant.activePrivilegeTypes.includes('CONSULT_OPD') &&
+    (consultant.availability === 'ON_DUTY' || consultant.availability === 'ON_CALL')
+  );
+}
+
 export function availabilityFor(
   shifts: RosterShiftEntry[],
   now: number

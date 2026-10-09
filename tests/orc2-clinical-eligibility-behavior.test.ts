@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   activePrivileges,
+  isRoutableConsultant,
   credentialsValid,
   isoDayActive,
   isClinicalConsultantMembership,
@@ -45,6 +46,22 @@ describe('ORC-2 consultant authority behavioral regressions', () => {
     expect(credentialsValid([credential({ expiryDate: '2026-01-01' })], now)).toBe(false);
     expect(credentialsValid([credential(), credential({ expiryDate: '2020-01-01' })], now)).toBe(false);
     expect(credentialsValid([credential({ issueDate: '' })], now)).toBe(false);
+  });
+
+  test('routing rejects wrong facility, missing privilege and unknown/off-duty roster', () => {
+    const consultant = {
+      consultantId: 'uid-1', employeeId: 'e1', displayName: 'Dr Test', positionTitle: 'Consultant',
+      specialty: 'Medicine', subSpecialties: [], departmentId: 'medicine', departmentName: 'Medicine',
+      facilityId: 'hospital-a', availability: 'ON_DUTY' as const, activePrivilegeTypes: ['CONSULT_OPD'],
+      credentialVerified: true as const,
+    };
+    expect(isRoutableConsultant(consultant, 'hospital-a')).toBe(true);
+    expect(isRoutableConsultant({ ...consultant, availability: 'ON_CALL' }, 'hospital-a')).toBe(true);
+    expect(isRoutableConsultant({ ...consultant, availability: 'UNKNOWN' }, 'hospital-a')).toBe(false);
+    expect(isRoutableConsultant({ ...consultant, availability: 'OFF_DUTY' }, 'hospital-a')).toBe(false);
+    expect(isRoutableConsultant({ ...consultant, activePrivilegeTypes: [] }, 'hospital-a')).toBe(false);
+    expect(isRoutableConsultant(consultant, 'hospital-b')).toBe(false);
+    expect(isRoutableConsultant(undefined, 'hospital-a')).toBe(false);
   });
 
   test('malformed and open-ended grants cannot be used as active authority', () => {

@@ -1050,6 +1050,7 @@ interface HospitalContextType {
   completeTelehealthSession: (sessionId: string, note?: Partial<TelehealthSoapNote>, prescriptions?: TelehealthPrescription[]) => Promise<void>;
   cancelUnusedTelehealthSession: (sessionId: string, expectedUpdatedAt: string, reason: string) => Promise<TelehealthSession>;
   repairTelehealthRoomToken: (sessionId: string, expectedUpdatedAt: string) => Promise<TelehealthSession>;
+  claimTelehealthEncounter: (sessionId: string, expectedUpdatedAt: string) => Promise<TelehealthSession>;
 }
 
 const HospitalContext = createContext<HospitalContextType | undefined>(undefined);
@@ -2277,6 +2278,24 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const claimTelehealthEncounter = async (
+    sessionId: string,
+    expectedUpdatedAt: string
+  ): Promise<TelehealthSession> => {
+    const result = await executeActiveTenantCommand<TelehealthSession>(
+      'ClaimTelehealthEncounterCommand',
+      { sessionId, expectedUpdatedAt }
+    );
+    if (!result.success || !result.data) {
+      throw new Error(result.error?.message || 'Encounter acceptance was rejected.');
+    }
+    const authoritative = result.data;
+    setTelehealthSessions((current) =>
+      current.map((item) => item.id === sessionId ? authoritative : item)
+    );
+    return authoritative;
+  };
+
   const repairTelehealthRoomToken = async (
     sessionId: string,
     expectedUpdatedAt: string
@@ -2491,6 +2510,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
         completeTelehealthSession,
         cancelUnusedTelehealthSession,
         repairTelehealthRoomToken,
+        claimTelehealthEncounter,
       }}
     >
       {children}

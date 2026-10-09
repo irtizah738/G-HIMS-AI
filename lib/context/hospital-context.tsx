@@ -1018,6 +1018,7 @@ interface HospitalContextType {
   ) => Promise<void>;
   registerNewPatient: (patientData: Omit<Patient, 'id' | 'mrn' | 'registeredAt' | 'encounters'>) => Promise<Patient>;
   mergePatients: (primaryId: string, secondaryId: string, mergeReason: string) => Promise<Patient>;
+  removePatientFromActiveMpi: (patientId: string, expectedMrn: string, reason: string) => Promise<void>;
   addClinicalNote: (patientId: string, note: Omit<ClinicalNote, 'id' | 'timestamp'>) => Promise<void>;
   addLabOrder: (patientId: string, order: Omit<LabOrder, 'id' | 'orderedAt'>) => Promise<void>;
   addVitals: (patientId: string, vitals: Omit<Vitals, 'timestamp'>) => Promise<void>;
@@ -1684,6 +1685,32 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     );
 
     return consolidatedPrimary;
+  };
+
+  const removePatientFromActiveMpi = async (
+    patientId: string,
+    expectedMrn: string,
+    reason: string
+  ): Promise<void> => {
+    const result = await executeActiveTenantCommand<{
+      patientId: string;
+      status: 'REMOVED';
+    }>('RemovePatientRecordCommand', {
+      patientId,
+      expectedMrn,
+      reason: reason.trim(),
+    });
+
+    if (!result.success || result.queuedOffline || result.data?.status !== 'REMOVED') {
+      throw new Error(result.error?.message || 'Authoritative patient removal was not committed.');
+    }
+    setPatients((previous) => previous.filter((patient) => patient.id !== patientId));
+    setSelectedPatientId((previous) => previous === patientId ? null : previous);
+    addAuditLog(
+      'MPI_PATIENT_REMOVED',
+      `Patient MRN ${expectedMrn}`,
+      'Removal acknowledged by authoritative server. See immutable audit ledger for reason and actor.'
+    );
   };
 
   const requireVerifiedClinicalContextForPatient = (
@@ -2356,6 +2383,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
         dischargePatientFromBed,
         registerNewPatient,
         mergePatients,
+        removePatientFromActiveMpi,
         addClinicalNote,
         addLabOrder,
         addVitals,

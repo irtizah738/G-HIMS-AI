@@ -61,12 +61,12 @@ function isoDayActive(from: string | undefined, until: string | undefined, now: 
   return now >= start && now <= end;
 }
 
-function credentialsValid(credentials: EmployeeCredential[], now: number): boolean {
+export function credentialsValid(credentials: EmployeeCredential[], now: number): boolean {
   const mandatory = credentials.filter((item) => item.isMandatoryForPractice);
   if (!mandatory.length) return false;
   return mandatory.every((credential) => {
     const expiry = Date.parse(`${credential.expiryDate}T23:59:59.999Z`);
-    return credential.verificationStatus === 'VERIFIED' && Number.isFinite(expiry) && expiry >= now;
+    return credential.verificationStatus === 'VERIFIED' && Boolean(credential.verifiedByActorId) && Boolean(credential.verifiedAt) && Number.isFinite(expiry) && expiry >= now;
   });
 }
 

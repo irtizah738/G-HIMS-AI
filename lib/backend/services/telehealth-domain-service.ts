@@ -48,6 +48,11 @@ export interface CompleteTelehealthSessionPayload {
 }
 
 /** Cancellation is a no-care administrative disposition, NEVER a substitute for signing or discharge. */
+export interface RepairTelehealthRoomTokenPayload {
+  sessionId: string;
+  expectedUpdatedAt: string;
+}
+
 export interface CancelUnusedTelehealthEncounterPayload {
   sessionId: string;
   expectedUpdatedAt: string;
@@ -412,6 +417,89 @@ export class TelehealthDomainService {
     return { success:true, commandId, idempotencyKey, entityId:session.id, eventId:tx.eventId, auditId:tx.auditId, outboxId:tx.outboxId, data:next };
   }
 
+
+  public static async repairLegacyRoomToken(
+    context: CommandContext,
+    commandId: string,
+    idempotencyKey: string,
+    payload: RepairTelehealthRoomTokenPayload
+  ): Promise<CommandResult<TelehealthSession>> {
+    const auth = AuthorizationPipeline.evaluate(context, {
+      requiredRoles: ['DOCTOR', 'CONSULTANT', 'NURSE', 'SYSTEM_ADMIN'],
+    });
+    if (!auth.authorized) {
+      return { success: false, commandId, idempotencyKey,
+        error: { code: auth.code || 'UNAUTHORIZED',
+          message: auth.reason || 'Clinician media-room authority required.' } };
+    }
+    const preflight = await DomainStateRepository.getById<TelehealthSession>(
+      context.tenantId, 'telehealthSessions', payload.sessionId
+    );
+    if (!preflight) {
+      return { success: false, commandId, idempotencyKey,
+        error: { code: 'TELEHEALTH_SESSION_NOT_FOUND', message: 'Session not found.' } };
+    }
+    const governedRoom = /^ROOM-[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/;
+    if (governedRoom.test(preflight.roomToken || '')) {
+      return { success: false, commandId, idempotencyKey,
+        error: { code: 'TELEHEALTH_ROOM_ALREADY_VALID', message: 'Room credential is already in the supported format.' } };
+    }
+    const replacementToken = `ROOM-${crypto.randomUUID().toUpperCase()}`;
+    try {
+      const tx = await TransactionManager.executeAtomicReadModifyMutation({
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        actorRole: context.roles[0] || 'CLINICIAN',
+        aggregateType: 'TELEHEALTH_SESSION',
+        aggregateId: payload.sessionId,
+        eventType: 'TELEHEALTH_MEDIA_ROOM_TOKEN_REPAIRED',
+        auditAction: 'TELEHEALTH_MEDIA_ROOM_TOKEN_REPAIRED',
+        auditResourceType: 'TELEHEALTH_SESSION',
+        auditResourceId: payload.sessionId,
+        outboxTopic: 'g-hims-telehealth-events',
+        idempotencyKey, commandId, correlationId: context.correlationId,
+        readTargets: [
+          { key: 'session', entityType: 'TELEHEALTH_SESSION', entityId: payload.sessionId, required: true },
+        ],
+        emptyQueryGuards: preflight.roomToken
+          ? [{ collectionName: 'telehealthSignaling', field: 'roomToken', value: preflight.roomToken }]
+          : [],
+        prepare: current => {
+          const session = current.session as unknown as TelehealthSession;
+          if (session.id !== payload.sessionId ||
+              (session.tenantId && session.tenantId !== context.tenantId) ||
+              session.roomToken !== preflight.roomToken ||
+              session.updatedAt !== preflight.updatedAt ||
+              session.updatedAt !== payload.expectedUpdatedAt) {
+            throw new Error('TELEHEALTH_ROOM_REPAIR_VERSION_CONFLICT: refresh before retrying.');
+          }
+          if (!['WAITING_ROOM', 'IN_CONSULTATION', 'DOCUMENTING'].includes(session.status) ||
+              governedRoom.test(session.roomToken || '')) {
+            throw new Error('TELEHEALTH_ROOM_REPAIR_NOT_ELIGIBLE: only unresolved legacy rooms qualify.');
+          }
+          const nextSession = { ...session, roomToken: replacementToken, updatedAt: new Date().toISOString() };
+          return {
+            domainState: nextSession,
+            eventPayload: {
+              sessionId: session.id, encounterId: session.encounterId,
+              action: 'REPLACED_LEGACY_INVALID_MEDIA_CREDENTIAL',
+            },
+            auditReason: 'Replaced unusable legacy media-room capability after verifying no room was established.',
+            resultData: nextSession,
+          };
+        },
+      });
+      return { success: true, commandId, idempotencyKey, entityId: payload.sessionId,
+        eventId: tx.eventId, auditId: tx.auditId, outboxId: tx.outboxId,
+        data: tx.resultData as TelehealthSession };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Room repair was rejected.';
+      const code = error instanceof Error && 'code' in error
+        ? String((error as Error & { code: string }).code)
+        : message.includes(':') ? message.split(':')[0] : 'TELEHEALTH_ROOM_REPAIR_REJECTED';
+      return { success: false, commandId, idempotencyKey, error: { code, message } };
+    }
+  }
 
   public static async cancelUnused(
     context: CommandContext,

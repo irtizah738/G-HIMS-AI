@@ -119,6 +119,7 @@ export class PatientRecordRemovalDomainService {
         auditAction: 'PATIENT_RECORD_REMOVED',
         auditResourceType: 'PATIENT',
         auditResourceId: patientId,
+        omitDomainStateFromAudit: true,
         outboxTopic: 'g-hims-patient-identity-events',
         commandId,
         idempotencyKey,

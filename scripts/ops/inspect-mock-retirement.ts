@@ -10,6 +10,8 @@
  */
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
+import { mockRetirementNonOpdPointerBlockers } from '@/lib/backend/services/mock-patient-pointer-inspection';
+import type { PatientMPI } from '@/types/mpi';
 
 const TARGET_TENANTS = new Set(['tenant_02bb76e3', 'central-metro-hospital']);
 const CONFIRMED_MOCKS = new Map([
@@ -118,7 +120,17 @@ async function run() {
     activeTelehealthEncounterIds: pointer(care.activeTelehealthEncounterIds),
   };
 
-  const blockers: string[] = [];
+  const blockers: string[] = mockRetirementNonOpdPointerBlockers(
+    patient as unknown as PatientMPI
+  ).map(field => 'COMMAND_POLICY_BLOCKER:' + field);
+  if (patient.activeCareContexts !== null && patient.activeCareContexts !== undefined &&
+      (typeof patient.activeCareContexts !== 'object' || Array.isArray(patient.activeCareContexts))) {
+    blockers.push('INVALID_CARE_CONTEXT_STRUCTURE');
+  }
+  if (care.activeOpdEncounterIds !== undefined && care.activeOpdEncounterIds !== null &&
+      !Array.isArray(care.activeOpdEncounterIds)) {
+    blockers.push('INVALID_OPD_POINTER_TYPE');
+  }
   if (rawPointers.activeBedId.value) blockers.push('PATIENT_ACTIVE_BED_POINTER');
   if (rawPointers.activeIpdEncounterId.value) blockers.push('PATIENT_ACTIVE_IPD_POINTER');
   if (rawPointers.activeEmergencyEncounterId.value) blockers.push('PATIENT_ACTIVE_EMERGENCY_POINTER');

@@ -52,8 +52,7 @@ export async function POST(req: NextRequest) {
         return reject('TELEHEALTH_CLINICIAN_AUTHORITY_REQUIRED', 403);
       }
       const assignedProvider = String(encounter.data()?.assignedProviderId || '');
-      if (assignedProvider && assignedProvider !== context.actorId &&
-          !context.roles.some(r => String(r).toUpperCase() === 'SYSTEM_ADMIN')) {
+      if (!assignedProvider || assignedProvider !== context.actorId) {
         return reject('TELEHEALTH_CLINICIAN_ASSIGNMENT_MISMATCH', 403);
       }
     } else {

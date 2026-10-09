@@ -24,6 +24,13 @@ const ADMIN_ROLES = ['ADMIN', 'ADMINISTRATOR', 'SYSTEM_ADMIN', 'SUPER_ADMIN'];
 const TERMINAL = new Set(['COMPLETED', 'CLOSED', 'CANCELLED', 'CANCELED', 'DISCHARGED', 'TRANSFERRED']);
 const MAX_ENCOUNTERS = 20;
 const MAX_QUEUE_TOKENS = 40;
+const MAX_TELEHEALTH_SESSIONS = 10;
+const CLINICAL_REVIEW_COLLECTIONS = [
+  'encounterEvidence', 'clinicalDocuments', 'clinicalObservations',
+  'medicationOrders', 'prescriptions', 'orders', 'diagnosticReports',
+  'clinicalConditions', 'clinicalAllergies',
+] as const;
+const EMPTY_TELEHEALTH_STATUSES = new Set(['WAITING_ROOM', 'IN_CONSULTATION', 'DOCUMENTING']);
 
 export interface RetireConfirmedMockPatientPayload {
   patientId: string;
@@ -48,16 +55,27 @@ export function assertMockCleanupEnvironment(tenantId: string): void {
     process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION ||
     process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION || ''
   ).trim();
-  const permittedNode = ['development', 'test'].includes(String(process.env.NODE_ENV || '').toLowerCase());
+  const nodeEnv = String(process.env.NODE_ENV || '').toLowerCase();
+  const permittedNode = ['development', 'test'].includes(nodeEnv);
+  const expectedProject = String(
+    mode === 'DEMO' ? process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO || '' :
+      process.env.GHIMS_FIREBASE_PROJECT_ID_TEST || ''
+  ).trim();
+  // The one known development project may have no separate production ID.
+  // Still require the existing opt-in plus a second explicit project acknowledgement.
+  const singleConfirmedDevProject = !prodProject && projectId === 'g-hims-ai' &&
+    expectedProject === projectId && mode === 'TEST' && nodeEnv === 'development' &&
+    process.env.GHIMS_MOCK_CLEANUP_DEV_PROJECT_ACK ===
+      'I_CONFIRM_G_HIMS_AI_IS_SYNTHETIC_ONLY';
 
   if (
     !TARGET_TENANTS.has(tenantId) ||
     !['TEST', 'DEMO'].includes(mode) ||
     !permittedNode ||
     process.env.GHIMS_ENABLE_CONFIRMED_MOCK_CLEANUP !== 'true' ||
-    !projectId ||
+    !projectId || !expectedProject || expectedProject !== projectId ||
     confirmation !== projectId ||
-    (prodProject && projectId === prodProject)
+    (prodProject ? projectId === prodProject : !singleConfirmedDevProject)
   ) {
     throw new AtomicMutationRejectedError(
       'MOCK_CLEANUP_DISABLED',
@@ -124,10 +142,13 @@ export class ConfirmedMockPatientRetirementDomainService {
       return reject(commandId, idempotencyKey, 'MOCK_CLEANUP_ALREADY_RETIRED', 'The mock identity is already removed or merged.');
     }
     const nonOpdPointers = mockRetirementNonOpdPointerBlockers(patient);
-    if (nonOpdPointers.length) {
+    const nonTelehealthBlockers = nonOpdPointers.filter(
+      field => field !== 'activeCareContexts.activeTelehealthEncounterIds'
+    );
+    if (nonTelehealthBlockers.length) {
       return reject(
         commandId, idempotencyKey, 'MOCK_CLEANUP_NON_OPD_ACTIVE_CARE',
-        'Synthetic retirement blocked by ' + nonOpdPointers.join(', ') +
+        'Synthetic retirement blocked by ' + nonTelehealthBlockers.join(', ') +
         '. Read source: ' +
         (['TEST', 'DEMO'].includes(getRuntimeMode()) &&
         TransactionManager.hasEphemeralState(context.tenantId)
@@ -146,23 +167,37 @@ export class ConfirmedMockPatientRetirementDomainService {
     }
 
     const encounterIds = new Set<string>();
+    const telehealthEncounterIds = new Set<string>();
     for (const encounter of encounters) {
       const id = String(encounter.encounterId || encounter.id || '').trim();
       const type = String(encounter.encounterType || encounter.type || '').toUpperCase();
-      if (!id || encounterIds.has(id) || type !== 'OPD') {
+      if (!id || encounterIds.has(id) || !['OPD', 'TELEHEALTH'].includes(type)) {
         return reject(
           commandId, idempotencyKey, 'MOCK_CLEANUP_UNSUPPORTED_ENCOUNTER',
-          'Only unique, fully identified OPD test encounters can be retired by this command.'
+          'Only unique, fully identified OPD or empty verified telehealth test encounters are eligible.'
         );
       }
       encounterIds.add(id);
+      if (type === 'TELEHEALTH') telehealthEncounterIds.add(id);
     }
 
-    const activeOpdIds = patient.activeCareContexts?.activeOpdEncounterIds || [];
+    const rawOpdIds = patient.activeCareContexts?.activeOpdEncounterIds;
+    const rawTelehealthIds = patient.activeCareContexts?.activeTelehealthEncounterIds;
+    if ((rawOpdIds !== undefined && !Array.isArray(rawOpdIds)) ||
+        (rawTelehealthIds !== undefined && !Array.isArray(rawTelehealthIds))) {
+      return reject(commandId, idempotencyKey, 'MOCK_CLEANUP_POINTERS_MALFORMED',
+        'Malformed care pointers require manual review.');
+    }
+    const activeOpdIds = (rawOpdIds || []) as string[];
+    const activeTelehealthIds = (rawTelehealthIds || []) as string[];
     const stalePointers = [
       ...(patient.activeEncounterId ? [patient.activeEncounterId] : []),
-      ...activeOpdIds,
-    ].filter(id => !encounterIds.has(id));
+      ...activeOpdIds, ...activeTelehealthIds,
+    ].filter(id => typeof id !== 'string' || !encounterIds.has(id));
+    if (activeTelehealthIds.some(id => !telehealthEncounterIds.has(id))) {
+      return reject(commandId, idempotencyKey, 'MOCK_CLEANUP_TELEHEALTH_POINTER_MISMATCH',
+        'Active telehealth pointer does not match the authoritative encounter.');
+    }
     if (stalePointers.length) {
       return reject(
         commandId, idempotencyKey, 'MOCK_CLEANUP_ORPHANED_CARE_POINTER',
@@ -170,9 +205,70 @@ export class ConfirmedMockPatientRetirementDomainService {
       );
     }
 
+    const sessions = await DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+      context.tenantId, 'telehealthSessions', 'patientId', patientId,
+      { pageSize: 20, maxRows: MAX_TELEHEALTH_SESSIONS + 1 }
+    );
+    if (sessions.length > MAX_TELEHEALTH_SESSIONS) {
+      return reject(commandId, idempotencyKey, 'MOCK_CLEANUP_TOO_MANY_TELEHEALTH_SESSIONS',
+        'Too many linked telehealth sessions for bounded review.');
+    }
+    const seenSessionIds = new Set<string>();
+    const matchedEncounterIds = new Set<string>();
+    for (const session of sessions) {
+      const sessionId = String(session.id || '').trim();
+      const encounterId = String(session.encounterId || '').trim();
+      const status = String(session.status || '').toUpperCase();
+      const soap = session.soapNote && typeof session.soapNote === 'object' &&
+        !Array.isArray(session.soapNote)
+        ? session.soapNote as Record<string, unknown> : {};
+      const hasClinicalActivity = Boolean(session.signedEvidenceId) ||
+        ['subjective', 'objective', 'assessment', 'plan'].some(field =>
+          String(soap[field] || '').trim().length > 0) ||
+        (Array.isArray(session.prescriptions) && session.prescriptions.length > 0) ||
+        (Array.isArray(session.transcription) && session.transcription.length > 0) ||
+        Number(session.callDurationSeconds || 0) > 0 || session.isRecording === true;
+      if (!sessionId || seenSessionIds.has(sessionId) ||
+          !telehealthEncounterIds.has(encounterId) ||
+          matchedEncounterIds.has(encounterId) ||
+          String(session.patientId) !== patientId ||
+          String(session.tenantId || context.tenantId) !== context.tenantId ||
+          !EMPTY_TELEHEALTH_STATUSES.has(status) || hasClinicalActivity) {
+        return reject(commandId, idempotencyKey, 'MOCK_CLEANUP_TELEHEALTH_REVIEW_REQUIRED',
+          'Telehealth session is missing, mismatched, final, duplicate, or contains clinical/call activity.');
+      }
+      seenSessionIds.add(sessionId);
+      matchedEncounterIds.add(encounterId);
+    }
+    if (matchedEncounterIds.size !== telehealthEncounterIds.size ||
+        activeTelehealthIds.some(id => !matchedEncounterIds.has(id))) {
+      return reject(commandId, idempotencyKey, 'MOCK_CLEANUP_TELEHEALTH_SESSION_MISSING',
+        'Every telehealth encounter and active pointer must resolve to one empty session.');
+    }
+    // Even an empty session cannot prove clinical evidence is absent.
+    for (const collection of CLINICAL_REVIEW_COLLECTIONS) {
+      const rows = await DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        context.tenantId, collection, 'patientId', patientId,
+        { pageSize: 5, maxRows: 6 }
+      );
+      if (rows.length) {
+        return reject(commandId, idempotencyKey, 'MOCK_CLEANUP_CLINICAL_REVIEW_REQUIRED',
+          'Clinical evidence or orders exist in ' + collection + '. Review manually.');
+      }
+    }
+    for (const field of ['patientId', 'currentPatientId']) {
+      const linkedBeds = await DomainStateRepository.queryAllEqual<Record<string, unknown>>(
+        context.tenantId, 'beds', field, patientId, { pageSize: 5, maxRows: 6 }
+      );
+      if (linkedBeds.length) {
+        return reject(commandId, idempotencyKey, 'MOCK_CLEANUP_BED_LINK_REVIEW_REQUIRED',
+          'A bed still references the patient; no change was made.');
+      }
+    }
+
     // No automatic invoice voids, reversals, or payment destruction. If finance
     // data exists, its own governed reversal/retirement must happen first.
-    for (const collection of ['invoices', 'encounterCharges', 'payments']) {
+    for (const collection of ['invoices', 'encounterCharges', 'payments', 'cashReceipts', 'invoiceSettlements']) {
       const rows = await DomainStateRepository.queryAllEqual<Record<string, unknown>>(
         context.tenantId, collection, 'patientId', patientId,
         { pageSize: 5, maxRows: 6 }

@@ -13,6 +13,7 @@ import { DomainStateRepository } from '@/server/repositories/domain-state-reposi
 import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
 import type { CommandContext, CommandResult } from '../types';
 import type { PatientMPI } from '@/types/mpi';
+import { mockRetirementNonOpdPointerBlockers } from './mock-patient-pointer-inspection';
 
 const TARGET_TENANTS = new Set(['tenant_02bb76e3', 'central-metro-hospital']);
 const ALLOWED_PATIENTS: Readonly<Record<string, string>> = Object.freeze({
@@ -122,12 +123,12 @@ export class ConfirmedMockPatientRetirementDomainService {
     if (['REMOVED', 'MERGED'].includes(String(patient.status || '').toUpperCase())) {
       return reject(commandId, idempotencyKey, 'MOCK_CLEANUP_ALREADY_RETIRED', 'The mock identity is already removed or merged.');
     }
-    const care = patient.activeCareContexts;
-    if (patient.activeBedId || care?.activeIpdEncounterId ||
-        care?.activeEmergencyEncounterId || care?.activeTelehealthEncounterIds?.length) {
+    const nonOpdPointers = mockRetirementNonOpdPointerBlockers(patient);
+    if (nonOpdPointers.length) {
       return reject(
         commandId, idempotencyKey, 'MOCK_CLEANUP_NON_OPD_ACTIVE_CARE',
-        'This identity has non-OPD care pointers or a bed assignment; synthetic cleanup cannot retire it automatically.'
+        'Synthetic retirement blocked by ' + nonOpdPointers.join(', ') +
+        '. Inspect the authoritative encounter or bed evidence. No records were changed.'
       );
     }
 
@@ -245,9 +246,7 @@ export class ConfirmedMockPatientRetirementDomainService {
               latest.id !== patientId || latest.mrn?.toUpperCase() !== mrn ||
               normalized(latest.fullName) !== ALLOWED_PATIENTS[mrn] ||
               ['MERGED', 'REMOVED'].includes(String(latest.status || '').toUpperCase()) ||
-              latest.activeBedId || latest.activeCareContexts?.activeIpdEncounterId ||
-              latest.activeCareContexts?.activeEmergencyEncounterId ||
-              latest.activeCareContexts?.activeTelehealthEncounterIds?.length) {
+              mockRetirementNonOpdPointerBlockers(latest).length > 0) {
             throw new AtomicMutationRejectedError(
               'MOCK_CLEANUP_PATIENT_CHANGED',
               'Patient identity or care scope changed since verification; no changes were committed.'

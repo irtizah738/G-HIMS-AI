@@ -198,7 +198,9 @@ export class PatientMergeDomainService {
       version: Number(secondary.version || 0) + 1,
     };
 
-    const tx = await TransactionManager.executeAtomicMutation({
+    let tx: Awaited<ReturnType<typeof TransactionManager.executeAtomicMutation>>;
+    try {
+      tx = await TransactionManager.executeAtomicMutation({
       tenantId: context.tenantId,
       actorId: context.actorId,
       actorRole: context.roles[0] || 'MEDICAL_DIRECTOR',
@@ -227,7 +229,21 @@ export class PatientMergeDomainService {
         domainState: secondaryState,
         expectedServerVersion: Number((secondary as PatientMPI & { _serverVersion?: number })._serverVersion || 0),
       }],
-    });
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('DOMAIN_STATE_VERSION_CONFLICT')) {
+        return {
+          success: false,
+          commandId,
+          idempotencyKey,
+          error: {
+            code: 'PATIENT_MERGE_CONCURRENT_UPDATE',
+            message: 'Another operation changed a patient identity while merging. Refresh MPI, verify the surviving MRN and retry with a new command.',
+          },
+        };
+      }
+      throw error;
+    }
 
     return {
       success: true,

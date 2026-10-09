@@ -10,7 +10,7 @@ describe('ORC-1B safe multi-surface encrypted hydration',()=>{
     expect(secure).toContain('requestedCollections.has(row.collection)');
     expect(secure).toContain('changedAuthority ||');
     expect(secure).toContain("scope: 'edge-authority'");
-    expect(secure).toContain("scope: metadata.scope");
+    expect(secure).toContain('scope: snapshotScope');
     expect(secure).toContain("EDGE_SNAPSHOT_AUTHORITY_REQUIRED");
   });
   test('server revisions reflect verified roles, privileges, facility and department scope',async()=>{

@@ -40,3 +40,56 @@
 - Firestore rules already disallow client writes to tenant telehealth session state. Administrative commands use server-derived tenant context, role checks, and atomic writes.
 
 These gaps are release blockers for uncontrolled hospital deployment, not reasons to disable the existing clinical safety guard.
+
+## ICE relay provisioning (required for restrictive networks)
+
+This application cannot create or operate institution TURN infrastructure merely by
+setting frontend values. Provision a Coturn-compatible TURN server (or an equivalent
+approved provider implementing coturn REST ephemeral credentials) with DNS/TLS,
+UDP/TCP listener access and a firewall-approved relay port range.
+
+Configure **server environment / secret manager**, never the client bundle:
+
+```dotenv
+GHIMS_WEBRTC_STUN_URLS_JSON=["stun:turn.example-hospital.org:3478"]
+GHIMS_WEBRTC_TURN_URLS_JSON=["turn:turn.example-hospital.org:3478?transport=udp","turns:turn.example-hospital.org:5349?transport=tcp"]
+GHIMS_WEBRTC_TURN_REST_SECRET=<32+ character shared secret stored in deployment secret manager>
+```
+
+`GHIMS_WEBRTC_TURN_REST_SECRET` must exactly match the trusted TURN service's
+REST shared secret. Credentials are HMAC-SHA1 of a one-hour expiring username,
+generated server-side and returned only to an assigned authenticated clinician or
+the patient holding an **active** session capability. Do not place this secret in
+`NEXT_PUBLIC_` or commit credentials to Git, Firestore, URLs, analytics, or logs.
+The old `NEXT_PUBLIC_GHIMS_WEBRTC_ICE_SERVERS_JSON` is no longer consumed by
+the Telehealth clients. An unconfigured provider remains a visible warning:
+**code cannot silently provision TURN hosting, DNS, certificates, firewall ports or
+a service secret**.
+
+Qualification: validate WebRTC ICE relay candidates and audio/video bidirectionally
+on separate NATs and a restrictive hospital/mobile network. Confirm rejected room
+tokens cannot retrieve credentials; patient cannot request relay credentials before
+the clinician activates the room; credentials expire; media and signaling stop at
+session finality. An expired TURN credential should be recovered through a new
+authorized configuration request on reconnect, not persisted indefinitely.
+
+## HCM signing authorization
+
+The backend requires the actor's authenticated tenant-scoped
+DOCTOR/CONSULTANT role and HCM-verified `SIGN_CLINICAL_NOTES` privilege.
+The Telehealth UI cannot create an HCM employee, credential, privilege grant or
+consultant roster. An authorized HCM officer must verify the real clinician's
+employment, professional registration, location/facility assignment, active
+credential, privilege grant and consultant routing before testing clinical signing.
+After changing authority, use **Refresh my clinical authorization** and repeat
+the signed-note flow with the assigned clinician. Never grant a mock signature to
+an administrator merely to unblock deletion.
+
+## Recover signed-but-open encounters
+
+The client checks the read-only `/api/telehealth/signed-evidence` endpoint before
+signing. It searches the current actor's exact-content final signed SOAP evidence
+within the tenant encounter, reuses its ID if uniquely matched, and rejects any
+conflicting existing telehealth SOAP note for human review. This prevents common
+duplicate-signature retries after a page reload. A concurrent two-tab signature
+race still needs server-authoritative single-note uniqueness qualification.

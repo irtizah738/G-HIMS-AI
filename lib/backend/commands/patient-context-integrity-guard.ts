@@ -131,6 +131,13 @@ export class PatientContextIntegrityGuard {
     }
 
     const patient = patientSnapshot.data() || {};
+    if (normalize(patient.status).toUpperCase() === 'REMOVED') {
+      return {
+        ok: false,
+        code: 'PATIENT_REMOVED_FROM_ACTIVE_MPI',
+        message: 'Patient record is removed from active care. Do not create new clinical activity against this identity.',
+      };
+    }
     const patientTenantId = normalize(patient.tenantId).toLowerCase();
     if (patientTenantId && patientTenantId !== tenantId) {
       return {

@@ -50,6 +50,7 @@ export default function InvoiceCashCollectionPage({ params }: PageProps) {
   // Do not generate another cash receipt for a retry of the same collection.
   const receiptAttempt = useRef<{
     receiptId: string;
+    collectedAt: number;
     invoiceId: string;
     amountMinorUnits: number;
     referenceNumber: string;
@@ -145,6 +146,7 @@ export default function InvoiceCashCollectionPage({ params }: PageProps) {
     }
     const attempt = existingAttempt || {
       receiptId: `receipt_${crypto.randomUUID()}`,
+      collectedAt: Date.now(),
       invoiceId: invoice.id,
       amountMinorUnits,
       referenceNumber: referenceNumber.trim(),
@@ -172,7 +174,7 @@ export default function InvoiceCashCollectionPage({ params }: PageProps) {
           ...(attempt.referenceNumber
             ? { referenceNumber: attempt.referenceNumber }
             : {}),
-          collectedAt: Date.now(),
+          collectedAt: attempt.collectedAt,
         },
         {
           idempotencyKey: `billing-cash-receipt:${receiptId}`,

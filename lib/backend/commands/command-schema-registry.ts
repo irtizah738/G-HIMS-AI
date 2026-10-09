@@ -874,6 +874,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
   CreateTelehealthSessionCommand: {
     1: z.object({
       patientId: nonEmpty.max(150),
+      facilityId: nonEmpty.max(150).optional(),
       type: z.enum([
         'Telehealth Consultation',
         'Remote Post-Op Follow-up',

@@ -354,6 +354,10 @@ export class ConfirmedMockPatientRetirementDomainService {
             key: `queue_${i}`, entityType: 'OPD_QUEUE_TOKEN',
             entityId: String(q.tokenId || q.id || q.queueTokenId), required: true,
           })),
+          ...sessions.map((session, i) => ({
+            key: `session_${i}`, entityType: 'TELEHEALTH_SESSION',
+            entityId: String(session.id), required: true,
+          })),
         ],
         prepare: (current) => {
           // Check the environment again at commit, not only during preflight.
@@ -363,7 +367,15 @@ export class ConfirmedMockPatientRetirementDomainService {
               latest.id !== patientId || latest.mrn?.toUpperCase() !== mrn ||
               normalized(latest.fullName) !== ALLOWED_PATIENTS[mrn] ||
               ['MERGED', 'REMOVED'].includes(String(latest.status || '').toUpperCase()) ||
-              mockRetirementNonOpdPointerBlockers(latest).length > 0) {
+              mockRetirementNonOpdPointerBlockers(latest).some(
+                field => field !== 'activeCareContexts.activeTelehealthEncounterIds'
+              ) ||
+              Number(latest.version || 0) !== Number(patient.version || 0) ||
+              JSON.stringify(latest.activeCareContexts?.activeTelehealthEncounterIds || []) !==
+                JSON.stringify(activeTelehealthIds) ||
+              JSON.stringify(latest.activeCareContexts?.activeOpdEncounterIds || []) !==
+                JSON.stringify(activeOpdIds) ||
+              String(latest.activeEncounterId || '') !== String(patient.activeEncounterId || '')) {
             throw new AtomicMutationRejectedError(
               'MOCK_CLEANUP_PATIENT_CHANGED',
               'Patient identity or care scope changed since verification; no changes were committed.'
@@ -377,7 +389,9 @@ export class ConfirmedMockPatientRetirementDomainService {
             const id = String(encounter.encounterId || encounter.id);
             if (!state || String(state.patientId) !== patientId ||
                 String(state.encounterId || state.id) !== id ||
-                String(state.encounterType || state.type || '').toUpperCase() !== 'OPD') {
+                String(state.encounterType || state.type || '').toUpperCase() !==
+                  String(encounter.encounterType || encounter.type || '').toUpperCase() ||
+                String(state.status || '') !== String(encounter.status || '')) {
               throw new AtomicMutationRejectedError(
                 'MOCK_CLEANUP_ENCOUNTER_CHANGED',
                 `Encounter ${id} changed. Refresh before retrying.`

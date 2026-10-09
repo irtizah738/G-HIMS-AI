@@ -56,6 +56,12 @@ export function TelehealthView() {
   const [busy, setBusy] = useState(false);
 
   const [patientId, setPatientId] = useState(patients[0]?.id || '');
+  const [facilityId, setFacilityId] = useState(user?.facilityIds?.[0] || '');
+  useEffect(() => {
+    const authorized = user?.facilityIds || [];
+    if (!authorized.includes(facilityId)) setFacilityId(authorized[0] || '');
+  }, [facilityId, user?.facilityIds]);
+
   const [chiefComplaint, setChiefComplaint] = useState('');
   const [visitType, setVisitType] = useState<TelehealthSession['type']>('Telehealth Consultation');
 
@@ -120,8 +126,8 @@ export function TelehealthView() {
 
   const schedule = async (event: FormEvent) => {
     event.preventDefault();
-    if (!patientId || !chiefComplaint.trim()) {
-      setError('Select an authoritative patient and enter the clinical reason for the virtual visit.');
+    if (!patientId || !facilityId || !chiefComplaint.trim()) {
+      setError('Select an authoritative patient, an authorized facility and a clinical reason for the virtual visit.');
       return;
     }
 
@@ -129,6 +135,7 @@ export function TelehealthView() {
       () =>
         createTelehealthSession({
           patientId,
+          facilityId,
           type: visitType,
           chiefComplaint: chiefComplaint.trim(),
         }),
@@ -293,6 +300,17 @@ export function TelehealthView() {
             ))}
           </select>
           <select
+            aria-label="Authorized telehealth facility"
+            value={facilityId}
+            onChange={(event) => setFacilityId(event.target.value)}
+            className="rounded-xl border bg-transparent p-2 text-sm"
+          >
+            <option value="">Select authorized facility</option>
+            {(user?.facilityIds || []).map((id) => (
+              <option key={id} value={id}>{id}</option>
+            ))}
+          </select>
+          <select
             value={visitType}
             onChange={(event) => setVisitType(event.target.value as TelehealthSession['type'])}
             className="rounded-xl border bg-transparent p-2 text-sm"
@@ -310,7 +328,7 @@ export function TelehealthView() {
           />
           <button
             type="submit"
-            disabled={busy}
+            disabled={busy || networkMode === 'offline' || !facilityId}
             className="rounded-xl bg-teal-600 px-4 py-2 text-xs font-bold text-white md:col-span-3 md:w-fit"
           >
             Schedule telehealth encounter

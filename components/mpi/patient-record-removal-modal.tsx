@@ -142,156 +142,211 @@ export function PatientRecordRemovalModal({
 
   return (
     <div
-      className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/70 p-4"
+      className="fixed inset-0 z-[110] grid place-items-center overflow-y-auto bg-slate-950/75 p-2 sm:p-4"
       role="presentation"
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="remove-patient-title"
-        className="w-full max-w-lg rounded-2xl bg-white p-6 text-slate-900 shadow-2xl dark:bg-slate-900 dark:text-slate-100"
+        aria-describedby="remove-patient-safety"
+        aria-busy={pending}
+        data-testid="mpi-removal-dialog"
+        className="flex max-h-[calc(100dvh-1rem)] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white text-slate-900 shadow-2xl dark:bg-slate-900 dark:text-slate-100 sm:max-h-[calc(100dvh-2rem)]"
       >
-        <div className="flex items-start justify-between gap-3">
-          <h2 id="remove-patient-title" className="flex items-center gap-2 text-lg font-bold">
-            <Trash2 className="h-5 w-5 text-rose-600" />
-            Remove from active patient registry
-          </h2>
-          <button type="button" onClick={onClose} disabled={pending} aria-label="Cancel removal">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-800 sm:px-5">
+          <div className="min-w-0">
+            <h2 id="remove-patient-title" className="flex items-center gap-2 text-base font-bold sm:text-lg">
+              <Trash2 className="h-5 w-5 shrink-0 text-rose-600" />
+              Remove from active patient registry
+            </h2>
+            <p className="mt-1 break-words text-xs text-slate-500 dark:text-slate-400">
+              {patient.fullName} · <span className="font-mono">{patient.mrn}</span>
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={pending}
+            aria-label="Cancel removal"
+            className="shrink-0 rounded-lg p-2 hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 disabled:opacity-50 dark:hover:bg-slate-800"
+          >
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-100">
-          <div className="flex items-center gap-2 font-bold">
-            <AlertTriangle className="h-4 w-4" /> High-impact administrative action
-          </div>
-          <p className="mt-2">
-            This action removes the patient from routine MPI searches, not from legal
-            clinical or financial history. Their MRN, prior care, identity provenance,
-            immutable event and audit trail remain retained.
-          </p>
-        </div>
-        <div className="mt-4 text-sm">
-          <span className="font-bold">{patient.fullName}</span>
-          <p className="font-mono text-xs text-slate-600 dark:text-slate-300">
-            MRN: {patient.mrn} · Patient ID: {patient.id}
-          </p>
-        </div>
-        {hasActiveCare && (
-          <div data-testid="remove-patient-active-care-warning" className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-            <div className="flex items-center gap-2 font-bold text-amber-900 dark:text-amber-300">
-              <AlertTriangle className="h-4 w-4 text-amber-600" /> Active Clinical Care in Progress
-            </div>
-            <p className="mt-1 text-xs">
-              This patient currently has active care episodes or open encounters. In accordance with clinical governance, patient records cannot be removed while clinical care is underway. Complete the clinical disposition or discharge the patient before removal.
-            </p>
-          </div>
-        )}
-        <form onSubmit={submit} className="mt-4 space-y-4">
-          <label className="block text-sm font-semibold">
-            Why are you removing this patient record? <span className="text-rose-600">*</span>
-            <textarea
-              data-testid="remove-patient-reason"
-              required
-              autoFocus
-              rows={4}
-              minLength={20}
-              maxLength={1000}
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="Describe the administrative reason, supporting evidence and request/reference number."
-              className="mt-2 w-full rounded-lg border border-slate-300 bg-transparent p-3 text-sm dark:border-slate-700"
-            />
-            <span className="mt-1 block text-xs font-normal text-slate-500">
-              {reasonLength}/1000 characters (minimum 20). This explanation is retained in the audit ledger.
-            </span>
-          </label>
-          <label className="block text-sm font-semibold">
-            Type MRN {patient.mrn} to confirm <span className="text-rose-600">*</span>
-            <input
-              data-testid="remove-patient-mrn"
-              value={confirmationMrn}
-              onChange={(e) => setConfirmationMrn(e.target.value)}
-              required
-              autoComplete="off"
-              className="mt-2 w-full rounded-lg border border-slate-300 bg-transparent p-3 font-mono text-sm dark:border-slate-700"
-            />
-          </label>
-          <label className="flex items-start gap-2 text-xs">
-            <input
-              type="checkbox"
-              checked={retentionAcknowledged}
-              onChange={(e) => setRetentionAcknowledged(e.target.checked)}
-              className="mt-0.5"
-            />
-            <span>
-              I understand this is an audited removal from the active registry, not
-              a permanent destruction of clinical, audit, identity or financial records.
-            </span>
-          </label>
-          {isConfirmedMock && (
-            <div className="space-y-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-              <p className="font-bold">Development-only: retire confirmed mock patient and OPD encounters</p>
-              <p>
-                This option handles an unresolved OPD test encounter without pretending clinical
-                care was completed. It preserves the original records and records the administrative
-                cancellation, operator, time and reason. The server rejects production, non-OPD care,
-                other MRNs and patients with linked financial records.
+
+        <form
+          id="patient-record-removal-form"
+          className="flex min-h-0 flex-1 flex-col"
+          onSubmit={(event) => {
+            if (isConfirmedMock && hasActiveCare) {
+              event.preventDefault();
+              void retireMock();
+            } else {
+              void submit(event);
+            }
+          }}
+        >
+          <div
+            data-testid="mpi-removal-dialog-scroll"
+            className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-3 sm:px-5"
+          >
+            <div
+              id="remove-patient-safety"
+              className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-900 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-100"
+            >
+              <p className="flex items-center gap-2 font-bold">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                High-impact administrative action
               </p>
+              <p className="mt-1">
+                This removes the patient from routine MPI searches, not from legal records.
+                MRN, prior care, identity provenance, financial history and the immutable audit trail remain retained.
+              </p>
+            </div>
+
+            {hasActiveCare && (
+              <div
+                data-testid="remove-patient-active-care-warning"
+                className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
+              >
+                <p className="flex items-center gap-2 font-bold text-amber-900 dark:text-amber-300">
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+                  Active Clinical Care in Progress
+                </p>
+                <p className="mt-1">
+                  Ordinary removal is blocked while care is active or unresolved.
+                  {isConfirmedMock
+                    ? ' The special synthetic OPD retirement below requires independent server verification; it never records a clinical discharge.'
+                    : ' Complete the appropriate clinical disposition or discharge before requesting removal.'}
+                </p>
+              </div>
+            )}
+
+            {isConfirmedMock && hasActiveCare && (
+              <div
+                data-testid="mpi-mock-retirement-options"
+                className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
+              >
+                <p className="font-bold">Development-only: retire confirmed mock patient and OPD encounters</p>
+                <p>
+                  Only the two specifically allowlisted mock identities can use this action.
+                  It requires an isolated TEST/DEMO development server and explicit cleanup authorization.
+                  The server rejects non-OPD care, linked financial records, and production requests.
+                  Encounter cancellation and the operator's reason are retained in the audit trail.
+                </p>
+                <label className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    checked={syntheticConfirmed}
+                    onChange={(event) => setSyntheticConfirmed(event.target.checked)}
+                    data-testid="retire-mock-synthetic-confirmation"
+                    className="mt-0.5 h-4 w-4 shrink-0"
+                  />
+                  <span>I confirm all care episodes in this patient record are synthetic and belong to development testing.</span>
+                </label>
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <label className="block text-sm font-semibold">
+                Why are you removing this patient record? <span className="text-rose-600">*</span>
+                <textarea
+                  data-testid="remove-patient-reason"
+                  required
+                  rows={3}
+                  minLength={20}
+                  maxLength={1000}
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                  placeholder="Describe the administrative reason, supporting evidence and request/reference number."
+                  className="mt-1 block w-full resize-y rounded-lg border border-slate-300 bg-transparent p-3 text-sm dark:border-slate-700"
+                />
+                <span className="mt-1 block text-xs font-normal text-slate-500">
+                  {reasonLength}/1000 characters (minimum 20). This explanation is retained in the audit ledger.
+                </span>
+              </label>
+              <label className="block text-sm font-semibold">
+                Type MRN {patient.mrn} to confirm <span className="text-rose-600">*</span>
+                <input
+                  data-testid="remove-patient-mrn"
+                  value={confirmationMrn}
+                  onChange={(event) => setConfirmationMrn(event.target.value)}
+                  required
+                  autoComplete="off"
+                  className="mt-1 block min-h-11 w-full rounded-lg border border-slate-300 bg-transparent p-3 font-mono text-sm dark:border-slate-700"
+                />
+              </label>
               <label className="flex items-start gap-2 text-xs">
                 <input
                   type="checkbox"
-                  checked={syntheticConfirmed}
-                  onChange={(e) => setSyntheticConfirmed(e.target.checked)}
-                  data-testid="retire-mock-synthetic-confirmation"
-                  className="mt-0.5"
+                  checked={retentionAcknowledged}
+                  onChange={(event) => setRetentionAcknowledged(event.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0"
                 />
-                <span>I confirm all care episodes in this patient record are synthetic and belong to development testing.</span>
+                <span>
+                  I understand this is an audited removal from the active registry, not permanent
+                  destruction of clinical, audit, identity or financial records.
+                </span>
               </label>
+            </div>
+
+            {!allowed && (
+              <p className="text-xs font-semibold text-rose-700 dark:text-rose-300">
+                Hospital administrator authority is required.
+              </p>
+            )}
+            {isOffline && (
+              <p className="text-xs font-semibold text-rose-700 dark:text-rose-300">
+                Online server authorization is required; patient removal cannot be queued offline.
+              </p>
+            )}
+          </div>
+
+          <div
+            data-testid="mpi-removal-dialog-actions"
+            className="shrink-0 space-y-2 border-t border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900 sm:px-5"
+          >
+            {error && (
+              <p
+                role="alert"
+                data-testid="remove-patient-error"
+                className="max-h-24 overflow-y-auto text-xs font-medium text-rose-700 dark:text-rose-300"
+              >
+                {error}
+              </p>
+            )}
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <button
                 type="button"
-                data-testid="retire-confirmed-mock-patient"
-                disabled={!valid || !syntheticConfirmed}
-                onClick={retireMock}
-                className="rounded-lg bg-amber-800 px-3 py-2 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={onClose}
+                disabled={pending}
+                className="min-h-10 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold disabled:opacity-50 dark:border-slate-700"
               >
-                {pending ? 'Committing audited mock cleanup…' : 'Retire mock record and linked OPD test encounters'}
+                Cancel
               </button>
+              {isConfirmedMock && hasActiveCare ? (
+                <button
+                  type="submit"
+                  data-testid="retire-confirmed-mock-patient"
+                  disabled={!valid || !syntheticConfirmed}
+                  className="min-h-10 max-w-full rounded-lg bg-amber-800 px-3 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {pending ? 'Committing audited mock cleanup…' : 'Retire verified mock OPD record'}
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  data-testid="remove-patient-confirm"
+                  disabled={!valid || hasActiveCare}
+                  title={hasActiveCare ? 'Cannot remove: patient has active care episodes in progress' : undefined}
+                  className="flex min-h-10 items-center gap-2 rounded-lg bg-rose-700 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ShieldCheck className="h-4 w-4" />
+                  {pending ? 'Committing…' : 'Confirm audited removal'}
+                </button>
+              )}
             </div>
-          )}
-          {!allowed && (
-            <p className="text-sm text-rose-700">Hospital administrator authority is required.</p>
-          )}
-          {isOffline && (
-            <p className="text-sm text-rose-700">Online server authorization is required; patient removal cannot be queued offline.</p>
-          )}
-          {error && (
-            <p role="alert" data-testid="remove-patient-error" className="text-sm text-rose-700">
-              {error}
-            </p>
-          )}
-          <div className="flex justify-end gap-3">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={pending}
-              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold dark:border-slate-700"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              data-testid="remove-patient-confirm"
-              disabled={!valid || hasActiveCare}
-              title={
-                hasActiveCare
-                  ? 'Cannot remove: patient has active care episodes in progress'
-                  : undefined
-              }
-              className="flex items-center gap-2 rounded-lg bg-rose-700 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <ShieldCheck className="h-4 w-4" />
-              {pending ? 'Committing…' : 'Confirm audited removal'}
-            </button>
           </div>
         </form>
       </div>

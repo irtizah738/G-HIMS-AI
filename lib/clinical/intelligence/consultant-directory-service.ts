@@ -109,12 +109,18 @@ export class ConsultantDirectoryService {
     options: { departmentId?: string; specialty?: string } = {}
   ): Promise<EligibleConsultant[]> {
     const now = Date.now();
+    const authorizedFacilities = new Set(
+      (context.facilityIds || [])
+        .map((id) => String(id || '').trim().toUpperCase())
+        .filter(Boolean)
+    );
+    if (authorizedFacilities.size === 0) return [];
     const [employees, memberships, credentials, privileges, shifts] = await Promise.all([
-      DomainStateRepository.list<EmployeeMaster>(context.tenantId, 'employees', 1000),
-      DomainStateRepository.listWithDocumentIds<Membership>(context.tenantId, 'users', 1000),
-      DomainStateRepository.list<EmployeeCredential>(context.tenantId, 'clinicalCredentials', 5000),
-      DomainStateRepository.list<ClinicalPrivilege>(context.tenantId, 'clinicalPrivileges', 5000),
-      DomainStateRepository.list<RosterShiftEntry>(context.tenantId, 'rosterAssignments', 5000),
+      DomainStateRepository.listAllWithDocumentIds<EmployeeMaster>(context.tenantId, 'employees'),
+      DomainStateRepository.listAllWithDocumentIds<Membership>(context.tenantId, 'users'),
+      DomainStateRepository.listAllWithDocumentIds<EmployeeCredential>(context.tenantId, 'clinicalCredentials'),
+      DomainStateRepository.listAllWithDocumentIds<ClinicalPrivilege>(context.tenantId, 'clinicalPrivileges'),
+      DomainStateRepository.listAllWithDocumentIds<RosterShiftEntry>(context.tenantId, 'rosterAssignments'),
     ]);
 
     // Membership documents are canonically keyed by Auth UID. A duplicated
@@ -153,13 +159,23 @@ export class ConsultantDirectoryService {
     const requestedSpecialty = String(options.specialty || '').trim().toLowerCase();
 
     return employees
-      .filter((employee) => employee.employmentStatus === 'ACTIVE' && Boolean(employee.userId))
+      .filter((employee) =>
+        employee.employmentStatus === 'ACTIVE' &&
+        Boolean(employee.userId) &&
+        authorizedFacilities.has(String(employee.primaryFacilityId || '').trim().toUpperCase())
+      )
       .map((employee): EligibleConsultant | null => {
         const membership = membershipByUser.get(String(employee.userId));
         if (!membership || !isClinicalConsultantMembership(membership)) return null;
         if (!credentialsValid(credentialsByEmployee.get(employee.employeeId) || [], now)) return null;
 
-        const granted = activePrivileges(privilegesByEmployee.get(employee.employeeId) || [], now);
+        const granted = activePrivileges(privilegesByEmployee.get(employee.employeeId) || [], now)
+          .filter((privilege) =>
+            String(privilege.facilityId || '').trim().toUpperCase() ===
+              String(employee.primaryFacilityId || '').trim().toUpperCase() &&
+            String(privilege.departmentId || '').trim().toUpperCase() ===
+              String(employee.primaryDepartmentId || '').trim().toUpperCase()
+          );
         if (!granted.length) return null;
 
         const departmentId = String(employee.primaryDepartmentId || '').trim();
@@ -195,7 +211,15 @@ export class ConsultantDirectoryService {
           departmentId,
           departmentName,
           facilityId: employee.primaryFacilityId,
-          ...availabilityFor(shiftsByEmployee.get(employee.employeeId) || [], now),
+          ...availabilityFor(
+            (shiftsByEmployee.get(employee.employeeId) || []).filter((shift) =>
+              String(shift.facilityId || '').trim().toUpperCase() ===
+                String(employee.primaryFacilityId || '').trim().toUpperCase() &&
+              String(shift.departmentId || '').trim().toUpperCase() ===
+                String(employee.primaryDepartmentId || '').trim().toUpperCase()
+            ),
+            now
+          ),
           activePrivilegeTypes: Array.from(new Set(granted.map((item) => item.privilegeType))).sort(),
           credentialVerified: true,
         };

@@ -42,7 +42,8 @@ const personaUid = (key: string) => `dev-sandbox-${key}`;
 async function ensureScenarioMrnRegistry(scenario: typeof SANDBOX_SCENARIOS[number]): Promise<'created' | 'existing'> {
   const patientRef = tenant.collection('patients').doc(scenario.patientId);
   const registryRef = tenant.collection('mpi_registry').doc(buildMpiRegistryKey('MRN', scenario.mrn));
-  return db.runTransaction(async (transaction) => {
+  // Initialization already rejects an absent Admin store; preserve that guard across this closure.
+  return db!.runTransaction(async (transaction) => {
     const patient = await transaction.get(patientRef);
     const registry = await transaction.get(registryRef);
     if (!patient.exists || patient.data()?.sandboxFixture !== true ||

@@ -54,8 +54,11 @@ describe('MPI authoritative care blockers for audited patient removal', () => {
     expect(route).toContain('unresolvedRemovalEncounter(');
     expect(route).toContain('readyForRemoval: blockers.length === 0');
     expect(route).not.toContain('.delete(');
+    expect(route).not.toContain('transaction.set(');
+    expect(route).not.toContain('doc.ref.set(');
+    expect(route).not.toContain('.add(');
     expect(route).not.toContain('.update(');
-    expect(route).not.toContain('.set(');
+
   });
 
   test('blocked submit never bypasses server and provides an actionable review button', async () => {

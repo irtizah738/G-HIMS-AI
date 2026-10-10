@@ -182,6 +182,12 @@ export interface Patient {
   chronicConditions: string[];
   activeBedId?: string;
   activeEncounterId?: string;
+  activeCareContexts?: {
+    activeOpdEncounterIds?: string[];
+    activeTelehealthEncounterIds?: string[];
+    activeIpdEncounterId?: string;
+    activeEmergencyEncounterId?: string;
+  };
   encounters: Encounter[];
   registeredAt: string;
   status?: 'ACTIVE' | 'MERGED' | 'INACTIVE' | 'DECEASED' | 'REMOVED';

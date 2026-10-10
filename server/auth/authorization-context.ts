@@ -218,10 +218,9 @@ export async function resolveAuthorizationContext(
       })
     : [];
 
-  const clinicalPrivileges =
-    hcmPrivileges.length > 0
-      ? hcmPrivileges
-      : (membership.credentialStatus === 'VERIFIED' ? (membership.clinicalPrivileges || []) : []);
+  // Clinical authority must come exclusively from canonical HCM grants.
+  // Membership credentials/role-derived privileges can never restore a revoked grant.
+  const clinicalPrivileges = hcmPrivileges;
 
   return {
     uid: verifiedToken.uid,

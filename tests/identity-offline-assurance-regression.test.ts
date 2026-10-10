@@ -97,6 +97,29 @@ describe('Offline cached identity is not authoritative', () => {
     expect(canResumeOfflineIdentity('clinician-1', { user: identity, session: { ...session, authenticatedAt: new Date(now - 13 * 60 * 60 * 1000).toISOString() } }, now)).toBe(false);
   });
 
+  test('tenant switch requires canonical identity assurance and a bound device before claim changes', async () => {
+    const [route, client] = await Promise.all([
+      source('app/api/auth/tenant-selection/route.ts'),
+      source('lib/auth/auth-client.ts'),
+    ]);
+    const switchPost = route.split('export async function POST')[1] || '';
+    const policyIndex = switchPost.indexOf('await resolveAuthorizationContext(verifiedToken, targetTenantId)');
+    const claimsIndex = switchPost.indexOf('await adminAuth.setCustomUserClaims(');
+    const sessionIndex = switchPost.indexOf('const session = await createSession(');
+    expect(policyIndex).toBeGreaterThan(-1);
+    expect(claimsIndex).toBeGreaterThan(policyIndex);
+    expect(sessionIndex).toBeGreaterThan(policyIndex);
+    expect(switchPost).toContain("mode === 'STAGING' || mode === 'PRODUCTION'");
+    expect(switchPost).toContain('if (deviceRequired && !String(deviceData.deviceId ||');
+    expect(switchPost).toContain('await registerOrUpdateDevice({');
+    expect(switchPost).toContain('deviceId: registeredDevice?.deviceId');
+    expect(switchPost).toContain('deviceId: session.deviceId');
+    expect(switchPost).not.toContain("role: membership.roles[0] || 'doctor'");
+    expect(switchPost).not.toContain("|| 'general_medicine'");
+    expect(client).toContain('body: JSON.stringify({ tenantId: targetTenantId, device })');
+    expect(client).toContain('const device = generateDeviceMetadata()');
+  });
+
   test('session refresh refuses revoked and mismatched device bindings', async () => {
     const route = await source('app/api/auth/session/route.ts');
     const getRoute = route.split('export async function GET')[1]?.split('export async function DELETE')[0] || '';

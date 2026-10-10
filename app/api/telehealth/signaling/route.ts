@@ -72,7 +72,7 @@ async function authorizeClinician(
       String(role || '').toUpperCase()
     )
   );
-  if (!clinicalRole || context.clinicalPrivileges.length === 0) {
+  if (!clinicalRole || (context.clinicalPrivileges?.length ?? 0) === 0) {
     throw new Error('TELEHEALTH_CLINICIAN_AUTHORITY_REQUIRED');
   }
 

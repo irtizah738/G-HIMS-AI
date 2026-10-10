@@ -25,6 +25,12 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Production identity assurance and offline continuity regression
+        run: |
+          bun run typecheck
+          bun run lint
+          bun test tests/identity-offline-assurance-regression.test.ts
+
       - name: High and critical dependency advisory gate
         run: bun audit --audit-level=high
 

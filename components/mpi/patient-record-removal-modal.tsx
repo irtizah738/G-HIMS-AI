@@ -275,7 +275,7 @@ export function PatientRecordRemovalModal({
               </p>
             </div>
 
-            {(hasActiveCare || careBlockers.length > 0) && (
+            {(readiness ? !readiness.readyForRemoval : hasActiveCare) && (
               <div
                 data-testid="remove-patient-active-care-warning"
                 className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
@@ -295,6 +295,7 @@ export function PatientRecordRemovalModal({
 
             {allowed && !isOffline && (
               <section
+                id="mpi-removal-readiness-panel"
                 aria-label="Authoritative removal readiness"
                 data-testid="mpi-removal-readiness"
                 className="space-y-2 rounded-lg border border-slate-300 p-3 text-xs dark:border-slate-700"
@@ -315,9 +316,17 @@ export function PatientRecordRemovalModal({
                   Verified against the authenticated tenant’s authoritative patient and encounters.
                   This check is read-only and never closes care or removes a patient.
                 </p>
+                {inspectPending && <p role="status">Checking authoritative patient and encounter status…</p>}
                 {inspectionError && (
                   <p role="alert" className="text-rose-700 dark:text-rose-300">
                     Inspection unavailable: {inspectionError}. Removal remains disabled.
+                  </p>
+                )}
+                {readiness?.readyForRemoval && hasActiveCare && (
+                  <p role="status" className="text-amber-700 dark:text-amber-300">
+                    The local hospital view still shows care pointers, but the verified Firestore
+                    record currently has no blockers. Its edge cache may be stale; removal will be
+                    rechecked by the server and any disagreement will safely reject the request.
                   </p>
                 )}
                 {readiness?.readyForRemoval && (
@@ -463,14 +472,21 @@ export function PatientRecordRemovalModal({
                 </button>
               ) : (
                 <button
-                  type="submit"
+                  type={canAttemptOrdinaryRemoval ? 'submit' : 'button'}
                   data-testid="remove-patient-confirm"
-                  disabled={!canAttemptOrdinaryRemoval}
-                  title={removalBlocked ? 'Removal requires a successful authoritative check with no active or unresolved care' : undefined}
+                  disabled={pending || !allowed || isOffline}
+                  title={removalBlocked ? 'Review the authoritative clinical blockers before removal can be enabled' : undefined}
+                  onClick={canAttemptOrdinaryRemoval ? undefined : () => {
+                    document.getElementById('mpi-removal-readiness-panel')?.scrollIntoView({
+                      behavior: 'smooth', block: 'nearest',
+                    });
+                    if (!inspectPending && !inspectionError) setInspectionRevision(value => value + 1);
+                  }}
                   className="flex min-h-10 items-center gap-2 rounded-lg bg-rose-700 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <ShieldCheck className="h-4 w-4" />
-                  {pending ? 'Committing…' : 'Confirm audited removal'}
+                  {pending ? 'Committing…' : canAttemptOrdinaryRemoval
+                    ? 'Confirm audited removal' : 'Review clinical blockers'}
                 </button>
               )}
             </div>

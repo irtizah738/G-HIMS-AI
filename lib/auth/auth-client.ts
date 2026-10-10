@@ -307,7 +307,7 @@ export class AuthClient {
       // navigator.onLine is not authoritative in sandboxed/managed browsers.
       const connectivity = await probeApplicationConnectivity();
       if (!connectivity.isOnline) {
-        if (!canResumeOfflineIdentity(currentUser?.uid, cached)) return null;
+        if (!cached || !canResumeOfflineIdentity(currentUser?.uid, cached)) return null;
         await migrateLegacyEdgeStorage({
           tenantId: cached.user.tenantId,
           actorId: cached.user.uid,

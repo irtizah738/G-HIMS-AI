@@ -207,16 +207,21 @@ export async function resolveAuthorizationContext(
     });
   }
 
-  const clinicalPrivileges=isClinicalRole(membership.roles)
+  const hcmPrivileges = isClinicalRole(membership.roles)
     ? await resolveCredentialGatedPrivileges({
-        tenantId:membership.tenantId,
-        userId:verifiedToken.uid,
-        email:verifiedToken.email,
-        roles:membership.roles,
-        facilityIds:membership.facilityIds,
-        departmentIds:membership.departmentIds,
-       })
+        tenantId: membership.tenantId,
+        userId: verifiedToken.uid,
+        email: verifiedToken.email,
+        roles: membership.roles,
+        facilityIds: membership.facilityIds,
+        departmentIds: membership.departmentIds,
+      })
     : [];
+
+  const clinicalPrivileges =
+    hcmPrivileges.length > 0
+      ? hcmPrivileges
+      : (membership.credentialStatus === 'VERIFIED' ? (membership.clinicalPrivileges || []) : []);
 
   return {
     uid: verifiedToken.uid,

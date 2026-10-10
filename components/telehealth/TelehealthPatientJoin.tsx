@@ -10,14 +10,18 @@ type SignalMessage = {
   createdAt: number;
 };
 
+const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
+  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+];
+
 function iceServers(): RTCIceServer[] {
   const raw = String(process.env.NEXT_PUBLIC_GHIMS_WEBRTC_ICE_SERVERS_JSON || '').trim();
-  if (!raw) return [];
+  if (!raw) return DEFAULT_ICE_SERVERS;
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_ICE_SERVERS;
   } catch {
-    return [];
+    return DEFAULT_ICE_SERVERS;
   }
 }
 

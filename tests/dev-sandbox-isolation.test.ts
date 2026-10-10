@@ -8,7 +8,7 @@ import {
 import {
   SANDBOX_SCENARIOS, SANDBOX_PERSONAS, scenarioCarePointers,
 } from '@/lib/dev-sandbox/scenarios';
-import { assertServerFirebaseProjectIsolation } from '@/lib/runtime/environment-contract';
+import { simulateSandboxExternalSystem } from '@/lib/dev-sandbox/external-system-simulator';
 
 const valid = {
   GHIMS_RUNTIME_MODE: 'TEST',
@@ -79,6 +79,17 @@ describe('DEV-2 to DEV-5 synthetic scenario integrity', () => {
     expect(script).toContain("collection('clinicalPrivileges')");
     expect(script).toContain("collection('rosterAssignments')");
     expect(script).not.toContain("roles: ['SYSTEM_ADMIN', 'DOCTOR']");
+  });
+
+  test('external service simulations cannot touch clinical or billing authority', () => {
+    const result = simulateSandboxExternalSystem(valid, 'WEBRTC_MEDIA', 'TIMEOUT');
+    expect(result.simulated).toBe(true);
+    expect(result.externalActivityExecuted).toBe(false);
+    expect(result.clinicalOrFinancialAuthorityChanged).toBe(false);
+    expect(result.traceLabel).toBe('SYNTHETIC_ONLY:WEBRTC_MEDIA:TIMEOUT');
+    expect(() => simulateSandboxExternalSystem({
+      ...valid, GHIMS_RUNTIME_MODE: 'STAGING',
+    }, 'EXTERNAL_PAYMENT_GATEWAY', 'AVAILABLE')).toThrow('DEV_SANDBOX_TEST_RUNTIME_ONLY');
   });
 
   test('reset only destroys a verified marked sandbox tenant with double acknowledgment', async () => {

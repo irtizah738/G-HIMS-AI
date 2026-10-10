@@ -196,7 +196,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLoadingStatus('IDLE');
       }
     } catch (err: any) {
+      // An unsuccessful authoritative refresh must never leave a previously
+      // privileged identity active. Offline continuity is established only
+      // through the explicit bounded cached-identity path above.
       console.warn('Session restoration notice:', err);
+      setUser(null);
+      setSession(null);
+      setActiveTenant(null);
+      setRoles([]);
+      setPermissions([]);
+      setClinicalPrivileges([]);
+      setIsOfflineContinuity(false);
       setLoadingStatus('IDLE');
     } finally {
       setLoading(false);

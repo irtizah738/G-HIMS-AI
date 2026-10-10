@@ -160,7 +160,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSession(sessionRec);
     setIsOfflineContinuity(payload.offlineContinuity === true);
     setActiveTenant(payload.tenant);
-    setRoles(payload.authorization.roles);
+    // Cached role labels are local display metadata, never a live authorization grant.
+    setRoles(payload.offlineContinuity ? [] : payload.authorization.roles);
     setPermissions(payload.authorization.permissions);
     setClinicalPrivileges(payload.authorization.clinicalPrivileges || []);
     setAccountStatus(payload.authorization.accountStatus);
@@ -193,6 +194,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setPermissions([]);
         setClinicalPrivileges([]);
         setIsOfflineContinuity(false);
+        setAccessibleTenants([]);
         setLoadingStatus('IDLE');
       }
     } catch (err: any) {
@@ -207,6 +209,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setPermissions([]);
       setClinicalPrivileges([]);
       setIsOfflineContinuity(false);
+      setAccessibleTenants([]);
       setLoadingStatus('IDLE');
     } finally {
       setLoading(false);
@@ -354,6 +357,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setPermissions([]);
       setClinicalPrivileges([]);
       setIsOfflineContinuity(false);
+      setAccessibleTenants([]);
       setIsLocked(false);
       setLoading(false);
       setLoadingStatus('IDLE');
@@ -468,9 +472,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const hasR = useCallback(
     (role: string) => {
-      return checkRole(user, role);
+      return !isOfflineContinuity && checkRole(user, role);
     },
-    [user]
+    [user, isOfflineContinuity]
   );
 
   const hasPriv = useCallback(

@@ -125,6 +125,10 @@ export async function POST(req: NextRequest) {
     if (!['START', 'OFFER', 'ANSWER', 'ICE', 'LEAVE'].includes(type)) {
       throw new Error('TELEHEALTH_SIGNAL_TYPE_INVALID');
     }
+    if ((senderRole === 'PATIENT' && !['ANSWER', 'ICE', 'LEAVE'].includes(type)) ||
+        (senderRole === 'CLINICIAN' && type === 'ANSWER')) {
+      throw new Error('TELEHEALTH_SIGNAL_ROLE_TYPE_INVALID');
+    }
     assertTenant(tenantId);
     assertRoomToken(roomToken);
 
@@ -179,7 +183,7 @@ export async function POST(req: NextRequest) {
           ok: true,
           patientJoinToken: issuedPatientJoinToken,
           expiresAt: now + CALL_LEASE_MS,
-        });
+        }, { headers: { 'Cache-Control': 'no-store' } });
       }
     } else {
       if (
@@ -291,7 +295,7 @@ export async function GET(req: NextRequest) {
           payload: message.payload,
           createdAt: message.createdAt,
         })),
-    });
+    }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     return errorResponse(error);
   }

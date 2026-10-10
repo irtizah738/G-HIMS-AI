@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Copy, Mic, MicOff, PhoneOff, Video, VideoOff } from 'lucide-react';
 import { AuthClient } from '@/lib/auth/auth-client';
+import { loadTelehealthIceConfiguration } from '@/lib/telehealth/ice-client';
 import type { TelehealthSession } from '@/lib/types/ghims';
 
 type SignalMessage = {
@@ -17,21 +18,6 @@ interface TelehealthCallPanelProps {
   tenantId: string;
   disabled?: boolean;
   onConnected?: () => Promise<void> | void;
-}
-
-const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
-  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-];
-
-function iceServers(): RTCIceServer[] {
-  const raw = String(process.env.NEXT_PUBLIC_GHIMS_WEBRTC_ICE_SERVERS_JSON || '').trim();
-  if (!raw) return DEFAULT_ICE_SERVERS;
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_ICE_SERVERS;
-  } catch {
-    return DEFAULT_ICE_SERVERS;
-  }
 }
 
 export function TelehealthCallPanel({
@@ -55,6 +41,7 @@ export function TelehealthCallPanel({
   const [micEnabled, setMicEnabled] = useState(true);
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [relayAvailable, setRelayAvailable] = useState<boolean | null>(null);
   const [patientJoinToken, setPatientJoinToken] = useState<string | null>(null);
 
   const joinUrl =
@@ -169,6 +156,10 @@ export function TelehealthCallPanel({
         throw new Error('The server did not issue a patient-specific join capability.');
       }
       setPatientJoinToken(startedRoom.patientJoinToken);
+      const ice = await loadTelehealthIceConfiguration({
+        tenantId, roomToken: session.roomToken, role: 'CLINICIAN',
+      });
+      setRelayAvailable(ice.relayConfigured);
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
@@ -179,7 +170,7 @@ export function TelehealthCallPanel({
         localVideoRef.current.srcObject = stream;
       }
 
-      const peer = new RTCPeerConnection({ iceServers: iceServers() });
+      const peer = new RTCPeerConnection({ iceServers: ice.iceServers });
       peerRef.current = peer;
       stream.getTracks().forEach((track) => peer.addTrack(track, stream));
 
@@ -353,9 +344,10 @@ export function TelehealthCallPanel({
         </div>
       )}
 
-      {iceServers().length === 0 && (
-        <p className="text-[10px] text-amber-700 dark:text-amber-300">
-          Direct peer-to-peer media is enabled. Configure NEXT_PUBLIC_GHIMS_WEBRTC_ICE_SERVERS_JSON with institution-approved STUN/TURN infrastructure for reliable calls across restrictive networks.
+      {relayAvailable === false && (
+        <p role="status" className="text-[11px] text-amber-700 dark:text-amber-300">
+          Institution-approved TURN relay is not configured. Hospital firewall and
+          mobile-network calls may fail until IT provisions the relay.
         </p>
       )}
     </div>

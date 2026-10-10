@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
+import { assertTelehealthPatientJoinToken } from '@/lib/backend/security/telehealth-patient-capability';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
 import type { TelehealthSession } from '@/lib/types/ghims';
@@ -31,17 +32,6 @@ function assertRoomToken(roomToken: string): void {
   }
 }
 
-function requirePatientJoinToken(presented: string, expectedHash?: string): void {
-  if (!/^[A-Za-z0-9_-]{43}$/.test(presented) || !expectedHash || !/^[a-f0-9]{64}$/.test(expectedHash)) {
-    throw new Error('TELEHEALTH_PATIENT_JOIN_TOKEN_INVALID');
-  }
-  const presentedHash = createHash('sha256').update(presented).digest();
-  const expected = Buffer.from(expectedHash, 'hex');
-  if (expected.length !== presentedHash.length || !timingSafeEqual(presentedHash, expected)) {
-    throw new Error('TELEHEALTH_PATIENT_JOIN_TOKEN_INVALID');
-  }
-}
-
 async function findSession(
   tenantId: string,
   roomToken: string
@@ -54,9 +44,10 @@ async function findSession(
     .doc(tenantId)
     .collection('telehealthSessions')
     .where('roomToken', '==', roomToken)
-    .limit(1)
+    .limit(2)
     .get();
 
+  if (snapshot.size > 1) throw new Error('TELEHEALTH_SESSION_AMBIGUOUS');
   if (snapshot.empty) return null;
   return snapshot.docs[0].data() as TelehealthSession;
 }
@@ -68,11 +59,13 @@ async function authorizeClinician(
 ): Promise<string> {
   const { context } = await deriveAuthoritativeContext(req, tenantId);
   const clinicalRole = context.roles.some((role) =>
-    ['DOCTOR', 'CONSULTANT', 'NURSE'].includes(
+    ['DOCTOR', 'CONSULTANT'].includes(
       String(role || '').toUpperCase()
     )
   );
-  if (!clinicalRole || (context.clinicalPrivileges?.length ?? 0) === 0) {
+  if (!clinicalRole || !context.clinicalPrivileges?.some(privilege =>
+    ['SIGN_CLINICAL_NOTES', 'UNRESTRICTED_CLINICAL_CHIEF'].includes(String(privilege).toUpperCase())
+  )) {
     throw new Error('TELEHEALTH_CLINICIAN_AUTHORITY_REQUIRED');
   }
 
@@ -88,7 +81,8 @@ async function authorizeClinician(
   if (!encounter.exists) throw new Error('TELEHEALTH_ENCOUNTER_NOT_FOUND');
   const assignedProviderId = clean(encounter.data()?.assignedProviderId);
   if (
-    !assignedProviderId || assignedProviderId !== context.actorId
+    !assignedProviderId || assignedProviderId !== context.actorId ||
+    !context.facilityIds?.includes(clean(encounter.data()?.facilityId))
   ) {
     throw new Error('TELEHEALTH_CLINICIAN_ASSIGNMENT_MISMATCH');
   }
@@ -193,7 +187,7 @@ export async function POST(req: NextRequest) {
       ) {
         throw new Error('TELEHEALTH_CALL_NOT_ACTIVE');
       }
-      requirePatientJoinToken(patientJoinToken, room.patientJoinTokenHash);
+      assertTelehealthPatientJoinToken(patientJoinToken, room.patientJoinTokenHash);
     }
 
     if (senderRole === 'CLINICIAN' && type !== 'START') {
@@ -273,7 +267,7 @@ export async function GET(req: NextRequest) {
     if (receiverRole === 'CLINICIAN') {
       await authorizeClinician(req, tenantId, session);
     } else {
-      requirePatientJoinToken(patientJoinToken, room.patientJoinTokenHash);
+      assertTelehealthPatientJoinToken(patientJoinToken, room.patientJoinTokenHash);
     }
 
     const messages = await roomRef

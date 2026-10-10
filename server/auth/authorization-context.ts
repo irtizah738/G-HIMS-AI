@@ -218,10 +218,12 @@ export async function resolveAuthorizationContext(
       })
     : [];
 
-  const clinicalPrivileges =
-    hcmPrivileges.length > 0
-      ? hcmPrivileges
-      : (membership.credentialStatus === 'VERIFIED' ? (membership.clinicalPrivileges || []) : []);
+  // HCM is the sole authority for clinical privileges. The tenant membership
+  // is an identity/role record, not a fallback license or signing grant.
+  // A doctor without verified employee/credential/facility privilege is denied.
+  const clinicalPrivileges = isClinicalRole(membership.roles)
+    ? hcmPrivileges
+    : [];
 
   return {
     uid: verifiedToken.uid,

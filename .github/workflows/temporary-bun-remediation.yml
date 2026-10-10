@@ -1,0 +1,46 @@
+name: Temporary Bun dependency remediation
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  remediate:
+    if: ${{ github.event.pull_request.head.repo.full_name == 'irtizah738/G-HIMS-AI' && github.head_ref == 'fix/restore-bun-lock-current-main-20261010' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          persist-credentials: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install original frozen dependencies
+        run: bun install --frozen-lockfile
+      - name: Remove unused ESLint tree containing unpatched braces
+        run: bun remove eslint eslint-config-next
+      - name: Repair remaining audited transitive dependencies
+        run: bun audit fix
+      - name: Require zero high and critical dependency advisories
+        run: bun audit --audit-level=high
+      - name: Verify no product regression
+        run: |
+          bun run typecheck
+          bun run lint
+          bun run test
+          bun run build
+      - name: Persist only validated manifest and lock to repair branch
+        run: |
+          set -euo pipefail
+          test "$(git branch --show-current)" = "fix/restore-bun-lock-current-main-20261010"
+          git add package.json bun.lock
+          if git diff --cached --quiet; then
+            echo 'Dependency audit already resolved with unchanged lock.'
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(deps): remove unused ESLint dependency tree and upgrade audited Bun packages"
+          git push origin HEAD:refs/heads/fix/restore-bun-lock-current-main-20261010

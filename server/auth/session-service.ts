@@ -195,26 +195,37 @@ export function validateSessionRecord(
     });
   }
 
-  if (sessionData.status === 'EXPIRED') {
+  // Unknown lifecycle values are never treated as an active session.
+  if (sessionData.status !== 'ACTIVE') {
     throw new AuthError({
       code: 'SESSION_EXPIRED',
-      message: 'Clinical session has expired',
+      message: 'Clinical session is not active',
       statusCode: 401,
     });
   }
 
   const now = Date.now();
-  if (now > new Date(sessionData.expiresAt).getTime()) {
+  const expiresAtMs = Date.parse(sessionData.expiresAt);
+  const authenticatedAtMs = Date.parse(sessionData.authenticatedAt);
+  const createdAtMs = Date.parse(sessionData.createdAt);
+  const lastActivity = Date.parse(sessionData.lastActivityAt || sessionData.lastSeenAt);
+  // NaN dates bypass numeric comparisons. Fail closed for malformed or
+  // inconsistent session timestamps, not just properly formatted expirations.
+  if (
+    ![expiresAtMs, authenticatedAtMs, createdAtMs, lastActivity].every(Number.isFinite) ||
+    expiresAtMs <= now ||
+    authenticatedAtMs > now + 60_000 ||
+    createdAtMs > now + 60_000 ||
+    lastActivity > now + 60_000 ||
+    expiresAtMs <= authenticatedAtMs ||
+    expiresAtMs - authenticatedAtMs > SESSION_TTL_MS + 60_000
+  ) {
     throw new AuthError({
       code: 'SESSION_EXPIRED',
-      message: 'Clinical session expired',
+      message: 'Clinical session timestamps are invalid or expired',
       statusCode: 401,
     });
   }
-
-  const lastActivity = new Date(
-    sessionData.lastActivityAt || sessionData.lastSeenAt
-  ).getTime();
 
   if (now - lastActivity > INACTIVITY_LIMIT_MS) {
     throw new AuthError({

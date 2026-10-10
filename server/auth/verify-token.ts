@@ -6,6 +6,8 @@
 import { getAdminAuth } from '@/server/firebase/admin';
 import { DecodedIdToken } from 'firebase-admin/auth';
 import { AuthError } from '@/lib/auth/auth-errors';
+import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
+import { assertVerifiedIdentityAssurance } from './identity-assurance';
 
 export interface VerifiedTokenResult {
   uid: string;
@@ -37,6 +39,7 @@ export async function verifyFirebaseToken(
 
   try {
     const decodedToken = await auth.verifyIdToken(token, checkRevoked);
+    assertVerifiedIdentityAssurance(decodedToken, getRuntimeMode());
     return {
       uid: decodedToken.uid,
       email: decodedToken.email || '',
@@ -44,6 +47,7 @@ export async function verifyFirebaseToken(
       claims: decodedToken,
     };
   } catch (err: any) {
+    if (err instanceof AuthError) throw err;
     if (err?.code === 'auth/id-token-revoked') {
       throw new AuthError({
         code: 'SESSION_REVOKED',

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { extractBearerToken, verifyFirebaseToken } from '@/server/auth/verify-token';
 import { resolveAuthorizationContext } from '@/server/auth/authorization-context';
 import { createSession, validateSession, revokeSession } from '@/server/auth/session-service';
-import { registerOrUpdateDevice } from '@/server/auth/device-service';
+import { registerOrUpdateDevice, assertDeviceActive } from '@/server/auth/device-service';
 import { logAuthEvent } from '@/server/auth/audit-service';
 import { getUserAccessibleTenants } from '@/server/auth/tenant-membership';
 import { getAdminAuth } from '@/server/firebase/admin';
@@ -188,6 +188,27 @@ export async function GET(req: NextRequest) {
     }
 
     const session = await validateSession(tenantId, sessionId, verifiedToken.uid);
+    // Session identifiers are untrusted selectors; the existing server record
+    // must still be bound to a live, non-revoked workstation/device.
+    const requestedDeviceId = String(req.headers.get('x-ghims-device-id') || '').trim();
+    const deviceRequired = ['STAGING', 'PRODUCTION'].includes(getRuntimeMode());
+    if (deviceRequired && (!session.deviceId || requestedDeviceId !== session.deviceId)) {
+      throw new AuthError({
+        code: 'DEVICE_REVOKED',
+        message: 'Production-like session requires its original active device binding.',
+        statusCode: 403,
+      });
+    }
+    if (session.deviceId) {
+      await assertDeviceActive(tenantId, session.deviceId, verifiedToken.uid);
+      if (requestedDeviceId && requestedDeviceId !== session.deviceId) {
+        throw new AuthError({
+          code: 'DEVICE_REVOKED',
+          message: 'Session validation device does not match its server-side binding.',
+          statusCode: 403,
+        });
+      }
+    }
     const authContext = await resolveAuthorizationContext(verifiedToken, tenantId, session.sessionId, session.deviceId);
     const accessibleTenants = await getUserAccessibleTenants(verifiedToken.uid, verifiedToken.email);
 

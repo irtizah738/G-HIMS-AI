@@ -9,6 +9,8 @@ import { VerifiedTokenResult } from './verify-token';
 import { getTenantMembership } from './tenant-membership';
 import { credentialsValid } from '@/lib/clinical/intelligence/consultant-directory-service';
 import { getAdminFirestore } from '@/server/firebase/admin';
+import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
+import { assertPrivilegedSecondFactor } from './identity-assurance';
 import type {
   ClinicalPrivilege,
   EmployeeCredential,
@@ -207,6 +209,10 @@ export async function resolveAuthorizationContext(
     });
   }
 
+  // Production privileged users must prove a real second factor before
+  // acquiring any tenant or HCM authorization; role membership alone is not MFA.
+  assertPrivilegedSecondFactor(verifiedToken.claims, membership.roles, getRuntimeMode());
+
   const hcmPrivileges = isClinicalRole(membership.roles)
     ? await resolveCredentialGatedPrivileges({
         tenantId: membership.tenantId,
@@ -218,9 +224,8 @@ export async function resolveAuthorizationContext(
       })
     : [];
 
-  // Only the canonical, scoped HCM employee/credential/privilege chain may
-  // grant clinical authority. A tenant-membership fallback would reinstate
-  // privileges after revocation or when HCM records are missing.
+  // Clinical authority must come exclusively from canonical HCM grants.
+  // Membership credentials/role-derived privileges can never restore a revoked grant.
   const clinicalPrivileges = hcmPrivileges;
 
   return {

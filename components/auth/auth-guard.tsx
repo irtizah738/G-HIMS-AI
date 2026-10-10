@@ -40,6 +40,7 @@ export function AuthGuard({
     switchTenant,
     signOut,
     refreshAuth,
+    isOfflineContinuity,
   } = useAuth();
 
   const [mounted, setMounted] = useState(false);
@@ -216,6 +217,11 @@ export function AuthGuard({
   return (
     <>
       <SessionLockModal />
+      {isOfflineContinuity && (
+        <div role="status" className="border-b border-amber-300 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-950">
+          Offline cached identity only — server authorization is not verified. Clinical signing, approvals and privileged actions require reconnection; queued capture requires a valid offline lease and online reauthorization before replay.
+        </div>
+      )}
       {children}
     </>
   );

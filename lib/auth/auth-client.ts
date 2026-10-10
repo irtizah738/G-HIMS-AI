@@ -315,6 +315,7 @@ export class AuthClient {
         return {
           authenticated: false,
           offlineContinuity: true,
+          offlineContinuityAuthenticatedAt: cached.session.authenticatedAt,
           user: {
             uid: cached.user.uid,
             displayName: cached.user.displayName,

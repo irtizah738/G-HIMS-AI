@@ -157,6 +157,8 @@ export interface OfflineCaptureCapabilityLease {
 
 export interface LoginResponsePayload {
   authenticated: boolean;
+  /** Local identity continuity only. Never a freshly authorized server session. */
+  offlineContinuity?: boolean;
   customToken?: string;
   user: {
     uid: string;

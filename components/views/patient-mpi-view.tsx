@@ -572,11 +572,25 @@ export function PatientMpiView() {
                 <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
                   <span>Blood: <strong className="text-slate-700">{patient.bloodGroup}</strong></span>
                   {patient.activeBedId ? (
-                    <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded font-medium text-[10px]">
-                      Inpatient (Bed)
+                    <span className="text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded font-medium text-[10px]">
+                      Inpatient bed reference
+                    </span>
+                  ) : patient.encounters.some((encounter) => encounter.status === 'active') ? (
+                    <span className="text-amber-700 text-[10px]">
+                      {patient.encounters.find((encounter) => encounter.status === 'active')?.type} care active/unresolved
+                    </span>
+                  ) : patient.activeEncounterId ||
+                    patient.activeCareContexts?.activeIpdEncounterId ||
+                    patient.activeCareContexts?.activeEmergencyEncounterId ||
+                    (patient.activeCareContexts?.activeOpdEncounterIds?.length || 0) > 0 ||
+                    (patient.activeCareContexts?.activeTelehealthEncounterIds?.length || 0) > 0 ? (
+                    <span className="text-amber-700 text-[10px]">
+                      Unresolved care pointer — review
                     </span>
                   ) : (
-                    <span className="text-slate-400 text-[10px]">Outpatient</span>
+                    <span className="text-slate-400 text-[10px]">
+                      No active encounter in this view
+                    </span>
                   )}
                 </div>
               </div>

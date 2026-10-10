@@ -191,6 +191,14 @@ export async function GET(req: NextRequest) {
     // Session identifiers are untrusted selectors; the existing server record
     // must still be bound to a live, non-revoked workstation/device.
     const requestedDeviceId = String(req.headers.get('x-ghims-device-id') || '').trim();
+    const deviceRequired = ['STAGING', 'PRODUCTION'].includes(getRuntimeMode());
+    if (deviceRequired && (!session.deviceId || requestedDeviceId !== session.deviceId)) {
+      throw new AuthError({
+        code: 'DEVICE_REVOKED',
+        message: 'Production-like session requires its original active device binding.',
+        statusCode: 403,
+      });
+    }
     if (session.deviceId) {
       await assertDeviceActive(tenantId, session.deviceId, verifiedToken.uid);
       if (requestedDeviceId && requestedDeviceId !== session.deviceId) {

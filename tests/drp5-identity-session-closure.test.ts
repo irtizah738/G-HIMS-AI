@@ -47,6 +47,23 @@ describe('DRP-5 identity and session closure', () => {
     expect(validateSessionRecord(activeSession(), 'user-drp5').status).toBe('ACTIVE');
   });
 
+  test('malformed session timestamps and unrecognized lifecycle values are never authorized', () => {
+    for (const overrides of [
+      { status: 'UNKNOWN' as UserSessionRecord['status'] },
+      { expiresAt: 'not-a-date' },
+      { expiresAt: '' },
+      { authenticatedAt: 'not-a-date' },
+      { createdAt: '' },
+      { lastActivityAt: 'malformed' },
+      { expiresAt: new Date(Date.now() + 15 * 60 * 60 * 1000).toISOString() },
+      { authenticatedAt: new Date(Date.now() + 10 * 60 * 1000).toISOString() },
+      { lastActivityAt: new Date(Date.now() + 10 * 60 * 1000).toISOString() },
+      { lastActivityAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() },
+    ]) {
+      expect(() => validateSessionRecord(activeSession(overrides), 'user-drp5')).toThrow();
+    }
+  });
+
   test('server re-resolves membership and credential-gated privileges on protected requests', async () => {
     const [context, authz, membership] = await Promise.all([
       source('lib/backend/security/authoritative-context.ts'),

@@ -360,6 +360,9 @@ export class AuthClient {
           Authorization: `Bearer ${idToken}`,
           'x-ghims-tenant-id': cached.user.tenantId,
           'x-ghims-session-id': cached.session.sessionId,
+          ...(cached.session.deviceId
+            ? { 'x-ghims-device-id': cached.session.deviceId }
+            : {}),
         },
       });
 
@@ -372,6 +375,11 @@ export class AuthClient {
     } catch {
       return null;
     }
+  }
+
+  /** Discard cached session, tenant memberships and offline capture lease. */
+  public static async invalidateLocalAuthorization(): Promise<void> {
+    await clearCachedAuthSession();
   }
 
   /**

@@ -218,10 +218,10 @@ export async function resolveAuthorizationContext(
       })
     : [];
 
-  const clinicalPrivileges =
-    hcmPrivileges.length > 0
-      ? hcmPrivileges
-      : (membership.credentialStatus === 'VERIFIED' ? (membership.clinicalPrivileges || []) : []);
+  // Only the canonical, scoped HCM employee/credential/privilege chain may
+  // grant clinical authority. A tenant-membership fallback would reinstate
+  // privileges after revocation or when HCM records are missing.
+  const clinicalPrivileges = hcmPrivileges;
 
   return {
     uid: verifiedToken.uid,

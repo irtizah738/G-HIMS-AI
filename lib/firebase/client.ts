@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
-import { getAuth, Auth } from 'firebase/auth';
-import { initializeFirestore, getFirestore, Firestore, setLogLevel } from 'firebase/firestore';
+import { getAuth, connectAuthEmulator, Auth } from 'firebase/auth';
+import { initializeFirestore, getFirestore, connectFirestoreEmulator, Firestore, setLogLevel } from 'firebase/firestore';
 import { getAnalytics, isSupported, Analytics } from 'firebase/analytics';
 import firebaseConfig from '@/firebase-applet-config.json';
 import { assertClientFirebaseProjectIsolation } from '@/lib/runtime/environment-contract';
@@ -50,6 +50,19 @@ export const app: FirebaseApp = existingClientApp || initializeApp(clientCredent
 // Authentication Instance
 export const auth: Auth = getAuth(app);
 
+const requestedLocalSandbox = process.env.NEXT_PUBLIC_GHIMS_DEV_SANDBOX_EMULATORS === 'true';
+if (requestedLocalSandbox && typeof window !== 'undefined') {
+  const localPage = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+  if (process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE !== 'TEST' ||
+      String(clientCredentials.projectId) !== 'ghims-dev-sandbox-local' ||
+      process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST !== 'ghims-dev-sandbox-local' ||
+      !localPage ||
+      process.env.NODE_ENV === 'production') {
+    throw new Error('DEV_SANDBOX_BROWSER_EMULATOR_SCOPE_INVALID');
+  }
+  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+}
+
 // Firestore Instance with multi-tenant custom database ID support and forced long polling for preview sandbox stability
 const customDbId = process.env.NEXT_PUBLIC_FIRESTORE_DATABASE_ID || (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
 
@@ -67,6 +80,11 @@ export const db: Firestore = (() => {
     return dbId ? getFirestore(app, dbId) : getFirestore(app);
   }
 })();
+
+if (requestedLocalSandbox && typeof window !== 'undefined') {
+  // Only the verified local TEST page may opt into the emulator above.
+  connectFirestoreEmulator(db, '127.0.0.1', 8080);
+}
 
 // Analytics Instance (Safe SSR / Browser verification)
 let analyticsInstance: Analytics | null = null;

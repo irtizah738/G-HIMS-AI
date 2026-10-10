@@ -303,6 +303,20 @@ export async function hydrateEdgeSnapshot(
     );
     await enforceEdgeStorageBudget(normalizedTenantId).catch(() => { });
 
+    // Shared workstations can change Firebase identity while IndexedDB writes
+    // or storage-budget enforcement is in flight. Never hand an old actor's
+    // successful server snapshot to the new actor's UI after that await.
+    const afterPersist = await getCachedAuthSession();
+    if (
+      !afterPersist ||
+      !canResumeOfflineIdentity(auth.currentUser?.uid, afterPersist) ||
+      afterPersist.user.uid !== currentUser.uid ||
+      afterPersist.user.tenantId.trim().toLowerCase() !== normalizedTenantId ||
+      afterPersist.session.sessionId !== cached.session.sessionId
+    ) {
+      throw new Error('EDGE_HYDRATION_SESSION_CHANGED');
+    }
+
     return {
       tenantId: normalizedTenantId,
       generatedAt: Number(payload.generatedAt || Date.now()),

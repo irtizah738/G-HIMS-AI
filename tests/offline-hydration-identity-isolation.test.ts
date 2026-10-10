@@ -55,4 +55,23 @@ describe('Offline cached edge identity isolation', () => {
     expect(fn.indexOf('canResumeOfflineIdentity(')).toBeLessThan(fn.indexOf('listSecureEdgeEntities('));
     expect(fn).not.toContain('await listSecureEdgeEntities(tenantId, actorId, collection)');
   });
+
+  test('a late shared-workstation identity switch blocks server PHI return after encrypted storage', async () => {
+    const src = await readFile(path.join(process.cwd(), 'lib/offline/hydration.ts'), 'utf8');
+    const fn = src.split('export async function hydrateEdgeSnapshot(')[1] || '';
+    const persist = fn.indexOf('await replaceSecureTenantEdgeSnapshot(');
+    const budget = fn.indexOf('await enforceEdgeStorageBudget(normalizedTenantId)');
+    const checked = fn.indexOf('canResumeOfflineIdentity(auth.currentUser?.uid, afterPersist)');
+    const blocked = fn.indexOf("throw new Error('EDGE_HYDRATION_SESSION_CHANGED')", budget);
+    const handedToUi = fn.indexOf("freshness: 'CURRENT'", budget);
+    expect(persist).toBeGreaterThan(-1);
+    expect(budget).toBeGreaterThan(persist);
+    expect(checked).toBeGreaterThan(budget);
+    expect(blocked).toBeGreaterThan(checked);
+    expect(handedToUi).toBeGreaterThan(blocked);
+    expect(fn.slice(budget, handedToUi)).toContain(
+      'afterPersist.session.sessionId !== cached.session.sessionId'
+    );
+  });
+
 });

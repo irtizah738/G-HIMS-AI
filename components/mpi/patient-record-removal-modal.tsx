@@ -128,14 +128,13 @@ export function PatientRecordRemovalModal({
 
   const removalBlocked = !readiness?.readyForRemoval;
   const careBlockers = readiness?.blockers || [];
-  const canAttemptOrdinaryRemoval = valid && !removalBlocked && !inspectPending;
-
 
   const reasonLength = reason.trim().length;
   const verifiedMrn = confirmationMrn.trim().toUpperCase() === patient.mrn.trim().toUpperCase();
   const valid = allowed && !isOffline && Boolean(activeTenant?.tenantId) &&
     reasonLength >= 20 && reasonLength <= 1000 && verifiedMrn &&
     retentionAcknowledged && !pending;
+  const canAttemptOrdinaryRemoval = valid && !removalBlocked && !inspectPending;
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();

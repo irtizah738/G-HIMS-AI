@@ -19,14 +19,18 @@ interface TelehealthCallPanelProps {
   onConnected?: () => Promise<void> | void;
 }
 
+const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
+  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+];
+
 function iceServers(): RTCIceServer[] {
   const raw = String(process.env.NEXT_PUBLIC_GHIMS_WEBRTC_ICE_SERVERS_JSON || '').trim();
-  if (!raw) return [];
+  if (!raw) return DEFAULT_ICE_SERVERS;
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_ICE_SERVERS;
   } catch {
-    return [];
+    return DEFAULT_ICE_SERVERS;
   }
 }
 
@@ -51,13 +55,14 @@ export function TelehealthCallPanel({
   const [micEnabled, setMicEnabled] = useState(true);
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [patientJoinToken, setPatientJoinToken] = useState<string | null>(null);
 
   const joinUrl =
-    typeof window === 'undefined'
+    !patientJoinToken || typeof window === 'undefined'
       ? ''
       : `${window.location.origin}/telehealth/join?tenant=${encodeURIComponent(
           tenantId
-        )}&room=${encodeURIComponent(session.roomToken)}`;
+        )}&room=${encodeURIComponent(session.roomToken)}&join=${encodeURIComponent(patientJoinToken)}`;
 
   const clinicianSignal = async (
     type: 'START' | 'OFFER' | 'ICE' | 'LEAVE',
@@ -147,6 +152,7 @@ export function TelehealthCallPanel({
   const startCall = async () => {
     if (disabled || state === 'PREPARING' || state === 'WAITING' || state === 'CONNECTED') return;
     setError(null);
+    setPatientJoinToken(null);
     setState('PREPARING');
     connectedReportedRef.current = false;
     processedRef.current.clear();
@@ -158,7 +164,11 @@ export function TelehealthCallPanel({
         throw new Error('This browser does not provide camera/microphone access required for telehealth.');
       }
 
-      await clinicianSignal('START');
+      const startedRoom = await clinicianSignal('START');
+      if (typeof startedRoom.patientJoinToken !== 'string' || !startedRoom.patientJoinToken) {
+        throw new Error('The server did not issue a patient-specific join capability.');
+      }
+      setPatientJoinToken(startedRoom.patientJoinToken);
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
@@ -226,6 +236,7 @@ export function TelehealthCallPanel({
       // Local media must still terminate if the signaling endpoint is unavailable.
     } finally {
       disposeMedia();
+      setPatientJoinToken(null);
       setState('ENDED');
     }
   };

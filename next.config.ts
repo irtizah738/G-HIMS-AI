@@ -11,6 +11,7 @@ const nextConfig: NextConfig = {
     '@google-cloud/firestore',
     '@grpc/grpc-js',
   ],
+  output: 'standalone',
   images: {
     remotePatterns: [
       {

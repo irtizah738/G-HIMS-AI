@@ -44,6 +44,7 @@ describe('ORC Firebase STAGING project and deployment isolation', () => {
       GHIMS_FIREBASE_PROJECT_ID_STAGING: 'ghims-staging-isolated-test',
       NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING: 'ghims-staging-isolated-test',
       GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'ghims-production-isolated-test',
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'ghims-production-isolated-test',
       FIREBASE_PROJECT_ID: 'ghims-staging-isolated-test',
       NEXT_PUBLIC_FIREBASE_PROJECT_ID: 'ghims-staging-isolated-test',
       FIRESTORE_DATABASE_ID: '(default)',
@@ -72,6 +73,14 @@ describe('ORC Firebase STAGING project and deployment isolation', () => {
     const missingComparison = run({ GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: '' });
     expect(missingComparison.exitCode).not.toBe(0);
     expect(JSON.parse(missingComparison.stderr).code).toBe('STAGING_PRODUCTION_REFERENCE_REQUIRED');
+
+    const missingPublicComparison = run({ NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: '' });
+    expect(missingPublicComparison.exitCode).not.toBe(0);
+    expect(JSON.parse(missingPublicComparison.stderr).code).toBe('STAGING_PUBLIC_PRODUCTION_REFERENCE_REQUIRED');
+
+    const mismatchedPublicComparison = run({ NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'other-project' });
+    expect(mismatchedPublicComparison.exitCode).not.toBe(0);
+    expect(JSON.parse(mismatchedPublicComparison.stderr).code).toBe('STAGING_PUBLIC_PRODUCTION_REFERENCE_MISMATCH');
 
     const wrongAdmin = run({ FIREBASE_CLIENT_EMAIL: 'prod-admin@ghims-production-isolated-test.iam.gserviceaccount.com' });
     expect(wrongAdmin.exitCode).not.toBe(0);

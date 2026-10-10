@@ -49,6 +49,7 @@ Open the connected Vercel **g-hims-ai** project → Settings → Environment Var
 | `GHIMS_FIREBASE_PROJECT_ID_STAGING`, `NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING` | Actual NEW staging project ID |
 | `FIREBASE_PROJECT_ID`, `NEXT_PUBLIC_FIREBASE_PROJECT_ID` | Same staging project ID |
 | `GHIMS_FIREBASE_PROJECT_ID_PRODUCTION` | Existing production project ID, **non-secret comparison reference only** |
+| `NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION` | **Same existing production project ID**, non-secret public comparison reference needed by the browser to fail closed before Firebase SDK initialization |
 | `NEXT_PUBLIC_FIREBASE_API_KEY`, `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`, `NEXT_PUBLIC_FIREBASE_APP_ID` | New staging Web app config |
 | `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`, `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET` | New staging Web app config |
 | `FIRESTORE_DATABASE_ID`, `NEXT_PUBLIC_FIRESTORE_DATABASE_ID` | Staging Firestore database, usually `(default)` |

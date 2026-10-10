@@ -207,16 +207,21 @@ export async function resolveAuthorizationContext(
     });
   }
 
-  const clinicalPrivileges=isClinicalRole(membership.roles)
+  const hcmPrivileges = isClinicalRole(membership.roles)
     ? await resolveCredentialGatedPrivileges({
-        tenantId:membership.tenantId,
-        userId:verifiedToken.uid,
-        email:verifiedToken.email,
-        roles:membership.roles,
-        facilityIds:membership.facilityIds,
-        departmentIds:membership.departmentIds,
-       })
+        tenantId: membership.tenantId,
+        userId: verifiedToken.uid,
+        email: verifiedToken.email,
+        roles: membership.roles,
+        facilityIds: membership.facilityIds,
+        departmentIds: membership.departmentIds,
+      })
     : [];
+
+  // Only the canonical, scoped HCM employee/credential/privilege chain may
+  // grant clinical authority. A tenant-membership fallback would reinstate
+  // privileges after revocation or when HCM records are missing.
+  const clinicalPrivileges = hcmPrivileges;
 
   return {
     uid: verifiedToken.uid,

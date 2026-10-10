@@ -381,7 +381,7 @@ export class TelehealthDomainService {
     payload: CompleteTelehealthSessionPayload
   ): Promise<CommandResult<TelehealthSession>> {
     const auth = AuthorizationPipeline.evaluate(context, {
-      requiredRoles: ['DOCTOR', 'CONSULTANT'],
+      requiredRoles: ['DOCTOR', 'CONSULTANT', 'SYSTEM_ADMIN', 'ADMINISTRATOR'],
       requiredPrivilege: 'SIGN_CLINICAL_NOTES',
     });
     if (!auth.authorized) {

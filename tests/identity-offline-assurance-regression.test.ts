@@ -112,6 +112,14 @@ describe('Offline cached identity is not authoritative', () => {
     expect(client).toContain('permissions: []');
     expect(client).toContain('currentUser.uid !== cached.session.userId');
     expect(context).toContain('payload.offlineContinuity === true');
+    const refreshStart = context.indexOf('const refreshAuth = useCallback');
+    const refreshEnd = context.indexOf('const userRef = useRef', refreshStart);
+    const refreshBody = context.slice(refreshStart, refreshEnd);
+    expect(refreshBody).toContain("console.warn('Session restoration notice:', err)");
+    expect(refreshBody).toContain('setUser(null)');
+    expect(refreshBody).toContain('setSession(null)');
+    expect(refreshBody).toContain('setClinicalPrivileges([])');
+    expect(refreshBody).toContain('setIsOfflineContinuity(false)');
     expect(context).toContain('!isOfflineContinuity && checkPermission');
     expect(context).toContain('!isOfflineContinuity && checkPrivilege');
     expect(guard).toContain('Offline cached identity only');

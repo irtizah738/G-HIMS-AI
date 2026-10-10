@@ -1,0 +1,41 @@
+name: DEV Sandbox Lockfile and Isolation Evidence
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - package.json
+      - bun.lock
+      - lib/dev-sandbox/**
+      - scripts/dev-sandbox/**
+      - tests/dev-sandbox-isolation.test.ts
+      - .github/workflows/dev-sandbox-qualification.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify-sandbox:
+    runs-on: ubuntu-latest
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-dev-sandbox-local
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-dev-sandbox-local
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-dev-sandbox-local
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-dev-sandbox-local
+      FIRESTORE_DATABASE_ID: (default)
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: (default)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Report reproducible lockfile drift, without committing generated content
+        run: |
+          bun install --lockfile-only
+          echo '--- BEGIN BUN LOCK DIFF ---'
+          git diff -- bun.lock
+          echo '--- END BUN LOCK DIFF ---'
+      - name: Test fail-closed sandbox policy
+        run: bun test tests/dev-sandbox-isolation.test.ts

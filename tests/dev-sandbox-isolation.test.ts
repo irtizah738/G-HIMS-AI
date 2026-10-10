@@ -9,6 +9,7 @@ import {
   SANDBOX_SCENARIOS, SANDBOX_PERSONAS, scenarioCarePointers,
 } from '@/lib/dev-sandbox/scenarios';
 import { simulateSandboxExternalSystem } from '@/lib/dev-sandbox/external-system-simulator';
+import { adaptExactMpiIdentityForOpd } from '@/lib/opd/workspace-read-model';
 import { sandboxEmulatorConnectSources } from '@/lib/dev-sandbox/csp';
 
 const valid = {
@@ -92,6 +93,65 @@ describe('DEV-1 browser CSP emulator isolation', () => {
     expect(source).toContain('buildContentSecurityPolicy(nonce, request.nextUrl.hostname)');
     expect(source).toContain('sandboxConnectSources.join');
     expect(source).toContain("sandboxConnectSources.length === 0 ? ['upgrade-insecure-requests'] : []");
+  });
+});
+
+describe('DEV-5.1 MPI identity consistency across OPD and shell', () => {
+  test('authoritative exact MPI identity keeps real ID/MRN and never invents chart facts', () => {
+    const scenario = SANDBOX_SCENARIOS.find(item => item.id === 'mpi-identity')!;
+    const patient = adaptExactMpiIdentityForOpd({
+      patientId: scenario.patientId,
+      mrn: scenario.mrn,
+      fullName: scenario.fullName,
+      dateOfBirth: '1990-01-01',
+      gender: 'Other',
+      status: 'ACTIVE',
+    });
+    expect(patient.id).toBe(scenario.patientId);
+    expect(patient.mrn).toBe('DS-MRN-0001');
+    expect(patient.fullName).toBe('Sandbox Identity Alpha');
+    expect(patient.tariffPlan).toBe('UNASSIGNED');
+    expect(patient.bloodGroup).toBe('Unknown');
+    expect(patient.nationalId).toBe('');
+    expect(patient.phone).toBe('');
+    expect(() => adaptExactMpiIdentityForOpd({
+      patientId: scenario.patientId, mrn: scenario.mrn, fullName: scenario.fullName,
+      dateOfBirth: '1990-01-01', gender: 'Other', status: 'REMOVED',
+    })).toThrow('MPI_LOOKUP_INACTIVE_IDENTITY');
+  });
+
+  test('OPD exact MRN/CNIC search uses authenticated canonical MPI route not OPD-only patients', async () => {
+    const search = await readFile(join(process.cwd(), 'components/opd/OpdPatientSearchMpi.tsx'), 'utf8');
+    expect(search).toContain("AuthClient.authorizedFetch(");
+    expect(search).toContain('/api/clinical/mpi/lookup?');
+    expect(search).toContain('adaptExactMpiIdentityForOpd(payload.patient)');
+    expect(search).toContain("lookupPending");
+    expect(search).toContain("Registration is disabled until lookup succeeds.");
+    expect(search).toContain("Open Existing Patient");
+  });
+
+  test('MPI detail selection must respect current visible search', async () => {
+    const shell = await readFile(join(process.cwd(), 'components/views/patient-mpi-view.tsx'), 'utf8');
+    expect(shell).toContain('const visiblePatients = searchFilter.trim() ? filteredPatients : activePatients;');
+    expect(shell).toContain('const currentPatient = visiblePatients.find');
+    expect(shell).not.toContain('const currentPatient = activePatients.find');
+  });
+
+  test('already registered MPI identity cannot trigger a new patient registration', async () => {
+    const workspace = await readFile(join(process.cwd(), 'components/opd/OpdMasterWorkspace.tsx'), 'utf8');
+    expect(workspace).toContain("setShellSelectedPatientId(p.id);");
+    expect(workspace).toContain("setShellActiveTab('patients');");
+    expect(workspace).not.toContain('handleRegisterSuccess(p);');
+  });
+
+  test('synthetic MRN registry is seeded, verified and repairable in place with collision guard', async () => {
+    const script = await readFile(join(process.cwd(), 'scripts/dev-sandbox/manage.ts'), 'utf8');
+    expect(script).toContain('ensureScenarioMrnRegistry(scenario)');
+    expect(script).toContain("action === 'repair-mpi'");
+    expect(script).toContain('DEV_SANDBOX_MPI_REGISTRY_COLLISION');
+    expect(script).toContain('DEV_SANDBOX_MPI_REGISTRY_UNVERIFIED');
+    expect(script).toContain("buildMpiRegistryKey('MRN', scenario.mrn)");
+    expect(script).toContain("assertExistingMarker()");
   });
 });
 

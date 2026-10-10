@@ -9,6 +9,7 @@ import {
   SANDBOX_SCENARIOS, SANDBOX_PERSONAS, scenarioCarePointers,
 } from '@/lib/dev-sandbox/scenarios';
 import { simulateSandboxExternalSystem } from '@/lib/dev-sandbox/external-system-simulator';
+import { sandboxEmulatorConnectSources } from '@/lib/dev-sandbox/csp';
 
 const valid = {
   GHIMS_RUNTIME_MODE: 'TEST',
@@ -50,6 +51,47 @@ describe('DEV-1 dedicated sandbox safety boundary', () => {
     const source = await readFile(join(process.cwd(), 'lib/runtime/environment-contract.ts'), 'utf8');
     expect(source).toContain("['TEST', 'DEMO', 'STAGING', 'PRODUCTION']");
     expect(source).toContain('ENVIRONMENT_PROJECT_COLLISION');
+  });
+});
+
+describe('DEV-1 browser CSP emulator isolation', () => {
+  const browserSandbox = {
+    ...valid,
+    NEXT_PUBLIC_GHIMS_RUNTIME_MODE: 'TEST',
+    NEXT_PUBLIC_GHIMS_DEV_SANDBOX_EMULATORS: 'true',
+    NEXT_PUBLIC_FIREBASE_PROJECT_ID: SANDBOX_PROJECT_ID,
+    NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: SANDBOX_PROJECT_ID,
+  };
+
+  test('permits only exact local Firebase emulator origins for the localhost TEST app', () => {
+    const sources = ['http://127.0.0.1:9099', 'http://127.0.0.1:8080'];
+    expect(sandboxEmulatorConnectSources(browserSandbox, 'localhost')).toEqual(sources);
+    expect(sandboxEmulatorConnectSources(browserSandbox, '127.0.0.1')).toEqual(sources);
+  });
+
+  test.each([
+    [{ NODE_ENV: 'production' }, 'localhost'],
+    [{ GHIMS_RUNTIME_MODE: 'STAGING' }, 'localhost'],
+    [{ NEXT_PUBLIC_GHIMS_RUNTIME_MODE: 'PRODUCTION' }, 'localhost'],
+    [{ NEXT_PUBLIC_GHIMS_DEV_SANDBOX_EMULATORS: 'false' }, 'localhost'],
+    [{ NEXT_PUBLIC_FIREBASE_PROJECT_ID: 'g-hims-ai' }, 'localhost'],
+    [{ NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: 'g-hims-ai' }, 'localhost'],
+    [{ GHIMS_DEV_SANDBOX_ACK: '' }, 'localhost'],
+    [{ GHIMS_DEV_SANDBOX_TENANT_ID: 'central-metro-hospital' }, 'localhost'],
+    [{ FIREBASE_AUTH_EMULATOR_HOST: 'localhost:9099' }, 'localhost'],
+    [{ FIRESTORE_EMULATOR_HOST: 'localhost:8080' }, 'localhost'],
+    [{}, 'hospital.example.com'],
+    [{}, '192.168.1.10'],
+  ] as const)('keeps local emulator origins out of other environments (%j, %s)', (changes, hostname) => {
+    expect(sandboxEmulatorConnectSources({ ...browserSandbox, ...changes }, hostname)).toEqual([]);
+  });
+
+  test('proxy applies loopback CSP exception only after the complete sandbox guard', async () => {
+    const source = await readFile(join(process.cwd(), 'proxy.ts'), 'utf8');
+    expect(source).toContain('sandboxEmulatorConnectSources(process.env, hostname)');
+    expect(source).toContain('buildContentSecurityPolicy(nonce, request.nextUrl.hostname)');
+    expect(source).toContain('sandboxConnectSources.join');
+    expect(source).toContain("sandboxConnectSources.length === 0 ? ['upgrade-insecure-requests'] : []");
   });
 });
 

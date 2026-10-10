@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Users,
   Search,
@@ -60,6 +60,7 @@ import { OpdOfflineSyncManager } from './OpdOfflineSyncManager';
 import { executeActiveTenantCommand, registerActiveTenantPatient } from '@/lib/api/command-client';
 import { useAuth } from '@/lib/auth/auth-context';
 import { useHospital } from '@/lib/context/hospital-context';
+import { hospitalPatientsToOpdMpi } from '@/lib/clinical/mpi/shared-patient-directory';
 import { PatientContextSafetyBlock } from '@/components/clinical/patient-context-safety-block';
 import { useOfflineStatus } from '@/hooks/useOfflineStatus';
 import { hydrateEdgeSnapshot } from '@/lib/offline/hydration';
@@ -446,7 +447,11 @@ const SEED_EVENTS: OpdTimelineEvent[] = [
 
 export function OpdMasterWorkspace() {
   const auth = useAuth();
+  const router = useRouter();
   const {
+    patients: sharedMpiPatients,
+    mpiDirectoryReadiness,
+    mpiDirectoryTenantId,
     clinicalContext,
     bindClinicalEncounter,
     clearClinicalContext,
@@ -485,6 +490,18 @@ export function OpdMasterWorkspace() {
     ].some((role) => normalizedRoles.has(role));
   const canAccessTab = (tabId: string) =>
     (OPD_TAB_ROLES[tabId] || []).includes(activeRole);
+
+  const directoryTenantMatch = IS_DEMO_RUNTIME ||
+    (Boolean(auth.activeTenant?.tenantId) &&
+      String(mpiDirectoryTenantId || '').trim().toLowerCase() ===
+        String(auth.activeTenant?.tenantId || '').trim().toLowerCase());
+  const mpiReadiness = directoryTenantMatch
+    ? mpiDirectoryReadiness
+    : 'UNHYDRATED';
+  const directoryPatients = useMemo(
+    () => directoryTenantMatch ? hospitalPatientsToOpdMpi(sharedMpiPatients) : [],
+    [directoryTenantMatch, sharedMpiPatients]
+  );
 
   // Global State
   const [patients, setPatients] = useState<PatientDemographics[]>(() => IS_DEMO_RUNTIME ? SEED_PATIENTS : []);
@@ -3221,14 +3238,33 @@ export function OpdMasterWorkspace() {
       {/* 2. Patient Search & MPI Duplicate Matching */}
       {activeTab === 'SEARCH_MPI' && (
         <OpdPatientSearchMpi
-          patients={patients}
+          patients={directoryPatients}
+          directoryReadiness={mpiReadiness}
+          activeOpdPatientIds={encounters.filter((e) =>
+            !['COMPLETED','CANCELLED','DISCHARGED','TRANSFERRED'].includes(String(e.status || '').toUpperCase())
+          ).map((e) => e.patientId)}
+          onRefreshDirectory={() => {
+            if (auth.activeTenant?.tenantId) {
+              window.dispatchEvent(new CustomEvent('ghims:mpi-directory-refresh', {
+                detail: { tenantId: auth.activeTenant.tenantId },
+              }));
+            }
+          }}
           onSelectPatient={(p) => {
-            const existingEnc = encounters.find((e) => e.patientId === p.id);
+            // MPI is permanent identity, not an OPD encounter creation API.
+            // A patient with no OPD episode must NOT be registered again.
+            const existingEnc = encounters.find((e) =>
+              e.patientId === p.id &&
+              !['COMPLETED','CANCELLED','DISCHARGED','TRANSFERRED'].includes(String(e.status || '').toUpperCase())
+            );
             if (existingEnc) {
               setSelectedEncounterId(existingEnc.id);
               setActiveTab('CONSULTATION');
             } else {
-              handleRegisterSuccess(p);
+              const tenantId = String(auth.activeTenant?.tenantId || '').trim();
+              if (tenantId) {
+                router.push(`/${encodeURIComponent(tenantId)}/patients/${encodeURIComponent(p.id)}/360`);
+              }
             }
           }}
           onInitiateNewRegistration={(initial) => {

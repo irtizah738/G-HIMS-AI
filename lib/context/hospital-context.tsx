@@ -969,6 +969,9 @@ interface BindClinicalEncounterInput {
 interface HospitalContextType {
   beds: Bed[];
   patients: Patient[];
+  /** Authoritative tenant-scoped MPI directory hydration; no zero-count claim before load. */
+  mpiDirectoryReadiness: 'DEMO' | 'CURRENT' | 'STALE' | 'PARTIAL' | 'UNHYDRATED' | 'DENIED' | 'FAILED';
+  mpiDirectoryTenantId: string | null;
   staff: StaffMember[];
   stats: HospitalStats;
   opdQueue: OpdQueueToken[];
@@ -1058,6 +1061,12 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
 
   const [beds, setBeds] = useState<Bed[]>(() => isDemoRuntime ? initialBeds : []);
   const [patients, setPatients] = useState<Patient[]>(() => isDemoRuntime ? initialPatients : []);
+  const [mpiDirectoryReadiness, setMpiDirectoryReadiness] = useState<HospitalContextType['mpiDirectoryReadiness']>(
+    isDemoRuntime ? 'DEMO' : 'UNHYDRATED'
+  );
+  const [mpiDirectoryTenantId, setMpiDirectoryTenantId] = useState<string | null>(
+    isDemoRuntime ? 'DEMO' : null
+  );
   const [staff, setStaff] = useState<StaffMember[]>(() => isDemoRuntime ? initialStaff : []);
   const [opdQueue, setOpdQueue] = useState<OpdQueueToken[]>(() => isDemoRuntime ? initialOpdQueue : []);
   const [mismatches, setMismatches] = useState<BillingAuditMismatch[]>(() => isDemoRuntime ? initialMismatches : []);
@@ -1169,6 +1178,8 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     if (!tenantId) {
       setBeds([]);
       setPatients([]);
+      setMpiDirectoryReadiness('UNHYDRATED');
+      setMpiDirectoryTenantId(null);
       setOpdQueue([]);
       setMismatches([]);
       setTelehealthSessions([]);
@@ -1185,6 +1196,14 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       const models = adaptEdgeSnapshot(snapshot);
       setBeds(models.beds);
       setPatients(models.patients);
+      setMpiDirectoryReadiness(
+        snapshot.freshness === 'CURRENT' ? 'CURRENT' :
+        snapshot.freshness === 'STALE' ? 'STALE' :
+        snapshot.freshness === 'DENIED' ? 'DENIED' :
+        snapshot.freshness === 'PARTIAL' ? 'PARTIAL' :
+        snapshot.freshness === 'FAILED' ? 'FAILED' : 'UNHYDRATED'
+      );
+      setMpiDirectoryTenantId(tenantId);
       setOpdQueue(models.opdQueue);
       setMismatches(models.mismatches);
       setTelehealthSessions(models.telehealthSessions);
@@ -1214,11 +1233,18 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       refreshAuthoritativeSnapshot();
     };
 
+    const handleMpiRefresh = (event: Event) => {
+      const detail = (event as CustomEvent<{ tenantId?: string }>).detail;
+      if (String(detail?.tenantId || '').trim().toLowerCase() !== tenantId) return;
+      refreshAuthoritativeSnapshot();
+    };
     window.addEventListener('ghims:edge-sync-complete', handleSyncComplete);
+    window.addEventListener('ghims:mpi-directory-refresh', handleMpiRefresh);
 
     return () => {
       cancelled = true;
       window.removeEventListener('ghims:edge-sync-complete', handleSyncComplete);
+      window.removeEventListener('ghims:mpi-directory-refresh', handleMpiRefresh);
     };
   }, [
     activeTenant?.tenantId,
@@ -2328,6 +2354,15 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     if (activeTelehealthSession?.id === sessionId) {
       setActiveTelehealthSession(authoritative);
     }
+    // Successful Telehealth completion also changes patient care pointers and
+    // encounter lifecycle in the canonical aggregate. Never leave other MPI
+    // workspaces on an obsolete pre-completion snapshot.
+    const tenantId = String(activeTenant?.tenantId || user?.tenantId || '').trim().toLowerCase();
+    if (tenantId && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('ghims:edge-sync-complete', {
+        detail: { tenantId },
+      }));
+    }
   };
 
   return (
@@ -2335,6 +2370,8 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       value={{
         beds,
         patients,
+        mpiDirectoryReadiness,
+        mpiDirectoryTenantId,
         staff,
         stats,
         opdQueue,

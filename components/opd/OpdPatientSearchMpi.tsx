@@ -25,6 +25,9 @@ import { useAuth } from '@/lib/auth/auth-context';
 
 interface OpdPatientSearchMpiProps {
   patients: PatientDemographics[];
+  directoryReadiness: 'DEMO' | 'CURRENT' | 'STALE' | 'PARTIAL' | 'UNHYDRATED' | 'DENIED' | 'FAILED';
+  activeOpdPatientIds: string[];
+  onRefreshDirectory: () => void;
   onSelectPatient: (patient: PatientDemographics) => void;
   onInitiateNewRegistration: (initialData?: Partial<PatientDemographics>) => void;
   onInitiateMergeRequest: (sourcePatientId: string, targetPatientId: string, reason: string) => void;
@@ -33,6 +36,9 @@ interface OpdPatientSearchMpiProps {
 
 export function OpdPatientSearchMpi({
   patients,
+  directoryReadiness,
+  activeOpdPatientIds,
+  onRefreshDirectory,
   onSelectPatient,
   onInitiateNewRegistration,
   onInitiateMergeRequest,
@@ -40,6 +46,8 @@ export function OpdPatientSearchMpi({
 }: OpdPatientSearchMpiProps) {
   const { roles } = useAuth();
   const canRemove = roles.some(role => ['ADMIN', 'ADMINISTRATOR', 'SYSTEM_ADMIN', 'SUPER_ADMIN'].includes(String(role).toUpperCase()));
+  const directoryAvailable = ['CURRENT', 'DEMO', 'STALE'].includes(directoryReadiness);
+  const directoryCurrent = ['CURRENT', 'DEMO'].includes(directoryReadiness);
   const [removalCandidate, setRemovalCandidate] = useState<PatientDemographics | null>(null);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [searchField, setSearchField] = useState<'ALL' | 'MRN' | 'CNIC' | 'PHONE' | 'NAME' | 'APPT'>('MRN');
@@ -51,6 +59,7 @@ export function OpdPatientSearchMpi({
 
   // Filtered patients based on search
   const searchResults = useMemo(() => {
+    if (!directoryAvailable) return [];
     if (!searchTerm.trim()) {
       return patients.filter(p => !['MERGED', 'REMOVED'].includes(String(p.status || 'ACTIVE').toUpperCase()));
     }
@@ -77,11 +86,11 @@ export function OpdPatientSearchMpi({
         (p.preferredName && p.preferredName.toLowerCase().includes(qLower))
       );
     });
-  }, [patients, searchTerm, searchField]);
+  }, [patients, searchTerm, searchField, directoryAvailable]);
 
   // Real-time MPI Duplicate Detection Engine for current search or prospective new patient
   const mpiDuplicateMatches = useMemo((): MpiMatchResult[] => {
-    if (!searchTerm.trim() || searchTerm.length < 3) return [];
+    if (!directoryAvailable || !searchTerm.trim() || searchTerm.length < 3) return [];
     const q = searchTerm.toLowerCase().trim();
 
     return patients.filter((candidate) => !['MERGED', 'REMOVED'].includes(String(candidate.status || 'ACTIVE').toUpperCase())).map((candidate) => {
@@ -117,7 +126,7 @@ export function OpdPatientSearchMpi({
         isDefiniteDuplicate: score >= 90,
       };
     }).filter((r) => r.matchScore >= 60);
-  }, [patients, searchTerm]);
+  }, [patients, searchTerm, directoryAvailable]);
 
   const handleSimulateScan = () => {
     if (patients.length > 0) {
@@ -153,6 +162,7 @@ export function OpdPatientSearchMpi({
             </button>
             <button
               onClick={() => onInitiateNewRegistration({ fullName: searchTerm })}
+              disabled={!directoryCurrent}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
             >
               <PlusCircle className="w-4 h-4" />
@@ -250,22 +260,53 @@ export function OpdPatientSearchMpi({
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
             <Users className="w-4 h-4 text-blue-600" />
-            Registry Matching Records ({searchResults.length})
+            Registry Matching Records ({directoryAvailable ? searchResults.length : '—'})
           </h3>
-          <span className="text-xs text-slate-400">Strict Tenant-Isolated Scope</span>
+          <span className="text-xs text-slate-400">
+            {directoryReadiness === 'DEMO' ? 'Synthetic DEMO directory — not Firestore' :
+              `Tenant-isolated shared MPI · ${directoryReadiness}`}
+          </span>
         </div>
 
-        {searchResults.length === 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs dark:border-slate-800">
+          <p role="status">
+            {directoryReadiness === 'DEMO'
+              ? 'Both MPI screens display the same synthetic DEMO patient directory.'
+              : directoryReadiness === 'CURRENT'
+                ? 'Patient identities are from the shared authorized hospital MPI snapshot.'
+                : directoryReadiness === 'STALE'
+                  ? 'Cached patient directory is stale. Refresh before registering, merging or removing records.'
+                  : 'Patient directory is not yet verified. An empty OPD list does NOT mean no MPI record exists.'}
+          </p>
+          <button
+            type="button"
+            onClick={onRefreshDirectory}
+            className="rounded-lg border px-3 py-2 font-semibold hover:bg-slate-100 dark:hover:bg-slate-800"
+          >Refresh MPI directory</button>
+        </div>
+        {!directoryAvailable ? (
+          <div role="status" data-testid="opd-mpi-not-hydrated"
+               className="rounded-xl border border-amber-400/40 p-6 text-center text-sm text-amber-700 dark:text-amber-300">
+            MPI results are unavailable ({directoryReadiness}). Verify the active tenant and
+            authorized hospital directory hydration. Do not register a duplicate identity.
+          </div>
+        ) : searchResults.length === 0 ? (
           <div className="py-12 text-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl space-y-3">
             <Users className="w-8 h-8 text-slate-400 mx-auto" />
-            <p className="text-xs font-bold text-slate-500">No patient records found matching &quot;{searchTerm}&quot;</p>
+            <p className="text-xs font-bold text-slate-500">
+              {searchTerm.trim()
+                ? `No matching MPI identity for “${searchTerm}” in the ${directoryReadiness.toLowerCase()} directory.`
+                : 'The current MPI directory contains no visible active patient identities.'}
+            </p>
+            {searchTerm.trim() && directoryCurrent && (
             <button
               onClick={() => onInitiateNewRegistration({ fullName: searchTerm })}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
             >
               <PlusCircle className="w-4 h-4" />
-              Register &quot;{searchTerm}&quot; as New Patient
+              Review identity and register new patient
             </button>
+            )}
           </div>
         ) : (
           <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
@@ -314,9 +355,10 @@ export function OpdPatientSearchMpi({
                       <div className="flex items-center justify-end gap-2">
                         <button
                           onClick={() => onSelectPatient(p)}
+                          data-testid={`opd-mpi-select-${p.id}`}
                           className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
                         >
-                          Start OPD Visit
+                          {activeOpdPatientIds.includes(p.id) ? 'Continue OPD encounter' : 'Review Patient 360'}
                         </button>
                         {canRemove && (
                           <button

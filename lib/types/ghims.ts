@@ -139,13 +139,13 @@ export interface BillingAuditMismatch {
 
 export interface Encounter {
   id: string;
-  type: 'Inpatient' | 'Outpatient' | 'Emergency';
+  type: 'Inpatient' | 'Outpatient' | 'Emergency' | 'Telehealth';
   department: string;
   admitDate: string;
   dischargeDate?: string;
   chiefComplaint: string;
   attendingPhysician: string;
-  status: 'active' | 'discharged' | 'transferred';
+  status: 'active' | 'completed' | 'cancelled' | 'discharged' | 'transferred';
   vitalsHistory: Vitals[];
   clinicalNotes: ClinicalNote[];
   medications: Medication[];
@@ -169,6 +169,8 @@ export interface Patient {
   gender: 'Male' | 'Female' | 'Other';
   bloodGroup: 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-' | 'Unknown';
   contactNumber: string;
+  /** Tenant-authorized national identifier where available. */
+  nationalId?: string;
   email: string;
   address: string;
   emergencyContact: {
@@ -180,6 +182,12 @@ export interface Patient {
   chronicConditions: string[];
   activeBedId?: string;
   activeEncounterId?: string;
+  activeCareContexts?: {
+    activeOpdEncounterIds?: string[];
+    activeTelehealthEncounterIds?: string[];
+    activeIpdEncounterId?: string;
+    activeEmergencyEncounterId?: string;
+  };
   encounters: Encounter[];
   registeredAt: string;
   status?: 'ACTIVE' | 'MERGED' | 'INACTIVE' | 'DECEASED' | 'REMOVED';

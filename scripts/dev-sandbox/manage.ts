@@ -105,7 +105,7 @@ if (action === 'reset') {
     const privilegeTypes =
       persona.key === 'doctor' ? [
         'SIGN_CLINICAL_NOTE', 'SIGN_CLINICAL_NOTES', 'SIGN_SOAP_CLINICAL_NOTE',
-        'ORDER_LAB', 'PRESCRIBE_MEDICATION',
+        'CONSULT_OPD', 'ORDER_LAB', 'PRESCRIBE_MEDICATION',
       ] : persona.key === 'nurse' ? ['RECORD_VITALS'] :
       persona.key === 'lab' ? ['VERIFY_LAB_RESULT'] :
       persona.key === 'pharmacy' ? ['DISPENSE_MEDICATION'] : [];
@@ -139,6 +139,7 @@ if (action === 'reset') {
         credentialNumber: `DS-SYNTHETIC-${persona.key.toUpperCase()}`,
         issueDate: '2026-01-01', expiryDate: '2035-12-31',
         verificationStatus: 'VERIFIED', isMandatoryForPractice: true,
+        verifiedByActorId: personaUid('admin'), verifiedAt: nowIso,
         syntheticQualificationRecord: true, sandboxFixture: true,
       });
       for (const privilegeType of privilegeTypes) {
@@ -154,8 +155,10 @@ if (action === 'reset') {
       await tenant.collection('rosterAssignments').doc(`ds_roster_${persona.key}`).create({
         assignmentId: `ds_roster_${persona.key}`, tenantId, employeeId,
         facilityId: SANDBOX_FACILITY_ID, departmentId: persona.department,
-        startsAt: now - 3600_000, endsAt: now + 12 * 3600_000,
-        status: 'PUBLISHED', syntheticQualificationRecord: true, sandboxFixture: true,
+        startTime: new Date(now - 3600_000).toISOString(),
+        endTime: new Date(now + 12 * 3600_000).toISOString(),
+        shiftName: 'DAY', status: 'PUBLISHED',
+        syntheticQualificationRecord: true, sandboxFixture: true,
       });
     }
   }

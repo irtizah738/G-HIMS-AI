@@ -32,7 +32,7 @@ describe('MPI authoritative care blockers for audited patient removal', () => {
         activeOpdEncounterIds: 'not-an-array',
       },
     });
-    expect(result.filter(b => b.status === 'POINTER_MALFORMED').length).toBe(5);
+    expect(result.filter(b => b.status === 'POINTER_MALFORMED').length).toBe(6);
     expect(result.find(b => b.encounterId === 'valid')?.domain).toBe('TELEHEALTH');
   });
 

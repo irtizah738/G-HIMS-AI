@@ -126,6 +126,10 @@ describe('Offline cached identity is not authoritative', () => {
     expect(getRoute).toContain('validateSession(tenantId, sessionId, verifiedToken.uid)');
     expect(getRoute).toContain('assertDeviceActive(tenantId, session.deviceId, verifiedToken.uid)');
     expect(getRoute).toContain('requestedDeviceId !== session.deviceId');
+    expect(getRoute).toContain("['STAGING', 'PRODUCTION'].includes(getRuntimeMode())");
+    expect(getRoute).toContain('!session.deviceId || requestedDeviceId !== session.deviceId');
+    const client = await source('lib/auth/auth-client.ts');
+    expect(client).toContain("{ 'x-ghims-device-id': cached.session.deviceId }");
     expect(getRoute).toContain("code: 'DEVICE_REVOKED'");
     expect(getRoute).toContain('resolveAuthorizationContext(verifiedToken, tenantId, session.sessionId');
   });
@@ -155,6 +159,9 @@ describe('Offline cached identity is not authoritative', () => {
     expect(refreshBody).toContain('setIsOfflineContinuity(false)');
     expect(context).toContain('!isOfflineContinuity && checkPermission');
     expect(context).toContain('!isOfflineContinuity && checkRole');
+    expect(context).toContain('const verifiedPriorSession = await AuthClient.validateCurrentSession()');
+    expect(context).toContain('await AuthClient.invalidateLocalAuthorization()');
+    expect(client).toContain('public static async invalidateLocalAuthorization()');
     expect(context).toContain('setRoles(payload.offlineContinuity ? [] : payload.authorization.roles)');
     // Prior tenant discovery is sensitive identity metadata and must not
     // remain visible when a server session is denied or the user signs out.

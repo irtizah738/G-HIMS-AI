@@ -366,17 +366,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Tenant Switching Action — ORC-1A: explicit suspension state machine
   // READY → SWITCHING (invalidate prior) → VERIFYING (new token received) → READY
-  // On failure: restore prior verified tenant context instead of leaving it empty.
+  // On failure: restore only after fresh server verification; otherwise clear authority.
   const switchTenant = useCallback(
     async (tenantId: string) => {
       setLoading(true);
       // ORC-1A: Enter SWITCHING to signal guards to block child mounts
       setLoadingStatus('SWITCHING');
-      // Capture prior verified tenant so we can restore it on failure
+      // The prior tenant is only a comparison target, never restored authorization.
       const priorTenant = activeTenant;
-      const priorRoles = roles;
-      const priorPermissions = permissions;
-      const priorPrivileges = clinicalPrivileges;
       try {
         const payload = await AuthClient.switchTenant(tenantId);
         // ORC-1A: Invalidate prior tenant subscriptions BEFORE publishing the new context.
@@ -390,23 +387,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         applyLoginPayload(payload);
         setLoadingStatus('READY');
       } catch (err: any) {
-        // ORC-1A: Restore the prior verified state rather than leaving context empty.
-        // An empty context would cause every tenant-scoped query to fail with no
-        // indication of what went wrong, and could expose an unauthenticated UI.
+        // Server-side claim changes can partially complete before a switch
+        // fails. Prior client role/privilege arrays are NOT evidence of a
+        // continuing valid session. Revalidate against the server first.
+        let restoredFromServer = false;
         if (priorTenant) {
-          setActiveTenant(priorTenant);
-          setRoles(priorRoles);
-          setPermissions(priorPermissions);
-          setClinicalPrivileges(priorPrivileges);
+          try {
+            const verifiedPriorSession = await AuthClient.validateCurrentSession();
+            if (verifiedPriorSession?.authenticated &&
+                verifiedPriorSession.tenant.tenantId === priorTenant.tenantId) {
+              applyLoginPayload(verifiedPriorSession);
+              restoredFromServer = true;
+            }
+          } catch {
+            // Network failure, revocation or a changed tenant must fail closed.
+          }
         }
-        setError(err?.userMessage || err?.message || 'Failed to switch tenant');
+        if (!restoredFromServer) {
+          await AuthClient.invalidateLocalAuthorization().catch(() => {});
+          setUser(null);
+          setSession(null);
+          setActiveTenant(null);
+          setRoles([]);
+          setPermissions([]);
+          setClinicalPrivileges([]);
+          setAccessibleTenants([]);
+          setIsOfflineContinuity(false);
+          setIsOffline(false);
+        }
+        setError(err?.userMessage || err?.message || 'Failed to switch tenant; sign in again.');
         setLoadingStatus('ERROR');
         throw err;
       } finally {
         setLoading(false);
       }
     },
-    [applyLoginPayload, activeTenant, roles, permissions, clinicalPrivileges]
+    [applyLoginPayload, activeTenant]
   );
 
   // Password Reset Action

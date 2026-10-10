@@ -49,7 +49,7 @@ export function TelehealthCallPanel({
       ? ''
       : `${window.location.origin}/telehealth/join?tenant=${encodeURIComponent(
           tenantId
-        )}&room=${encodeURIComponent(session.roomToken)}&join=${encodeURIComponent(patientJoinToken)}`;
+        )}&room=${encodeURIComponent(session.roomToken)}#join=${encodeURIComponent(patientJoinToken)}`;
 
   const clinicianSignal = async (
     type: 'START' | 'OFFER' | 'ICE' | 'LEAVE',

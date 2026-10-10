@@ -62,6 +62,11 @@ for (const file of files.sort()) {
     }
   }
 
+  // Declaration files contain types only; transpileModule deliberately emits no
+  // JavaScript for them and may throw an internal Debug Failure in TypeScript.
+  // They are already fully parsed and typechecked by the preceding tsc --noEmit gate.
+  if (/\.d\.(?:ts|mts|cts)$/.test(file)) continue;
+
   const result = ts.transpileModule(source, {
     fileName: file,
     reportDiagnostics: true,

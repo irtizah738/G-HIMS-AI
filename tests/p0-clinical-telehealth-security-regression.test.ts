@@ -43,7 +43,7 @@ describe('P0 clinical and telehealth security invariants', () => {
   test('Bun frozen-lockfile root manifest dependency ranges are exact', async () => {
     const pkg = JSON.parse(await source('package.json'));
     // bun.lock is JSONC; remove trailing commas for this structural assertion.
-    const lock = JSON.parse((await source('bun.lock')).replace(/,\\s*([}\\]])/g, '$1'));
+    const lock = JSON.parse((await source('bun.lock')).replace(/,\s*([}\]])/g, '$1'));
     expect(pkg.dependencies).toEqual(lock.workspaces[''].dependencies);
     expect(pkg.devDependencies).toEqual(lock.workspaces[''].devDependencies);
   });

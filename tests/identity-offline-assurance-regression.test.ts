@@ -105,6 +105,8 @@ describe('Offline cached identity is not authoritative', () => {
     ]);
     expect(client).toContain('canResumeOfflineIdentity(currentUser?.uid, cached)');
     expect(client).toContain('offlineContinuity: true');
+    expect(client).toContain('offlineContinuityAuthenticatedAt: cached.session.authenticatedAt');
+    expect(context).toContain('payload.offlineContinuityAuthenticatedAt || new Date(0).toISOString()');
     expect(client).toContain('authenticated: false');
     expect(client).toContain('clinicalPrivileges: []');
     expect(client).toContain('permissions: []');

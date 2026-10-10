@@ -241,6 +241,11 @@ export function adaptEdgeSnapshot(snapshot: EdgeSnapshot): HospitalEdgeModels {
         chronicConditions: Array.isArray((raw as any).chronicConditions) ? (raw as any).chronicConditions : [],
         activeBedId: asString((raw as any).activeBedId) || undefined,
         activeEncounterId: asString((raw as any).activeEncounterId) || undefined,
+        activeCareContexts: (raw as any).activeCareContexts &&
+          typeof (raw as any).activeCareContexts === 'object' &&
+          !Array.isArray((raw as any).activeCareContexts)
+          ? (raw as any).activeCareContexts as Patient['activeCareContexts']
+          : undefined,
         status: asString((raw as any).status, 'ACTIVE').toUpperCase() as Patient['status'],
         mergedIntoPatientId:
           asString((raw as any).mergedIntoPatientId) || undefined,

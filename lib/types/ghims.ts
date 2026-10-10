@@ -145,7 +145,7 @@ export interface Encounter {
   dischargeDate?: string;
   chiefComplaint: string;
   attendingPhysician: string;
-  status: 'active' | 'discharged' | 'transferred';
+  status: 'active' | 'completed' | 'cancelled' | 'discharged' | 'transferred';
   vitalsHistory: Vitals[];
   clinicalNotes: ClinicalNote[];
   medications: Medication[];
@@ -169,6 +169,8 @@ export interface Patient {
   gender: 'Male' | 'Female' | 'Other';
   bloodGroup: 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-' | 'Unknown';
   contactNumber: string;
+  /** Tenant-authorized national identifier where available. */
+  nationalId?: string;
   email: string;
   address: string;
   emergencyContact: {

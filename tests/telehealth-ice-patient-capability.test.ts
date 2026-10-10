@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { assertTelehealthPatientJoinToken } from '@/lib/backend/security/telehealth-patient-capability';
+import { assertTelehealthRoomLease, type ExpectedTelehealthRoom } from '@/lib/backend/security/telehealth-room-policy';
 
 const source = (name: string) => readFileSync(name, 'utf8');
 
@@ -20,18 +21,47 @@ describe('Governed Telehealth TURN issuance and patient capability', () => {
     }
   });
 
+  test('room policy rejects expired, malformed, cross-tenant-context or reassigned media room', () => {
+    const now = 1_800_000_000_000;
+    const exact: ExpectedTelehealthRoom = {
+      roomToken: 'ROOM-EXAMPLE', sessionId: 'session-1',
+      encounterId: 'encounter-1', patientId: 'patient-1', clinicianId: 'doctor-1',
+    };
+    const valid: Record<string, unknown> = {
+      ...exact, active: true, expiresAt: now + 60_000,
+    };
+    expect(() => assertTelehealthRoomLease(valid, exact, now)).not.toThrow();
+    expect(() => assertTelehealthRoomLease(undefined, exact, now))
+      .toThrow('TELEHEALTH_CALL_NOT_ACTIVE');
+    for (const malformed of [
+      { ...valid, active: false },
+      { ...valid, expiresAt: now - 1 },
+      { ...valid, expiresAt: 'late' },
+      { ...valid, clinicianId: 'doctor-2' },
+      { ...valid, patientId: 'another-patient' },
+      { ...valid, encounterId: 'another-encounter' },
+      { ...valid, sessionId: 'another-session' },
+      { ...valid, roomToken: 'other-room' },
+    ]) {
+      expect(() => assertTelehealthRoomLease(malformed, exact, now))
+        .toThrow('TELEHEALTH_CALL_NOT_ACTIVE');
+    }
+    expect(() => assertTelehealthRoomLease(valid, { ...exact, clinicianId: '' }, now))
+      .toThrow('TELEHEALTH_CALL_NOT_ACTIVE');
+  });
+
   test('patient ICE endpoint checks independent token after room lease and before credential issuance', () => {
     const api = source('app/api/telehealth/ice-config/route.ts');
-    const leaseCheck = api.indexOf('data?.active !== true');
+    const leaseCheck = api.indexOf('assertTelehealthRoomLease(data, {');
     const verifyJoin = api.indexOf('assertTelehealthPatientJoinToken(patientJoinToken, data.patientJoinTokenHash)');
     const mint = api.indexOf('buildTelehealthIceConfiguration(roomToken)');
     expect(leaseCheck).toBeGreaterThan(-1);
     expect(verifyJoin).toBeGreaterThan(leaseCheck);
     expect(mint).toBeGreaterThan(verifyJoin);
     for (const check of [
-      'data.expiresAt <= Date.now()', 'data.sessionId !== session.id',
-      'data.encounterId !== session.encounterId', 'data.patientId !== session.patientId',
-      "data.clinicianId !== String(encounter.data()?.assignedProviderId || '')",
+      'sessionId: session.id', 'encounterId: session.encounterId',
+      'patientId: session.patientId',
+      "clinicianId: String(encounter.data()?.assignedProviderId || '')",
       'deriveAuthoritativeContext(req, tenantId)', 'TELEHEALTH_CLINICIAN_ASSIGNMENT_MISMATCH',
       "'Cache-Control': 'no-store, private'",
     ]) expect(api).toContain(check);

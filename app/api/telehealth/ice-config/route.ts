@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { assertTelehealthPatientJoinToken } from '@/lib/backend/security/telehealth-patient-capability';
+import { assertTelehealthRoomLease } from '@/lib/backend/security/telehealth-room-policy';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
 import { buildTelehealthIceConfiguration } from '@/lib/backend/services/telehealth-ice-configuration';
@@ -50,13 +51,13 @@ export async function POST(req: NextRequest) {
     }
     const room = await tenant.collection('telehealthSignaling').doc(roomToken).get();
     const data = room.data();
-    if (!room.exists || data?.active !== true ||
-        !Number.isFinite(data?.expiresAt) || data.expiresAt <= Date.now() ||
-        data.sessionId !== session.id || data.encounterId !== session.encounterId ||
-        data.patientId !== session.patientId || data.roomToken !== roomToken ||
-        data.clinicianId !== String(encounter.data()?.assignedProviderId || '')) {
-      return reject('TELEHEALTH_CALL_NOT_ACTIVE', 403);
-    }
+    assertTelehealthRoomLease(data, {
+      roomToken,
+      sessionId: session.id,
+      encounterId: session.encounterId,
+      patientId: session.patientId,
+      clinicianId: String(encounter.data()?.assignedProviderId || ''),
+    });
     if (role === 'CLINICIAN') {
       const { context } = await deriveAuthoritativeContext(req, tenantId);
       if (!context.roles.some(r => ['DOCTOR', 'CONSULTANT'].includes(String(r).toUpperCase())) ||

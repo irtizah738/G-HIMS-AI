@@ -75,6 +75,10 @@ describe('DEV-2 to DEV-5 synthetic scenario integrity', () => {
     expect(SANDBOX_PERSONAS.some(p => p.key === 'doctor' && p.role === 'DOCTOR')).toBe(true);
     expect(script).toContain("'SIGN_CLINICAL_NOTES'");
     expect(script).toContain("verificationStatus: 'VERIFIED'");
+    expect(script).toContain("verifiedByActorId: personaUid('admin')");
+    expect(script).toContain('verifiedAt: nowIso');
+    expect(script).toContain("'CONSULT_OPD'");
+    expect(script).toContain("shiftName: 'DAY', status: 'PUBLISHED'");
     expect(script).toContain("employmentStatus: 'ACTIVE'");
     expect(script).toContain("collection('clinicalPrivileges')");
     expect(script).toContain("collection('rosterAssignments')");

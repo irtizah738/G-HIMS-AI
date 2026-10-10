@@ -109,6 +109,36 @@ other Firebase project IDs. Start the frontend locally with `bun dev`.
 Server env variables above must also be provided to the Next.js process.
 **Do not deploy with** `NEXT_PUBLIC_GHIMS_DEV_SANDBOX_EMULATORS=true`.
 
+### DEV-5.1: Canonical MPI lookup parity (existing sandboxes)
+
+OPD encounter hydration is intentionally scoped to active OPD patients and does
+not contain every registered MPI identity. Exact MRN/CNIC lookup therefore
+uses the authenticated `/api/clinical/mpi/lookup` endpoint with the current
+tenant and session. Do not weaken the OPD scope or register a known patient
+again to make it visible.
+
+Sandbox fixtures created by earlier versions omitted the authoritative
+`mpi_registry` entries. Repair ONLY those exact synthetic MRNs using the
+existing verified emulator-only tenant:
+
+```powershell
+bun run dev:sandbox:repair-mpi
+bun run dev:sandbox:verify
+bun run dev:sandbox:test
+```
+
+The repair rechecks the disposable tenant marker, validates each patient
+document, creates missing canonical MRN registry entries transactionally, and
+rejects collisions. It does not reset patients, Auth identities, encounters or
+clinical evidence. A fresh seed now writes the indices directly.
+
+After restarting `bun dev`, confirm `DS-MRN-0001` resolves as
+`Sandbox Identity Alpha` in both OPD MPI exact search and the standalone MPI.
+The standalone MPI details must follow the filtered patient rather than
+display a previously selected unrelated patient. An already registered patient
+without an OPD encounter opens its MPI record without invoking new-patient
+registration; starting a fresh encounter remains a separate governed workflow.
+
 ### 5. Disposable reset
 
 This permanently erases only the dedicated *local emulator tenant*, including

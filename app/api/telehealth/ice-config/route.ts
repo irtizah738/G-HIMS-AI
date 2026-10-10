@@ -51,6 +51,7 @@ export async function POST(req: NextRequest) {
     }
     const room = await tenant.collection('telehealthSignaling').doc(roomToken).get();
     const data = room.data();
+    if (!data) return reject('TELEHEALTH_CALL_NOT_ACTIVE', 403);
     assertTelehealthRoomLease(data, {
       roomToken,
       sessionId: session.id,

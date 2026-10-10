@@ -87,6 +87,16 @@ describe('Offline cached identity is not authoritative', () => {
     expect(canResumeOfflineIdentity('clinician-1', { user: identity, session: { ...session, authenticatedAt: new Date(now - 13 * 60 * 60 * 1000).toISOString() } }, now)).toBe(false);
   });
 
+  test('session refresh refuses revoked and mismatched device bindings', async () => {
+    const route = await source('app/api/auth/session/route.ts');
+    const getRoute = route.split('export async function GET')[1]?.split('export async function DELETE')[0] || '';
+    expect(getRoute).toContain('validateSession(tenantId, sessionId, verifiedToken.uid)');
+    expect(getRoute).toContain('assertDeviceActive(tenantId, session.deviceId, verifiedToken.uid)');
+    expect(getRoute).toContain('requestedDeviceId !== session.deviceId');
+    expect(getRoute).toContain("code: 'DEVICE_REVOKED'");
+    expect(getRoute).toContain('resolveAuthorizationContext(verifiedToken, tenantId, session.sessionId');
+  });
+
   test('client never claims cached offline identity as server authentication or privilege authority', async () => {
     const [client, context, guard] = await Promise.all([
       source('lib/auth/auth-client.ts'),

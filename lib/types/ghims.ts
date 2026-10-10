@@ -139,7 +139,7 @@ export interface BillingAuditMismatch {
 
 export interface Encounter {
   id: string;
-  type: 'Inpatient' | 'Outpatient' | 'Emergency';
+  type: 'Inpatient' | 'Outpatient' | 'Emergency' | 'Telehealth';
   department: string;
   admitDate: string;
   dischargeDate?: string;

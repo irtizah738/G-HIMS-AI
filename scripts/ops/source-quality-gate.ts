@@ -62,6 +62,10 @@ for (const file of files.sort()) {
     }
   }
 
+  // Ambient .d.ts declarations are checked by tsc, not transpileModule,
+  // which cannot emit a declaration-only module and can throw Debug Failure.
+  if (/\.d\.(?:ts|mts|cts)$/.test(relative)) continue;
+
   const result = ts.transpileModule(source, {
     fileName: file,
     reportDiagnostics: true,

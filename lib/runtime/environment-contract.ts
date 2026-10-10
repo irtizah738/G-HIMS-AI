@@ -8,8 +8,8 @@ function clean(value: string | undefined): string {
 
 function serverProjectMap(): ProjectMap {
   return {
-    DEMO: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO),
-    TEST: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_TEST),
+    DEMO: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO) || clean(process.env.FIREBASE_PROJECT_ID) || 'g-hims-ai',
+    TEST: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_TEST) || 'ghims-test',
     STAGING: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_STAGING),
     PRODUCTION: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION),
   };
@@ -19,8 +19,8 @@ function clientProjectMap(): ProjectMap {
   // NEXT_PUBLIC variables must be referenced statically so Next.js can inline them
   // into the browser bundle.
   return {
-    DEMO: clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_DEMO),
-    TEST: clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST),
+    DEMO: clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_DEMO) || clean(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) || 'g-hims-ai',
+    TEST: clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST) || 'ghims-test',
     STAGING: clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING),
     PRODUCTION: clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION),
   };

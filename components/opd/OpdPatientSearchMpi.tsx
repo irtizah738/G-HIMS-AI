@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { normalizeCnic, normalizeMrn } from '@/lib/clinical/mpi/patient-mpi';
 import {
   Search,
@@ -22,6 +22,8 @@ import {
 import { PatientDemographics, MpiMatchResult } from '@/types/opd-domain';
 import { PatientRecordRemovalModal } from '@/components/mpi/patient-record-removal-modal';
 import { useAuth } from '@/lib/auth/auth-context';
+import { AuthClient } from '@/lib/auth/auth-client';
+import { adaptExactMpiIdentityForOpd } from '@/lib/opd/workspace-read-model';
 
 interface OpdPatientSearchMpiProps {
   patients: PatientDemographics[];
@@ -38,7 +40,7 @@ export function OpdPatientSearchMpi({
   onInitiateMergeRequest,
   onPatientRemoved,
 }: OpdPatientSearchMpiProps) {
-  const { roles } = useAuth();
+  const { roles, activeTenant } = useAuth();
   const canRemove = roles.some(role => ['ADMIN', 'ADMINISTRATOR', 'SYSTEM_ADMIN', 'SUPER_ADMIN'].includes(String(role).toUpperCase()));
   const [removalCandidate, setRemovalCandidate] = useState<PatientDemographics | null>(null);
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -49,8 +51,69 @@ export function OpdPatientSearchMpi({
   const [mergeReason, setMergeReason] = useState<string>('');
   const [simulatedBarcode, setSimulatedBarcode] = useState<string>('');
 
+  const exactField = searchField === 'MRN' || searchField === 'CNIC';
+  const query = searchTerm.trim();
+  const normalizedQuery = searchField === 'CNIC' ? normalizeCnic(query) : normalizeMrn(query);
+  const lookupKey = exactField && normalizedQuery && activeTenant?.tenantId
+    ? `${activeTenant.tenantId}:${searchField}:${normalizedQuery}`
+    : '';
+  const [exactLookup, setExactLookup] = useState<{
+    key: string;
+    status: 'found' | 'not_found' | 'failed';
+    patient?: PatientDemographics;
+    error?: string;
+  } | null>(null);
+  const lookupPending = Boolean(lookupKey) && exactLookup?.key !== lookupKey;
+
+  // An exact MPI request is authoritative, not limited to OPD encounters.
+  // Keep server-verified identity results scoped to this query/tenant only.
+  useEffect(() => {
+    if (!lookupKey || !activeTenant?.tenantId) {
+      setExactLookup(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      const params = new URLSearchParams({
+        tenantId: activeTenant.tenantId,
+        [searchField === 'CNIC' ? 'cnic' : 'mrn']: query,
+      });
+      void (async () => {
+        try {
+          const response = await AuthClient.authorizedFetch(
+            `/api/clinical/mpi/lookup?${params.toString()}`,
+            { method: 'GET', cache: 'no-store' },
+            activeTenant.tenantId
+          );
+          if (cancelled) return;
+          if (response.status === 404) {
+            setExactLookup({ key: lookupKey, status: 'not_found' });
+            return;
+          }
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload.success || !payload.patient) {
+            throw new Error(String(payload.error || `MPI_LOOKUP_HTTP_${response.status}`));
+          }
+          const patient = adaptExactMpiIdentityForOpd(payload.patient);
+          if (!cancelled) setExactLookup({ key: lookupKey, status: 'found', patient });
+        } catch (error) {
+          if (!cancelled) setExactLookup({
+            key: lookupKey,
+            status: 'failed',
+            error: error instanceof Error ? error.message : 'Exact MPI lookup failed',
+          });
+        }
+      })();
+    }, 300);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [lookupKey, activeTenant?.tenantId, searchField, query]);
+
   // Filtered patients based on search
   const searchResults = useMemo(() => {
+    if (lookupKey) {
+      return !lookupPending && exactLookup?.status === 'found' && exactLookup.patient
+        ? [exactLookup.patient] : [];
+    }
     if (!searchTerm.trim()) {
       return patients.filter(p => !['MERGED', 'REMOVED'].includes(String(p.status || 'ACTIVE').toUpperCase()));
     }
@@ -77,7 +140,7 @@ export function OpdPatientSearchMpi({
         (p.preferredName && p.preferredName.toLowerCase().includes(qLower))
       );
     });
-  }, [patients, searchTerm, searchField]);
+  }, [patients, searchTerm, searchField, lookupKey, lookupPending, exactLookup]);
 
   // Real-time MPI Duplicate Detection Engine for current search or prospective new patient
   const mpiDuplicateMatches = useMemo((): MpiMatchResult[] => {
@@ -189,7 +252,7 @@ export function OpdPatientSearchMpi({
       </div>
 
       {/* Duplicate Alert Banner (if high-probability collision found) */}
-      {mpiDuplicateMatches.length > 0 && (
+      {!exactField && mpiDuplicateMatches.length > 0 && (
         <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold flex items-center gap-2">
@@ -255,17 +318,24 @@ export function OpdPatientSearchMpi({
           <span className="text-xs text-slate-400">Strict Tenant-Isolated Scope</span>
         </div>
 
-        {searchResults.length === 0 ? (
+        {lookupPending ? (
+          <div className="p-6 text-center text-xs text-slate-500">Verifying exact patient identity against the authoritative MPI…</div>
+        ) : lookupKey && exactLookup?.status === 'failed' ? (
+          <div role="alert" className="p-6 text-xs text-rose-600">Exact MPI lookup failed: {exactLookup.error}. Registration is disabled until lookup succeeds.</div>
+        ) : searchResults.length === 0 ? (
           <div className="py-12 text-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl space-y-3">
             <Users className="w-8 h-8 text-slate-400 mx-auto" />
             <p className="text-xs font-bold text-slate-500">No patient records found matching &quot;{searchTerm}&quot;</p>
-            <button
-              onClick={() => onInitiateNewRegistration({ fullName: searchTerm })}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
-            >
-              <PlusCircle className="w-4 h-4" />
-              Register &quot;{searchTerm}&quot; as New Patient
-            </button>
+            {!exactField && (
+              <button
+                onClick={() => onInitiateNewRegistration({ fullName: searchTerm })}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <PlusCircle className="w-4 h-4" />
+                Register &quot;{searchTerm}&quot; as New Patient
+              </button>
+            )}
+            {exactField && <p className="text-xs text-amber-600">Exact MPI identity not found. Verify identifier and registration status before creating a patient.</p>}
           </div>
         ) : (
           <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
@@ -316,7 +386,7 @@ export function OpdPatientSearchMpi({
                           onClick={() => onSelectPatient(p)}
                           className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
                         >
-                          Start OPD Visit
+                          {lookupKey ? 'Open Existing Patient' : 'Start OPD Visit'}
                         </button>
                         {canRemove && (
                           <button

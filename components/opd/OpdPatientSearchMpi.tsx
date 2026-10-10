@@ -215,7 +215,7 @@ export function OpdPatientSearchMpi({
               Scan Barcode / QR
             </button>
             <button
-              onClick={() => onInitiateNewRegistration({ fullName: searchTerm })}
+              onClick={() => onInitiateNewRegistration()}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
             >
               <PlusCircle className="w-4 h-4" />

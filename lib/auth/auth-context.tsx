@@ -39,6 +39,7 @@ interface AuthContextType {
   loadingStatus: AuthStateLoadingStatus;
   error: string | null;
   isOffline: boolean;
+  isOfflineContinuity: boolean;
   accessibleTenants: TenantSelectionItem[];
   signIn: (email: string, pass: string, options?: SignInOptions) => Promise<LoginResponsePayload>;
   signInFederated: (options?: SignInOptions) => Promise<LoginResponsePayload>;
@@ -70,6 +71,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loadingStatus, setLoadingStatus] = useState<AuthStateLoadingStatus>('RESTORING_SESSION');
   const [error, setError] = useState<string | null>(null);
   const [isOffline, setIsOffline] = useState<boolean>(false);
+  const [isOfflineContinuity, setIsOfflineContinuity] = useState<boolean>(false);
   const [accessibleTenants, setAccessibleTenants] = useState<TenantSelectionItem[]>([]);
 
   const inactivityMonitorRef = useRef<InactivityMonitor | null>(null);
@@ -152,6 +154,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     setUser(authUser);
     setSession(sessionRec);
+    setIsOfflineContinuity(payload.offlineContinuity === true);
     setActiveTenant(payload.tenant);
     setRoles(payload.authorization.roles);
     setPermissions(payload.authorization.permissions);
@@ -171,8 +174,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const payload = await AuthClient.validateCurrentSession();
 
-      if (payload && payload.authenticated) {
+      if (payload && (payload.authenticated || payload.offlineContinuity === true)) {
         applyLoginPayload(payload);
+        setIsOffline(payload.offlineContinuity === true);
         if (payload.accessibleTenants && payload.accessibleTenants.length > 0) {
           setAccessibleTenants(payload.accessibleTenants);
         }
@@ -184,6 +188,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setRoles([]);
         setPermissions([]);
         setClinicalPrivileges([]);
+        setIsOfflineContinuity(false);
         setLoadingStatus('IDLE');
       }
     } catch (err: any) {
@@ -207,7 +212,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    return () => unsubscribe();
+    const handleConnectivityRestored = () => { void refreshAuth(); };
+    window.addEventListener('online', handleConnectivityRestored);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('online', handleConnectivityRestored);
+    };
   }, [refreshAuth]);
 
   // Sign In Action
@@ -329,6 +339,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setRoles([]);
       setPermissions([]);
       setClinicalPrivileges([]);
+      setIsOfflineContinuity(false);
       setIsLocked(false);
       setLoading(false);
       setLoadingStatus('IDLE');
@@ -436,9 +447,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const hasPerm = useCallback(
     (permission: string) => {
-      return checkPermission(user, permission);
+      return !isOfflineContinuity && checkPermission(user, permission);
     },
-    [user]
+    [user, isOfflineContinuity]
   );
 
   const hasR = useCallback(
@@ -450,9 +461,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const hasPriv = useCallback(
     (privilege: string) => {
-      return checkPrivilege(user, privilege);
+      return !isOfflineContinuity && checkPrivilege(user, privilege);
     },
-    [user]
+    [user, isOfflineContinuity]
   );
 
   const value = useMemo(
@@ -469,6 +480,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loadingStatus,
       error,
       isOffline,
+      isOfflineContinuity,
       accessibleTenants,
       signIn,
       signInFederated,
@@ -497,6 +509,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loadingStatus,
       error,
       isOffline,
+      isOfflineContinuity,
       accessibleTenants,
       signIn,
       signInFederated,

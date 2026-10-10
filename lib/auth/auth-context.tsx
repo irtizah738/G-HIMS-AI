@@ -123,6 +123,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user, isLocked, lockSession]);
 
   const applyLoginPayload = useCallback((payload: LoginResponsePayload) => {
+    // Never claim a new authentication timestamp when restoring local-only state.
+    const authenticatedAt = payload.offlineContinuity
+      ? (payload.offlineContinuityAuthenticatedAt || new Date(0).toISOString())
+      : new Date().toISOString();
     const authUser: AuthenticatedUser = {
       uid: payload.user.uid,
       email: payload.user.email,
@@ -136,7 +140,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clinicalPrivileges: payload.authorization.clinicalPrivileges,
       sessionId: payload.session.sessionId,
       deviceId: payload.session.deviceId,
-      lastAuthenticatedAt: new Date().toISOString(),
+      lastAuthenticatedAt: authenticatedAt,
     };
 
     const sessionRec: UserSessionRecord = {
@@ -147,7 +151,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       status: 'ACTIVE',
       createdAt: new Date().toISOString(),
       lastSeenAt: new Date().toISOString(),
-      authenticatedAt: new Date().toISOString(),
+      authenticatedAt,
       lastActivityAt: new Date().toISOString(),
       expiresAt: payload.session.expiresAt,
     };

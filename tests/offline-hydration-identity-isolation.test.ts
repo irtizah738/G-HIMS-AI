@@ -54,6 +54,14 @@ describe('Offline cached edge identity isolation', () => {
     expect(fn.indexOf('canResumeOfflineIdentity(')).toBeLessThan(fn.indexOf('getEdgeSyncMetadata('));
     expect(fn.indexOf('canResumeOfflineIdentity(')).toBeLessThan(fn.indexOf('listSecureEdgeEntities('));
     expect(fn).not.toContain('await listSecureEdgeEntities(tenantId, actorId, collection)');
+    // Decryption and metadata reads are asynchronous: identity must be checked
+    // again immediately before patient data is handed back to the caller.
+    const decrypted = fn.indexOf('await listSecureEdgeEntities(normalizedTenantId, actorId, collection)');
+    const finalCheck = fn.indexOf('canResumeOfflineIdentity(auth.currentUser?.uid, afterRead)');
+    const handedToUi = fn.indexOf('collections: Object.fromEntries(entries)');
+    expect(finalCheck).toBeGreaterThan(decrypted);
+    expect(handedToUi).toBeGreaterThan(finalCheck);
+    expect(fn.slice(finalCheck, handedToUi)).toContain("errorCode: 'OFFLINE_IDENTITY_NOT_VERIFIED'");
   });
 
   test('a late shared-workstation identity switch blocks server PHI return after encrypted storage', async () => {

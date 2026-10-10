@@ -162,6 +162,27 @@ export async function loadLocalEdgeSnapshot(
   );
   const metadata = await getEdgeSyncMetadata(normalizedTenantId, surface);
 
+  // IndexedDB reads yield control to the browser. A logout, shared-device
+  // account switch or session expiry during decryption must not return PHI.
+  const afterRead = await getCachedAuthSession();
+  if (
+    !afterRead ||
+    !canResumeOfflineIdentity(auth.currentUser?.uid, afterRead) ||
+    afterRead.user.uid !== actorId ||
+    afterRead.user.tenantId.trim().toLowerCase() !== normalizedTenantId ||
+    afterRead.session.sessionId !== cached.session.sessionId
+  ) {
+    return {
+      tenantId: normalizedTenantId,
+      generatedAt: 0,
+      snapshotVersion: 'local-locked',
+      collections: {},
+      source: 'LOCAL',
+      freshness: 'UNHYDRATED',
+      errorCode: 'OFFLINE_IDENTITY_NOT_VERIFIED',
+    };
+  }
+
   return {
     tenantId: normalizedTenantId,
     generatedAt: metadata?.serverGeneratedAt || metadata?.lastHydratedAt || 0,

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
 import type { TelehealthSession } from '@/lib/types/ghims';
@@ -25,8 +26,19 @@ function assertTenant(tenantId: string): void {
 }
 
 function assertRoomToken(roomToken: string): void {
-  if (!roomToken || !roomToken.startsWith('ROOM-') || roomToken.trim().length < 8) {
+  if (!roomToken || !/^ROOM-[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/.test(roomToken)) {
     throw new Error('TELEHEALTH_MEDIA_ROOM_TOKEN_INVALID');
+  }
+}
+
+function requirePatientJoinToken(presented: string, expectedHash?: string): void {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(presented) || !expectedHash || !/^[a-f0-9]{64}$/.test(expectedHash)) {
+    throw new Error('TELEHEALTH_PATIENT_JOIN_TOKEN_INVALID');
+  }
+  const presentedHash = createHash('sha256').update(presented).digest();
+  const expected = Buffer.from(expectedHash, 'hex');
+  if (expected.length !== presentedHash.length || !timingSafeEqual(presentedHash, expected)) {
+    throw new Error('TELEHEALTH_PATIENT_JOIN_TOKEN_INVALID');
   }
 }
 
@@ -56,11 +68,13 @@ async function authorizeClinician(
 ): Promise<string> {
   const { context } = await deriveAuthoritativeContext(req, tenantId);
   const clinicalRole = context.roles.some((role) =>
-    ['DOCTOR', 'CONSULTANT', 'NURSE', 'SYSTEM_ADMIN'].includes(
+    ['DOCTOR', 'CONSULTANT', 'NURSE'].includes(
       String(role || '').toUpperCase()
     )
   );
-  if (!clinicalRole) throw new Error('TELEHEALTH_CLINICIAN_AUTHORITY_REQUIRED');
+  if (!clinicalRole || (context.clinicalPrivileges?.length ?? 0) === 0) {
+    throw new Error('TELEHEALTH_CLINICIAN_AUTHORITY_REQUIRED');
+  }
 
   const db = getAdminFirestore();
   if (!db) throw new Error('TELEHEALTH_SIGNALING_STORE_UNAVAILABLE');
@@ -74,9 +88,7 @@ async function authorizeClinician(
   if (!encounter.exists) throw new Error('TELEHEALTH_ENCOUNTER_NOT_FOUND');
   const assignedProviderId = clean(encounter.data()?.assignedProviderId);
   if (
-    assignedProviderId &&
-    assignedProviderId !== context.actorId &&
-    !context.roles.includes('SYSTEM_ADMIN')
+    !assignedProviderId || assignedProviderId !== context.actorId
   ) {
     throw new Error('TELEHEALTH_CLINICIAN_ASSIGNMENT_MISMATCH');
   }
@@ -88,7 +100,8 @@ function errorResponse(error: unknown) {
   const status =
     message.includes('AUTH') ||
     message.includes('ACCESS_DENIED') ||
-    message.includes('ASSIGNMENT_MISMATCH')
+    message.includes('ASSIGNMENT_MISMATCH') ||
+    message.includes('TOKEN_INVALID')
       ? 403
       : message.includes('NOT_FOUND')
         ? 404
@@ -102,6 +115,7 @@ export async function POST(req: NextRequest) {
     const tenantId = clean(body.tenantId).toLowerCase();
     const roomToken = clean(body.roomToken);
     const senderRole = clean(body.senderRole).toUpperCase() as SignalRole;
+    const patientJoinToken = clean(body.patientJoinToken);
     const type = clean(body.type).toUpperCase() as SignalType;
     const payload = body.payload ?? null;
 
@@ -110,6 +124,10 @@ export async function POST(req: NextRequest) {
     }
     if (!['START', 'OFFER', 'ANSWER', 'ICE', 'LEAVE'].includes(type)) {
       throw new Error('TELEHEALTH_SIGNAL_TYPE_INVALID');
+    }
+    if ((senderRole === 'PATIENT' && !['ANSWER', 'ICE', 'LEAVE'].includes(type)) ||
+        (senderRole === 'CLINICIAN' && type === 'ANSWER')) {
+      throw new Error('TELEHEALTH_SIGNAL_ROLE_TYPE_INVALID');
     }
     assertTenant(tenantId);
     assertRoomToken(roomToken);
@@ -135,13 +153,17 @@ export async function POST(req: NextRequest) {
     const now = Date.now();
     const roomSnapshot = await roomRef.get();
     const room = roomSnapshot.data() as
-      | { active?: boolean; expiresAt?: number; clinicianId?: string }
+      | { active?: boolean; expiresAt?: number; clinicianId?: string; patientJoinTokenHash?: string }
       | undefined;
 
     let senderId = 'PATIENT_CAPABILITY';
     if (senderRole === 'CLINICIAN') {
       senderId = await authorizeClinician(req, tenantId, session);
       if (type === 'START') {
+        // A clinician authorizes a short-lived patient link independently of the room ID.
+        // Persist only a digest, so a stolen Firestore record cannot grant call access.
+        const issuedPatientJoinToken = randomBytes(32).toString('base64url');
+        const patientJoinTokenHash = createHash('sha256').update(issuedPatientJoinToken).digest('hex');
         await roomRef.set(
           {
             roomToken,
@@ -150,6 +172,7 @@ export async function POST(req: NextRequest) {
             patientId: session.patientId,
             active: true,
             clinicianId: senderId,
+            patientJoinTokenHash,
             startedAt: now,
             expiresAt: now + CALL_LEASE_MS,
             updatedAt: now,
@@ -158,8 +181,9 @@ export async function POST(req: NextRequest) {
         );
         return NextResponse.json({
           ok: true,
+          patientJoinToken: issuedPatientJoinToken,
           expiresAt: now + CALL_LEASE_MS,
-        });
+        }, { headers: { 'Cache-Control': 'no-store' } });
       }
     } else {
       if (
@@ -169,6 +193,7 @@ export async function POST(req: NextRequest) {
       ) {
         throw new Error('TELEHEALTH_CALL_NOT_ACTIVE');
       }
+      requirePatientJoinToken(patientJoinToken, room.patientJoinTokenHash);
     }
 
     if (senderRole === 'CLINICIAN' && type !== 'START') {
@@ -210,6 +235,7 @@ export async function GET(req: NextRequest) {
     const receiverRole = clean(
       req.nextUrl.searchParams.get('receiverRole')
     ).toUpperCase() as SignalRole;
+    const patientJoinToken = clean(req.headers.get('x-ghims-patient-join-token'));
     const after = Math.max(
       0,
       Number(req.nextUrl.searchParams.get('after') || 0) || 0
@@ -236,7 +262,7 @@ export async function GET(req: NextRequest) {
       .doc(roomToken);
     const roomSnapshot = await roomRef.get();
     const room = roomSnapshot.data() as
-      | { active?: boolean; expiresAt?: number }
+      | { active?: boolean; expiresAt?: number; patientJoinTokenHash?: string }
       | undefined;
     const now = Date.now();
 
@@ -246,6 +272,8 @@ export async function GET(req: NextRequest) {
 
     if (receiverRole === 'CLINICIAN') {
       await authorizeClinician(req, tenantId, session);
+    } else {
+      requirePatientJoinToken(patientJoinToken, room.patientJoinTokenHash);
     }
 
     const messages = await roomRef
@@ -267,7 +295,7 @@ export async function GET(req: NextRequest) {
           payload: message.payload,
           createdAt: message.createdAt,
         })),
-    });
+    }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     return errorResponse(error);
   }

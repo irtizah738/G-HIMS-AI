@@ -244,9 +244,10 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      // Telehealth sessions contain PHI and join capabilities. Browser clients
+      // must use authenticated server-side patient/care-team scoped projections.
       match /telehealthSessions/{sessionId} {
-        allow read: if canReadClinical(tenantId);
-        allow write: if false;
+        allow read, write: if false;
       }
 
       match /mpi_registry/{mpiKey} {

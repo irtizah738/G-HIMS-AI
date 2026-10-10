@@ -22,7 +22,7 @@ jobs:
       - name: Remove unused ESLint tree containing unpatched braces
         run: bun remove eslint eslint-config-next
       - name: Repair remaining audited transitive dependencies
-        run: bun audit fix
+        run: bun audit fix --latest
       - name: Require zero high and critical dependency advisories
         run: bun audit --audit-level=high
       - name: Verify no product regression

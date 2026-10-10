@@ -100,6 +100,10 @@ beforeAll(async () => {
       id: 'audit-a',
       action: 'TEST',
     });
+    await setDoc(doc(db, 'tenants', 'tenant-a', 'telehealthSessions', 'th-private'), {
+      id: 'th-private', patientId: 'pat-a', roomToken: 'ROOM-PRIVATE',
+      soapNote: { subjective: 'patient-only history' },
+    });
 
     await setDoc(doc(db, 'patients', 'legacy-pat'), {
       id: 'legacy-pat',
@@ -290,4 +294,21 @@ describe('Firestore P0 tenant isolation and server-authoritative writes', () => 
     await assertFails(getDoc(doc(doctorDb, 'tenants', 'tenant-a', 'audit_logs', 'audit-a')));
     await assertSucceeds(getDoc(doc(adminDb, 'tenants', 'tenant-a', 'audit_logs', 'audit-a')));
   });
+});
+
+
+describe('Telehealth PHI is never readable directly from Firestore clients', () => {
+  for (const [uid, role] of [
+    ['user-a', 'doctor'],
+    ['user-other', 'nurse'],
+    ['user-admin', 'administrator'],
+  ] as const) {
+    test(`${role} cannot directly fetch a telehealth session or room secret`, async () => {
+      const db = testEnv.authenticatedContext(uid, {
+        tenantId: 'tenant-a',
+        accessibleTenants: ['tenant-a'],
+      }).firestore();
+      await assertFails(getDoc(doc(db, 'tenants', 'tenant-a', 'telehealthSessions', 'th-private')));
+    });
+  }
 });

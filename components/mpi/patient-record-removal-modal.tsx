@@ -472,11 +472,11 @@ export function PatientRecordRemovalModal({
                 </button>
               ) : (
                 <button
-                  type={canAttemptOrdinaryRemoval ? 'submit' : 'button'}
+                  type={removalBlocked ? 'button' : 'submit'}
                   data-testid="remove-patient-confirm"
-                  disabled={pending || !allowed || isOffline}
+                  disabled={pending || !allowed || isOffline || (!removalBlocked && !valid)}
                   title={removalBlocked ? 'Review the authoritative clinical blockers before removal can be enabled' : undefined}
-                  onClick={canAttemptOrdinaryRemoval ? undefined : () => {
+                  onClick={!removalBlocked ? undefined : () => {
                     document.getElementById('mpi-removal-readiness-panel')?.scrollIntoView({
                       behavior: 'smooth', block: 'nearest',
                     });
@@ -485,8 +485,8 @@ export function PatientRecordRemovalModal({
                   className="flex min-h-10 items-center gap-2 rounded-lg bg-rose-700 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <ShieldCheck className="h-4 w-4" />
-                  {pending ? 'Committing…' : canAttemptOrdinaryRemoval
-                    ? 'Confirm audited removal' : 'Review clinical blockers'}
+                  {pending ? 'Committing…' : removalBlocked
+                    ? 'Review clinical blockers' : 'Confirm audited removal'}
                 </button>
               )}
             </div>

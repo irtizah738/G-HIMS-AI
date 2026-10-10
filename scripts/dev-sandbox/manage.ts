@@ -6,6 +6,7 @@
  * Reset destroys only the marked disposable sandbox tenant IN THE EMULATOR.
  */
 import { getAdminAuth, getAdminFirestore } from '../../server/firebase/admin';
+import { buildMpiRegistryKey } from '../../lib/clinical/mpi/patient-mpi';
 import {
   SANDBOX_ACK, SANDBOX_PROJECT_ID, SANDBOX_TENANT_ID,
   validateDevelopmentSandbox,
@@ -16,8 +17,8 @@ import {
 } from '../../lib/dev-sandbox/scenarios';
 
 const action = String(process.argv[2] || '').trim().toLowerCase();
-if (!['seed', 'verify', 'reset'].includes(action)) {
-  throw new Error('DEV_SANDBOX_ACTION_REQUIRED: seed | verify | reset');
+if (!['seed', 'verify', 'reset', 'repair-mpi'].includes(action)) {
+  throw new Error('DEV_SANDBOX_ACTION_REQUIRED: seed | verify | reset | repair-mpi');
 }
 const { tenantId, projectId } = validateDevelopmentSandbox(process.env);
 const db = getAdminFirestore();
@@ -37,6 +38,32 @@ function assertExistingMarker(): void {
 }
 
 const personaUid = (key: string) => `dev-sandbox-${key}`;
+/** Collision-safe canonical MRN indices for the isolated synthetic tenant. */
+async function ensureScenarioMrnRegistry(scenario: typeof SANDBOX_SCENARIOS[number]): Promise<'created' | 'existing'> {
+  const patientRef = tenant.collection('patients').doc(scenario.patientId);
+  const registryRef = tenant.collection('mpi_registry').doc(buildMpiRegistryKey('MRN', scenario.mrn));
+  return db.runTransaction(async (transaction) => {
+    const patient = await transaction.get(patientRef);
+    const registry = await transaction.get(registryRef);
+    if (!patient.exists || patient.data()?.sandboxFixture !== true ||
+        patient.data()?.mrn !== scenario.mrn || patient.data()?.tenantId !== tenantId) {
+      throw new Error(`DEV_SANDBOX_MPI_PATIENT_IDENTITY_MISMATCH:${scenario.id}`);
+    }
+    if (registry.exists) {
+      if (registry.data()?.patientId !== scenario.patientId) {
+        throw new Error(`DEV_SANDBOX_MPI_REGISTRY_COLLISION:${scenario.mrn}`);
+      }
+      return 'existing';
+    }
+    transaction.create(registryRef, {
+      patientId: scenario.patientId, tenantId, type: 'MRN', mrn: scenario.mrn,
+      status: 'ACTIVE', sandboxFixture: true, syntheticQualificationRecord: true,
+      createdAt: Date.now(),
+    });
+    return 'created';
+  });
+}
+
 
 if (action === 'reset') {
   if (!existingTenant.exists) {
@@ -67,6 +94,16 @@ if (action === 'reset') {
       scope: 'local-emulator-disposable-tenant', resetAt: new Date().toISOString(),
     }) + '\n');
   }
+} else if (action === 'repair-mpi') {
+  assertExistingMarker();
+  const checks = [];
+  for (const scenario of SANDBOX_SCENARIOS) {
+    checks.push({ mrn: scenario.mrn, result: await ensureScenarioMrnRegistry(scenario) });
+  }
+  process.stdout.write(JSON.stringify({
+    success: true, action, projectId, tenantId, checks,
+    note: 'Canonical sandbox-only MRN indices repaired without resetting patients or encounters.',
+  }, null, 2) + '\n');
 } else if (action === 'seed') {
   if (existingTenant.exists) {
     assertExistingMarker();
@@ -191,6 +228,7 @@ if (action === 'reset') {
       createdAt: now, updatedAt: now, sandboxFixture: true,
       syntheticQualificationRecord: true, scenarioId: scenario.id,
     });
+    await ensureScenarioMrnRegistry(scenario);
     if (scenario.encounterId) {
       await tenant.collection('encounters').doc(scenario.encounterId).create({
         id: scenario.encounterId, encounterId: scenario.encounterId,
@@ -252,6 +290,10 @@ if (action === 'reset') {
           episode.data()?.patientId !== scenario.patientId) {
         throw new Error(`DEV_SANDBOX_SCENARIO_ENCOUNTER_MISMATCH:${scenario.id}`);
       }
+    }
+    const registry = await tenant.collection('mpi_registry').doc(buildMpiRegistryKey('MRN', scenario.mrn)).get();
+    if (registry.data()?.patientId !== scenario.patientId) {
+      throw new Error(`DEV_SANDBOX_MPI_REGISTRY_UNVERIFIED:${scenario.mrn}; run repair-mpi`);
     }
     checks.push({ scenario: scenario.id, result: 'IDENTITY_BOUND' });
   }

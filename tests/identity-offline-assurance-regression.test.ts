@@ -48,7 +48,7 @@ describe('Production identity assurance', () => {
     expect(() => assertVerifiedIdentityAssurance({ email: 'doctor@example.invalid', email_verified: false }, 'PRODUCTION'))
       .toThrow(AuthError);
     expect(() => assertVerifiedIdentityAssurance({ email: '', email_verified: true }, 'PRODUCTION'))
-      .toThrow('Production identity has no verified email claim');
+      .toThrow('Production-like staff identity has no verified email claim');
     expect(() => assertVerifiedIdentityAssurance({ email: 'doctor@example.invalid', email_verified: false }, 'TEST'))
       .not.toThrow();
     expect(() => assertVerifiedIdentityAssurance({ email: 'doctor@example.invalid', email_verified: true }, 'PRODUCTION'))
@@ -62,8 +62,18 @@ describe('Production identity assurance', () => {
       .toThrow(AuthError);
     expect(() => assertPrivilegedSecondFactor(token({ sign_in_second_factor: 'totp' }), ['nurse'], 'PRODUCTION'))
       .not.toThrow();
-    expect(() => assertPrivilegedSecondFactor(token(), ['receptionist'], 'PRODUCTION'))
+    for (const role of ['admin', 'SuperAdmin', 'RECEPTIONIST', 'billing_clerk', 'FINANCE_MANAGER', 'unknown_staff_alias']) {
+      expect(() => assertPrivilegedSecondFactor(token(), [role], 'PRODUCTION'))
+        .toThrow('Hospital staff session requires verified MFA');
+    }
+    expect(() => assertPrivilegedSecondFactor(token(), ['PATIENT'], 'PRODUCTION'))
       .not.toThrow();
+    expect(() => assertPrivilegedSecondFactor(token(), ['patient', 'doctor'], 'PRODUCTION'))
+      .toThrow(AuthError);
+    expect(() => assertPrivilegedSecondFactor(token(), ['receptionist'], 'STAGING'))
+      .toThrow(AuthError);
+    expect(() => assertVerifiedIdentityAssurance({ email: 'staff@example.invalid', email_verified: false }, 'STAGING'))
+      .toThrow(AuthError);
     expect(() => assertPrivilegedSecondFactor(token(), ['doctor'], 'TEST'))
       .not.toThrow();
   });

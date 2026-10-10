@@ -528,13 +528,14 @@ export class AuthClient {
     }
 
     const idToken = await currentUser.getIdToken(true);
+    const device = generateDeviceMetadata();
     const response = await fetch('/api/auth/tenant-selection', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${idToken}`,
       },
-      body: JSON.stringify({ tenantId: targetTenantId }),
+      body: JSON.stringify({ tenantId: targetTenantId, device }),
     });
 
     const data: LoginResponsePayload = await response.json();

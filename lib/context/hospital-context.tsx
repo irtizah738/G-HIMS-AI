@@ -1233,11 +1233,18 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       refreshAuthoritativeSnapshot();
     };
 
+    const handleMpiRefresh = (event: Event) => {
+      const detail = (event as CustomEvent<{ tenantId?: string }>).detail;
+      if (String(detail?.tenantId || '').trim().toLowerCase() !== tenantId) return;
+      refreshAuthoritativeSnapshot();
+    };
     window.addEventListener('ghims:edge-sync-complete', handleSyncComplete);
+    window.addEventListener('ghims:mpi-directory-refresh', handleMpiRefresh);
 
     return () => {
       cancelled = true;
       window.removeEventListener('ghims:edge-sync-complete', handleSyncComplete);
+      window.removeEventListener('ghims:mpi-directory-refresh', handleMpiRefresh);
     };
   }, [
     activeTenant?.tenantId,

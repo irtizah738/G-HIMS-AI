@@ -55,13 +55,14 @@ export function TelehealthCallPanel({
   const [micEnabled, setMicEnabled] = useState(true);
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [patientJoinToken, setPatientJoinToken] = useState<string | null>(null);
 
   const joinUrl =
-    typeof window === 'undefined'
+    !patientJoinToken || typeof window === 'undefined'
       ? ''
       : `${window.location.origin}/telehealth/join?tenant=${encodeURIComponent(
           tenantId
-        )}&room=${encodeURIComponent(session.roomToken)}`;
+        )}&room=${encodeURIComponent(session.roomToken)}&join=${encodeURIComponent(patientJoinToken)}`;
 
   const clinicianSignal = async (
     type: 'START' | 'OFFER' | 'ICE' | 'LEAVE',
@@ -151,6 +152,7 @@ export function TelehealthCallPanel({
   const startCall = async () => {
     if (disabled || state === 'PREPARING' || state === 'WAITING' || state === 'CONNECTED') return;
     setError(null);
+    setPatientJoinToken(null);
     setState('PREPARING');
     connectedReportedRef.current = false;
     processedRef.current.clear();
@@ -162,7 +164,11 @@ export function TelehealthCallPanel({
         throw new Error('This browser does not provide camera/microphone access required for telehealth.');
       }
 
-      await clinicianSignal('START');
+      const startedRoom = await clinicianSignal('START');
+      if (typeof startedRoom.patientJoinToken !== 'string' || !startedRoom.patientJoinToken) {
+        throw new Error('The server did not issue a patient-specific join capability.');
+      }
+      setPatientJoinToken(startedRoom.patientJoinToken);
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
@@ -230,6 +236,7 @@ export function TelehealthCallPanel({
       // Local media must still terminate if the signaling endpoint is unavailable.
     } finally {
       disposeMedia();
+      setPatientJoinToken(null);
       setState('ENDED');
     }
   };

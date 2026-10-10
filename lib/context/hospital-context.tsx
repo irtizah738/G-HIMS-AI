@@ -2354,6 +2354,15 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     if (activeTelehealthSession?.id === sessionId) {
       setActiveTelehealthSession(authoritative);
     }
+    // Successful Telehealth completion also changes patient care pointers and
+    // encounter lifecycle in the canonical aggregate. Never leave other MPI
+    // workspaces on an obsolete pre-completion snapshot.
+    const tenantId = String(activeTenant?.tenantId || user?.tenantId || '').trim().toLowerCase();
+    if (tenantId && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('ghims:edge-sync-complete', {
+        detail: { tenantId },
+      }));
+    }
   };
 
   return (

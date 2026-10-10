@@ -1,0 +1,108 @@
+import { describe, expect, test } from 'bun:test';
+import type { DecodedIdToken } from 'firebase-admin/auth';
+import type { AuthenticatedUser, UserSessionRecord } from '@/lib/auth/auth-types';
+import { AuthError } from '@/lib/auth/auth-errors';
+import {
+  assertVerifiedIdentityAssurance,
+  assertPrivilegedSecondFactor,
+} from '@/server/auth/identity-assurance';
+import { canResumeOfflineIdentity } from '@/lib/auth/offline-session-policy';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+
+const now = new Date('2026-10-10T12:00:00.000Z').getTime();
+const source = (file: string) => readFile(path.join(process.cwd(), file), 'utf8');
+
+const identity: AuthenticatedUser = {
+  uid: 'clinician-1',
+  email: 'doctor@example.invalid',
+  tenantId: 'hospital-a',
+  roles: ['doctor'],
+  permissions: ['SIGN_CLINICAL_NOTES'],
+  clinicalPrivileges: ['SIGN_CLINICAL_NOTES'],
+  departmentIds: ['medicine'],
+  facilityIds: ['ward-1'],
+  accountStatus: 'ACTIVE',
+  sessionId: 'session-1',
+  lastAuthenticatedAt: new Date(now - 10_000).toISOString(),
+};
+const session: UserSessionRecord = {
+  sessionId: 'session-1',
+  userId: identity.uid,
+  tenantId: identity.tenantId,
+  status: 'ACTIVE',
+  createdAt: new Date(now - 20_000).toISOString(),
+  authenticatedAt: new Date(now - 10_000).toISOString(),
+  lastSeenAt: new Date(now - 10_000).toISOString(),
+  lastActivityAt: new Date(now - 10_000).toISOString(),
+  expiresAt: new Date(now + 60_000).toISOString(),
+};
+const token = (claims: Record<string, unknown> = {}) => ({
+  email: 'doctor@example.invalid',
+  email_verified: true,
+  firebase: { sign_in_provider: 'password', ...claims },
+} as unknown as DecodedIdToken);
+
+describe('Production identity assurance', () => {
+  test('production refuses unverified email and missing identity, but tests remain isolated', () => {
+    expect(() => assertVerifiedIdentityAssurance({ email: 'doctor@example.invalid', email_verified: false }, 'PRODUCTION'))
+      .toThrow(AuthError);
+    expect(() => assertVerifiedIdentityAssurance({ email: '', email_verified: true }, 'PRODUCTION'))
+      .toThrow('Production identity has no verified email claim');
+    expect(() => assertVerifiedIdentityAssurance({ email: 'doctor@example.invalid', email_verified: false }, 'TEST'))
+      .not.toThrow();
+    expect(() => assertVerifiedIdentityAssurance({ email: 'doctor@example.invalid', email_verified: true }, 'PRODUCTION'))
+      .not.toThrow();
+  });
+
+  test('privileged production users require claim-proven MFA, without SSO provider bypass', () => {
+    expect(() => assertPrivilegedSecondFactor(token(), ['doctor'], 'PRODUCTION'))
+      .toThrow('requires verified MFA');
+    expect(() => assertPrivilegedSecondFactor(token({ sign_in_provider: 'oidc.hospital' }), ['SYSTEM_ADMIN'], 'PRODUCTION'))
+      .toThrow(AuthError);
+    expect(() => assertPrivilegedSecondFactor(token({ sign_in_second_factor: 'totp' }), ['nurse'], 'PRODUCTION'))
+      .not.toThrow();
+    expect(() => assertPrivilegedSecondFactor(token(), ['receptionist'], 'PRODUCTION'))
+      .not.toThrow();
+    expect(() => assertPrivilegedSecondFactor(token(), ['doctor'], 'TEST'))
+      .not.toThrow();
+  });
+});
+
+describe('Offline cached identity is not authoritative', () => {
+  test('permits bounded local continuity only for matching active Firebase identity', () => {
+    expect(canResumeOfflineIdentity('clinician-1', { user: identity, session }, now)).toBe(true);
+    expect(canResumeOfflineIdentity(undefined, { user: identity, session }, now)).toBe(false);
+    expect(canResumeOfflineIdentity('intruder', { user: identity, session }, now)).toBe(false);
+    expect(canResumeOfflineIdentity('clinician-1', { user: identity, session: { ...session, userId: 'intruder' } }, now)).toBe(false);
+    expect(canResumeOfflineIdentity('clinician-1', { user: identity, session: { ...session, tenantId: 'hospital-b' } }, now)).toBe(false);
+    expect(canResumeOfflineIdentity('clinician-1', { user: identity, session: { ...session, sessionId: 'other' } }, now)).toBe(false);
+  });
+
+  test('rejects suspended, revoked, expired, future-issued and old offline sessions', () => {
+    expect(canResumeOfflineIdentity('clinician-1', { user: { ...identity, accountStatus: 'SUSPENDED' }, session }, now)).toBe(false);
+    expect(canResumeOfflineIdentity('clinician-1', { user: identity, session: { ...session, status: 'REVOKED' } }, now)).toBe(false);
+    expect(canResumeOfflineIdentity('clinician-1', { user: identity, session: { ...session, expiresAt: new Date(now - 1).toISOString() } }, now)).toBe(false);
+    expect(canResumeOfflineIdentity('clinician-1', { user: identity, session: { ...session, authenticatedAt: new Date(now + 30_000).toISOString() } }, now)).toBe(false);
+    expect(canResumeOfflineIdentity('clinician-1', { user: identity, session: { ...session, authenticatedAt: new Date(now - 13 * 60 * 60 * 1000).toISOString() } }, now)).toBe(false);
+  });
+
+  test('client never claims cached offline identity as server authentication or privilege authority', async () => {
+    const [client, context, guard] = await Promise.all([
+      source('lib/auth/auth-client.ts'),
+      source('lib/auth/auth-context.tsx'),
+      source('components/auth/auth-guard.tsx'),
+    ]);
+    expect(client).toContain('canResumeOfflineIdentity(currentUser?.uid, cached)');
+    expect(client).toContain('offlineContinuity: true');
+    expect(client).toContain('authenticated: false');
+    expect(client).toContain('clinicalPrivileges: []');
+    expect(client).toContain('permissions: []');
+    expect(client).toContain('currentUser.uid !== cached.session.userId');
+    expect(context).toContain('payload.offlineContinuity === true');
+    expect(context).toContain('!isOfflineContinuity && checkPermission');
+    expect(context).toContain('!isOfflineContinuity && checkPrivilege');
+    expect(guard).toContain('Offline cached identity only');
+    expect(client).toContain('Protected server actions require an online authoritative session');
+  });
+});

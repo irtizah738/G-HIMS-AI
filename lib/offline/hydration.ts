@@ -2,6 +2,7 @@
 
 import { auth } from '@/lib/firebase/client';
 import { getCachedAuthSession } from '@/lib/offline/auth-storage';
+import { canResumeOfflineIdentity } from '@/lib/auth/offline-session-policy';
 import { getEdgeSyncMetadata } from '@/lib/offline/db';
 import {
   listSecureEdgeEntities,
@@ -56,13 +57,28 @@ export async function loadLocalEdgeSnapshot(
 ): Promise<EdgeSnapshot> {
   const surface = requireEdgeHydrationSurface(requestedSurface);
   const cached = await getCachedAuthSession();
-  const actorId = cached?.user?.uid || '';
   const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
-  if (cached && (
+  if (!normalizedTenantId) throw new Error('EDGE_HYDRATION_TENANT_REQUIRED');
+  // The encrypted local read model is never released using a cached UID alone.
+  // The restored Firebase identity must match the bounded active session.
+  // On user sign-out, UID switch, or offline session expiry, fail closed.
+  if (!cached || !canResumeOfflineIdentity(auth.currentUser?.uid, cached)) {
+    return {
+      tenantId: normalizedTenantId,
+      generatedAt: 0,
+      snapshotVersion: 'local-locked',
+      collections: {},
+      source: 'LOCAL',
+      freshness: 'UNHYDRATED',
+      errorCode: 'OFFLINE_IDENTITY_NOT_VERIFIED',
+    };
+  }
+  const actorId = cached.user.uid;
+  if (
     cached.user.tenantId.trim().toLowerCase() !== normalizedTenantId ||
     cached.session.tenantId.trim().toLowerCase() !== normalizedTenantId ||
     cached.session.userId !== cached.user.uid
-  )) {
+  ) {
     throw new Error('EDGE_HYDRATION_TENANT_MISMATCH');
   }
   const authority = await getEdgeSyncMetadata(normalizedTenantId, 'edge-authority');
@@ -141,13 +157,13 @@ export async function loadLocalEdgeSnapshot(
   const entries = await Promise.all(
     collectionsToLoad.map(async (collection) => [
       collection,
-      await listSecureEdgeEntities(tenantId, actorId, collection),
+      await listSecureEdgeEntities(normalizedTenantId, actorId, collection),
     ] as const)
   );
   const metadata = await getEdgeSyncMetadata(normalizedTenantId, surface);
 
   return {
-    tenantId,
+    tenantId: normalizedTenantId,
     generatedAt: metadata?.serverGeneratedAt || metadata?.lastHydratedAt || 0,
     snapshotVersion: metadata?.snapshotVersion || 'local-unhydrated',
     collections: Object.fromEntries(entries),

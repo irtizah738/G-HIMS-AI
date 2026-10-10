@@ -31,6 +31,7 @@ describe('Governed Telehealth TURN issuance and patient capability', () => {
     for (const check of [
       'data.expiresAt <= Date.now()', 'data.sessionId !== session.id',
       'data.encounterId !== session.encounterId', 'data.patientId !== session.patientId',
+      "data.clinicianId !== String(encounter.data()?.assignedProviderId || '')",
       'deriveAuthoritativeContext(req, tenantId)', 'TELEHEALTH_CLINICIAN_ASSIGNMENT_MISMATCH',
       "'Cache-Control': 'no-store, private'",
     ]) expect(api).toContain(check);
@@ -47,6 +48,8 @@ describe('Governed Telehealth TURN issuance and patient capability', () => {
     expect(patient).toContain("role: 'PATIENT', patientJoinToken");
     expect(patient).toContain("'x-ghims-patient-join-token': patientJoinToken");
     expect(clinician).toContain("role: 'CLINICIAN'");
+    expect(clinician).toContain("await clinicianSignal('LEAVE').catch(() => {})");
+    expect(clinician).toContain('setPatientJoinToken(null)');
     expect(signaling).toContain('assertTelehealthPatientJoinToken(patientJoinToken, room.patientJoinTokenHash)');
     expect(signaling).toContain('TELEHEALTH_SESSION_AMBIGUOUS');
     expect(signaling).toContain("['DOCTOR', 'CONSULTANT']");

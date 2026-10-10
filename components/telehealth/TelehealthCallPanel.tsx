@@ -214,7 +214,12 @@ export function TelehealthCallPanel({
         });
       }, 1000);
     } catch (cause) {
+      // START may have already minted a bearer link. Revoke the active media
+      // room on partial startup failure so a stale link cannot join later.
+      await clinicianSignal('LEAVE').catch(() => {});
       disposeMedia();
+      setPatientJoinToken(null);
+      setRelayAvailable(null);
       setState('IDLE');
       setError(cause instanceof Error ? cause.message : 'Unable to start the telehealth call.');
     }

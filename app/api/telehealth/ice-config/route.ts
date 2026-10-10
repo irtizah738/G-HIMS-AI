@@ -53,7 +53,8 @@ export async function POST(req: NextRequest) {
     if (!room.exists || data?.active !== true ||
         !Number.isFinite(data?.expiresAt) || data.expiresAt <= Date.now() ||
         data.sessionId !== session.id || data.encounterId !== session.encounterId ||
-        data.patientId !== session.patientId || data.roomToken !== roomToken) {
+        data.patientId !== session.patientId || data.roomToken !== roomToken ||
+        data.clinicianId !== String(encounter.data()?.assignedProviderId || '')) {
       return reject('TELEHEALTH_CALL_NOT_ACTIVE', 403);
     }
     if (role === 'CLINICIAN') {

@@ -38,7 +38,9 @@ describe('P0 clinical and telehealth security invariants', () => {
     expect(clinician).toContain('setPatientJoinToken(startedRoom.patientJoinToken)');
     expect(patient).toContain("'x-ghims-patient-join-token': patientJoinToken");
     expect(patient).toContain('patientJoinToken,');
-    expect(join).toContain("searchParams.get('join')");
+    expect(join).toContain("fragment.get('join')");
+    expect(join).toContain("url.searchParams.get('join')");
+    expect(join).toContain("window.history.replaceState");
   });
 
   test('Bun frozen-lockfile root manifest dependency ranges are exact', async () => {

@@ -90,6 +90,17 @@ describe('Governed Telehealth TURN issuance and patient capability', () => {
     }
   });
 
+  test('new invitation token uses fragment and is cleared from URL after mounting', () => {
+    const clinician = source('components/telehealth/TelehealthCallPanel.tsx');
+    const join = source('app/telehealth/join/page.tsx');
+    expect(clinician).toContain('#join=${encodeURIComponent(patientJoinToken)}');
+    expect(clinician).not.toContain('&join=${encodeURIComponent(patientJoinToken)}');
+    expect(join).toContain("fragment.get('join')");
+    expect(join).toContain("url.searchParams.get('join')");
+    expect(join.indexOf('window.history.replaceState('))
+      .toBeLessThan(join.indexOf('setInvitation({ tenantId, roomToken, patientJoinToken })'));
+  });
+
   test('TURN credentials come only from server-side HMAC secret with bounded TTL', () => {
     const server = source('lib/backend/services/telehealth-ice-configuration.ts');
     expect(server).toContain("import 'server-only'");

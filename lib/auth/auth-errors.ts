@@ -16,6 +16,8 @@ export type AuthErrorCode =
   | 'SESSION_NOT_FOUND'
   | 'NETWORK_UNAVAILABLE'
   | 'AUTHENTICATION_REQUIRED'
+  | 'EMAIL_VERIFICATION_REQUIRED'
+  | 'MFA_REQUIRED'
   | 'AUTHORIZATION_REQUIRED'
   | 'RATE_LIMITED'
   | 'CLINICAL_PRIVILEGE_DENIED'
@@ -76,6 +78,10 @@ export function getDefaultUserMessage(code: AuthErrorCode): string {
       return 'Clinical session not found or invalid.';
     case 'NETWORK_UNAVAILABLE':
       return 'Network connection is unavailable. Switched to offline clinical cache mode.';
+    case 'EMAIL_VERIFICATION_REQUIRED':
+      return 'Verify your account email with the hospital identity provider before production access.';
+    case 'MFA_REQUIRED':
+      return 'Complete multifactor authentication for privileged hospital access.';
     case 'AUTHENTICATION_REQUIRED':
       return 'Authentication required. Please sign in to access clinical systems.';
     case 'AUTHORIZATION_REQUIRED':

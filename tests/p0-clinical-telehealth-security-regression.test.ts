@@ -32,7 +32,7 @@ describe('P0 clinical and telehealth security invariants', () => {
     expect(signaling).toContain("createHash('sha256').update(issuedPatientJoinToken)");
     expect(signaling).toContain('timingSafeEqual(presentedHash, expected)');
     expect(signaling).toContain('requirePatientJoinToken(patientJoinToken, room.patientJoinTokenHash)');
-    expect(signaling).toContain('context.clinicalPrivileges.length === 0');
+    expect(signaling).toContain('(context.clinicalPrivileges?.length ?? 0) === 0');
     expect(signaling).toContain('!assignedProviderId || assignedProviderId !== context.actorId');
     expect(clinician).toContain('setPatientJoinToken(startedRoom.patientJoinToken)');
     expect(patient).toContain("'x-ghims-patient-join-token': patientJoinToken");

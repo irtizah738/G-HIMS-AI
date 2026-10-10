@@ -26,11 +26,15 @@ describe('Staging Firebase isolation is mandatory across server and browser', ()
     const env = await readFile(path.join(process.cwd(), 'lib/runtime/environment-contract.ts'), 'utf8');
     const client = await readFile(path.join(process.cwd(), 'lib/firebase/client.ts'), 'utf8');
     const admin = await readFile(path.join(process.cwd(), 'server/firebase/admin.ts'), 'utf8');
+    const preflight = await readFile(path.join(process.cwd(), 'scripts/ops/drp-staging-preflight.ts'), 'utf8');
 
     expect(env).toContain("assertStagingProjectDistinct(projects.STAGING, projects.PRODUCTION, 'client')");
     expect(env).toContain("assertStagingProjectDistinct(projects.STAGING, projects.PRODUCTION, 'server')");
     expect(client.indexOf('assertClientFirebaseProjectIsolation(')).toBeLessThan(client.indexOf('initializeApp(clientCredentials)'));
     expect(admin.indexOf('assertServerFirebaseProjectIsolation(String(projectId ||')).
       toBeLessThan(admin.indexOf('initializeApp({'));
+    expect(preflight).toContain('STAGING_PUBLIC_PRODUCTION_REFERENCE_REQUIRED');
+    expect(preflight).toContain('STAGING_PUBLIC_PRODUCTION_REFERENCE_MISMATCH');
+    expect(preflight).toContain('publicProductionProject !== productionProject');
   });
 });

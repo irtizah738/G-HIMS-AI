@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Mic, MicOff, PhoneOff, ShieldCheck, Video, VideoOff } from 'lucide-react';
+import { loadTelehealthIceConfiguration } from '@/lib/telehealth/ice-client';
 
 type SignalMessage = {
   messageId: string;
@@ -9,21 +10,6 @@ type SignalMessage = {
   payload: any;
   createdAt: number;
 };
-
-const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
-  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-];
-
-function iceServers(): RTCIceServer[] {
-  const raw = String(process.env.NEXT_PUBLIC_GHIMS_WEBRTC_ICE_SERVERS_JSON || '').trim();
-  if (!raw) return DEFAULT_ICE_SERVERS;
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_ICE_SERVERS;
-  } catch {
-    return DEFAULT_ICE_SERVERS;
-  }
-}
 
 export function TelehealthPatientJoin({
   tenantId,
@@ -153,6 +139,9 @@ export function TelehealthPatientJoin({
 
       // Verify the clinician has activated the room before requesting media.
       await loadSignals();
+      const ice = await loadTelehealthIceConfiguration({
+        tenantId, roomToken, role: 'PATIENT', patientJoinToken,
+      });
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
@@ -161,7 +150,7 @@ export function TelehealthPatientJoin({
       streamRef.current = stream;
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
-      const peer = new RTCPeerConnection({ iceServers: iceServers() });
+      const peer = new RTCPeerConnection({ iceServers: ice.iceServers });
       peerRef.current = peer;
       stream.getTracks().forEach((track) => peer.addTrack(track, stream));
 

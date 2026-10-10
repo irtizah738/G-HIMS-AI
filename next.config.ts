@@ -12,6 +12,16 @@ const nextConfig: NextConfig = {
     '@grpc/grpc-js',
   ],
   output: 'standalone',
+  async headers() {
+    return [{
+      source: '/telehealth/join',
+      headers: [
+        { key: 'Referrer-Policy', value: 'no-referrer' },
+        { key: 'Cache-Control', value: 'private, no-store' },
+        { key: 'X-Robots-Tag', value: 'noindex, nofollow, noarchive' },
+      ],
+    }];
+  },
   images: {
     remotePatterns: [
       {

@@ -1,0 +1,112 @@
+import { describe, expect, test } from 'bun:test';
+import { createHash, randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { assertTelehealthPatientJoinToken } from '@/lib/backend/security/telehealth-patient-capability';
+import { assertTelehealthRoomLease, type ExpectedTelehealthRoom } from '@/lib/backend/security/telehealth-room-policy';
+
+const source = (name: string) => readFileSync(name, 'utf8');
+
+describe('Governed Telehealth TURN issuance and patient capability', () => {
+  test('exact room-bound 256-bit token required; empty, tampered, revoked credentials fail', () => {
+    const token = randomBytes(32).toString('base64url');
+    const hash = createHash('sha256').update(token).digest('hex');
+    expect(() => assertTelehealthPatientJoinToken(token, hash)).not.toThrow();
+    const other = randomBytes(32).toString('base64url');
+    for (const [bad, hashValue] of [
+      ['', hash], [other, hash], [token.slice(1), hash], [token, undefined],
+      [token, createHash('sha256').update(other).digest('hex')],
+    ] as Array<[string, string | undefined]>) {
+      expect(() => assertTelehealthPatientJoinToken(bad, hashValue))
+        .toThrow('TELEHEALTH_PATIENT_JOIN_TOKEN_INVALID');
+    }
+  });
+
+  test('room policy rejects expired, malformed, cross-tenant-context or reassigned media room', () => {
+    const now = 1_800_000_000_000;
+    const exact: ExpectedTelehealthRoom = {
+      roomToken: 'ROOM-EXAMPLE', sessionId: 'session-1',
+      encounterId: 'encounter-1', patientId: 'patient-1', clinicianId: 'doctor-1',
+    };
+    const valid: Record<string, unknown> = {
+      ...exact, active: true, expiresAt: now + 60_000,
+    };
+    expect(() => assertTelehealthRoomLease(valid, exact, now)).not.toThrow();
+    expect(() => assertTelehealthRoomLease(undefined, exact, now))
+      .toThrow('TELEHEALTH_CALL_NOT_ACTIVE');
+    for (const malformed of [
+      { ...valid, active: false },
+      { ...valid, expiresAt: now - 1 },
+      { ...valid, expiresAt: 'late' },
+      { ...valid, clinicianId: 'doctor-2' },
+      { ...valid, patientId: 'another-patient' },
+      { ...valid, encounterId: 'another-encounter' },
+      { ...valid, sessionId: 'another-session' },
+      { ...valid, roomToken: 'other-room' },
+    ]) {
+      expect(() => assertTelehealthRoomLease(malformed, exact, now))
+        .toThrow('TELEHEALTH_CALL_NOT_ACTIVE');
+    }
+    expect(() => assertTelehealthRoomLease(valid, { ...exact, clinicianId: '' }, now))
+      .toThrow('TELEHEALTH_CALL_NOT_ACTIVE');
+  });
+
+  test('patient ICE endpoint checks independent token after room lease and before credential issuance', () => {
+    const api = source('app/api/telehealth/ice-config/route.ts');
+    const leaseCheck = api.indexOf('assertTelehealthRoomLease(data, {');
+    const verifyJoin = api.indexOf('assertTelehealthPatientJoinToken(patientJoinToken, data.patientJoinTokenHash)');
+    const mint = api.indexOf('buildTelehealthIceConfiguration(roomToken)');
+    expect(leaseCheck).toBeGreaterThan(-1);
+    expect(verifyJoin).toBeGreaterThan(leaseCheck);
+    expect(mint).toBeGreaterThan(verifyJoin);
+    for (const check of [
+      'sessionId: session.id', 'encounterId: session.encounterId',
+      'patientId: session.patientId',
+      "clinicianId: String(encounter.data()?.assignedProviderId || '')",
+      'deriveAuthoritativeContext(req, tenantId)', 'TELEHEALTH_CLINICIAN_ASSIGNMENT_MISMATCH',
+      "'Cache-Control': 'no-store, private'",
+    ]) expect(api).toContain(check);
+    expect(api).not.toContain('NEXT_PUBLIC_GHIMS_WEBRTC_ICE_SERVERS_JSON');
+  });
+
+  test('clients preserve patient signaling and ICE capabilities with no browser TURN secret', () => {
+    const client = source('lib/telehealth/ice-client.ts');
+    const patient = source('components/telehealth/TelehealthPatientJoin.tsx');
+    const clinician = source('components/telehealth/TelehealthCallPanel.tsx');
+    const signaling = source('app/api/telehealth/signaling/route.ts');
+    expect(client).toContain("role: 'PATIENT';");
+    expect(client).toContain('patientJoinToken: string;');
+    expect(patient).toContain("role: 'PATIENT', patientJoinToken");
+    expect(patient).toContain("'x-ghims-patient-join-token': patientJoinToken");
+    expect(clinician).toContain("role: 'CLINICIAN'");
+    expect(clinician).toContain("await clinicianSignal('LEAVE').catch(() => {})");
+    expect(clinician).toContain('setPatientJoinToken(null)');
+    expect(signaling).toContain('assertTelehealthPatientJoinToken(patientJoinToken, room.patientJoinTokenHash)');
+    expect(signaling).toContain('TELEHEALTH_SESSION_AMBIGUOUS');
+    expect(signaling).toContain("['DOCTOR', 'CONSULTANT']");
+    expect(signaling).not.toContain("['DOCTOR', 'CONSULTANT', 'NURSE']");
+    for (const code of [client, patient, clinician]) {
+      expect(code).not.toContain('GHIMS_WEBRTC_TURN_REST_SECRET');
+      expect(code).not.toContain('NEXT_PUBLIC_GHIMS_WEBRTC_ICE_SERVERS_JSON');
+    }
+  });
+
+  test('new invitation token uses fragment and is cleared from URL after mounting', () => {
+    const clinician = source('components/telehealth/TelehealthCallPanel.tsx');
+    const join = source('app/telehealth/join/page.tsx');
+    expect(clinician).toContain('#join=${encodeURIComponent(patientJoinToken)}');
+    expect(clinician).not.toContain('&join=${encodeURIComponent(patientJoinToken)}');
+    expect(join).toContain("fragment.get('join')");
+    expect(join).toContain("url.searchParams.get('join')");
+    expect(join.indexOf('window.history.replaceState('))
+      .toBeLessThan(join.indexOf('setInvitation({ tenantId, roomToken, patientJoinToken })'));
+  });
+
+  test('TURN credentials come only from server-side HMAC secret with bounded TTL', () => {
+    const server = source('lib/backend/services/telehealth-ice-configuration.ts');
+    expect(server).toContain("import 'server-only'");
+    expect(server).toContain("createHmac('sha1', secret)");
+    expect(server).toContain('Math.floor(Date.now() / 1000) + 3600');
+    expect(server).toContain('GHIMS_WEBRTC_TURN_REST_SECRET');
+    expect(server).toContain('GHIMS_WEBRTC_TURN_URLS_JSON');
+  });
+});

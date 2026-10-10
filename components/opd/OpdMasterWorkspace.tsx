@@ -493,7 +493,8 @@ export function OpdMasterWorkspace() {
 
   const directoryTenantMatch = IS_DEMO_RUNTIME ||
     (Boolean(auth.activeTenant?.tenantId) &&
-      mpiDirectoryTenantId === auth.activeTenant?.tenantId);
+      String(mpiDirectoryTenantId || '').trim().toLowerCase() ===
+        String(auth.activeTenant?.tenantId || '').trim().toLowerCase());
   const mpiReadiness = directoryTenantMatch
     ? mpiDirectoryReadiness
     : 'UNHYDRATED';

@@ -71,8 +71,8 @@ const eligibility = ConsultantDirectoryService.assertConsultantEligibility({
   now: Date.now(),
 });
 if (!eligibility.eligible || eligibility.availability !== 'ON_DUTY' ||
-    !eligibility.activePrivilegeTypes.includes('CONSULT_OPD') ||
-    !eligibility.activePrivilegeTypes.includes('SIGN_CLINICAL_NOTES')) {
+    !eligibility.activePrivilegeTypes?.includes('CONSULT_OPD') ||
+    !eligibility.activePrivilegeTypes?.includes('SIGN_CLINICAL_NOTES')) {
   throw new Error('DEV_SANDBOX_CLINICIAN_NOT_ROUTABLE:' +
     (eligibility.reason || eligibility.availability));
 }

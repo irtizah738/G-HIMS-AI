@@ -5,7 +5,8 @@
  */
 import { getAdminAuth, getAdminFirestore } from '../../server/firebase/admin';
 import { validateDevelopmentSandbox } from '../../lib/dev-sandbox/safety';
-import { SANDBOX_PERSONAS, SANDBOX_SCENARIOS, scenarioCarePointers } from '../../lib/dev-sandbox/scenarios';
+import { SANDBOX_FACILITY_ID, SANDBOX_PERSONAS, SANDBOX_SCENARIOS, scenarioCarePointers } from '../../lib/dev-sandbox/scenarios';
+import { ConsultantDirectoryService } from '../../lib/clinical/intelligence/consultant-directory-service';
 
 const { tenantId } = validateDevelopmentSandbox(process.env);
 const db = getAdminFirestore();
@@ -48,6 +49,9 @@ const clinicalCredentials = await tenant.collection('clinicalCredentials')
   .where('employeeId', '==', 'ds_emp_doctor').limit(2).get();
 const signingPrivileges = await tenant.collection('clinicalPrivileges')
   .where('employeeId', '==', 'ds_emp_doctor').get();
+const doctorRecord = await tenant.collection('employees').doc('ds_emp_doctor').get();
+const roster = await tenant.collection('rosterAssignments')
+  .where('employeeId', '==', 'ds_emp_doctor').get();
 if (!(await auth.getUser(uid)).email?.endsWith('@ghims-dev-sandbox.invalid') ||
     clinicalMember.data()?.credentialStatus !== 'VERIFIED' ||
     !clinicalMember.data()?.clinicalPrivileges?.includes('SIGN_CLINICAL_NOTES') ||
@@ -56,8 +60,25 @@ if (!(await auth.getUser(uid)).email?.endsWith('@ghims-dev-sandbox.invalid') ||
       x.data().status === 'GRANTED')) {
   throw new Error('DEV_SANDBOX_HCM_DOCTOR_CREDENTIAL_NOT_READY');
 }
+const eligibility = ConsultantDirectoryService.assertConsultantEligibility({
+  employee: doctorRecord.data() as any,
+  membership: clinicalMember.data() as any,
+  credentials: clinicalCredentials.docs.map(doc => doc.data() as any),
+  privileges: signingPrivileges.docs.map(doc => doc.data() as any),
+  shifts: roster.docs.map(doc => doc.data() as any),
+  facilityId: SANDBOX_FACILITY_ID,
+  departmentId: doctor.department,
+  now: Date.now(),
+});
+if (!eligibility.eligible || eligibility.availability !== 'ON_DUTY' ||
+    !eligibility.activePrivilegeTypes.includes('CONSULT_OPD') ||
+    !eligibility.activePrivilegeTypes.includes('SIGN_CLINICAL_NOTES')) {
+  throw new Error('DEV_SANDBOX_CLINICIAN_NOT_ROUTABLE:' +
+    (eligibility.reason || eligibility.availability));
+}
 process.stdout.write(JSON.stringify({
   success: true, tenantId, doctorIdentity: 'SYNTHETIC_VERIFIED_IN_EMULATOR',
+  consultantEligibility: 'ON_DUTY_AND_HCM_VERIFIED',
   checks, stage: 'READY_FOR_ACTUAL_COMMAND_E2E',
   next: 'Use authenticated sandbox UI/API workflows and collect command/audit/outbox evidence for each scenario.',
 }, null, 2) + '\n');

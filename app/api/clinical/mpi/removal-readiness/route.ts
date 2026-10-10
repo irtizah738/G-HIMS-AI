@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
     const patientDoc = await tenant.collection('patients').doc(patientId).get();
     if (!patientDoc.exists) return responseError('PATIENT_NOT_FOUND', 404);
     const patient = patientDoc.data() as Record<string, unknown>;
-    if ((patient.tenantId && patient.tenantId !== context.tenantId) ||
+    if (patient.tenantId !== context.tenantId ||
         String(patient.mrn || '').trim().toUpperCase() !== expectedMrn) {
       return responseError('PATIENT_IDENTITY_MISMATCH', 409);
     }
@@ -63,6 +63,14 @@ export async function POST(req: NextRequest) {
       }] : [];
     });
     const pointers = pointerBlockers(patient);
+    const lifecycleById = new Map<string, string>();
+    for (const doc of found.docs) {
+      const data = doc.data();
+      const status = String(data.status || '').trim().toUpperCase() || 'UNKNOWN';
+      const authoritativeId = String(data.encounterId || data.id || doc.id);
+      lifecycleById.set(authoritativeId, status);
+      lifecycleById.set(doc.id, status);
+    }
     const byEncounter = new Map(encounters.map(e => [e.encounterId, e]));
     // Do not hide stale pointers: even a terminal encounter is still blocked
     // if the patient's active-care reference was not safely reconciled.
@@ -70,9 +78,20 @@ export async function POST(req: NextRequest) {
       ...encounters,
       ...pointers.map(p => {
         const matched = p.encounterId ? byEncounter.get(p.encounterId) : undefined;
-        return matched ? {
+        if (matched) return {
           ...p, status: matched.status,
           detail: 'Unresolved encounter and active patient pointer. Complete the governed clinical disposition.',
+        };
+        const status = p.encounterId ? lifecycleById.get(p.encounterId) : undefined;
+        if (status && ['COMPLETED','CLOSED','DISCHARGED','CANCELLED','CANCELED','TRANSFERRED'].includes(status)) {
+          return {
+            ...p, status: 'STALE_POINTER_TERMINAL_ENCOUNTER',
+            detail: `Encounter is ${status}, but the patient's active-care pointer remains. An authorized clinical reconciliation must clear it atomically.`,
+          };
+        }
+        return p.encounterId && !status ? {
+          ...p, status: 'POINTER_ENCOUNTER_NOT_FOUND',
+          detail: 'No matching encounter was found under this patient. Verify identity and reconcile the orphaned pointer through an audited command.',
         } : p;
       }),
     ];

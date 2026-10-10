@@ -1,6 +1,4 @@
-import { db } from '@/lib/firebase/client';
 import { collection, getDocs, limit, orderBy, query } from 'firebase/firestore';
-import { AuthClient } from '@/lib/auth/auth-client';
 
 export type AuditAction =
   | 'READ'
@@ -132,6 +130,9 @@ export function buildCanonicalAuditString(
  * Identity, role, tenant session, network origin and persistence are re-derived server-side.
  */
 export async function logAuditEvent(input: AuditEventInput): Promise<AuditLogEntry> {
+  // Pure severity/chain utilities must never initialize Firebase during imports.
+  // Load browser identity only when an authenticated audit command is requested.
+  const { AuthClient } = await import('@/lib/auth/auth-client');
   const response = await AuthClient.authorizedFetch(
     '/api/audit/events',
     {
@@ -288,6 +289,9 @@ export async function fetchAuditLogs(
   if (!cleanTenantId) return [];
 
   try {
+    // Configuration validation remains strict for live reads but does not run
+    // when pure audit utilities are loaded during isolated backend tests.
+    const { db } = await import('@/lib/firebase/client');
     const snapshot = await getDocs(
       query(
         collection(db, 'tenants', cleanTenantId, 'audit_logs'),

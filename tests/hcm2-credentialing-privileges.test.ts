@@ -106,8 +106,8 @@ describe('HCM-2 credentialing and clinical privileges',()=>{
     expect(auth).toContain("privilege.status!=='GRANTED'");
     expect(auth).toContain('facilityScope');
     expect(auth).toContain('departmentScope');
-    expect(auth).toContain('const clinicalPrivileges = hcmPrivileges;');
-    expect(auth).not.toContain('membership.clinicalPrivileges || []');
+    expect(auth).toContain('const clinicalPrivileges = hcmPrivileges');
+    expect(auth).not.toContain('membership.clinicalPrivileges');
     expect(auth).toContain('resolveCredentialGatedPrivileges');
     expect(auth).toContain('    : [];');
     expect(auth).not.toContain('credentialGatedRoleBaseline');

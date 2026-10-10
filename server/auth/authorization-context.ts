@@ -218,8 +218,9 @@ export async function resolveAuthorizationContext(
       })
     : [];
 
-  // Clinical authority must come exclusively from canonical HCM grants.
-  // Membership credentials/role-derived privileges can never restore a revoked grant.
+  // Only the canonical, scoped HCM employee/credential/privilege chain may
+  // grant clinical authority. A tenant-membership fallback would reinstate
+  // privileges after revocation or when HCM records are missing.
   const clinicalPrivileges = hcmPrivileges;
 
   return {

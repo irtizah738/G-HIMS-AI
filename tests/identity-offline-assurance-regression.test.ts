@@ -131,6 +131,14 @@ describe('Offline cached identity is not authoritative', () => {
     expect(refreshBody).toContain('setClinicalPrivileges([])');
     expect(refreshBody).toContain('setIsOfflineContinuity(false)');
     expect(context).toContain('!isOfflineContinuity && checkPermission');
+    expect(context).toContain('!isOfflineContinuity && checkRole');
+    expect(context).toContain('setRoles(payload.offlineContinuity ? [] : payload.authorization.roles)');
+    // Prior tenant discovery is sensitive identity metadata and must not
+    // remain visible when a server session is denied or the user signs out.
+    const refreshSource = context.split('const refreshAuth = useCallback')[1]?.split('const userRef')[0] || '';
+    expect(refreshSource.match(/setAccessibleTenants\(\[\]\)/g)?.length).toBe(2);
+    const logoutSource = context.split('const signOut = useCallback')[1]?.split('// Tenant Switching Action')[0] || '';
+    expect(logoutSource).toContain('setAccessibleTenants([])');
     expect(context).toContain('!isOfflineContinuity && checkPrivilege');
     expect(guard).toContain('Offline cached identity only');
     expect(client).toContain('Protected server actions require an online authoritative session');

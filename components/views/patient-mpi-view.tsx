@@ -44,7 +44,7 @@ import { executeActiveTenantCommand } from '@/lib/api/command-client';
 
 export function PatientMpiView() {
   const router = useRouter();
-  const { patients, selectedPatientId, setSelectedPatientId, registerNewPatient, mergePatients, addClinicalNote, addVitals, beds } = useHospital();
+  const { patients, mpiDirectoryReadiness, mpiDirectoryTenantId, selectedPatientId, setSelectedPatientId, registerNewPatient, mergePatients, addClinicalNote, addVitals, beds } = useHospital();
   const auth = useAuth();
   const canRemove = auth.roles.some((role) =>
     ['ADMIN', 'ADMINISTRATOR', 'SYSTEM_ADMIN', 'SUPER_ADMIN'].includes(String(role).trim().toUpperCase())
@@ -97,8 +97,14 @@ export function PatientMpiView() {
   const [registrationError, setRegistrationError] = useState<string | null>(null);
 
   // ABAC patient dataset gating: If user is 'patient', ONLY show their own record
-  const scopedPatients =
-    currentRole === 'patient'
+  const directoryMatchesTenant =
+    mpiDirectoryReadiness === 'DEMO' ||
+    Boolean(auth.activeTenant?.tenantId && mpiDirectoryTenantId === auth.activeTenant.tenantId);
+  const directoryUsable = directoryMatchesTenant &&
+    ['DEMO','CURRENT','STALE'].includes(mpiDirectoryReadiness);
+  const scopedPatients = !directoryUsable
+    ? []
+    : currentRole === 'patient'
       ? activePatientId
         ? patients.filter((p) => p.id === activePatientId)
         : []
@@ -163,7 +169,9 @@ export function PatientMpiView() {
 
   const activePatients = scopedPatients.filter(p => !['MERGED', 'REMOVED'].includes(String(p.status || 'ACTIVE').toUpperCase()));
   const currentPatient = activePatients.find((p) => p.id === selectedPatientId) || activePatients[0];
-  const activeEncounter = currentPatient?.encounters?.[0];
+  const activeEncounter = currentPatient?.encounters?.find(
+    (encounter) => encounter.status === 'active'
+  );
   const assignedBed = beds.find((b) => b.id === currentPatient?.activeBedId);
 
   const handleOpenPatient360 = async () => {
@@ -492,12 +500,20 @@ export function PatientMpiView() {
             <button
               id="btn-open-new-patient-modal"
               onClick={() => setShowNewPatientModal(true)}
+              disabled={!directoryUsable || mpiDirectoryReadiness === 'STALE'}
               className="px-2.5 py-1 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-1 shadow-xs transition-colors"
             >
               <Plus className="w-3.5 h-3.5" /> New Patient
             </button>
           </div>
 
+          <p role="status" className="text-[11px] text-slate-500" data-testid="hospital-mpi-directory-readiness">
+            {mpiDirectoryReadiness === 'DEMO'
+              ? 'Synthetic DEMO patient directory — not Firestore'
+              : directoryUsable
+                ? `Shared authorized hospital MPI · ${mpiDirectoryReadiness}`
+                : 'Patient directory unverified; check tenant and hydration before registration'}
+          </p>
           <div className="relative">
             <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
@@ -513,6 +529,12 @@ export function PatientMpiView() {
 
         {/* Patient List */}
         <div className="flex-1 overflow-y-auto divide-y divide-slate-100 p-2 space-y-1">
+          {!directoryUsable && (
+            <p role="status" className="rounded-lg border border-amber-200 p-3 text-xs text-amber-700">
+              Patient directory unavailable ({mpiDirectoryReadiness}). This is not confirmation
+              that the tenant has zero patients. Refresh the authenticated tenant session.
+            </p>
+          )}
           {filteredPatients.map((patient) => {
             const isSelected = patient.id === currentPatient?.id;
             return (

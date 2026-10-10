@@ -1,10 +1,25 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { AlertTriangle, ShieldCheck, Trash2, X } from 'lucide-react';
 import { useAuth } from '@/lib/auth/auth-context';
 import { useHospital } from '@/lib/context/hospital-context';
 import { executeActiveTenantCommand } from '@/lib/api/command-client';
+import { AuthClient } from '@/lib/auth/auth-client';
+
+type RemovalCareBlocker = {
+  source: 'ENCOUNTER' | 'ACTIVE_CARE_POINTER' | 'ACTIVE_BED';
+  domain: string;
+  encounterId?: string;
+  status: string;
+  detail: string;
+};
+type RemovalReadiness = {
+  success: true;
+  readyForRemoval: boolean;
+  checkedAt: number;
+  blockers: RemovalCareBlocker[];
+};
 
 export interface RemovablePatient {
   id: string;
@@ -40,7 +55,7 @@ export function PatientRecordRemovalModal({
   ]);
   const activeEncounters = (effectivePatient.encounters || []).filter((e) => {
     const s = String(e.status || '').trim().toUpperCase();
-    return s && !terminalStatuses.has(s);
+    return !terminalStatuses.has(s);
   });
   const hasActiveCarePointers = Boolean(
     effectivePatient.activeBedId ||
@@ -67,19 +82,72 @@ export function PatientRecordRemovalModal({
       patient.mrn === 'MRN-20260930-3611' && patient.fullName.trim().toLowerCase() === 'test patient');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [readiness, setReadiness] = useState<RemovalReadiness | null>(null);
+  const [inspectPending, setInspectPending] = useState(false);
+  const [inspectionError, setInspectionError] = useState<string | null>(null);
+  const [inspectionRevision, setInspectionRevision] = useState(0);
+  useEffect(() => {
+    if (!activeTenant?.tenantId || !allowed || isOffline) {
+      setReadiness(null);
+      return;
+    }
+    let active = true;
+    setInspectPending(true);
+    setReadiness(null);
+    setInspectionError(null);
+    void AuthClient.authorizedFetch(
+      '/api/clinical/mpi/removal-readiness',
+      {
+        method: 'POST',
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenantId: activeTenant.tenantId,
+          patientId: patient.id,
+          expectedMrn: patient.mrn,
+        }),
+      },
+      activeTenant.tenantId
+    )
+      .then(async response => {
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || result.success !== true ||
+            typeof result.readyForRemoval !== 'boolean' ||
+            !Array.isArray(result.blockers)) {
+          throw new Error(result.error || 'Authoritative care inspection failed.');
+        }
+        return result as RemovalReadiness;
+      })
+      .then(result => { if (active) setReadiness(result); })
+      .catch(cause => {
+        if (active) setInspectionError(cause instanceof Error ? cause.message : 'Unable to verify patient care.');
+      })
+      .finally(() => { if (active) setInspectPending(false); });
+    return () => { active = false; };
+  }, [activeTenant?.tenantId, allowed, isOffline, patient.id, patient.mrn, inspectionRevision]);
+
+  const removalBlocked = !readiness?.readyForRemoval;
+  const careBlockers = readiness?.blockers || [];
 
   const reasonLength = reason.trim().length;
   const verifiedMrn = confirmationMrn.trim().toUpperCase() === patient.mrn.trim().toUpperCase();
   const valid = allowed && !isOffline && Boolean(activeTenant?.tenantId) &&
     reasonLength >= 20 && reasonLength <= 1000 && verifiedMrn &&
     retentionAcknowledged && !pending;
+  const canAttemptOrdinaryRemoval = valid && !removalBlocked && !inspectPending;
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!valid || hasActiveCare) {
-      if (hasActiveCare) {
-        setError('Cannot remove patient record: active clinical care is underway. Close or discharge all active encounters before removal.');
-      }
+    if (!canAttemptOrdinaryRemoval) {
+      setError(
+        inspectPending
+          ? 'The clinical-care inspection is still running.'
+          : inspectionError
+            ? 'Authoritative care inspection failed: ' + inspectionError
+            : careBlockers.length
+              ? 'Removal is blocked by ' + careBlockers.length + ' verified encounter/care reference(s). Review the blockers and complete their authorized workflows.'
+              : 'A successful authoritative clinical-care inspection is required before removal.'
+      );
       return;
     }
     setPending(true);
@@ -206,7 +274,7 @@ export function PatientRecordRemovalModal({
               </p>
             </div>
 
-            {hasActiveCare && (
+            {(readiness ? !readiness.readyForRemoval : hasActiveCare) && (
               <div
                 data-testid="remove-patient-active-care-warning"
                 className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
@@ -216,12 +284,78 @@ export function PatientRecordRemovalModal({
                   Active Clinical Care in Progress
                 </p>
                 <p className="mt-1">
-                  Ordinary removal is blocked while care is active or unresolved.
+                  Ordinary removal is blocked while clinical care or an active-care reference remains unresolved.
                   {isConfirmedMock
                     ? ' The special synthetic retirement below requires independent server verification; it never records a clinical discharge.'
                     : ' Complete the appropriate clinical disposition or discharge before requesting removal.'}
                 </p>
               </div>
+            )}
+
+            {allowed && !isOffline && (
+              <section
+                id="mpi-removal-readiness-panel"
+                aria-label="Authoritative removal readiness"
+                data-testid="mpi-removal-readiness"
+                className="space-y-2 rounded-lg border border-slate-300 p-3 text-xs dark:border-slate-700"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-bold">Clinical-care removal blockers</p>
+                  <button
+                    type="button"
+                    data-testid="mpi-removal-refresh-blockers"
+                    disabled={pending || inspectPending}
+                    onClick={() => setInspectionRevision(value => value + 1)}
+                    className="rounded-lg border px-3 py-2 font-semibold disabled:opacity-50"
+                  >
+                    {inspectPending ? 'Checking Firestore…' : 'Refresh blockers'}
+                  </button>
+                </div>
+                <p className="text-slate-600 dark:text-slate-300">
+                  Verified against the authenticated tenant’s authoritative patient and encounters.
+                  This check is read-only and never closes care or removes a patient.
+                </p>
+                {inspectPending && <p role="status">Checking authoritative patient and encounter status…</p>}
+                {inspectionError && (
+                  <p role="alert" className="text-rose-700 dark:text-rose-300">
+                    Inspection unavailable: {inspectionError}. Removal remains disabled.
+                  </p>
+                )}
+                {readiness?.readyForRemoval && hasActiveCare && (
+                  <p role="status" className="text-amber-700 dark:text-amber-300">
+                    The local hospital view still shows care pointers, but the verified Firestore
+                    record currently has no blockers. Its edge cache may be stale; removal will be
+                    rechecked by the server and any disagreement will safely reject the request.
+                  </p>
+                )}
+                {readiness?.readyForRemoval && (
+                  <p role="status" className="text-emerald-700 dark:text-emerald-300">
+                    No active-care blockers were found in the authoritative check.
+                    Removal will still be revalidated by the backend.
+                  </p>
+                )}
+                {careBlockers.length > 0 && (
+                  <div className="max-h-48 space-y-2 overflow-y-auto" data-testid="mpi-removal-care-blockers">
+                    {careBlockers.map((item, index) => (
+                      <div key={`${item.source}:${item.encounterId || item.domain}:${index}`}
+                           className="rounded-lg border border-amber-400/50 p-2">
+                        <p className="font-semibold">{item.domain} · {item.status}</p>
+                        {item.encounterId && (
+                          <p className="break-all font-mono">Encounter: {item.encounterId}</p>
+                        )}
+                        <p>{item.detail}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {(careBlockers.length > 0 || hasActiveCare) && (
+                  <p className="font-medium">
+                    Resolve the encounter in its clinical workspace (OPD, IPD, Emergency or Telehealth),
+                    then refresh this check. A terminal encounter with a lingering active-care pointer
+                    requires authorized reconciliation; administrators cannot clear it by forcing MPI removal.
+                  </p>
+                )}
+              </section>
             )}
 
             {isConfirmedMock && hasActiveCare && (
@@ -337,14 +471,21 @@ export function PatientRecordRemovalModal({
                 </button>
               ) : (
                 <button
-                  type="submit"
+                  type={removalBlocked ? 'button' : 'submit'}
                   data-testid="remove-patient-confirm"
-                  disabled={!valid || hasActiveCare}
-                  title={hasActiveCare ? 'Cannot remove: patient has active care episodes in progress' : undefined}
+                  disabled={pending || !allowed || isOffline || (!removalBlocked && !valid)}
+                  title={removalBlocked ? 'Review the authoritative clinical blockers before removal can be enabled' : undefined}
+                  onClick={!removalBlocked ? undefined : () => {
+                    document.getElementById('mpi-removal-readiness-panel')?.scrollIntoView({
+                      behavior: 'smooth', block: 'nearest',
+                    });
+                    if (!inspectPending && !inspectionError) setInspectionRevision(value => value + 1);
+                  }}
                   className="flex min-h-10 items-center gap-2 rounded-lg bg-rose-700 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <ShieldCheck className="h-4 w-4" />
-                  {pending ? 'Committing…' : 'Confirm audited removal'}
+                  {pending ? 'Committing…' : removalBlocked
+                    ? 'Review clinical blockers' : 'Confirm audited removal'}
                 </button>
               )}
             </div>

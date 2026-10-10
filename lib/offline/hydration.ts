@@ -2,6 +2,7 @@
 
 import { auth } from '@/lib/firebase/client';
 import { getCachedAuthSession } from '@/lib/offline/auth-storage';
+import { canResumeOfflineIdentity } from '@/lib/auth/offline-session-policy';
 import { getEdgeSyncMetadata } from '@/lib/offline/db';
 import {
   listSecureEdgeEntities,
@@ -56,13 +57,28 @@ export async function loadLocalEdgeSnapshot(
 ): Promise<EdgeSnapshot> {
   const surface = requireEdgeHydrationSurface(requestedSurface);
   const cached = await getCachedAuthSession();
-  const actorId = cached?.user?.uid || '';
   const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
-  if (cached && (
+  if (!normalizedTenantId) throw new Error('EDGE_HYDRATION_TENANT_REQUIRED');
+  // The encrypted local read model is never released using a cached UID alone.
+  // The restored Firebase identity must match the bounded active session.
+  // On user sign-out, UID switch, or offline session expiry, fail closed.
+  if (!cached || !canResumeOfflineIdentity(auth.currentUser?.uid, cached)) {
+    return {
+      tenantId: normalizedTenantId,
+      generatedAt: 0,
+      snapshotVersion: 'local-locked',
+      collections: {},
+      source: 'LOCAL',
+      freshness: 'UNHYDRATED',
+      errorCode: 'OFFLINE_IDENTITY_NOT_VERIFIED',
+    };
+  }
+  const actorId = cached.user.uid;
+  if (
     cached.user.tenantId.trim().toLowerCase() !== normalizedTenantId ||
     cached.session.tenantId.trim().toLowerCase() !== normalizedTenantId ||
     cached.session.userId !== cached.user.uid
-  )) {
+  ) {
     throw new Error('EDGE_HYDRATION_TENANT_MISMATCH');
   }
   const authority = await getEdgeSyncMetadata(normalizedTenantId, 'edge-authority');
@@ -141,13 +157,34 @@ export async function loadLocalEdgeSnapshot(
   const entries = await Promise.all(
     collectionsToLoad.map(async (collection) => [
       collection,
-      await listSecureEdgeEntities(tenantId, actorId, collection),
+      await listSecureEdgeEntities(normalizedTenantId, actorId, collection),
     ] as const)
   );
   const metadata = await getEdgeSyncMetadata(normalizedTenantId, surface);
 
+  // IndexedDB reads yield control to the browser. A logout, shared-device
+  // account switch or session expiry during decryption must not return PHI.
+  const afterRead = await getCachedAuthSession();
+  if (
+    !afterRead ||
+    !canResumeOfflineIdentity(auth.currentUser?.uid, afterRead) ||
+    afterRead.user.uid !== actorId ||
+    afterRead.user.tenantId.trim().toLowerCase() !== normalizedTenantId ||
+    afterRead.session.sessionId !== cached.session.sessionId
+  ) {
+    return {
+      tenantId: normalizedTenantId,
+      generatedAt: 0,
+      snapshotVersion: 'local-locked',
+      collections: {},
+      source: 'LOCAL',
+      freshness: 'UNHYDRATED',
+      errorCode: 'OFFLINE_IDENTITY_NOT_VERIFIED',
+    };
+  }
+
   return {
-    tenantId,
+    tenantId: normalizedTenantId,
     generatedAt: metadata?.serverGeneratedAt || metadata?.lastHydratedAt || 0,
     snapshotVersion: metadata?.snapshotVersion || 'local-unhydrated',
     collections: Object.fromEntries(entries),
@@ -286,6 +323,20 @@ export async function hydrateEdgeSnapshot(
       }
     );
     await enforceEdgeStorageBudget(normalizedTenantId).catch(() => { });
+
+    // Shared workstations can change Firebase identity while IndexedDB writes
+    // or storage-budget enforcement is in flight. Never hand an old actor's
+    // successful server snapshot to the new actor's UI after that await.
+    const afterPersist = await getCachedAuthSession();
+    if (
+      !afterPersist ||
+      !canResumeOfflineIdentity(auth.currentUser?.uid, afterPersist) ||
+      afterPersist.user.uid !== currentUser.uid ||
+      afterPersist.user.tenantId.trim().toLowerCase() !== normalizedTenantId ||
+      afterPersist.session.sessionId !== cached.session.sessionId
+    ) {
+      throw new Error('EDGE_HYDRATION_SESSION_CHANGED');
+    }
 
     return {
       tenantId: normalizedTenantId,

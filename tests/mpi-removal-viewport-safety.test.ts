@@ -28,7 +28,7 @@ describe('MPI removal modal viewport and clinical-safety regression', () => {
 
     expect(modal).toContain("if (!canAttemptOrdinaryRemoval)");
     expect(modal).toContain("const canAttemptOrdinaryRemoval = valid && !removalBlocked && !inspectPending");
-    expect(modal).toContain("type={canAttemptOrdinaryRemoval ? 'submit' : 'button'}");
+    expect(modal).toContain("type={removalBlocked ? 'button' : 'submit'}");
     expect(modal).toContain('Review clinical blockers');
     expect(modal).toContain("isConfirmedMock && hasActiveCare");
     expect(modal).toContain("disabled={!valid || !syntheticConfirmed}");

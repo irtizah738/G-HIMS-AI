@@ -969,6 +969,9 @@ interface BindClinicalEncounterInput {
 interface HospitalContextType {
   beds: Bed[];
   patients: Patient[];
+  /** Authoritative tenant-scoped MPI directory hydration; no zero-count claim before load. */
+  mpiDirectoryReadiness: 'DEMO' | 'CURRENT' | 'STALE' | 'PARTIAL' | 'UNHYDRATED' | 'DENIED' | 'FAILED';
+  mpiDirectoryTenantId: string | null;
   staff: StaffMember[];
   stats: HospitalStats;
   opdQueue: OpdQueueToken[];
@@ -1058,6 +1061,12 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
 
   const [beds, setBeds] = useState<Bed[]>(() => isDemoRuntime ? initialBeds : []);
   const [patients, setPatients] = useState<Patient[]>(() => isDemoRuntime ? initialPatients : []);
+  const [mpiDirectoryReadiness, setMpiDirectoryReadiness] = useState<HospitalContextType['mpiDirectoryReadiness']>(
+    isDemoRuntime ? 'DEMO' : 'UNHYDRATED'
+  );
+  const [mpiDirectoryTenantId, setMpiDirectoryTenantId] = useState<string | null>(
+    isDemoRuntime ? 'DEMO' : null
+  );
   const [staff, setStaff] = useState<StaffMember[]>(() => isDemoRuntime ? initialStaff : []);
   const [opdQueue, setOpdQueue] = useState<OpdQueueToken[]>(() => isDemoRuntime ? initialOpdQueue : []);
   const [mismatches, setMismatches] = useState<BillingAuditMismatch[]>(() => isDemoRuntime ? initialMismatches : []);
@@ -1169,6 +1178,8 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     if (!tenantId) {
       setBeds([]);
       setPatients([]);
+      setMpiDirectoryReadiness('UNHYDRATED');
+      setMpiDirectoryTenantId(null);
       setOpdQueue([]);
       setMismatches([]);
       setTelehealthSessions([]);
@@ -1185,6 +1196,14 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       const models = adaptEdgeSnapshot(snapshot);
       setBeds(models.beds);
       setPatients(models.patients);
+      setMpiDirectoryReadiness(
+        snapshot.freshness === 'CURRENT' ? 'CURRENT' :
+        snapshot.freshness === 'STALE' ? 'STALE' :
+        snapshot.freshness === 'DENIED' ? 'DENIED' :
+        snapshot.freshness === 'PARTIAL' ? 'PARTIAL' :
+        snapshot.freshness === 'FAILED' ? 'FAILED' : 'UNHYDRATED'
+      );
+      setMpiDirectoryTenantId(tenantId);
       setOpdQueue(models.opdQueue);
       setMismatches(models.mismatches);
       setTelehealthSessions(models.telehealthSessions);
@@ -2335,6 +2354,8 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       value={{
         beds,
         patients,
+        mpiDirectoryReadiness,
+        mpiDirectoryTenantId,
         staff,
         stats,
         opdQueue,

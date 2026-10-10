@@ -79,7 +79,8 @@ describe('Single tenant-authorized MPI across OPD and hospital modules', () => {
     expect(opd).toContain('hospitalPatientsToOpdMpi(sharedMpiPatients)');
     expect(opd).toContain('patients={directoryPatients}');
     expect(opd).not.toContain('handleRegisterSuccess(p);');
-    expect(opd).toContain('mpiDirectoryTenantId === auth.activeTenant?.tenantId');
+    expect(opd).toContain("String(mpiDirectoryTenantId || '').trim().toLowerCase()");
+    expect(opd).toContain("String(auth.activeTenant?.tenantId || '').trim().toLowerCase()");
     expect(panel).toContain('directoryReadiness');
     expect(panel).toContain('opd-mpi-not-hydrated');
     expect(panel).toContain('Review Patient 360');

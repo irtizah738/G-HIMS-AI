@@ -1,4 +1,4 @@
-name: DEV Sandbox Lockfile and Isolation Evidence
+name: DEV Sandbox Emulator Qualification
 
 on:
   pull_request:
@@ -7,6 +7,9 @@ on:
       - package.json
       - bun.lock
       - lib/dev-sandbox/**
+      - lib/runtime/environment-contract.ts
+      - lib/firebase/client.ts
+      - server/auth/authorization-context.ts
       - scripts/dev-sandbox/**
       - tests/dev-sandbox-isolation.test.ts
       - .github/workflows/dev-sandbox-qualification.yml
@@ -19,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GHIMS_RUNTIME_MODE: TEST
+      NODE_ENV: development
       NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
       FIREBASE_PROJECT_ID: ghims-dev-sandbox-local
       NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-dev-sandbox-local
@@ -26,16 +30,20 @@ jobs:
       NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-dev-sandbox-local
       FIRESTORE_DATABASE_ID: (default)
       NEXT_PUBLIC_FIRESTORE_DATABASE_ID: (default)
+      GHIMS_DEV_SANDBOX_TENANT_ID: dev-sandbox-hospital
+      GHIMS_DEV_SANDBOX_ACK: I_CONFIRM_DISPOSABLE_LOCAL_EMULATORS_ONLY
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
-      - name: Report reproducible lockfile drift, without committing generated content
-        run: |
-          bun install --lockfile-only
-          echo '--- BEGIN BUN LOCK DIFF ---'
-          git diff -- bun.lock
-          echo '--- END BUN LOCK DIFF ---'
+      - name: Frozen dependency authority
+        run: bun install --frozen-lockfile
       - name: Test fail-closed sandbox policy
         run: bun test tests/dev-sandbox-isolation.test.ts
+      - name: Create ephemeral emulator-only credential
+        run: echo "GHIMS_DEV_SANDBOX_PASSWORD=$(openssl rand -hex 24)" >> "$GITHUB_ENV"
+      - name: Exercise local Auth and Firestore seed, verify, reset and re-seed
+        run: |
+          npx --yes firebase-tools@14.22.0 emulators:exec --only auth,firestore --project ghims-dev-sandbox-local \
+            "bun run dev:sandbox:seed && bun run dev:sandbox:verify && bun run dev:sandbox:rehearse && GHIMS_DEV_SANDBOX_RESET_ACK=RESET_DISPOSABLE_EMULATOR_TENANT bun run dev:sandbox:reset && bun run dev:sandbox:seed && bun run dev:sandbox:verify"

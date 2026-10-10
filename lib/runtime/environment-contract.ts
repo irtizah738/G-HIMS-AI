@@ -75,13 +75,40 @@ function assertProjectMatchesMode(
   }
 }
 
+/**
+ * Staging cannot prove isolation if the production project identity is missing.
+ * Its public Firebase project ID is not a secret and must be configured for
+ * both server and browser environments so an accidental shared project fails
+ * before either Firebase SDK initializes or handles clinical data.
+ */
+export function assertStagingProjectDistinct(
+  stagingProjectId: string | undefined,
+  productionProjectId: string | undefined,
+  scope: 'server' | 'client'
+): void {
+  const staging = clean(stagingProjectId);
+  const production = clean(productionProjectId);
+  if (!staging || !production) {
+    throw new Error(
+      'ENVIRONMENT_STAGING_ISOLATION_UNVERIFIED: ' + scope +
+      ' requires explicit, separate staging and production Firebase project IDs.'
+    );
+  }
+  if (staging === production) {
+    throw new Error(
+      'ENVIRONMENT_PROJECT_COLLISION: ' + scope +
+      ' STAGING and PRODUCTION cannot share a Firebase project.'
+    );
+  }
+}
+
 export function assertServerFirebaseProjectIsolation(actualProjectId: string): void {
-  assertProjectMatchesMode(
-    'server',
-    getRuntimeMode(),
-    actualProjectId,
-    serverProjectMap()
-  );
+  const mode = getRuntimeMode();
+  const projects = serverProjectMap();
+  if (mode === 'STAGING') {
+    assertStagingProjectDistinct(projects.STAGING, projects.PRODUCTION, 'server');
+  }
+  assertProjectMatchesMode('server', mode, actualProjectId, projects);
 }
 
 export function getPublicRuntimeMode(): GhimsRuntimeMode {
@@ -96,10 +123,10 @@ export function getPublicRuntimeMode(): GhimsRuntimeMode {
 }
 
 export function assertClientFirebaseProjectIsolation(actualProjectId: string): void {
-  assertProjectMatchesMode(
-    'client',
-    getPublicRuntimeMode(),
-    actualProjectId,
-    clientProjectMap()
-  );
+  const mode = getPublicRuntimeMode();
+  const projects = clientProjectMap();
+  if (mode === 'STAGING') {
+    assertStagingProjectDistinct(projects.STAGING, projects.PRODUCTION, 'client');
+  }
+  assertProjectMatchesMode('client', mode, actualProjectId, projects);
 }

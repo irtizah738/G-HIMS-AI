@@ -99,7 +99,9 @@ export function PatientMpiView() {
   // ABAC patient dataset gating: If user is 'patient', ONLY show their own record
   const directoryMatchesTenant =
     mpiDirectoryReadiness === 'DEMO' ||
-    Boolean(auth.activeTenant?.tenantId && mpiDirectoryTenantId === auth.activeTenant.tenantId);
+    Boolean(auth.activeTenant?.tenantId &&
+      String(mpiDirectoryTenantId || '').trim().toLowerCase() ===
+        String(auth.activeTenant.tenantId).trim().toLowerCase());
   const directoryUsable = directoryMatchesTenant &&
     ['DEMO','CURRENT','STALE'].includes(mpiDirectoryReadiness);
   const scopedPatients = !directoryUsable

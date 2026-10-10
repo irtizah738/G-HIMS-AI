@@ -38,6 +38,18 @@ if (!productionProject) {
 if (productionProject === stagingProject) {
   fail('STAGING_PROJECT_COLLISION');
 }
+// The browser must also carry the non-secret production comparator. Without
+// it, a staging bundle can initialize the production Firebase client before
+// the server rejects the mixed-trust configuration.
+const publicProductionProject = String(
+  process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION || ''
+).trim();
+if (!publicProductionProject) {
+  fail('STAGING_PUBLIC_PRODUCTION_REFERENCE_REQUIRED');
+}
+if (publicProductionProject !== productionProject) {
+  fail('STAGING_PUBLIC_PRODUCTION_REFERENCE_MISMATCH');
+}
 
 const forbiddenProjects = [
   process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO,

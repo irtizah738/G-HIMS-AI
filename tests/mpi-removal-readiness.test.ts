@@ -69,7 +69,7 @@ describe('MPI authoritative care blockers for audited patient removal', () => {
     expect(modal).toContain('Review clinical blockers');
     expect(modal).toContain('const canAttemptOrdinaryRemoval = valid && !removalBlocked && !inspectPending');
     expect(modal).toContain('if (!canAttemptOrdinaryRemoval)');
-    expect(modal).toContain("type={canAttemptOrdinaryRemoval ? 'submit' : 'button'}");
+    expect(modal).toContain("type={removalBlocked ? 'button' : 'submit'}");
     expect(modal).toContain("'RemovePatientRecordCommand'");
   });
 

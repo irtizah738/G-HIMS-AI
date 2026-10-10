@@ -461,10 +461,11 @@ export class AuthClient {
     const currentUser = auth.currentUser;
     const cached = await getCachedAuthSession();
 
-    if (!currentUser || !cached) {
+    if (!currentUser || !cached || currentUser.uid !== cached.user.uid ||
+        currentUser.uid !== cached.session.userId) {
       throw new AuthError({
         code: 'AUTHENTICATION_REQUIRED',
-        message: 'An active authenticated G-HIMS session is required',
+        message: 'A matching authenticated Firebase identity and G-HIMS session are required',
         statusCode: 401,
       });
     }

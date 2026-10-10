@@ -26,7 +26,14 @@ function pointerBlockers(patient: Record<string, unknown>): RemovalBlocker[] {
     ? patient.activeCareContexts as Record<string, unknown> : {};
   const blockers: RemovalBlocker[] = [];
   const add = (domain: string, value: unknown) => {
-    if (typeof value !== 'string' || !value.trim()) return;
+    if (value === undefined || value === null || value === '') return;
+    if (typeof value !== 'string' || !value.trim()) {
+      blockers.push({
+        source: 'ACTIVE_CARE_POINTER', domain, status: 'POINTER_MALFORMED',
+        detail: 'Encounter reference has an invalid type. Authoritative reconciliation is required.',
+      });
+      return;
+    }
     blockers.push({
       source: 'ACTIVE_CARE_POINTER', domain, encounterId: value.trim(),
       status: 'UNRESOLVED_POINTER',

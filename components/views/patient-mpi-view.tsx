@@ -162,7 +162,10 @@ export function PatientMpiView() {
   });
 
   const activePatients = scopedPatients.filter(p => !['MERGED', 'REMOVED'].includes(String(p.status || 'ACTIVE').toUpperCase()));
-  const currentPatient = activePatients.find((p) => p.id === selectedPatientId) || activePatients[0];
+  // A searched MPI identity must be the only possible detail-panel identity.
+  // Never keep a previous selection displayed when the current search excludes it.
+  const visiblePatients = searchFilter.trim() ? filteredPatients : activePatients;
+  const currentPatient = visiblePatients.find((p) => p.id === selectedPatientId) || visiblePatients[0];
   const activeEncounter = currentPatient?.encounters?.[0];
   const assignedBed = beds.find((b) => b.id === currentPatient?.activeBedId);
 

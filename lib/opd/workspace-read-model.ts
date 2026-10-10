@@ -239,6 +239,46 @@ function mapQueueStatus(value: unknown): QueueEntry['status'] {
   return 'WAITING';
 }
 
+/**
+ * Exact MPI lookup is distinct from encounter-scoped OPD hydration. This adapter
+ * intentionally carries only fields returned by the authorized MPI identity API.
+ * Unknown clinical or financial details remain explicitly unknown/unassigned.
+ */
+export function adaptExactMpiIdentityForOpd(raw: {
+  patientId: string;
+  mrn: string;
+  fullName: string;
+  dateOfBirth: string;
+  gender: string;
+  status?: string;
+}): PatientDemographics {
+  const patientId = String(raw.patientId || '').trim();
+  const mrn = String(raw.mrn || '').trim();
+  if (!patientId || !mrn) throw new Error('MPI_LOOKUP_INVALID_IDENTITY');
+  const status = String(raw.status || 'ACTIVE').trim().toUpperCase();
+  if (status === 'REMOVED' || status === 'MERGED') {
+    throw new Error('MPI_LOOKUP_INACTIVE_IDENTITY');
+  }
+  return {
+    id: patientId,
+    mrn,
+    fullName: String(raw.fullName || '').trim(),
+    dob: String(raw.dateOfBirth || '').trim(),
+    age: ageFromDob(String(raw.dateOfBirth || '')),
+    gender: normalizeGender(raw.gender),
+    status: status === 'INACTIVE' || status === 'DECEASED' ? status : 'ACTIVE',
+    nationalId: '',
+    maritalStatus: 'Unknown',
+    nationality: '',
+    primaryLanguage: '',
+    phone: '',
+    residentialAddress: '',
+    tariffPlan: 'UNASSIGNED',
+    bloodGroup: 'Unknown',
+    createdAt: 0,
+  };
+}
+
 export interface OpdWorkspaceReadModel {
   patients: PatientDemographics[];
   appointments: AppointmentRecord[];

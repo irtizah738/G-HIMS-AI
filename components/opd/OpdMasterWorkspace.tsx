@@ -450,6 +450,8 @@ export function OpdMasterWorkspace() {
     clinicalContext,
     bindClinicalEncounter,
     clearClinicalContext,
+    setSelectedPatientId: setShellSelectedPatientId,
+    setActiveTab: setShellActiveTab,
   } = useHospital();
   const searchParams = useSearchParams();
   const requestedEncounterId = String(
@@ -3228,7 +3230,11 @@ export function OpdMasterWorkspace() {
               setSelectedEncounterId(existingEnc.id);
               setActiveTab('CONSULTATION');
             } else {
-              handleRegisterSuccess(p);
+              // Exact MPI discovery is NOT an OPD registration command.
+              // Selecting a known patient cannot silently create a duplicate
+              // permanent identity or an unapproved encounter.
+              setShellSelectedPatientId(p.id);
+              setShellActiveTab('patients');
             }
           }}
           onInitiateNewRegistration={(initial) => {

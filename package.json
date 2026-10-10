@@ -6,6 +6,7 @@
     "dev": "next dev --port 3000",
     "dev:sandbox:seed": "bun scripts/dev-sandbox/manage.ts seed",
     "dev:sandbox:verify": "bun scripts/dev-sandbox/manage.ts verify",
+    "dev:sandbox:repair-mpi": "bun scripts/dev-sandbox/manage.ts repair-mpi",
     "dev:sandbox:reset": "bun scripts/dev-sandbox/manage.ts reset",
     "dev:sandbox:test": "bun test tests/dev-sandbox-isolation.test.ts",
     "dev:sandbox:rehearse": "bun scripts/dev-sandbox/rehearse.ts",

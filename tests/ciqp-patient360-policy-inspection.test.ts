@@ -52,6 +52,28 @@ describe('CIQP legacy projection inspection (read only)', () => {
     })).toBe('MISMATCH_REQUIRES_CLINICAL_REVIEW');
   });
 
+  test('an equal revision with a different source hash cannot be called a legacy contamination candidate', () => {
+    expect(classifyPatient360PolicyInspection({
+      stored: projection({ contentHash: 'unexplained-different-hash' }),
+      canonical: projection(),
+      rawEventTypes: ['CLINICAL_DRAFT_GENERATED'],
+    })).toBe('MISMATCH_REQUIRES_CLINICAL_REVIEW');
+  });
+
+  test('read-only inspector uses every canonical patient-event query path, including excluded AI audit events', async () => {
+    const [script, service] = await Promise.all([
+      Bun.file('scripts/ops/ciqp-inspect-patient360-legacy.ts').text(),
+      Bun.file('lib/clinical/patient360/patient360-projection-service.ts').text(),
+    ]);
+    expect(script).toContain('includeNonClinical: true');
+    expect(script).toContain('loadPatientEvents(tenantId, doc.id');
+    expect(script).not.toContain(".where('payload.patientId', '==', doc.id)");
+    expect(service).toContain("queryEventsByField(eventsRef, 'payload.patientId', patientId)");
+    expect(service).toContain("queryEventsByField(eventsRef, 'payload.primaryPatientId', patientId)");
+    expect(service).toContain("queryEventsByField(eventsRef, 'payload.secondaryPatientId', patientId)");
+    expect(service).toContain("queryEventsByField(eventsRef, 'aggregateId', patientId)");
+  });
+
   test('unfinished publication and truncated event streams are never declared safe', () => {
     expect(classifyPatient360PolicyInspection({
       stored: projection({ timelineGeneration: 'gen', timelineReady: false }),

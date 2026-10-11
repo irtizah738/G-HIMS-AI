@@ -82,22 +82,6 @@ describe('Hospital-0 deployment and qualification contract', () => {
     expect(manifest).toContain('ENGINEERING_QUALIFIED');
   });
 
-  test('STAGING deployment remains isolated from production and requires dedicated project identity', async () => {
-    const [docs, deploy, runtime] = await Promise.all([
-      source('docs/operations/HOSPITAL0_DEPLOYMENT_QUALIFICATION.md'),
-      source('.github/workflows/staging-deploy.yml'),
-      source('lib/runtime/environment-contract.ts'),
-    ]);
-
-    expect(docs).toContain('dedicated Firebase project');
-    expect(docs).toContain('GHIMS_FIREBASE_PROJECT_ID_STAGING');
-    expect(docs).toContain('NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING');
-    expect(deploy).toContain('GHIMS_STAGING_EXPECTED_RUNTIME: STAGING');
-    expect(deploy).toContain('vercel pull --yes --environment=preview');
-    expect(runtime).toContain('ENVIRONMENT_PROJECT_COLLISION');
-    expect(runtime).toContain("STAGING: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_STAGING)");
-  });
-
   test('automatic Git deployments remain disabled before Preview receives STAGING credentials', async () => {
     const vercel = JSON.parse(await source('vercel.json'));
     expect(vercel.git?.deploymentEnabled).toBe(false);

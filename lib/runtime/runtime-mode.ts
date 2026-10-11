@@ -14,7 +14,10 @@ export function inferRuntimeModeFromNodeEnv(
   nodeEnv: string | undefined
 ): GhimsRuntimeMode {
   const normalized = String(nodeEnv || '').trim().toLowerCase();
-  if (normalized === 'development' || normalized === 'test') {
+  if (normalized === 'development') {
+    return 'DEMO';
+  }
+  if (normalized === 'test') {
     return 'TEST';
   }
   return 'PRODUCTION';

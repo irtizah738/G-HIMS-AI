@@ -374,12 +374,27 @@ export class Patient360ProjectionService {
     timeline: Patient360TimelineItem[];
     repairedMissingProjection: boolean;
   }> {
-    const current = await this.readClinicalView(
-      tenantId,
-      patientId,
-      timelineLimit
-    );
-    if (current.projection) {
+    // A worker can stop after committing the projection but before publishing
+    // all timeline chunks. Keep direct reads fail-closed; only this authorized
+    // self-healing entry point may attempt one bounded canonical rebuild.
+    let current: Awaited<ReturnType<typeof this.readClinicalView>> | null = null;
+    try {
+      current = await this.readClinicalView(
+        tenantId,
+        patientId,
+        timelineLimit
+      );
+    } catch (error) {
+      if (!(error instanceof Error) ||
+          error.message !== 'PATIENT360_TIMELINE_NOT_READY') {
+        throw error;
+      }
+      // Treat an incomplete generation like a missing projection: rebuild
+      // from authoritative facts and then re-read the revision-fenced view.
+      // Any second interruption, superseding revision, or source-store error
+      // still propagates. Never return an incomplete timeline.
+    }
+    if (current?.projection) {
       return {
         projection: current.projection,
         timeline: current.timeline,

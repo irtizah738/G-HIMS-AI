@@ -66,6 +66,38 @@ describe('CIQP-05 Patient 360 revision-fenced timeline (Firestore emulator)', ()
     const auditCheckpoint = await tenantRef
       .collection('patient360ProjectionCheckpoints').doc(auditEventId).get();
     expect(auditCheckpoint.data()?.status).toBe('IGNORED');
+    // Inspection must see *all* patient-event routes, even when their
+    // unsigned AI events are correctly excluded from clinical revisions.
+    // The old inspector only queried payload.patientId and missed these.
+    const scopedLegacyRoutes = [
+      { aggregateType: 'AI_DRAFT', aggregateId: id('draft'), payload: { primaryPatientId: patientId } },
+      { aggregateType: 'AI_DRAFT', aggregateId: id('draft'), payload: { secondaryPatientId: patientId } },
+      { aggregateType: 'PATIENT', aggregateId: patientId, payload: {} },
+    ];
+    const legacyIds: string[] = [];
+    for (const [index, route] of scopedLegacyRoutes.entries()) {
+      const legacyId = id('legacy_ai_audit');
+      legacyIds.push(legacyId);
+      await tenantRef.collection('events').doc(legacyId).set({
+        eventId: legacyId,
+        tenantId,
+        eventType: 'CLINICAL_DRAFT_REJECTED',
+        ...route,
+        recordedAt: Date.now() + 11_000 + index,
+        occurredAt: Date.now() + 11_000 + index,
+      });
+    }
+    const allForInspection = await Patient360ProjectionService.loadPatientEvents(
+      tenantId, patientId, { includeNonClinical: true }
+    );
+    for (const legacyId of legacyIds) {
+      expect(allForInspection.some(event => event.eventId === legacyId)).toBe(true);
+    }
+    expect(allForInspection.some(event => event.eventId === auditEventId)).toBe(true);
+    const clinicalOnly = await Patient360ProjectionService.loadPatientEvents(tenantId, patientId);
+    expect(clinicalOnly.some(event => legacyIds.includes(event.eventId))).toBe(false);
+    expect(clinicalOnly.some(event => event.eventId === auditEventId)).toBe(false);
+
     const afterAudit = await Patient360ProjectionService.rebuildPatient(tenantId, patientId);
     expect(afterAudit.contentHash).toBe(first.contentHash);
     expect(afterAudit.revision).toBe(first.revision);

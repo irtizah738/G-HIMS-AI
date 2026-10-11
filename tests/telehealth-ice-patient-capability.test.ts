@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { assertTelehealthPatientJoinToken } from '@/lib/backend/security/telehealth-patient-capability';
-import { assertTelehealthRoomLease, type ExpectedTelehealthRoom } from '@/lib/backend/security/telehealth-room-policy';
+import { assertTelehealthRoomLease, filterCurrentTelehealthLeaseMessages, type ExpectedTelehealthRoom } from '@/lib/backend/security/telehealth-room-policy';
 
 const source = (name: string) => readFileSync(name, 'utf8');
 
@@ -48,6 +48,41 @@ describe('Governed Telehealth TURN issuance and patient capability', () => {
     }
     expect(() => assertTelehealthRoomLease(valid, { ...exact, clinicianId: '' }, now))
       .toThrow('TELEHEALTH_CALL_NOT_ACTIVE');
+  });
+
+  test('a fresh call lease never exposes signaling from an earlier use of the room', () => {
+    const currentLease = 'abcdefghijklmnopqrstuv';
+    const previousLease = 'zyxwvutsrqponmlkjihgfe';
+    const messages = [
+      { leaseId: previousLease, senderRole: 'CLINICIAN', payload: 'older patient offer' },
+      { leaseId: previousLease, senderRole: 'PATIENT', payload: 'older patient answer' },
+      { leaseId: currentLease, senderRole: 'PATIENT', payload: 'current patient answer' },
+      { leaseId: currentLease, senderRole: 'CLINICIAN', payload: 'current clinician offer' },
+      { senderRole: 'CLINICIAN', payload: 'unbound legacy message' },
+    ];
+    expect(filterCurrentTelehealthLeaseMessages(messages, currentLease, 'PATIENT')
+      .map(m => m.payload)).toEqual(['current clinician offer']);
+    expect(filterCurrentTelehealthLeaseMessages(messages, currentLease, 'CLINICIAN')
+      .map(m => m.payload)).toEqual(['current patient answer']);
+    expect(filterCurrentTelehealthLeaseMessages(messages, '', 'PATIENT')).toEqual([]);
+    const signaling = source('app/api/telehealth/signaling/route.ts');
+    expect(signaling).toContain("randomBytes(16).toString('base64url')");
+    expect(signaling).toContain('leaseId,');
+    expect(signaling).toContain('filterCurrentTelehealthLeaseMessages(');
+    expect(signaling).toContain('requireActiveSignalingLease(tenantId, session, roomToken, room)');
+    expect(signaling).toContain("Math.max(after, startedAt - 1)");
+  });
+
+  test('patient and clinician release live media on expired or revoked signaling', () => {
+    const patient = source('components/telehealth/TelehealthPatientJoin.tsx');
+    const clinician = source('components/telehealth/TelehealthCallPanel.tsx');
+    for (const p of [patient, clinician]) {
+      expect(p).toContain('handlePollingFailure');
+      expect(p).toContain('TELEHEALTH_CALL_NOT_ACTIVE');
+      expect(p).toContain("setState('ENDED')");
+    }
+    expect(patient).toContain('dispose();');
+    expect(clinician).toContain('disposeMedia();');
   });
 
   test('patient ICE endpoint checks independent token after room lease and before credential issuance', () => {

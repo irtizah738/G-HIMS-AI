@@ -201,6 +201,34 @@ describe('CI-10A evidence and provenance fabric', () => {
     expect(first.evidenceCount).toBeGreaterThan(0);
   });
 
+  test('AI snapshot creation metadata cannot change evidence hashes or create provenance', () => {
+    const baseline = ClinicalEvidenceService.buildSnapshot(
+      projection(), events, 'LONGITUDINAL_SUMMARY', 'doctor-a', 2000
+    );
+    const metadataEvent = {
+      eventId: 'evt-cisnap-created',
+      eventType: 'CLINICAL_INTELLIGENCE_EVIDENCE_SNAPSHOT_CREATED',
+      aggregateType: 'CLINICAL_INTELLIGENCE_EVIDENCE_SNAPSHOT',
+      aggregateId: baseline.snapshotId,
+      payload: {
+        patientId: 'patient-ci10',
+        snapshotId: baseline.snapshotId,
+        snapshotHash: baseline.snapshotHash,
+      },
+      occurredAt: 3000,
+      recordedAt: 3000,
+    };
+    const afterRead = ClinicalEvidenceService.buildSnapshot(
+      projection(), [...events, metadataEvent], 'LONGITUDINAL_SUMMARY',
+      'doctor-b', 9000
+    );
+    expect(afterRead.snapshotId).toBe(baseline.snapshotId);
+    expect(afterRead.snapshotHash).toBe(baseline.snapshotHash);
+    expect(afterRead.evidenceRefs).toEqual(baseline.evidenceRefs);
+    expect(afterRead.evidenceRefs.flatMap((ref) => ref.sourceEventIds))
+      .not.toContain('evt-cisnap-created');
+  });
+
   test('ties clinical evidence references back to immutable source events', () => {
     const snapshot = ClinicalEvidenceService.buildSnapshot(
       projection(),
@@ -313,6 +341,16 @@ describe('CI-10A evidence and provenance fabric', () => {
     expect(service).toContain('Patient360ProjectionService.readOrRebuildClinicalView');
     expect(service).not.toContain('CI10_PATIENT360_PROJECTION_NOT_READY');
     expect(service).not.toContain('Patient360ProjectionService.getProjection(context.tenantId, patientId)');
+  });
+
+  test('authoritative snapshot creation freezes source-event cursor and rechecks publication', async () => {
+    const service = await source(
+      'lib/clinical/intelligence/clinical-evidence-service.ts'
+    );
+    expect(service).toContain('evidenceEventsAtProjectionCursor(projection, events)');
+    expect(service).toContain('scopedEvents,');
+    expect(service).toContain('Patient360ProjectionService.getProjection(');
+    expect(service).toContain('CI10_EVIDENCE_PROJECTION_REVISION_CHANGED');
   });
 
   test('provider gateway and API are evidence scoped and provider neutral', async () => {

@@ -4,8 +4,6 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: [
     'ais-dev-bo7mqgmhjalnjw6vyttn2u-644889006515.asia-east1.run.app',
     'ais-pre-bo7mqgmhjalnjw6vyttn2u-644889006515.asia-east1.run.app',
-    '*.asia-east1.run.app',
-    '*.run.app',
     'localhost:3000',
     '127.0.0.1:3000',
   ],

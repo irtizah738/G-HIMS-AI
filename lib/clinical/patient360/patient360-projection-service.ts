@@ -190,6 +190,19 @@ export class Patient360ProjectionService {
     tenantId: string,
     patientId: string
   ): Promise<Patient360Projection | null> {
+    const projection = await this.getProjectionRaw(tenantId, patientId);
+    if (projection?.timelineGeneration && !projection.timelineReady) {
+      // The same readiness boundary governs direct Clinical Intelligence
+      // projection reads and timeline reads, not just UI timeline hydration.
+      throw new Error('PATIENT360_TIMELINE_NOT_READY');
+    }
+    return projection;
+  }
+
+  private static async getProjectionRaw(
+    tenantId: string,
+    patientId: string
+  ): Promise<Patient360Projection | null> {
     const db = getAdminFirestore();
     if (!db) {
       throw new Error('PATIENT360_PROJECTION_STORE_UNAVAILABLE');
@@ -211,8 +224,8 @@ export class Patient360ProjectionService {
     tenantId: string,
     patientId: string
   ): Promise<Patient360Projection | null> {
-    const existing = await this.getProjection(tenantId, patientId);
-    if (existing) {
+    const existing = await this.getProjectionRaw(tenantId, patientId);
+    if (existing && (!existing.timelineGeneration || existing.timelineReady)) {
       return existing;
     }
     try {
@@ -665,12 +678,12 @@ export class Patient360ProjectionService {
       throw new Error('PATIENT360_PROJECTION_SUPERSEDED');
     }
 
-    const current = await this.getProjection(tenantId, patientId);
+    const current = await this.getProjectionRaw(tenantId, patientId);
     if (current?.timelineGeneration === projection.contentHash &&
         !current.timelineReady) {
       await this.writeTimeline(tenantId, patientId, timeline, projection);
     }
-    const published = await this.getProjection(tenantId, patientId);
+    const published = await this.getProjectionRaw(tenantId, patientId);
     if (!published || published.contentHash !== projection.contentHash ||
         (published.timelineGeneration && !published.timelineReady)) {
       throw new Error('PATIENT360_TIMELINE_PUBLICATION_NOT_READY');
@@ -870,14 +883,14 @@ export class Patient360ProjectionService {
       if (disposition === 'STALE') {
         throw new Error('PATIENT360_PROJECTION_SUPERSEDED');
       }
-      const active = await this.getProjection(tenantId, patientId);
+      const active = await this.getProjectionRaw(tenantId, patientId);
       if (active?.timelineGeneration === projected.projection.contentHash &&
           !active.timelineReady) {
         timelineCount += await this.writeTimeline(
           tenantId, patientId, projected.timeline, projected.projection
         );
       }
-      const published = await this.getProjection(tenantId, patientId);
+      const published = await this.getProjectionRaw(tenantId, patientId);
       if (!published || published.contentHash !== projected.projection.contentHash ||
           (published.timelineGeneration && !published.timelineReady)) {
         throw new Error('PATIENT360_TIMELINE_PUBLICATION_NOT_READY');

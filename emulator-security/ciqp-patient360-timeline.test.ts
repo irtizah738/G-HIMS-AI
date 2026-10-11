@@ -74,7 +74,7 @@ describe('CIQP-05 Patient 360 revision-fenced timeline (Firestore emulator)', ()
     await expect(Patient360ProjectionService.getTimeline(tenantId, patientId))
       .rejects.toThrow('PATIENT360_TIMELINE_NOT_READY');
     const repaired = await Patient360ProjectionService.getOrRebuildProjection(tenantId, patientId);
-    expect(repaired.timelineReady).toBe(true);
+    expect(repaired?.timelineReady).toBe(true);
     expect(secondRows.some(row => row.eventId === freshEventId)).toBe(true);
 
     // A backlog of obsolete timeline versions must not require a new Firestore

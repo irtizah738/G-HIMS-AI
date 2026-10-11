@@ -1,4 +1,5 @@
 import { FieldPath, type CollectionReference, type DocumentData, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
+import { isPatient360ClinicalSourceEvent } from '@/lib/clinical/patient360/clinical-source-event-policy';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { sanitizeForFirestore } from '@/lib/firestore/sanitize';
 import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
@@ -71,6 +72,7 @@ function directPatientAggregateId(event: {
 }
 
 function patientIdsFromEvent(event: DomainEventEnvelope): string[] {
+  if (!isPatient360ClinicalSourceEvent(event)) return [];
   const payload = event.payload || {};
   return unique([
     payload.patientId as string,
@@ -438,6 +440,7 @@ export class Patient360ProjectionService {
     }
 
     return Array.from(byId.values())
+      .filter(isPatient360ClinicalSourceEvent)
       .sort(
         (left, right) =>
           Number(left.recordedAt || left.occurredAt || 0) -
@@ -862,6 +865,7 @@ export class Patient360ProjectionService {
 
     const patientIds = unique(
       events.flatMap((event) => {
+        if (!isPatient360ClinicalSourceEvent(event)) return [];
         const payload = event.payload || {};
         return [
           payload.patientId as string,
@@ -904,12 +908,12 @@ export class Patient360ProjectionService {
       const chunk = events.slice(offset, offset + 350);
       const batch = db.batch();
       for (const event of chunk) {
-        const ids = unique([
+        const ids = isPatient360ClinicalSourceEvent(event) ? unique([
           event.payload?.patientId as string,
           event.payload?.primaryPatientId as string,
           event.payload?.secondaryPatientId as string,
           directPatientAggregateId(event),
-        ]);
+        ]) : [];
         const checkpoint = {
           eventId: event.eventId,
           tenantId,

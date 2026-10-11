@@ -27,7 +27,8 @@ const HCM_PRIVILEGE_MAP: Readonly<Record<ClinicalPrivilegeType | 'SIGN_CLINICAL_
     SIGN_CLINICAL_NOTES:['SIGN_CLINICAL_NOTE','SIGN_CLINICAL_NOTES'],
     SIGN_DEATH_CERTIFICATE:['SIGN_DEATH_CERTIFICATE'],
     PERFORM_INVASIVE_PROCEDURES:['PERFORM_INVASIVE_PROCEDURES','PERFORM_PROCEDURES'],
-    SIGN_SOAP_CLINICAL_NOTE:['SIGN_SOAP_CLINICAL_NOTE','SIGN_CLINICAL_NOTES'],\n};
+    SIGN_SOAP_CLINICAL_NOTE:['SIGN_SOAP_CLINICAL_NOTE','SIGN_CLINICAL_NOTES'],
+};
 
 export function mapHcmPrivilegeToAuthorization(privilege: ClinicalPrivilegeType | string): string[] {
   const key = String(privilege || '').trim().toUpperCase();

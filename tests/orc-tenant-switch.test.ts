@@ -56,7 +56,9 @@ describe('ORC-8 Matrix: Tenant Switch Suspension & Isolation', () => {
     const guard = await source('components/tenant/tenant-route-authority-guard.tsx');
 
     // Must check loading and unresolved state
-    expect(guard).toContain('if (loading || unresolved)');
+    expect(guard).toContain('if (loading)');
+    expect(guard).toContain('if (!user)');
+    expect(guard).toContain('if (unresolved)');
     expect(guard).toContain('Resolving authenticated hospital context');
 
     // Must check mismatched route vs session

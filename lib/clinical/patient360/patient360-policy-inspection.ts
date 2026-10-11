@@ -44,7 +44,9 @@ export function classifyPatient360PolicyInspection(
     input.rawEventTypes.some((eventType) =>
       !isPatient360ClinicalSourceEvent({ eventType })
     ) &&
-    input.stored.revision >= input.canonical.revision
+    // A matching revision with different content is ambiguous; AI event
+    // presence elsewhere in the record is not evidence of contamination.
+    input.stored.revision > input.canonical.revision
   ) {
     return 'LEGACY_NONAUTHORITATIVE_EVENT_CANDIDATE';
   }

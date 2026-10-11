@@ -58,6 +58,29 @@ describe('G-HIMS P3 operational assurance and adversarial matrix',()=>{
     expect(()=>assertServerFirebaseProjectIsolation('ghims-prod')).toThrow(/ENVIRONMENT_PROJECT_COLLISION/);
   });
 
+  test('TEST mode never silently connects to the DEMO Firebase project', () => {
+    process.env.GHIMS_RUNTIME_MODE = 'TEST';
+    process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO = 'synthetic-demo';
+    delete process.env.GHIMS_FIREBASE_PROJECT_ID_TEST;
+    process.env.FIREBASE_PROJECT_ID = 'synthetic-demo';
+    expect(() => assertServerFirebaseProjectIsolation('synthetic-demo'))
+      .toThrow(/ENVIRONMENT_PROJECT_MISMATCH/);
+    expect(() => assertServerFirebaseProjectIsolation('ghims-test')).not.toThrow();
+
+    process.env.GHIMS_FIREBASE_PROJECT_ID_TEST = 'synthetic-demo';
+    expect(() => assertServerFirebaseProjectIsolation('synthetic-demo'))
+      .toThrow(/ENVIRONMENT_PROJECT_COLLISION/);
+  });
+
+  test('development requests do not acquire DEMO runtime powers implicitly', () => {
+    expect(inferRuntimeModeFromNodeEnv('development')).toBe('TEST');
+    const config = source('next.config.ts');
+    return config.then((text) => {
+      expect(text).not.toContain("'*.run.app'");
+      expect(text).not.toContain("'*.asia-east1.run.app'");
+    });
+  });
+
   test('revoked and expired sessions fail closed',()=>{
     const base:any={
       sessionId:'sess_test',

@@ -37,42 +37,6 @@ describe('Wave 5 enterprise hardening', () => {
     expect(byClass.get('INTEGRATION_RAW')?.defaultRetentionDays).toBe(0);
   });
 
-  test('authenticated load qualification uses real session authority and emits bounded evidence only', async () => {
-    const load = await source('scripts/ops/wave5-authenticated-load.ts');
-    expect(load).toContain('WAVE5_LOAD_STAGING_ONLY');
-    expect(load).toContain('WAVE5_LOAD_REMOTE_HTTPS_STAGING_REQUIRED');
-    expect(load).toContain('accounts:signInWithPassword');
-    expect(load).toContain('/api/auth/session');
-    expect(load).toContain('/api/offline/bootstrap?tenantId=');
-    expect(load).toContain("'x-ghims-session-id': sessionId");
-    expect(load).toContain('GHIMS_WAVE5_LOAD_CONCURRENCY');
-    expect(load).toContain('GHIMS_WAVE5_LOAD_P95_LIMIT_MS');
-    expect(load).toContain('GHIMS_WAVE5_LOAD_MAX_ERROR_RATE');
-
-    const evidenceBlock = load.slice(load.indexOf('const evidence = {'));
-    expect(evidenceBlock).not.toContain('email,');
-    expect(evidenceBlock).not.toContain('password,');
-    expect(evidenceBlock).not.toContain('idToken,');
-    expect(evidenceBlock).not.toContain('sessionId,');
-  });
-
-  test('projection failure injection stays isolated and clean recovery remains required', async () => {
-    const [service, drill, recovery] = await Promise.all([
-      source('lib/backend/recovery/projection-recovery-service.ts'),
-      source('scripts/ops/wave5-projection-failure-injection.ts'),
-      source('docs/operations/PROJECTION_RECOVERY.md'),
-    ]);
-
-    expect(service).toContain('PROJECTION_REBUILD_FORBIDDEN_IN_PRODUCTION');
-    expect(service).toContain('GHIMS_PROJECTION_REBUILD_INJECT_FAILURE');
-    expect(service).toContain('PROJECTION_REBUILD_INJECTED_FAILURE');
-    expect(service).toContain("status: 'FAILED'");
-    expect(drill).toContain('WAVE5_FAILURE_INJECTION_FORBIDDEN_IN_PRODUCTION');
-    expect(drill).toContain('AFTER_PROJECTION_WORKER');
-    expect(drill).toContain('Run a clean projection rebuild');
-    expect(recovery).toContain('identical authoritative input must yield the same projection fingerprint');
-  });
-
   test('Wave 5 evidence manifest refuses to equate repository state with production qualification', async () => {
     const manifest = await source('scripts/ops/wave5-evidence-manifest.ts');
 

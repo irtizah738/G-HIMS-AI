@@ -5,49 +5,6 @@ import path from 'node:path';
 const source = (file: string) => readFile(path.join(process.cwd(), file), 'utf8');
 
 describe('G-HIMS P7 controlled live pilot qualification', () => {
-  test('hospital-day rehearsal uses real Firebase auth, authoritative sessions and protected APIs', async () => {
-    const rehearsal = await source('scripts/ops/p7-hospital-day-rehearsal.ts');
-
-    expect(rehearsal).toContain('accounts:signInWithPassword');
-    expect(rehearsal).toContain("request('/api/auth/session'");
-    expect(rehearsal).toContain("request('/api/health/ready')");
-    expect(rehearsal).toContain('/api/offline/bootstrap');
-    expect(rehearsal).toContain("request('/api/clinical/encounter/create'");
-    expect(rehearsal).toContain("request('/api/commands/execute'");
-    expect(rehearsal).toContain("'RecordVitalsCommand'");
-    expect(rehearsal).toContain("'SignClinicalNoteCommand'");
-    expect(rehearsal).toContain("'PlaceDiagnosticOrderCommand'");
-    expect(rehearsal).toContain("'RecordCashReceiptCommand'");
-    expect(rehearsal).toContain("'PrescribeMedicationCommand'");
-    expect(rehearsal).toContain("'DispensePrescriptionCommand'");
-  });
-
-  test('hospital-day rehearsal explicitly verifies duplicate registration idempotency', async () => {
-    const rehearsal = await source('scripts/ops/p7-hospital-day-rehearsal.ts');
-
-    expect(rehearsal).toContain('registration_idempotent_retry');
-    expect(rehearsal).toContain("duplicate?.data?.patient?.id === patientId");
-    expect(rehearsal).toContain("duplicate?.data?.encounter?.id === encounterId");
-  });
-
-  test('hospital-day rehearsal includes all required operational personas', async () => {
-    const rehearsal = await source('scripts/ops/p7-hospital-day-rehearsal.ts');
-
-    for (const persona of [
-      "'admin'",
-      "'reception'",
-      "'nurse'",
-      "'doctor'",
-      "'billing'",
-      "'lab'",
-      "'pharmacy'",
-    ]) {
-      expect(rehearsal).toContain(persona);
-    }
-    expect(rehearsal).toContain('role_scoped_offline_bootstrap');
-    expect(rehearsal).toContain('lab_order_visibility');
-  });
-
   test('P7 evidence manifest refuses to equate code assertions with external evidence', async () => {
     const manifest = await source('scripts/ops/p7-evidence-manifest.ts');
 

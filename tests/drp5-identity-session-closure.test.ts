@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { validateSessionRecord } from '@/server/auth/session-service';
+import { mapHcmPrivilegeToAuthorization } from '@/server/auth/clinical-privilege-map';
 import type { UserSessionRecord } from '@/lib/auth/auth-types';
 
 const source = (file: string) =>
@@ -138,7 +139,7 @@ describe('DRP-5 identity and session closure', () => {
     const auth = await source('server/auth/authorization-context.ts');
     expect(auth).not.toContain('credentialGatedRoleBaseline');
     expect(auth).toContain('const effective = new Set<string>();');
-    expect(auth).toContain("PRESCRIBE_MEDICATION:['PRESCRIBE_MEDICATION','PRESCRIBE'");
+    expect(mapHcmPrivilegeToAuthorization('PRESCRIBE_MEDICATION')).toContain('PRESCRIBE');
     expect(auth).toContain("collection('employees')");
     expect(auth).toContain("collection('clinicalCredentials')");
     expect(auth).toContain("collection('clinicalPrivileges')");

@@ -86,8 +86,18 @@ async function run() {
     failures,
     writesPerformed: 0,
     migrationPerformed: false,
+    releaseGate: failures > 0 || projections.size > MAX_PATIENTS ||
+      Object.keys(statuses).some((status) => status !== 'CURRENT_POLICY_MATCH')
+        ? 'BLOCKED'
+        : 'READ_ONLY_COHORT_MATCHED',
   }, null, 2));
-  if (failures > 0 || projections.size > MAX_PATIENTS) process.exitCode = 1;
+  // Even a successfully diagnosed legacy mismatch is NOT a safe release.
+  const hasUnresolvedRevisions = Object.keys(statuses).some(
+    (status) => status !== 'CURRENT_POLICY_MATCH'
+  );
+  if (failures > 0 || projections.size > MAX_PATIENTS || hasUnresolvedRevisions) {
+    process.exitCode = 1;
+  }
 }
 
 if (import.meta.main) {

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { deriveClinicalPrivileges } from '@/server/auth/tenant-membership';
+import { mapHcmPrivilegeToAuthorization } from '@/server/auth/clinical-privilege-map';
 import { validateCommandPayload } from '@/lib/backend/commands/command-schema-registry';
 
 const source = (relPath: string) => readFile(join(process.cwd(), relPath), 'utf8');
@@ -21,7 +22,7 @@ describe('ORC-8 Matrix: Doctor Vitals Recording Privilege', () => {
   test('authoritative RECORD_VITALS requires canonical HCM privileges, never a role fallback', async () => {
     const authContext = await source('server/auth/authorization-context.ts');
 
-    expect(authContext).toContain("RECORD_VITALS:['RECORD_VITALS']");
+    expect(mapHcmPrivilegeToAuthorization('RECORD_VITALS')).toEqual(['RECORD_VITALS']);
     expect(authContext).toContain("if (!credentialsValid(credentials, Date.now())) return [];");
     expect(authContext).toContain("privilege.status!=='GRANTED'");
     expect(authContext).not.toContain('credentialGatedRoleBaseline');

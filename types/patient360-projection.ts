@@ -258,12 +258,6 @@ export interface Patient360Projection {
   /** Human/debug-friendly checkpoint cursor: <recordedAt>:<eventId>. */
   sourceCheckpoint: string;
   contentHash: string;
-  /**
-   * Version-fenced timeline generation. Legacy projections may omit these;
-   * upgraded projections are never served until their generation is complete.
-   */
-  timelineGeneration?: string;
-  timelineReady?: boolean;
   projectedAt: number;
   lastEventId?: string;
   lastEventRecordedAt?: number;

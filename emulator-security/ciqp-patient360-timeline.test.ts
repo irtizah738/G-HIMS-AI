@@ -69,11 +69,37 @@ describe('CIQP-05 Patient 360 revision-fenced timeline (Firestore emulator)', ()
     // partially published clinical history, and replay must restore readiness.
     const projectionRef = tenantRef.collection('patient360Projections').doc(patientId);
     await projectionRef.update({ timelineReady: false });
+    await expect(Patient360ProjectionService.getProjection(tenantId, patientId))
+      .rejects.toThrow('PATIENT360_TIMELINE_NOT_READY');
     await expect(Patient360ProjectionService.getTimeline(tenantId, patientId))
       .rejects.toThrow('PATIENT360_TIMELINE_NOT_READY');
-    const repaired = await Patient360ProjectionService.rebuildPatient(tenantId, patientId);
+    const repaired = await Patient360ProjectionService.getOrRebuildProjection(tenantId, patientId);
     expect(repaired.timelineReady).toBe(true);
     expect(secondRows.some(row => row.eventId === freshEventId)).toBe(true);
+
+    // A backlog of obsolete timeline versions must not require a new Firestore
+    // composite index or truncate current events at the first page boundary.
+    const obsolete = tenantRef.collection('patient360Timeline');
+    for (let offset = 0; offset < 550; offset += 250) {
+      const batch = db.batch();
+      for (let i = offset; i < Math.min(offset + 250, 550); i++) {
+        const obsoleteId = `obsolete-${i}`;
+        batch.set(obsolete.doc(obsoleteId), {
+          timelineItemId: obsoleteId,
+          tenantId,
+          patientId,
+          eventId: obsoleteId,
+          eventType: 'SYNTHETIC_OBSOLETE',
+          occurredAt: Number.MAX_SAFE_INTEGER - i,
+          summary: 'Synthetic superseded generation',
+          timelineGeneration: 'obsolete-content-hash',
+        });
+      }
+      await batch.commit();
+    }
+    const acrossPages = await Patient360ProjectionService.getTimeline(tenantId, patientId);
+    expect(acrossPages.map(row => row.eventId)).toEqual(secondRows.map(row => row.eventId));
+    expect(acrossPages.some(row => row.eventType === 'SYNTHETIC_OBSOLETE')).toBe(false);
 
     const service = Patient360ProjectionService as unknown as {
       commitProjectionMonotonically(tenant: string, patient: string, projection: Patient360Projection): Promise<string>;

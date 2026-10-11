@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { mapHcmPrivilegeToAuthorization } from '@/server/auth/clinical-privilege-map';
 
 const source = (path: string) => readFile(join(process.cwd(), path), 'utf8');
 
@@ -19,11 +20,10 @@ describe('ORC-2 HCM clinical privilege authority', () => {
     expect(auth).not.toContain(': membership.clinicalPrivileges;');
   });
   test('routine privileges are explicitly typed and mapped from granted HCM records', async () => {
-    const auth = await source('server/auth/authorization-context.ts');
     const hcm = await source('types/hcm-advanced.ts');
     for (const privilege of ['RECORD_VITALS', 'TRIAGE_PATIENTS', 'ADMIT_INPATIENT', 'DISCHARGE_INPATIENT']) {
       expect(hcm).toContain("| '"+privilege+"'");
-      expect(auth).toContain(privilege+":['"+privilege+"']");
+      expect(mapHcmPrivilegeToAuthorization(privilege)).toEqual([privilege]);
     }
   });
   test('direct consultation assignment revalidates current HCM roster and facility', async () => {

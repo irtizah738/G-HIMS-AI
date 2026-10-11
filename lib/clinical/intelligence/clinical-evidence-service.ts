@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { isPatient360ClinicalSourceEvent } from '@/lib/clinical/patient360/clinical-source-event-policy';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { sanitizeForFirestore } from '@/lib/firestore/sanitize';
 import type { CommandContext, DomainEventEnvelope } from '@/lib/backend/types';
@@ -331,8 +332,11 @@ export class ClinicalEvidenceService {
       throw new Error('CI10_EVIDENCE_SCOPE_INVALID');
     }
 
+    // Evidence-snapshot audit events never constitute clinical provenance.
+    // Enforce this even for direct buildSnapshot callers supplying raw events.
+    const clinicalEvents = events.filter(isPatient360ClinicalSourceEvent);
     const evidenceRefs = candidatesFromProjection(projection, supplemental)
-      .map((candidate) => toEvidenceRef(projection, candidate, events))
+      .map((candidate) => toEvidenceRef(projection, candidate, clinicalEvents))
       .sort(
         (left, right) =>
           left.sourceType.localeCompare(right.sourceType) ||

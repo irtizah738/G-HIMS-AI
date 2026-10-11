@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createHash, randomBytes } from 'node:crypto';
 import { assertTelehealthPatientJoinToken } from '@/lib/backend/security/telehealth-patient-capability';
+import { assertTelehealthRoomLease } from '@/lib/backend/security/telehealth-room-policy';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
 import type { TelehealthSession } from '@/lib/types/ghims';
@@ -89,13 +90,59 @@ async function authorizeClinician(
   return context.actorId;
 }
 
+type SignalingRoom = {
+  active?: boolean;
+  roomToken?: string;
+  sessionId?: string;
+  encounterId?: string;
+  patientId?: string;
+  clinicianId?: string;
+  patientJoinTokenHash?: string;
+  leaseId?: string;
+  startedAt?: number;
+  expiresAt?: number;
+};
+
+/** The patient capability and HCM authorization are checked separately by callers.
+ * This additionally ensures a reused room token never crosses care episodes or clinicians.
+ */
+async function requireActiveSignalingLease(
+  tenantId: string, session: TelehealthSession, roomToken: string,
+  room: SignalingRoom | undefined,
+): Promise<{ leaseId: string; startedAt: number }> {
+  const db = getAdminFirestore();
+  if (!db) throw new Error('TELEHEALTH_SIGNALING_STORE_UNAVAILABLE');
+  const encounter = await db.collection('tenants').doc(tenantId)
+    .collection('encounters').doc(session.encounterId).get();
+  if (!encounter.exists ||
+      encounter.data()?.patientId !== session.patientId ||
+      String(encounter.data()?.encounterType || encounter.data()?.type || '').toUpperCase() !== 'TELEHEALTH') {
+    throw new Error('TELEHEALTH_ENCOUNTER_SCOPE_INVALID');
+  }
+  assertTelehealthRoomLease(room, {
+    roomToken,
+    sessionId: session.id,
+    encounterId: session.encounterId,
+    patientId: session.patientId,
+    clinicianId: clean(encounter.data()?.assignedProviderId),
+  });
+  if (!/^[A-Za-z0-9_-]{22}$/.test(clean(room?.leaseId)) ||
+      typeof room?.startedAt !== 'number' ||
+      !Number.isSafeInteger(room.startedAt)) {
+    throw new Error('TELEHEALTH_CALL_LEASE_INVALID');
+  }
+  return { leaseId: room.leaseId!, startedAt: room.startedAt };
+}
+
 function errorResponse(error: unknown) {
   const message = error instanceof Error ? error.message : 'TELEHEALTH_SIGNALING_ERROR';
   const status =
     message.includes('AUTH') ||
     message.includes('ACCESS_DENIED') ||
     message.includes('ASSIGNMENT_MISMATCH') ||
-    message.includes('TOKEN_INVALID')
+    message.includes('TOKEN_INVALID') ||
+    message.includes('LEASE_INVALID') ||
+    message.includes('CALL_NOT_ACTIVE')
       ? 403
       : message.includes('NOT_FOUND')
         ? 404
@@ -146,9 +193,7 @@ export async function POST(req: NextRequest) {
       .doc(roomToken);
     const now = Date.now();
     const roomSnapshot = await roomRef.get();
-    const room = roomSnapshot.data() as
-      | { active?: boolean; expiresAt?: number; clinicianId?: string; patientJoinTokenHash?: string }
-      | undefined;
+    const room = roomSnapshot.data() as SignalingRoom | undefined;
 
     let senderId = 'PATIENT_CAPABILITY';
     if (senderRole === 'CLINICIAN') {
@@ -158,6 +203,7 @@ export async function POST(req: NextRequest) {
         // Persist only a digest, so a stolen Firestore record cannot grant call access.
         const issuedPatientJoinToken = randomBytes(32).toString('base64url');
         const patientJoinTokenHash = createHash('sha256').update(issuedPatientJoinToken).digest('hex');
+        const leaseId = randomBytes(16).toString('base64url');
         await roomRef.set(
           {
             roomToken,
@@ -167,6 +213,7 @@ export async function POST(req: NextRequest) {
             active: true,
             clinicianId: senderId,
             patientJoinTokenHash,
+            leaseId,
             startedAt: now,
             expiresAt: now + CALL_LEASE_MS,
             updatedAt: now,
@@ -196,6 +243,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const { leaseId } = await requireActiveSignalingLease(tenantId, session, roomToken, room);
+
     if (type === 'LEAVE') {
       if (senderRole === 'CLINICIAN') {
         await roomRef.set(
@@ -208,6 +257,7 @@ export async function POST(req: NextRequest) {
     const messageRef = roomRef.collection('messages').doc();
     await messageRef.set({
       messageId: messageRef.id,
+      leaseId,
       senderRole,
       senderId,
       type,
@@ -255,9 +305,7 @@ export async function GET(req: NextRequest) {
       .collection('telehealthSignaling')
       .doc(roomToken);
     const roomSnapshot = await roomRef.get();
-    const room = roomSnapshot.data() as
-      | { active?: boolean; expiresAt?: number; patientJoinTokenHash?: string }
-      | undefined;
+    const room = roomSnapshot.data() as SignalingRoom | undefined;
     const now = Date.now();
 
     if (!room?.active || !room.expiresAt || room.expiresAt <= now) {
@@ -270,9 +318,11 @@ export async function GET(req: NextRequest) {
       assertTelehealthPatientJoinToken(patientJoinToken, room.patientJoinTokenHash);
     }
 
+    const { leaseId, startedAt } = await requireActiveSignalingLease(tenantId, session, roomToken, room);
+
     const messages = await roomRef
       .collection('messages')
-      .where('createdAt', '>', after)
+      .where('createdAt', '>', Math.max(after, startedAt - 1))
       .orderBy('createdAt', 'asc')
       .limit(100)
       .get();
@@ -282,7 +332,7 @@ export async function GET(req: NextRequest) {
       expiresAt: room.expiresAt,
       messages: messages.docs
         .map((doc) => doc.data())
-        .filter((message) => message.senderRole !== receiverRole)
+        .filter((message) => message.leaseId === leaseId && message.senderRole !== receiverRole)
         .map((message) => ({
           messageId: message.messageId,
           type: message.type,

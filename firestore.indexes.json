@@ -283,28 +283,6 @@
       ]
     },
     {
-      "collectionGroup": "patient360Timeline",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "timelineGeneration",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "occurredAt",
-          "order": "DESCENDING"
-        },
-        {
-          "fieldPath": "eventId",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
       "collectionGroup": "scmSupplierInvoices",
       "queryScope": "COLLECTION",
       "fields": [

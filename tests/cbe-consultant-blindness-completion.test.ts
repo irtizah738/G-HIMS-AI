@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { validateCommandPayload } from '@/lib/backend/commands/command-schema-registry';
+import { mapHcmPrivilegeToAuthorization } from '@/server/auth/clinical-privilege-map';
 
 const source = (path: string) => readFile(join(process.cwd(), path), 'utf8');
 
@@ -98,7 +99,6 @@ describe('CBE consultant blindness completion', () => {
     const resultService = await source(
       'lib/backend/services/diagnostic-result-domain-service.ts'
     );
-    const auth = await source('server/auth/authorization-context.ts');
     const hcm = await source('types/hcm-advanced.ts');
     const demo = await source('scripts/demo/provision-demo-identities.ts');
 
@@ -108,9 +108,7 @@ describe('CBE consultant blindness completion', () => {
     expect(resultService).not.toContain(
       "requiredPrivilege: 'DISCHARGE_INPATIENT',"
     );
-    expect(auth).toContain(
-      "ACKNOWLEDGE_CRITICAL_RESULT:['ACKNOWLEDGE_CRITICAL_RESULT']"
-    );
+    expect(mapHcmPrivilegeToAuthorization('ACKNOWLEDGE_CRITICAL_RESULT')).toEqual(['ACKNOWLEDGE_CRITICAL_RESULT']);
     expect(hcm).toContain("'ACKNOWLEDGE_CRITICAL_RESULT'");
     expect(demo).toContain("'ACKNOWLEDGE_CRITICAL_RESULT'");
   });

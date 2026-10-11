@@ -201,6 +201,34 @@ describe('CI-10A evidence and provenance fabric', () => {
     expect(first.evidenceCount).toBeGreaterThan(0);
   });
 
+  test('AI snapshot creation metadata cannot change evidence hashes or create provenance', () => {
+    const baseline = ClinicalEvidenceService.buildSnapshot(
+      projection(), events, 'LONGITUDINAL_SUMMARY', 'doctor-a', 2000
+    );
+    const metadataEvent = {
+      eventId: 'evt-cisnap-created',
+      eventType: 'CLINICAL_INTELLIGENCE_EVIDENCE_SNAPSHOT_CREATED',
+      aggregateType: 'CLINICAL_INTELLIGENCE_EVIDENCE_SNAPSHOT',
+      aggregateId: baseline.snapshotId,
+      payload: {
+        patientId: 'patient-ci10',
+        snapshotId: baseline.snapshotId,
+        snapshotHash: baseline.snapshotHash,
+      },
+      occurredAt: 3000,
+      recordedAt: 3000,
+    };
+    const afterRead = ClinicalEvidenceService.buildSnapshot(
+      projection(), [...events, metadataEvent], 'LONGITUDINAL_SUMMARY',
+      'doctor-b', 9000
+    );
+    expect(afterRead.snapshotId).toBe(baseline.snapshotId);
+    expect(afterRead.snapshotHash).toBe(baseline.snapshotHash);
+    expect(afterRead.evidenceRefs).toEqual(baseline.evidenceRefs);
+    expect(afterRead.evidenceRefs.flatMap((ref) => ref.sourceEventIds))
+      .not.toContain('evt-cisnap-created');
+  });
+
   test('ties clinical evidence references back to immutable source events', () => {
     const snapshot = ClinicalEvidenceService.buildSnapshot(
       projection(),

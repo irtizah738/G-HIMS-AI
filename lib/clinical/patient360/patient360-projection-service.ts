@@ -255,28 +255,58 @@ export class Patient360ProjectionService {
     }
 
     const safeLimit = Math.max(1, Math.min(500, limit));
-    let query = db
+    const collection = db
       .collection('tenants')
       .doc(tenantId)
-      .collection('patient360Timeline')
-      .where('patientId', '==', patientId);
-    if (current.timelineGeneration) {
-      query = query.where('timelineGeneration', '==', current.timelineGeneration);
-    }
-    const snapshot = await query
-      .orderBy('occurredAt', 'desc')
-      .orderBy('eventId', 'desc')
-      .limit(safeLimit)
-      .get();
+      .collection('patient360Timeline');
 
-    return snapshot.docs
-      .map((document) => document.data() as Patient360TimelineItem)
-      .sort(
-        (left, right) =>
-          Number(right.occurredAt || 0) - Number(left.occurredAt || 0) ||
-          right.eventId.localeCompare(left.eventId)
-      )
-      .slice(0, safeLimit);
+    // Reuse the already-deployed patientId/occurredAt/eventId composite
+    // index. Filter generations server-side after a bounded, paginated read
+    // instead of requiring a new index to serve clinical timelines. Older
+    // revisions remain stored but can never be returned as current facts.
+    const rows: Patient360TimelineItem[] = [];
+    let scanned = 0;
+    let lastDocument: QueryDocumentSnapshot<DocumentData> | null = null;
+    while (rows.length < safeLimit) {
+      let query = collection
+        .where('patientId', '==', patientId)
+        .orderBy('occurredAt', 'desc')
+        .orderBy('eventId', 'desc')
+        .limit(PATIENT360_PAGE_SIZE);
+      if (lastDocument) query = query.startAfter(lastDocument);
+      const page = await query.get();
+      scanned += page.size;
+      if (scanned > PATIENT360_SOURCE_MAX) {
+        throw new Error('PATIENT360_TIMELINE_SCAN_LIMIT_EXCEEDED');
+      }
+      for (const document of page.docs) {
+        const row = document.data() as Patient360TimelineItem & {
+          timelineGeneration?: string;
+        };
+        if (row.patientId !== patientId || row.tenantId !== tenantId) {
+          throw new Error('PATIENT360_TIMELINE_SCOPE_MISMATCH');
+        }
+        if (current.timelineGeneration
+          ? row.timelineGeneration !== current.timelineGeneration
+          : Boolean(row.timelineGeneration)) continue;
+        rows.push(row);
+        if (rows.length >= safeLimit) break;
+      }
+      if (page.size < PATIENT360_PAGE_SIZE) break;
+      lastDocument = page.docs[page.docs.length - 1] || null;
+      if (!lastDocument) break;
+    }
+
+    // A new clinical event can supersede this projection while a paginated
+    // read is in flight. Never return a mismatched projection/timeline pair.
+    const latest = await this.getProjection(tenantId, patientId);
+    if (!latest || latest.sourceCheckpoint !== current.sourceCheckpoint ||
+        latest.contentHash !== current.contentHash ||
+        latest.timelineGeneration !== current.timelineGeneration ||
+        (latest.timelineGeneration && !latest.timelineReady)) {
+      throw new Error('PATIENT360_VIEW_REVISION_CHANGED');
+    }
+    return rows.slice(0, safeLimit);
   }
 
   public static async readClinicalView(

@@ -45,6 +45,35 @@ describe('CIQP-05 Patient 360 revision-fenced timeline (Firestore emulator)', ()
     expect(firstRows.every(row => row.patientId === patientId)).toBe(true);
 
     const tenantRef = db.collection('tenants').doc(tenantId);
+
+    // A CI-10 evidence-snapshot event must remain durably auditable without
+    // recursively changing Patient 360's clinical event cursor or evidence.
+    const auditEventId = id('ciqp_snapshot_audit');
+    const auditEvent = {
+      eventId: auditEventId,
+      tenantId,
+      eventType: 'CLINICAL_INTELLIGENCE_EVIDENCE_SNAPSHOT_CREATED',
+      aggregateType: 'CLINICAL_INTELLIGENCE_EVIDENCE_SNAPSHOT',
+      aggregateId: id('cisnap'),
+      payload: { patientId, snapshotHash: id('hash') },
+      occurredAt: Date.now() + 10_000,
+      recordedAt: Date.now() + 10_000,
+    };
+    await tenantRef.collection('events').doc(auditEventId).set(auditEvent);
+    const ignored = await Patient360ProjectionService.refreshFromEvent(auditEvent);
+    expect(ignored.status).toBe('IGNORED');
+    expect(ignored.updatedPatientIds).toEqual([]);
+    const auditCheckpoint = await tenantRef
+      .collection('patient360ProjectionCheckpoints').doc(auditEventId).get();
+    expect(auditCheckpoint.data()?.status).toBe('IGNORED');
+    const afterAudit = await Patient360ProjectionService.rebuildPatient(tenantId, patientId);
+    expect(afterAudit.contentHash).toBe(first.contentHash);
+    expect(afterAudit.revision).toBe(first.revision);
+    const filteredEvents = await Patient360ProjectionService.loadPatientEvents(tenantId, patientId);
+    expect(filteredEvents.some((item) => item.eventId === auditEventId)).toBe(false);
+    expect((await Patient360ProjectionService.getTimeline(tenantId, patientId)).map(x => x.eventId))
+      .toEqual(firstRows.map(x => x.eventId));
+
     const latest = (await tenantRef.collection('events').get()).docs
       .map(doc => doc.data()).reduce((a, b) => Math.max(a, Number(b.recordedAt || 0)), 0);
     const freshEventId = id('ciqp_evt');

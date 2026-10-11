@@ -73,6 +73,23 @@ describe('CIQP-05 Patient 360 revision-fenced timeline (Firestore emulator)', ()
       .rejects.toThrow('PATIENT360_TIMELINE_NOT_READY');
     await expect(Patient360ProjectionService.getTimeline(tenantId, patientId))
       .rejects.toThrow('PATIENT360_TIMELINE_NOT_READY');
+    await expect(Patient360ProjectionService.readClinicalView(tenantId, patientId))
+      .rejects.toThrow('PATIENT360_TIMELINE_NOT_READY');
+
+    // The actual API/AI self-healing read must repair an interrupted
+    // generation, not just an entirely missing patient projection.
+    const healedView = await Patient360ProjectionService.readOrRebuildClinicalView(
+      tenantId,
+      patientId
+    );
+    expect(healedView.repairedMissingProjection).toBe(true);
+    expect(healedView.projection.timelineReady).toBe(true);
+    expect(healedView.projection.contentHash).toBe(second.contentHash);
+    expect(healedView.timeline.map(row => row.eventId))
+      .toEqual(secondRows.map(row => row.eventId));
+
+    // Preserve coverage of the direct projection recovery entry point.
+    await projectionRef.update({ timelineReady: false });
     const repaired = await Patient360ProjectionService.getOrRebuildProjection(tenantId, patientId);
     expect(repaired?.timelineReady).toBe(true);
     expect(secondRows.some(row => row.eventId === freshEventId)).toBe(true);

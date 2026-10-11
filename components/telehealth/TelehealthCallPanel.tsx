@@ -136,6 +136,25 @@ export function TelehealthCallPanel({
     }
   };
 
+  const handlePollingFailure = (cause: unknown) => {
+    const code = cause instanceof Error ? cause.message : 'Telehealth signaling failed.';
+    if ([
+      'TELEHEALTH_CALL_NOT_ACTIVE',
+      'TELEHEALTH_CALL_LEASE_INVALID',
+      'TELEHEALTH_SESSION_FINAL',
+      'TELEHEALTH_ENCOUNTER_SCOPE_INVALID',
+      'TELEHEALTH_CLINICIAN_ASSIGNMENT_MISMATCH',
+      'TELEHEALTH_CLINICIAN_AUTHORITY_REQUIRED',
+    ].some(reason => code.includes(reason))) {
+      disposeMedia();
+      setPatientJoinToken(null);
+      setState('ENDED');
+      setError('The clinical call room is no longer authorized. Confirm patient and clinician status before starting a new call.');
+      return;
+    }
+    setError(code);
+  };
+
   const startCall = async () => {
     if (disabled || state === 'PREPARING' || state === 'WAITING' || state === 'CONNECTED') return;
     setError(null);
@@ -209,9 +228,7 @@ export function TelehealthCallPanel({
       setState('WAITING');
       await processSignals();
       pollRef.current = window.setInterval(() => {
-        void processSignals().catch((cause) => {
-          setError(cause instanceof Error ? cause.message : 'Telehealth signaling failed.');
-        });
+        void processSignals().catch(handlePollingFailure);
       }, 1000);
     } catch (cause) {
       // START may have already minted a bearer link. Revoke the active media

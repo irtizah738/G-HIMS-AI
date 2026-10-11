@@ -28,3 +28,17 @@ export function assertTelehealthRoomLease(
     throw new Error('TELEHEALTH_CALL_NOT_ACTIVE');
   }
 }
+
+/** Historical messages in a reused signaling document must never be visible
+ * to another call even if the room token and participant role are unchanged.
+ */
+export function filterCurrentTelehealthLeaseMessages<T extends { leaseId?: string; senderRole?: string }>(
+  messages: T[],
+  leaseId: string,
+  receiverRole: string,
+): T[] {
+  if (!/^[A-Za-z0-9_-]{22}$/.test(leaseId)) return [];
+  return messages.filter(
+    (message) => message.leaseId === leaseId && message.senderRole !== receiverRole,
+  );
+}

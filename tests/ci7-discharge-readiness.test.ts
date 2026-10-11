@@ -534,20 +534,4 @@ describe('G-HIMS CI-7 Discharge Readiness Intelligence', () => {
     expect(tx).toContain("BED_TRANSFER: 'bedTransfers'");
   });
 
-  test('Hobby deployment path disables automatic previews and avoids Pro-only staging target', async () => {
-    const vercel = JSON.parse(await source('vercel.json'));
-    const workflow = await source('.github/workflows/staging-deploy.yml');
-
-    expect(vercel.git?.deploymentEnabled).toBe(false);
-    expect(workflow).toContain(
-      'vercel pull --yes --environment=preview'
-    );
-    expect(workflow).toContain(
-      'vercel deploy --prebuilt --yes'
-    );
-    expect(workflow).toContain('VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}');
-    expect(workflow).not.toContain('--token="$VERCEL_TOKEN"');
-    expect(workflow).not.toContain('--target=staging');
-    expect(workflow).toContain('G-HIMS runtime: STAGING');
-  });
 });

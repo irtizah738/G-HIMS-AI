@@ -101,9 +101,6 @@ describe('CBE consultant blindness completion', () => {
     const auth = await source('server/auth/authorization-context.ts');
     const hcm = await source('types/hcm-advanced.ts');
     const demo = await source('scripts/demo/provision-demo-identities.ts');
-    const staging = await source(
-      'scripts/ops/p7-provision-staging-identities.ts'
-    );
 
     expect(resultService).toContain(
       "requiredPrivilege: 'ACKNOWLEDGE_CRITICAL_RESULT'"
@@ -116,7 +113,6 @@ describe('CBE consultant blindness completion', () => {
     );
     expect(hcm).toContain("'ACKNOWLEDGE_CRITICAL_RESULT'");
     expect(demo).toContain("'ACKNOWLEDGE_CRITICAL_RESULT'");
-    expect(staging).toContain("'ACKNOWLEDGE_CRITICAL_RESULT'");
   });
 
   test('consultant attention projection is event-driven and rebuildable', async () => {

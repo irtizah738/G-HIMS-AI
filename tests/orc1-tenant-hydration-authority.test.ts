@@ -30,7 +30,9 @@ describe('ORC-1 tenant hydration authority', () => {
     expect(client).toContain('EDGE_HYDRATION_BAD_REQUEST');
     expect(client).toContain("freshness: 'CURRENT'");
     expect(client).toContain("freshness: 'UNHYDRATED'");
-    expect(guard).toContain('if (loading || unresolved)');
+    expect(guard).toContain('if (loading)');
+    expect(guard).toContain('if (!user)');
+    expect(guard).toContain('if (unresolved)');
     expect(guard).toContain('if (mismatched)');
   });
 });

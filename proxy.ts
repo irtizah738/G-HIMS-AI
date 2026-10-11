@@ -37,8 +37,8 @@ function buildContentSecurityPolicy(nonce: string): string {
 
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${developmentScriptPolicy}`,
-    `style-src 'self' 'nonce-${nonce}'`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'unsafe-inline'${developmentScriptPolicy}`,
+    `style-src 'self' 'unsafe-inline' 'nonce-${nonce}'`,
     "style-src-attr 'unsafe-inline'",
     "img-src 'self' blob: data: https://lh3.googleusercontent.com",
     "font-src 'self' data:",

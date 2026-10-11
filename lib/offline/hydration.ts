@@ -2,6 +2,7 @@
 
 import { auth } from '@/lib/firebase/client';
 import { getCachedAuthSession } from '@/lib/offline/auth-storage';
+import { canReadOfflineClinicalSnapshot } from '@/lib/offline/clinical-offline-identity-policy';
 import { getEdgeSyncMetadata } from '@/lib/offline/db';
 import {
   listSecureEdgeEntities,
@@ -73,11 +74,7 @@ export async function loadLocalEdgeSnapshot(
   const restoredUid = auth.currentUser?.uid || '';
   // A decrypted cache entry is NOT proof of the actor currently signed in on
   // this shared browser. Validate Firebase's restored UID before ANY PHI read.
-  if (!cached || !restoredUid || actorId !== restoredUid ||
-      cached.session.userId !== restoredUid ||
-      cached.session.status !== 'ACTIVE' ||
-      !Number.isFinite(Date.parse(cached.session.expiresAt)) ||
-      Date.now() >= Date.parse(cached.session.expiresAt)) {
+  if (!canReadOfflineClinicalSnapshot(restoredUid, cached, normalizedTenantId)) {
     return lockedLocalEdgeSnapshot(normalizedTenantId);
   }
   if (cached && (
@@ -164,15 +161,8 @@ export async function loadLocalEdgeSnapshot(
   // A user/tenant/session switch can complete while encrypted reads are
   // pending. Revalidate before returning even a single patient record.
   const latest = await getCachedAuthSession();
-  if (!latest || auth.currentUser?.uid !== restoredUid ||
-      latest.user.uid !== restoredUid ||
-      latest.user.tenantId.trim().toLowerCase() !== normalizedTenantId ||
-      latest.session.tenantId.trim().toLowerCase() !== normalizedTenantId ||
-      latest.session.userId !== restoredUid ||
-      latest.session.sessionId !== cached.session.sessionId ||
-      latest.session.status !== 'ACTIVE' ||
-      !Number.isFinite(Date.parse(latest.session.expiresAt)) ||
-      Date.now() >= Date.parse(latest.session.expiresAt)) {
+  if (!canReadOfflineClinicalSnapshot(auth.currentUser?.uid, latest, normalizedTenantId) ||
+      latest?.session.sessionId !== cached.session.sessionId) {
     return lockedLocalEdgeSnapshot(normalizedTenantId);
   }
 
@@ -320,11 +310,9 @@ export async function hydrateEdgeSnapshot(
     // An account switch during asynchronous persistence must never return
     // the earlier actor's server patient snapshot to the new actor.
     const afterWrite = await getCachedAuthSession();
-    if (!afterWrite || auth.currentUser?.uid !== currentUser.uid ||
-        afterWrite.user.uid !== currentUser.uid ||
-        afterWrite.session.userId !== currentUser.uid ||
-        afterWrite.user.tenantId.trim().toLowerCase() !== normalizedTenantId ||
-        afterWrite.session.sessionId !== cached.session.sessionId) {
+    if (!canReadOfflineClinicalSnapshot(auth.currentUser?.uid, afterWrite, normalizedTenantId) ||
+        auth.currentUser?.uid !== currentUser.uid ||
+        afterWrite?.session.sessionId !== cached.session.sessionId) {
       throw new Error('EDGE_HYDRATION_SESSION_CHANGED');
     }
 

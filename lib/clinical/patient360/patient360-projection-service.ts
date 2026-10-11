@@ -376,12 +376,23 @@ export class Patient360ProjectionService {
     timeline: Patient360TimelineItem[];
     repairedMissingProjection: boolean;
   }> {
-    const current = await this.readClinicalView(
-      tenantId,
-      patientId,
-      timelineLimit
-    );
-    if (current.projection) {
+    // An interrupted publication remains invisible to ordinary readers.
+    // The authorized read path may attempt one canonical, revision-fenced repair.
+    let current: Awaited<ReturnType<typeof this.readClinicalView>> | null = null;
+    try {
+      current = await this.readClinicalView(
+        tenantId,
+        patientId,
+        timelineLimit
+      );
+    } catch (error) {
+      if (!(error instanceof Error) ||
+          error.message !== 'PATIENT360_TIMELINE_NOT_READY') {
+        throw error;
+      }
+      // A second interruption or a new source revision still fails closed.
+    }
+    if (current?.projection) {
       return {
         projection: current.projection,
         timeline: current.timeline,

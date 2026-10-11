@@ -343,6 +343,16 @@ describe('CI-10A evidence and provenance fabric', () => {
     expect(service).not.toContain('Patient360ProjectionService.getProjection(context.tenantId, patientId)');
   });
 
+  test('authoritative snapshot creation freezes source-event cursor and rechecks publication', async () => {
+    const service = await source(
+      'lib/clinical/intelligence/clinical-evidence-service.ts'
+    );
+    expect(service).toContain('evidenceEventsAtProjectionCursor(projection, events)');
+    expect(service).toContain('scopedEvents,');
+    expect(service).toContain('Patient360ProjectionService.getProjection(');
+    expect(service).toContain('CI10_EVIDENCE_PROJECTION_REVISION_CHANGED');
+  });
+
   test('provider gateway and API are evidence scoped and provider neutral', async () => {
     const gateway = await source(
       'lib/clinical/intelligence/clinical-intelligence-gateway.ts'

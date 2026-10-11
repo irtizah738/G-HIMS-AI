@@ -64,6 +64,15 @@ describe('CIQP-05 Patient 360 revision-fenced timeline (Firestore emulator)', ()
     expect(second.timelineReady).toBe(true);
     const secondRows = await Patient360ProjectionService.getTimeline(tenantId, patientId);
     expect(secondRows.length).toBeGreaterThan(firstRows.length);
+
+    // Simulate an interrupted timeline publication. Readers must not see
+    // partially published clinical history, and replay must restore readiness.
+    const projectionRef = tenantRef.collection('patient360Projections').doc(patientId);
+    await projectionRef.update({ timelineReady: false });
+    await expect(Patient360ProjectionService.getTimeline(tenantId, patientId))
+      .rejects.toThrow('PATIENT360_TIMELINE_NOT_READY');
+    const repaired = await Patient360ProjectionService.rebuildPatient(tenantId, patientId);
+    expect(repaired.timelineReady).toBe(true);
     expect(secondRows.some(row => row.eventId === freshEventId)).toBe(true);
 
     const service = Patient360ProjectionService as unknown as {

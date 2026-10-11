@@ -37,40 +37,31 @@ export function TenantRouteAuthorityGuard({
     router.replace(segments.join('/') || `/${encodeURIComponent(sessionTenant)}`);
   }, [loading, user, mismatched, pathname, routeTenant, router, sessionTenant]);
 
-  if (loading) {
+  if (loading || unresolved) {
+    if (!loading && !user) {
+      return (
+        <div role="status" className="min-h-[40vh] flex flex-col items-center justify-center p-6 text-center space-y-4">
+          <div className="text-base font-bold text-slate-900 dark:text-white">
+            Authentication Required
+          </div>
+          <p className="text-xs text-slate-500 max-w-sm">
+            Please sign in with your hospital credentials to access clinical records.
+          </p>
+          <button
+            onClick={() => router.replace('/login')}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl transition cursor-pointer"
+          >
+            Sign In to G-HIMS
+          </button>
+        </div>
+      );
+    }
     return (
       <div role="status" className="min-h-[40vh] flex flex-col items-center justify-center p-6 text-center space-y-3">
         <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
         <div className="text-sm font-semibold text-slate-700 dark:text-slate-300">
           Resolving authenticated hospital context…
         </div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return (
-      <div role="status" className="min-h-[40vh] flex flex-col items-center justify-center p-6 text-center space-y-4">
-        <div className="text-base font-bold text-slate-900 dark:text-white">
-          Authentication Required
-        </div>
-        <p className="text-xs text-slate-500 max-w-sm">
-          Please sign in with your hospital credentials to access clinical records.
-        </p>
-        <button
-          onClick={() => router.replace('/login')}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl transition cursor-pointer"
-        >
-          Sign In to G-HIMS
-        </button>
-      </div>
-    );
-  }
-
-  if (unresolved) {
-    return (
-      <div role="status" className="p-6 text-sm text-slate-600 dark:text-slate-400">
-        Resolving hospital facility scope…
       </div>
     );
   }

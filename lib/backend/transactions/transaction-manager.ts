@@ -269,6 +269,7 @@ function collectionForEntityType(entityType: string): string {
     RESOURCE_RESERVATION: 'resourceReservations',
     MAINTENANCE_WORK_ORDER: 'maintenanceWorkOrders',
     CALIBRATION_RECORD: 'calibrationRecords',
+    PATIENT: 'patients',
     PATIENT_MPI: 'patients',
     PATIENT_SAFETY: 'patients',
     PATIENT_IDENTITY_CONFIRMATION: 'patientIdentityConfirmations',

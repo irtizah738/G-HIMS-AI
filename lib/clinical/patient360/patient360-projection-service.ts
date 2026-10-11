@@ -424,7 +424,8 @@ export class Patient360ProjectionService {
 
   public static async loadPatientEvents(
     tenantId: string,
-    patientId: string
+    patientId: string,
+    options: { includeNonClinical?: boolean } = {}
   ): Promise<Patient360SourceEvent[]> {
     const db = getAdminFirestore();
     if (!db) {
@@ -450,8 +451,11 @@ export class Patient360ProjectionService {
       }
     }
 
+    // The emulator-only legacy inspector needs the same four authoritative
+    // patient-scope queries *before* the clinical-source policy filter. Keep
+    // the default clinical read behavior unchanged.
     return Array.from(byId.values())
-      .filter(isPatient360ClinicalSourceEvent)
+      .filter((event) => options.includeNonClinical || isPatient360ClinicalSourceEvent(event))
       .sort(
         (left, right) =>
           Number(left.recordedAt || left.occurredAt || 0) -

@@ -423,6 +423,47 @@ describe('G-HIMS CI-4 authoritative Patient 360 projection', () => {
     expect(second.projection.revision).toBe(first.projection.revision);
   });
 
+  test('derived AI evidence snapshot creation does not change clinical revision or timeline', () => {
+    const sources = baseSources();
+    const original = Patient360Projector.project(sources);
+    const withAuditMetadata = Patient360Projector.project({
+      ...sources,
+      events: [...sources.events, {
+        eventId: 'evt-ai-snapshot',
+        eventType: 'CLINICAL_INTELLIGENCE_EVIDENCE_SNAPSHOT_CREATED',
+        aggregateType: 'CLINICAL_INTELLIGENCE_EVIDENCE_SNAPSHOT',
+        aggregateId: 'cisnap-1',
+        payload: { patientId: 'patient-a', snapshotId: 'cisnap-1' },
+        occurredAt: 1700000010000,
+        recordedAt: 1700000010000,
+      }],
+    });
+
+    expect(withAuditMetadata.projection.contentHash).toBe(original.projection.contentHash);
+    expect(withAuditMetadata.projection.sourceFingerprint).toBe(original.projection.sourceFingerprint);
+    expect(withAuditMetadata.projection.sourceCheckpoint).toBe(original.projection.sourceCheckpoint);
+    expect(withAuditMetadata.projection.revision).toBe(original.projection.revision);
+    expect(withAuditMetadata.timeline).toEqual(original.timeline);
+
+    // A governed signed clinical document is not metadata and remains visible.
+    const withSignedDocument = Patient360Projector.project({
+      ...sources,
+      events: [...sources.events, {
+        eventId: 'evt-clinical-draft-signed',
+        eventType: 'CLINICAL_DRAFT_SIGNED',
+        aggregateType: 'CLINICAL_DOCUMENT',
+        aggregateId: 'doc-signed',
+        payload: { patientId: 'patient-a', encounterId: 'enc-a' },
+        occurredAt: 1700000010000,
+        recordedAt: 1700000010000,
+      }],
+    });
+    expect(withSignedDocument.projection.revision).toBe(original.projection.revision + 1);
+    expect(withSignedDocument.timeline.map((item) => item.eventId)).toContain(
+      'evt-clinical-draft-signed'
+    );
+  });
+
   test('cross-patient records do not alter projection content or fingerprint', () => {
     const sources = baseSources();
     const withOtherPatient = Patient360Projector.project(sources);

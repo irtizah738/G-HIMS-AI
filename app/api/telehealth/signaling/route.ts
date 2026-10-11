@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createHash, randomBytes } from 'node:crypto';
 import { assertTelehealthPatientJoinToken } from '@/lib/backend/security/telehealth-patient-capability';
-import { assertTelehealthRoomLease } from '@/lib/backend/security/telehealth-room-policy';
+import { assertTelehealthRoomLease, filterCurrentTelehealthLeaseMessages } from '@/lib/backend/security/telehealth-room-policy';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
 import type { TelehealthSession } from '@/lib/types/ghims';
@@ -330,10 +330,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       active: true,
       expiresAt: room.expiresAt,
-      messages: messages.docs
-        .map((doc) => doc.data())
-        .filter((message) => message.leaseId === leaseId && message.senderRole !== receiverRole)
-        .map((message) => ({
+      messages: filterCurrentTelehealthLeaseMessages(
+        messages.docs.map((doc) => doc.data()), leaseId, receiverRole,
+      ).map((message) => ({
           messageId: message.messageId,
           type: message.type,
           payload: message.payload,

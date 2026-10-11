@@ -56,20 +56,23 @@ async function run() {
       }
       const [sources, rawEvents] = await Promise.all([
         Patient360ProjectionService.loadSources(tenantId, doc.id),
-        tenantRef.collection('events')
-          .where('payload.patientId', '==', doc.id)
-          .limit(MAX_RAW_EVENTS + 1)
-          .get(),
+        // Use the exact four patient-event query scopes employed by the
+        // canonical projector: patientId, primaryPatientId,
+        // secondaryPatientId and patient aggregateId. Reading only
+        // payload.patientId silently misses legacy metadata evidence.
+        Patient360ProjectionService.loadPatientEvents(tenantId, doc.id, {
+          includeNonClinical: true,
+        }),
       ]);
 
       const canonical = Patient360Projector.project(sources).projection;
       const status = classifyPatient360PolicyInspection({
         stored,
         canonical,
-        rawEventTypes: rawEvents.docs
+        rawEventTypes: rawEvents
           .slice(0, MAX_RAW_EVENTS)
-          .map((event) => String(event.data().eventType || '')),
-        exceededEventLimit: rawEvents.size > MAX_RAW_EVENTS,
+          .map((event) => String(event.eventType || '')),
+        exceededEventLimit: rawEvents.length > MAX_RAW_EVENTS,
       });
       statuses[status] = (statuses[status] || 0) + 1;
     } catch {

@@ -50,6 +50,18 @@ async function secureAuthorityEpoch(
     .join('');
 }
 
+function lockedLocalEdgeSnapshot(tenantId: string): EdgeSnapshot {
+  return {
+    tenantId,
+    generatedAt: 0,
+    snapshotVersion: 'local-locked',
+    collections: {},
+    source: 'LOCAL',
+    freshness: 'UNHYDRATED',
+    errorCode: 'OFFLINE_IDENTITY_NOT_VERIFIED',
+  };
+}
+
 export async function loadLocalEdgeSnapshot(
   tenantId: string,
   requestedSurface: EdgeHydrationSurface
@@ -58,6 +70,16 @@ export async function loadLocalEdgeSnapshot(
   const cached = await getCachedAuthSession();
   const actorId = cached?.user?.uid || '';
   const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
+  const restoredUid = auth.currentUser?.uid || '';
+  // A decrypted cache entry is NOT proof of the actor currently signed in on
+  // this shared browser. Validate Firebase's restored UID before ANY PHI read.
+  if (!cached || !restoredUid || actorId !== restoredUid ||
+      cached.session.userId !== restoredUid ||
+      cached.session.status !== 'ACTIVE' ||
+      !Number.isFinite(Date.parse(cached.session.expiresAt)) ||
+      Date.now() >= Date.parse(cached.session.expiresAt)) {
+    return lockedLocalEdgeSnapshot(normalizedTenantId);
+  }
   if (cached && (
     cached.user.tenantId.trim().toLowerCase() !== normalizedTenantId ||
     cached.session.tenantId.trim().toLowerCase() !== normalizedTenantId ||
@@ -75,14 +97,7 @@ export async function loadLocalEdgeSnapshot(
     !authority.authorityEpoch
   ) {
     // Never expose legacy cache from a previous session or privilege scope.
-    return {
-      tenantId: normalizedTenantId,
-      generatedAt: 0,
-      snapshotVersion: 'local-locked',
-      collections: {},
-      source: 'LOCAL',
-      freshness: 'UNHYDRATED',
-    };
+    return lockedLocalEdgeSnapshot(normalizedTenantId);
   }
 
   const surfaceCollections: Record<Exclude<EdgeHydrationSurface, 'OPD'>, string[]> = {
@@ -145,6 +160,21 @@ export async function loadLocalEdgeSnapshot(
     ] as const)
   );
   const metadata = await getEdgeSyncMetadata(normalizedTenantId, surface);
+
+  // A user/tenant/session switch can complete while encrypted reads are
+  // pending. Revalidate before returning even a single patient record.
+  const latest = await getCachedAuthSession();
+  if (!latest || auth.currentUser?.uid !== restoredUid ||
+      latest.user.uid !== restoredUid ||
+      latest.user.tenantId.trim().toLowerCase() !== normalizedTenantId ||
+      latest.session.tenantId.trim().toLowerCase() !== normalizedTenantId ||
+      latest.session.userId !== restoredUid ||
+      latest.session.sessionId !== cached.session.sessionId ||
+      latest.session.status !== 'ACTIVE' ||
+      !Number.isFinite(Date.parse(latest.session.expiresAt)) ||
+      Date.now() >= Date.parse(latest.session.expiresAt)) {
+    return lockedLocalEdgeSnapshot(normalizedTenantId);
+  }
 
   return {
     tenantId,
@@ -286,6 +316,17 @@ export async function hydrateEdgeSnapshot(
       }
     );
     await enforceEdgeStorageBudget(normalizedTenantId).catch(() => { });
+
+    // An account switch during asynchronous persistence must never return
+    // the earlier actor's server patient snapshot to the new actor.
+    const afterWrite = await getCachedAuthSession();
+    if (!afterWrite || auth.currentUser?.uid !== currentUser.uid ||
+        afterWrite.user.uid !== currentUser.uid ||
+        afterWrite.session.userId !== currentUser.uid ||
+        afterWrite.user.tenantId.trim().toLowerCase() !== normalizedTenantId ||
+        afterWrite.session.sessionId !== cached.session.sessionId) {
+      throw new Error('EDGE_HYDRATION_SESSION_CHANGED');
+    }
 
     return {
       tenantId: normalizedTenantId,

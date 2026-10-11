@@ -24,8 +24,12 @@ describe('MPI removal modal viewport and clinical-safety regression', () => {
   test('active care cannot trigger ordinary removal; eligible mock action remains explicitly verified and server-governed', async () => {
     const modal = await read('components/mpi/patient-record-removal-modal.tsx');
     const service = await read('lib/backend/services/confirmed-mock-patient-retirement-domain-service.ts');
-    expect(modal).toContain("if (!valid || hasActiveCare)");
-    expect(modal).toContain("disabled={!valid || hasActiveCare}");
+
+
+    expect(modal).toContain("if (!canAttemptOrdinaryRemoval)");
+    expect(modal).toContain("const canAttemptOrdinaryRemoval = valid && !removalBlocked && !inspectPending");
+    expect(modal).toContain("type={removalBlocked ? 'button' : 'submit'}");
+    expect(modal).toContain('Review clinical blockers');
     expect(modal).toContain("isConfirmedMock && hasActiveCare");
     expect(modal).toContain("disabled={!valid || !syntheticConfirmed}");
     expect(modal).toContain("data-testid=\"retire-confirmed-mock-patient\"");

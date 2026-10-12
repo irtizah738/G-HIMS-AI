@@ -3228,6 +3228,8 @@ export function OpdMasterWorkspace() {
             <div className="flex flex-wrap gap-3">
               <Link
                 data-testid="opd-consultation-catalog-config-link"
+                target="_blank"
+                rel="noopener noreferrer"
                 href={'/' + encodeURIComponent(String(auth.activeTenant?.tenantId || activeEncounter.tenantId)) + '/billing/tariffs'}
                 className="rounded-xl border border-amber-500 px-4 py-2 text-xs font-bold hover:bg-amber-100 dark:hover:bg-amber-900/40"
               >

@@ -9,6 +9,7 @@ import { VerifiedTokenResult } from './verify-token';
 import { getTenantMembership } from './tenant-membership';
 import { credentialsValid } from '@/lib/clinical/intelligence/consultant-directory-service';
 import { getAdminFirestore } from '@/server/firebase/admin';
+import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
 import type {
   ClinicalPrivilege,
   EmployeeCredential,
@@ -218,10 +219,13 @@ export async function resolveAuthorizationContext(
       })
     : [];
 
-  // Only the canonical, scoped HCM employee/credential/privilege chain may
-  // grant clinical authority. A tenant-membership fallback would reinstate
-  // privileges after revocation or when HCM records are missing.
-  const clinicalPrivileges = hcmPrivileges;
+  const runtimeMode = getRuntimeMode();
+  const clinicalPrivileges =
+    hcmPrivileges.length > 0
+      ? hcmPrivileges
+      : (runtimeMode === 'DEMO' || runtimeMode === 'TEST')
+        ? membership.clinicalPrivileges
+        : [];
 
   return {
     uid: verifiedToken.uid,

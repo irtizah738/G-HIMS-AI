@@ -3,7 +3,15 @@ import { getRuntimeMode, inferRuntimeModeFromNodeEnv, type GhimsRuntimeMode } fr
 type ProjectMap = Partial<Record<GhimsRuntimeMode, string>>;
 
 function clean(value: string | undefined): string {
-  return String(value || '').trim();
+  if (!value) return '';
+  let str = String(value).trim();
+  if (
+    (str.startsWith('"') && str.endsWith('"')) ||
+    (str.startsWith("'") && str.endsWith("'"))
+  ) {
+    str = str.slice(1, -1).trim();
+  }
+  return str;
 }
 
 function assertConfiguredTestDemoDistinct(testId: string, demoId: string, scope: string): void {

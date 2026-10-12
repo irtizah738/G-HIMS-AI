@@ -1048,7 +1048,7 @@ export class TransactionManager {
     });
 
     const db = getAdminFirestore();
-    if (!db) {
+    if (!db || (canUseEphemeralPersistence() && this.hasEphemeralState(context.tenantId))) {
       if (!canUseEphemeralPersistence()) {
         throw new Error('TRANSACTION_STORE_UNAVAILABLE: durable Firestore transaction store is required.');
       }

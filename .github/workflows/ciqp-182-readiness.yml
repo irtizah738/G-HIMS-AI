@@ -1,0 +1,36 @@
+name: CIQP-182 Read-Only Staging Readiness
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ciqp182-readonly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-qualification:
+    name: CIQP-182 source guards and evidence validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      GHIMS_INTEGRATION_HL7_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Frozen dependencies
+        run: bun install --frozen-lockfile
+      - name: Hosted staging read-only guards and evidence checker (NO hosted access)
+        run: bun run test:ciqp:readiness
+      - name: TypeScript
+        run: bun run typecheck

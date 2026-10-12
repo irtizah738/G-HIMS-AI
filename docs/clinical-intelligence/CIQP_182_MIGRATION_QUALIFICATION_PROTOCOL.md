@@ -28,3 +28,96 @@
 
 ## Gate
 **Status: SOURCE IMPLEMENTED / EMULATOR CI IN PROGRESS — HOSTED STAGING AND CLINICAL APPROVAL BLOCKED.** Do not close issue #182 or mark G-HIMS-AI clinically production-ready until exact-head tests have all passed and every hosted-staging/restore/institutional sign-off requirement above has verifiable records. Do not merge #189 solely because source CI is green.
+
+
+## Implemented hosted-staging read-only diagnostic (source only; no hosted access yet)
+
+This tool is separate from the emulator-only mutation harness. It makes
+read-only queries to a dedicated G-HIMS-AI Firebase STAGING project and cannot
+perform migration, rebuild projections or execute Firestore writes.
+
+- Operator command: bun scripts/ops/ciqp-inspect-staging-readonly.ts
+- Guard: lib/clinical/patient360/ciqp-hosted-staging-readonly.ts
+- Unit tests: tests/ciqp-hosted-staging-readonly.test.ts
+- Offline evidence completeness checker: bun scripts/ops/ciqp-verify-qualification-evidence.ts <qualification-manifest.json>
+- Evidence tests: tests/ciqp-qualification-evidence.test.ts
+- Dedicated source CI: .github/workflows/ciqp-182-readiness.yml
+
+**This does not replace the outstanding hosted-staging migration executor/change
+approval. Do not weaken the emulator-only migration guard or repoint the
+emulator tool at a hosted database.**
+
+### Isolated staging operator setup — independently authorized
+
+The operator must first provision and verify:
+1. A **separate G-HIMS-AI** Firebase STAGING project, not production
+   g-hims-ai and not the unrelated G-HIMS-OS staging project.
+2. A dedicated Firestore read-only identity scoped to staging, not a
+   production service account. A project-scoped IAM restriction is essential;
+   source-level read-only code is not a substitute.
+3. A synthetic-only Firestore tenant named ciqp-synthetic-<cohort>; confirm
+   test-data provenance through a separately retained signed attestation.
+   The tool cannot independently prove that records are synthetic.
+4. The exact approved G-HIMS-AI source SHA checked out clean, with no edits.
+
+Set the following environment variables in the isolated operator terminal only:
+
+- GHIMS_RUNTIME_MODE=STAGING
+- FIREBASE_PROJECT_ID=<dedicated-ghims-ai-staging-project>
+- GHIMS_FIREBASE_PROJECT_ID_STAGING=<same-dedicated-staging-project>
+- GHIMS_FIREBASE_PROJECT_ID_PRODUCTION=<separate-real-production-project-id>
+- GHIMS_CIQP_STAGING_TENANT_ID=ciqp-synthetic-<cohort>
+- GHIMS_CIQP_STAGING_CONFIRM_PROJECT=<same-dedicated-staging-project>
+- GHIMS_CIQP_STAGING_CONFIRM_TENANT=ciqp-synthetic-<cohort>
+- GHIMS_CIQP_STAGING_EXPECTED_SHA=<40-character-clean-checkout-head>
+- GHIMS_CIQP_STAGING_DATA_ACK=OPERATOR_ATTESTS_SYNTHETIC_ONLY
+- GHIMS_CIQP_STAGING_READONLY_ACK=STAGING_READ_ONLY_NO_WRITES
+- GHIMS_CIQP_STAGING_AUDIT_HMAC_KEY=<fresh-private-random-secret-at-least-32-bytes>
+
+Do not set either emulator host variable. Supply credentials exclusively for
+the dedicated staging project through approved local Google identity/ADC or
+a project-scoped service account. Never commit tokens, private keys or HMAC
+keys. GOOGLE_APPLICATION_CREDENTIALS, if used, must point only at a staging
+read-only identity.
+
+Run: bun scripts/ops/ciqp-inspect-staging-readonly.ts
+
+The output contains only aggregate classification counts, a keyed HMAC,
+a bounded coverage marker and permanent releaseAuthorization: NOT_GRANTED.
+It never prints patient IDs, MRNs, event payloads, individual patient
+fingerprints or keys. A zero-patient or over-limit cohort fails closed.
+COHORT_MATCHED_ONLY is not a production patient inventory, migration or
+clinical approval.
+
+### Backup/restore and hosted apply design review (not yet executed)
+
+1. Provision an independent restore target, separate from the source staging
+   and production projects. Record export/import operation IDs, observed RPO
+   and measured restore duration.
+2. Compare keyed immutable-event and outbox HMACs, event counts and canonical
+   source/timeline parity. Projection revision alone is not sufficient:
+   migration intentionally changes legacy revision semantics without rewriting
+   immutable clinical events.
+3. A separately reviewed hosted staging executor must enforce an explicitly
+   authorized synthetic cohort, policy epoch compare-and-swap, concurrent
+   source rechecks, generation-fenced timeline writes, idempotent recovery,
+   incident stop criteria, and project denylisting. Production writes remain
+   forbidden.
+4. Run the offline evidence-manifest checker. Even a syntactically complete
+   manifest returns clinicalReleaseAuthority: NOT_ESTABLISHED and
+   productionDeploymentAuthority: NOT_ESTABLISHED until the linked artifacts
+   and signatures are independently reviewed.
+
+### Still outstanding: actual externally authorized evidence
+
+- Signed synthetic-data provenance, isolated staging Firebase project/IAM.
+- Approved staging inventory and a separately reviewed synthetic hosted
+  migration apply path; immutable events and outbox must remain untouched.
+- Real export/import to an isolated restore target, operation logs, RPO/RTO,
+  timeline parity and immutable integrity receipts.
+- Named operator, independent credentialed clinician and institutional/site
+  approval, plus a signed production change/rollback plan.
+- Exact-head completed CI, staging deployment SHA and independent verification
+  before declaring any external gate closed.
+
+**Until this is evidenced, issue #182 stays OPEN and PR #189 stays DRAFT.**

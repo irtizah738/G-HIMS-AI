@@ -130,6 +130,8 @@ describe('CIQP legacy projection inspection (read only)', () => {
     expect(assertEmulatorInspectionScope(accepted)).toBe('synthetic-tenant');
     expect(() => assertEmulatorInspectionScope({ ...accepted, FIRESTORE_EMULATOR_HOST: '' }))
       .toThrow('CIQP_INSPECTION_EMULATOR_ONLY');
+    expect(() => assertEmulatorInspectionScope({ ...accepted, FIRESTORE_EMULATOR_HOST: 'remote.example:443' }))
+      .toThrow('CIQP_INSPECTION_EMULATOR_ONLY');
     expect(() => assertEmulatorInspectionScope({ ...accepted, GHIMS_RUNTIME_MODE: 'PRODUCTION' }))
       .toThrow('CIQP_INSPECTION_EMULATOR_ONLY');
     expect(() => assertEmulatorInspectionScope({ ...accepted, NODE_ENV: 'production' }))

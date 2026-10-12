@@ -35,7 +35,13 @@ export function assertEmulatorPolicyMigrationScope(env: NodeJS.ProcessEnv, tenan
 }
 
 function relatesToPatient(event: Patient360SourceEvent, patientId: string): boolean {
-  return String(event.payload?.patientId || '') === patientId ||
+  // Canonical event loading uses all four patient identity routes. The legacy
+  // corroboration gate must use the same routes or valid historical events may
+  // be silently omitted, creating an incorrect migration classification.
+  const payload = event.payload || {};
+  const payloadMatches = ['patientId', 'primaryPatientId', 'secondaryPatientId']
+    .some(field => typeof payload[field] === 'string' && payload[field] === patientId);
+  return payloadMatches ||
     (String(event.aggregateType || '').toUpperCase().includes('PATIENT') &&
       String(event.aggregateId || '') === patientId);
 }

@@ -19,7 +19,10 @@ function scoped(tenantId: string) {
   assertEmulatorPolicyMigrationScope(process.env, tenantId);
 }
 
-async function seededLegacy(tenantId: string, patientId: string) {
+async function seededLegacy(
+  tenantId: string, patientId: string,
+  unsignedRoute: 'patientId' | 'primaryPatientId' | 'secondaryPatientId' | 'aggregateId' = 'patientId'
+) {
   scoped(tenantId);
   const db = getAdminFirestore();
   if (!db) throw new Error('CIQP_TEST_FIRESTORE_MISSING');
@@ -41,8 +44,10 @@ async function seededLegacy(tenantId: string, patientId: string) {
   const recordedAt = latest + 50000;
   await tenant.collection('events').doc(eventId).set({
     eventId, tenantId, eventType: 'CLINICAL_DRAFT_GENERATED',
-    aggregateType: 'CLINICAL_DRAFT', aggregateId: id('draft'),
-    payload: { patientId }, recordedAt, occurredAt: recordedAt,
+    aggregateType: unsignedRoute === 'aggregateId' ? 'PATIENT' : 'CLINICAL_DRAFT',
+    aggregateId: unsignedRoute === 'aggregateId' ? patientId : id('draft'),
+    payload: unsignedRoute === 'aggregateId' ? {} : { [unsignedRoute]: patientId },
+    recordedAt, occurredAt: recordedAt,
   });
   const ref = tenant.collection('patient360Projections').doc(patientId);
   const legacy: Patient360Projection = {
@@ -85,6 +90,18 @@ describe('CIQP-05 controlled synthetic Patient360 legacy migration (Firestore em
     expect(retry.status).toBe('ALREADY_CURRENT');
     expect((await tenant.collection('patient360ProjectionPolicyMigrations').get()).size).toBe(1);
   });
+
+  for (const route of ['primaryPatientId', 'secondaryPatientId', 'aggregateId'] as const) {
+    test(`legacy corroboration recognizes the canonical ${route} event identity route`, async () => {
+      const tenantId = id('ciqp_tenant'), patientId = id('ciqp_patient');
+      const { tenant, eventId, legacy } = await seededLegacy(tenantId, patientId, route);
+      const result = await migratePatient360LegacyPolicyEmulator(tenantId, patientId);
+      expect(result.status).toBe('MIGRATED');
+      expect(result.previousRevision).toBe(legacy.revision);
+      expect(result.currentRevision).toBe(legacy.revision - 1);
+      expect((await tenant.collection('events').doc(eventId).get()).exists).toBe(true);
+    });
+  }
 
   test('already-current migration refuses to certify missing published timeline rows', async () => {
     const tenantId = id('ciqp_tenant'), patientId = id('ciqp_patient');

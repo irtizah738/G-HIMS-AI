@@ -1,0 +1,57 @@
+name: CIQP-182 Recovery Isolation Diagnostics
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ciqp182-recovery-diagnostics-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  isolated-synthetic-scenario:
+    name: CIQP-182 isolated ${{ matrix.case }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - case: crash-and-resume
+            pattern: "crash after policy CAS"
+          - case: new-signed-event
+            pattern: "newly signed fact between preflight"
+          - case: concurrent-workers
+            pattern: "two workers racing"
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-p4-ci
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p4-ci
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Emulator tooling
+        run: npm install --no-save --package-lock=false @firebase/rules-unit-testing@5.0.2 firebase-tools@15.30.2
+      - name: Isolated synthetic recovery scenario (fail closed, diagnostic only)
+        env:
+          CIQP_SCENARIO_PATTERN: ${{ matrix.pattern }}
+        run: |
+          timeout --signal=TERM --kill-after=10s 120s firebase emulators:exec --project ghims-p4-ci --only firestore \
+            "bun test --timeout 15000 --test-name-pattern '$CIQP_SCENARIO_PATTERN' emulator-security/ciqp-patient360-policy-migration.test.ts"

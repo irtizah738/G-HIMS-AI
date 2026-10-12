@@ -13,6 +13,10 @@ export interface CiqpEvidenceRecord {
 export interface CiqpRestoreEvidence {
   sourceStagingProject: string;
   isolatedRestoreProject: string;
+  sourceEventCount: number;
+  restoredEventCount: number;
+  sourceOutboxCount: number;
+  restoredOutboxCount: number;
   sourceImmutableHmac: string;
   restoredImmutableHmac: string;
   sourceOutboxHmac: string;
@@ -122,6 +126,10 @@ export function assessCiqpQualificationEvidence(
       !restore.isolatedRestoreProject ||
       restore.isolatedRestoreProject === evidence.stagingProjectId ||
       restore.isolatedRestoreProject === evidence.productionProjectId ||
+      !Number.isSafeInteger(restore.sourceEventCount) || restore.sourceEventCount <= 0 ||
+      restore.sourceEventCount !== restore.restoredEventCount ||
+      !Number.isSafeInteger(restore.sourceOutboxCount) || restore.sourceOutboxCount <= 0 ||
+      restore.sourceOutboxCount !== restore.restoredOutboxCount ||
       !hmac64(restore.sourceImmutableHmac) ||
       restore.sourceImmutableHmac !== restore.restoredImmutableHmac ||
       !hmac64(restore.sourceOutboxHmac) ||

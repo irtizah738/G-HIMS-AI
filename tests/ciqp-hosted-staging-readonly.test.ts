@@ -3,6 +3,7 @@ import type { Firestore } from 'firebase-admin/firestore';
 import {
   assertCiqpHostedStagingReadOnlyScope, assertCiqpStagingCheckout,
   assertCiqpHostedStagingSyntheticApplyScope,
+  classifyCiqpStagingDiagnosticGate,
   inspectCiqpHostedStagingReadOnly,
 } from '@/lib/clinical/patient360/ciqp-hosted-staging-readonly';
 
@@ -188,6 +189,29 @@ describe('CIQP #182 hosted staging READ-ONLY perimeter', () => {
     expect(source).toContain('assertCiqpHostedStagingSyntheticApplyScope(process.env)');
     expect(source).toContain('loadStagingRawPatientEvents(db, scope, patientId)');
     expect(source).toContain('migratePatient360LegacyPolicyCore(');
+  });
+
+  test('staging dry-run refuses ambiguous or incomplete clinical revision evidence', () => {
+    expect(classifyCiqpStagingDiagnosticGate(
+      { CURRENT_POLICY_MATCH: 2 }, 2, false, 0
+    )).toBe('COHORT_MATCHED_ONLY');
+    expect(classifyCiqpStagingDiagnosticGate(
+      { CURRENT_POLICY_MATCH: 2, LEGACY_NONAUTHORITATIVE_EVENT_CANDIDATE: 1 },
+      3, false, 0
+    )).toBe('REVIEW_REQUIRED');
+    for (const unsafe of [
+      'TIMELINE_PARITY_MISMATCH', 'INCOMPLETE_GENERATION',
+      'MISMATCH_REQUIRES_CLINICAL_REVIEW', 'RAW_EVENT_LIMIT_EXCEEDED',
+      'TIMELINE_UNVERIFIED',
+    ] as const) {
+      expect(classifyCiqpStagingDiagnosticGate({
+        LEGACY_NONAUTHORITATIVE_EVENT_CANDIDATE: 1,
+        [unsafe]: 1,
+      }, 2, false, 0)).toBe('BLOCKED');
+    }
+    expect(classifyCiqpStagingDiagnosticGate(
+      { CURRENT_POLICY_MATCH: 1 }, 1, true, 0
+    )).toBe('BLOCKED');
   });
 
 });

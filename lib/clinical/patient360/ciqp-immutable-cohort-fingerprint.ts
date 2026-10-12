@@ -71,6 +71,9 @@ export async function fingerprintCiqpImmutableTenant(
     fingerprintCollection(db, tenantId, 'events', hmacKey),
     fingerprintCollection(db, tenantId, 'outbox', hmacKey),
   ]);
+  if (events.count === 0 || outbox.count === 0) {
+    throw new Error('CIQP_IMMUTABLE_EMPTY_COHORT');
+  }
   return {
     eventCount: events.count, eventHmac: events.hmac,
     outboxCount: outbox.count, outboxHmac: outbox.hmac,

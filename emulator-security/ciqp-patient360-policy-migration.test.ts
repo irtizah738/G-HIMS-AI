@@ -127,12 +127,16 @@ describe('CIQP-05 controlled synthetic Patient360 legacy migration (Firestore em
       afterCommit: async () => { throw new Error('SYNTHETIC_CRASH_AFTER_CAS'); },
     })).rejects.toThrow('SYNTHETIC_CRASH_AFTER_CAS');
     console.info('CIQP_EMULATOR_CHECKPOINT_CRASH_INJECTED');
+    console.info('CIQP_EMULATOR_CHECKPOINT_BEFORE_POST_CRASH_READ');
     const partial = (await ref.get()).data() as Patient360Projection;
+    console.info('CIQP_EMULATOR_CHECKPOINT_AFTER_POST_CRASH_READ');
     expect(partial.projectionPolicyEpoch).toBe(2);
     expect(partial.timelineReady).toBe(false);
+    console.info('CIQP_EMULATOR_CHECKPOINT_BEFORE_FAIL_CLOSED_PROJECTION_READ');
     await expect(Patient360ProjectionService.getProjection(tenantId, patientId))
       .rejects.toThrow('PATIENT360_TIMELINE_NOT_READY');
     console.info('CIQP_EMULATOR_CHECKPOINT_INCOMPLETE_VIEW_DENIED');
+    console.info('CIQP_EMULATOR_CHECKPOINT_BEFORE_RECOVERY_RETRY');
     const recovered = await migratePatient360LegacyPolicyEmulator(tenantId, patientId);
     console.info('CIQP_EMULATOR_CHECKPOINT_RECOVERY_COMPLETED');
     expect(recovered.status).toBe('RESUMED');

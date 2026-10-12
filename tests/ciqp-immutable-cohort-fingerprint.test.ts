@@ -4,7 +4,7 @@ import {
   canonicalCiqpJson, fingerprintCiqpImmutableTenant, assertCiqpImmutableParity,
 } from '@/lib/clinical/patient360/ciqp-immutable-cohort-fingerprint';
 
-function fakeImmutableDb(replacement = false) {
+function fakeImmutableDb(replacement = false, empty = false) {
   const calls: string[] = [];
   const data: Record<string, Array<{ id: string; data: () => unknown }>> = {
     events: [
@@ -16,6 +16,7 @@ function fakeImmutableDb(replacement = false) {
       { id: 'outbox-a', data: () => ({ eventId: 'event-a', status: 'PENDING' }) },
     ],
   };
+  if (empty) { data.events = []; data.outbox = []; }
   const db = {
     collection(name: string) {
       calls.push(name);
@@ -80,6 +81,13 @@ describe('CIQP-05 immutable source and outbox evidence', () => {
     expect(() => assertCiqpImmutableParity(clean, clean)).not.toThrow();
     expect(() => assertCiqpImmutableParity(clean, changed))
       .toThrow('CIQP_IMMUTABLE_EVENT_OR_OUTBOX_CHANGED');
+  });
+
+  test('empty immutable event/outbox cohorts cannot establish a restore baseline', async () => {
+    const scope = 'ciqp-synthetic-cohort01';
+    await expect(fingerprintCiqpImmutableTenant(
+      fakeImmutableDb(false, true).db, scope, 'staging-secret'.repeat(4)
+    )).rejects.toThrow('CIQP_IMMUTABLE_EMPTY_COHORT');
   });
 
   test('rejects non-synthetic scope, empty key and invalid numbers', async () => {

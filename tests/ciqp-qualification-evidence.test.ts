@@ -27,6 +27,10 @@ const complete = (): CiqpQualificationEvidence => ({
   restoration: {
     sourceStagingProject: 'ghims-ai-ciqp-staging',
     isolatedRestoreProject: 'ghims-ai-ciqp-restore',
+    sourceEventCount: 8,
+    restoredEventCount: 8,
+    sourceOutboxCount: 4,
+    restoredOutboxCount: 4,
     sourceImmutableHmac: 'b'.repeat(64),
     restoredImmutableHmac: 'b'.repeat(64),
     sourceOutboxHmac: 'c'.repeat(64),
@@ -102,4 +106,22 @@ describe('CIQP-05 migration qualification evidence stays fail-closed', () => {
     expect(assessCiqpQualificationEvidence(e).missing)
       .toContain('namedOperatorApproval');
   });
+  test('zero-row or count-mismatched restore cannot qualify as integrity evidence', () => {
+    const e = complete();
+    if (!e.restoration) throw new Error('fixture');
+    e.restoration.sourceEventCount = 0;
+    e.restoration.restoredEventCount = 0;
+    expect(assessCiqpQualificationEvidence(e).missing)
+      .toContain('INDEPENDENT_BACKUP_RESTORE_AND_INTEGRITY');
+    e.restoration.sourceEventCount = 8;
+    e.restoration.restoredEventCount = 7;
+    expect(assessCiqpQualificationEvidence(e).missing)
+      .toContain('INDEPENDENT_BACKUP_RESTORE_AND_INTEGRITY');
+    e.restoration.restoredEventCount = 8;
+    e.restoration.sourceOutboxCount = 0;
+    e.restoration.restoredOutboxCount = 0;
+    expect(assessCiqpQualificationEvidence(e).missing)
+      .toContain('INDEPENDENT_BACKUP_RESTORE_AND_INTEGRITY');
+  });
+
 });

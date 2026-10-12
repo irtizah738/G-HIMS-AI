@@ -157,6 +157,26 @@ export async function loadStagingRawPatientEvents(
 }
 
 /**
+ * A candidate classification means "review migration", not automatic apply.
+ * Missing/corrupt timelines, ambiguous hashes and truncated evidence BLOCK
+ * staged execution, even when another patient is a legitimate candidate.
+ */
+export function classifyCiqpStagingDiagnosticGate(
+  counts: Partial<Record<Patient360PolicyInspectionStatus, number>>,
+  inspected: number, truncated: boolean, failures: number
+): CiqpStagingReadOnlyReport['gate'] {
+  if (truncated || inspected === 0 || failures > 0) return 'BLOCKED';
+  const present = Object.entries(counts)
+    .filter(([, n]) => Number(n) > 0)
+    .map(([status]) => status);
+  if (!present.length) return 'BLOCKED';
+  if (present.some(status => status !== 'CURRENT_POLICY_MATCH' &&
+      status !== 'LEGACY_NONAUTHORITATIVE_EVENT_CANDIDATE')) return 'BLOCKED';
+  return present.some(status => status === 'LEGACY_NONAUTHORITATIVE_EVENT_CANDIDATE')
+    ? 'REVIEW_REQUIRED' : 'COHORT_MATCHED_ONLY';
+}
+
+/**
  * Never calls Firestore setters, transactions, projection rebuilds, or hosted
  * migration. A project-restricted read-only IAM identity provides a second
  * independent no-write boundary.
@@ -218,7 +238,7 @@ export async function inspectCiqpHostedStagingReadOnly(
     }
   }
   const inspected = truncated ? 0 : snapshot.size;
-  const hasUnresolved = Object.keys(counts).some(key => key !== 'CURRENT_POLICY_MATCH');
+
   return {
     operation: 'CIQP_HOSTED_STAGING_READ_ONLY',
     expectedSourceSha: scope.expectedSha,
@@ -229,8 +249,7 @@ export async function inspectCiqpHostedStagingReadOnly(
     writesPerformed: 0,
     migrationPerformed: false,
     provenance: 'OPERATOR_DECLARED_NOT_INDEPENDENTLY_VERIFIED',
-    gate: truncated || inspected === 0 || failures > 0
-      ? 'BLOCKED' : hasUnresolved ? 'REVIEW_REQUIRED' : 'COHORT_MATCHED_ONLY',
+    gate: classifyCiqpStagingDiagnosticGate(counts, inspected, truncated, failures),
     releaseAuthorization: 'NOT_GRANTED',
   };
 }

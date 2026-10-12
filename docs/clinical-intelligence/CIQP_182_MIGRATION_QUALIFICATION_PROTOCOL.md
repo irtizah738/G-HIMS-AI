@@ -145,6 +145,18 @@ timeline publications, oversized cohorts or wrong project. A failed write
 may require an authorized recovery drill. It never rewrites original clinical
 events or deletes historical generations.
 
+For an independently **authorized synthetic** staging export, the
+restore rehearsal utility is
+node scripts/ops/ciqp-restore-rehearsal.mjs. It defaults to DRY_RUN.
+Its APPLY_RESTORE mode can only import into an explicit independent
+ciqp-*-restore Firebase project after two source/destination confirmations,
+a restore ticket, a named operator and a synthetic-only acknowledgement.
+It never imports into the staging source project or the known production
+project. The target project/database must be verified EMPTY and dedicated
+before IAM-authorized execution. Its output is not an approval, proof of
+successful restoration, or a substitute for comparing actual source counts,
+event/outbox HMACs, and measured RPO/RTO.
+
 For an independently restored source fixture, use:
 
 bun scripts/ops/ciqp-fingerprint-staging-immutable.ts

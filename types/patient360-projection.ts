@@ -244,6 +244,10 @@ export interface Patient360Projection {
     medicationAdministrations: number;
     specialtyActivities: number;
   };
+  /** Versioned authority boundary for excluding unsigned AI audit metadata. */
+  projectionPolicyEpoch?: number;
+  /** Emulator-qualified migration generation identifier; not a clinical source event. */
+  policyMigrationId?: string;
   /** Projection schema version. Increment only for a read-model contract change. */
   projectionVersion: number;
   /** Deterministic monotonic revision derived from patient-scoped authoritative events. */

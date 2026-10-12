@@ -7,6 +7,7 @@ import { AuthorizationContext } from '@/lib/auth/auth-types';
 import { AuthError } from '@/lib/auth/auth-errors';
 import { VerifiedTokenResult } from './verify-token';
 import { getTenantMembership } from './tenant-membership';
+import { mapHcmPrivilegeToAuthorization } from './clinical-privilege-map';
 import { credentialsValid } from '@/lib/clinical/intelligence/consultant-directory-service';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import type {
@@ -39,41 +40,6 @@ function hcmDateWindowActive(
     from <= today && today <= until;
 }
 
-
-/** Explicit, narrowly scoped clinical privilege expansion. Unknown grants confer no rights. */
-function mapHcmPrivilegeToAuthorization(privilege: ClinicalPrivilege['privilegeType'] | string): string[] {
-  const map: Record<string, readonly string[]> = {
-    CONSULT_OPD:['CONSULT_OPD'],
-    RECORD_VITALS:['RECORD_VITALS'],
-    TRIAGE_PATIENTS:['TRIAGE_PATIENTS'],
-    ADMIT_INPATIENT:['ADMIT_INPATIENT'],
-    DISCHARGE_INPATIENT:['DISCHARGE_INPATIENT'],
-    ADMINISTER_MEDICATIONS:['ADMINISTER_MEDICATIONS'],
-    EXECUTE_NURSING_CARE_PLAN:['EXECUTE_NURSING_CARE_PLAN'],
-    PRESCRIBE_MEDICATION:['PRESCRIBE_MEDICATION','PRESCRIBE','ORDER_MEDICATIONS','SIGN_PRESCRIPTIONS'],
-    PERFORM_GENERAL_SURGERY:['PERFORM_GENERAL_SURGERY','PERFORM_PROCEDURES'],
-    PERFORM_CARDIOTHORACIC_SURGERY:['PERFORM_CARDIOTHORACIC_SURGERY','PERFORM_PROCEDURES'],
-    ADMINISTER_ANESTHESIA:['ADMINISTER_ANESTHESIA','PERFORM_PROCEDURES'],
-    ORDER_LAB:['ORDER_LAB','ORDER_DIAGNOSTICS'],
-    ORDER_RADIOLOGY:['ORDER_RADIOLOGY','ORDER_DIAGNOSTICS'],
-    ORDER_PROCEDURE:['ORDER_PROCEDURE'],
-    ORDER_HIGH_COMPLEXITY_LAB:['ORDER_HIGH_COMPLEXITY_LAB'],
-    APPROVE_LAB_RESULTS:['APPROVE_LAB_RESULTS'],
-    VERIFY_LAB_RESULT:['VERIFY_LAB_RESULT'],
-    ACKNOWLEDGE_CRITICAL_RESULT:['ACKNOWLEDGE_CRITICAL_RESULT'],
-    INTERPRET_IMAGING:['INTERPRET_IMAGING'],
-    INTERPRET_RADIOLOGY_CT_MRI:['INTERPRET_RADIOLOGY_CT_MRI','INTERPRET_IMAGING'],
-    DISPENSE_MEDICATION:['DISPENSE_MEDICATION'],
-    SIGN_CLINICAL_NOTE:['SIGN_CLINICAL_NOTE','SIGN_CLINICAL_NOTES'],
-    SIGN_CLINICAL_NOTES:['SIGN_CLINICAL_NOTE','SIGN_CLINICAL_NOTES'],
-    SIGN_DEATH_CERTIFICATE:['SIGN_DEATH_CERTIFICATE'],
-    PERFORM_INVASIVE_PROCEDURES:['PERFORM_INVASIVE_PROCEDURES','PERFORM_PROCEDURES'],
-    SIGN_SOAP_CLINICAL_NOTE:['SIGN_SOAP_CLINICAL_NOTE','SIGN_CLINICAL_NOTES'],
-  };
-  const key = String(privilege || '').trim().toUpperCase();
-  if (!Object.prototype.hasOwnProperty.call(map, key)) return [];
-  return [...map[key]];
-}
 
 async function resolveCredentialGatedPrivileges(params:{
   tenantId:string;

@@ -65,7 +65,7 @@ describe('G-HIMS P3 operational assurance and adversarial matrix',()=>{
     process.env.FIREBASE_PROJECT_ID = 'synthetic-demo';
     expect(() => assertServerFirebaseProjectIsolation('synthetic-demo'))
       .toThrow(/ENVIRONMENT_PROJECT_MISMATCH/);
-    expect(() => assertServerFirebaseProjectIsolation('g-hims-ai')).not.toThrow();
+    expect(() => assertServerFirebaseProjectIsolation('ghims-test')).not.toThrow();
 
     process.env.GHIMS_FIREBASE_PROJECT_ID_TEST = 'synthetic-demo';
     expect(() => assertServerFirebaseProjectIsolation('synthetic-demo'))

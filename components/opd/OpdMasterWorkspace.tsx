@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import {
   Users,
   Search,
@@ -204,6 +205,8 @@ export function OpdMasterWorkspace() {
     useState<boolean>(false);
   const [billingReconciliationError, setBillingReconciliationError] =
     useState<string | null>(null);
+  const [consultationBillingBlocker, setConsultationBillingBlocker] = useState<{ encounterId: string; message: string } | null>(null);
+  const [consultationBillingBusy, setConsultationBillingBusy] = useState(false);
   const offlineWorkflowTail = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
@@ -708,6 +711,9 @@ export function OpdMasterWorkspace() {
         : `Patient ${authoritativePatient.fullName} registered. Token ${tokenNum} issued.`
     );
 
+    setConsultationBillingBlocker(consultationBillingFailure
+      ? { encounterId: newEncId, message: consultationBillingFailure }
+      : null);
     if (consultationBillingFailure) {
       recordEvent(
         'CONSULTATION_BILLING_BLOCKED',
@@ -719,6 +725,38 @@ export function OpdMasterWorkspace() {
     // This also makes a successful registration visibly actionable instead of
     // returning the operator to a generic dashboard.
     setActiveTab(offlineRegistration ? 'DASHBOARD' : 'BILLING');
+  };
+
+  // Registration persists even if invoice setup fails. Recover the original
+  // encounter, never create a second registration or a client-priced invoice.
+  const handleRecoverConsultationInvoice = async () => {
+    if (!activeEncounter || activeEncounter.consultationInvoice) return;
+    const encounterId = activeEncounter.id;
+    setConsultationBillingBusy(true);
+    setConsultationBillingBlocker(null);
+    try {
+      requireOnlineOpdAuthority('consultation invoice recovery');
+      const result = await executeActiveTenantCommand<{ invoice: Record<string, any> }>(
+        'CreateOpdConsultationInvoiceCommand',
+        { encounterId }
+      );
+      if (!result.success || !result.data?.invoice) {
+        throw new Error(result.error?.message || 'The consultation invoice could not be recovered.');
+      }
+      const invoice = adaptAuthoritativeConsultationInvoice(result.data.invoice);
+      setEncounters((current) => current.map((encounter) =>
+        encounter.id === encounterId ? { ...encounter, consultationInvoice: invoice } : encounter
+      ));
+      recordEvent('CONSULTATION_BILLING_RECOVERED', 'Authoritative consultation invoice recovered for encounter ' + encounterId + '.');
+      await refreshAuthoritativeWorkspace();
+    } catch (error) {
+      setConsultationBillingBlocker({
+        encounterId,
+        message: error instanceof Error ? error.message : 'Consultation billing recovery failed.',
+      });
+    } finally {
+      setConsultationBillingBusy(false);
+    }
   };
 
   const handleBookAppointment = async (input: {
@@ -3168,6 +3206,46 @@ export function OpdMasterWorkspace() {
         />
       )}
 
+      {/* A missing tenant catalog must not strand a committed registration. */}
+      {activeTab === 'BILLING' &&
+        canAccessTab('BILLING') &&
+        patientContextReady &&
+        activeEncounter &&
+        !activeEncounter.consultationInvoice && (
+          <div data-testid="opd-consultation-billing-recovery" className="space-y-3 rounded-2xl border border-amber-300 bg-amber-50 p-5 text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+              <div>
+                <h3 className="text-sm font-bold">Consultation invoice missing — payment gate remains closed</h3>
+                <p className="mt-1 text-xs leading-relaxed">
+                  Registration and queue-token issuance are already recorded. An authorized Billing or Finance administrator must configure the tenant consultation service, tax rate and revenue account. Then retry the invoice for this encounter — do not register the patient again.
+                </p>
+                {consultationBillingBlocker?.encounterId === activeEncounter.id && (
+                  <p role="alert" className="mt-2 text-xs font-medium">{consultationBillingBlocker.message}</p>
+                )}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <Link
+                data-testid="opd-consultation-catalog-config-link"
+                href={'/' + encodeURIComponent(String(auth.activeTenant?.tenantId || activeEncounter.tenantId)) + '/billing/tariffs'}
+                className="rounded-xl border border-amber-500 px-4 py-2 text-xs font-bold hover:bg-amber-100 dark:hover:bg-amber-900/40"
+              >
+                Open billing configuration
+              </Link>
+              <button
+                data-testid="opd-consultation-invoice-retry"
+                type="button"
+                disabled={!isOnline || consultationBillingBusy}
+                onClick={() => void handleRecoverConsultationInvoice()}
+                className="rounded-xl bg-amber-900 px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {consultationBillingBusy ? 'Recovering invoice…' : 'Retry consultation invoice'}
+              </button>
+            </div>
+          </div>
+        )}
+
       {/* 10. Billing settlement + final reconciliation */}
       {activeTab === 'BILLING' &&
         canAccessTab('BILLING') &&
@@ -3187,6 +3265,7 @@ export function OpdMasterWorkspace() {
         canAccessTab('BILLING') &&
         patientContextReady &&
         activeEncounter &&
+        activeEncounter.consultationInvoice &&
         (
           !activeBillingInvoice ||
           (

@@ -130,6 +130,25 @@ describe('CIQP-05 controlled synthetic Patient360 legacy migration (Firestore em
       .some(row => row.eventId === signedId)).toBe(true);
   });
 
+  test('a new event during finalization keeps migration publication blocked', async () => {
+    const tenantId = id('ciqp_tenant'), patientId = id('ciqp_patient');
+    const { tenant, ref, recordedAt } = await seededLegacy(tenantId, patientId);
+    const eventId = id('new_signed_fact');
+    const result = await migratePatient360LegacyPolicyEmulator(tenantId, patientId, {
+      beforePublication: async () => {
+        await tenant.collection('events').doc(eventId).set({
+          tenantId, eventId, eventType: 'CLINICAL_DRAFT_SIGNED',
+          aggregateType: 'PATIENT', aggregateId: patientId,
+          payload: { patientId }, occurredAt: recordedAt + 1, recordedAt: recordedAt + 1,
+        });
+      },
+    });
+    expect(result.status).toBe('BLOCKED_CONCURRENT_WRITER');
+    expect((await ref.get()).data()?.timelineReady).toBe(false);
+    const rebuilt = await Patient360ProjectionService.rebuildPatient(tenantId, patientId);
+    expect(rebuilt.eventCheckpoint?.eventId).toBe(eventId);
+  });
+
   test('two workers racing on one migration cannot author two policy ledgers', async () => {
     const tenantId = id('ciqp_tenant'), patientId = id('ciqp_patient');
     const { tenant, ref } = await seededLegacy(tenantId, patientId);

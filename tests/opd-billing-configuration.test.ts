@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { TransactionManager } from '@/lib/backend/transactions/transaction-manager';
 import { OpdBillingConfigurationDomainService } from '@/lib/backend/services/opd-billing-configuration-domain-service';
 import { financePeriodId } from '@/lib/finance/finance-engine';
@@ -78,6 +80,21 @@ function seedFinanceControls(tenantId: string) {
 describe('governed OPD consultation billing configuration', () => {
   beforeEach(() => {
     TransactionManager.resetEphemeralStateForTesting();
+  });
+
+  test('missing consultation catalog exposes setup and recovery without duplicating registration', async () => {
+    const workspace = await readFile(path.join(process.cwd(), 'components/opd/OpdMasterWorkspace.tsx'), 'utf8');
+    const billing = await readFile(path.join(process.cwd(), 'lib/backend/services/opd-billing-domain-service.ts'), 'utf8');
+    expect(workspace).toContain('data-testid="opd-consultation-billing-recovery"');
+    expect(workspace).toContain('data-testid="opd-consultation-catalog-config-link"');
+    expect(workspace).toContain('data-testid="opd-consultation-invoice-retry"');
+    expect(workspace).toContain("!activeEncounter.consultationInvoice && (");
+    expect(workspace).toContain('activeEncounter.consultationInvoice &&');
+    const configPage = await readFile(path.join(process.cwd(), 'app/[tenantId]/billing/tariffs/page.tsx'), 'utf8');
+    expect(configPage).toContain("commandType: 'ConfigureOpdConsultationBillingCommand'");
+    expect(workspace).not.toContain('setDoc(');
+    expect(billing).toContain('OPD_CONSULTATION_INVOICE_ALREADY_EXISTS');
+    expect(billing).toContain('OPD_CONSULTATION_CATALOG_NOT_CONFIGURED');
   });
 
   test('authorized admin atomically configures consultation service and cash tariff', async () => {

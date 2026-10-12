@@ -797,6 +797,9 @@ export class Patient360Projector {
     return {
       projection: {
         ...content,
+        // Version the clinical-authority policy without altering the
+        // historic content hash algorithm or source evidence fingerprint.
+        projectionPolicyEpoch: 2,
         contentHash,
         projectedAt,
       },

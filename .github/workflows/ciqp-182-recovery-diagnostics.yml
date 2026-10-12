@@ -53,5 +53,5 @@ jobs:
         env:
           CIQP_SCENARIO_PATTERN: ${{ matrix.pattern }}
         run: |
-          timeout --signal=TERM --kill-after=10s 120s firebase emulators:exec --project ghims-p4-ci --only firestore \
+          timeout --signal=TERM --kill-after=10s 120s ./node_modules/.bin/firebase emulators:exec --project ghims-p4-ci --only firestore \
             "bun test --timeout 15000 --test-name-pattern '$CIQP_SCENARIO_PATTERN' emulator-security/ciqp-patient360-policy-migration.test.ts"

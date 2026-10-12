@@ -11,7 +11,7 @@ import { FieldPath } from 'firebase-admin/firestore';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { Patient360Projector } from '@/lib/clinical/patient360/patient360-projector';
 import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
-import { classifyPatient360PolicyInspection } from '@/lib/clinical/patient360/patient360-policy-inspection';
+import { classifyPatient360PolicyInspection, patient360TimelineParity } from '@/lib/clinical/patient360/patient360-policy-inspection';
 import {
   assertEmulatorPolicyMigrationScope, migratePatient360LegacyPolicyEmulator,
 } from '@/lib/clinical/patient360/ciqp-policy-migration';
@@ -46,9 +46,15 @@ export async function runCiqpEmulatorMigrationCohort(): Promise<{
           Patient360ProjectionService.loadSources(tenantId, doc.id),
           Patient360ProjectionService.loadPatientEvents(tenantId, doc.id, { includeNonClinical: true }),
         ]);
-        const canonical = Patient360Projector.project(canonicalSources).projection;
+        const computed = Patient360Projector.project(canonicalSources);
+        const published = stored.timelineGeneration && !stored.timelineReady
+          ? null
+          : await Patient360ProjectionService.getTimeline(tenantId, doc.id, 500, stored);
         const result = classifyPatient360PolicyInspection({
-          stored, canonical,
+          stored, canonical: computed.projection,
+          timelineMatches: published === null
+            ? undefined
+            : patient360TimelineParity(published, computed.timeline),
           rawEventTypes: raw.map(event => event.eventType),
           exceededEventLimit: raw.length > 500,
         });

@@ -15,6 +15,7 @@ import { sanitizeForFirestore } from '@/lib/firestore/sanitize';
 import { isPatient360ClinicalSourceEvent } from './clinical-source-event-policy';
 import { Patient360Projector, type Patient360ProjectionSources, type Patient360SourceEvent } from './patient360-projector';
 import { Patient360ProjectionService } from './patient360-projection-service';
+import { patient360TimelineParity } from './patient360-policy-inspection';
 import type { Patient360Projection, Patient360TimelineItem } from '@/types/patient360-projection';
 import type { PatientClinicalKnowledgeStatus } from '@/types/clinical-canonical';
 
@@ -244,10 +245,25 @@ export async function migratePatient360LegacyPolicyEmulator(
       stored.contentHash === current.contentHash &&
       stored.sourceFingerprint === current.sourceFingerprint &&
       stored.sourceCheckpoint === current.sourceCheckpoint) {
-    if (stored.timelineReady) return {
-      status: 'ALREADY_CURRENT', previousRevision: stored.revision,
-      currentRevision: current.revision, timelineRows: preflight.timeline.length,
-    };
+    if (stored.timelineReady) {
+      // A projection flag and content hash alone do not prove timeline integrity.
+      // Never certify an already-migrated patient if rows are absent, stale,
+      // duplicated, truncated, or out of clinical-source order.
+      try {
+        const published = await Patient360ProjectionService.getTimeline(
+          tenantId, patientId, 500, stored
+        );
+        if (!patient360TimelineParity(published, preflight.timeline)) {
+          return { status: 'BLOCKED_UNCORROBORATED' };
+        }
+      } catch {
+        return { status: 'BLOCKED_UNCORROBORATED' };
+      }
+      return {
+        status: 'ALREADY_CURRENT', previousRevision: stored.revision,
+        currentRevision: current.revision, timelineRows: preflight.timeline.length,
+      };
+    }
     // An interrupted transaction already stored the migration ledger.
     const ledgerSnap = await ledgerRef.get();
     if (!stored.policyMigrationId ||

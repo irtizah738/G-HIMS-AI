@@ -9,7 +9,6 @@ import { VerifiedTokenResult } from './verify-token';
 import { getTenantMembership } from './tenant-membership';
 import { credentialsValid } from '@/lib/clinical/intelligence/consultant-directory-service';
 import { getAdminFirestore } from '@/server/firebase/admin';
-import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
 import type {
   ClinicalPrivilege,
   EmployeeCredential,
@@ -40,8 +39,10 @@ function hcmDateWindowActive(
     from <= today && today <= until;
 }
 
+
+/** Explicit, narrowly scoped clinical privilege expansion. Unknown grants confer no rights. */
 function mapHcmPrivilegeToAuthorization(privilege: ClinicalPrivilege['privilegeType'] | string): string[] {
-  const map: Record<string, string[]> = {
+  const map: Record<string, readonly string[]> = {
     CONSULT_OPD:['CONSULT_OPD'],
     RECORD_VITALS:['RECORD_VITALS'],
     TRIAGE_PATIENTS:['TRIAGE_PATIENTS'],
@@ -65,12 +66,13 @@ function mapHcmPrivilegeToAuthorization(privilege: ClinicalPrivilege['privilegeT
     DISPENSE_MEDICATION:['DISPENSE_MEDICATION'],
     SIGN_CLINICAL_NOTE:['SIGN_CLINICAL_NOTE','SIGN_CLINICAL_NOTES'],
     SIGN_CLINICAL_NOTES:['SIGN_CLINICAL_NOTE','SIGN_CLINICAL_NOTES'],
-    SIGN_DEATH_CERTIFICATE:['SIGN_DEATH_CERTIFICATE','SIGN_CLINICAL_NOTES'],
+    SIGN_DEATH_CERTIFICATE:['SIGN_DEATH_CERTIFICATE'],
     PERFORM_INVASIVE_PROCEDURES:['PERFORM_INVASIVE_PROCEDURES','PERFORM_PROCEDURES'],
     SIGN_SOAP_CLINICAL_NOTE:['SIGN_SOAP_CLINICAL_NOTE','SIGN_CLINICAL_NOTES'],
   };
   const key = String(privilege || '').trim().toUpperCase();
-  return map[key] || [key];
+  if (!Object.prototype.hasOwnProperty.call(map, key)) return [];
+  return [...map[key]];
 }
 
 async function resolveCredentialGatedPrivileges(params:{
@@ -219,13 +221,10 @@ export async function resolveAuthorizationContext(
       })
     : [];
 
-  const runtimeMode = getRuntimeMode();
-  const clinicalPrivileges =
-    hcmPrivileges.length > 0
-      ? hcmPrivileges
-      : (runtimeMode === 'DEMO' || runtimeMode === 'TEST')
-        ? membership.clinicalPrivileges
-        : [];
+  // Only the canonical, scoped HCM employee/credential/privilege chain may
+  // grant clinical authority. A tenant-membership fallback would reinstate
+  // privileges after revocation or when HCM records are missing.
+  const clinicalPrivileges = hcmPrivileges;
 
   return {
     uid: verifiedToken.uid,

@@ -70,35 +70,20 @@ function canUseFirebaseEmulator(): boolean {
 }
 
 function canUseApplicationDefaultCredentials(): boolean {
-  if (process.env.VERCEL) return false;
-  const runtimeMode = String(process.env.GHIMS_RUNTIME_MODE || '').trim().toUpperCase();
-  // In DEMO/TEST environments (such as AI Studio previews), ambient container ADC
-  // belongs to the hosting Cloud Run project and lacks IAM permissions on foreign
-  // Firebase projects. Require explicit FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY.
-  if (runtimeMode === 'DEMO' || runtimeMode === 'TEST' || !runtimeMode) {
-    return false;
-  }
-  return Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS);
-}
-
-function cleanEnvString(raw: string | undefined): string {
-  if (!raw) return '';
-  let val = raw.trim();
-  if (
-    (val.startsWith('"') && val.endsWith('"')) ||
-    (val.startsWith("'") && val.endsWith("'"))
-  ) {
-    val = val.slice(1, -1).trim();
-  }
-  return val;
+  // Vercel functions do not have a local service-account JSON file unless an
+  // operator explicitly provisions one into the runtime, which G-HIMS does not do.
+  // Use FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY on Vercel.
+  return Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS) && !process.env.VERCEL;
 }
 
 function getAdminCredentials(): { clientEmail: string | null; privateKey: string | null } {
-  const clientEmail = cleanEnvString(
+  const clientEmail = (
     process.env.FIREBASE_CLIENT_EMAIL ||
     process.env.client_email ||
     ''
-  );
+  )
+    .replace(/^['"]|['"]$/g, '')
+    .trim();
 
   const rawKey =
     process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_PRIVATE_KEY.includes('BEGIN')
@@ -125,19 +110,18 @@ export function hasAdminCredentials(): boolean {
 export function getAdminApp(): App | null {
   if (adminApp) return adminApp;
 
-  const rawProject =
+  const projectId =
     process.env.FIREBASE_PROJECT_ID ||
     process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
     firebaseConfig.projectId;
-  const projectId = cleanEnvString(rawProject);
 
-  assertServerFirebaseProjectIsolation(projectId);
+  assertServerFirebaseProjectIsolation(String(projectId || ''));
 
   const existingApps = getApps();
   if (existingApps.length > 0) {
     const existing = getApp();
-    const existingProjectId = cleanEnvString(String(existing.options.projectId || ''));
-    assertServerFirebaseProjectIsolation(existingProjectId || projectId);
+    const existingProjectId = String(existing.options.projectId || '');
+    assertServerFirebaseProjectIsolation(existingProjectId || String(projectId || ''));
     if (existingProjectId && projectId && existingProjectId !== projectId) {
       throw new Error(
         `FIREBASE_ADMIN_PROJECT_MISMATCH: existing app uses ${existingProjectId}, expected ${projectId}.`
@@ -203,10 +187,9 @@ export function getAdminFirestore(): Firestore | null {
   if (!app) return null;
 
   try {
-    const rawDatabaseId =
+    const configuredDatabaseId =
       process.env.FIRESTORE_DATABASE_ID ||
       (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
-    const configuredDatabaseId = cleanEnvString(rawDatabaseId);
 
     const firestore =
       configuredDatabaseId && configuredDatabaseId !== '(default)'

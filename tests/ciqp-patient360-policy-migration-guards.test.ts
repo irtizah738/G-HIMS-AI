@@ -15,6 +15,12 @@ describe('CIQP-05 migration authority: no hosted data path', () => {
       { ...good, FIRESTORE_EMULATOR_HOST: 'localhost:8080' }, 'synthetic-tenant'
     )).not.toThrow();
   });
+  test('protected migration evidence cannot be accessed from client Firestore rules', async () => {
+    const rules = await Bun.file('firestore.rules').text();
+    expect(rules).toContain('match /patient360ProjectionPolicyMigrations/{patientId} {');
+    expect(rules).toMatch(/match \/patient360ProjectionPolicyMigrations\/\{patientId\} \{\s*allow read, write: if false;/);
+  });
+
   test('fails closed for production, staging, remote hosts, and missing acknowledgements', () => {
     for (const changes of [
       { GHIMS_RUNTIME_MODE: 'PRODUCTION' },

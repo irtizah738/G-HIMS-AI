@@ -86,6 +86,22 @@ describe('CIQP-05 controlled synthetic Patient360 legacy migration (Firestore em
     expect((await tenant.collection('patient360ProjectionPolicyMigrations').get()).size).toBe(1);
   });
 
+  test('already-current migration refuses to certify missing published timeline rows', async () => {
+    const tenantId = id('ciqp_tenant'), patientId = id('ciqp_patient');
+    const { tenant } = await seededLegacy(tenantId, patientId);
+    const first = await migratePatient360LegacyPolicyEmulator(tenantId, patientId);
+    expect(first.status).toBe('MIGRATED');
+    const projection = (await tenant.collection('patient360Projections').doc(patientId).get())
+      .data() as Patient360Projection;
+    expect(projection.timelineReady).toBe(true);
+    const rows = await tenant.collection('patient360Timeline')
+      .where('patientId', '==', patientId).get();
+    expect(rows.size).toBeGreaterThan(0);
+    await rows.docs[0].ref.delete();
+    const retry = await migratePatient360LegacyPolicyEmulator(tenantId, patientId);
+    expect(retry.status).toBe('BLOCKED_UNCORROBORATED');
+  });
+
   test('crash after policy CAS blocks readers, then replay completes the same generation', async () => {
     const tenantId = id('ciqp_tenant'), patientId = id('ciqp_patient');
     const { tenant, ref } = await seededLegacy(tenantId, patientId);

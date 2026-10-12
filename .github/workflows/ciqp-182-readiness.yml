@@ -34,3 +34,33 @@ jobs:
         run: bun run test:ciqp:readiness
       - name: TypeScript
         run: bun run typecheck
+
+  emulator-recovery:
+    name: CIQP-182 emulator crash/replay/race qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-p4-ci
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p4-ci
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install emulator tooling without changing dependency authority
+        run: npm install --no-save --package-lock=false @firebase/rules-unit-testing@5.0.2 firebase-tools@15.30.2
+      - name: Synthetic policy-epoch crash/race/restore qualification (bounded)
+        run: timeout --signal=TERM --kill-after=10s 600s bun run test:ciqp:emulator

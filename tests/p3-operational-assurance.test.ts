@@ -72,6 +72,16 @@ describe('G-HIMS P3 operational assurance and adversarial matrix',()=>{
       .toThrow(/ENVIRONMENT_PROJECT_COLLISION/);
   });
 
+  test('TEST cannot connect to an explicitly configured production Firebase project', () => {
+    process.env.GHIMS_RUNTIME_MODE = 'TEST';
+    process.env.GHIMS_FIREBASE_PROJECT_ID_TEST = 'g-hims-ai';
+    process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION = 'g-hims-ai';
+    delete process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO;
+    delete process.env.GHIMS_FIREBASE_PROJECT_ID_STAGING;
+    expect(() => assertServerFirebaseProjectIsolation('g-hims-ai'))
+      .toThrow(/ENVIRONMENT_PROJECT_COLLISION/);
+  });
+
   test('development requests do not acquire DEMO runtime powers implicitly', () => {
     expect(inferRuntimeModeFromNodeEnv('development')).toBe('TEST');
     const config = source('next.config.ts');

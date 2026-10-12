@@ -2,7 +2,7 @@
   "schema": "ghims.branch-retirement.v2",
   "preparedAgainst": "d9f56c6adc5426ba565f5245d11cdc033688387f",
   "description": "One-time audited removal of exact-SHA merged PR branches. Preserve main, open/draft PRs, and all closed-unmerged or unreviewed branches. No application or patient data is touched.",
-  "cleanupBranch": "chore/retire-verified-merged-branches-20261012",
+  "cleanupBranch": "chore/review-unmerged-branches-20261012",
   "branches": [
     {
       "name": "clinical/ciqp-baseline-evidence-20261011",
@@ -108,6 +108,13 @@
       "name": "refactor/extract-staging-to-ghims-os-20261011",
       "sha": "b7374e31d1264c6739302f3f4f1ce698e0534325",
       "pr": 171
+    }
+  ],
+  "obsoleteAncestorBranches": [
+    {
+      "name": "fix/mock-retirement-clinical-pointer-diagnostics-20261009",
+      "sha": "861d95cf4bf41b6a69bc2fc6e222b88a3592ab26",
+      "reason": "Verified zero ahead, 64 behind main on 2026-10-12; all commits already in main"
     }
   ]
 }

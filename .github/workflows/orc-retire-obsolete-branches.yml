@@ -84,6 +84,50 @@ jobs:
               core.info('Removed merged and SHA-verified branch ' + entry.name);
               deleted++;
             }
+            // A branch with NO associated PR is eligible only if every commit
+            // is already on main. Never treat "closed" as proof of merged.
+            const ancestorBranches = data.obsoleteAncestorBranches;
+            if (!Array.isArray(ancestorBranches) || ancestorBranches.length !== 1) {
+              core.setFailed('Unexpected obsolete-ancestor cleanup inventory.');
+              return;
+            }
+            for (const entry of ancestorBranches) {
+              if (!entry || !/^fix\/[a-z0-9-]+$/.test(entry.name) ||
+                  entry.name === 'main' || seen.has(entry.name) ||
+                  !/^[a-f0-9]{40}$/.test(entry.sha) ||
+                  openHeads.has(entry.name) ||
+                  [...open, ...closed].some(pr => pr.head.ref === entry.name)) {
+                core.setFailed('Unreviewed, active or PR-associated branch cannot be deleted: ' + String(entry?.name));
+                return;
+              }
+              const candidate = branchMap.get(entry.name);
+              if (!candidate) { alreadyAbsent++; continue; }
+              if (candidate.protected || candidate.commit.sha !== entry.sha) {
+                core.setFailed('Obsolete ancestor branch changed or became protected: ' + entry.name);
+                return;
+              }
+              const comparison = await github.rest.repos.compareCommits({
+                owner, repo, base: entry.name, head: 'main',
+              });
+              // For base=ancestor and head=main, main must be strictly ahead
+              // while the candidate must have no exclusive commits.
+              if (comparison.data.behind_by !== 0 ||
+                  comparison.data.ahead_by <= 0 ||
+                  comparison.data.status !== 'ahead') {
+                core.setFailed('Branch contains unique work or is not an ancestor of main: ' + entry.name);
+                return;
+              }
+              const current = await github.rest.git.getRef({
+                owner, repo, ref: 'heads/' + entry.name,
+              });
+              if (current.data.object.sha !== entry.sha) {
+                core.setFailed('Concurrent obsolete ancestor update detected: ' + entry.name);
+                return;
+              }
+              await github.rest.git.deleteRef({owner, repo, ref: 'heads/' + entry.name});
+              core.info('Retired confirmed ancestor with zero exclusive commits: ' + entry.name);
+              deleted++;
+            }
             // Retire this workflow's own cleanup PR branch if and only if the
             // PR is already merged and its branch HEAD is unchanged.
             const cleanupName = data.cleanupBranch;

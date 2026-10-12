@@ -243,7 +243,7 @@ export async function migratePatient360LegacyPolicyEmulator(
     }
     const published = await publishMigrationTimeline(tenantId, patientId, stored, preflight.timeline);
     return { status: published ? 'RESUMED' : 'BLOCKED_CONCURRENT_WRITER',
-      previousRevision: ledgerSnap.data()?.previousRevision,
+      previousRevision: ledgerSnap.data()?.priorRevision,
       currentRevision: current.revision, timelineRows: published ? preflight.timeline.length : 0 };
   }
 

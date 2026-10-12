@@ -65,10 +65,20 @@ describe('G-HIMS P3 operational assurance and adversarial matrix',()=>{
     process.env.FIREBASE_PROJECT_ID = 'synthetic-demo';
     expect(() => assertServerFirebaseProjectIsolation('synthetic-demo'))
       .toThrow(/ENVIRONMENT_PROJECT_MISMATCH/);
-    expect(() => assertServerFirebaseProjectIsolation('ghims-test')).not.toThrow();
+    expect(() => assertServerFirebaseProjectIsolation('g-hims-ai')).not.toThrow();
 
     process.env.GHIMS_FIREBASE_PROJECT_ID_TEST = 'synthetic-demo';
     expect(() => assertServerFirebaseProjectIsolation('synthetic-demo'))
+      .toThrow(/ENVIRONMENT_PROJECT_COLLISION/);
+  });
+
+  test('TEST cannot connect to an explicitly configured production Firebase project', () => {
+    process.env.GHIMS_RUNTIME_MODE = 'TEST';
+    process.env.GHIMS_FIREBASE_PROJECT_ID_TEST = 'g-hims-ai';
+    process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION = 'g-hims-ai';
+    delete process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO;
+    delete process.env.GHIMS_FIREBASE_PROJECT_ID_STAGING;
+    expect(() => assertServerFirebaseProjectIsolation('g-hims-ai'))
       .toThrow(/ENVIRONMENT_PROJECT_COLLISION/);
   });
 

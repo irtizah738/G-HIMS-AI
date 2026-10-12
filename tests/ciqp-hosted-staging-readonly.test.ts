@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { Firestore } from 'firebase-admin/firestore';
 import {
   assertCiqpHostedStagingReadOnlyScope, assertCiqpStagingCheckout,
+  assertCiqpHostedStagingSyntheticApplyScope,
   inspectCiqpHostedStagingReadOnly,
 } from '@/lib/clinical/patient360/ciqp-hosted-staging-readonly';
 
@@ -148,4 +149,45 @@ describe('CIQP #182 hosted staging READ-ONLY perimeter', () => {
     expect(runner).toContain('assertCiqpHostedStagingReadOnlyScope(process.env)');
     expect(runner).toContain('assertCiqpStagingCheckout(scope.expectedSha');
   });
+  test('hosted synthetic apply requires independent additional ticket/restore/identity fence', () => {
+    const applyEnv: NodeJS.ProcessEnv = {
+      ...good,
+      GHIMS_CIQP_STAGING_APPLY_ACK: 'APPROVED_SYNTHETIC_STAGING_CAS_ONLY',
+      GHIMS_CIQP_STAGING_APPLY_CONFIRM_PROJECT: 'ghims-ai-ciqp-staging',
+      GHIMS_CIQP_STAGING_APPLY_CONFIRM_TENANT: 'ciqp-synthetic-cohort01',
+      GHIMS_CIQP_STAGING_APPLY_CONFIRM_SHA: SHA,
+      GHIMS_CIQP_STAGING_CHANGE_TICKET: 'CIQP-182-20261013-APPROVED',
+      GHIMS_CIQP_STAGING_RESTORE_TICKET: 'RESTORE-20261013-TESTED',
+      GHIMS_CIQP_STAGING_OPERATOR_ID: 'qualified.operator',
+      GHIMS_CIQP_STAGING_SYNTHETIC_ATTESTATION_SHA256: 'b'.repeat(64),
+    };
+    expect(assertCiqpHostedStagingSyntheticApplyScope(applyEnv))
+      .toEqual(assertCiqpHostedStagingReadOnlyScope(good));
+    for (const changes of [
+      { GHIMS_CIQP_STAGING_APPLY_ACK: '' },
+      { GHIMS_CIQP_STAGING_CHANGE_TICKET: '' },
+      { GHIMS_CIQP_STAGING_RESTORE_TICKET: '' },
+      { GHIMS_CIQP_STAGING_OPERATOR_ID: '' },
+      { GHIMS_CIQP_STAGING_APPLY_CONFIRM_PROJECT: 'g-hims-ai' },
+      { GHIMS_CIQP_STAGING_APPLY_CONFIRM_TENANT: 'other-tenant' },
+      { GHIMS_CIQP_STAGING_APPLY_CONFIRM_SHA: 'c'.repeat(40) },
+      { GHIMS_CIQP_STAGING_SYNTHETIC_ATTESTATION_SHA256: '' },
+    ]) {
+      expect(() => assertCiqpHostedStagingSyntheticApplyScope({
+        ...applyEnv, ...changes,
+      })).toThrow('CIQP_STAGING_SYNTHETIC_APPLY_NOT_AUTHORIZED');
+    }
+    expect(() => assertCiqpHostedStagingSyntheticApplyScope({
+      ...applyEnv, GHIMS_RUNTIME_MODE: 'PRODUCTION',
+    })).toThrow('CIQP_STAGING_READ_ONLY_SCOPE_DENIED');
+  });
+
+  test('hosted staging and emulator entry points remain separately scoped', async () => {
+    const source = await Bun.file('lib/clinical/patient360/ciqp-policy-migration.ts').text();
+    expect(source).toContain('assertEmulatorPolicyMigrationScope(process.env, tenantId)');
+    expect(source).toContain('assertCiqpHostedStagingSyntheticApplyScope(process.env)');
+    expect(source).toContain('loadStagingRawPatientEvents(db, scope, patientId)');
+    expect(source).toContain('migratePatient360LegacyPolicyCore(');
+  });
+
 });

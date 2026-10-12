@@ -60,6 +60,31 @@ export function assertCiqpHostedStagingReadOnlyScope(
   return { projectId: staging, tenantId, expectedSha: sha.toLowerCase() };
 }
 
+/**
+ * Separate authority for synthetic-only hosted STAGING writes. Environment
+ * receipts are assertions, not independently verified sign-offs. An external
+ * change review, synthetic provenance, independent restore evidence and
+ * a staging-scoped writer identity are mandatory before this can be run.
+ */
+export function assertCiqpHostedStagingSyntheticApplyScope(
+  env: NodeJS.ProcessEnv
+): CiqpHostedStagingScope {
+  const scope = assertCiqpHostedStagingReadOnlyScope(env);
+  if (
+    env.GHIMS_CIQP_STAGING_APPLY_ACK !== 'APPROVED_SYNTHETIC_STAGING_CAS_ONLY' ||
+    env.GHIMS_CIQP_STAGING_APPLY_CONFIRM_PROJECT !== scope.projectId ||
+    env.GHIMS_CIQP_STAGING_APPLY_CONFIRM_TENANT !== scope.tenantId ||
+    env.GHIMS_CIQP_STAGING_APPLY_CONFIRM_SHA?.toLowerCase() !== scope.expectedSha ||
+    !/^CIQP-182-[A-Z0-9-]{8,80}$/.test(env.GHIMS_CIQP_STAGING_CHANGE_TICKET || '') ||
+    !/^RESTORE-[A-Z0-9-]{8,80}$/.test(env.GHIMS_CIQP_STAGING_RESTORE_TICKET || '') ||
+    !/^[a-zA-Z0-9_.@-]{6,100}$/.test(env.GHIMS_CIQP_STAGING_OPERATOR_ID || '') ||
+    !/^[a-f0-9]{64}$/i.test(env.GHIMS_CIQP_STAGING_SYNTHETIC_ATTESTATION_SHA256 || '')
+  ) {
+    throw new Error('CIQP_STAGING_SYNTHETIC_APPLY_NOT_AUTHORIZED');
+  }
+  return scope;
+}
+
 export function assertCiqpStagingCheckout(
   expectedSha: string, actualSha: string, gitPorcelain: string
 ): void {
@@ -101,7 +126,7 @@ function eventRelatesToPatient(event: Patient360SourceEvent, patientId: string):
  * hosted *staging* with a capped, read-only query and never returns identifiers
  * outside this process.
  */
-async function loadStagingRawPatientEvents(
+export async function loadStagingRawPatientEvents(
   db: Firestore, scope: CiqpHostedStagingScope, patientId: string
 ): Promise<Patient360SourceEvent[]> {
   const events = db.collection('tenants').doc(scope.tenantId).collection('events');

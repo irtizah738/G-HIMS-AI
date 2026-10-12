@@ -43,9 +43,10 @@ perform migration, rebuild projections or execute Firestore writes.
 - Evidence tests: tests/ciqp-qualification-evidence.test.ts
 - Dedicated source CI: .github/workflows/ciqp-182-readiness.yml
 
-**This does not replace the outstanding hosted-staging migration executor/change
-approval. Do not weaken the emulator-only migration guard or repoint the
-emulator tool at a hosted database.**
+**The synthetic-only hosted-staging executor is now implemented as source code
+in scripts/ops/ciqp-migrate-staging-synthetic.ts. It has NOT been executed
+against hosted Firestore or independently qualified. The emulator-only wrapper
+still rejects any hosted project. Operator change authorization is outstanding.**
 
 ### Isolated staging operator setup — independently authorized
 
@@ -98,21 +99,77 @@ clinical approval.
    source/timeline parity. Projection revision alone is not sufficient:
    migration intentionally changes legacy revision semantics without rewriting
    immutable clinical events.
-3. A separately reviewed hosted staging executor must enforce an explicitly
-   authorized synthetic cohort, policy epoch compare-and-swap, concurrent
-   source rechecks, generation-fenced timeline writes, idempotent recovery,
-   incident stop criteria, and project denylisting. Production writes remain
-   forbidden.
+3. The source-hosted staging executor reuses the exact emulator-tested
+   policy-epoch compare-and-swap core and checks explicit project, tenant,
+   source SHA, operator, synthetic provenance, change and restore receipts;
+   its actual staging behavior, idempotent recovery and stop/rollback must
+   still be qualified independently. Production writes remain forbidden.
 4. Run the offline evidence-manifest checker. Even a syntactically complete
    manifest returns clinicalReleaseAuthority: NOT_ESTABLISHED and
    productionDeploymentAuthority: NOT_ESTABLISHED until the linked artifacts
    and signatures are independently reviewed.
 
+
+
+### Hosted synthetic staging migration source (NOT approved/executed)
+
+The source implements TWO paths that require the same isolated staging identity,
+clean exact-head checkout, synthetic tenant and private HMAC key:
+
+- DRY_RUN (default, no writes):
+  bun scripts/ops/ciqp-migrate-staging-synthetic.ts
+- APPLY_SYNTHETIC (one scoped patient, controlled compare-and-swap):
+  set GHIMS_CIQP_STAGING_MIGRATION_MODE=APPLY_SYNTHETIC, then run the same tool.
+
+APPLY_SYNTHETIC additionally **requires independent approval and restoration
+evidence before an authorized operator can supply these variables**:
+
+- GHIMS_CIQP_STAGING_APPLY_ACK=APPROVED_SYNTHETIC_STAGING_CAS_ONLY
+- GHIMS_CIQP_STAGING_APPLY_CONFIRM_PROJECT=<actual-staging-project>
+- GHIMS_CIQP_STAGING_APPLY_CONFIRM_TENANT=<actual-synthetic-tenant>
+- GHIMS_CIQP_STAGING_APPLY_CONFIRM_SHA=<frozen-candidate-sha>
+- GHIMS_CIQP_STAGING_CHANGE_TICKET=CIQP-182-<approved-ticket-reference>
+- GHIMS_CIQP_STAGING_RESTORE_TICKET=RESTORE-<signed-restore-reference>
+- GHIMS_CIQP_STAGING_OPERATOR_ID=<authorized-operator-identity>
+- GHIMS_CIQP_STAGING_SYNTHETIC_ATTESTATION_SHA256=<signed-provenance-document-digest>
+- GHIMS_CIQP_STAGING_APPLY_PATIENT_ID=<specific-synthetic-patient-id>
+
+Environment variables alone do not establish clinical or institutional
+approval. The operator must verify approval authenticity and the source data
+provenance *outside* the code before attempting a write.
+
+The staging executor takes a **read-only preflight inventory**, then compares
+immutable events and outbox keyed HMACs before and after its single-patient
+apply. It fails closed on mismatches, concurrent clinical facts, incomplete
+timeline publications, oversized cohorts or wrong project. A failed write
+may require an authorized recovery drill. It never rewrites original clinical
+events or deletes historical generations.
+
+For an independently restored source fixture, use:
+
+bun scripts/ops/ciqp-fingerprint-staging-immutable.ts
+
+with the same HMAC key and synthetic tenant identifier on each isolated
+source/restore target. Compare eventCount/eventHmac and
+outboxCount/outboxHmac alongside authorized export/import operation records.
+This source tool **does not perform backup, restore or rollback**. Those
+operations require authorized external cloud IAM and actual executed evidence.
+
+Begin with docs/clinical-intelligence/CIQP_182_EVIDENCE_MANIFEST_TEMPLATE.json.
+All template fields are blank by design and must not be committed with patient
+identifiers or credentials. The signed/executed manifest belongs in a
+restricted evidence store, not the public repository.
+
+The offline evidence checker accepts a JSON manifest; it verifies field
+completeness and SHA linkage but cannot authenticate human signatures,
+external URLs, exported data, or institutional authority. Every returned
+production/clinical authorization status remains NOT_ESTABLISHED.
+
 ### Still outstanding: actual externally authorized evidence
 
 - Signed synthetic-data provenance, isolated staging Firebase project/IAM.
-- Approved staging inventory and a separately reviewed synthetic hosted
-  migration apply path; immutable events and outbox must remain untouched.
+- Approved execution of the source-implemented synthetic hosted staging
+  migration path; immutable events and outbox must remain untouched.
 - Real export/import to an isolated restore target, operation logs, RPO/RTO,
   timeline parity and immutable integrity receipts.
 - Named operator, independent credentialed clinician and institutional/site

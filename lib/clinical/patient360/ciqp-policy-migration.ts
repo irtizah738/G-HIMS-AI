@@ -16,6 +16,10 @@ import { isPatient360ClinicalSourceEvent } from './clinical-source-event-policy'
 import { Patient360Projector, type Patient360ProjectionSources, type Patient360SourceEvent } from './patient360-projector';
 import { Patient360ProjectionService } from './patient360-projection-service';
 import { patient360TimelineParity } from './patient360-policy-inspection';
+import {
+  assertCiqpHostedStagingSyntheticApplyScope, loadStagingRawPatientEvents,
+  type CiqpHostedStagingScope,
+} from './ciqp-hosted-staging-readonly';
 import type { Patient360Projection, Patient360TimelineItem } from '@/types/patient360-projection';
 import type { PatientClinicalKnowledgeStatus } from '@/types/clinical-canonical';
 
@@ -219,15 +223,18 @@ async function publishMigrationTimeline(
  * signed event or any other canonical fact invalidates the preflight hash.
  * Never authorize production by changing the environment variables alone.
  */
-export async function migratePatient360LegacyPolicyEmulator(
+type CiqpMigrationHooks = {
+  beforeTransaction?: () => Promise<void>;
+  afterCommit?: () => Promise<void>;
+  beforePublication?: () => Promise<void>;
+};
+
+/** Both explicitly scoped entry points use this exact same CAS transaction. */
+async function migratePatient360LegacyPolicyCore(
   tenantId: string, patientId: string,
-  hooks: {
-    beforeTransaction?: () => Promise<void>;
-    afterCommit?: () => Promise<void>;
-    beforePublication?: () => Promise<void>;
-  } = {}
+  loadRawEvents: () => Promise<Patient360SourceEvent[]>,
+  hooks: CiqpMigrationHooks = {}
 ): Promise<Patient360PolicyMigrationOutcome> {
-  assertEmulatorPolicyMigrationScope(process.env, tenantId);
   if (!/^[a-zA-Z0-9_-]{4,120}$/.test(patientId)) {
     throw new Error('CIQP_MIGRATION_INVALID_PATIENT_ID');
   }
@@ -242,7 +249,7 @@ export async function migratePatient360LegacyPolicyEmulator(
 
   const [source, raw] = await Promise.all([
     Patient360ProjectionService.loadSources(tenantId, patientId),
-    Patient360ProjectionService.loadPatientEvents(tenantId, patientId, { includeNonClinical: true }),
+    loadRawEvents(),
   ]);
   const preflight = Patient360Projector.project(source);
   const current = preflight.projection;
@@ -342,4 +349,44 @@ export async function migratePatient360LegacyPolicyEmulator(
   return { status: published ? 'MIGRATED' : 'BLOCKED_CONCURRENT_WRITER',
     previousRevision: stored.revision, currentRevision: current.revision,
     timelineRows: published ? preflight.timeline.length : 0 };
+}
+
+
+/**
+ * Unchanged public contract: local TEST emulator, explicit synthetic ACK only.
+ * Hosted staging cannot call this wrapper, even with arbitrary env overrides.
+ */
+export async function migratePatient360LegacyPolicyEmulator(
+  tenantId: string, patientId: string, hooks: CiqpMigrationHooks = {}
+): Promise<Patient360PolicyMigrationOutcome> {
+  assertEmulatorPolicyMigrationScope(process.env, tenantId);
+  return migratePatient360LegacyPolicyCore(
+    tenantId, patientId,
+    () => Patient360ProjectionService.loadPatientEvents(
+      tenantId, patientId, { includeNonClinical: true }
+    ),
+    hooks
+  );
+}
+
+/**
+ * Independently scoped hosted STAGING synthetic-only executor.
+ * Never callable for real/production data. The external staging approvals
+ * and restricted IAM identity must be verified outside this source code.
+ */
+export async function migratePatient360SyntheticHostedStaging(
+  scope: CiqpHostedStagingScope, patientId: string
+): Promise<Patient360PolicyMigrationOutcome> {
+  const approved = assertCiqpHostedStagingSyntheticApplyScope(process.env);
+  if (approved.projectId !== scope.projectId ||
+      approved.tenantId !== scope.tenantId ||
+      approved.expectedSha !== scope.expectedSha) {
+    throw new Error('CIQP_STAGING_APPLY_SCOPE_CHANGED');
+  }
+  const db = getAdminFirestore();
+  if (!db) throw new Error('CIQP_STAGING_FIRESTORE_UNAVAILABLE');
+  return migratePatient360LegacyPolicyCore(
+    scope.tenantId, patientId,
+    () => loadStagingRawPatientEvents(db, scope, patientId)
+  );
 }

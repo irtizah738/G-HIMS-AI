@@ -15,6 +15,7 @@ A blocker is closed only by evidence, not by changing a label.
 | EXT-EDI-01 | Claims | Payer/clearinghouse companion-guide validation incomplete | Accepted test transaction/certification evidence |
 | EXT-GOV-01 | Governance | No hospital pilot/production approval exists in repository evidence | Institutional approval outside repository |
 | EXT-SEC-01 | Security | Independent production penetration assessment not evidenced | Assessment + remediation report |
+| CIQP-P360-182 | Clinical Intelligence / Patient 360 | Legacy unsigned-AI-contaminated projection revisions still require a separately approved hosted migration and clinical/institutional validation; current implementation is synthetic-emulator-only | Exact SHA green emulator race/crash/replay tests, approved synthetic staging migration and restore drill, current projection/timeline parity, source ledger hashes and signed operator + clinician release approval |
 
 ## Containment already implemented
 

@@ -45,6 +45,67 @@ describe('CIQP-05 Patient 360 revision-fenced timeline (Firestore emulator)', ()
     expect(firstRows.every(row => row.patientId === patientId)).toBe(true);
 
     const tenantRef = db.collection('tenants').doc(tenantId);
+
+    // A CI-10 evidence-snapshot event must remain durably auditable without
+    // recursively changing Patient 360's clinical event cursor or evidence.
+    const auditEventId = id('ciqp_snapshot_audit');
+    const auditEvent = {
+      eventId: auditEventId,
+      tenantId,
+      eventType: 'CLINICAL_INTELLIGENCE_EVIDENCE_SNAPSHOT_CREATED',
+      aggregateType: 'CLINICAL_INTELLIGENCE_EVIDENCE_SNAPSHOT',
+      aggregateId: id('cisnap'),
+      payload: { patientId, snapshotHash: id('hash') },
+      occurredAt: Date.now() + 10_000,
+      recordedAt: Date.now() + 10_000,
+    };
+    await tenantRef.collection('events').doc(auditEventId).set(auditEvent);
+    const ignored = await Patient360ProjectionService.refreshFromEvent(auditEvent);
+    expect(ignored.status).toBe('IGNORED');
+    expect(ignored.updatedPatientIds).toEqual([]);
+    const auditCheckpoint = await tenantRef
+      .collection('patient360ProjectionCheckpoints').doc(auditEventId).get();
+    expect(auditCheckpoint.data()?.status).toBe('IGNORED');
+    // Inspection must see *all* patient-event routes, even when their
+    // unsigned AI events are correctly excluded from clinical revisions.
+    // The old inspector only queried payload.patientId and missed these.
+    const scopedLegacyRoutes = [
+      { aggregateType: 'AI_DRAFT', aggregateId: id('draft'), payload: { primaryPatientId: patientId } },
+      { aggregateType: 'AI_DRAFT', aggregateId: id('draft'), payload: { secondaryPatientId: patientId } },
+      { aggregateType: 'PATIENT', aggregateId: patientId, payload: {} },
+    ];
+    const legacyIds: string[] = [];
+    for (const [index, route] of scopedLegacyRoutes.entries()) {
+      const legacyId = id('legacy_ai_audit');
+      legacyIds.push(legacyId);
+      await tenantRef.collection('events').doc(legacyId).set({
+        eventId: legacyId,
+        tenantId,
+        eventType: 'CLINICAL_DRAFT_REJECTED',
+        ...route,
+        recordedAt: Date.now() + 11_000 + index,
+        occurredAt: Date.now() + 11_000 + index,
+      });
+    }
+    const allForInspection = await Patient360ProjectionService.loadPatientEvents(
+      tenantId, patientId, { includeNonClinical: true }
+    );
+    for (const legacyId of legacyIds) {
+      expect(allForInspection.some(event => event.eventId === legacyId)).toBe(true);
+    }
+    expect(allForInspection.some(event => event.eventId === auditEventId)).toBe(true);
+    const clinicalOnly = await Patient360ProjectionService.loadPatientEvents(tenantId, patientId);
+    expect(clinicalOnly.some(event => legacyIds.includes(event.eventId))).toBe(false);
+    expect(clinicalOnly.some(event => event.eventId === auditEventId)).toBe(false);
+
+    const afterAudit = await Patient360ProjectionService.rebuildPatient(tenantId, patientId);
+    expect(afterAudit.contentHash).toBe(first.contentHash);
+    expect(afterAudit.revision).toBe(first.revision);
+    const filteredEvents = await Patient360ProjectionService.loadPatientEvents(tenantId, patientId);
+    expect(filteredEvents.some((item) => item.eventId === auditEventId)).toBe(false);
+    expect((await Patient360ProjectionService.getTimeline(tenantId, patientId)).map(x => x.eventId))
+      .toEqual(firstRows.map(x => x.eventId));
+
     const latest = (await tenantRef.collection('events').get()).docs
       .map(doc => doc.data()).reduce((a, b) => Math.max(a, Number(b.recordedAt || 0)), 0);
     const freshEventId = id('ciqp_evt');
@@ -73,6 +134,17 @@ describe('CIQP-05 Patient 360 revision-fenced timeline (Firestore emulator)', ()
       .rejects.toThrow('PATIENT360_TIMELINE_NOT_READY');
     await expect(Patient360ProjectionService.getTimeline(tenantId, patientId))
       .rejects.toThrow('PATIENT360_TIMELINE_NOT_READY');
+    await expect(Patient360ProjectionService.readClinicalView(tenantId, patientId))
+      .rejects.toThrow('PATIENT360_TIMELINE_NOT_READY');
+    const healedView = await Patient360ProjectionService.readOrRebuildClinicalView(
+      tenantId, patientId
+    );
+    expect(healedView.repairedMissingProjection).toBe(true);
+    expect(healedView.projection.timelineReady).toBe(true);
+    expect(healedView.projection.contentHash).toBe(second.contentHash);
+    expect(healedView.timeline.map(row => row.eventId))
+      .toEqual(secondRows.map(row => row.eventId));
+    await projectionRef.update({ timelineReady: false });
     const repaired = await Patient360ProjectionService.getOrRebuildProjection(tenantId, patientId);
     expect(repaired?.timelineReady).toBe(true);
     expect(secondRows.some(row => row.eventId === freshEventId)).toBe(true);

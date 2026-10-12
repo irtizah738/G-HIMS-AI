@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import { isPatient360ClinicalSourceEvent } from '@/lib/clinical/patient360/clinical-source-event-policy';
+import { evidenceEventsAtProjectionCursor } from '@/lib/clinical/intelligence/evidence-event-cursor-fence';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { sanitizeForFirestore } from '@/lib/firestore/sanitize';
 import type { CommandContext, DomainEventEnvelope } from '@/lib/backend/types';
@@ -331,8 +333,11 @@ export class ClinicalEvidenceService {
       throw new Error('CI10_EVIDENCE_SCOPE_INVALID');
     }
 
+    // Evidence-snapshot audit events never constitute clinical provenance.
+    // Enforce this even for direct buildSnapshot callers supplying raw events.
+    const clinicalEvents = events.filter(isPatient360ClinicalSourceEvent);
     const evidenceRefs = candidatesFromProjection(projection, supplemental)
-      .map((candidate) => toEvidenceRef(projection, candidate, events))
+      .map((candidate) => toEvidenceRef(projection, candidate, clinicalEvents))
       .sort(
         (left, right) =>
           left.sourceType.localeCompare(right.sourceType) ||
@@ -522,6 +527,11 @@ export class ClinicalEvidenceService {
       throw new Error('CI10_PATIENT360_SCOPE_MISMATCH');
     }
 
+    // Capture provenance only from events represented by this exact
+    // Patient 360 projection. Events arriving concurrently are not evidence
+    // for the frozen revision; missing events fail closed.
+    const scopedEvents = evidenceEventsAtProjectionCursor(projection, events);
+
     const supplemental: EvidenceSupplement | undefined =
       purpose === 'LONGITUDINAL_SUMMARY'
         ? await LongitudinalEvidenceLoader.load(context.tenantId, patientId)
@@ -552,12 +562,23 @@ export class ClinicalEvidenceService {
 
     const snapshot = this.buildSnapshot(
       projection,
-      events,
+      scopedEvents,
       purpose,
       context.actorId,
       Date.now(),
       supplemental
     );
+
+    // A worker may publish a newer generation while supplement evidence is
+    // loading. Fail closed instead of recording a mixed-revision evidence set.
+    const latestProjection = await Patient360ProjectionService.getProjection(
+      context.tenantId, patientId
+    );
+    if (!latestProjection ||
+        latestProjection.contentHash !== projection.contentHash ||
+        latestProjection.sourceCheckpoint !== projection.sourceCheckpoint) {
+      throw new Error('CI10_EVIDENCE_PROJECTION_REVISION_CHANGED');
+    }
 
     const db = getAdminFirestore();
     if (!db) {

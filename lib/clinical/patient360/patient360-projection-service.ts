@@ -1,4 +1,5 @@
 import { FieldPath, type CollectionReference, type DocumentData, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
+import { isPatient360ClinicalSourceEvent } from '@/lib/clinical/patient360/clinical-source-event-policy';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { sanitizeForFirestore } from '@/lib/firestore/sanitize';
 import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
@@ -71,6 +72,7 @@ function directPatientAggregateId(event: {
 }
 
 function patientIdsFromEvent(event: DomainEventEnvelope): string[] {
+  if (!isPatient360ClinicalSourceEvent(event)) return [];
   const payload = event.payload || {};
   return unique([
     payload.patientId as string,
@@ -374,12 +376,23 @@ export class Patient360ProjectionService {
     timeline: Patient360TimelineItem[];
     repairedMissingProjection: boolean;
   }> {
-    const current = await this.readClinicalView(
-      tenantId,
-      patientId,
-      timelineLimit
-    );
-    if (current.projection) {
+    // An interrupted publication remains invisible to ordinary readers.
+    // The authorized read path may attempt one canonical, revision-fenced repair.
+    let current: Awaited<ReturnType<typeof this.readClinicalView>> | null = null;
+    try {
+      current = await this.readClinicalView(
+        tenantId,
+        patientId,
+        timelineLimit
+      );
+    } catch (error) {
+      if (!(error instanceof Error) ||
+          error.message !== 'PATIENT360_TIMELINE_NOT_READY') {
+        throw error;
+      }
+      // A second interruption or a new source revision still fails closed.
+    }
+    if (current?.projection) {
       return {
         projection: current.projection,
         timeline: current.timeline,
@@ -411,8 +424,18 @@ export class Patient360ProjectionService {
 
   public static async loadPatientEvents(
     tenantId: string,
-    patientId: string
+    patientId: string,
+    options: { includeNonClinical?: boolean } = {}
   ): Promise<Patient360SourceEvent[]> {
+    // Raw unsigned AI audit events are accessible only to isolated emulator
+    // qualification; production clinical reads cannot bypass source policy.
+    if (options.includeNonClinical && (
+      process.env.GHIMS_RUNTIME_MODE !== 'TEST' ||
+      !process.env.FIRESTORE_EMULATOR_HOST ||
+      process.env.NODE_ENV === 'production'
+    )) {
+      throw new Error('CIQP_RAW_EVENT_INSPECTION_EMULATOR_ONLY');
+    }
     const db = getAdminFirestore();
     if (!db) {
       throw new Error('PATIENT360_PROJECTION_STORE_UNAVAILABLE');
@@ -437,7 +460,11 @@ export class Patient360ProjectionService {
       }
     }
 
+    // The emulator-only legacy inspector needs the same four authoritative
+    // patient-scope queries *before* the clinical-source policy filter. Keep
+    // the default clinical read behavior unchanged.
     return Array.from(byId.values())
+      .filter((event) => options.includeNonClinical || isPatient360ClinicalSourceEvent(event))
       .sort(
         (left, right) =>
           Number(left.recordedAt || left.occurredAt || 0) -
@@ -862,6 +889,7 @@ export class Patient360ProjectionService {
 
     const patientIds = unique(
       events.flatMap((event) => {
+        if (!isPatient360ClinicalSourceEvent(event)) return [];
         const payload = event.payload || {};
         return [
           payload.patientId as string,
@@ -904,12 +932,12 @@ export class Patient360ProjectionService {
       const chunk = events.slice(offset, offset + 350);
       const batch = db.batch();
       for (const event of chunk) {
-        const ids = unique([
+        const ids = isPatient360ClinicalSourceEvent(event) ? unique([
           event.payload?.patientId as string,
           event.payload?.primaryPatientId as string,
           event.payload?.secondaryPatientId as string,
           directPatientAggregateId(event),
-        ]);
+        ]) : [];
         const checkpoint = {
           eventId: event.eventId,
           tenantId,

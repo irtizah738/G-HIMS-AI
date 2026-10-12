@@ -191,6 +191,15 @@ async function publishMigrationTimeline(
     const [snap, ledgerSnap] = await Promise.all([tx.get(ref), tx.get(ledger)]);
     if (!stillOwned(snap.data() as Patient360Projection | undefined) ||
         ledgerSnap.data()?.migrationId !== projection.policyMigrationId) return false;
+    // A freshly signed clinical fact may arrive AFTER the policy CAS but
+    // before final timeline publication. Re-read all bounded authoritative
+    // source queries in this same transaction, and never expose a stale
+    // migrated generation as ready when that happens.
+    const refreshed = await readCanonicalInTransaction(tx, tenantRef, patientId);
+    const current = Patient360Projector.project(refreshed.sources).projection;
+    if (current.contentHash !== projection.contentHash ||
+        current.sourceFingerprint !== projection.sourceFingerprint ||
+        current.sourceCheckpoint !== projection.sourceCheckpoint) return false;
     tx.update(ref, { timelineReady: true });
     tx.update(ledger, { status: 'PUBLISHED', publishedAt: Date.now() });
     return true;
@@ -205,7 +214,11 @@ async function publishMigrationTimeline(
  */
 export async function migratePatient360LegacyPolicyEmulator(
   tenantId: string, patientId: string,
-  hooks: { beforeTransaction?: () => Promise<void>; afterCommit?: () => Promise<void> } = {}
+  hooks: {
+    beforeTransaction?: () => Promise<void>;
+    afterCommit?: () => Promise<void>;
+    beforePublication?: () => Promise<void>;
+  } = {}
 ): Promise<Patient360PolicyMigrationOutcome> {
   assertEmulatorPolicyMigrationScope(process.env, tenantId);
   if (!/^[a-zA-Z0-9_-]{4,120}$/.test(patientId)) {
@@ -300,6 +313,7 @@ export async function migratePatient360LegacyPolicyEmulator(
 
   if (result !== 'APPLIED') return { status: result };
   if (hooks.afterCommit) await hooks.afterCommit();
+  if (hooks.beforePublication) await hooks.beforePublication();
   const published = await publishMigrationTimeline(tenantId, patientId, {
     ...current, policyMigrationId: migrationId, projectionPolicyEpoch: PATIENT360_CLINICAL_POLICY_EPOCH,
   }, preflight.timeline);

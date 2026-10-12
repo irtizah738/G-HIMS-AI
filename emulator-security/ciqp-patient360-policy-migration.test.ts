@@ -95,7 +95,7 @@ describe('CIQP-05 controlled synthetic Patient360 legacy migration (Firestore em
       .data() as Patient360Projection;
     expect(projection.timelineReady).toBe(true);
     const rows = await tenant.collection('patient360Timeline')
-      .where('patientId', '==', patientId).get();
+      .where('timelineGeneration', '==', projection.contentHash).get();
     expect(rows.size).toBeGreaterThan(0);
     await rows.docs[0].ref.delete();
     const retry = await migratePatient360LegacyPolicyEmulator(tenantId, patientId);

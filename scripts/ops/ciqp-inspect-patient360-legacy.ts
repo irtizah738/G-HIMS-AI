@@ -20,7 +20,7 @@ const MAX_RAW_EVENTS = 2000;
 export function assertEmulatorInspectionScope(env: NodeJS.ProcessEnv): string {
   if (
     env.GHIMS_RUNTIME_MODE !== 'TEST' ||
-    !/^(localhost|127\\.0\\.0\\.1):[0-9]{2,5}$/.test(env.FIRESTORE_EMULATOR_HOST || '') ||
+    !/^(localhost|127\.0\.0\.1):[0-9]{2,5}$/.test(env.FIRESTORE_EMULATOR_HOST || '') ||
     env.NODE_ENV === 'production' ||
     env.GHIMS_CIQP_READ_ONLY_ACK !== 'INSPECT_EMULATOR_NO_WRITES'
   ) {

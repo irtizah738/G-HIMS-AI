@@ -138,6 +138,40 @@ describe('governed OPD consultation billing configuration', () => {
     expect(tariff?.copayPercent).toBe(100);
   });
 
+  test('tenant ADMIN role can configure consultation billing through governed finance controls', async () => {
+    const tenantId = 'tenant-opd-config-admin';
+    seedFinanceControls(tenantId);
+    const result = await OpdBillingConfigurationDomainService.configureConsultationService(
+      context(tenantId, ['ADMIN']),
+      'cmd-admin-opd-config',
+      'idem-admin-opd-config',
+      {
+        serviceCode: 'OPD-CONSULT',
+        description: 'Standard OPD Consultation',
+        currency: 'PKR',
+        unitPriceMinorUnits: 150_000,
+        taxRateBasisPoints: 0,
+        revenueAccountCode: '4010',
+      }
+    );
+    expect(result.success).toBe(true);
+    expect(TransactionManager.getEphemeralStateForTesting(
+      tenantId, 'BILLING_SERVICE_CATALOG', 'opd-consultation-standard'
+    )?.status).toBe('ACTIVE');
+  });
+
+  test('admin role is accepted by both billing UI and invoice server without altering clinical privilege policy', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const [page, billing] = await Promise.all([
+      readFile(join(process.cwd(), 'app/[tenantId]/billing/tariffs/page.tsx'), 'utf8'),
+      readFile(join(process.cwd(), 'lib/backend/services/opd-billing-domain-service.ts'), 'utf8'),
+    ]);
+    expect(page).toContain("roles.has('ADMIN')");
+    expect(billing).toContain("'ADMIN'");
+    expect(billing).toContain('OPD_CONSULTATION_CATALOG_NOT_CONFIGURED');
+  });
+
   test('configuration fails closed when revenue account is missing', async () => {
     const tenantId = 'tenant-opd-config-no-revenue';
 

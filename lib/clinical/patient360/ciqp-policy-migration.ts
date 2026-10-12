@@ -25,7 +25,7 @@ const MAX_TOTAL_ROWS = 1250;
 export function assertEmulatorPolicyMigrationScope(env: NodeJS.ProcessEnv, tenantId: string): void {
   if (env.GHIMS_RUNTIME_MODE !== 'TEST' ||
       env.NODE_ENV === 'production' ||
-      !/^(localhost|127\\.0\\.0\\.1):[0-9]{2,5}$/.test(env.FIRESTORE_EMULATOR_HOST || '') ||
+      !/^(localhost|127\.0\.0\.1):[0-9]{2,5}$/.test(env.FIRESTORE_EMULATOR_HOST || '') ||
       env.GHIMS_CIQP_MIGRATION_ACK !== 'SYNTHETIC_EMULATOR_POLICY_MIGRATION_ONLY' ||
       env.GHIMS_CIQP_MIGRATION_TENANT_ID !== tenantId ||
       !/^[a-zA-Z0-9_-]{4,100}$/.test(tenantId)) {

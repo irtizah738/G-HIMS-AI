@@ -26,7 +26,7 @@ function serverProjectMap(): ProjectMap {
   const test = clean(process.env.GHIMS_FIREBASE_PROJECT_ID_TEST);
   assertConfiguredTestDemoDistinct(test, demo, 'server');
   return {
-    DEMO: demo || clean(process.env.FIREBASE_PROJECT_ID) || 'g-hims-ai',
+    DEMO: demo,
     TEST: test || 'ghims-test',
     STAGING: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_STAGING),
     PRODUCTION: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION),
@@ -40,7 +40,7 @@ function clientProjectMap(): ProjectMap {
   const test = clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST);
   assertConfiguredTestDemoDistinct(test, demo, 'client');
   return {
-    DEMO: demo || clean(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) || 'g-hims-ai',
+    DEMO: demo,
     TEST: test || 'ghims-test',
     STAGING: clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING),
     PRODUCTION: clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION),
@@ -48,7 +48,7 @@ function clientProjectMap(): ProjectMap {
 }
 
 function assertDistinctNamedProjects(projects: ProjectMap, scope: string): void {
-  const protectedModes: GhimsRuntimeMode[] = ['DEMO', 'STAGING', 'PRODUCTION'];
+  const protectedModes: GhimsRuntimeMode[] = ['TEST', 'DEMO', 'STAGING', 'PRODUCTION'];
   const seen = new Map<string, GhimsRuntimeMode>();
 
   for (const mode of protectedModes) {

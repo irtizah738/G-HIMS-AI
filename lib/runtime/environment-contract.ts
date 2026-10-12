@@ -6,11 +6,20 @@ function clean(value: string | undefined): string {
   return String(value || '').trim();
 }
 
+function assertConfiguredTestDemoDistinct(testId: string, demoId: string, scope: string): void {
+  if (testId && demoId && testId === demoId) {
+    throw new Error('ENVIRONMENT_PROJECT_COLLISION: ' + scope +
+      ' TEST and DEMO must use distinct explicitly configured Firebase projects.');
+  }
+}
+
 function serverProjectMap(): ProjectMap {
-  const defaultProjectId = clean(process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO) || clean(process.env.FIREBASE_PROJECT_ID) || 'g-hims-ai';
+  const demo = clean(process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO);
+  const test = clean(process.env.GHIMS_FIREBASE_PROJECT_ID_TEST);
+  assertConfiguredTestDemoDistinct(test, demo, 'server');
   return {
-    DEMO: defaultProjectId,
-    TEST: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_TEST) || defaultProjectId,
+    DEMO: demo || clean(process.env.FIREBASE_PROJECT_ID) || 'g-hims-ai',
+    TEST: test || 'ghims-test',
     STAGING: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_STAGING),
     PRODUCTION: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION),
   };
@@ -19,10 +28,12 @@ function serverProjectMap(): ProjectMap {
 function clientProjectMap(): ProjectMap {
   // NEXT_PUBLIC variables must be referenced statically so Next.js can inline them
   // into the browser bundle.
-  const defaultProjectId = clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_DEMO) || clean(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) || 'g-hims-ai';
+  const demo = clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_DEMO);
+  const test = clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST);
+  assertConfiguredTestDemoDistinct(test, demo, 'client');
   return {
-    DEMO: defaultProjectId,
-    TEST: clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST) || defaultProjectId,
+    DEMO: demo || clean(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) || 'g-hims-ai',
+    TEST: test || 'ghims-test',
     STAGING: clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING),
     PRODUCTION: clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION),
   };

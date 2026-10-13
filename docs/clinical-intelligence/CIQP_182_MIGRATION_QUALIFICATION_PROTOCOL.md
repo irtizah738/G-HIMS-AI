@@ -193,6 +193,32 @@ completeness and SHA linkage but cannot authenticate human signatures,
 external URLs, exported data, or institutional authority. Every returned
 production/clinical authorization status remains NOT_ESTABLISHED.
 
+### Snapshot lineage and outbox consumer reconciliation
+
+The issue requires independent preservation of historical Clinical Intelligence
+evidence identity, *in addition to* immutable event/outbox integrity. Before and
+after a reviewed synthetic migration, an operator must capture SHA-linked
+read-only aggregate counts and keyed HMACs of the original snapshot identifiers
+and provenance relations. Both count and HMAC must match. Do not emit patient
+IDs, snapshot IDs, per-patient hashes, free-text clinical material, or secret keys.
+Absence of historical snapshots is **not** positive identity-continuity evidence;
+the qualification evidence checker fails this field closed for zero snapshots.
+Use a purposely seeded historic-snapshot synthetic cohort for that drill.
+
+A separate reviewed outbox-consumer rehearsal must record bounded pending and
+consumed counts before/after, evidence of zero duplicate deliveries, and zero
+outbox records emitted by the policy migration. The immutable-record fingerprint
+does not establish consumption/replay safety. Record the sanitized run URL and
+exact reviewed source SHA for both controls. Assess these fields using the
+offline `ops:ciqp:verify-evidence` command. That validator only checks
+structure, exact-SHA linkage and consistency; **it does not fetch cloud data,
+verify signatures, or establish clinical/institutional release authority**.
+
+The template fields `clinicalIntelligenceSnapshotLineage` and
+`outboxConsumptionReconciliation` must be filled with authentic, independently
+collected evidence, never synthetic values in a real authorization package.
+Do not infer a zero-duplicate result from an absence of logged errors.
+
 ### Still outstanding: actual externally authorized evidence
 
 - Signed synthetic-data provenance, isolated staging Firebase project/IAM.

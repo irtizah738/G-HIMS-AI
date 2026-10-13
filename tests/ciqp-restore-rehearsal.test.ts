@@ -133,7 +133,7 @@ describe('CIQP-182 isolated synthetic Firestore restore rehearsal', () => {
     expect(commands[2]).toContain('--project=ciqp-ghims-restore');
     expect(commands[2]).not.toContain('--project=g-hims-ai');
     expect(requests).toEqual([
-      'https://firestore.googleapis.com/v1/projects/ciqp-ghims-restore/databases/%28default%29/documents:listCollectionIds',
+      'https://firestore.googleapis.com/v1/projects/ciqp-ghims-restore/databases/(default)/documents:listCollectionIds',
     ]);
   });
 

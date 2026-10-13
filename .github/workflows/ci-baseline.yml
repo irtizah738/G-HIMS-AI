@@ -39,17 +39,24 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
-      - name: Package-manager authority
+      - name: Verify checked-in dependency lockfile authority
         run: |
-          test -f bun.lock
-          test ! -f package-lock.json
+          set -euo pipefail
+          # The reviewed repository tracks npm's package-lock.json (v3).
+          # Bun 1.4.2 can deterministically import it at install time; its
+          # generated bun.lock is ephemeral and must not become competing source.
+          test -f package-lock.json
+          test ! -f bun.lock
           test ! -f yarn.lock
           test ! -f pnpm-lock.yaml
+          node -e "const fs=require('fs'); const l=JSON.parse(fs.readFileSync('package-lock.json','utf8')); const p=JSON.parse(fs.readFileSync('package.json','utf8')); if(l.lockfileVersion!==3 || l.name!==p.name || l.version!==p.version)process.exit(1)"
 
-      - name: Install
+      - name: Frozen install from authoritative npm v3 lockfile
         run: |
+          set -euo pipefail
           bun install --frozen-lockfile
-          git diff --exit-code -- bun.lock
+          git diff --exit-code -- package-lock.json
+          git ls-files --error-unmatch package-lock.json
       - name: TypeScript
         run: bun run typecheck
       - name: ESLint

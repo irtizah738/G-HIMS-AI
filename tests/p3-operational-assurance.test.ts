@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { NextRequest } from 'next/server';
-import { assertServerFirebaseProjectIsolation, getPublicRuntimeMode } from '../lib/runtime/environment-contract';
+import { assertServerFirebaseProjectIsolation, assertClientFirebaseProjectIsolation, getPublicRuntimeMode } from '../lib/runtime/environment-contract';
 import { getRuntimeMode, inferRuntimeModeFromNodeEnv } from '../lib/runtime/runtime-mode';
 import { emitOperationalEvent } from '../lib/observability/server-telemetry';
 import { validateSessionRecord } from '../server/auth/session-service';
@@ -69,6 +69,29 @@ describe('G-HIMS P3 operational assurance and adversarial matrix',()=>{
 
     process.env.GHIMS_FIREBASE_PROJECT_ID_TEST = 'synthetic-demo';
     expect(() => assertServerFirebaseProjectIsolation('synthetic-demo'))
+      .toThrow(/ENVIRONMENT_PROJECT_COLLISION/);
+  });
+
+  test('isolated TEST Firebase project is not implicitly configured as DEMO or PRODUCTION', () => {
+    process.env.GHIMS_RUNTIME_MODE = 'TEST';
+    process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE = 'TEST';
+    process.env.GHIMS_FIREBASE_PROJECT_ID_TEST = 'ghims-p4-ci';
+    process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST = 'ghims-p4-ci';
+    process.env.FIREBASE_PROJECT_ID = 'ghims-p4-ci';
+    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID = 'ghims-p4-ci';
+    delete process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO;
+    delete process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_DEMO;
+    delete process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION;
+    delete process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION;
+    expect(() => assertServerFirebaseProjectIsolation('ghims-p4-ci')).not.toThrow();
+    expect(() => assertClientFirebaseProjectIsolation('ghims-p4-ci')).not.toThrow();
+    // Explicit aliases remain prohibited even when operating in TEST.
+    process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION = 'ghims-p4-ci';
+    expect(() => assertServerFirebaseProjectIsolation('ghims-p4-ci'))
+      .toThrow(/ENVIRONMENT_PROJECT_COLLISION/);
+    delete process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION;
+    process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_DEMO = 'ghims-p4-ci';
+    expect(() => assertClientFirebaseProjectIsolation('ghims-p4-ci'))
       .toThrow(/ENVIRONMENT_PROJECT_COLLISION/);
   });
 

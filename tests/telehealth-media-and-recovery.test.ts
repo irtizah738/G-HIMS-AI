@@ -20,7 +20,18 @@ describe('Telehealth media authority and durable completion recovery', () => {
     expect(source).toContain('TELEHEALTH_CLINICIAN_ASSIGNMENT_MISMATCH');
     expect(source).toContain('TELEHEALTH_CALL_NOT_ACTIVE');
     expect(source).toContain("'Cache-Control': 'no-store, private'");
-    expect(source).toContain("data?.sessionId !== session.id");
+    // The current ICE route delegates exact room/session/encounter identity,
+    // expiry and clinician checks to the shared fail-closed lease validator.
+    expect(source).toContain('assertTelehealthRoomLease(data, {');
+    expect(source).toContain('sessionId: session.id');
+    expect(source).toContain('encounterId: session.encounterId');
+    expect(source).toContain('patientId: session.patientId');
+    const lease = await read('lib/backend/security/telehealth-room-policy.ts');
+    for (const field of ['roomToken', 'sessionId', 'encounterId', 'patientId', 'clinicianId']) {
+      expect(lease).toContain('room.' + field + ' !== expected.' + field);
+    }
+    expect(lease).toContain('room.active !== true');
+    expect(lease).toContain('room.expiresAt <= nowMs');
     expect(source).toContain('buildTelehealthIceConfiguration(roomToken)');
   });
 

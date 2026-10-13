@@ -60,6 +60,20 @@ export interface ConsultantDoctor {
 
 export const DEMO_CONSULTANT_REGISTRY: ConsultantDoctor[] = [
   {
+    id: 'rDjRzEyxnVcp9xZfYeA3HWYb6U23',
+    name: 'Dr. Ufaq Waqas',
+    title: 'Consultant Physician & Intensivist',
+    department: 'General Medicine',
+    subSpecialty: 'Internal Medicine • Critical Care • Gynecologist',
+    badge: 'Credential Verified',
+    status: 'ON_DUTY_AVAILABLE',
+    currentQueueCount: 1,
+    assignedBayOrRoom: 'General Medicine',
+    contactExtension: 'Ext. 3301',
+    qualifications: 'Verified HCM credential and active clinical privilege',
+    avgReviewTimeMinutes: 10,
+  },
+  {
     id: 'doc-card-01',
     name: 'Dr. Sarah Jenkins, MD, FACC',
     title: 'Consultant Interventional Cardiologist',

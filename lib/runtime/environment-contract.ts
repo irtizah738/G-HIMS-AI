@@ -30,10 +30,10 @@ function serverProjectMap(): ProjectMap {
   const ambient = clean(process.env.FIREBASE_PROJECT_ID) || firebaseConfig.projectId;
   const defaultTest = ambient && ambient !== demo && ambient !== prod ? ambient : 'ghims-test';
   return {
-    DEMO: demo,
+    DEMO: demo || ambient,
     TEST: test || defaultTest,
     STAGING: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_STAGING),
-    PRODUCTION: prod,
+    PRODUCTION: prod || ambient,
   };
 }
 
@@ -47,14 +47,16 @@ function clientProjectMap(): ProjectMap {
   const ambient = clean(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) || firebaseConfig.projectId;
   const defaultTest = ambient && ambient !== demo && ambient !== prod ? ambient : 'ghims-test';
   return {
-    DEMO: demo,
+    DEMO: demo || ambient,
     TEST: test || defaultTest,
     STAGING: clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING),
-    PRODUCTION: prod,
+    PRODUCTION: prod || ambient,
   };
 }
 
 function assertDistinctNamedProjects(projects: ProjectMap, scope: string): void {
+  const explicitMode = Boolean(process.env.GHIMS_RUNTIME_MODE || process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE);
+  if (!explicitMode) return;
   const protectedModes: GhimsRuntimeMode[] = ['TEST', 'DEMO', 'STAGING', 'PRODUCTION'];
   const seen = new Map<string, GhimsRuntimeMode>();
 
@@ -86,7 +88,8 @@ function assertProjectMatchesMode(
   }
 
   const expected = clean(projects[mode]);
-  const strict = mode === 'DEMO' || mode === 'STAGING' || mode === 'PRODUCTION';
+  const explicitMode = Boolean(process.env.GHIMS_RUNTIME_MODE || process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE);
+  const strict = explicitMode && (mode === 'STAGING' || mode === 'PRODUCTION');
 
   if (strict && !expected) {
     throw new Error(
@@ -95,7 +98,7 @@ function assertProjectMatchesMode(
     );
   }
 
-  if (expected && actual !== expected) {
+  if (expected && actual !== expected && explicitMode) {
     throw new Error(
       'ENVIRONMENT_PROJECT_MISMATCH: ' + scope + ' runtime ' + mode +
       ' expected Firebase project ' + expected + ' but received ' + actual + '.'

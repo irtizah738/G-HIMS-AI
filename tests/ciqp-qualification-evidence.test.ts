@@ -24,6 +24,18 @@ const complete = (): CiqpQualificationEvidence => ({
   approvedStagingApply: receipt,
   timelineParity: receipt,
   immutableEventAndOutboxProof: receipt,
+  clinicalIntelligenceSnapshotLineage: {
+    sourceSnapshotCount: 3, postMigrationSnapshotCount: 3,
+    sourceIdentifierHmac: 'd'.repeat(64), postMigrationIdentifierHmac: 'd'.repeat(64),
+    sourceProvenanceHmac: 'e'.repeat(64), postMigrationProvenanceHmac: 'e'.repeat(64),
+    receipt,
+  },
+  outboxConsumptionReconciliation: {
+    pendingBefore: 2, pendingAfter: 1,
+    consumedBefore: 5, consumedAfter: 6,
+    duplicateDispatchesObserved: 0, migrationEmittedOutboxRecords: 0,
+    receipt,
+  },
   restoration: {
     sourceStagingProject: 'ghims-ai-ciqp-staging',
     isolatedRestoreProject: 'ghims-ai-ciqp-restore',
@@ -87,6 +99,57 @@ describe('CIQP-05 migration qualification evidence stays fail-closed', () => {
     e.restoration.isolatedRestoreProject = e.stagingProjectId;
     expect(assessCiqpQualificationEvidence(e).missing)
       .toContain('INDEPENDENT_BACKUP_RESTORE_AND_INTEGRITY');
+  });
+
+  test('missing historic clinical intelligence snapshot identity/provenance evidence blocks documentation', () => {
+    const evidence = complete();
+    delete evidence.clinicalIntelligenceSnapshotLineage;
+    expect(assessCiqpQualificationEvidence(evidence).missing)
+      .toContain('CLINICAL_INTELLIGENCE_SNAPSHOT_LINEAGE');
+  });
+
+  test('snapshot identity or provenance drift blocks qualification even when counts agree', () => {
+    const evidence = complete();
+    const snapshot = evidence.clinicalIntelligenceSnapshotLineage!;
+    snapshot.postMigrationIdentifierHmac = 'f'.repeat(64);
+    expect(assessCiqpQualificationEvidence(evidence).missing)
+      .toContain('CLINICAL_INTELLIGENCE_SNAPSHOT_LINEAGE');
+    snapshot.postMigrationIdentifierHmac = snapshot.sourceIdentifierHmac;
+    snapshot.postMigrationProvenanceHmac = 'f'.repeat(64);
+    expect(assessCiqpQualificationEvidence(evidence).missing)
+      .toContain('CLINICAL_INTELLIGENCE_SNAPSHOT_LINEAGE');
+    snapshot.postMigrationProvenanceHmac = snapshot.sourceProvenanceHmac;
+    snapshot.postMigrationSnapshotCount += 1;
+    expect(assessCiqpQualificationEvidence(evidence).missing)
+      .toContain('CLINICAL_INTELLIGENCE_SNAPSHOT_LINEAGE');
+    snapshot.postMigrationSnapshotCount = snapshot.sourceSnapshotCount;
+    snapshot.receipt = { sha: 'f'.repeat(40), evidenceUrl: link };
+    expect(assessCiqpQualificationEvidence(evidence).missing)
+      .toContain('CLINICAL_INTELLIGENCE_SNAPSHOT_LINEAGE');
+  });
+
+  test('missing, duplicated, unobserved or regressing outbox consumption blocks qualification', () => {
+    const e = complete();
+    delete e.outboxConsumptionReconciliation;
+    expect(assessCiqpQualificationEvidence(e).missing)
+      .toContain('OUTBOX_CONSUMPTION_RECONCILIATION');
+    const base = complete();
+    const o = base.outboxConsumptionReconciliation!;
+    o.duplicateDispatchesObserved = 1;
+    expect(assessCiqpQualificationEvidence(base).missing)
+      .toContain('OUTBOX_CONSUMPTION_RECONCILIATION');
+    o.duplicateDispatchesObserved = 0;
+    o.migrationEmittedOutboxRecords = 1;
+    expect(assessCiqpQualificationEvidence(base).missing)
+      .toContain('OUTBOX_CONSUMPTION_RECONCILIATION');
+    o.migrationEmittedOutboxRecords = 0;
+    o.consumedAfter = o.consumedBefore - 1;
+    expect(assessCiqpQualificationEvidence(base).missing)
+      .toContain('OUTBOX_CONSUMPTION_RECONCILIATION');
+    o.consumedAfter = o.consumedBefore;
+    o.pendingAfter = o.pendingBefore + 1;
+    expect(assessCiqpQualificationEvidence(base).missing)
+      .toContain('OUTBOX_CONSUMPTION_RECONCILIATION');
   });
 
   test('even a syntactically complete manifest is not independent clinical or production approval', () => {

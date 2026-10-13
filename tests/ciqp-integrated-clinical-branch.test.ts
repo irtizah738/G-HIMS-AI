@@ -66,8 +66,8 @@ describe('PR #189 integrated authority and patient-safety contracts', () => {
       { leaseId: 'abcdefghijklmnopqrstuw', senderRole: 'doctor', payload: 'previous' },
       { leaseId: 'abcdefghijklmnopqrstuv', senderRole: 'patient', payload: 'own' },
     ];
-    expect(filterCurrentTelehealthLeaseMessages(messages, 'abcdefghijklmnopqrstuv', 'patient'))
-      .map(message => message.payload).toEqual(['current']);
+    expect(filterCurrentTelehealthLeaseMessages(messages, 'abcdefghijklmnopqrstuv', 'patient')
+      .map(message => message.payload)).toEqual(['current']);
   });
 
   test('Local sandbox cannot be used to bypass hosted clinical environment safety', () => {

@@ -44,6 +44,7 @@ function encounterType(value: unknown): Encounter['type'] {
   const normalized = asString(value).toUpperCase();
   if (normalized.includes('INPATIENT') || normalized === 'IPD') return 'Inpatient';
   if (normalized.includes('EMERGENCY') || normalized === 'ED') return 'Emergency';
+  if (normalized === 'TELEHEALTH' || normalized === 'VIRTUAL') return 'Telehealth';
   return 'Outpatient';
 }
 
@@ -51,6 +52,9 @@ function encounterStatus(value: unknown): Encounter['status'] {
   const normalized = asString(value).toUpperCase();
   if (normalized.includes('DISCHARG')) return 'discharged';
   if (normalized.includes('TRANSFER')) return 'transferred';
+  if (['COMPLETED', 'CLOSED'].includes(normalized)) return 'completed';
+  if (['CANCELLED', 'CANCELED'].includes(normalized)) return 'cancelled';
+  // Unknown and missing statuses are NEVER assumed to be completed.
   return 'active';
 }
 
@@ -77,7 +81,7 @@ function bloodGroup(value: unknown): Patient['bloodGroup'] {
   const allowed: Patient['bloodGroup'][] = ['A+','A-','B+','B-','AB+','AB-','O+','O-'];
   return allowed.includes(candidate as Patient['bloodGroup'])
     ? candidate as Patient['bloodGroup']
-    : 'O+';
+    : 'Unknown';
 }
 
 export interface HospitalEdgeModels {
@@ -221,6 +225,11 @@ export function adaptEdgeSnapshot(snapshot: EdgeSnapshot): HospitalEdgeModels {
         gender: normalizeGender((raw as any).gender),
         bloodGroup: bloodGroup((raw as any).bloodGroup),
         contactNumber: asString((raw as any).contactPhone || (raw as any).contactNumber),
+        nationalId: (() => {
+          const identifiers = Array.isArray((raw as any).identifiers) ? (raw as any).identifiers : [];
+          const cnic = identifiers.find((item: any) => String(item?.type || '').toUpperCase() === 'CNIC');
+          return asString(cnic?.value || (raw as any).nationalId);
+        })(),
         email: asString((raw as any).email),
         address: asString((raw as any).address),
         emergencyContact: ((raw as any).emergencyContact || {
@@ -232,6 +241,11 @@ export function adaptEdgeSnapshot(snapshot: EdgeSnapshot): HospitalEdgeModels {
         chronicConditions: Array.isArray((raw as any).chronicConditions) ? (raw as any).chronicConditions : [],
         activeBedId: asString((raw as any).activeBedId) || undefined,
         activeEncounterId: asString((raw as any).activeEncounterId) || undefined,
+        activeCareContexts: (raw as any).activeCareContexts &&
+          typeof (raw as any).activeCareContexts === 'object' &&
+          !Array.isArray((raw as any).activeCareContexts)
+          ? (raw as any).activeCareContexts as Patient['activeCareContexts']
+          : undefined,
         status: asString((raw as any).status, 'ACTIVE').toUpperCase() as Patient['status'],
         mergedIntoPatientId:
           asString((raw as any).mergedIntoPatientId) || undefined,

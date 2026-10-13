@@ -152,10 +152,26 @@ Its APPLY_RESTORE mode can only import into an explicit independent
 ciqp-*-restore Firebase project after two source/destination confirmations,
 a restore ticket, a named operator and a synthetic-only acknowledgement.
 It never imports into the staging source project or the known production
-project. The target project/database must be verified EMPTY and dedicated
-before IAM-authorized execution. Its output is not an approval, proof of
-successful restoration, or a substitute for comparing actual source counts,
-event/outbox HMACs, and measured RPO/RTO.
+project. In APPLY_RESTORE mode, set
+GHIMS_CIQP_RESTORE_EMPTY_TARGET_ATTESTATION_SHA256 to the 64-character digest
+of a separately signed, restricted empty-target/fresh-project attestation.
+The operator must independently verify that attestation, IAM isolation, and
+change ticket before supplying acknowledgments. A digest variable is not
+a verified signature.
+
+The executor now checks the exact destination database metadata using
+gcloud, then performs a credentialed, read-only Firestore root
+listCollectionIds inventory with the same operator's gcloud identity.
+Any visible collection, paginated inventory, invalid response, or access
+failure refuses the import. A passing root inventory cannot rule out all
+orphaned descendants or concurrent writers: independent project-creation
+and emptiness evidence and exclusive change control are still required.
+The source and production databases are never import targets.
+
+A successful import invocation is not proof of successful restoration,
+clinical safety, or deployment approval. Independently compare actual
+source/restore counts, event/outbox HMACs, timeline parity, export/import
+operation receipts, and measured RPO/RTO.
 
 For an independently restored source fixture, use:
 

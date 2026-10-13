@@ -66,19 +66,22 @@ describe('CIQP-182 isolated synthetic Firestore restore rehearsal', () => {
     expect(() => assertCiqpRestoreScope({
       ...apply, GHIMS_CIQP_RESTORE_TICKET: '',
     })).toThrow('CIQP_RESTORE_APPROVAL_NOT_PRESENT');
-    let command = '', args: string[] = [];
+    const commands: string[] = [];
     const log = spyOn(console, 'log').mockImplementation(() => undefined);
     try {
-      runCiqpRestoreRehearsal(apply, (tool: string, a: string[]) => {
-        command = tool;
-        args = a;
-        return { status: 0 };
-      });
+      expect(() => runCiqpRestoreRehearsal(apply, (tool: string, args: string[]) => {
+        commands.push(tool + ' ' + args.join(' '));
+        return {
+          status: 0,
+          stdout: JSON.stringify({ name: 'projects/ciqp-ghims-restore/databases/(default)' }),
+        };
+      })).toThrow('CIQP_RESTORE_EMPTY_DESTINATION_PROOF_REQUIRED');
     } finally {
       log.mockRestore();
     }
-    expect(command).toBe('gcloud');
-    expect(args).toContain('--project=ciqp-ghims-restore');
-    expect(args).not.toContain('--project=g-hims-ai');
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toContain('firestore databases describe');
+    expect(commands[0]).toContain('--project=ciqp-ghims-restore');
+    expect(commands[0]).not.toContain('firestore import');
   });
 });

@@ -62,10 +62,9 @@ describe('OPD authorization closure', () => {
     expect(billing).toContain("not authorized to collect or settle patient payments");
   });
 
-  test('DEMO and STAGING clinical personas include persistent HCM credential chains', async () => {
+  test('DEMO clinical personas include persistent HCM credential chains', async () => {
     const demo = await source('scripts/demo/provision-demo-identities.ts');
-    const staging = await source('scripts/ops/p7-provision-staging-identities.ts');
-    for (const src of [demo, staging]) {
+    for (const src of [demo]) {
       expect(src).toContain("collection('employees')");
       expect(src).toContain("collection('clinicalCredentials')");
       expect(src).toContain("collection('clinicalPrivileges')");

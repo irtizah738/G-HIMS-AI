@@ -20,7 +20,6 @@ interface TelehealthCallPanelProps {
   onConnected?: () => Promise<void> | void;
 }
 
-
 export function TelehealthCallPanel({
   session,
   tenantId,
@@ -43,13 +42,14 @@ export function TelehealthCallPanel({
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [copied, setCopied] = useState(false);
   const [relayAvailable, setRelayAvailable] = useState<boolean | null>(null);
+  const [patientJoinToken, setPatientJoinToken] = useState<string | null>(null);
 
   const joinUrl =
-    typeof window === 'undefined'
+    !patientJoinToken || typeof window === 'undefined'
       ? ''
       : `${window.location.origin}/telehealth/join?tenant=${encodeURIComponent(
           tenantId
-        )}&room=${encodeURIComponent(session.roomToken)}`;
+        )}&room=${encodeURIComponent(session.roomToken)}#join=${encodeURIComponent(patientJoinToken)}`;
 
   const clinicianSignal = async (
     type: 'START' | 'OFFER' | 'ICE' | 'LEAVE',
@@ -136,9 +136,29 @@ export function TelehealthCallPanel({
     }
   };
 
+  const handlePollingFailure = (cause: unknown) => {
+    const code = cause instanceof Error ? cause.message : 'Telehealth signaling failed.';
+    if ([
+      'TELEHEALTH_CALL_NOT_ACTIVE',
+      'TELEHEALTH_CALL_LEASE_INVALID',
+      'TELEHEALTH_SESSION_FINAL',
+      'TELEHEALTH_ENCOUNTER_SCOPE_INVALID',
+      'TELEHEALTH_CLINICIAN_ASSIGNMENT_MISMATCH',
+      'TELEHEALTH_CLINICIAN_AUTHORITY_REQUIRED',
+    ].some(reason => code.includes(reason))) {
+      disposeMedia();
+      setPatientJoinToken(null);
+      setState('ENDED');
+      setError('The clinical call room is no longer authorized. Confirm patient and clinician status before starting a new call.');
+      return;
+    }
+    setError(code);
+  };
+
   const startCall = async () => {
     if (disabled || state === 'PREPARING' || state === 'WAITING' || state === 'CONNECTED') return;
     setError(null);
+    setPatientJoinToken(null);
     setState('PREPARING');
     connectedReportedRef.current = false;
     processedRef.current.clear();
@@ -150,7 +170,11 @@ export function TelehealthCallPanel({
         throw new Error('This browser does not provide camera/microphone access required for telehealth.');
       }
 
-      // Retrieve scoped short-lived TURN credentials before opening the room.
+      const startedRoom = await clinicianSignal('START');
+      if (typeof startedRoom.patientJoinToken !== 'string' || !startedRoom.patientJoinToken) {
+        throw new Error('The server did not issue a patient-specific join capability.');
+      }
+      setPatientJoinToken(startedRoom.patientJoinToken);
       const ice = await loadTelehealthIceConfiguration({
         tenantId, roomToken: session.roomToken, role: 'CLINICIAN',
       });
@@ -165,7 +189,6 @@ export function TelehealthCallPanel({
         localVideoRef.current.srcObject = stream;
       }
 
-      await clinicianSignal('START');
       const peer = new RTCPeerConnection({ iceServers: ice.iceServers });
       peerRef.current = peer;
       stream.getTracks().forEach((track) => peer.addTrack(track, stream));
@@ -205,12 +228,15 @@ export function TelehealthCallPanel({
       setState('WAITING');
       await processSignals();
       pollRef.current = window.setInterval(() => {
-        void processSignals().catch((cause) => {
-          setError(cause instanceof Error ? cause.message : 'Telehealth signaling failed.');
-        });
+        void processSignals().catch(handlePollingFailure);
       }, 1000);
     } catch (cause) {
+      // START may have already minted a bearer link. Revoke the active media
+      // room on partial startup failure so a stale link cannot join later.
+      await clinicianSignal('LEAVE').catch(() => {});
       disposeMedia();
+      setPatientJoinToken(null);
+      setRelayAvailable(null);
       setState('IDLE');
       setError(cause instanceof Error ? cause.message : 'Unable to start the telehealth call.');
     }
@@ -223,6 +249,7 @@ export function TelehealthCallPanel({
       // Local media must still terminate if the signaling endpoint is unavailable.
     } finally {
       disposeMedia();
+      setPatientJoinToken(null);
       setState('ENDED');
     }
   };
@@ -341,9 +368,8 @@ export function TelehealthCallPanel({
 
       {relayAvailable === false && (
         <p role="status" className="text-[11px] text-amber-700 dark:text-amber-300">
-          No authenticated TURN relay is configured. Calls may fail on hospital firewalls or mobile NAT.
-          Ask an administrator to provision GHIMS_WEBRTC_TURN_URLS_JSON and the server-only
-          GHIMS_WEBRTC_TURN_REST_SECRET. Audio/text clinical fallback remains available.
+          Institution-approved TURN relay is not configured. Hospital firewall and
+          mobile-network calls may fail until IT provisions the relay.
         </p>
       )}
     </div>

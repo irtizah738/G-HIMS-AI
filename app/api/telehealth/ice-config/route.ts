@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { assertTelehealthPatientJoinToken } from '@/lib/backend/security/telehealth-patient-capability';
+import { assertTelehealthRoomLease } from '@/lib/backend/security/telehealth-room-policy';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
 import { buildTelehealthIceConfiguration } from '@/lib/backend/services/telehealth-ice-configuration';
@@ -20,6 +22,7 @@ export async function POST(req: NextRequest) {
     }
     const tenantId = typeof body.tenantId === 'string' ? body.tenantId.trim().toLowerCase() : '';
     const roomToken = typeof body.roomToken === 'string' ? body.roomToken.trim() : '';
+    const patientJoinToken = typeof body.patientJoinToken === 'string' ? body.patientJoinToken.trim() : '';
     const role = body.role;
     if (!/^[a-z0-9_-]{3,128}$/.test(tenantId) || !ROOM_TOKEN.test(roomToken) ||
         (role !== 'CLINICIAN' && role !== 'PATIENT')) {
@@ -46,9 +49,21 @@ export async function POST(req: NextRequest) {
         String(encounter.data()?.encounterType || encounter.data()?.type || '').toUpperCase() !== 'TELEHEALTH') {
       return reject('TELEHEALTH_ENCOUNTER_SCOPE_INVALID', 409);
     }
+    const room = await tenant.collection('telehealthSignaling').doc(roomToken).get();
+    const data = room.data();
+    if (!data) return reject('TELEHEALTH_CALL_NOT_ACTIVE', 403);
+    assertTelehealthRoomLease(data, {
+      roomToken,
+      sessionId: session.id,
+      encounterId: session.encounterId,
+      patientId: session.patientId,
+      clinicianId: String(encounter.data()?.assignedProviderId || ''),
+    });
     if (role === 'CLINICIAN') {
       const { context } = await deriveAuthoritativeContext(req, tenantId);
-      if (!context.roles.some(r => ['DOCTOR', 'CONSULTANT'].includes(String(r).toUpperCase()))) {
+      if (!context.roles.some(r => ['DOCTOR', 'CONSULTANT'].includes(String(r).toUpperCase())) ||
+          !context.clinicalPrivileges?.some(p =>
+            ['SIGN_CLINICAL_NOTES', 'UNRESTRICTED_CLINICAL_CHIEF'].includes(String(p).toUpperCase()))) {
         return reject('TELEHEALTH_CLINICIAN_AUTHORITY_REQUIRED', 403);
       }
       const assignedProvider = String(encounter.data()?.assignedProviderId || '');
@@ -57,15 +72,8 @@ export async function POST(req: NextRequest) {
         return reject('TELEHEALTH_CLINICIAN_ASSIGNMENT_MISMATCH', 403);
       }
     } else {
-      // Patient room capability is valid only after the clinician started the
-      // leased signaling room; an old or leaked link cannot mint TURN access.
-      const room = await tenant.collection('telehealthSignaling').doc(roomToken).get();
-      const data = room.data();
-      if (!room.exists || data?.active !== true || Number(data?.expiresAt || 0) <= Date.now() ||
-          data?.sessionId !== session.id || data?.encounterId !== session.encounterId ||
-          data?.patientId !== session.patientId) {
-        return reject('TELEHEALTH_CALL_NOT_ACTIVE', 403);
-      }
+      // Room ID alone is not a patient capability; never issue TURN without the 256-bit join token.
+      assertTelehealthPatientJoinToken(patientJoinToken, data.patientJoinTokenHash);
     }
     const configuration = buildTelehealthIceConfiguration(roomToken);
     return NextResponse.json(configuration, { headers: NO_CACHE });

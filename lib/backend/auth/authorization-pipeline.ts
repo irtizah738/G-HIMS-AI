@@ -217,4 +217,18 @@ export class AuthorizationPipeline {
       evaluatedContext,
     };
   }
+
+  /**
+   * Asserts that the actor possesses at least one of the specified roles,
+   * throwing an Error with the failure code (e.g. INSUFFICIENT_ROLE) if unauthorized.
+   */
+  public static requireRole(
+    context: CommandContext,
+    requiredRoles: string[]
+  ): void {
+    const decision = this.evaluate(context, { requiredRoles });
+    if (!decision.authorized) {
+      throw new Error(decision.code || 'INSUFFICIENT_ROLE');
+    }
+  }
 }

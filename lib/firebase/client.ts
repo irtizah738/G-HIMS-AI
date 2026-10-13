@@ -14,14 +14,26 @@ if (typeof window !== 'undefined') {
   }
 }
 
+function cleanValue(val: string | undefined): string {
+  if (!val) return '';
+  let str = String(val).trim();
+  if (
+    (str.startsWith('"') && str.endsWith('"')) ||
+    (str.startsWith("'") && str.endsWith("'"))
+  ) {
+    str = str.slice(1, -1).trim();
+  }
+  return str;
+}
+
 const clientCredentials = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || firebaseConfig.apiKey,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || firebaseConfig.authDomain,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || firebaseConfig.projectId,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || firebaseConfig.storageBucket,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || firebaseConfig.messagingSenderId,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || firebaseConfig.appId,
-  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID || firebaseConfig.measurementId,
+  apiKey: cleanValue(process.env.NEXT_PUBLIC_FIREBASE_API_KEY) || firebaseConfig.apiKey,
+  authDomain: cleanValue(process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN) || firebaseConfig.authDomain,
+  projectId: cleanValue(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) || firebaseConfig.projectId,
+  storageBucket: cleanValue(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET) || firebaseConfig.storageBucket,
+  messagingSenderId: cleanValue(process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID) || firebaseConfig.messagingSenderId,
+  appId: cleanValue(process.env.NEXT_PUBLIC_FIREBASE_APP_ID) || firebaseConfig.appId,
+  measurementId: cleanValue(process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID) || firebaseConfig.measurementId,
 };
 
 assertClientFirebaseProjectIsolation(String(clientCredentials.projectId || ''));
@@ -30,7 +42,7 @@ assertClientFirebaseProjectIsolation(String(clientCredentials.projectId || ''));
 // same environment; never silently reuse another project's app.
 const existingClientApp: FirebaseApp | null = getApps().length > 0 ? getApp() : null;
 if (existingClientApp) {
-  const existingProjectId = String(existingClientApp.options.projectId || '');
+  const existingProjectId = cleanValue(String(existingClientApp.options.projectId || ''));
   assertClientFirebaseProjectIsolation(
     existingProjectId || String(clientCredentials.projectId || '')
   );
@@ -51,7 +63,8 @@ export const app: FirebaseApp = existingClientApp || initializeApp(clientCredent
 export const auth: Auth = getAuth(app);
 
 // Firestore Instance with multi-tenant custom database ID support and forced long polling for preview sandbox stability
-const customDbId = process.env.NEXT_PUBLIC_FIRESTORE_DATABASE_ID || (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
+const rawCustomDbId = cleanValue(process.env.NEXT_PUBLIC_FIRESTORE_DATABASE_ID) || (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
+const customDbId = cleanValue(rawCustomDbId);
 
 export const db: Firestore = (() => {
   const dbId = customDbId && customDbId !== '(default)' ? customDbId : undefined;

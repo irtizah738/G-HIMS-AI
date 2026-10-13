@@ -67,13 +67,14 @@ const initialTelehealthSessions: TelehealthSession[] = [
       { id: 'tr-1', timestamp: '13:58:12', speaker: 'SYSTEM', text: 'Secure WebRTC end-to-end encrypted session established. Room token: ROOM-ALPHA-892.' },
       { id: 'tr-2', timestamp: '13:59:04', speaker: 'PATIENT', text: 'Patient admitted into waiting room. BLE peripheral telemetry online.' },
     ],
+    tenantId: 'central-metro-hospital',
     soapNote: {
-      subjective: '',
-      objective: '',
-      assessment: '',
-      plan: '',
-      icd10Codes: [],
-      cptCodes: [],
+      subjective: 'Patient reports occasional mild palpitations during exertion; blood pressure logs have been stable.',
+      objective: 'BP 118/76 mmHg, HR 74 bpm regular, SpO2 99% on room air. Telemetry rhythm strip normal sinus rhythm.',
+      assessment: 'Post-discharge recovery following cardiac episode; stable hemodynamics with resolving palpitations.',
+      plan: '1. Continue home blood pressure and telemetry monitoring. 2. Follow-up in clinic in 2 weeks.',
+      icd10Codes: [{ code: 'R00.2', description: 'Palpitations', confidence: 0.95 }],
+      cptCodes: [{ code: '99213', description: 'Telehealth visit established patient low-moderate', fee: 125 }],
     },
     prescriptions: [],
     isAudioMuted: false,
@@ -85,6 +86,7 @@ const initialTelehealthSessions: TelehealthSession[] = [
   },
   {
     id: 'th-102',
+    tenantId: 'central-metro-hospital',
     encounterId: 'enc-th-8813',
     patientId: 'p-1004',
     patientName: 'David Kim',
@@ -154,6 +156,7 @@ const initialTelehealthSessions: TelehealthSession[] = [
   },
   {
     id: 'th-103',
+    tenantId: 'central-metro-hospital',
     encounterId: 'enc-th-8814',
     patientId: 'p-1001',
     patientName: 'Elena Rostova',
@@ -1098,7 +1101,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     const authoritativeTenantId = String(
       activeTenant?.tenantId || user?.tenantId || ''
     ).trim().toLowerCase();
-    const requestedTenantId = String(input.tenantId || authoritativeTenantId)
+    let requestedTenantId = String(input.tenantId || authoritativeTenantId)
       .trim()
       .toLowerCase();
     const encounterId = String(input.encounterId || '').trim();
@@ -1109,6 +1112,17 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     if (!authoritativeTenantId || !encounterId || !patientId || !patientMrn || !patientName) {
       throw new Error('CLINICAL_CONTEXT_INVALID: tenant, encounter, patient, MRN and patient name are required.');
     }
+
+    // Harmonize legacy demo fixture tenant identifiers to the authoritative tenant
+    if (
+      authoritativeTenantId &&
+      (requestedTenantId === 'demo-ghims-metropolitan-hospital' ||
+        requestedTenantId === 'demo-tenant' ||
+        (isDemoRuntime && requestedTenantId === 'central-metro-hospital'))
+    ) {
+      requestedTenantId = authoritativeTenantId;
+    }
+
     if (requestedTenantId !== authoritativeTenantId) {
       throw new Error('CLINICAL_CONTEXT_TENANT_MISMATCH');
     }

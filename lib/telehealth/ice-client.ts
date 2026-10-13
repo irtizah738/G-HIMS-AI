@@ -12,8 +12,16 @@ export interface TelehealthIceConfig {
 export async function loadTelehealthIceConfiguration(input: {
   tenantId: string;
   roomToken: string;
-  role: 'CLINICIAN' | 'PATIENT';
+  role: 'CLINICIAN';
+} | {
+  tenantId: string;
+  roomToken: string;
+  role: 'PATIENT';
+  patientJoinToken: string;
 }): Promise<TelehealthIceConfig> {
+  if (input.role === 'PATIENT' && !/^[A-Za-z0-9_-]{43}$/.test(input.patientJoinToken)) {
+    throw new Error('TELEHEALTH_PATIENT_JOIN_TOKEN_INVALID');
+  }
   const init: RequestInit = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

@@ -11,13 +11,14 @@ type SignalMessage = {
   createdAt: number;
 };
 
-
 export function TelehealthPatientJoin({
   tenantId,
   roomToken,
+  patientJoinToken,
 }: {
   tenantId: string;
   roomToken: string;
+  patientJoinToken: string;
 }) {
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -44,6 +45,7 @@ export function TelehealthPatientJoin({
         tenantId,
         roomToken,
         senderRole: 'PATIENT',
+        patientJoinToken,
         type,
         payload,
       }),
@@ -58,7 +60,11 @@ export function TelehealthPatientJoin({
       `/api/telehealth/signaling?tenantId=${encodeURIComponent(tenantId)}` +
       `&roomToken=${encodeURIComponent(roomToken)}` +
       `&receiverRole=PATIENT&after=${Math.max(0, lastSeenRef.current - 1)}`;
-    const response = await fetch(url, { method: 'GET', cache: 'no-store' });
+    const response = await fetch(url, {
+      method: 'GET',
+      cache: 'no-store',
+      headers: { 'x-ghims-patient-join-token': patientJoinToken },
+    });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || 'Unable to receive call signaling data.');
     return Array.isArray(data.messages) ? data.messages : [];
@@ -117,6 +123,25 @@ export function TelehealthPatientJoin({
     }
   };
 
+  const handlePollingFailure = (cause: unknown) => {
+    const code = cause instanceof Error ? cause.message : 'Telehealth signaling failed.';
+    // A closed, expired or reassigned clinical room must not leave the camera
+    // or microphone running after the signaling session loses authority.
+    if ([
+      'TELEHEALTH_CALL_NOT_ACTIVE',
+      'TELEHEALTH_CALL_LEASE_INVALID',
+      'TELEHEALTH_SESSION_FINAL',
+      'TELEHEALTH_ENCOUNTER_SCOPE_INVALID',
+      'TELEHEALTH_PATIENT_JOIN_TOKEN_INVALID',
+    ].some(reason => code.includes(reason))) {
+      dispose();
+      setState('ENDED');
+      setError('This telehealth visit is no longer active. Contact your clinical team for a new private link.');
+      return;
+    }
+    setError(code);
+  };
+
   const join = async () => {
     if (state === 'JOINING' || state === 'WAITING' || state === 'CONNECTED') return;
     setState('JOINING');
@@ -126,7 +151,7 @@ export function TelehealthPatientJoin({
     lastSeenRef.current = 0;
 
     try {
-      if (!tenantId || !roomToken) throw new Error('Telehealth join link is incomplete.');
+      if (!tenantId || !roomToken || !patientJoinToken) throw new Error('Telehealth join link is incomplete.');
       if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error('This browser does not support camera/microphone access.');
       }
@@ -134,7 +159,7 @@ export function TelehealthPatientJoin({
       // Verify the clinician has activated the room before requesting media.
       await loadSignals();
       const ice = await loadTelehealthIceConfiguration({
-        tenantId, roomToken, role: 'PATIENT',
+        tenantId, roomToken, role: 'PATIENT', patientJoinToken,
       });
 
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -172,9 +197,7 @@ export function TelehealthPatientJoin({
       setState('WAITING');
       await processSignals();
       pollRef.current = window.setInterval(() => {
-        void processSignals().catch((cause) => {
-          setError(cause instanceof Error ? cause.message : 'Telehealth signaling failed.');
-        });
+        void processSignals().catch(handlePollingFailure);
       }, 1000);
     } catch (cause) {
       dispose();

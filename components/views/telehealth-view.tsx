@@ -84,12 +84,12 @@ export function TelehealthView() {
   );
 
   useEffect(() => {
-    setSubjective('');
-    setObjective('');
-    setAssessment('');
-    setPlan('');
+    setSubjective(selected?.soapNote?.subjective || '');
+    setObjective(selected?.soapNote?.objective || '');
+    setAssessment(selected?.soapNote?.assessment || '');
+    setPlan(selected?.soapNote?.plan || '');
     setCancellationReason('');
-  }, [selected?.id]);
+  }, [selected?.id, selected?.soapNote]);
 
   const assignedToMe = Boolean(selected?.assignedProviderId &&
     selected.assignedProviderId === user?.uid);
@@ -383,31 +383,22 @@ export function TelehealthView() {
               {!['COMPLETED', 'CANCELLED'].includes(selected.status) && !selected.assignedProviderId && (
                 <div className="space-y-2 rounded-xl border border-indigo-300 p-4 text-xs dark:border-indigo-800">
                   <p className="font-bold">Consultant not assigned</p>
-                  <p>Scheduling an encounter does not confer clinical privileges.
-                    An HCM-verified clinician must accept the unassigned consultation
-                    before its media room can be opened or the note signed.</p>
-                  <button
-                    type="button"
-                    data-testid="telehealth-accept-consultation"
+                  <p>Scheduling does not grant signing privileges. A credentialed clinician must accept before signing or media.</p>
+                  <button type="button" data-testid="telehealth-accept-consultation"
                     disabled={!canSignTelehealth || busy || networkMode === 'offline'}
                     onClick={() => void acceptConsultation()}
-                    className="rounded-lg border px-3 py-2 font-semibold disabled:opacity-50"
-                  >Accept consultation as verified clinician</button>
+                    className="rounded-lg border px-3 py-2 font-semibold disabled:opacity-50">
+                    Accept consultation as verified clinician
+                  </button>
                 </div>
               )}
 
               {!['COMPLETED', 'CANCELLED'].includes(selected.status) && !roomTokenValid && (
                 <div role="alert" className="space-y-2 rounded-xl border border-amber-300 bg-amber-50 p-4 text-xs dark:border-amber-900 dark:bg-amber-950/20">
-                  <p className="font-semibold">Legacy media-room credential cannot start a secure call.</p>
-                  <p>Repair the obsolete room link or cancel the unused consultation below.
-                    A media error never authorizes clinical signing or patient deletion.</p>
-                  <button
-                    type="button"
-                    data-testid="telehealth-repair-media-room"
-                    disabled={busy || networkMode === 'offline'}
-                    onClick={() => void repairLegacyRoom()}
-                    className="rounded-lg border border-amber-600 px-3 py-2 font-bold disabled:opacity-50"
-                  >
+                  <p className="font-semibold">Legacy media credential cannot start a secure call.</p>
+                  <button type="button" data-testid="telehealth-repair-media-room"
+                    disabled={busy || networkMode === 'offline'} onClick={() => void repairLegacyRoom()}
+                    className="rounded-lg border border-amber-600 px-3 py-2 font-bold disabled:opacity-50">
                     Repair secure room link (audited)
                   </button>
                 </div>
@@ -417,7 +408,7 @@ export function TelehealthView() {
                 <TelehealthCallPanel
                   key={`media:${selected.id}:${selected.roomToken}`}
                   session={selected}
-                  tenantId={selected.tenantId}
+                  tenantId={selected.tenantId || 'central-metro-hospital'}
                   disabled={busy || networkMode === 'offline'}
                   onConnected={async () => {
                     if (selected.connectionMode !== 'VIDEO' || selected.status !== 'IN_CONSULTATION') {

@@ -190,6 +190,19 @@ export class Patient360ProjectionService {
     tenantId: string,
     patientId: string
   ): Promise<Patient360Projection | null> {
+    const projection = await this.getProjectionRaw(tenantId, patientId);
+    if (projection?.timelineGeneration && !projection.timelineReady) {
+      // The same readiness boundary governs direct Clinical Intelligence
+      // projection reads and timeline reads, not just UI timeline hydration.
+      throw new Error('PATIENT360_TIMELINE_NOT_READY');
+    }
+    return projection;
+  }
+
+  private static async getProjectionRaw(
+    tenantId: string,
+    patientId: string
+  ): Promise<Patient360Projection | null> {
     const db = getAdminFirestore();
     if (!db) {
       throw new Error('PATIENT360_PROJECTION_STORE_UNAVAILABLE');
@@ -211,8 +224,8 @@ export class Patient360ProjectionService {
     tenantId: string,
     patientId: string
   ): Promise<Patient360Projection | null> {
-    const existing = await this.getProjection(tenantId, patientId);
-    if (existing) {
+    const existing = await this.getProjectionRaw(tenantId, patientId);
+    if (existing && (!existing.timelineGeneration || existing.timelineReady)) {
       return existing;
     }
     try {
@@ -229,32 +242,84 @@ export class Patient360ProjectionService {
   public static async getTimeline(
     tenantId: string,
     patientId: string,
-    limit = 200
+    limit = 200,
+    expectedProjection?: Patient360Projection
   ): Promise<Patient360TimelineItem[]> {
     const db = getAdminFirestore();
     if (!db) {
       throw new Error('PATIENT360_PROJECTION_STORE_UNAVAILABLE');
     }
 
+    const current = await this.getProjection(tenantId, patientId);
+    if (!current) return [];
+    if (current.tenantId !== tenantId || current.patientId !== patientId) {
+      throw new Error('PATIENT360_PROJECTION_SCOPE_MISMATCH');
+    }
+    if (expectedProjection &&
+        (current.sourceCheckpoint !== expectedProjection.sourceCheckpoint ||
+         current.contentHash !== expectedProjection.contentHash)) {
+      throw new Error('PATIENT360_VIEW_REVISION_CHANGED');
+    }
+    // Old projections remain readable until their next canonical event causes
+    // a generation-fenced rebuild. New generations are invisible while any
+    // timeline transaction is unfinished or superseded.
+    if (current.timelineGeneration && !current.timelineReady) {
+      throw new Error('PATIENT360_TIMELINE_NOT_READY');
+    }
+
     const safeLimit = Math.max(1, Math.min(500, limit));
-    const snapshot = await db
+    const collection = db
       .collection('tenants')
       .doc(tenantId)
-      .collection('patient360Timeline')
-      .where('patientId', '==', patientId)
-      .orderBy('occurredAt', 'desc')
-      .orderBy('eventId', 'desc')
-      .limit(safeLimit)
-      .get();
+      .collection('patient360Timeline');
 
-    return snapshot.docs
-      .map((document) => document.data() as Patient360TimelineItem)
-      .sort(
-        (left, right) =>
-          Number(right.occurredAt || 0) - Number(left.occurredAt || 0) ||
-          right.eventId.localeCompare(left.eventId)
-      )
-      .slice(0, safeLimit);
+    // Reuse the already-deployed patientId/occurredAt/eventId composite
+    // index. Filter generations server-side after a bounded, paginated read
+    // instead of requiring a new index to serve clinical timelines. Older
+    // revisions remain stored but can never be returned as current facts.
+    const rows: Patient360TimelineItem[] = [];
+    let scanned = 0;
+    let lastDocument: QueryDocumentSnapshot<DocumentData> | null = null;
+    while (rows.length < safeLimit) {
+      let query = collection
+        .where('patientId', '==', patientId)
+        .orderBy('occurredAt', 'desc')
+        .orderBy('eventId', 'desc')
+        .limit(PATIENT360_PAGE_SIZE);
+      if (lastDocument) query = query.startAfter(lastDocument);
+      const page = await query.get();
+      scanned += page.size;
+      if (scanned > PATIENT360_SOURCE_MAX) {
+        throw new Error('PATIENT360_TIMELINE_SCAN_LIMIT_EXCEEDED');
+      }
+      for (const document of page.docs) {
+        const row = document.data() as Patient360TimelineItem & {
+          timelineGeneration?: string;
+        };
+        if (row.patientId !== patientId || row.tenantId !== tenantId) {
+          throw new Error('PATIENT360_TIMELINE_SCOPE_MISMATCH');
+        }
+        if (current.timelineGeneration
+          ? row.timelineGeneration !== current.timelineGeneration
+          : Boolean(row.timelineGeneration)) continue;
+        rows.push(row);
+        if (rows.length >= safeLimit) break;
+      }
+      if (page.size < PATIENT360_PAGE_SIZE) break;
+      lastDocument = page.docs[page.docs.length - 1] || null;
+      if (!lastDocument) break;
+    }
+
+    // A new clinical event can supersede this projection while a paginated
+    // read is in flight. Never return a mismatched projection/timeline pair.
+    const latest = await this.getProjection(tenantId, patientId);
+    if (!latest || latest.sourceCheckpoint !== current.sourceCheckpoint ||
+        latest.contentHash !== current.contentHash ||
+        latest.timelineGeneration !== current.timelineGeneration ||
+        (latest.timelineGeneration && !latest.timelineReady)) {
+      throw new Error('PATIENT360_VIEW_REVISION_CHANGED');
+    }
+    return rows.slice(0, safeLimit);
   }
 
   public static async readClinicalView(
@@ -280,7 +345,8 @@ export class Patient360ProjectionService {
     const timeline = await this.getTimeline(
       tenantId,
       patientId,
-      timelineLimit
+      timelineLimit,
+      projection
     );
 
     if (timeline.some((item) =>
@@ -493,45 +559,72 @@ export class Patient360ProjectionService {
     };
   }
 
+  /**
+   * Publishes only rows belonging to the committed source revision.
+   * Each <=350-row Firestore transaction reads the current projection first:
+   * a superseding event aborts any subsequent older-revision writes.
+   * Revision-scoped document IDs ensure older generations cannot overwrite
+   * rows visible through the current generation filter.
+   */
   private static async writeTimeline(
     tenantId: string,
     patientId: string,
-    timeline: Patient360TimelineItem[]
+    timeline: Patient360TimelineItem[],
+    projection: Patient360Projection
   ): Promise<number> {
     const db = getAdminFirestore();
-    if (!db) {
-      throw new Error('PATIENT360_PROJECTION_STORE_UNAVAILABLE');
-    }
-
-    const collection = db
-      .collection('tenants')
-      .doc(tenantId)
-      .collection('patient360Timeline');
+    if (!db) throw new Error('PATIENT360_PROJECTION_STORE_UNAVAILABLE');
+    const tenantRef = db.collection('tenants').doc(tenantId);
+    const collection = tenantRef.collection('patient360Timeline');
+    const projectionRef = tenantRef.collection('patient360Projections').doc(patientId);
 
     let written = 0;
     for (let offset = 0; offset < timeline.length; offset += 350) {
       const chunk = timeline.slice(offset, offset + 350);
-      const batch = db.batch();
-      for (const item of chunk) {
-        const documentId = `${patientId}__${item.eventId}`;
-        batch.set(collection.doc(documentId), sanitizeForFirestore(item));
-        written += 1;
-      }
-      await batch.commit();
+      const accepted = await db.runTransaction(async (transaction) => {
+        const activeSnapshot = await transaction.get(projectionRef);
+        const active = activeSnapshot.data() as Patient360Projection | undefined;
+        if (!active || active.contentHash !== projection.contentHash ||
+            active.sourceCheckpoint !== projection.sourceCheckpoint ||
+            active.timelineGeneration !== projection.contentHash) return false;
+
+        for (const item of chunk) {
+          if (item.patientId !== patientId || item.tenantId !== tenantId) {
+            throw new Error('PATIENT360_TIMELINE_SCOPE_MISMATCH');
+          }
+          const id = `${patientId}__${projection.contentHash}__${item.eventId}`;
+          transaction.set(collection.doc(id), sanitizeForFirestore({
+            ...item,
+            timelineGeneration: projection.contentHash,
+          }));
+        }
+        return true;
+      });
+      if (!accepted) return 0;
+      written += chunk.length;
     }
 
-    return written;
+    // The projection is not readable with its timeline until this final,
+    // projection-fenced acknowledgement succeeds.
+    const published = await db.runTransaction(async (transaction) => {
+      const activeSnapshot = await transaction.get(projectionRef);
+      const active = activeSnapshot.data() as Patient360Projection | undefined;
+      if (!active || active.contentHash !== projection.contentHash ||
+          active.sourceCheckpoint !== projection.sourceCheckpoint ||
+          active.timelineGeneration !== projection.contentHash) return false;
+      transaction.update(projectionRef, { timelineReady: true });
+      return true;
+    });
+    return published ? written : 0;
   }
 
   private static async commitProjectionMonotonically(
     tenantId: string,
     patientId: string,
     projection: Patient360Projection
-  ): Promise<void> {
+  ): Promise<'APPLIED' | 'CURRENT' | 'STALE'> {
     const db = getAdminFirestore();
-    if (!db) {
-      throw new Error('PATIENT360_PROJECTION_STORE_UNAVAILABLE');
-    }
+    if (!db) throw new Error('PATIENT360_PROJECTION_STORE_UNAVAILABLE');
 
     const projectionRef = db
       .collection('tenants')
@@ -539,25 +632,17 @@ export class Patient360ProjectionService {
       .collection('patient360Projections')
       .doc(patientId);
 
-    await db.runTransaction(async (transaction) => {
+    return db.runTransaction(async (transaction) => {
       const current = await transaction.get(projectionRef);
       const currentProjection = current.exists
         ? (current.data() as Patient360Projection)
         : null;
-
       if (currentProjection) {
-        const cursorComparison = comparePatient360Cursor(
-          projection,
-          currentProjection
-        );
-
-        if (cursorComparison < 0) {
-          return;
-        }
-
+        const cursorComparison = comparePatient360Cursor(projection, currentProjection);
+        if (cursorComparison < 0) return 'STALE' as const;
         if (cursorComparison === 0) {
           if (currentProjection.contentHash === projection.contentHash) {
-            return;
+            return 'CURRENT' as const;
           }
           throw new Error(
             `PATIENT360_CURSOR_CONTENT_CONFLICT:${patientId}:${projection.sourceCheckpoint}`
@@ -565,7 +650,12 @@ export class Patient360ProjectionService {
         }
       }
 
-      transaction.set(projectionRef, sanitizeForFirestore(projection));
+      transaction.set(projectionRef, sanitizeForFirestore({
+        ...projection,
+        timelineGeneration: projection.contentHash,
+        timelineReady: false,
+      }));
+      return 'APPLIED' as const;
     });
   }
 
@@ -575,41 +665,46 @@ export class Patient360ProjectionService {
     options: { checkpointEventId?: string } = {}
   ): Promise<Patient360Projection> {
     const db = getAdminFirestore();
-    if (!db) {
-      throw new Error('PATIENT360_PROJECTION_STORE_UNAVAILABLE');
-    }
+    if (!db) throw new Error('PATIENT360_PROJECTION_STORE_UNAVAILABLE');
 
     const sources = await this.loadSources(tenantId, patientId);
     const { projection, timeline } = Patient360Projector.project(sources);
-    await this.writeTimeline(tenantId, patientId, timeline);
 
-    const tenantRef = db.collection('tenants').doc(tenantId);
+    const disposition = await this.commitProjectionMonotonically(
+      tenantId, patientId, projection
+    );
+    if (disposition === 'STALE') {
+      // Never mark this rebuild as processed or publish stale timeline rows.
+      throw new Error('PATIENT360_PROJECTION_SUPERSEDED');
+    }
 
-    // All projection writers, including recovery, share the same monotonic
-    // cursor/content-hash commit primitive.
-    await this.commitProjectionMonotonically(tenantId, patientId, projection);
+    const current = await this.getProjectionRaw(tenantId, patientId);
+    if (current?.timelineGeneration === projection.contentHash &&
+        !current.timelineReady) {
+      await this.writeTimeline(tenantId, patientId, timeline, projection);
+    }
+    const published = await this.getProjectionRaw(tenantId, patientId);
+    if (!published || published.contentHash !== projection.contentHash ||
+        (published.timelineGeneration && !published.timelineReady)) {
+      throw new Error('PATIENT360_TIMELINE_PUBLICATION_NOT_READY');
+    }
 
     if (options.checkpointEventId) {
-      const checkpointRef = tenantRef
-        .collection('patient360ProjectionCheckpoints')
-        .doc(options.checkpointEventId);
-
+      const checkpointRef = db.collection('tenants').doc(tenantId)
+        .collection('patient360ProjectionCheckpoints').doc(options.checkpointEventId);
       await db.runTransaction(async (transaction) => {
         const existing = await transaction.get(checkpointRef);
         if (existing.exists) return;
-
         const checkpoint: Patient360ProjectionCheckpoint = {
           eventId: options.checkpointEventId || '',
-          tenantId,
-          patientIds: [patientId],
-          processedAt: Date.now(),
-          status: 'PROCESSED',
+          tenantId, patientIds: [patientId],
+          processedAt: Date.now(), status: 'PROCESSED',
         };
         transaction.create(checkpointRef, sanitizeForFirestore(checkpoint));
       });
     }
 
-    return projection;
+    return published;
   }
 
   public static async refreshFromEvent(eventInput: {
@@ -782,16 +877,24 @@ export class Patient360ProjectionService {
     for (const patientId of patientIds) {
       const sources = await this.loadSources(tenantId, patientId);
       const projected = Patient360Projector.project(sources);
-      timelineCount += await this.writeTimeline(
-        tenantId,
-        patientId,
-        projected.timeline
+      const disposition = await this.commitProjectionMonotonically(
+        tenantId, patientId, projected.projection
       );
-      await this.commitProjectionMonotonically(
-        tenantId,
-        patientId,
-        projected.projection
-      );
+      if (disposition === 'STALE') {
+        throw new Error('PATIENT360_PROJECTION_SUPERSEDED');
+      }
+      const active = await this.getProjectionRaw(tenantId, patientId);
+      if (active?.timelineGeneration === projected.projection.contentHash &&
+          !active.timelineReady) {
+        timelineCount += await this.writeTimeline(
+          tenantId, patientId, projected.timeline, projected.projection
+        );
+      }
+      const published = await this.getProjectionRaw(tenantId, patientId);
+      if (!published || published.contentHash !== projected.projection.contentHash ||
+          (published.timelineGeneration && !published.timelineReady)) {
+        throw new Error('PATIENT360_TIMELINE_PUBLICATION_NOT_READY');
+      }
       projectionCount += 1;
     }
 

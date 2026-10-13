@@ -38,7 +38,8 @@ export default function BillingTariffAuthorityPage({ params }: PageProps) {
       roles.has('BILLING_ADMIN') ||
       roles.has('FINANCE_MANAGER') ||
       roles.has('SYSTEM_ADMIN') ||
-      roles.has('ADMINISTRATOR')
+      roles.has('ADMINISTRATOR') ||
+      roles.has('ADMIN')
     );
   }, [auth.roles]);
 

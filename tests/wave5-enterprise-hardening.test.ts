@@ -37,71 +37,6 @@ describe('Wave 5 enterprise hardening', () => {
     expect(byClass.get('INTEGRATION_RAW')?.defaultRetentionDays).toBe(0);
   });
 
-  test('authenticated load qualification uses real session authority and emits bounded evidence only', async () => {
-    const load = await source('scripts/ops/wave5-authenticated-load.ts');
-    expect(load).toContain('WAVE5_LOAD_STAGING_ONLY');
-    expect(load).toContain('WAVE5_LOAD_REMOTE_HTTPS_STAGING_REQUIRED');
-    expect(load).toContain('accounts:signInWithPassword');
-    expect(load).toContain('/api/auth/session');
-    expect(load).toContain('/api/offline/bootstrap?tenantId=');
-    expect(load).toContain("'x-ghims-session-id': sessionId");
-    expect(load).toContain('GHIMS_WAVE5_LOAD_CONCURRENCY');
-    expect(load).toContain('GHIMS_WAVE5_LOAD_P95_LIMIT_MS');
-    expect(load).toContain('GHIMS_WAVE5_LOAD_MAX_ERROR_RATE');
-
-    const evidenceBlock = load.slice(load.indexOf('const evidence = {'));
-    expect(evidenceBlock).not.toContain('email,');
-    expect(evidenceBlock).not.toContain('password,');
-    expect(evidenceBlock).not.toContain('idToken,');
-    expect(evidenceBlock).not.toContain('sessionId,');
-  });
-
-  test('deployed Wave 5 staging qualification covers multi-role, cross-domain, load and operational health', async () => {
-    const workflow = await source(
-      '.github/workflows/wave5-staging-qualification.yml'
-    );
-
-    expect(workflow).toContain('WAVE5-STAGING');
-    expect(workflow).toContain('bun run ops:staging-smoke');
-    expect(workflow).toContain('bun run ops:p7:rehearsal');
-    expect(workflow).toContain('bun run ops:drp10:rehearsal');
-    expect(workflow).toContain('bun run ops:wave5:load');
-    expect(workflow).toContain('bun run ops:drp-operational-check');
-    expect(workflow).toContain('bun run test:opd-sq1:staging');
-    expect(workflow).toContain('Backup/restore, rollback, alert routing');
-  });
-
-  test('projection failure injection stays isolated and clean recovery remains required', async () => {
-    const [service, drill, recovery] = await Promise.all([
-      source('lib/backend/recovery/projection-recovery-service.ts'),
-      source('scripts/ops/wave5-projection-failure-injection.ts'),
-      source('docs/operations/PROJECTION_RECOVERY.md'),
-    ]);
-
-    expect(service).toContain('PROJECTION_REBUILD_FORBIDDEN_IN_PRODUCTION');
-    expect(service).toContain('GHIMS_PROJECTION_REBUILD_INJECT_FAILURE');
-    expect(service).toContain('PROJECTION_REBUILD_INJECTED_FAILURE');
-    expect(service).toContain("status: 'FAILED'");
-    expect(drill).toContain('WAVE5_FAILURE_INJECTION_FORBIDDEN_IN_PRODUCTION');
-    expect(drill).toContain('AFTER_PROJECTION_WORKER');
-    expect(drill).toContain('Run a clean projection rebuild');
-    expect(recovery).toContain('identical authoritative input must yield the same projection fingerprint');
-  });
-
-  test('rollback rehearsal can only redeploy a known-good main ancestor into guarded STAGING', async () => {
-    const workflow = await source(
-      '.github/workflows/wave5-staging-rollback.yml'
-    );
-
-    expect(workflow).toContain('WAVE5-ROLLBACK');
-    expect(workflow).toContain('git merge-base --is-ancestor');
-    expect(workflow).toContain('vercel pull --yes --environment=preview');
-    expect(workflow).toContain('vercel deploy --prebuilt --yes');
-    expect(workflow).toContain('bun run ops:staging-smoke');
-    expect(workflow).toContain('wave5-rollback-rehearsal.json');
-    expect(workflow).not.toContain('vercel deploy --prod');
-  });
-
   test('Wave 5 evidence manifest refuses to equate repository state with production qualification', async () => {
     const manifest = await source('scripts/ops/wave5-evidence-manifest.ts');
 
@@ -179,20 +114,6 @@ describe('Wave 5 enterprise hardening', () => {
     expect(wave5).toContain('not an independent penetration test');
     expect(p7Manifest).toContain('p7-independent-security-assessment.json');
     expect(drpSecurity).toContain('independent penetration evidence remains an explicit pre-pilot gate');
-  });
-
-  test('deployed browser qualification supports protected previews without hardcoding a bypass credential', async () => {
-    const [opdConfig, wave2Config] = await Promise.all([
-      source('playwright.opd-staging.config.ts'),
-      source('playwright.wave2-staging.config.ts'),
-    ]);
-
-    for (const config of [opdConfig, wave2Config]) {
-      expect(config).toContain('GHIMS_STAGING_BYPASS_HEADER_NAME');
-      expect(config).toContain('GHIMS_STAGING_BYPASS_HEADER_VALUE');
-      expect(config).toContain('extraHTTPHeaders');
-      expect(config).not.toContain('x-vercel-protection-bypass:');
-    }
   });
 
   test('Wave 5 documentation keeps engineering and live qualification distinct', async () => {

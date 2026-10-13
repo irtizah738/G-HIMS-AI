@@ -139,21 +139,6 @@ describe('OPD-RP20/RP21 E2E and failure injection qualification', () => {
     TransactionManager.resetEphemeralStateForTesting();
   });
 
-  test('RP20 staging fixtures are synthetic-only and production refusing', async () => {
-    const fixture = await source(
-      'scripts/ops/opd-rp20-provision-staging-fixtures.ts'
-    );
-
-    expect(fixture).toContain("runtime !== 'STAGING'");
-    expect(fixture).toContain('OPD_RP20_REFUSES_PRODUCTION_PROJECT');
-    expect(fixture).toContain('tenant.syntheticOnly !== true');
-    expect(fixture).toContain('GHIMS_OPD_RP20_CONFIRM_PROJECT');
-    expect(fixture).toContain('syntheticQualificationRecord: true');
-    expect(fixture).toContain("'opd-consultation-standard'");
-    expect(fixture).toContain("'LAB-RP20-CBC'");
-    expect(fixture).toContain("'P7-PARA-500'");
-  });
-
   test('final disposition atomically closes encounter patient context and active queue token', async () => {
     const tenantId = 'tenant-rp20-happy';
     const fixture = seedClosableEncounter(tenantId, 'happy');

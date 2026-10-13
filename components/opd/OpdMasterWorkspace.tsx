@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import {
   Users,
   Search,
@@ -113,336 +114,16 @@ const OPD_TAB_ROLES: Record<string, OpdRole[]> = {
 };
 
 
-// Initial Mock Seed Data (DEMO runtime only)
-const SEED_PATIENTS: PatientDemographics[] = [
-  {
-    id: 'pat-101',
-    mrn: 'MRN-20260901-8842',
-    fullName: 'Eleanor Vance',
-    preferredName: 'Nora',
-    gender: 'Female',
-    dob: '1984-04-12',
-    age: 42,
-    nationalId: '61101-1928374-2',
-    maritalStatus: 'Married',
-    nationality: 'Pakistani',
-    primaryLanguage: 'English / Urdu',
-    phone: '+92 300 8877665',
-    email: 'eleanor.vance@example.org',
-    residentialAddress: 'House 42, Street 18, F-7/2, Islamabad',
-    emergencyContact: {
-      name: 'Tariq Vance',
-      relation: 'Spouse',
-      phone: '+92 321 9988771',
-    },
-    tariffPlan: 'CORPORATE_PPO',
-    insuranceDetails: {
-      payerName: 'Jubilee Life Healthcare',
-      policyNumber: 'POL-JUB-998811',
-      coveragePercent: 80,
-      copayPercent: 20,
-      expiryDate: '2027-12-31',
-    },
-    bloodGroup: 'O+',
-    knownAllergies: ['Penicillin', 'NSAIDs'],
-    chronicConditions: ['Hypertension'],
-    createdAt: Date.now() - 86400000,
-  },
-  {
-    id: 'pat-102',
-    mrn: 'MRN-20260901-9124',
-    fullName: 'Tariq Mehmood',
-    gender: 'Male',
-    dob: '1968-08-22',
-    age: 58,
-    nationalId: '37405-9988112-1',
-    maritalStatus: 'Married',
-    nationality: 'Pakistani',
-    primaryLanguage: 'Urdu',
-    phone: '+92 333 5544332',
-    residentialAddress: 'G-10/4, Islamabad',
-    tariffPlan: 'SEHAT_CARD_UNIVERSAL',
-    insuranceDetails: {
-      payerName: 'State Universal Health Card (Sehat Sahulat)',
-      policyNumber: 'CNIC-37405-9988112-1',
-      coveragePercent: 100,
-      copayPercent: 0,
-    },
-    bloodGroup: 'B+',
-    knownAllergies: [],
-    chronicConditions: ['Type 2 Diabetes', 'Coronary Artery Disease'],
-    createdAt: Date.now() - 172800000,
-  },
-  {
-    id: 'pat-103',
-    mrn: 'MRN-20260901-3319',
-    fullName: 'Amina Zainab (Pediatric)',
-    gender: 'Female',
-    dob: '2020-02-14',
-    age: 6,
-    nationalId: '61101-0019283-4',
-    maritalStatus: 'Single',
-    nationality: 'Pakistani',
-    primaryLanguage: 'Urdu',
-    phone: '+92 345 1122334',
-    residentialAddress: 'Sector I-8/2, Islamabad',
-    emergencyContact: {
-      name: 'Zainab Bibi',
-      relation: 'Mother',
-      phone: '+92 345 1122334',
-    },
-    tariffPlan: 'OUT_OF_POCKET',
-    bloodGroup: 'A+',
-    knownAllergies: [],
-    chronicConditions: [],
-    createdAt: Date.now() - 43200000,
-  },
-];
+import {
+  SEED_PATIENTS,
+  SEED_APPOINTMENTS,
+  SEED_ENCOUNTERS,
+  SEED_QUEUE,
+  SEED_EVENTS,
+} from '@/lib/fixtures/opd-fixtures';
 
-const SEED_APPOINTMENTS: AppointmentRecord[] = [
-  {
-    id: 'appt-101',
-    patientId: 'pat-101',
-    patientName: 'Eleanor Vance',
-    mrn: 'MRN-20260901-8842',
-    doctorId: 'doc-01',
-    doctorName: 'Dr. Sarah Jenkins',
-    department: 'Cardiology',
-    appointmentType: 'NEW_CONSULTATION',
-    scheduledDate: new Date().toISOString().slice(0, 10),
-    scheduledTimeSlot: '09:30',
-    durationMinutes: 20,
-    status: 'CHECKED_IN',
-    chiefComplaint: 'Progressive exertional dyspnea and pedal swelling',
-    bookingChannel: 'ONLINE_PORTAL',
-    createdAt: Date.now() - 7200000,
-  },
-  {
-    id: 'appt-102',
-    patientId: 'pat-102',
-    patientName: 'Tariq Mehmood',
-    mrn: 'MRN-20260901-9124',
-    doctorId: 'doc-02',
-    doctorName: 'Dr. Marcus Vance',
-    department: 'General Medicine',
-    appointmentType: 'ROUTINE_REVIEW',
-    scheduledDate: new Date().toISOString().slice(0, 10),
-    scheduledTimeSlot: '10:00',
-    durationMinutes: 20,
-    status: 'CONFIRMED',
-    chiefComplaint: 'Routine Diabetic HbA1c review and blood pressure check',
-    bookingChannel: 'FRONT_DESK',
-    createdAt: Date.now() - 14400000,
-  },
-];
 
-const SEED_ENCOUNTERS: ComprehensiveOpdEncounter[] = [
-  {
-    id: 'enc-101',
-    tenantId: 'demo-ghims-metropolitan-hospital',
-    patientId: 'pat-101',
-    mrn: 'MRN-20260901-8842',
-    patientName: 'Eleanor Vance',
-    gender: 'Female',
-    age: 42,
-    tariffPlan: 'CORPORATE_PPO',
-    insuranceDetails: {
-      payerName: 'Jubilee Life Healthcare',
-      policyNumber: 'POL-JUB-998811',
-      coveragePercent: 80,
-      copayPercent: 20,
-    },
-    knownAllergies: ['Penicillin', 'NSAIDs'],
-    tokenNumber: 'CARD-101',
-    encounterType: 'OPD_SPECIALIST',
-    department: 'Cardiology',
-    attendingDoctorId: 'doc-01',
-    attendingDoctorName: 'Dr. Sarah Jenkins (Cardiology)',
-    currentStage: 'SPECIALTY_CONSULTATION',
-    stageProgress: {
-      REGISTRATION: { status: 'COMPLETED', enteredAt: Date.now() - 3600000, completedAt: Date.now() - 3300000, completedBy: 'Registrar K. Ahmed' },
-      BILLING_AUTHORIZATION: { status: 'COMPLETED', enteredAt: Date.now() - 3300000, completedAt: Date.now() - 3000000, completedBy: 'Cashier J. Wilson' },
-      QUEUE_ASSIGNMENT: { status: 'COMPLETED', enteredAt: Date.now() - 3000000, completedAt: Date.now() - 2700000, completedBy: 'Triage Desk' },
-      NURSING_INTAKE: { status: 'COMPLETED', enteredAt: Date.now() - 2700000, completedAt: Date.now() - 2100000, completedBy: 'Nurse R. Chen' },
-      MO_ASSESSMENT: { status: 'COMPLETED', enteredAt: Date.now() - 2100000, completedAt: Date.now() - 1500000, completedBy: 'Dr. A. Khan (MO)' },
-      SPECIALTY_CONSULTATION: { status: 'ACTIVE', enteredAt: Date.now() - 1500000 },
-      DIAGNOSTIC_ORDERS: { status: 'PENDING' },
-      PHARMACY_FEFO: { status: 'PENDING' },
-      BILLING_SETTLEMENT: { status: 'PENDING' },
-      DISPOSITION_CLOSURE: { status: 'PENDING' },
-      TIMELINE_AUDIT: { status: 'PENDING' },
-    },
-    vitalsAssessment: {
-      heartRate: 88,
-      systolicBp: 134,
-      diastolicBp: 86,
-      respiratoryRate: 18,
-      temperatureCelsius: 36.9,
-      spo2Percent: 97,
-      onSupplementalOxygen: false,
-      bloodGlucoseMgDl: 110,
-      heightCm: 168,
-      weightKg: 68.5,
-      bmi: 24.3,
-      painScale: 2,
-      fallRiskScore: 1,
-      gcsScore: 15,
-      gcsEye: 4,
-      gcsVerbal: 5,
-      gcsMotor: 6,
-      consciousnessAvpu: 'ALERT',
-      news2Score: 0,
-      news2Risk: 'LOW',
-      measuredAt: Date.now() - 2400000,
-      measuredBy: 'Staff Nurse R. Chen (RN)',
-      triageNotes: 'Alert, responsive. Mild bilateral ankle swelling noted.',
-    },
-    diagnosticOrders: [
-      {
-        id: 'diag-101',
-        category: 'LABORATORY',
-        testCode: 'LAB-BNP-03',
-        testName: 'Serum NT-proBNP Quantitative',
-        specimenType: 'Serum Gel Tube',
-        specimenBarcode: 'SPEC-8842-BNP',
-        urgency: 'URGENT',
-        reasonForOrder: 'Heart failure assessment',
-        status: 'PROCESSING',
-        orderingDoctor: 'Dr. Sarah Jenkins',
-        orderedAt: Date.now() - 1200000,
-        costAmountMinorUnits: 450000,
-        requiresConsent: false,
-        consentVerified: true,
-      },
-      {
-        id: 'diag-102',
-        category: 'RADIOLOGY',
-        testCode: 'RAD-CXR-01',
-        testName: 'Chest X-Ray (PA View)',
-        urgency: 'ROUTINE',
-        reasonForOrder: 'Cardiomegaly check',
-        status: 'VERIFIED',
-        orderingDoctor: 'Dr. Sarah Jenkins',
-        orderedAt: Date.now() - 1400000,
-        resultsSummary: 'Normal cardiothoracic ratio, clear lung fields.',
-        costAmountMinorUnits: 220000,
-        requiresConsent: false,
-        consentVerified: true,
-      },
-    ],
-    prescriptions: [
-      {
-        id: 'rx-101',
-        medicationCode: 'RX-FUROS-40',
-        drugName: 'Furosemide',
-        formulation: 'Tablet',
-        dosage: '40 mg',
-        route: 'Oral',
-        frequency: 'OD (Once Daily Morning)',
-        durationDays: 14,
-        quantity: 14,
-        unitPriceMinorUnits: 1500,
-        totalAmountMinorUnits: 21000,
-        specialInstructions: 'Take with morning meal. Hydrate well.',
-        substitutionAllowed: true,
-        status: 'PRESCRIBED',
-        prescribedAt: Date.now() - 900000,
-        prescribedBy: 'Dr. Sarah Jenkins',
-        batchAllocation: {
-          batchNumber: 'BTH-2026-088',
-          expiryDate: '2027-11-30',
-          locationBin: 'Shelf B-12',
-          quantityAllocated: 14,
-          fefoVerified: true,
-        },
-      },
-    ],
-    invoice: {
-      id: 'inv-101',
-      invoiceNumber: 'INV-20260901-001',
-      payerTariffPlan: 'CORPORATE_PPO',
-      lineItems: [
-        { id: 'li-01', serviceCode: 'OPD-CONS-SPEC', description: 'Specialist Cardiology Consultation', category: 'CONSULTATION', quantity: 1, unitPriceMinorUnits: 350000, totalMinorUnits: 350000 },
-        { id: 'li-02', serviceCode: 'LAB-BNP-03', description: 'Serum NT-proBNP Quantitative', category: 'LABORATORY', quantity: 1, unitPriceMinorUnits: 450000, totalMinorUnits: 450000 },
-        { id: 'li-03', serviceCode: 'RAD-CXR-01', description: 'Chest X-Ray (PA View)', category: 'RADIOLOGY', quantity: 1, unitPriceMinorUnits: 220000, totalMinorUnits: 220000 },
-        { id: 'li-04', serviceCode: 'RX-FUROS-40', description: 'Furosemide 40mg (14 Tabs)', category: 'PHARMACY', quantity: 1, unitPriceMinorUnits: 21000, totalMinorUnits: 21000 },
-      ],
-      totalAmountMinorUnits: 1041000, // PKR 10,410.00
-      payerCoverageAmountMinorUnits: 832800, // 80% = PKR 8,328.00
-      patientCopayAmountMinorUnits: 208200, // 20% = PKR 2,082.00
-      amountPaidMinorUnits: 0,
-      balanceDueMinorUnits: 208200,
-      settlementStatus: 'PENDING',
-      payments: [],
-      createdAt: Date.now() - 1000000,
-    },
-    startedAt: Date.now() - 3600000,
-    status: 'IN_CONSULTATION',
-  },
-];
 
-const SEED_QUEUE: QueueEntry[] = [
-  {
-    id: 'q-101',
-    encounterId: 'enc-101',
-    tokenNumber: 'CARD-101',
-    patientName: 'Eleanor Vance',
-    mrn: 'MRN-20260901-8842',
-    department: 'Cardiology',
-    assignedRoomOrBay: 'Consultation Room 104',
-    assignedDoctorName: 'Dr. Sarah Jenkins',
-    triagePriority: 'YELLOW_URGENT',
-    status: 'IN_SERVICE',
-    issuedAt: Date.now() - 3000000,
-    calledAt: Date.now() - 1500000,
-  },
-  {
-    id: 'q-102',
-    encounterId: 'enc-102',
-    tokenNumber: 'MED-102',
-    patientName: 'Tariq Mehmood',
-    mrn: 'MRN-20260901-9124',
-    department: 'General Medicine',
-    assignedRoomOrBay: 'Consultation Room 101',
-    assignedDoctorName: 'Dr. Marcus Vance',
-    triagePriority: 'GREEN_STANDARD',
-    status: 'WAITING',
-    issuedAt: Date.now() - 2400000,
-  },
-];
-
-const SEED_EVENTS: OpdTimelineEvent[] = [
-  {
-    id: 'evt-01',
-    encounterId: 'enc-101',
-    eventType: 'PATIENT_REGISTERED',
-    timestamp: Date.now() - 3600000,
-    actorName: 'Registrar K. Ahmed',
-    actorRole: 'RECEPTIONIST',
-    description: 'Patient registered under Corporate PPO tariff. Informed consents captured.',
-    hash: 'SHA256:8f2a99c4d1e2b3a4',
-  },
-  {
-    id: 'evt-02',
-    encounterId: 'enc-101',
-    eventType: 'TRIAGE_VITALS_RECORDED',
-    timestamp: Date.now() - 2400000,
-    actorName: 'Nurse R. Chen',
-    actorRole: 'TRIAGE_NURSE',
-    description: 'Physiological vitals captured. NEWS2 score = 0 (Low risk). GCS = 15.',
-    hash: 'SHA256:1a2b3c4d5e6f7a8b',
-  },
-  {
-    id: 'evt-03',
-    encounterId: 'enc-101',
-    eventType: 'QUEUE_CALLED',
-    timestamp: Date.now() - 1500000,
-    actorName: 'Dr. Sarah Jenkins',
-    actorRole: 'SPECIALIST_CONSULTANT',
-    description: 'Token CARD-101 called to Consultation Room 104.',
-    hash: 'SHA256:9c8b7a6f5e4d3c2b',
-  },
-];
 
 export function OpdMasterWorkspace() {
   const auth = useAuth();
@@ -524,6 +205,8 @@ export function OpdMasterWorkspace() {
     useState<boolean>(false);
   const [billingReconciliationError, setBillingReconciliationError] =
     useState<string | null>(null);
+  const [consultationBillingBlocker, setConsultationBillingBlocker] = useState<{ encounterId: string; message: string } | null>(null);
+  const [consultationBillingBusy, setConsultationBillingBusy] = useState(false);
   const offlineWorkflowTail = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
@@ -727,8 +410,25 @@ export function OpdMasterWorkspace() {
       return;
     }
 
+    const authoritativeTenant = String(auth.activeTenant?.tenantId || '').trim().toLowerCase();
+    const encounterTenant = String(activeEncounter.tenantId || '').trim().toLowerCase();
+
+    // Harmonize demo fixture tenant to authoritative tenant if mismatched
+    if (authoritativeTenant && encounterTenant && encounterTenant !== authoritativeTenant) {
+      if (
+        encounterTenant === 'demo-ghims-metropolitan-hospital' ||
+        encounterTenant.startsWith('demo-') ||
+        encounterTenant === 'central-metro-hospital'
+      ) {
+        activeEncounter.tenantId = authoritativeTenant;
+      } else {
+        clearClinicalContext();
+        return;
+      }
+    }
+
     bindClinicalEncounter({
-      tenantId: activeEncounter.tenantId || auth.activeTenant?.tenantId,
+      tenantId: authoritativeTenant || activeEncounter.tenantId,
       encounterId: activeEncounter.id,
       patientId: activeEncounter.patientId,
       patientMrn: activeEncounter.mrn,
@@ -736,6 +436,7 @@ export function OpdMasterWorkspace() {
       source: 'OPD_MASTER',
     });
   }, [
+    activeEncounter,
     activeEncounter?.id,
     activeEncounter?.patientId,
     activeEncounter?.mrn,
@@ -1010,6 +711,9 @@ export function OpdMasterWorkspace() {
         : `Patient ${authoritativePatient.fullName} registered. Token ${tokenNum} issued.`
     );
 
+    setConsultationBillingBlocker(consultationBillingFailure
+      ? { encounterId: newEncId, message: consultationBillingFailure }
+      : null);
     if (consultationBillingFailure) {
       recordEvent(
         'CONSULTATION_BILLING_BLOCKED',
@@ -1021,6 +725,38 @@ export function OpdMasterWorkspace() {
     // This also makes a successful registration visibly actionable instead of
     // returning the operator to a generic dashboard.
     setActiveTab(offlineRegistration ? 'DASHBOARD' : 'BILLING');
+  };
+
+  // Registration persists even if invoice setup fails. Recover the original
+  // encounter, never create a second registration or a client-priced invoice.
+  const handleRecoverConsultationInvoice = async () => {
+    if (!activeEncounter || activeEncounter.consultationInvoice) return;
+    const encounterId = activeEncounter.id;
+    setConsultationBillingBusy(true);
+    setConsultationBillingBlocker(null);
+    try {
+      requireOnlineOpdAuthority('consultation invoice recovery');
+      const result = await executeActiveTenantCommand<{ invoice: Record<string, any> }>(
+        'CreateOpdConsultationInvoiceCommand',
+        { encounterId }
+      );
+      if (!result.success || !result.data?.invoice) {
+        throw new Error(result.error?.message || 'The consultation invoice could not be recovered.');
+      }
+      const invoice = adaptAuthoritativeConsultationInvoice(result.data.invoice);
+      setEncounters((current) => current.map((encounter) =>
+        encounter.id === encounterId ? { ...encounter, consultationInvoice: invoice } : encounter
+      ));
+      recordEvent('CONSULTATION_BILLING_RECOVERED', 'Authoritative consultation invoice recovered for encounter ' + encounterId + '.');
+      await refreshAuthoritativeWorkspace();
+    } catch (error) {
+      setConsultationBillingBlocker({
+        encounterId,
+        message: error instanceof Error ? error.message : 'Consultation billing recovery failed.',
+      });
+    } finally {
+      setConsultationBillingBusy(false);
+    }
   };
 
   const handleBookAppointment = async (input: {
@@ -3470,6 +3206,48 @@ export function OpdMasterWorkspace() {
         />
       )}
 
+      {/* A missing tenant catalog must not strand a committed registration. */}
+      {activeTab === 'BILLING' &&
+        canAccessTab('BILLING') &&
+        patientContextReady &&
+        activeEncounter &&
+        !activeEncounter.consultationInvoice && (
+          <div data-testid="opd-consultation-billing-recovery" className="space-y-3 rounded-2xl border border-amber-300 bg-amber-50 p-5 text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+              <div>
+                <h3 className="text-sm font-bold">Consultation invoice missing — payment gate remains closed</h3>
+                <p className="mt-1 text-xs leading-relaxed">
+                  Registration and queue-token issuance are already recorded. An authorized Billing or Finance administrator must configure the tenant consultation service, tax rate and revenue account. Then retry the invoice for this encounter — do not register the patient again.
+                </p>
+                {consultationBillingBlocker?.encounterId === activeEncounter.id && (
+                  <p role="alert" className="mt-2 text-xs font-medium">{consultationBillingBlocker.message}</p>
+                )}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <Link
+                data-testid="opd-consultation-catalog-config-link"
+                target="_blank"
+                rel="noopener noreferrer"
+                href={'/' + encodeURIComponent(String(auth.activeTenant?.tenantId || activeEncounter.tenantId)) + '/billing/tariffs'}
+                className="rounded-xl border border-amber-500 px-4 py-2 text-xs font-bold hover:bg-amber-100 dark:hover:bg-amber-900/40"
+              >
+                Open billing configuration
+              </Link>
+              <button
+                data-testid="opd-consultation-invoice-retry"
+                type="button"
+                disabled={!isOnline || consultationBillingBusy}
+                onClick={() => void handleRecoverConsultationInvoice()}
+                className="rounded-xl bg-amber-900 px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {consultationBillingBusy ? 'Recovering invoice…' : 'Retry consultation invoice'}
+              </button>
+            </div>
+          </div>
+        )}
+
       {/* 10. Billing settlement + final reconciliation */}
       {activeTab === 'BILLING' &&
         canAccessTab('BILLING') &&
@@ -3489,6 +3267,7 @@ export function OpdMasterWorkspace() {
         canAccessTab('BILLING') &&
         patientContextReady &&
         activeEncounter &&
+        activeEncounter.consultationInvoice &&
         (
           !activeBillingInvoice ||
           (

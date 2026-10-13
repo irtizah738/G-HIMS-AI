@@ -1011,6 +1011,15 @@ export class CommandBus {
           );
           break;
 
+        case 'UnmergePatientCommand':
+          result = await PatientMergeDomainService.unmerge(
+            context,
+            command.commandId,
+            command.idempotencyKey,
+            command.payload as any
+          );
+          break;
+
         case 'ConfirmPatientIdentityCommand':
           result = await PatientIdentityDomainService.confirmPatientIdentity(
             context,

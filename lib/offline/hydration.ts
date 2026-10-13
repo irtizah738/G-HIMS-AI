@@ -2,6 +2,8 @@
 
 import { auth } from '@/lib/firebase/client';
 import { getCachedAuthSession } from '@/lib/offline/auth-storage';
+import { canResumeOfflineIdentity } from '@/lib/auth/offline-session-policy';
+import { canReadOfflineClinicalSnapshot } from '@/lib/offline/clinical-offline-identity-policy';
 import { getEdgeSyncMetadata } from '@/lib/offline/db';
 import {
   listSecureEdgeEntities,
@@ -50,6 +52,18 @@ async function secureAuthorityEpoch(
     .join('');
 }
 
+function lockedLocalEdgeSnapshot(tenantId: string): EdgeSnapshot {
+  return {
+    tenantId,
+    generatedAt: 0,
+    snapshotVersion: 'local-locked',
+    collections: {},
+    source: 'LOCAL',
+    freshness: 'UNHYDRATED',
+    errorCode: 'OFFLINE_IDENTITY_NOT_VERIFIED',
+  };
+}
+
 export async function loadLocalEdgeSnapshot(
   tenantId: string,
   requestedSurface: EdgeHydrationSurface
@@ -58,6 +72,14 @@ export async function loadLocalEdgeSnapshot(
   const cached = await getCachedAuthSession();
   const actorId = cached?.user?.uid || '';
   const normalizedTenantId = String(tenantId || '').trim().toLowerCase();
+  if (!normalizedTenantId) throw new Error('EDGE_HYDRATION_TENANT_REQUIRED');
+  const restoredUid = auth.currentUser?.uid || '';
+  // A decrypted cache entry is NOT proof of the actor currently signed in on
+  // this shared browser. Validate Firebase's restored UID before ANY PHI read.
+  if (!canResumeOfflineIdentity(auth.currentUser?.uid, cached) ||
+      !canReadOfflineClinicalSnapshot(restoredUid, cached, normalizedTenantId)) {
+    return lockedLocalEdgeSnapshot(normalizedTenantId);
+  }
   if (cached && (
     cached.user.tenantId.trim().toLowerCase() !== normalizedTenantId ||
     cached.session.tenantId.trim().toLowerCase() !== normalizedTenantId ||
@@ -75,14 +97,7 @@ export async function loadLocalEdgeSnapshot(
     !authority.authorityEpoch
   ) {
     // Never expose legacy cache from a previous session or privilege scope.
-    return {
-      tenantId: normalizedTenantId,
-      generatedAt: 0,
-      snapshotVersion: 'local-locked',
-      collections: {},
-      source: 'LOCAL',
-      freshness: 'UNHYDRATED',
-    };
+    return lockedLocalEdgeSnapshot(normalizedTenantId);
   }
 
   const surfaceCollections: Record<Exclude<EdgeHydrationSurface, 'OPD'>, string[]> = {
@@ -141,13 +156,22 @@ export async function loadLocalEdgeSnapshot(
   const entries = await Promise.all(
     collectionsToLoad.map(async (collection) => [
       collection,
-      await listSecureEdgeEntities(tenantId, actorId, collection),
+      await listSecureEdgeEntities(normalizedTenantId, actorId, collection),
     ] as const)
   );
   const metadata = await getEdgeSyncMetadata(normalizedTenantId, surface);
 
+  // A user/tenant/session switch can complete while encrypted reads are
+  // pending. Revalidate before returning even a single patient record.
+  const afterRead = await getCachedAuthSession();
+  if (!canResumeOfflineIdentity(auth.currentUser?.uid, afterRead) ||
+      !canReadOfflineClinicalSnapshot(auth.currentUser?.uid, afterRead, normalizedTenantId) ||
+      afterRead?.session.sessionId !== cached.session.sessionId) {
+    return lockedLocalEdgeSnapshot(normalizedTenantId);
+  }
+
   return {
-    tenantId,
+    tenantId: normalizedTenantId,
     generatedAt: metadata?.serverGeneratedAt || metadata?.lastHydratedAt || 0,
     snapshotVersion: metadata?.snapshotVersion || 'local-unhydrated',
     collections: Object.fromEntries(entries),
@@ -286,6 +310,16 @@ export async function hydrateEdgeSnapshot(
       }
     );
     await enforceEdgeStorageBudget(normalizedTenantId).catch(() => { });
+
+    // An account switch during asynchronous persistence must never return
+    // the earlier actor's server patient snapshot to the new actor.
+    const afterPersist = await getCachedAuthSession();
+    if (!canResumeOfflineIdentity(auth.currentUser?.uid, afterPersist) ||
+        !canReadOfflineClinicalSnapshot(auth.currentUser?.uid, afterPersist, normalizedTenantId) ||
+        auth.currentUser?.uid !== currentUser.uid ||
+        afterPersist?.session.sessionId !== cached.session.sessionId) {
+      throw new Error('EDGE_HYDRATION_SESSION_CHANGED');
+    }
 
     return {
       tenantId: normalizedTenantId,

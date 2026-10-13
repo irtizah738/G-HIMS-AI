@@ -67,6 +67,7 @@ export class OpdBillingDomainService {
         'FINANCE_MANAGER',
         'SYSTEM_ADMIN',
         'ADMINISTRATOR',
+        'ADMIN',
       ],
     });
     if (!auth.authorized) {

@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
 import './globals.css';
 import { ThemeProvider } from '@/lib/theme/theme-context';
 import { GlobalErrorBoundary } from '@/components/common/GlobalErrorBoundary';
@@ -11,13 +12,16 @@ export const metadata: Metadata = {
     'Programmable Healthcare + Enterprise Operating System unifying clinical EMR workflows, protocol engines, immutable event store, SAP-style double-entry ERP General Ledger, HCM clinical privileges, diagnostic LIS/RIS, offline-first runtime, and ambient AI intelligence.',
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const reqHeaders = await headers();
+  const nonce = reqHeaders.get('x-nonce') || undefined;
+
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning nonce={nonce}>
       <body className="antialiased bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 selection:bg-blue-100 selection:text-blue-900 dark:selection:bg-blue-900 dark:selection:text-blue-100 min-h-screen">
         <GlobalErrorBoundary>
           <ThemeProvider>

@@ -56,16 +56,29 @@ export function runCiqpRestoreRehearsal(env, run = spawnSync) {
     productionReleaseAuthority: 'NOT_GRANTED',
   }));
   if (s.mode === 'DRY_RUN') return;
-  const args = [
-    'firestore', 'import', s.gcs,
-    '--project=' + s.destination,
-    '--database=' + s.databaseId,
-    '--quiet',
-  ];
-  const result = run('gcloud', args, { stdio: 'inherit' });
-  if (result.error || result.status !== 0) {
-    throw new Error('CIQP_SYNTHETIC_RESTORE_EXECUTION_FAILED');
+  // Fail closed before importing: a confirmation string is not proof that the
+  // destination database is empty. Check the actual target database and all
+  // top-level document collections using the same scoped operator identity.
+  const database = run('gcloud', [
+    'firestore', 'databases', 'describe',
+    '--project=' + s.destination, '--database=' + s.databaseId,
+    '--format=json',
+  ], { encoding: 'utf8' });
+  if (database.error || database.status !== 0) {
+    throw new Error('CIQP_RESTORE_DESTINATION_UNVERIFIED');
   }
+  let metadata;
+  try { metadata = JSON.parse(database.stdout); } catch {
+    throw new Error('CIQP_RESTORE_DESTINATION_UNVERIFIED');
+  }
+  if (!metadata?.name?.endsWith('/databases/' + s.databaseId)) {
+    throw new Error('CIQP_RESTORE_DESTINATION_UNVERIFIED');
+  }
+  // Database metadata alone cannot establish emptiness. Until an independent
+  // inventory/emptiness proof is integrated, deny imports instead of risking
+  // overwriting an existing restore target.
+  throw new Error('CIQP_RESTORE_EMPTY_DESTINATION_PROOF_REQUIRED');
+  // No import is executed without a verified empty-destination precondition.
 }
 
 if (import.meta.url === new URL('file://' + process.argv[1]).href) {

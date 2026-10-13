@@ -16,5 +16,7 @@
   "namedOperatorApproval": null,
   "credentialedClinicalReview": null,
   "institutionalAuthorization": null,
-  "reviewedProductionMigrationPlan": null
+  "reviewedProductionMigrationPlan": null,
+  "clinicalIntelligenceSnapshotLineage": null,
+  "outboxConsumptionReconciliation": null
 }

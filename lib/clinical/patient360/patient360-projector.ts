@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { isPatient360ClinicalSourceEvent } from '@/lib/clinical/patient360/clinical-source-event-policy';
 import type {
   ClinicalAllergy,
   ClinicalCondition,
@@ -555,6 +556,7 @@ export class Patient360Projector {
       .map(diseaseIntakeSummary);
 
     const patientEvents = sources.events
+      .filter(isPatient360ClinicalSourceEvent)
       .filter((event) => {
         const payloadPatientId = asString(event.payload?.patientId);
         const patientAggregateId =
@@ -795,6 +797,9 @@ export class Patient360Projector {
     return {
       projection: {
         ...content,
+        // Version the clinical-authority policy without altering the
+        // historic content hash algorithm or source evidence fingerprint.
+        projectionPolicyEpoch: 2,
         contentHash,
         projectedAt,
       },

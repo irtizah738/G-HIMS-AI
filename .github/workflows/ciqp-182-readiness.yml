@@ -1,0 +1,72 @@
+name: CIQP-182 Read-Only Staging Readiness
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ciqp182-readonly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-qualification:
+    name: CIQP-182 source guards and evidence validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      GHIMS_INTEGRATION_HL7_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Qualify exact PR source head; other workflows independently validate merge trees.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Frozen dependencies
+        run: bun install --frozen-lockfile
+      - name: Hosted staging read-only guards and evidence checker (NO hosted access)
+        run: bun run test:ciqp:readiness
+      - name: TypeScript
+        run: bun run typecheck
+
+  emulator-recovery:
+    name: CIQP-182 emulator crash/replay/race qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-p4-ci
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p4-ci
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Qualify exact PR source head; other workflows independently validate merge trees.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install emulator tooling without changing dependency authority
+        run: npm install --no-save --package-lock=false @firebase/rules-unit-testing@5.0.2 firebase-tools@15.30.2
+      - name: Synthetic policy-epoch crash/race/restore qualification (bounded)
+        run: timeout --signal=TERM --kill-after=10s 600s bun run test:ciqp:emulator

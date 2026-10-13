@@ -24,6 +24,18 @@
 | 13 | Retrospective evaluation | Protocol, evaluator, scoring harness | Institutional approval, frozen **real** dataset, >=2 independent reviewers, third adjudicator, actual report |
 | 14 | Hospital-0 | Clinical pilot charter, evidence contract | Institutional authorization, staff enrollment, signed clinical evaluation, incident review, onsite evidence |
 
+## CIQP-05 legacy Patient 360 policy epoch migration — 2026-10-12
+
+- **Current stage: source implementation + synthetic emulator qualification IN PROGRESS; not deployed-qualified, not clinically validated.**
+- Main baseline P0 repair: `720c262e4165da05c4964205751246a9783524a6`, 18/18 green push checks. Draft PR #189 contains the separate CIQP historical migration work and MUST retain its draft status until independent approval.
+- The versioned `projectionPolicyEpoch=2` is added *outside* the canonical hash input to preserve audit/content-hash compatibility. AI-generated, reviewed, approved-but-unsigned and rejected draft events remain immutable in the event store, but do not count toward the authoritative Patient 360 revision.
+- `lib/clinical/patient360/ciqp-policy-migration.ts` is an **emulator-only** migration qualification engine: explicit TEST + local Firestore emulator host + synthetic tenant + acknowledgement; there is no hosted/staging/production execution route.
+- The migration's CAS transaction re-reads the stored projection, patient, canonical clinical collections, clinical knowledge and all four patient-event routes. It only accepts a legacy revision with a matching raw event count and stored last-event cursor that is corroborated by excluded AI events; ambiguous / oversize / concurrent updates fail closed.
+- For accepted synthetic cases, it persists previous revision, cursor, source fingerprint, and content hash in a tenant-owned audit ledger, commits a generation with `timelineReady=false`, writes revision-scoped rows, and finalizes readiness only after publication. Interrupted migrations can resume idempotently without rewriting immutable events. No existing event/outbox or old timeline rows are deleted.
+- New `emulator-security/ciqp-patient360-policy-migration.test.ts` exercises synthetic migration/retry, crash and resume, signed clinical event inserted during preflight, two-worker CAS, and cross-tenant isolation. The P4 emulator CI script includes it. `tests/ciqp-patient360-policy-migration-guards.test.ts` enforces the emulator-only gate.
+- `scripts/ops/ciqp-migrate-patient360-legacy.ts` provides bounded read-only dry-run vs explicit synthetic-emulator apply, aggregate-count output only, and always reports `EMULATOR_ONLY_NOT_APPROVED`. It is **not** a live migration executable.
+- **Outstanding release evidence:** exact final SHA and full completed CI/emulator pass, realistic restore rehearsal, signed staging tenant authorization and synthetic staging dry-run/run evidence under a separately reviewed *hosted* migration design, backups/rollback, operators' approval, incident response, independently verified two-worker source-event race behavior, and clinical sign-off. Do not mark issue #182 complete or deploy PR #189 on source CI alone.
+
 ## Explicit no-claims boundary
 
 1. The `scripts/ops/ci-synthetic-validation.ts` cohort contains **fixed numerical benchmark labels** for 120 synthetic cases. Passing it verifies scoring and safety gate logic. It is **not 120 model-reviewed patients** and does not measure observed real-world clinical accuracy.

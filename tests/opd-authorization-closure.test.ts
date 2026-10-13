@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { mapHcmPrivilegeToAuthorization } from '@/server/auth/clinical-privilege-map';
 
 async function source(path: string): Promise<string> {
   return readFile(join(process.cwd(), path), 'utf8');
@@ -11,8 +12,8 @@ describe('OPD authorization closure', () => {
     const documentation = await source('lib/backend/services/clinical-documentation-domain-service.ts');
     const auth = await source('server/auth/authorization-context.ts');
     expect(documentation).toContain("requiredPrivilege: 'SIGN_CLINICAL_NOTES'");
-    expect(auth).toContain("SIGN_CLINICAL_NOTE:['SIGN_CLINICAL_NOTE','SIGN_CLINICAL_NOTES']");
-    expect(auth).toContain("SIGN_SOAP_CLINICAL_NOTE:['SIGN_SOAP_CLINICAL_NOTE','SIGN_CLINICAL_NOTES']");
+    expect(mapHcmPrivilegeToAuthorization('SIGN_CLINICAL_NOTE')).toEqual(['SIGN_CLINICAL_NOTE', 'SIGN_CLINICAL_NOTES']);
+    expect(mapHcmPrivilegeToAuthorization('SIGN_SOAP_CLINICAL_NOTE')).toEqual(['SIGN_SOAP_CLINICAL_NOTE', 'SIGN_CLINICAL_NOTES']);
     expect(auth).toContain('credentialsValid(credentials, Date.now())');
   });
 
@@ -24,9 +25,8 @@ describe('OPD authorization closure', () => {
   });
 
   test('radiology interpretation no longer grants radiology ordering', async () => {
-    const auth = await source('server/auth/authorization-context.ts');
-    expect(auth).toContain("INTERPRET_RADIOLOGY_CT_MRI:['INTERPRET_RADIOLOGY_CT_MRI','INTERPRET_IMAGING']");
-    expect(auth).not.toContain("INTERPRET_RADIOLOGY_CT_MRI:['INTERPRET_RADIOLOGY_CT_MRI','ORDER_RADIOLOGY']");
+    expect(mapHcmPrivilegeToAuthorization('INTERPRET_RADIOLOGY_CT_MRI')).toEqual(['INTERPRET_RADIOLOGY_CT_MRI', 'INTERPRET_IMAGING']);
+    expect(mapHcmPrivilegeToAuthorization('INTERPRET_RADIOLOGY_CT_MRI')).not.toContain('ORDER_RADIOLOGY');
   });
 
   test('dispensing result verification and vitals are explicitly privilege gated', async () => {

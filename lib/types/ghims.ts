@@ -139,13 +139,13 @@ export interface BillingAuditMismatch {
 
 export interface Encounter {
   id: string;
-  type: 'Inpatient' | 'Outpatient' | 'Emergency';
+  type: 'Inpatient' | 'Outpatient' | 'Emergency' | 'Telehealth';
   department: string;
   admitDate: string;
   dischargeDate?: string;
   chiefComplaint: string;
   attendingPhysician: string;
-  status: 'active' | 'discharged' | 'transferred';
+  status: 'active' | 'completed' | 'cancelled' | 'discharged' | 'transferred';
   vitalsHistory: Vitals[];
   clinicalNotes: ClinicalNote[];
   medications: Medication[];
@@ -169,6 +169,7 @@ export interface Patient {
   gender: 'Male' | 'Female' | 'Other';
   bloodGroup: 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-' | 'Unknown';
   contactNumber: string;
+  nationalId?: string;
   email: string;
   address: string;
   emergencyContact: {
@@ -180,6 +181,12 @@ export interface Patient {
   chronicConditions: string[];
   activeBedId?: string;
   activeEncounterId?: string;
+  activeCareContexts?: {
+    activeOpdEncounterIds?: string[];
+    activeTelehealthEncounterIds?: string[];
+    activeIpdEncounterId?: string;
+    activeEmergencyEncounterId?: string;
+  };
   encounters: Encounter[];
   registeredAt: string;
   status?: 'ACTIVE' | 'MERGED' | 'INACTIVE' | 'DECEASED' | 'REMOVED';
@@ -380,6 +387,7 @@ export interface TelehealthPrescription {
 export interface TelehealthSession {
   id: string;
   tenantId?: string;
+  facilityId?: string;
   encounterId: string;
   patientId: string;
   patientName: string;
@@ -388,6 +396,7 @@ export interface TelehealthSession {
   gender: string;
   scheduledTime: string;
   status: 'WAITING_ROOM' | 'IN_CONSULTATION' | 'DOCUMENTING' | 'COMPLETED' | 'CANCELLED';
+  assignedProviderId?: string;
   type: 'Telehealth Consultation' | 'Remote Post-Op Follow-up' | 'RPM Chronic Care Review' | 'Urgent Tele-Triage';
   attendingPhysician: string;
   clinicianNpi: string;

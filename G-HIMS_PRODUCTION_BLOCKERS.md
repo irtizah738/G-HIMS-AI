@@ -9,12 +9,15 @@ A blocker is closed only by evidence, not by changing a label.
 | P3-ENV-01 | Deployment | Target production environment has not been evaluated by `/api/health/ready` with real production configuration | Readiness 200 response tied to deployed commit/environment |
 | P3-DR-01 | Backup/restore | No repository evidence of a successful isolated restore drill | Drill record with export/import IDs, timestamps, measured recovery point and restore duration |
 | P3-OBS-01 | Monitoring | External alert sink/on-call routing is not proven by repository code | Controlled alert delivery evidence and ownership |
+| P3-IAM-01 | Production identity assurance | Verified email and Firebase MFA enrollment not yet validated for hospital staff | Provider-backed role-by-role MFA, emergency staff login recovery, claim and revocation test evidence |
+| P3-OFF-01 | Offline identity continuity | Staff cross-UID cache isolation and reconnect revocation require live qualification | Device/UID-switch, revoked offline cache, online replay denied and reauthorization evidence |
 | EXT-DICOM-01 | PACS | No live PACS/VNA conformance validation | Site integration test evidence |
 | EXT-DEVICE-01 | Medical devices | Physical telemetry transport/device identity/calibration validation incomplete | Manufacturer/site validation and clinical engineering sign-off |
 | EXT-HL7-01 | Interface engine | Institutional HL7 mappings/transport not validated | Interface-engine test evidence |
 | EXT-EDI-01 | Claims | Payer/clearinghouse companion-guide validation incomplete | Accepted test transaction/certification evidence |
 | EXT-GOV-01 | Governance | No hospital pilot/production approval exists in repository evidence | Institutional approval outside repository |
 | EXT-SEC-01 | Security | Independent production penetration assessment not evidenced | Assessment + remediation report |
+| CIQP-P360-182 | Clinical Intelligence / Patient 360 | Legacy unsigned-AI-contaminated projection revisions still require a separately approved hosted migration and clinical/institutional validation; current implementation is synthetic-emulator-only | Exact SHA green emulator race/crash/replay tests, approved synthetic staging migration and restore drill, current projection/timeline parity, source ledger hashes and signed operator + clinician release approval |
 
 ## Containment already implemented
 

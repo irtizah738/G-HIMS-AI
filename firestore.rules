@@ -328,6 +328,11 @@ service cloud.firestore {
       match /patient360ProjectionCheckpoints/{eventId} {
         allow read, write: if false;
       }
+      // CIQP policy migration carries protected clinical provenance metadata.
+      // Client SDKs may neither access nor forge the migration ledger.
+      match /patient360ProjectionPolicyMigrations/{patientId} {
+        allow read, write: if false;
+      }
 
       // Clinical Intelligence is derived PHI. Clients consume bounded projections
       // only through authenticated server APIs / encrypted offline hydration.

@@ -3,6 +3,8 @@ import { extractBearerToken, verifyFirebaseToken } from '@/server/auth/verify-to
 import { getUserAccessibleTenants, getTenantMembership } from '@/server/auth/tenant-membership';
 import { resolveAuthorizationContext } from '@/server/auth/authorization-context';
 import { createSession } from '@/server/auth/session-service';
+import { registerOrUpdateDevice } from '@/server/auth/device-service';
+import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
 import { logAuthEvent } from '@/server/auth/audit-service';
 import { getAdminAuth } from '@/server/firebase/admin';
 import { LoginResponsePayload } from '@/lib/auth/auth-types';
@@ -34,7 +36,10 @@ export async function POST(req: NextRequest) {
     const verifiedToken = await verifyFirebaseToken(token, true);
 
     const body = await req.json().catch(() => ({}));
-    const targetTenantId = (body.tenantId || '').trim().toLowerCase();
+    const targetTenantId = String(body.tenantId || '').trim().toLowerCase();
+    const deviceData = body.device || {};
+    const mode = getRuntimeMode();
+    const deviceRequired = mode === 'STAGING' || mode === 'PRODUCTION';
 
     if (!targetTenantId) {
       return NextResponse.json({ error: 'tenantId is required' }, { status: 400 });
@@ -59,6 +64,29 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Resolve the full authorization policy, including verified email, staff MFA
+    // and canonical HCM credentials BEFORE mutating tenant claims or sessions.
+    // Membership alone never constitutes production identity assurance.
+    await resolveAuthorizationContext(verifiedToken, targetTenantId);
+
+    if (deviceRequired && !String(deviceData.deviceId || '').trim()) {
+      throw new AuthError({
+        code: 'DEVICE_REVOKED',
+        message: 'A registered workstation identity is required for tenant switching.',
+        statusCode: 403,
+      });
+    }
+    const registeredDevice = deviceData.deviceId
+      ? await registerOrUpdateDevice({
+          deviceId: String(deviceData.deviceId).trim(),
+          userId: verifiedToken.uid,
+          tenantId: targetTenantId,
+          deviceType: deviceData.deviceType,
+          platform: deviceData.platform,
+          appVersion: deviceData.appVersion,
+        })
+      : undefined;
+
     // 2. Update Firebase custom claims for active tenant scope
     const adminAuth = getAdminAuth();
     if (!adminAuth) {
@@ -76,12 +104,12 @@ export async function POST(req: NextRequest) {
 
     await adminAuth.setCustomUserClaims(verifiedToken.uid, {
       tenantId: targetTenantId,
-      role: membership.roles[0] || 'doctor',
+      role: membership.roles[0],
       roles: membership.roles,
       accessibleTenants: accessibleTenantsBeforeSwitch
         .filter((tenant) => tenant.status === 'ACTIVE')
         .map((tenant) => tenant.tenantId),
-      department: membership.departmentIds[0] || 'general_medicine',
+      ...(membership.departmentIds[0] ? { department: membership.departmentIds[0] } : {}),
       claimedAt: Date.now(),
     });
 
@@ -89,6 +117,7 @@ export async function POST(req: NextRequest) {
     const session = await createSession({
       userId: verifiedToken.uid,
       tenantId: targetTenantId,
+      deviceId: registeredDevice?.deviceId,
       ip: clientIp,
       userAgent,
     });
@@ -96,7 +125,8 @@ export async function POST(req: NextRequest) {
     const authContext = await resolveAuthorizationContext(
       verifiedToken,
       targetTenantId,
-      session.sessionId
+      session.sessionId,
+      registeredDevice?.deviceId
     );
 
     const accessibleTenants = await getUserAccessibleTenants(verifiedToken.uid, verifiedToken.email);
@@ -134,6 +164,7 @@ export async function POST(req: NextRequest) {
       session: {
         sessionId: session.sessionId,
         expiresAt: session.expiresAt,
+        deviceId: session.deviceId,
       },
       accessibleTenants: accessibleTenants.map((t) => ({
         tenantId: t.tenantId,

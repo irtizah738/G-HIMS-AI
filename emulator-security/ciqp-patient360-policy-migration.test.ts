@@ -133,8 +133,18 @@ describe('CIQP-05 controlled synthetic Patient360 legacy migration (Firestore em
     expect(partial.projectionPolicyEpoch).toBe(2);
     expect(partial.timelineReady).toBe(false);
     console.info('CIQP_EMULATOR_CHECKPOINT_BEFORE_FAIL_CLOSED_PROJECTION_READ');
-    await expect(Patient360ProjectionService.getProjection(tenantId, patientId))
-      .rejects.toThrow('PATIENT360_TIMELINE_NOT_READY');
+    // Explicitly await and inspect the rejection. A failed clinical read must
+    // reject rather than hang, resolve with stale data, or rely on a test
+    // runner's asynchronous rejection matcher.
+    let failClosedReadError: unknown;
+    try {
+      await Patient360ProjectionService.getProjection(tenantId, patientId);
+    } catch (error) {
+      failClosedReadError = error;
+    }
+    console.info('CIQP_EMULATOR_CHECKPOINT_AFTER_FAIL_CLOSED_PROJECTION_READ');
+    expect(failClosedReadError).toBeInstanceOf(Error);
+    expect((failClosedReadError as Error).message).toBe('PATIENT360_TIMELINE_NOT_READY');
     console.info('CIQP_EMULATOR_CHECKPOINT_INCOMPLETE_VIEW_DENIED');
     console.info('CIQP_EMULATOR_CHECKPOINT_BEFORE_RECOVERY_RETRY');
     const recovered = await migratePatient360LegacyPolicyEmulator(tenantId, patientId);

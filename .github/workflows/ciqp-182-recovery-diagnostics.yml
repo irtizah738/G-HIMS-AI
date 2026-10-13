@@ -39,6 +39,9 @@ jobs:
       NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Qualify exact PR source head; other workflows independently validate merge trees.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2

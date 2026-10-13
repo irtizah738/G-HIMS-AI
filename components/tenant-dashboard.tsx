@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useHospital } from '@/lib/context/hospital-context';
-import { useAuth } from '@/lib/firebase/auth-context';
+import { useAuth } from '@/lib/auth/auth-context';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
 import { CommandHubView } from '@/components/views/command-hub-view';
@@ -101,7 +101,7 @@ export function TenantDashboard() {
   const { currentTenant } = useTenant();
   const currentTenantId = currentTenant?.id || 'central-metro-hospital';
   const { activeTab, setActiveTab, stats, mismatches, networkMode, patients } = useHospital();
-  const { user, signInWithGoogle, signOut, loading: authLoading } = useAuth();
+  const { user, signOut, loading: authLoading } = useAuth();
   const { currentRole, roleDefinition, canAccessModule, setRole } = useRBAC();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [sidebarMobileOpen, setSidebarMobileOpen] = useState(false);

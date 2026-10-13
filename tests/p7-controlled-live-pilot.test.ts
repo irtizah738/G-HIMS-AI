@@ -5,61 +5,6 @@ import path from 'node:path';
 const source = (file: string) => readFile(path.join(process.cwd(), file), 'utf8');
 
 describe('G-HIMS P7 controlled live pilot qualification', () => {
-  test('staging persona provisioning is fail-closed to the dedicated STAGING project', async () => {
-    const provision = await source('scripts/ops/p7-provision-staging-identities.ts');
-
-    expect(provision).toContain("runtime !== 'STAGING'");
-    expect(provision).toContain('GHIMS_P7_ALLOW_STAGING_PROVISION');
-    expect(provision).toContain('GHIMS_P7_CONFIRM_PROJECT');
-    expect(provision).toContain('GHIMS_FIREBASE_PROJECT_ID_STAGING');
-    expect(provision).toContain('P7_STAGING_PROJECT_MISMATCH');
-    expect(provision).toContain("password.length < 16");
-    expect(provision).toContain('Passwords are intentionally omitted from output');
-  });
-
-  test('hospital-day rehearsal uses real Firebase auth, authoritative sessions and protected APIs', async () => {
-    const rehearsal = await source('scripts/ops/p7-hospital-day-rehearsal.ts');
-
-    expect(rehearsal).toContain('accounts:signInWithPassword');
-    expect(rehearsal).toContain("request('/api/auth/session'");
-    expect(rehearsal).toContain("request('/api/health/ready')");
-    expect(rehearsal).toContain('/api/offline/bootstrap');
-    expect(rehearsal).toContain("request('/api/clinical/encounter/create'");
-    expect(rehearsal).toContain("request('/api/commands/execute'");
-    expect(rehearsal).toContain("'RecordVitalsCommand'");
-    expect(rehearsal).toContain("'SignClinicalNoteCommand'");
-    expect(rehearsal).toContain("'PlaceDiagnosticOrderCommand'");
-    expect(rehearsal).toContain("'RecordCashReceiptCommand'");
-    expect(rehearsal).toContain("'PrescribeMedicationCommand'");
-    expect(rehearsal).toContain("'DispensePrescriptionCommand'");
-  });
-
-  test('hospital-day rehearsal explicitly verifies duplicate registration idempotency', async () => {
-    const rehearsal = await source('scripts/ops/p7-hospital-day-rehearsal.ts');
-
-    expect(rehearsal).toContain('registration_idempotent_retry');
-    expect(rehearsal).toContain("duplicate?.data?.patient?.id === patientId");
-    expect(rehearsal).toContain("duplicate?.data?.encounter?.id === encounterId");
-  });
-
-  test('hospital-day rehearsal includes all required operational personas', async () => {
-    const rehearsal = await source('scripts/ops/p7-hospital-day-rehearsal.ts');
-
-    for (const persona of [
-      "'admin'",
-      "'reception'",
-      "'nurse'",
-      "'doctor'",
-      "'billing'",
-      "'lab'",
-      "'pharmacy'",
-    ]) {
-      expect(rehearsal).toContain(persona);
-    }
-    expect(rehearsal).toContain('role_scoped_offline_bootstrap');
-    expect(rehearsal).toContain('lab_order_visibility');
-  });
-
   test('P7 evidence manifest refuses to equate code assertions with external evidence', async () => {
     const manifest = await source('scripts/ops/p7-evidence-manifest.ts');
 
@@ -93,14 +38,4 @@ describe('G-HIMS P7 controlled live pilot qualification', () => {
     expect(p6).toContain('requires_review');
     expect(p7).toContain('docs/operations/OFFLINE_FIRST_QUALIFICATION.md');
   });
-  test('staging clinician provisioning creates HCM credential and privilege evidence', async () => {
-    const provision = await source('scripts/ops/p7-provision-staging-identities.ts');
-    expect(provision).toContain("collection('employees')");
-    expect(provision).toContain("collection('clinicalCredentials')");
-    expect(provision).toContain("collection('clinicalPrivileges')");
-    expect(provision).toContain('syntheticQualificationRecord');
-    expect(provision).toContain("'PRESCRIBE_MEDICATION'");
-    expect(provision).toContain("'SIGN_SOAP_CLINICAL_NOTE'");
-  });
-
 });

@@ -3,13 +3,31 @@ import { getRuntimeMode, inferRuntimeModeFromNodeEnv, type GhimsRuntimeMode } fr
 type ProjectMap = Partial<Record<GhimsRuntimeMode, string>>;
 
 function clean(value: string | undefined): string {
-  return String(value || '').trim();
+  if (!value) return '';
+  let str = String(value).trim();
+  if (
+    (str.startsWith('"') && str.endsWith('"')) ||
+    (str.startsWith("'") && str.endsWith("'"))
+  ) {
+    str = str.slice(1, -1).trim();
+  }
+  return str;
+}
+
+function assertConfiguredTestDemoDistinct(testId: string, demoId: string, scope: string): void {
+  if (testId && demoId && testId === demoId) {
+    throw new Error('ENVIRONMENT_PROJECT_COLLISION: ' + scope +
+      ' TEST and DEMO must use distinct explicitly configured Firebase projects.');
+  }
 }
 
 function serverProjectMap(): ProjectMap {
+  const demo = clean(process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO);
+  const test = clean(process.env.GHIMS_FIREBASE_PROJECT_ID_TEST);
+  assertConfiguredTestDemoDistinct(test, demo, 'server');
   return {
-    DEMO: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO) || clean(process.env.FIREBASE_PROJECT_ID) || 'g-hims-ai',
-    TEST: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_TEST) || 'ghims-test',
+    DEMO: demo,
+    TEST: test || 'ghims-test',
     STAGING: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_STAGING),
     PRODUCTION: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION),
   };
@@ -18,16 +36,19 @@ function serverProjectMap(): ProjectMap {
 function clientProjectMap(): ProjectMap {
   // NEXT_PUBLIC variables must be referenced statically so Next.js can inline them
   // into the browser bundle.
+  const demo = clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_DEMO);
+  const test = clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST);
+  assertConfiguredTestDemoDistinct(test, demo, 'client');
   return {
-    DEMO: clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_DEMO) || clean(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) || 'g-hims-ai',
-    TEST: clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST) || 'ghims-test',
+    DEMO: demo,
+    TEST: test || 'ghims-test',
     STAGING: clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING),
     PRODUCTION: clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION),
   };
 }
 
 function assertDistinctNamedProjects(projects: ProjectMap, scope: string): void {
-  const protectedModes: GhimsRuntimeMode[] = ['DEMO', 'STAGING', 'PRODUCTION'];
+  const protectedModes: GhimsRuntimeMode[] = ['TEST', 'DEMO', 'STAGING', 'PRODUCTION'];
   const seen = new Map<string, GhimsRuntimeMode>();
 
   for (const mode of protectedModes) {

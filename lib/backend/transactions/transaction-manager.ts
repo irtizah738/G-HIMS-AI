@@ -269,6 +269,7 @@ function collectionForEntityType(entityType: string): string {
     RESOURCE_RESERVATION: 'resourceReservations',
     MAINTENANCE_WORK_ORDER: 'maintenanceWorkOrders',
     CALIBRATION_RECORD: 'calibrationRecords',
+    PATIENT: 'patients',
     PATIENT_MPI: 'patients',
     PATIENT_SAFETY: 'patients',
     PATIENT_IDENTITY_CONFIRMATION: 'patientIdentityConfirmations',
@@ -1047,7 +1048,7 @@ export class TransactionManager {
     });
 
     const db = getAdminFirestore();
-    if (!db) {
+    if (!db || (canUseEphemeralPersistence() && this.hasEphemeralState(context.tenantId))) {
       if (!canUseEphemeralPersistence()) {
         throw new Error('TRANSACTION_STORE_UNAVAILABLE: durable Firestore transaction store is required.');
       }

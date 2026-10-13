@@ -30,7 +30,13 @@ describe('ORC-1 tenant hydration authority', () => {
     expect(client).toContain('EDGE_HYDRATION_BAD_REQUEST');
     expect(client).toContain("freshness: 'CURRENT'");
     expect(client).toContain("freshness: 'UNHYDRATED'");
+    // A combined pending-context gate is safer than mounting children while
+    // either authentication or tenant resolution is incomplete.
     expect(guard).toContain('if (loading || unresolved)');
+    expect(guard).toContain('if (!loading && !user)');
     expect(guard).toContain('if (mismatched)');
+    expect(guard).toContain('return <>{children}</>');
+    expect(guard.indexOf('if (loading || unresolved)')).toBeLessThan(guard.indexOf('return <>{children}</>'));
+    expect(guard.indexOf('if (mismatched)')).toBeLessThan(guard.indexOf('return <>{children}</>'));
   });
 });

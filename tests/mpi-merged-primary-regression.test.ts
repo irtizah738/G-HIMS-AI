@@ -101,4 +101,44 @@ describe('MPI already-merged primary regression', () => {
     expect(audits[0].newValue).toBeUndefined();
     expect((await TransactionManager.getEvents(tenantId))[0].eventType).toBe('PATIENT_RECORDS_MERGED');
   });
+
+  test('tenant_02bb76e3 mock patients resolve and merge without PRIMARY_PATIENT_NOT_FOUND', async () => {
+    const mockContext: CommandContext = {
+      tenantId: 'tenant_02bb76e3',
+      actorId: 'admin-dev',
+      roles: ['ADMINISTRATOR'],
+      permissions: [],
+      clinicalPrivileges: [],
+      requestId: 'req-mock-merge',
+      correlationId: 'corr-mock-merge',
+    };
+    const result = await PatientMergeDomainService.merge(mockContext, 'cmd-mock-1', 'idemp-mock-1', {
+      primaryPatientId: 'mock-eleanor-001',
+      secondaryPatientId: 'mock-test-002',
+      mergeReason: 'Merging duplicate testing records for Eleanor Vance.',
+      overrideDemographicConflict: true,
+    });
+    expect(result.success).toBe(true);
+    expect(result.data?.status).toBe('MERGED');
+  });
+
+  test('MRN-based merge resolves correctly and prevents self-merge across ID and MRN formats', async () => {
+    const mockContext: CommandContext = {
+      tenantId: 'tenant_02bb76e3',
+      actorId: 'admin-dev',
+      roles: ['ADMINISTRATOR'],
+      permissions: [],
+      clinicalPrivileges: [],
+      requestId: 'req-mrn-merge',
+      correlationId: 'corr-mrn-merge',
+    };
+    // Passing mock-eleanor-001 and its MRN MRN-20260820-8790 should detect self-merge
+    const selfMerge = await PatientMergeDomainService.merge(mockContext, 'cmd-self-1', 'idemp-self-1', {
+      primaryPatientId: 'mock-eleanor-001',
+      secondaryPatientId: 'MRN-20260820-8790',
+      mergeReason: 'Attempting self-merge with differing ID representations.',
+    });
+    expect(selfMerge.success).toBe(false);
+    expect(selfMerge.error?.code).toBe('INVALID_MERGE_SELF');
+  });
 });

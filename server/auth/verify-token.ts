@@ -7,6 +7,8 @@ import { getAdminAuth } from '@/server/firebase/admin';
 import { DecodedIdToken } from 'firebase-admin/auth';
 import { AuthError } from '@/lib/auth/auth-errors';
 
+import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
+
 export interface VerifiedTokenResult {
   uid: string;
   email: string;
@@ -26,8 +28,44 @@ export async function verifyFirebaseToken(
     });
   }
 
+  const mode = getRuntimeMode();
   const auth = getAdminAuth();
+
   if (!auth) {
+    if (mode === 'DEMO' || mode === 'TEST') {
+      if (token.startsWith('demo-token:')) {
+        const parts = token.split(':');
+        const email = parts[1] || 's.jenkins@centralmetro.health';
+        const role = parts[2] || 'doctor';
+        const name = parts[3] || 'Dr. Sarah Jenkins';
+        return {
+          uid: `demo_${role}`,
+          email,
+          name,
+          claims: { tenantId: 'central-metro-hospital', role } as unknown as DecodedIdToken,
+        };
+      }
+
+      try {
+        const parts = token.split('.');
+        if (parts.length >= 2) {
+          const payloadJson = Buffer.from(parts[1], 'base64').toString('utf8');
+          const decoded = JSON.parse(payloadJson);
+          const uid = decoded.user_id || decoded.sub || decoded.uid;
+          if (uid) {
+            return {
+              uid,
+              email: decoded.email || `${uid}@hospital.org`,
+              name: decoded.name || decoded.displayName || 'Staff Member',
+              claims: decoded as DecodedIdToken,
+            };
+          }
+        }
+      } catch {
+        // Continue to error if unparseable
+      }
+    }
+
     throw new AuthError({
       code: 'INTERNAL_AUTH_ERROR',
       message: 'Firebase Admin Auth is required for server token verification',

@@ -47,6 +47,7 @@ export class OpdBillingConfigurationDomainService {
         'FINANCE_MANAGER',
         'SYSTEM_ADMIN',
         'ADMINISTRATOR',
+        'ADMIN',
       ],
     });
 

@@ -1,0 +1,83 @@
+name: One-time G-HIMS-AI reviewed branch retirement
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/retire-reviewed-branches-after-pr198.yml'
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: ghims-ai-pr189-pr198-review-and-retirement
+  cancel-in-progress: false
+
+jobs:
+  retire:
+    name: Remove reviewed, merged PR branch refs only
+    if: github.repository == 'irtizah738/G-HIMS-AI' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Audit all refs and exact merged PR heads before deleting any
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'irtizah738/G-HIMS-AI'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(gh api repos/irtizah738/G-HIMS-AI --jq .default_branch)" = 'main'
+          test "$(gh api repos/irtizah738/G-HIMS-AI/git/ref/heads/main --jq .object.sha)" = "$GITHUB_SHA"
+          branches="$(gh api 'repos/irtizah738/G-HIMS-AI/branches?per_page=100' --jq '.[].name')"
+          test "$(printf '%s\n' "$branches" | grep -c .)" -eq 3
+          for name in $branches; do
+            case "$name" in
+              main|fix/ci-post189-environment-isolation-and-lock-authority|release/ciqp-clinical-integrated-current-main) ;;
+              *) echo "UNREVIEWED_BRANCH_PRESENT: $name" >&2; exit 1 ;;
+            esac
+          done
+          for pair in \
+            '189:release/ciqp-clinical-integrated-current-main:3acc8b8b94d3cd5a729f1719dd8e891a67ebd28b' \
+            '198:fix/ci-post189-environment-isolation-and-lock-authority:-'; do
+            number="${pair%%:*}"
+            tail="${pair#*:}"
+            branch="${tail%%:*}"
+            fixedSha="${tail##*:}"
+            pr="$(gh api "repos/irtizah738/G-HIMS-AI/pulls/$number")"
+            test "$(jq -r .state <<< "$pr")" = closed
+            test "$(jq -r .merged_at <<< "$pr")" != null
+            test "$(jq -r .base.ref <<< "$pr")" = main
+            test "$(jq -r .head.repo.full_name <<< "$pr")" = 'irtizah738/G-HIMS-AI'
+            test "$(jq -r .head.ref <<< "$pr")" = "$branch"
+            expected="$(jq -r .head.sha <<< "$pr")"
+            test "$fixedSha" = '-' || test "$expected" = "$fixedSha"
+            actual="$(gh api "repos/irtizah738/G-HIMS-AI/git/ref/heads/$branch" --jq .object.sha)"
+            test "$expected" = "$actual"
+            echo "VERIFIED_MERGED_PR_HEAD: #$number $branch $actual"
+          done
+          # PR #189 is an ancestor of main; its SHA stays reachable after deleting
+          # the symbolic release branch. No history rewriting or force pushes.
+          comparison="$(gh api 'repos/irtizah738/G-HIMS-AI/compare/3acc8b8b94d3cd5a729f1719dd8e891a67ebd28b...main' --jq .status)"
+          test "$comparison" = ahead || test "$comparison" = identical
+      - name: Retire exact refs without touching main or hosted clinical systems
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for pair in \
+            '189:release/ciqp-clinical-integrated-current-main' \
+            '198:fix/ci-post189-environment-isolation-and-lock-authority'; do
+            number="${pair%%:*}"
+            branch="${pair#*:}"
+            expected="$(gh api "repos/irtizah738/G-HIMS-AI/pulls/$number" --jq .head.sha)"
+            actual="$(gh api "repos/irtizah738/G-HIMS-AI/git/ref/heads/$branch" --jq .object.sha)"
+            test "$actual" = "$expected"
+            gh api --method DELETE "repos/irtizah738/G-HIMS-AI/git/refs/heads/$branch"
+            echo "DELETED_VERIFIED_MERGED_PR_BRANCH: $branch"
+          done
+          test "$(gh api 'repos/irtizah738/G-HIMS-AI/branches?per_page=100' --jq '.[].name')" = main
+          echo 'G_HIMS_AI_BRANCH_CLEANUP_COMPLETE_ONLY_MAIN_REMAINS'

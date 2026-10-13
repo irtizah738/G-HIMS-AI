@@ -52,23 +52,32 @@ describe('CIQP-07 protected offline Patient 360 access', () => {
     expect(canReadOfflineClinicalSnapshot(user.uid, { user, session: { ...session, userId: 'synthetic-clinician-B' } }, 'hospital-a', NOW)).toBe(false);
   });
 
-  test('actual edge source checks restored identity both before reading and after async reads', async () => {
+  test('edge hydration checks both current identity policies before and after asynchronous PHI reads', async () => {
     const source = await readFile('lib/offline/hydration.ts', 'utf8');
-    const before = source.indexOf('if (!canReadOfflineClinicalSnapshot(restoredUid, cached, normalizedTenantId))');
-    const authorityRead = source.indexOf("const authority = await getEdgeSyncMetadata(normalizedTenantId, 'edge-authority')");
-    const encryptedRead = source.indexOf('await listSecureEdgeEntities(tenantId, actorId, collection)');
-    const post = source.indexOf('if (!canReadOfflineClinicalSnapshot(auth.currentUser?.uid, latest, normalizedTenantId)');
-    const exposed = source.indexOf('collections: Object.fromEntries(entries)');
-    const persisted = source.indexOf('await replaceSecureTenantEdgeSnapshot(');
-    const postWrite = source.indexOf('if (!canReadOfflineClinicalSnapshot(auth.currentUser?.uid, afterWrite, normalizedTenantId)');
-    const serverReturn = source.indexOf("freshness: 'CURRENT'");
-    expect(before).toBeGreaterThan(0);
-    expect(authorityRead).toBeGreaterThan(before);
-    expect(encryptedRead).toBeGreaterThan(before);
+    const local = source.split('export async function loadLocalEdgeSnapshot(')[1]
+      ?.split('export async function hydrateEdgeSnapshot(')[0] || '';
+    const server = source.split('export async function hydrateEdgeSnapshot(')[1] || '';
+    const before = local.indexOf('canResumeOfflineIdentity(auth.currentUser?.uid, cached)');
+    const policyBefore = local.indexOf('canReadOfflineClinicalSnapshot(restoredUid, cached, normalizedTenantId)');
+    const authorityRead = local.indexOf("const authority = await getEdgeSyncMetadata(normalizedTenantId, 'edge-authority')");
+    const encryptedRead = local.indexOf('await listSecureEdgeEntities(normalizedTenantId, actorId, collection)');
+    const post = local.indexOf('canResumeOfflineIdentity(auth.currentUser?.uid, afterRead)');
+    const postClinical = local.indexOf('canReadOfflineClinicalSnapshot(auth.currentUser?.uid, afterRead, normalizedTenantId)');
+    const exposed = local.indexOf('collections: Object.fromEntries(entries)');
+    const persisted = server.indexOf('await replaceSecureTenantEdgeSnapshot(');
+    const postWrite = server.indexOf('canResumeOfflineIdentity(auth.currentUser?.uid, afterPersist)');
+    const postClinicalWrite = server.indexOf('canReadOfflineClinicalSnapshot(auth.currentUser?.uid, afterPersist, normalizedTenantId)');
+    const serverReturn = server.lastIndexOf("freshness: 'CURRENT'");
+    expect(before).toBeGreaterThan(-1);
+    expect(policyBefore).toBeGreaterThan(before);
+    expect(authorityRead).toBeGreaterThan(policyBefore);
+    expect(encryptedRead).toBeGreaterThan(authorityRead);
     expect(post).toBeGreaterThan(encryptedRead);
-    expect(exposed).toBeGreaterThan(post);
+    expect(postClinical).toBeGreaterThan(post);
+    expect(exposed).toBeGreaterThan(postClinical);
     expect(postWrite).toBeGreaterThan(persisted);
-    expect(serverReturn).toBeGreaterThan(postWrite);
+    expect(postClinicalWrite).toBeGreaterThan(postWrite);
+    expect(serverReturn).toBeGreaterThan(postClinicalWrite);
     expect(source).toContain('OFFLINE_IDENTITY_NOT_VERIFIED');
   });
 });

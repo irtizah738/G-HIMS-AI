@@ -10,6 +10,8 @@ import { getTenantMembership } from './tenant-membership';
 import { mapHcmPrivilegeToAuthorization } from './clinical-privilege-map';
 import { credentialsValid } from '@/lib/clinical/intelligence/consultant-directory-service';
 import { getAdminFirestore } from '@/server/firebase/admin';
+import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
+import { assertPrivilegedSecondFactor } from './identity-assurance';
 import type {
   ClinicalPrivilege,
   EmployeeCredential,
@@ -175,6 +177,10 @@ export async function resolveAuthorizationContext(
       userMessage: 'Your account registration is pending departmental administrator approval.',
     });
   }
+
+  // Staff in production-like environments must complete provider-verified MFA
+  // before any tenant or HCM privileges are evaluated. No role exceptions.
+  assertPrivilegedSecondFactor(verifiedToken.claims, membership.roles, getRuntimeMode());
 
   const hcmPrivileges = isClinicalRole(membership.roles)
     ? await resolveCredentialGatedPrivileges({

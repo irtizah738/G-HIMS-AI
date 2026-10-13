@@ -9,6 +9,8 @@ A blocker is closed only by evidence, not by changing a label.
 | P3-ENV-01 | Deployment | Target production environment has not been evaluated by `/api/health/ready` with real production configuration | Readiness 200 response tied to deployed commit/environment |
 | P3-DR-01 | Backup/restore | No repository evidence of a successful isolated restore drill | Drill record with export/import IDs, timestamps, measured recovery point and restore duration |
 | P3-OBS-01 | Monitoring | External alert sink/on-call routing is not proven by repository code | Controlled alert delivery evidence and ownership |
+| P3-IAM-01 | Production identity assurance | Verified email and Firebase MFA enrollment not yet validated for hospital staff | Provider-backed role-by-role MFA, emergency staff login recovery, claim and revocation test evidence |
+| P3-OFF-01 | Offline identity continuity | Staff cross-UID cache isolation and reconnect revocation require live qualification | Device/UID-switch, revoked offline cache, online replay denied and reauthorization evidence |
 | EXT-DICOM-01 | PACS | No live PACS/VNA conformance validation | Site integration test evidence |
 | EXT-DEVICE-01 | Medical devices | Physical telemetry transport/device identity/calibration validation incomplete | Manufacturer/site validation and clinical engineering sign-off |
 | EXT-HL7-01 | Interface engine | Institutional HL7 mappings/transport not validated | Interface-engine test evidence |

@@ -14,6 +14,7 @@ import {
 } from 'firebase/auth';
 import { auth } from '@/lib/firebase/client';
 import { probeApplicationConnectivity } from '@/lib/offline/connectivity';
+import { canResumeOfflineIdentity } from './offline-session-policy';
 import {
   AuthenticatedUser,
   LoginResponsePayload,
@@ -298,19 +299,23 @@ export class AuthClient {
   public static async validateCurrentSession(): Promise<LoginResponsePayload | null> {
     try {
       const cached = await getCachedAuthSession();
+      // Resolve persisted Firebase identity before evaluating encrypted offline cache.
+      await auth.authStateReady();
       const currentUser = auth.currentUser;
 
       // Offline cache is a continuity aid only; it is never used to mint new authority.
       // navigator.onLine is not authoritative in sandboxed/managed browsers.
       const connectivity = await probeApplicationConnectivity();
       if (!connectivity.isOnline) {
-        if (!cached) return null;
+        if (!cached || !canResumeOfflineIdentity(currentUser?.uid, cached)) return null;
         await migrateLegacyEdgeStorage({
           tenantId: cached.user.tenantId,
           actorId: cached.user.uid,
         }).catch(() => {});
         return {
-          authenticated: true,
+          authenticated: false,
+          offlineContinuity: true,
+          offlineContinuityAuthenticatedAt: cached.session.authenticatedAt,
           user: {
             uid: cached.user.uid,
             displayName: cached.user.displayName,
@@ -322,10 +327,12 @@ export class AuthClient {
           },
           authorization: {
             roles: cached.user.roles,
-            permissions: cached.user.permissions,
+            // Cached authorization can be revoked without connectivity. Keep
+            // scope for local display but remove online command entitlements.
+            permissions: [],
             departmentIds: cached.user.departmentIds,
             facilityIds: cached.user.facilityIds,
-            clinicalPrivileges: cached.user.clinicalPrivileges || [],
+            clinicalPrivileges: [],
             accountStatus: cached.user.accountStatus,
           },
           session: {
@@ -341,6 +348,10 @@ export class AuthClient {
       }
 
       if (!currentUser || !cached) return null;
+      if (!canResumeOfflineIdentity(currentUser.uid, cached)) {
+        await clearCachedAuthSession();
+        return null;
+      }
 
       const idToken = await currentUser.getIdToken(false);
       const response = await fetch('/api/auth/session', {
@@ -349,6 +360,9 @@ export class AuthClient {
           Authorization: `Bearer ${idToken}`,
           'x-ghims-tenant-id': cached.user.tenantId,
           'x-ghims-session-id': cached.session.sessionId,
+          ...(cached.session.deviceId
+            ? { 'x-ghims-device-id': cached.session.deviceId }
+            : {}),
         },
       });
 
@@ -361,6 +375,11 @@ export class AuthClient {
     } catch {
       return null;
     }
+  }
+
+  /** Discard cached session, tenant memberships and offline capture lease. */
+  public static async invalidateLocalAuthorization(): Promise<void> {
+    await clearCachedAuthSession();
   }
 
   /**
@@ -451,10 +470,11 @@ export class AuthClient {
     const currentUser = auth.currentUser;
     const cached = await getCachedAuthSession();
 
-    if (!currentUser || !cached) {
+    if (!currentUser || !cached || currentUser.uid !== cached.user.uid ||
+        currentUser.uid !== cached.session.userId) {
       throw new AuthError({
         code: 'AUTHENTICATION_REQUIRED',
-        message: 'An active authenticated G-HIMS session is required',
+        message: 'A matching authenticated Firebase identity and G-HIMS session are required',
         statusCode: 401,
       });
     }
@@ -516,13 +536,14 @@ export class AuthClient {
     }
 
     const idToken = await currentUser.getIdToken(true);
+    const device = generateDeviceMetadata();
     const response = await fetch('/api/auth/tenant-selection', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${idToken}`,
       },
-      body: JSON.stringify({ tenantId: targetTenantId }),
+      body: JSON.stringify({ tenantId: targetTenantId, device }),
     });
 
     const data: LoginResponsePayload = await response.json();

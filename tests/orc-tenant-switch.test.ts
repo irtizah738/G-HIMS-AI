@@ -28,11 +28,10 @@ describe('ORC-8 Matrix: Tenant Switch Suspension & Isolation', () => {
     // Must set SWITCHING first
     expect(authContext).toContain("setLoadingStatus('SWITCHING')");
 
-    // Must snapshot prior state for rollback on error
+    // Prior tenant ID is a verification target, never an authority snapshot.
     expect(authContext).toContain('const priorTenant = activeTenant');
-    expect(authContext).toContain('const priorRoles = roles');
-    expect(authContext).toContain('const priorPermissions = permissions');
-    expect(authContext).toContain('const priorPrivileges = clinicalPrivileges');
+    expect(authContext).not.toContain('const priorRoles = roles');
+    expect(authContext).not.toContain('const priorPrivileges = clinicalPrivileges');
 
     // Must clear prior tenant state to prevent in-flight command dispatch against stale tenant
     expect(authContext).toContain('setActiveTenant(null)');
@@ -43,12 +42,15 @@ describe('ORC-8 Matrix: Tenant Switch Suspension & Isolation', () => {
     // Must transition to VERIFYING
     expect(authContext).toContain("setLoadingStatus('VERIFYING')");
 
-    // Must restore prior verified state on failure
-    expect(authContext).toContain('if (priorTenant) {');
-    expect(authContext).toContain('setActiveTenant(priorTenant)');
-    expect(authContext).toContain('setRoles(priorRoles)');
-    expect(authContext).toContain('setPermissions(priorPermissions)');
-    expect(authContext).toContain('setClinicalPrivileges(priorPrivileges)');
+    // A switch failure must revalidate the prior tenant online or purge it.
+    expect(authContext).toContain('const verifiedPriorSession = await AuthClient.validateCurrentSession()');
+    expect(authContext).toContain('verifiedPriorSession?.authenticated');
+    expect(authContext).toContain('verifiedPriorSession.tenant.tenantId === priorTenant.tenantId');
+    expect(authContext).toContain('applyLoginPayload(verifiedPriorSession)');
+    expect(authContext).toContain('await AuthClient.invalidateLocalAuthorization()');
+    expect(authContext).not.toContain('setActiveTenant(priorTenant)');
+    expect(authContext).not.toContain('setRoles(priorRoles)');
+    expect(authContext).toContain('setAccessibleTenants([])');
     expect(authContext).toContain("setLoadingStatus('ERROR')");
   });
 

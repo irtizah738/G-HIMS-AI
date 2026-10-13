@@ -39,6 +39,7 @@ interface AuthContextType {
   loadingStatus: AuthStateLoadingStatus;
   error: string | null;
   isOffline: boolean;
+  isOfflineContinuity: boolean;
   accessibleTenants: TenantSelectionItem[];
   signIn: (email: string, pass: string, options?: SignInOptions) => Promise<LoginResponsePayload>;
   signInFederated: (options?: SignInOptions) => Promise<LoginResponsePayload>;
@@ -70,6 +71,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loadingStatus, setLoadingStatus] = useState<AuthStateLoadingStatus>('RESTORING_SESSION');
   const [error, setError] = useState<string | null>(null);
   const [isOffline, setIsOffline] = useState<boolean>(false);
+  const [isOfflineContinuity, setIsOfflineContinuity] = useState<boolean>(false);
   const [accessibleTenants, setAccessibleTenants] = useState<TenantSelectionItem[]>([]);
 
   const inactivityMonitorRef = useRef<InactivityMonitor | null>(null);
@@ -121,6 +123,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user, isLocked, lockSession]);
 
   const applyLoginPayload = useCallback((payload: LoginResponsePayload) => {
+    // Never claim a new authentication timestamp when restoring local-only state.
+    const authenticatedAt = payload.offlineContinuity
+      ? (payload.offlineContinuityAuthenticatedAt || new Date(0).toISOString())
+      : new Date().toISOString();
     const authUser: AuthenticatedUser = {
       uid: payload.user.uid,
       email: payload.user.email,
@@ -134,7 +140,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clinicalPrivileges: payload.authorization.clinicalPrivileges,
       sessionId: payload.session.sessionId,
       deviceId: payload.session.deviceId,
-      lastAuthenticatedAt: new Date().toISOString(),
+      lastAuthenticatedAt: authenticatedAt,
     };
 
     const sessionRec: UserSessionRecord = {
@@ -145,15 +151,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       status: 'ACTIVE',
       createdAt: new Date().toISOString(),
       lastSeenAt: new Date().toISOString(),
-      authenticatedAt: new Date().toISOString(),
+      authenticatedAt,
       lastActivityAt: new Date().toISOString(),
       expiresAt: payload.session.expiresAt,
     };
 
     setUser(authUser);
     setSession(sessionRec);
+    setIsOfflineContinuity(payload.offlineContinuity === true);
     setActiveTenant(payload.tenant);
-    setRoles(payload.authorization.roles);
+    // Cached role labels are local display metadata, never a live authorization grant.
+    setRoles(payload.offlineContinuity ? [] : payload.authorization.roles);
     setPermissions(payload.authorization.permissions);
     setClinicalPrivileges(payload.authorization.clinicalPrivileges || []);
     setAccountStatus(payload.authorization.accountStatus);
@@ -171,8 +179,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const payload = await AuthClient.validateCurrentSession();
 
-      if (payload && payload.authenticated) {
+      if (payload && (payload.authenticated || payload.offlineContinuity === true)) {
         applyLoginPayload(payload);
+        setIsOffline(payload.offlineContinuity === true);
         if (payload.accessibleTenants && payload.accessibleTenants.length > 0) {
           setAccessibleTenants(payload.accessibleTenants);
         }
@@ -184,10 +193,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setRoles([]);
         setPermissions([]);
         setClinicalPrivileges([]);
+        setIsOfflineContinuity(false);
+        setAccessibleTenants([]);
         setLoadingStatus('IDLE');
       }
     } catch (err: any) {
+      // An unsuccessful authoritative refresh must never leave a previously
+      // privileged identity active. Offline continuity is established only
+      // through the explicit bounded cached-identity path above.
       console.warn('Session restoration notice:', err);
+      setUser(null);
+      setSession(null);
+      setActiveTenant(null);
+      setRoles([]);
+      setPermissions([]);
+      setClinicalPrivileges([]);
+      setIsOfflineContinuity(false);
+      setAccessibleTenants([]);
       setLoadingStatus('IDLE');
     } finally {
       setLoading(false);
@@ -207,7 +229,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    return () => unsubscribe();
+    const handleConnectivityRestored = () => { void refreshAuth(); };
+    window.addEventListener('online', handleConnectivityRestored);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('online', handleConnectivityRestored);
+    };
   }, [refreshAuth]);
 
   // Sign In Action
@@ -329,6 +356,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setRoles([]);
       setPermissions([]);
       setClinicalPrivileges([]);
+      setIsOfflineContinuity(false);
+      setAccessibleTenants([]);
       setIsLocked(false);
       setLoading(false);
       setLoadingStatus('IDLE');
@@ -337,17 +366,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Tenant Switching Action — ORC-1A: explicit suspension state machine
   // READY → SWITCHING (invalidate prior) → VERIFYING (new token received) → READY
-  // On failure: restore prior verified tenant context instead of leaving it empty.
+  // On failure: restore only after fresh server verification; otherwise clear authority.
   const switchTenant = useCallback(
     async (tenantId: string) => {
       setLoading(true);
       // ORC-1A: Enter SWITCHING to signal guards to block child mounts
       setLoadingStatus('SWITCHING');
-      // Capture prior verified tenant so we can restore it on failure
+      // The prior tenant is only a comparison target, never restored authorization.
       const priorTenant = activeTenant;
-      const priorRoles = roles;
-      const priorPermissions = permissions;
-      const priorPrivileges = clinicalPrivileges;
       try {
         const payload = await AuthClient.switchTenant(tenantId);
         // ORC-1A: Invalidate prior tenant subscriptions BEFORE publishing the new context.
@@ -361,23 +387,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         applyLoginPayload(payload);
         setLoadingStatus('READY');
       } catch (err: any) {
-        // ORC-1A: Restore the prior verified state rather than leaving context empty.
-        // An empty context would cause every tenant-scoped query to fail with no
-        // indication of what went wrong, and could expose an unauthenticated UI.
+        // Server-side claim changes can partially complete before a switch
+        // fails. Prior client role/privilege arrays are NOT evidence of a
+        // continuing valid session. Revalidate against the server first.
+        let restoredFromServer = false;
         if (priorTenant) {
-          setActiveTenant(priorTenant);
-          setRoles(priorRoles);
-          setPermissions(priorPermissions);
-          setClinicalPrivileges(priorPrivileges);
+          try {
+            const verifiedPriorSession = await AuthClient.validateCurrentSession();
+            if (verifiedPriorSession?.authenticated &&
+                verifiedPriorSession.tenant.tenantId === priorTenant.tenantId) {
+              applyLoginPayload(verifiedPriorSession);
+              restoredFromServer = true;
+            }
+          } catch {
+            // Network failure, revocation or a changed tenant must fail closed.
+          }
         }
-        setError(err?.userMessage || err?.message || 'Failed to switch tenant');
+        if (!restoredFromServer) {
+          await AuthClient.invalidateLocalAuthorization().catch(() => {});
+          setUser(null);
+          setSession(null);
+          setActiveTenant(null);
+          setRoles([]);
+          setPermissions([]);
+          setClinicalPrivileges([]);
+          setAccessibleTenants([]);
+          setIsOfflineContinuity(false);
+          setIsOffline(false);
+        }
+        setError(err?.userMessage || err?.message || 'Failed to switch tenant; sign in again.');
         setLoadingStatus('ERROR');
         throw err;
       } finally {
         setLoading(false);
       }
     },
-    [applyLoginPayload, activeTenant, roles, permissions, clinicalPrivileges]
+    [applyLoginPayload, activeTenant]
   );
 
   // Password Reset Action
@@ -436,23 +481,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const hasPerm = useCallback(
     (permission: string) => {
-      return checkPermission(user, permission);
+      return !isOfflineContinuity && checkPermission(user, permission);
     },
-    [user]
+    [user, isOfflineContinuity]
   );
 
   const hasR = useCallback(
     (role: string) => {
-      return checkRole(user, role);
+      return !isOfflineContinuity && checkRole(user, role);
     },
-    [user]
+    [user, isOfflineContinuity]
   );
 
   const hasPriv = useCallback(
     (privilege: string) => {
-      return checkPrivilege(user, privilege);
+      return !isOfflineContinuity && checkPrivilege(user, privilege);
     },
-    [user]
+    [user, isOfflineContinuity]
   );
 
   const value = useMemo(
@@ -469,6 +514,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loadingStatus,
       error,
       isOffline,
+      isOfflineContinuity,
       accessibleTenants,
       signIn,
       signInFederated,
@@ -497,6 +543,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loadingStatus,
       error,
       isOffline,
+      isOfflineContinuity,
       accessibleTenants,
       signIn,
       signInFederated,

@@ -1,4 +1,5 @@
 import { getRuntimeMode, inferRuntimeModeFromNodeEnv, type GhimsRuntimeMode } from './runtime-mode';
+import firebaseConfig from '@/firebase-applet-config.json';
 
 type ProjectMap = Partial<Record<GhimsRuntimeMode, string>>;
 
@@ -25,11 +26,14 @@ function serverProjectMap(): ProjectMap {
   const demo = clean(process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO);
   const test = clean(process.env.GHIMS_FIREBASE_PROJECT_ID_TEST);
   assertConfiguredTestDemoDistinct(test, demo, 'server');
+  const prod = clean(process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION);
+  const ambient = clean(process.env.FIREBASE_PROJECT_ID) || firebaseConfig.projectId;
+  const defaultTest = ambient && ambient !== demo && ambient !== prod ? ambient : 'ghims-test';
   return {
     DEMO: demo,
-    TEST: test || 'ghims-test',
+    TEST: test || defaultTest,
     STAGING: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_STAGING),
-    PRODUCTION: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION),
+    PRODUCTION: prod,
   };
 }
 
@@ -39,11 +43,14 @@ function clientProjectMap(): ProjectMap {
   const demo = clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_DEMO);
   const test = clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST);
   assertConfiguredTestDemoDistinct(test, demo, 'client');
+  const prod = clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION);
+  const ambient = clean(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) || firebaseConfig.projectId;
+  const defaultTest = ambient && ambient !== demo && ambient !== prod ? ambient : 'ghims-test';
   return {
     DEMO: demo,
-    TEST: test || 'ghims-test',
+    TEST: test || defaultTest,
     STAGING: clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING),
-    PRODUCTION: clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION),
+    PRODUCTION: prod,
   };
 }
 

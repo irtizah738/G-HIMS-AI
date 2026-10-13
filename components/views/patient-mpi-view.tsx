@@ -170,7 +170,10 @@ export function PatientMpiView() {
   });
 
   const activePatients = scopedPatients.filter(p => !['MERGED', 'REMOVED'].includes(String(p.status || 'ACTIVE').toUpperCase()));
-  const currentPatient = activePatients.find((p) => p.id === selectedPatientId) || activePatients[0];
+  // Search results restrict the visible patient detail panel; never reveal
+  // an older selected patient excluded by the current query.
+  const visiblePatients = searchFilter.trim() ? filteredPatients : activePatients;
+  const currentPatient = visiblePatients.find((p) => p.id === selectedPatientId) || visiblePatients[0];
   const activeEncounter = currentPatient?.encounters?.find(
     (encounter) => encounter.status === 'active'
   );

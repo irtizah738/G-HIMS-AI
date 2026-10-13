@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { sandboxEmulatorConnectSources } from '@/lib/dev-sandbox/csp';
 
 // Tenant boundary path regex (e.g., /central-metro-hospital/diagnostics/...).
 // This is routing context only; protected APIs re-resolve tenant authority from
@@ -31,7 +32,8 @@ function runtimeMode(): string {
     .toUpperCase();
 }
 
-function buildContentSecurityPolicy(nonce: string): string {
+function buildContentSecurityPolicy(nonce: string, hostname: string): string {
+  const sandboxConnectSources = sandboxEmulatorConnectSources(process.env, hostname);
   const developmentScriptPolicy =
     process.env.NODE_ENV === 'development' ? " 'unsafe-eval'" : '';
 
@@ -42,7 +44,7 @@ function buildContentSecurityPolicy(nonce: string): string {
     "style-src-attr 'unsafe-inline'",
     "img-src 'self' blob: data: https://lh3.googleusercontent.com",
     "font-src 'self' data:",
-    "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://*.google.com",
+    `connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://*.google.com${sandboxConnectSources.length ? ` ${sandboxConnectSources.join(' ')}` : ''}`,
     "frame-src 'self' https://*.firebaseapp.com https://accounts.google.com",
     "worker-src 'self' blob:",
     "manifest-src 'self'",
@@ -50,7 +52,8 @@ function buildContentSecurityPolicy(nonce: string): string {
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors 'self' https://*.google.com https://*.aistudio.google.com https://*.run.app",
-    'upgrade-insecure-requests',
+    // Keep HTTPS upgrades for hosted traffic, not local HTTP emulator endpoints.
+    ...(sandboxConnectSources.length === 0 ? ['upgrade-insecure-requests'] : []),
   ].join('; ');
 }
 
@@ -92,7 +95,7 @@ export function proxy(request: NextRequest) {
   }
 
   const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
-  const contentSecurityPolicy = buildContentSecurityPolicy(nonce);
+  const contentSecurityPolicy = buildContentSecurityPolicy(nonce, request.nextUrl.hostname);
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('x-nonce', nonce);
   requestHeaders.set('Content-Security-Policy', contentSecurityPolicy);

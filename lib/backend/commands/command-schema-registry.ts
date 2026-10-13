@@ -938,6 +938,13 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       overrideDemographicConflict: z.boolean().optional(),
     }).strict(),
   },
+  UnmergePatientCommand: {
+    1: z.object({
+      primaryPatientId: nonEmpty.max(150),
+      secondaryPatientId: nonEmpty.max(150),
+      unmergeReason: z.string().trim().min(10).max(4000),
+    }).strict(),
+  },
   ConfirmPatientIdentityCommand: {
     1: z.object({
       patientId: nonEmpty.max(150),

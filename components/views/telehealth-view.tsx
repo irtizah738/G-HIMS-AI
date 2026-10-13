@@ -70,11 +70,11 @@ export function TelehealthView() {
   );
 
   useEffect(() => {
-    setSubjective('');
-    setObjective('');
-    setAssessment('');
-    setPlan('');
-  }, [selected?.id]);
+    setSubjective(selected?.soapNote?.subjective || '');
+    setObjective(selected?.soapNote?.objective || '');
+    setAssessment(selected?.soapNote?.assessment || '');
+    setPlan(selected?.soapNote?.plan || '');
+  }, [selected?.id, selected?.soapNote]);
 
   const replaceSession = (next: TelehealthSession) => {
     setSessions((current) =>
@@ -304,11 +304,11 @@ export function TelehealthView() {
                 </p>
               </div>
 
-              {!['COMPLETED', 'CANCELLED'].includes(selected.status) && selected.tenantId && (
+              {!['COMPLETED', 'CANCELLED'].includes(selected.status) && (
                 <TelehealthCallPanel
                   key={`media:${selected.id}:${selected.roomToken}`}
                   session={selected}
-                  tenantId={selected.tenantId}
+                  tenantId={selected.tenantId || 'central-metro-hospital'}
                   disabled={busy || networkMode === 'offline'}
                   onConnected={async () => {
                     if (selected.connectionMode !== 'VIDEO' || selected.status !== 'IN_CONSULTATION') {

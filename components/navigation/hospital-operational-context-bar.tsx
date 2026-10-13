@@ -21,7 +21,7 @@ import React, { useState } from 'react';
 import { useHospital } from '@/lib/context/hospital-context';
 import { useTenant } from '@/lib/tenant/context';
 import { useRBAC } from '@/lib/auth/rbac-context';
-import { useAuth } from '@/lib/firebase/auth-context';
+import { useAuth } from '@/lib/auth/auth-context';
 import {
   Building2,
   Stethoscope,

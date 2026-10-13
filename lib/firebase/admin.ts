@@ -53,6 +53,18 @@ function formatPrivateKey(rawKey: string | undefined): string | null {
   return key;
 }
 
+function cleanEnvString(raw: string | undefined): string {
+  if (!raw) return '';
+  let val = raw.trim();
+  if (
+    (val.startsWith('"') && val.endsWith('"')) ||
+    (val.startsWith("'") && val.endsWith("'"))
+  ) {
+    val = val.slice(1, -1).trim();
+  }
+  return val;
+}
+
 export function getAdminApp(): App | null {
   if (adminApp) return adminApp;
 
@@ -62,11 +74,12 @@ export function getAdminApp(): App | null {
     return adminApp;
   }
 
-  const projectId =
+  const rawProject =
     process.env.FIREBASE_PROJECT_ID ||
     process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
     firebaseConfig.projectId;
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim();
+  const projectId = cleanEnvString(rawProject);
+  const clientEmail = cleanEnvString(process.env.FIREBASE_CLIENT_EMAIL);
   const privateKey = formatPrivateKey(process.env.FIREBASE_PRIVATE_KEY);
 
   if (projectId && clientEmail && privateKey) {
@@ -126,10 +139,11 @@ export function getAdminFirestore(): Firestore | null {
   const app = getAdminApp();
   if (!app) return null;
 
-  const configuredDbId =
+  const rawDbId =
     process.env.FIRESTORE_DATABASE_ID ||
     process.env.NEXT_PUBLIC_FIRESTORE_DATABASE_ID ||
     (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
+  const configuredDbId = cleanEnvString(rawDbId);
 
   if (configuredDbId && configuredDbId !== '(default)') {
     return getFirestore(app, configuredDbId);

@@ -29,6 +29,7 @@ function conflictCategory(commandType: string): ConflictCategory {
       'AdmitPatientToBedCommand',
       'DischargePatientFromBedCommand',
       'MergePatientCommand',
+      'UnmergePatientCommand',
       'AdvanceStageCommand',
       'AdvanceDiagnosticWorklistCommand',
     ].includes(commandType)

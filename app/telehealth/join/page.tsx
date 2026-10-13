@@ -8,8 +8,9 @@ function JoinContent() {
   const searchParams = useSearchParams();
   const tenantId = String(searchParams.get('tenant') || '').trim().toLowerCase();
   const roomToken = String(searchParams.get('room') || '').trim();
+  const patientJoinToken = String(searchParams.get('join') || '').trim();
 
-  if (!tenantId || !roomToken) {
+  if (!tenantId || !roomToken || !patientJoinToken) {
     return (
       <div className="mx-auto max-w-xl p-8 text-center">
         <h1 className="text-lg font-black">Invalid telehealth join link</h1>
@@ -20,7 +21,7 @@ function JoinContent() {
     );
   }
 
-  return <TelehealthPatientJoin tenantId={tenantId} roomToken={roomToken} />;
+  return <TelehealthPatientJoin tenantId={tenantId} roomToken={roomToken} patientJoinToken={patientJoinToken} />;
 }
 
 export default function TelehealthJoinPage() {

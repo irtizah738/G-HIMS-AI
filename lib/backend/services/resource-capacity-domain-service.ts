@@ -25,6 +25,7 @@ import {
 } from '@/types/resource-management';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
 import type { Bed, BedStatus } from '@/lib/types/ghims';
+import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
 
 function deterministicId(
   prefix: string,
@@ -75,7 +76,7 @@ function isCalibrationLocked(
 }
 
 function repositoryRequiredOutsideTests(): void {
-  if (!DomainStateRepository.isAvailable() && process.env.NODE_ENV !== 'test') {
+  if (!DomainStateRepository.isAvailable() && process.env.NODE_ENV !== 'test' && getRuntimeMode() !== 'TEST') {
     throw new Error('RESOURCE_PERSISTENCE_UNAVAILABLE');
   }
 }
@@ -1699,7 +1700,7 @@ export class ResourceCapacityDomainService {
   }
 
   public static seedTestFixtures(tenantId = 'central-metro-hospital'): void {
-    if (process.env.NODE_ENV !== 'test') {
+    if (process.env.NODE_ENV !== 'test' && getRuntimeMode() !== 'TEST') {
       throw new Error('TEST_FIXTURE_SEED_FORBIDDEN_OUTSIDE_TESTS');
     }
     if (this.resources.size > 0) return;

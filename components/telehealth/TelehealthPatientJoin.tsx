@@ -10,23 +10,29 @@ type SignalMessage = {
   createdAt: number;
 };
 
+const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
+  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+];
+
 function iceServers(): RTCIceServer[] {
   const raw = String(process.env.NEXT_PUBLIC_GHIMS_WEBRTC_ICE_SERVERS_JSON || '').trim();
-  if (!raw) return [];
+  if (!raw) return DEFAULT_ICE_SERVERS;
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_ICE_SERVERS;
   } catch {
-    return [];
+    return DEFAULT_ICE_SERVERS;
   }
 }
 
 export function TelehealthPatientJoin({
   tenantId,
   roomToken,
+  patientJoinToken,
 }: {
   tenantId: string;
   roomToken: string;
+  patientJoinToken: string;
 }) {
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -53,6 +59,7 @@ export function TelehealthPatientJoin({
         tenantId,
         roomToken,
         senderRole: 'PATIENT',
+        patientJoinToken,
         type,
         payload,
       }),
@@ -67,7 +74,11 @@ export function TelehealthPatientJoin({
       `/api/telehealth/signaling?tenantId=${encodeURIComponent(tenantId)}` +
       `&roomToken=${encodeURIComponent(roomToken)}` +
       `&receiverRole=PATIENT&after=${Math.max(0, lastSeenRef.current - 1)}`;
-    const response = await fetch(url, { method: 'GET', cache: 'no-store' });
+    const response = await fetch(url, {
+      method: 'GET',
+      cache: 'no-store',
+      headers: { 'x-ghims-patient-join-token': patientJoinToken },
+    });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || 'Unable to receive call signaling data.');
     return Array.isArray(data.messages) ? data.messages : [];
@@ -135,7 +146,7 @@ export function TelehealthPatientJoin({
     lastSeenRef.current = 0;
 
     try {
-      if (!tenantId || !roomToken) throw new Error('Telehealth join link is incomplete.');
+      if (!tenantId || !roomToken || !patientJoinToken) throw new Error('Telehealth join link is incomplete.');
       if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error('This browser does not support camera/microphone access.');
       }

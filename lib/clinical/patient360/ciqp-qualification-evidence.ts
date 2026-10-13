@@ -28,6 +28,36 @@ export interface CiqpRestoreEvidence {
   receipt: CiqpEvidenceRecord;
 }
 
+/**
+ * The migration must not silently rewrite the identity/provenance of existing
+ * clinical-intelligence snapshots. These HMACs represent a separately
+ * recorded read-only inventory, not the individual snapshot identifiers.
+ */
+export interface CiqpSnapshotLineageEvidence {
+  sourceSnapshotCount: number;
+  postMigrationSnapshotCount: number;
+  sourceIdentifierHmac: string;
+  postMigrationIdentifierHmac: string;
+  sourceProvenanceHmac: string;
+  postMigrationProvenanceHmac: string;
+  receipt: CiqpEvidenceRecord;
+}
+
+/**
+ * Evidence of the outbox consumer's before/after counters, separate from
+ * immutable event/outbox fingerprints. The migration itself has no authority
+ * to enqueue, consume or replay canonical clinical messages.
+ */
+export interface CiqpOutboxConsumptionEvidence {
+  pendingBefore: number;
+  pendingAfter: number;
+  consumedBefore: number;
+  consumedAfter: number;
+  duplicateDispatchesObserved: number;
+  migrationEmittedOutboxRecords: number;
+  receipt: CiqpEvidenceRecord;
+}
+
 export interface CiqpQualificationEvidence {
   repository: 'irtizah738/G-HIMS-AI';
   candidateSha: string;
@@ -41,6 +71,8 @@ export interface CiqpQualificationEvidence {
   approvedStagingApply?: CiqpEvidenceRecord;
   timelineParity?: CiqpEvidenceRecord;
   immutableEventAndOutboxProof?: CiqpEvidenceRecord;
+  clinicalIntelligenceSnapshotLineage?: CiqpSnapshotLineageEvidence;
+  outboxConsumptionReconciliation?: CiqpOutboxConsumptionEvidence;
   restoration?: CiqpRestoreEvidence;
   namedOperatorApproval?: CiqpEvidenceRecord;
   credentialedClinicalReview?: CiqpEvidenceRecord;
@@ -118,6 +150,39 @@ export function assessCiqpQualificationEvidence(
   for (const [key, needsApprover] of required) {
     const record = evidence[key] as CiqpEvidenceRecord | undefined;
     if (!recordPresent(record, sha, needsApprover)) missing.push(String(key));
+  }
+
+  // Distinct from event/outbox immutability: unsigned AI evidence snapshots
+  // must preserve their original immutable identities and provenance links.
+  // Missing/empty collections cannot be treated as a completed lineage drill.
+  const snapshot = evidence.clinicalIntelligenceSnapshotLineage;
+  if (!snapshot ||
+      !Number.isSafeInteger(snapshot.sourceSnapshotCount) ||
+      snapshot.sourceSnapshotCount <= 0 ||
+      snapshot.postMigrationSnapshotCount !== snapshot.sourceSnapshotCount ||
+      !hmac64(snapshot.sourceIdentifierHmac) ||
+      snapshot.sourceIdentifierHmac !== snapshot.postMigrationIdentifierHmac ||
+      !hmac64(snapshot.sourceProvenanceHmac) ||
+      snapshot.sourceProvenanceHmac !== snapshot.postMigrationProvenanceHmac ||
+      !recordPresent(snapshot.receipt, sha, false)) {
+    missing.push('CLINICAL_INTELLIGENCE_SNAPSHOT_LINEAGE');
+  }
+
+  // Do not confuse an unmodified outbox collection with proof that messages
+  // were processed safely. Consumer counters need a separate verified receipt.
+  const outbox = evidence.outboxConsumptionReconciliation;
+  if (!outbox ||
+      !Number.isSafeInteger(outbox.pendingBefore) || outbox.pendingBefore < 0 ||
+      !Number.isSafeInteger(outbox.pendingAfter) || outbox.pendingAfter < 0 ||
+      !Number.isSafeInteger(outbox.consumedBefore) || outbox.consumedBefore < 0 ||
+      !Number.isSafeInteger(outbox.consumedAfter) ||
+      outbox.consumedAfter < outbox.consumedBefore ||
+      !Number.isSafeInteger(outbox.duplicateDispatchesObserved) ||
+      outbox.duplicateDispatchesObserved !== 0 ||
+      outbox.migrationEmittedOutboxRecords !== 0 ||
+      outbox.pendingAfter > outbox.pendingBefore ||
+      !recordPresent(outbox.receipt, sha, false)) {
+    missing.push('OUTBOX_CONSUMPTION_RECONCILIATION');
   }
 
   const restore = evidence.restoration;

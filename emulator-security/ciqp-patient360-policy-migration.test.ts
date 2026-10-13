@@ -224,8 +224,15 @@ describe('CIQP-05 controlled synthetic Patient360 legacy migration (Firestore em
       .toThrow('CIQP_POLICY_MIGRATION_EMULATOR_ONLY');
     await expect(migratePatient360LegacyPolicyEmulator(otherTenant, patientId))
       .rejects.toThrow('CIQP_POLICY_MIGRATION_EMULATOR_ONLY');
-    const unknown = await tenant.collection('events').add({
-      eventType: 'SYNTHETIC_UNCORROBORATED', tenantId, payload: { patientId },
+    // A well-formed but uncorroborated event must be rejected for its
+    // provenance, not as malformed source data. All canonical events carry
+    // eventId; omitting it exercises a different fail-closed guard.
+    const unknownId = id('unexplained_event');
+    const unknown = tenant.collection('events').doc(unknownId);
+    await unknown.set({
+      eventId: unknownId, eventType: 'SYNTHETIC_UNCORROBORATED',
+      aggregateType: 'PATIENT', aggregateId: patientId,
+      tenantId, payload: { patientId },
     });
     const result = await migratePatient360LegacyPolicyEmulator(tenantId, patientId);
     expect(result.status).toBe('BLOCKED_UNCORROBORATED');

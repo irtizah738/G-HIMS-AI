@@ -1,0 +1,50 @@
+name: CIQP Identity and Offline Exact-Head Qualification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'app/api/auth/**'
+      - 'components/auth/**'
+      - 'lib/auth/**'
+      - 'lib/offline/**'
+      - 'server/auth/**'
+      - 'tests/identity-offline-assurance-regression.test.ts'
+      - 'tests/offline-hydration-identity-isolation.test.ts'
+      - 'tests/drp5-identity-session-closure.test.ts'
+      - '.github/workflows/ciqp-identity-offline-exact-head.yml'
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ciqp-identity-head-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  identity-offline-exact-source:
+    name: Exact-source credential and offline identity regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Checkout immutable pull request source, not a changing temporary merge ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Frozen dependency authority
+        run: bun install --frozen-lockfile
+      - name: Bound MFA, tenant-switch and offline UID safety
+        run: |
+          bun test tests/identity-offline-assurance-regression.test.ts tests/offline-hydration-identity-isolation.test.ts tests/drp5-identity-session-closure.test.ts
+      - name: Typecheck merged clinical contracts
+        run: bun run typecheck

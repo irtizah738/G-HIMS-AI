@@ -1,0 +1,53 @@
+name: Telehealth Lifecycle Exact-Head Qualification
+
+on:
+  pull_request:
+    branches:
+      - main
+      - fix/telehealth-turn-patient-capability-20261010
+    paths:
+      - 'app/api/telehealth/**'
+      - 'components/telehealth/**'
+      - 'components/views/telehealth-view.tsx'
+      - 'lib/backend/**'
+      - 'lib/clinical/telehealth-unused-care-policy.ts'
+      - 'lib/context/hospital-context.tsx'
+      - 'tests/telehealth-*.test.ts'
+      - '.github/workflows/telehealth-lifecycle-exact-head.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  lifecycle-source:
+    name: Exact-head governed cancellation, completion, and media recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-telehealth-ci
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-telehealth-ci
+      FIREBASE_PROJECT_ID: ghims-telehealth-ci
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-telehealth-ci
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install frozen dependencies
+        run: bun install --frozen-lockfile
+      - name: Full unit and security regression
+        run: |
+          bun run test:unit
+          bun run test:security
+      - name: Typecheck and build
+        run: |
+          bun run typecheck
+          bun run build

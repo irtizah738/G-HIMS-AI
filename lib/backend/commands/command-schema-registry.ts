@@ -874,6 +874,7 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
   CreateTelehealthSessionCommand: {
     1: z.object({
       patientId: nonEmpty.max(150),
+      facilityId: nonEmpty.max(150).optional(),
       type: z.enum([
         'Telehealth Consultation',
         'Remote Post-Op Follow-up',
@@ -907,6 +908,25 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
     1: z.object({
       sessionId: nonEmpty.max(150),
       expectedUpdatedAt: nonEmpty.max(100),
+    }).strict(),
+  },
+  ClaimTelehealthEncounterCommand: {
+    1: z.object({
+      sessionId: nonEmpty.max(150),
+      expectedUpdatedAt: nonEmpty.max(100),
+    }).strict(),
+  },
+  RepairTelehealthRoomTokenCommand: {
+    1: z.object({
+      sessionId: nonEmpty.max(150),
+      expectedUpdatedAt: nonEmpty.max(100),
+    }).strict(),
+  },
+  CancelUnusedTelehealthEncounterCommand: {
+    1: z.object({
+      sessionId: nonEmpty.max(150),
+      expectedUpdatedAt: nonEmpty.max(100),
+      reason: z.string().trim().min(20).max(1000),
     }).strict(),
   },
   CompleteTelehealthSessionCommand: {

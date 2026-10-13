@@ -214,6 +214,22 @@ offline `ops:ciqp:verify-evidence` command. That validator only checks
 structure, exact-SHA linkage and consistency; **it does not fetch cloud data,
 verify signatures, or establish clinical/institutional release authority**.
 
+Read-only collection command (approved isolated local operator only):
+
+```bash
+bun run ops:ciqp:snapshot-outbox-readonly
+```
+
+Run once before and once after the synthetic migration on the **same**
+SHA-scoped tenant and with the same private HMAC key. Compare the returned
+`snapshotCount`, `snapshotIdentifierHmac` and `snapshotProvenanceHmac`;
+preserve sanitized outputs in the restricted evidence store. The collector
+also reports bounded `pendingOutboxCount`, `publishedOutboxCount` and
+`outboxStatusCounts`. It does **not** execute outbox dispatch, infer
+`duplicateDispatchesObserved: 0`, or generate an operator approval.
+Require an independently observed consumer replay to substantiate those
+fields; zero duplicates must be measured, not assumed.
+
 The template fields `clinicalIntelligenceSnapshotLineage` and
 `outboxConsumptionReconciliation` must be filled with authentic, independently
 collected evidence, never synthetic values in a real authorization package.

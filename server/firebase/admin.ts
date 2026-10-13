@@ -76,14 +76,24 @@ function canUseApplicationDefaultCredentials(): boolean {
   return Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS) && !process.env.VERCEL;
 }
 
+function cleanEnvString(raw: string | undefined): string {
+  if (!raw) return '';
+  let val = raw.trim();
+  if (
+    (val.startsWith('"') && val.endsWith('"')) ||
+    (val.startsWith("'") && val.endsWith("'"))
+  ) {
+    val = val.slice(1, -1).trim();
+  }
+  return val;
+}
+
 function getAdminCredentials(): { clientEmail: string | null; privateKey: string | null } {
-  const clientEmail = (
+  const clientEmail = cleanEnvString(
     process.env.FIREBASE_CLIENT_EMAIL ||
     process.env.client_email ||
     ''
-  )
-    .replace(/^['"]|['"]$/g, '')
-    .trim();
+  );
 
   const rawKey =
     process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_PRIVATE_KEY.includes('BEGIN')
@@ -110,18 +120,19 @@ export function hasAdminCredentials(): boolean {
 export function getAdminApp(): App | null {
   if (adminApp) return adminApp;
 
-  const projectId =
+  const rawProject =
     process.env.FIREBASE_PROJECT_ID ||
     process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
     firebaseConfig.projectId;
+  const projectId = cleanEnvString(rawProject);
 
-  assertServerFirebaseProjectIsolation(String(projectId || ''));
+  assertServerFirebaseProjectIsolation(projectId);
 
   const existingApps = getApps();
   if (existingApps.length > 0) {
     const existing = getApp();
-    const existingProjectId = String(existing.options.projectId || '');
-    assertServerFirebaseProjectIsolation(existingProjectId || String(projectId || ''));
+    const existingProjectId = cleanEnvString(String(existing.options.projectId || ''));
+    assertServerFirebaseProjectIsolation(existingProjectId || projectId);
     if (existingProjectId && projectId && existingProjectId !== projectId) {
       throw new Error(
         `FIREBASE_ADMIN_PROJECT_MISMATCH: existing app uses ${existingProjectId}, expected ${projectId}.`
@@ -187,9 +198,10 @@ export function getAdminFirestore(): Firestore | null {
   if (!app) return null;
 
   try {
-    const configuredDatabaseId =
+    const rawDatabaseId =
       process.env.FIRESTORE_DATABASE_ID ||
       (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
+    const configuredDatabaseId = cleanEnvString(rawDatabaseId);
 
     const firestore =
       configuredDatabaseId && configuredDatabaseId !== '(default)'

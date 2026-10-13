@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Mic, MicOff, PhoneOff, ShieldCheck, Video, VideoOff } from 'lucide-react';
+import { loadTelehealthIceConfiguration } from '@/lib/telehealth/ice-client';
 
 type SignalMessage = {
   messageId: string;
@@ -9,21 +10,6 @@ type SignalMessage = {
   payload: any;
   createdAt: number;
 };
-
-const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
-  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-];
-
-function iceServers(): RTCIceServer[] {
-  const raw = String(process.env.NEXT_PUBLIC_GHIMS_WEBRTC_ICE_SERVERS_JSON || '').trim();
-  if (!raw) return DEFAULT_ICE_SERVERS;
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_ICE_SERVERS;
-  } catch {
-    return DEFAULT_ICE_SERVERS;
-  }
-}
 
 export function TelehealthPatientJoin({
   tenantId,
@@ -137,6 +123,25 @@ export function TelehealthPatientJoin({
     }
   };
 
+  const handlePollingFailure = (cause: unknown) => {
+    const code = cause instanceof Error ? cause.message : 'Telehealth signaling failed.';
+    // A closed, expired or reassigned clinical room must not leave the camera
+    // or microphone running after the signaling session loses authority.
+    if ([
+      'TELEHEALTH_CALL_NOT_ACTIVE',
+      'TELEHEALTH_CALL_LEASE_INVALID',
+      'TELEHEALTH_SESSION_FINAL',
+      'TELEHEALTH_ENCOUNTER_SCOPE_INVALID',
+      'TELEHEALTH_PATIENT_JOIN_TOKEN_INVALID',
+    ].some(reason => code.includes(reason))) {
+      dispose();
+      setState('ENDED');
+      setError('This telehealth visit is no longer active. Contact your clinical team for a new private link.');
+      return;
+    }
+    setError(code);
+  };
+
   const join = async () => {
     if (state === 'JOINING' || state === 'WAITING' || state === 'CONNECTED') return;
     setState('JOINING');
@@ -153,6 +158,9 @@ export function TelehealthPatientJoin({
 
       // Verify the clinician has activated the room before requesting media.
       await loadSignals();
+      const ice = await loadTelehealthIceConfiguration({
+        tenantId, roomToken, role: 'PATIENT', patientJoinToken,
+      });
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
@@ -161,7 +169,7 @@ export function TelehealthPatientJoin({
       streamRef.current = stream;
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
-      const peer = new RTCPeerConnection({ iceServers: iceServers() });
+      const peer = new RTCPeerConnection({ iceServers: ice.iceServers });
       peerRef.current = peer;
       stream.getTracks().forEach((track) => peer.addTrack(track, stream));
 
@@ -189,9 +197,7 @@ export function TelehealthPatientJoin({
       setState('WAITING');
       await processSignals();
       pollRef.current = window.setInterval(() => {
-        void processSignals().catch((cause) => {
-          setError(cause instanceof Error ? cause.message : 'Telehealth signaling failed.');
-        });
+        void processSignals().catch(handlePollingFailure);
       }, 1000);
     } catch (cause) {
       dispose();

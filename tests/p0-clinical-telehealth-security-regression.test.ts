@@ -24,20 +24,23 @@ describe('P0 clinical and telehealth security invariants', () => {
 
   test('patient signaling uses separate hashed room-scoped expiring join credentials', async () => {
     const signaling = await source('app/api/telehealth/signaling/route.ts');
+    const capability = await source('lib/backend/security/telehealth-patient-capability.ts');
     const patient = await source('components/telehealth/TelehealthPatientJoin.tsx');
     const clinician = await source('components/telehealth/TelehealthCallPanel.tsx');
     const join = await source('app/telehealth/join/page.tsx');
 
     expect(signaling).toContain("randomBytes(32).toString('base64url')");
     expect(signaling).toContain("createHash('sha256').update(issuedPatientJoinToken)");
-    expect(signaling).toContain('timingSafeEqual(presentedHash, expected)');
-    expect(signaling).toContain('requirePatientJoinToken(patientJoinToken, room.patientJoinTokenHash)');
-    expect(signaling).toContain('(context.clinicalPrivileges?.length ?? 0) === 0');
+    expect(capability).toContain('timingSafeEqual(hash, expected)');
+    expect(signaling).toContain('assertTelehealthPatientJoinToken(patientJoinToken, room.patientJoinTokenHash)');
+    expect(signaling).toContain("['SIGN_CLINICAL_NOTES', 'UNRESTRICTED_CLINICAL_CHIEF']");
     expect(signaling).toContain('!assignedProviderId || assignedProviderId !== context.actorId');
     expect(clinician).toContain('setPatientJoinToken(startedRoom.patientJoinToken)');
     expect(patient).toContain("'x-ghims-patient-join-token': patientJoinToken");
     expect(patient).toContain('patientJoinToken,');
-    expect(join).toContain("searchParams.get('join')");
+    expect(join).toContain("fragment.get('join')");
+    expect(join).toContain("url.searchParams.get('join')");
+    expect(join).toContain("window.history.replaceState");
   });
 
   test('Bun frozen-lockfile root manifest dependency ranges are exact', async () => {

@@ -29,11 +29,17 @@ function serverProjectMap(): ProjectMap {
   const prod = clean(process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION);
   const ambient = clean(process.env.FIREBASE_PROJECT_ID) || firebaseConfig.projectId;
   const defaultTest = ambient && ambient !== demo && ambient !== prod ? ambient : 'ghims-test';
+  const runtime = getRuntimeMode();
+  // Never assign the active TEST project's ambient Firebase ID to DEMO or
+  // PRODUCTION: they are separate authority boundaries, not aliases.
+  // A deployed mode may use its own ambient ID only when that mode is active.
+  // Explicit GHIMS_FIREBASE_PROJECT_ID_* values always participate in collision
+  // detection regardless of the active mode.
   return {
-    DEMO: demo || ambient,
+    DEMO: demo || (runtime === 'DEMO' ? ambient : ''),
     TEST: test || defaultTest,
     STAGING: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_STAGING),
-    PRODUCTION: prod || ambient,
+    PRODUCTION: prod || (runtime === 'PRODUCTION' ? ambient : ''),
   };
 }
 
@@ -46,11 +52,12 @@ function clientProjectMap(): ProjectMap {
   const prod = clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION);
   const ambient = clean(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) || firebaseConfig.projectId;
   const defaultTest = ambient && ambient !== demo && ambient !== prod ? ambient : 'ghims-test';
+  const runtime = getPublicRuntimeMode();
   return {
-    DEMO: demo || ambient,
+    DEMO: demo || (runtime === 'DEMO' ? ambient : ''),
     TEST: test || defaultTest,
     STAGING: clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING),
-    PRODUCTION: prod || ambient,
+    PRODUCTION: prod || (runtime === 'PRODUCTION' ? ambient : ''),
   };
 }
 

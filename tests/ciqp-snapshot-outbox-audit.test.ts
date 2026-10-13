@@ -148,10 +148,9 @@ describe('CIQP-182 historic evidence and outbox inspector', () => {
     expect(audit).toContain("const identities = createHmac('sha256', hmacKey)");
     expect(audit).toContain("const provenance = createHmac('sha256', hmacKey)");
     for (const source of [audit, entry]) {
-      const withoutKnownCryptoUpdates = source.replace(
-        /\\b(?:identities|provenance)\\.update\\(/g,
-        'HMAC_DIGEST_UPDATE('
-      );
+      const withoutKnownCryptoUpdates = source
+        .replaceAll('identities.update(', 'HMAC_DIGEST_UPDATE(')
+        .replaceAll('provenance.update(', 'HMAC_DIGEST_UPDATE(');
       for (const forbidden of ['.runTransaction(', '.set(', '.update(', '.delete(']) {
         expect(withoutKnownCryptoUpdates).not.toContain(forbidden);
       }

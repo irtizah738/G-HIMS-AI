@@ -140,10 +140,24 @@ describe('CIQP-182 historic evidence and outbox inspector', () => {
     ]);
     expect(entry).toContain('assertCiqpHostedStagingReadOnlyScope(process.env)');
     expect(entry).toContain('assertCiqpStagingCheckout(scope.expectedSha');
+    // Node crypto Hmac.update() only buffers bytes for a keyed digest; it
+    // does not write Firestore. The former blanket '.update(' substring
+    // rejection caused 11 unrelated CI jobs to fail on this read-only code.
+    // Allow only the two explicitly initialized HMAC receivers and continue
+    // rejecting every other database-style mutation.
+    expect(audit).toContain("const identities = createHmac('sha256', hmacKey)");
+    expect(audit).toContain("const provenance = createHmac('sha256', hmacKey)");
     for (const source of [audit, entry]) {
+      const withoutKnownCryptoUpdates = source.replace(
+        /\\b(?:identities|provenance)\\.update\\(/g,
+        'HMAC_DIGEST_UPDATE('
+      );
       for (const forbidden of ['.runTransaction(', '.set(', '.update(', '.delete(']) {
-        expect(source).not.toContain(forbidden);
+        expect(withoutKnownCryptoUpdates).not.toContain(forbidden);
       }
+      // Simulated Firestore mutations must still trip the exact same guard.
+      const unsafe = withoutKnownCryptoUpdates + ' db.collection("tenants").doc("x").update({});';
+      expect(unsafe).toContain('.update(');
     }
   });
 });

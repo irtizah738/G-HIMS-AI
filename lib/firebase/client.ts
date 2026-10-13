@@ -14,29 +14,29 @@ if (typeof window !== 'undefined') {
   }
 }
 
+function cleanValue(val: string | undefined): string {
+  if (!val) return '';
+  let str = String(val).trim();
+  if (
+    (str.startsWith('"') && str.endsWith('"')) ||
+    (str.startsWith("'") && str.endsWith("'"))
+  ) {
+    str = str.slice(1, -1).trim();
+  }
+  return str;
+}
+
+// Opt-in only: the browser sandbox must never connect to hosted Firebase.
+const requestedLocalSandbox = process.env.NEXT_PUBLIC_GHIMS_DEV_SANDBOX_EMULATORS === 'true';
+
 const clientCredentials = {
-  // Never reuse a hosted application's telemetry or API configuration in the
-  // disposable local emulator. Firebase's Auth/Firestore emulators accept a
-  // syntactically valid dummy app config.
-  apiKey: process.env.NEXT_PUBLIC_GHIMS_DEV_SANDBOX_EMULATORS === 'true'
-    ? 'ghims-local-synthetic-api-key'
-    : process.env.NEXT_PUBLIC_FIREBASE_API_KEY || firebaseConfig.apiKey,
-  authDomain: process.env.NEXT_PUBLIC_GHIMS_DEV_SANDBOX_EMULATORS === 'true'
-    ? 'ghims-dev-sandbox-local.firebaseapp.com'
-    : process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || firebaseConfig.authDomain,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || firebaseConfig.projectId,
-  storageBucket: process.env.NEXT_PUBLIC_GHIMS_DEV_SANDBOX_EMULATORS === 'true'
-    ? 'ghims-dev-sandbox-local.appspot.com'
-    : process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || firebaseConfig.storageBucket,
-  messagingSenderId: process.env.NEXT_PUBLIC_GHIMS_DEV_SANDBOX_EMULATORS === 'true'
-    ? '000000000000'
-    : process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || firebaseConfig.messagingSenderId,
-  appId: process.env.NEXT_PUBLIC_GHIMS_DEV_SANDBOX_EMULATORS === 'true'
-    ? '1:000000000000:web:0000000000000000000000'
-    : process.env.NEXT_PUBLIC_FIREBASE_APP_ID || firebaseConfig.appId,
-  measurementId: process.env.NEXT_PUBLIC_GHIMS_DEV_SANDBOX_EMULATORS === 'true'
-    ? ''
-    : process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID || firebaseConfig.measurementId,
+  apiKey: requestedLocalSandbox ? 'ghims-local-synthetic-api-key' : (cleanValue(process.env.NEXT_PUBLIC_FIREBASE_API_KEY) || firebaseConfig.apiKey),
+  authDomain: requestedLocalSandbox ? 'ghims-dev-sandbox-local.firebaseapp.com' : (cleanValue(process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN) || firebaseConfig.authDomain),
+  projectId: cleanValue(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) || firebaseConfig.projectId,
+  storageBucket: requestedLocalSandbox ? 'ghims-dev-sandbox-local.appspot.com' : (cleanValue(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET) || firebaseConfig.storageBucket),
+  messagingSenderId: requestedLocalSandbox ? '000000000000' : (cleanValue(process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID) || firebaseConfig.messagingSenderId),
+  appId: requestedLocalSandbox ? '1:000000000000:web:0000000000000000000000' : (cleanValue(process.env.NEXT_PUBLIC_FIREBASE_APP_ID) || firebaseConfig.appId),
+  measurementId: requestedLocalSandbox ? '' : (cleanValue(process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID) || firebaseConfig.measurementId),
 };
 
 assertClientFirebaseProjectIsolation(String(clientCredentials.projectId || ''));
@@ -45,7 +45,7 @@ assertClientFirebaseProjectIsolation(String(clientCredentials.projectId || ''));
 // same environment; never silently reuse another project's app.
 const existingClientApp: FirebaseApp | null = getApps().length > 0 ? getApp() : null;
 if (existingClientApp) {
-  const existingProjectId = String(existingClientApp.options.projectId || '');
+  const existingProjectId = cleanValue(String(existingClientApp.options.projectId || ''));
   assertClientFirebaseProjectIsolation(
     existingProjectId || String(clientCredentials.projectId || '')
   );
@@ -65,21 +65,21 @@ export const app: FirebaseApp = existingClientApp || initializeApp(clientCredent
 // Authentication Instance
 export const auth: Auth = getAuth(app);
 
-const requestedLocalSandbox = process.env.NEXT_PUBLIC_GHIMS_DEV_SANDBOX_EMULATORS === 'true';
 if (requestedLocalSandbox && typeof window !== 'undefined') {
   const localPage = ['localhost', '127.0.0.1'].includes(window.location.hostname);
-  if (process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE !== 'TEST' ||
+  if (process.env.NODE_ENV === 'production' ||
+      process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE !== 'TEST' ||
       String(clientCredentials.projectId) !== 'ghims-dev-sandbox-local' ||
       process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST !== 'ghims-dev-sandbox-local' ||
-      !localPage ||
-      process.env.NODE_ENV === 'production') {
+      !localPage) {
     throw new Error('DEV_SANDBOX_BROWSER_EMULATOR_SCOPE_INVALID');
   }
   connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
 }
 
 // Firestore Instance with multi-tenant custom database ID support and forced long polling for preview sandbox stability
-const customDbId = process.env.NEXT_PUBLIC_FIRESTORE_DATABASE_ID || (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
+const rawCustomDbId = cleanValue(process.env.NEXT_PUBLIC_FIRESTORE_DATABASE_ID) || (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
+const customDbId = cleanValue(rawCustomDbId);
 
 export const db: Firestore = (() => {
   const dbId = customDbId && customDbId !== '(default)' ? customDbId : undefined;
@@ -97,7 +97,7 @@ export const db: Firestore = (() => {
 })();
 
 if (requestedLocalSandbox && typeof window !== 'undefined') {
-  // Only the verified local TEST page may opt into the emulator above.
+  // The strict TEST and localhost guard above has already succeeded.
   connectFirestoreEmulator(db, '127.0.0.1', 8080);
 }
 
@@ -106,7 +106,6 @@ let analyticsInstance: Analytics | null = null;
 
 export async function getFirebaseAnalytics(): Promise<Analytics | null> {
   if (typeof window === 'undefined' || requestedLocalSandbox) {
-    // Local synthetic activity must never reach hosted analytics.
     return null;
   }
   if (!analyticsInstance) {

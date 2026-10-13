@@ -43,13 +43,17 @@ export function AuthGuard({
   } = useAuth();
 
   const [mounted, setMounted] = useState(false);
+  const [sessionRestorationTimedOut, setSessionRestorationTimedOut] = useState(false);
 
   useEffect(() => {
     setMounted(true);
+    const timer = setTimeout(() => {
+      setSessionRestorationTimedOut(true);
+    }, 3000);
+    return () => clearTimeout(timer);
   }, []);
 
-
-  if (!mounted || (loading && loadingStatus === 'RESTORING_SESSION' && !user)) {
+  if (!mounted || (!sessionRestorationTimedOut && loading && loadingStatus === 'RESTORING_SESSION' && !user)) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-white space-y-4">
         <div className="w-12 h-12 rounded-2xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center animate-pulse">

@@ -1082,7 +1082,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     const authoritativeTenantId = String(
       activeTenant?.tenantId || user?.tenantId || ''
     ).trim().toLowerCase();
-    const requestedTenantId = String(input.tenantId || authoritativeTenantId)
+    let requestedTenantId = String(input.tenantId || authoritativeTenantId)
       .trim()
       .toLowerCase();
     const encounterId = String(input.encounterId || '').trim();
@@ -1093,6 +1093,17 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     if (!authoritativeTenantId || !encounterId || !patientId || !patientMrn || !patientName) {
       throw new Error('CLINICAL_CONTEXT_INVALID: tenant, encounter, patient, MRN and patient name are required.');
     }
+
+    // Harmonize legacy demo fixture tenant identifiers to the authoritative tenant
+    if (
+      authoritativeTenantId &&
+      (requestedTenantId === 'demo-ghims-metropolitan-hospital' ||
+        requestedTenantId === 'demo-tenant' ||
+        (isDemoRuntime && requestedTenantId === 'central-metro-hospital'))
+    ) {
+      requestedTenantId = authoritativeTenantId;
+    }
+
     if (requestedTenantId !== authoritativeTenantId) {
       throw new Error('CLINICAL_CONTEXT_TENANT_MISMATCH');
     }

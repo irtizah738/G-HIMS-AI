@@ -129,6 +129,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * @deprecated Use `useAuth` from `@/lib/auth/auth-context` instead for enterprise
+ * multi-tenant G-HIMS identity, RBAC permissions, and HCM clinical privileges.
+ * This raw Firebase hook is reserved strictly for low-level token plumbing.
+ */
 export function useAuth() {
   return useContext(AuthContext);
 }

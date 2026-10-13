@@ -73,7 +73,7 @@ function reject(commandId: string, idempotencyKey: string, code: string, message
 
 export function assertMockCleanupEnvironment(tenantId: string): void {
   const mode = getRuntimeMode();
-  const projectId = String(process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || '').trim();
+  const projectId = String(process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || '').replace(/^['"]|['"]$/g, '').trim();
   const confirmation = String(process.env.GHIMS_MOCK_CLEANUP_CONFIRM_PROJECT || '').trim();
   const prodProject = String(
     process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION ||

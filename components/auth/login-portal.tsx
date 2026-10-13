@@ -81,7 +81,7 @@ export function LoginPortal() {
         setTenantId((current) =>
           current && items.some((facility: LoginFacility) => facility.tenantId === current)
             ? current
-            : ''
+            : items[0]?.tenantId || ''
         );
       } catch (err: any) {
         if (err?.name !== 'AbortError') {

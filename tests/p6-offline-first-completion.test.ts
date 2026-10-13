@@ -3,7 +3,8 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { compareClocks, mergeClocks } from '@/lib/offline/vector-clock';
 
-const source = (file: string) => readFile(path.join(process.cwd(), file), 'utf8');
+const source = async (file: string): Promise<string> =>
+  (await readFile(path.join(process.cwd(), file), 'utf8')).replace(/\r\n/g, '\n');
 
 describe('G-HIMS P6 full offline-first completion', () => {
   test('edge PHI uses non-extractable AES-GCM envelopes', async () => {

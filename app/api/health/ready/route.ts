@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
+import { classifyFirebaseModuleLoadFailure } from '@/lib/runtime/firebase-module-health-classifier';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,8 +15,9 @@ export async function GET() {
     // Import within GET so failures in Firebase SDK module evaluation are
     // contained, not converted by Next.js into an unclassified HTTP 500.
     admin = await import('@/server/firebase/admin');
-  } catch {
+  } catch (error) {
     blockers.push('FIREBASE_ADMIN_MODULE_LOAD_FAILED');
+    blockers.push(classifyFirebaseModuleLoadFailure(error));
   }
 
   let auth: ReturnType<AdminModule['getAdminAuth']> = null;

@@ -8,6 +8,7 @@
  * no overwrites, no automatic retry or migration.
  */
 import crypto from 'node:crypto';
+import { getApp } from 'firebase-admin/app';
 import { execFileSync } from 'node:child_process';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { registerPatientAndEncounter } from '@/server/runtime/registration-orchestrator';
@@ -89,7 +90,7 @@ async function run(): Promise<void> {
   if (dirty) throw new Error('CIQP182_HOSPITAL0_CHECKOUT_DIRTY');
   const mode = assertCiqp182HostedWriterScope(process.env, head);
   const db = getAdminFirestore();
-  if (!db || db.projectId !== STAGING_PROJECT) {
+  if (!db || getApp().options.projectId !== STAGING_PROJECT) {
     throw new Error('CIQP182_HOSPITAL0_FIRESTORE_PROJECT_NOT_CONFIRMED');
   }
   const tenant = db.collection('tenants').doc(TENANT);

@@ -7,6 +7,7 @@ import {
 import { inspectCiqpHostedStagingReadOnly } from '@/lib/clinical/patient360/ciqp-hosted-staging-readonly';
 import { inspectCiqpSnapshotOutboxEvidence } from '@/lib/clinical/patient360/ciqp-snapshot-outbox-audit';
 import { fingerprintCiqpImmutableTenant } from '@/lib/clinical/patient360/ciqp-immutable-cohort-fingerprint';
+import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
 
 describe('CIQP-182 synthetic Hospital0 fixture (disposable Firestore emulator only)', () => {
   test('fail closed before Firebase init for hosted or ambiguous runtime', () => {
@@ -81,6 +82,73 @@ describe('CIQP-182 synthetic Hospital0 fixture (disposable Firestore emulator on
     expect(immutable.eventCount).toBe(result.eventCount);
     expect(immutable.outboxCount).toBe(result.outboxCount);
     for (const serialized of [JSON.stringify(result), JSON.stringify(report), JSON.stringify(evidence)]) {
+      expect(serialized).not.toContain(CIQP182_FIXTURE_PATIENT);
+      expect(serialized).not.toContain(CIQP182_FIXTURE_TENANT);
+    }
+
+    // Patient 360 M2C: an already seeded tenant cannot silently accept a
+    // second fixture run. Refusal must occur before another registration,
+    // immutable event, or outbox row is created.
+    await expect(seedCiqp182EmulatorFixture()).rejects.toThrow();
+    const afterDuplicateAttempt = await fingerprintCiqpImmutableTenant(
+      db, CIQP182_FIXTURE_TENANT, hmac
+    );
+    expect(afterDuplicateAttempt.eventCount).toBe(immutable.eventCount);
+    expect(afterDuplicateAttempt.outboxCount).toBe(immutable.outboxCount);
+
+    // Simulate a lost Patient 360 read-model document in the disposable
+    // emulator (never hosted). The bounded census must fail closed even
+    // though authoritative patient registration remains present.
+    await tenant.collection('patient360Projections')
+      .doc(CIQP182_FIXTURE_PATIENT).delete();
+    const missingProjection = await inspectCiqpHostedStagingReadOnly(db, {
+      projectId: 'ghims-p4-ci', tenantId: CIQP182_FIXTURE_TENANT,
+      expectedSha: sha,
+    }, hmac);
+    expect(missingProjection).toMatchObject({
+      gate: 'BLOCKED',
+      cohortCoverage: 'MISSING_PROJECTIONS',
+      registeredPatientsObserved: 1,
+      missingPatientProjections: 1,
+      orphanPatientProjections: 0,
+      writesPerformed: 0,
+      releaseAuthorization: 'NOT_GRANTED',
+    });
+
+    // Recover exclusively via the authoritative projection service.
+    // A recovered projection must pass census/parity inspection without
+    // duplicating source clinical events or dispatch outbox records.
+    const recoveredProjection = await Patient360ProjectionService.rebuildPatient(
+      CIQP182_FIXTURE_TENANT, CIQP182_FIXTURE_PATIENT
+    );
+    expect(recoveredProjection.timelineReady).toBe(true);
+    expect(recoveredProjection.contentHash).toBeTruthy();
+    const recoveredReport = await inspectCiqpHostedStagingReadOnly(db, {
+      projectId: 'ghims-p4-ci', tenantId: CIQP182_FIXTURE_TENANT,
+      expectedSha: sha,
+    }, hmac);
+    expect(recoveredReport).toMatchObject({
+      gate: 'COHORT_MATCHED_ONLY',
+      cohortCoverage: 'MATCHED',
+      registeredPatientsObserved: 1,
+      missingPatientProjections: 0,
+      orphanPatientProjections: 0,
+      inspected: 1, failures: 0,
+      writesPerformed: 0,
+      releaseAuthorization: 'NOT_GRANTED',
+    });
+    expect(recoveredReport.classificationCounts).toEqual({
+      CURRENT_POLICY_MATCH: 1,
+    });
+    const afterRecovery = await fingerprintCiqpImmutableTenant(
+      db, CIQP182_FIXTURE_TENANT, hmac
+    );
+    expect(afterRecovery.eventCount).toBe(immutable.eventCount);
+    expect(afterRecovery.outboxCount).toBe(immutable.outboxCount);
+    for (const serialized of [
+      JSON.stringify(missingProjection),
+      JSON.stringify(recoveredReport),
+    ]) {
       expect(serialized).not.toContain(CIQP182_FIXTURE_PATIENT);
       expect(serialized).not.toContain(CIQP182_FIXTURE_TENANT);
     }

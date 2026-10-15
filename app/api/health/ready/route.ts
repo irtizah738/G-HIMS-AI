@@ -7,11 +7,27 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   const blockers: string[] = [];
   const runtime = getRuntimeMode();
-  const auth = getAdminAuth();
-  const db = getAdminFirestore();
+  // Initialization may throw before the connectivity probes execute.
+  // Never expose raw SDK errors, project configuration, or credentials in HTTP.
+  let auth: ReturnType<typeof getAdminAuth> = null;
+  let db: ReturnType<typeof getAdminFirestore> = null;
+  try {
+    auth = getAdminAuth();
+  } catch {
+    blockers.push('FIREBASE_ADMIN_AUTH_INITIALIZATION_FAILED');
+  }
+  try {
+    db = getAdminFirestore();
+  } catch {
+    blockers.push('FIRESTORE_ADMIN_INITIALIZATION_FAILED');
+  }
 
-  if (!auth) blockers.push('FIREBASE_ADMIN_AUTH_UNAVAILABLE');
-  if (!db) blockers.push('FIRESTORE_ADMIN_UNAVAILABLE');
+  if (!auth && !blockers.includes('FIREBASE_ADMIN_AUTH_INITIALIZATION_FAILED')) {
+    blockers.push('FIREBASE_ADMIN_AUTH_UNAVAILABLE');
+  }
+  if (!db && !blockers.includes('FIRESTORE_ADMIN_INITIALIZATION_FAILED')) {
+    blockers.push('FIRESTORE_ADMIN_UNAVAILABLE');
+  }
 
   if (auth) {
     try {

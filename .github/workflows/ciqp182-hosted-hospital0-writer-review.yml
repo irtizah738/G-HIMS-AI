@@ -1,0 +1,53 @@
+name: CIQP182 Hospital0 hosted writer source-only safety
+
+on:
+  push:
+    branches:
+      - qualification/ciqp182-hosted-hospital0-safe-writer-20261015
+    paths:
+      - scripts/ops/ciqp182-hospital0-hosted-writer.ts
+      - tests/ciqp182-hosted-writer-safety.test.ts
+      - .github/workflows/ciqp182-hosted-hospital0-writer-review.yml
+
+permissions:
+  contents: read
+
+jobs:
+  source-only:
+    if: github.repository == 'irtizah738/G-HIMS-AI' && github.ref == 'refs/heads/qualification/ciqp182-hosted-hospital0-safe-writer-20261015'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NODE_ENV: test
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Confirm unprivileged source-only test environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'irtizah738/G-HIMS-AI'
+          test "$GITHUB_REF" = 'refs/heads/qualification/ciqp182-hosted-hospital0-safe-writer-20261015'
+          test -z "${FIREBASE_PRIVATE_KEY:-}"
+          test -z "${GOOGLE_APPLICATION_CREDENTIALS:-}"
+          test -z "${CIQP182_HOSPITAL0_WRITE_ACK:-}"
+          test -z "${FIRESTORE_EMULATOR_HOST:-}"
+      - name: Install frozen dependencies
+        run: bun install --frozen-lockfile
+      - name: Verify fail-closed writer, no hosted access
+        run: bun test tests/ciqp182-hosted-writer-safety.test.ts tests/ciqp-hosted-staging-readonly.test.ts
+      - name: Check TypeScript
+        run: bun run typecheck
+      - name: Qualifier evidence
+        run: |
+          echo 'CIQP182_WRITER_SOURCE_REVIEW_CANDIDATE'
+          echo 'FIRESTORE_READS_PERFORMED_FALSE'
+          echo 'HOSTED_FIRESTORE_WRITES_PERFORMED_FALSE'
+          echo 'RELEASE_AUTHORIZATION_NOT_GRANTED'

@@ -45,11 +45,22 @@ export async function seedCiqp182EmulatorFixture(): Promise<{
   const db = getAdminFirestore();
   if (!db) throw new Error('CIQP182_FIXTURE_EMULATOR_UNAVAILABLE');
   const tenant = db.collection('tenants').doc(CIQP182_FIXTURE_TENANT);
-  // Reject a duplicate fixture before Firestore SDK create() retries a
-  // pre-existing document conflict. This is only a fast-fail usability check:
-  // tenant.create() below remains the atomic safety boundary against races.
-  if ((await tenant.get()).exists) {
+  // An emulator REST existence check avoids Admin SDK credential discovery
+  // before the first Firestore write (which caused CI metadata lookup timeout).
+  // assertCiqp182EmulatorOnly above restricts this request to TEST + loopback.
+  // The create() call below remains the atomic race-safety boundary.
+  const host = process.env.FIRESTORE_EMULATOR_HOST!;
+  const preflight = await fetch(
+    'http://' + host +
+      '/v1/projects/ghims-p4-ci/databases/(default)/documents/tenants/' +
+      encodeURIComponent(CIQP182_FIXTURE_TENANT),
+    { method: 'GET', signal: AbortSignal.timeout(5000) }
+  ).catch(() => { throw new Error('CIQP182_EMULATOR_PREFLIGHT_UNAVAILABLE'); });
+  if (preflight.status === 200) {
     throw new Error('CIQP182_FIXTURE_TENANT_ALREADY_EXISTS');
+  }
+  if (preflight.status !== 404) {
+    throw new Error('CIQP182_EMULATOR_PREFLIGHT_UNAVAILABLE');
   }
   // Never overwrite an existing tenant or source row, even in the emulator.
   await tenant.create({

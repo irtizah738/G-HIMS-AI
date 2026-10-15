@@ -3,12 +3,13 @@
  * Separate from the emulator-only generator, read-only auditor and migration.
  *
  * Default DRY_RUN: reads only the pre-created tenant document and its
- * subcollection metadata. APPLY: explicitly approved, create-once fixture
+ * subcollection metadata. Authentication uses keyless GitHub OIDC and WIF. APPLY: explicitly approved, create-once fixture
  * against the one exact tenant; canonical registration may update only its
  * newly created tenant-scoped idempotency state. No production, no tenant recreation, no delete,
  * no overwrites, no automatic retry or migration.
  */
 import crypto from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { getApp } from 'firebase-admin/app';
 import { execFileSync } from 'node:child_process';
 import { getAdminFirestore } from '@/server/firebase/admin';
@@ -30,6 +31,39 @@ const METADATA = {
   syntheticOnly: true,
 } as const;
 
+/**
+ * Authorize only GitHub OIDC -> Google Workload Identity Federation.
+ * No exported service-account private key is accepted. The credential
+ * configuration is non-secret, but the token is short-lived and validated by
+ * Google against the provider's exact repository/ref/workflow conditions.
+ */
+export function isCiqp182ReviewedFederatedCredential(env: NodeJS.ProcessEnv): boolean {
+  if (env.FIREBASE_PRIVATE_KEY || env.client_email || env.private_key ||
+      env.GITHUB_ACTIONS !== 'true' ||
+      env.GITHUB_REPOSITORY !== 'irtizah738/G-HIMS-OS' ||
+      env.GITHUB_REF !== 'refs/heads/main' ||
+      env.GITHUB_WORKFLOW_REF !== 'irtizah738/G-HIMS-OS/.github/workflows/ciqp182-hospital0-create-synthetic-staging.yml@refs/heads/main' ||
+      !env.ACTIONS_ID_TOKEN_REQUEST_URL ||
+      !env.GOOGLE_APPLICATION_CREDENTIALS ||
+      !/^projects\\/\\d+\\/locations\\/global\\/workloadIdentityPools\\/[a-z0-9-]+\\/providers\\/[a-z0-9-]+$/.test(
+        env.CIQP182_HOSPITAL0_WIF_PROVIDER || ''
+      )) return false;
+  try {
+    const credentials = JSON.parse(
+      readFileSync(env.GOOGLE_APPLICATION_CREDENTIALS, 'utf8')
+    ) as Record<string, unknown>;
+    const expectedAudience = '//iam.googleapis.com/' + env.CIQP182_HOSPITAL0_WIF_PROVIDER;
+    const endpoint = String(credentials.service_account_impersonation_url || '');
+    return credentials.type === 'external_account' &&
+      credentials.audience === expectedAudience &&
+      /^https:\/\/iamcredentials\\.googleapis\\.com\/v1\/projects\/-\/serviceAccounts\//.test(endpoint) &&
+      decodeURIComponent(endpoint).endsWith('/' + WRITER + ':generateAccessToken') &&
+      credentials.subject_token_type === 'urn:ietf:params:oauth:token-type:jwt';
+  } catch {
+    return false;
+  }
+}
+
 export type Ciqp182HostedWriteMode = 'DRY_RUN' | 'APPLY';
 
 export function assertCiqp182HostedWriterScope(
@@ -43,7 +77,7 @@ export function assertCiqp182HostedWriterScope(
     env.GHIMS_RUNTIME_MODE === 'STAGING' &&
     env.NODE_ENV !== 'production' &&
     !env.VERCEL && !env.FIRESTORE_EMULATOR_HOST && !env.FIREBASE_AUTH_EMULATOR_HOST &&
-    !env.GOOGLE_APPLICATION_CREDENTIALS &&
+    isCiqp182ReviewedFederatedCredential(env) &&
     env.FIREBASE_PROJECT_ID === STAGING_PROJECT &&
     env.GHIMS_FIREBASE_PROJECT_ID_STAGING === STAGING_PROJECT &&
     env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION === 'g-hims-ai' &&
@@ -54,10 +88,7 @@ export function assertCiqp182HostedWriterScope(
     env.CIQP182_HOSPITAL0_CONFIRM_PROJECT === STAGING_PROJECT &&
     env.CIQP182_HOSPITAL0_CONFIRM_TENANT === TENANT &&
     /^[0-9a-f]{40}$/.test(sha) && sha === checkedOutSha.trim().toLowerCase() &&
-    env.FIREBASE_CLIENT_EMAIL === WRITER &&
     env.CIQP182_HOSPITAL0_WRITER_EMAIL === WRITER &&
-    typeof env.FIREBASE_PRIVATE_KEY === 'string' &&
-    env.FIREBASE_PRIVATE_KEY.includes('BEGIN') &&
     typeof env.CIQP182_HOSPITAL0_EVIDENCE_HMAC_KEY === 'string' &&
     Buffer.byteLength(env.CIQP182_HOSPITAL0_EVIDENCE_HMAC_KEY, 'utf8') >= 32;
   if (!valid) throw new Error('CIQP182_HOSPITAL0_STAGING_WRITER_SCOPE_DENIED');

@@ -3,8 +3,9 @@
  * Separate from the emulator-only generator, read-only auditor and migration.
  *
  * Default DRY_RUN: reads only the pre-created tenant document and its
- * subcollection metadata. APPLY: explicitly approved, create-only operations
- * against the one exact tenant. No production, no tenant recreation, no delete,
+ * subcollection metadata. APPLY: explicitly approved, create-once fixture
+ * against the one exact tenant; canonical registration may update only its
+ * newly created tenant-scoped idempotency state. No production, no tenant recreation, no delete,
  * no overwrites, no automatic retry or migration.
  */
 import crypto from 'node:crypto';
@@ -101,9 +102,10 @@ async function run(): Promise<void> {
   // This is not a "reseed". Reject ANY existing tenant collection to avoid
   // overwriting, merging, or interfering with previously generated evidence.
   const collections = await tenant.listCollections();
-  for (const col of collections) {
-    const rows = await col.limit(1).get();
-    if (!rows.empty) throw new Error('CIQP182_HOSPITAL0_EXISTING_TENANT_ROWS');
+  // Fail closed even if an existing collection currently has zero documents:
+  // nested orphaned subcollections or prior partial setup require review.
+  if (collections.length !== 0) {
+    throw new Error('CIQP182_HOSPITAL0_EXISTING_TENANT_ROWS');
   }
   if (mode === 'DRY_RUN') {
     process.stdout.write(JSON.stringify({

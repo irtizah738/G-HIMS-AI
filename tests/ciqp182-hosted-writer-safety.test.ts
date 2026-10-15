@@ -92,19 +92,32 @@ describe('CIQP182 hosted writer authority / no production boundary', () => {
     }
   });
 
-  test('write requires explicit independent review digests and exact source pin', () => {
-    expect(() => assertCiqp182HostedWriterScope({
-      ...allowed(), CIQP182_HOSPITAL0_WRITE_MODE: 'APPLY',
-    }, sha)).toThrow('CIQP182_HOSPITAL0_INDEPENDENT_WRITE_APPROVAL_REQUIRED');
-    expect(assertCiqp182HostedWriterScope({
+  test('APPLY requires documented owner exception and actual review receipts, not false independent approval', () => {
+    const ownerEvidence: NodeJS.ProcessEnv = {
       ...allowed(),
       CIQP182_HOSPITAL0_WRITE_MODE: 'APPLY',
       CIQP182_HOSPITAL0_WRITE_ACK: 'AUTHORIZE_CREATE_ONLY_SYNTHETIC_HOSPITAL0',
-      CIQP182_HOSPITAL0_SOURCE_REVIEWED: 'REVIEWED_EXACT_SOURCE',
+      CIQP182_HOSPITAL0_SOURCE_REVIEWED: 'OWNER_EXCEPTION_SYNTHETIC_STAGING_ONLY',
+      CIQP182_HOSPITAL0_OWNER_EXCEPTION_REF:
+        'https://github.com/irtizah738/G-HIMS-AI/pull/203#issuecomment-6193952944',
       CIQP182_HOSPITAL0_IAM_REVIEW_SHA256: 'b'.repeat(64),
       CIQP182_HOSPITAL0_FIXTURE_REVIEW_SHA256: 'c'.repeat(64),
       CIQP182_HOSPITAL0_APPROVED_SHA: sha,
-    }, sha)).toBe('APPLY');
+    };
+    for (const partial of [
+      {},
+      { CIQP182_HOSPITAL0_SOURCE_REVIEWED: 'REVIEWED_EXACT_SOURCE' },
+      { CIQP182_HOSPITAL0_OWNER_EXCEPTION_REF: undefined },
+      { CIQP182_HOSPITAL0_IAM_REVIEW_SHA256: undefined },
+      { CIQP182_HOSPITAL0_FIXTURE_REVIEW_SHA256: undefined },
+      { CIQP182_HOSPITAL0_APPROVED_SHA: 'd'.repeat(40) },
+    ]) {
+      expect(() => assertCiqp182HostedWriterScope(
+        Object.keys(partial).length ? { ...ownerEvidence, ...partial } :
+          { ...allowed(), CIQP182_HOSPITAL0_WRITE_MODE: 'APPLY' }, sha
+      )).toThrow('CIQP182_HOSPITAL0_OWNER_EXCEPTION_EVIDENCE_REQUIRED');
+    }
+    expect(assertCiqp182HostedWriterScope(ownerEvidence, sha)).toBe('APPLY');
   });
 
   test('only original six pre-created tenant metadata fields pass the equality guard', () => {

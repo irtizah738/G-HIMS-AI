@@ -153,6 +153,26 @@ describe('G-HIMS P5A identity and staging access boundary',()=>{
     expect(admin).toContain('Use FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY on Vercel');
   });
 
+  test('hosted Firebase health checks fail closed on SDK initialization errors',async()=>{
+    const ready=await source('app/api/health/ready/route.ts');
+    const clinical=await source('app/api/health/clinical-intelligence/route.ts');
+    for(const route of [ready,clinical]){
+      const authInit=route.indexOf('auth = getAdminAuth()');
+      const dbInit=route.indexOf('db = getAdminFirestore()');
+      expect(authInit).toBeGreaterThan(0);
+      expect(dbInit).toBeGreaterThan(authInit);
+      expect(route.slice(authInit,dbInit)).toContain('catch {');
+      expect(route.slice(dbInit,dbInit+180)).toContain('catch {');
+      expect(route).toContain('status: ready ? 200 : 503');
+      expect(route).not.toContain('error.message,');
+    }
+    expect(ready).toContain('FIREBASE_ADMIN_AUTH_INITIALIZATION_FAILED');
+    expect(ready).toContain('FIRESTORE_ADMIN_INITIALIZATION_FAILED');
+    expect(clinical).toContain('CI10I_FIREBASE_ADMIN_AUTH_INITIALIZATION_FAILED');
+    expect(clinical).toContain('CI10I_FIRESTORE_ADMIN_INITIALIZATION_FAILED');
+    expect(clinical).toContain('await auth.listUsers(1)');
+  });
+
   test('bootstrap requires explicit project and production confirmations',async()=>{
     const bootstrap=await source('scripts/ops/bootstrap-admin.ts');
     expect(bootstrap).toContain('GHIMS_ALLOW_ADMIN_BOOTSTRAP');

@@ -45,6 +45,12 @@ export async function seedCiqp182EmulatorFixture(): Promise<{
   const db = getAdminFirestore();
   if (!db) throw new Error('CIQP182_FIXTURE_EMULATOR_UNAVAILABLE');
   const tenant = db.collection('tenants').doc(CIQP182_FIXTURE_TENANT);
+  // Reject a duplicate fixture before Firestore SDK create() retries a
+  // pre-existing document conflict. This is only a fast-fail usability check:
+  // tenant.create() below remains the atomic safety boundary against races.
+  if ((await tenant.get()).exists) {
+    throw new Error('CIQP182_FIXTURE_TENANT_ALREADY_EXISTS');
+  }
   // Never overwrite an existing tenant or source row, even in the emulator.
   await tenant.create({
     name: 'CIQP182 Synthetic Hospital 0',

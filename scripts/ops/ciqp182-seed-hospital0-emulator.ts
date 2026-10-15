@@ -63,7 +63,7 @@ export async function seedCiqp182EmulatorFixture(): Promise<{
     fullName: 'Synthetic Patient Zero One',
     gender: 'other',
     dateOfBirth: '1981-01-01',
-    identifiers: [{ type: 'CNIC', value: '99999000111' }],
+    identifiers: [{ type: 'CNIC', value: '99999000111', issuer: 'SYNTHETIC_FIXTURE' }],
     contactPhone: '+920000000000',
     address: 'Synthetic fixture, emulator only',
     encounterType: 'OPD',

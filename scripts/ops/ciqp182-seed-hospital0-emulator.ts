@@ -60,7 +60,7 @@ export async function seedCiqp182EmulatorFixture(): Promise<{
     throw new Error('CIQP182_FIXTURE_TENANT_ALREADY_EXISTS');
   }
   if (preflight.status !== 404) {
-    throw new Error('CIQP182_EMULATOR_PREFLIGHT_UNAVAILABLE');
+    throw new Error('CIQP182_EMULATOR_PREFLIGHT_UNAVAILABLE_HTTP_' + preflight.status);
   }
   // Never overwrite an existing tenant or source row, even in the emulator.
   await tenant.create({

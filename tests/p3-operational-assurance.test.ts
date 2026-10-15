@@ -58,6 +58,46 @@ describe('G-HIMS P3 operational assurance and adversarial matrix',()=>{
     expect(()=>assertServerFirebaseProjectIsolation('ghims-prod')).toThrow(/ENVIRONMENT_PROJECT_COLLISION/);
   });
 
+  test('STAGING accepts its own ambient Firebase project without inferring a TEST alias', () => {
+    process.env.GHIMS_RUNTIME_MODE = 'STAGING';
+    process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE = 'STAGING';
+    process.env.FIREBASE_PROJECT_ID = 'studio-1130431360-48a05';
+    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID = 'studio-1130431360-48a05';
+    process.env.GHIMS_FIREBASE_PROJECT_ID_STAGING = 'studio-1130431360-48a05';
+    process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING = 'studio-1130431360-48a05';
+    process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION = 'g-hims-ai';
+    process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION = 'g-hims-ai';
+    process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO = 'ghims-demo';
+    process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_DEMO = 'ghims-demo';
+    delete process.env.GHIMS_FIREBASE_PROJECT_ID_TEST;
+    delete process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST;
+
+    expect(() => assertServerFirebaseProjectIsolation('studio-1130431360-48a05')).not.toThrow();
+    expect(() => assertClientFirebaseProjectIsolation('studio-1130431360-48a05')).not.toThrow();
+    expect(() => assertServerFirebaseProjectIsolation('g-hims-ai')).toThrow(/ENVIRONMENT_PROJECT_MISMATCH/);
+    expect(() => assertClientFirebaseProjectIsolation('g-hims-ai')).toThrow(/ENVIRONMENT_PROJECT_MISMATCH/);
+  });
+
+  test('STAGING still rejects an explicitly configured TEST project collision', () => {
+    process.env.GHIMS_RUNTIME_MODE = 'STAGING';
+    process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE = 'STAGING';
+    process.env.GHIMS_FIREBASE_PROJECT_ID_STAGING = 'ghims-isolated-staging';
+    process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING = 'ghims-isolated-staging';
+    process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION = 'g-hims-ai';
+    process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION = 'g-hims-ai';
+    process.env.FIREBASE_PROJECT_ID = 'ghims-isolated-staging';
+    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID = 'ghims-isolated-staging';
+    process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO = 'ghims-demo';
+    process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_DEMO = 'ghims-demo';
+    process.env.GHIMS_FIREBASE_PROJECT_ID_TEST = 'ghims-isolated-staging';
+    process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST = 'ghims-isolated-staging';
+
+    expect(() => assertServerFirebaseProjectIsolation('ghims-isolated-staging'))
+      .toThrow(/ENVIRONMENT_PROJECT_COLLISION/);
+    expect(() => assertClientFirebaseProjectIsolation('ghims-isolated-staging'))
+      .toThrow(/ENVIRONMENT_PROJECT_COLLISION/);
+  });
+
   test('TEST mode never silently connects to the DEMO Firebase project', () => {
     process.env.GHIMS_RUNTIME_MODE = 'TEST';
     process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO = 'synthetic-demo';

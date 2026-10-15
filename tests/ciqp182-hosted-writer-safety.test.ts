@@ -1,4 +1,7 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   assertCiqp182HostedWriterScope,
   matchesCiqp182HostedTenantMetadata,
@@ -7,6 +10,19 @@ import {
 const sha = 'a'.repeat(40);
 const stage = 'studio-1130431360-48a05';
 const writer = 'ciqp182-writer@studio-1130431360-48a05.iam.gserviceaccount.com';
+const provider = 'projects/123456789/locations/global/workloadIdentityPools/ciqp182-hospital0/providers/github-oidc';
+const dir = mkdtempSync(join(tmpdir(), 'ciqp182-wif-test-'));
+const creds = join(dir, 'gha-creds-mock.json');
+// Synthetic config only: no OAuth token, usable key, or hosted access.
+writeFileSync(creds, JSON.stringify({
+  type: 'external_account',
+  audience: '//iam.googleapis.com/' + provider,
+  subject_token_type: 'urn:ietf:params:oauth:token-type:jwt',
+  service_account_impersonation_url:
+    'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/' +
+    writer + ':generateAccessToken',
+}));
+afterAll(() => rmSync(dir, { recursive: true, force: true }));
 function allowed(): NodeJS.ProcessEnv {
   return {
     GHIMS_RUNTIME_MODE: 'STAGING', NODE_ENV: 'test',
@@ -19,8 +35,14 @@ function allowed(): NodeJS.ProcessEnv {
     CIQP182_HOSPITAL0_CONFIRM_PROJECT: stage,
     CIQP182_HOSPITAL0_CONFIRM_TENANT: 'ciqp-synthetic-hospital0',
     CIQP182_HOSPITAL0_SOURCE_SHA: sha,
-    FIREBASE_CLIENT_EMAIL: writer, CIQP182_HOSPITAL0_WRITER_EMAIL: writer,
-    FIREBASE_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----\\nsynthetic-not-valid\\n-----END PRIVATE KEY-----',
+    CIQP182_HOSPITAL0_WRITER_EMAIL: writer,
+    GITHUB_ACTIONS: 'true',
+    GITHUB_REPOSITORY: 'irtizah738/G-HIMS-OS',
+    GITHUB_REF: 'refs/heads/main',
+    GITHUB_WORKFLOW_REF: 'irtizah738/G-HIMS-OS/.github/workflows/ciqp182-hospital0-create-synthetic-staging.yml@refs/heads/main',
+    ACTIONS_ID_TOKEN_REQUEST_URL: 'https://example.invalid/no-real-token',
+    GOOGLE_APPLICATION_CREDENTIALS: creds,
+    CIQP182_HOSPITAL0_WIF_PROVIDER: provider,
     CIQP182_HOSPITAL0_EVIDENCE_HMAC_KEY: 'emulator-only-fixture-hmac-placeholder-value',
   };
 }
@@ -53,7 +75,14 @@ describe('CIQP182 hosted writer authority / no production boundary', () => {
       { FIREBASE_CLIENT_EMAIL: 'firebase-adminsdk-xx@' + stage + '.iam.gserviceaccount.com' },
       { FIREBASE_CLIENT_EMAIL: 'ciqp182-readonly@' + stage + '.iam.gserviceaccount.com' },
       { CIQP182_HOSPITAL0_WRITER_EMAIL: 'ciqp182-readonly@' + stage + '.iam.gserviceaccount.com' },
-      { FIREBASE_PRIVATE_KEY: undefined },
+      { FIREBASE_PRIVATE_KEY: 'forbidden-long-lived-credential' },
+      { FIREBASE_CLIENT_EMAIL: writer },
+      { GITHUB_ACTIONS: undefined },
+      { GITHUB_REPOSITORY: 'some-other/repo' },
+      { GITHUB_REF: 'refs/heads/feature' },
+      { GITHUB_WORKFLOW_REF: 'irtizah738/G-HIMS-OS/.github/workflows/unreviewed.yml@refs/heads/main' },
+      { ACTIONS_ID_TOKEN_REQUEST_URL: undefined },
+      { CIQP182_HOSPITAL0_WIF_PROVIDER: 'projects/other/providers/wrong' },
       { CIQP182_HOSPITAL0_EVIDENCE_HMAC_KEY: 'weak' },
       { CIQP182_HOSPITAL0_SOURCE_SHA: 'b'.repeat(40) },
     ];

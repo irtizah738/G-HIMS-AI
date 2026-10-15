@@ -85,6 +85,18 @@ Run: bun scripts/ops/ciqp-inspect-staging-readonly.ts
 
 The output contains only aggregate classification counts, a keyed HMAC,
 a bounded coverage marker and permanent releaseAuthorization: NOT_GRANTED.
+
+**Registry coverage safeguard (review candidate):** The bounded synthetic-hosted
+inventory must compare the tenant's authoritative `patients` document IDs
+against `patient360Projections` document IDs before assigning
+`COHORT_MATCHED_ONLY`. Missing patient projections, projections without a
+registered patient, duplicate/ambiguous IDs, zero patients or a cohort above
+the 25-patient cap block the report. It reads only document IDs for registry
+coverage, not patient profile fields, and reports aggregate discrepancy
+counts. This is a **bounded synthetic cohort**, not an exhaustive historical
+event census or proof that unindexed events cannot exist; independently
+reconcile raw events, audit and outbox lineage separately. No hosted scan
+has been authorized or executed by this source change.
 It never prints patient IDs, MRNs, event payloads, individual patient
 fingerprints or keys. A zero-patient or over-limit cohort fails closed.
 COHORT_MATCHED_ONLY is not a production patient inventory, migration or

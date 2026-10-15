@@ -54,7 +54,13 @@ export async function seedCiqp182EmulatorFixture(): Promise<{
     'http://' + host +
       '/v1/projects/ghims-p4-ci/databases/(default)/documents/tenants/' +
       encodeURIComponent(CIQP182_FIXTURE_TENANT),
-    { method: 'GET', signal: AbortSignal.timeout(5000) }
+    {
+      method: 'GET',
+      // Firestore emulator uses the literal, non-secret "owner" token for
+      // admin-rule bypass. The emulator-only guard above forbids hosted use.
+      headers: { Authorization: 'Bearer owner' },
+      signal: AbortSignal.timeout(5000),
+    }
   ).catch(() => { throw new Error('CIQP182_EMULATOR_PREFLIGHT_UNAVAILABLE'); });
   if (preflight.status === 200) {
     throw new Error('CIQP182_FIXTURE_TENANT_ALREADY_EXISTS');

@@ -569,4 +569,117 @@ describe('G-HIMS CI-4 authoritative Patient 360 projection', () => {
     expect(worker).toContain("'patient360Projections'");
     expect(worker).toContain("'patient360Timeline'");
   });
+
+  test('clinical-domain summaries preserve authoritative observations, allergy severity, orders, medication status and signed documents', () => {
+    const { projection } = Patient360Projector.project(baseSources(), 1700000030000);
+    expect(projection.latestVitals).toHaveLength(1);
+    expect(projection.latestVitals[0]).toMatchObject({
+      observationId: 'obs-new', display: 'Heart rate', status: 'FINAL',
+      value: { valueType: 'QUANTITY', quantity: { value: 88 } },
+    });
+    expect(projection.allergies).toEqual([
+      expect.objectContaining({
+        allergyId: 'allergy-a', substance: 'Penicillin',
+        criticality: 'HIGH', verificationStatus: 'CONFIRMED',
+      }),
+    ]);
+    expect(projection.currentMedications).toEqual([
+      expect.objectContaining({
+        medicationOrderId: 'rx-a', medication: 'Amlodipine 5 mg',
+        status: 'ACTIVE', prescribedBy: 'doctor-a', dosageText: '5 mg',
+      }),
+    ]);
+    expect(projection.recentDiagnosticOrders).toEqual([
+      expect.objectContaining({
+        diagnosticOrderId: 'ord-a', display: 'Complete blood count',
+        orderType: 'LAB', orderedBy: 'doctor-a', status: 'COMPLETED',
+      }),
+    ]);
+    expect(projection.recentResults).toEqual([
+      expect.objectContaining({
+        diagnosticReportId: 'report-a', orderId: 'ord-a', status: 'FINAL',
+      }),
+    ]);
+    expect(projection.recentDocuments).toEqual([
+      expect.objectContaining({
+        clinicalDocumentId: 'doc-a', documentType: 'SOAP',
+        status: 'FINAL', signedBy: 'doctor-a', signedAt: 1700000000280,
+      }),
+    ]);
+    expect(projection.counts).toMatchObject({
+      observations: 2, allergies: 1, medicationOrders: 1,
+      diagnosticOrders: 1, diagnosticReports: 1, documents: 1,
+    });
+  });
+
+  test('cross-patient clinical records of every domain cannot contaminate another Patient 360', () => {
+    const source = baseSources();
+    const original = Patient360Projector.project(source, 1700000040000);
+    const other = 'another-patient';
+    const injected: Patient360ProjectionSources = {
+      ...source,
+      observations: [...source.observations, {
+        ...source.observations[0], observationId: 'injected-vital', patientId: other,
+      }],
+      allergies: [...source.allergies, {
+        ...source.allergies[0], allergyId: 'injected-allergy', patientId: other,
+      }],
+      medicationOrders: [...source.medicationOrders, {
+        ...source.medicationOrders[0], medicationOrderId: 'injected-medication', patientId: other,
+      }],
+      diagnosticOrders: [...(source.diagnosticOrders || []), {
+        ...source.diagnosticOrders![0], diagnosticOrderId: 'injected-order', patientId: other,
+      }],
+      diagnosticReports: [...source.diagnosticReports, {
+        ...source.diagnosticReports[0], diagnosticReportId: 'injected-result', patientId: other,
+      }],
+      documents: [...source.documents, {
+        ...source.documents[0], clinicalDocumentId: 'injected-document', patientId: other,
+      }],
+      events: [...source.events, {
+        eventId: 'injected-event', eventType: 'VITALS_RECORDED',
+        aggregateType: 'ENCOUNTER_EVIDENCE', aggregateId: 'injected-evidence',
+        payload: { patientId: other, encounterId: 'foreign-encounter' },
+        occurredAt: 1700000040000, recordedAt: 1700000040000,
+      }],
+    };
+    const result = Patient360Projector.project(injected, 1700000040000);
+    expect(result.projection.contentHash).toBe(original.projection.contentHash);
+    expect(result.projection.sourceFingerprint).toBe(original.projection.sourceFingerprint);
+    expect(result.timeline).toEqual(original.timeline);
+    expect(JSON.stringify(result.projection)).not.toContain('injected-');
+  });
+
+  test('cancelled and entered-in-error clinical facts are not promoted as active decisions', () => {
+    const source = baseSources();
+    const { projection } = Patient360Projector.project({
+      ...source,
+      allergies: source.allergies.map(allergy => ({
+        ...allergy, verificationStatus: 'ENTERED_IN_ERROR' as const,
+      })),
+      medicationOrders: source.medicationOrders.map(order => ({
+        ...order, status: 'CANCELLED' as const,
+      })),
+      diagnosticOrders: (source.diagnosticOrders || []).map(order => ({
+        ...order, status: 'CANCELLED' as const,
+      })),
+      observations: source.observations.map(observation => ({
+        ...observation, status: 'ENTERED_IN_ERROR' as const,
+      })),
+      documents: source.documents.map(document => ({
+        ...document, status: 'ENTERED_IN_ERROR' as const,
+      })),
+    });
+    expect(projection.allergies).toEqual([]);
+    expect(projection.currentMedications).toEqual([]);
+    expect(projection.recentDiagnosticOrders).toEqual([]);
+    expect(projection.latestVitals).toEqual([]);
+    expect(projection.recentDocuments).toEqual([]);
+    // An error-coded source row still exists: counts/knowledge must not be
+    // misrepresented as a clinician assessment of "none known".
+    expect(projection.counts).toMatchObject({
+      allergies: 1, observations: 2, medicationOrders: 1,
+      diagnosticOrders: 1, documents: 1,
+    });
+  });
 });

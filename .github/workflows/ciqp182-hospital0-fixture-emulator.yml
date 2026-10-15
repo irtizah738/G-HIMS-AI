@@ -56,7 +56,7 @@ jobs:
       - name: Install pinned Firestore emulator
         run: npm install --global firebase-tools@15.30.2
       - name: Qualify synthetic fixture and immutable audit in disposable emulator
-        run: timeout --signal=TERM --kill-after=10s 600s firebase emulators:exec --project ghims-p4-ci --only firestore "bun test --timeout 60000 emulator-security/ciqp182-synthetic-hospital0-fixture.test.ts"
+        run: timeout --signal=TERM --kill-after=5s 180s firebase emulators:exec --project ghims-p4-ci --only firestore "bun test --timeout 30000 emulator-security/ciqp182-synthetic-hospital0-fixture.test.ts"
       - name: Check fixture TypeScript
         run: bun run typecheck
       - name: Record no hosted staging fixture population

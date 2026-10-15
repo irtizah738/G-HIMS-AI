@@ -105,6 +105,11 @@ export interface CiqpStagingReadOnlyReport {
   inspected: number;
   truncated: boolean;
   failures: number;
+  registeredPatientsObserved: number;
+  missingPatientProjections: number;
+  orphanPatientProjections: number;
+  cohortCoverage: 'MATCHED' | 'EMPTY' | 'TRUNCATED' | 'MISSING_PROJECTIONS' |
+    'ORPHAN_PROJECTIONS' | 'AMBIGUOUS_IDENTIFIERS';
   classificationCounts: Partial<Record<Patient360PolicyInspectionStatus, number>>;
   aggregateHmac: string;
   writesPerformed: 0;
@@ -177,6 +182,37 @@ export function classifyCiqpStagingDiagnosticGate(
 }
 
 /**
+ * Coverage is independent of projection parity: a valid projection cannot
+ * prove completeness for an unprojected registered patient. Never emit IDs.
+ * Truncated inventories are not clean censuses, even if their first page matches.
+ */
+export function classifyCiqpStagingCohortCoverage(
+  registryIds: readonly string[],
+  projectionIds: readonly string[],
+  truncated: boolean
+): Pick<CiqpStagingReadOnlyReport, 'registeredPatientsObserved' |
+  'missingPatientProjections' | 'orphanPatientProjections' | 'cohortCoverage'> {
+  const registered = new Set(registryIds);
+  const projected = new Set(projectionIds);
+  const missing = [...registered].filter(id => !projected.has(id)).length;
+  const orphan = [...projected].filter(id => !registered.has(id)).length;
+  const ambiguous = registered.size !== registryIds.length ||
+    projected.size !== projectionIds.length ||
+    [...registered, ...projected].some(id => !id || id.trim() !== id);
+  return {
+    registeredPatientsObserved: registryIds.length,
+    missingPatientProjections: truncated ? 0 : missing,
+    orphanPatientProjections: truncated ? 0 : orphan,
+    cohortCoverage: truncated ? 'TRUNCATED'
+      : ambiguous ? 'AMBIGUOUS_IDENTIFIERS'
+      : registered.size === 0 ? 'EMPTY'
+      : missing > 0 ? 'MISSING_PROJECTIONS'
+      : orphan > 0 ? 'ORPHAN_PROJECTIONS'
+      : 'MATCHED',
+  };
+}
+
+/**
  * Never calls Firestore setters, transactions, projection rebuilds, or hosted
  * migration. A project-restricted read-only IAM identity provides a second
  * independent no-write boundary.
@@ -188,12 +224,26 @@ export async function inspectCiqpHostedStagingReadOnly(
     throw new Error('CIQP_STAGING_HMAC_KEY_REQUIRED');
   }
   const tenant = db.collection('tenants').doc(scope.tenantId);
-  const snapshot = await tenant.collection('patient360Projections')
-    .orderBy(FieldPath.documentId()).limit(MAX_PATIENTS + 1).get();
-  // Fail closed: a zero-row cohort and a partial inventory are not evidence.
-  const truncated = snapshot.size > MAX_PATIENTS;
+  // A projection-only inventory can falsely certify a patient who has no
+  // projection. Read the authoritative patient registry in the SAME tenant,
+  // within the same fail-closed cap, without reading patient document fields.
+  const [snapshot, patientRegistry] = await Promise.all([
+    tenant.collection('patient360Projections')
+      .orderBy(FieldPath.documentId()).limit(MAX_PATIENTS + 1).get(),
+    tenant.collection('patients')
+      .orderBy(FieldPath.documentId()).limit(MAX_PATIENTS + 1).get(),
+  ]);
+  // Fail closed: a zero-row cohort or partial inventory is not evidence.
+  const truncated = snapshot.size > MAX_PATIENTS || patientRegistry.size > MAX_PATIENTS;
+  const coverage = classifyCiqpStagingCohortCoverage(
+    patientRegistry.docs.map(doc => doc.id),
+    snapshot.docs.map(doc => doc.id),
+    truncated
+  );
   const digest = createHmac('sha256', hmacKey);
   digest.update(scope.expectedSha);
+  // Bind the aggregate digest to the registry identity inventory as well.
+  digest.update(JSON.stringify(patientRegistry.docs.map(doc => doc.id).sort()));
   const counts: Partial<Record<Patient360PolicyInspectionStatus, number>> = {};
   let failures = 0;
   if (!truncated) {
@@ -244,12 +294,16 @@ export async function inspectCiqpHostedStagingReadOnly(
     expectedSourceSha: scope.expectedSha,
     cohort: 'BOUNDED_OPERATOR_ATTESTED_SYNTHETIC',
     inspected, truncated, failures,
+    ...coverage,
     classificationCounts: counts,
     aggregateHmac: digest.digest('hex'),
     writesPerformed: 0,
     migrationPerformed: false,
     provenance: 'OPERATOR_DECLARED_NOT_INDEPENDENTLY_VERIFIED',
-    gate: classifyCiqpStagingDiagnosticGate(counts, inspected, truncated, failures),
+    gate: classifyCiqpStagingDiagnosticGate(
+      counts, inspected, truncated,
+      failures + (coverage.cohortCoverage === 'MATCHED' ? 0 : 1)
+    ),
     releaseAuthorization: 'NOT_GRANTED',
   };
 }

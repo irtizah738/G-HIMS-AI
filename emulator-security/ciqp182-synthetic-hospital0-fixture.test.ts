@@ -86,10 +86,21 @@ describe('CIQP-182 synthetic Hospital0 fixture (disposable Firestore emulator on
       expect(serialized).not.toContain(CIQP182_FIXTURE_TENANT);
     }
 
-    // A second create-only fixture attempt is deliberately not exercised in
-    // this recovery test: its SDK conflict handling needs a separate bounded
-    // diagnostic after the first 60-second CI timeout. Keep this workflow on
-    // deterministic projection loss and reconstruction, not retries.
+    // Reproduce the previous 60-second duplicate-seed timeout with a
+    // fail-fast preflight and a stable error. No clinical/source row may be
+    // overwritten or duplicated when the second call is rejected.
+    const duplicateStart = Date.now();
+    await expect(seedCiqp182EmulatorFixture())
+      .rejects.toThrow('CIQP182_FIXTURE_TENANT_ALREADY_EXISTS');
+    expect(Date.now() - duplicateStart).toBeLessThan(10000);
+    const afterDuplicate = await fingerprintCiqpImmutableTenant(
+      db, CIQP182_FIXTURE_TENANT, hmac
+    );
+    expect(afterDuplicate.eventCount).toBe(immutable.eventCount);
+    expect(afterDuplicate.outboxCount).toBe(immutable.outboxCount);
+    expect((await tenant.collection('patients').get()).size).toBe(1);
+    expect((await tenant.collection('clinicalIntelligenceEvidenceSnapshots').get()).size).toBe(1);
+    expect((await tenant.collection('audit_logs').get()).size).toBeGreaterThan(0);
 
     // Simulate a lost Patient 360 read-model document in the disposable
     // emulator (never hosted). The bounded census must fail closed even

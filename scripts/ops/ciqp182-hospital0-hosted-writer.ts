@@ -93,15 +93,22 @@ export function assertCiqp182HostedWriterScope(
     Buffer.byteLength(env.CIQP182_HOSPITAL0_EVIDENCE_HMAC_KEY, 'utf8') >= 32;
   if (!valid) throw new Error('CIQP182_HOSPITAL0_STAGING_WRITER_SCOPE_DENIED');
 
-  // A separate CI reviewer must have approved the source and ephemeral write
-  // credential. A user declaration alone is not evidence of IAM effectiveness.
+  // The owner recorded a limited synthetic-staging exception on G-HIMS AI
+  // PR #203, issue comment 6193952944. This is NOT an independent review.
+  // The IAM/fixture digests identify actual retained owner-reviewed evidence:
+  // do not create dummy hashes or infer approval from a matching token.
+  // APPLY is additionally subject to a separately authorized successful
+  // live DRY_RUN and revocation of the temporary writer grant afterward.
   if (mode === 'APPLY' && (
     env.CIQP182_HOSPITAL0_WRITE_ACK !== 'AUTHORIZE_CREATE_ONLY_SYNTHETIC_HOSPITAL0' ||
-    env.CIQP182_HOSPITAL0_SOURCE_REVIEWED !== 'REVIEWED_EXACT_SOURCE' ||
+    env.CIQP182_HOSPITAL0_SOURCE_REVIEWED !==
+      'OWNER_EXCEPTION_SYNTHETIC_STAGING_ONLY' ||
+    env.CIQP182_HOSPITAL0_OWNER_EXCEPTION_REF !==
+      'https://github.com/irtizah738/G-HIMS-AI/pull/203#issuecomment-6193952944' ||
     !/^[a-f0-9]{64}$/.test(env.CIQP182_HOSPITAL0_IAM_REVIEW_SHA256 || '') ||
     !/^[a-f0-9]{64}$/.test(env.CIQP182_HOSPITAL0_FIXTURE_REVIEW_SHA256 || '') ||
     env.CIQP182_HOSPITAL0_APPROVED_SHA !== sha
-  )) throw new Error('CIQP182_HOSPITAL0_INDEPENDENT_WRITE_APPROVAL_REQUIRED');
+  )) throw new Error('CIQP182_HOSPITAL0_OWNER_EXCEPTION_EVIDENCE_REQUIRED');
   return mode as Ciqp182HostedWriteMode;
 }
 

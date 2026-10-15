@@ -1,0 +1,43 @@
+name: CIQP182 owner-exception source-only safety qualification
+
+on:
+  push:
+    branches:
+      - qualification/ciqp182-owner-exception-writer-20261015
+    paths:
+      - scripts/ops/ciqp182-hospital0-hosted-writer.ts
+      - tests/ciqp182-hosted-writer-safety.test.ts
+      - .github/workflows/ciqp182-owner-exception-writer-review.yml
+
+permissions:
+  contents: read
+
+jobs:
+  unprivileged-source-review:
+    if: github.repository == 'irtizah738/G-HIMS-AI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Source-only proof, no cloud secrets
+        run: |
+          test -z "${GOOGLE_APPLICATION_CREDENTIALS:-}"
+          test -z "${FIREBASE_PRIVATE_KEY:-}"
+          test "$GITHUB_REF" = 'refs/heads/qualification/ciqp182-owner-exception-writer-20261015'
+      - run: bun install --frozen-lockfile
+      - name: Staging writer scoped guards and owner-exception proofs
+        run: bun test tests/ciqp182-hosted-writer-safety.test.ts tests/ciqp-hosted-staging-readonly.test.ts
+      - name: Full TypeScript
+        run: bun run typecheck
+      - name: Preserve non-release boundary
+        run: |
+          echo 'CIQP182_OWNER_EXCEPTION_NOT_INDEPENDENT_REVIEW'
+          echo 'SOURCE_ONLY_QUALIFICATION_NO_HOSTED_WRITES'

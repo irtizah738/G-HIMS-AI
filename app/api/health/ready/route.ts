@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { getAdminAuth, getAdminFirestore } from '@/server/firebase/admin';
 import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
 
 export const dynamic = 'force-dynamic';
@@ -9,15 +8,25 @@ export async function GET() {
   const runtime = getRuntimeMode();
   // Initialization may throw before the connectivity probes execute.
   // Never expose raw SDK errors, project configuration, or credentials in HTTP.
-  let auth: ReturnType<typeof getAdminAuth> = null;
-  let db: ReturnType<typeof getAdminFirestore> = null;
+  type AdminModule = typeof import('@/server/firebase/admin');
+  let admin: AdminModule | null = null;
   try {
-    auth = getAdminAuth();
+    // Import within GET so failures in Firebase SDK module evaluation are
+    // contained, not converted by Next.js into an unclassified HTTP 500.
+    admin = await import('@/server/firebase/admin');
+  } catch {
+    blockers.push('FIREBASE_ADMIN_MODULE_LOAD_FAILED');
+  }
+
+  let auth: ReturnType<AdminModule['getAdminAuth']> = null;
+  let db: ReturnType<AdminModule['getAdminFirestore']> = null;
+  if (admin) try {
+    auth = admin.getAdminAuth();
   } catch {
     blockers.push('FIREBASE_ADMIN_AUTH_INITIALIZATION_FAILED');
   }
-  try {
-    db = getAdminFirestore();
+  if (admin) try {
+    db = admin.getAdminFirestore();
   } catch {
     blockers.push('FIRESTORE_ADMIN_INITIALIZATION_FAILED');
   }

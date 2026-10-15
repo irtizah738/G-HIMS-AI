@@ -1,0 +1,75 @@
+name: One-time Firebase Admin CommonJS interop lockfile qualification
+
+on:
+  push:
+    branches:
+      - fix/firebase-admin-jose-cjs-interop-20261015
+    paths:
+      - package.json
+      - .github/workflows/one-time-firebase-admin-interop-lockfile.yml
+
+permissions:
+  contents: write
+
+jobs:
+  qualify-interop:
+    if: github.repository == 'irtizah738/G-HIMS-AI' && github.ref == 'refs/heads/fix/firebase-admin-jose-cjs-interop-20261015'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Confirm exact branch, safe manifest, and no production writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'irtizah738/G-HIMS-AI'
+          test "$GITHUB_REF" = 'refs/heads/fix/firebase-admin-jose-cjs-interop-20261015'
+          node - <<'NODE'
+          const p=require('./package.json');
+          if(p.dependencies['firebase-admin']!=='14.5.0') process.exit(1);
+          if(p.overrides?.['jwks-rsa']?.jose!=='4.15.9') process.exit(1);
+          NODE
+      - name: Regenerate reviewed npm v3 lockfile without install hooks
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Verify scoped CommonJS-compatible resolution in lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const p=require('./package.json');
+          const lock=require('./package-lock.json');
+          const packages=Object.entries(lock.packages||{});
+          const jwks=packages.filter(([name])=>/node_modules\/jwks-rsa$/.test(name));
+          if(jwks.length===0) throw Error('MISSING_JWKS_DEPENDENCY');
+          const candidates=packages.filter(([name])=>name==='node_modules/jose'||name.endsWith('/node_modules/jose'));
+          if(!candidates.some(([name,d])=>d.version==='4.15.9')) throw Error('JOSE_CJS_COMPATIBLE_OVERRIDE_NOT_RESOLVED');
+          if(p.overrides?.['jwks-rsa']?.jose!=='4.15.9') throw Error('OVERRIDE_MISSING');
+          console.log('SCOPED_JWKS_JOSE_CJS_INTEROP_LOCKFILE_VERIFIED');
+          NODE
+      - name: Node-native firebase-admin/auth require smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          node -e "require('firebase-admin/auth'); require('firebase-admin/firestore'); console.log('FIREBASE_ADMIN_NODE_CJS_IMPORTS_OK')"
+      - name: Commit only the deterministic lockfile to this review branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          test -z "$(git status --porcelain | grep -v '^ M package-lock.json$' || true)" || {
+            echo 'UNEXPECTED_WORKTREE_CHANGE'; exit 1;
+          }
+          if ! git diff --quiet -- package-lock.json; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add -- package-lock.json
+            git commit -m "chore(lockfile): resolve scoped jwks-rsa jose CommonJS interop"
+            git push origin HEAD:refs/heads/fix/firebase-admin-jose-cjs-interop-20261015
+          fi
+          echo 'CANDIDATE_ONLY_LOCKFILE_REGENERATED_NO_PRODUCTION_DEPLOYMENT'

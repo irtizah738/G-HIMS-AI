@@ -15,11 +15,36 @@ export async function GET() {
   );
   const blockers = [...policy.blockers];
 
-  const auth = getAdminAuth();
-  const db = getAdminFirestore();
+  // Guard initialization as well as network access. Failed Firebase Admin
+  // construction must be a sanitized 503, never an unhandled Next.js 500.
+  let auth: ReturnType<typeof getAdminAuth> = null;
+  let db: ReturnType<typeof getAdminFirestore> = null;
+  try {
+    auth = getAdminAuth();
+  } catch {
+    blockers.push('CI10I_FIREBASE_ADMIN_AUTH_INITIALIZATION_FAILED');
+  }
+  try {
+    db = getAdminFirestore();
+  } catch {
+    blockers.push('CI10I_FIRESTORE_ADMIN_INITIALIZATION_FAILED');
+  }
 
-  if (!auth) blockers.push('CI10I_FIREBASE_ADMIN_AUTH_UNAVAILABLE');
-  if (!db) blockers.push('CI10I_FIRESTORE_ADMIN_UNAVAILABLE');
+  if (!auth && !blockers.includes('CI10I_FIREBASE_ADMIN_AUTH_INITIALIZATION_FAILED')) {
+    blockers.push('CI10I_FIREBASE_ADMIN_AUTH_UNAVAILABLE');
+  }
+  if (!db && !blockers.includes('CI10I_FIRESTORE_ADMIN_INITIALIZATION_FAILED')) {
+    blockers.push('CI10I_FIRESTORE_ADMIN_UNAVAILABLE');
+  }
+
+  // Match general readiness: obtaining an SDK object does not verify IAM.
+  if (auth) {
+    try {
+      await auth.listUsers(1);
+    } catch {
+      blockers.push('CI10I_FIREBASE_ADMIN_AUTH_CONNECTIVITY_FAILED');
+    }
+  }
 
   if (db) {
     try {

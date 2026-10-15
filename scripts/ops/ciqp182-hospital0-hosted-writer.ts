@@ -45,7 +45,7 @@ export function isCiqp182ReviewedFederatedCredential(env: NodeJS.ProcessEnv): bo
       env.GITHUB_WORKFLOW_REF !== 'irtizah738/G-HIMS-OS/.github/workflows/ciqp182-hospital0-create-synthetic-staging.yml@refs/heads/main' ||
       !env.ACTIONS_ID_TOKEN_REQUEST_URL ||
       !env.GOOGLE_APPLICATION_CREDENTIALS ||
-      !/^projects\\/\\d+\\/locations\\/global\\/workloadIdentityPools\\/[a-z0-9-]+\\/providers\\/[a-z0-9-]+$/.test(
+      !new RegExp('^projects/[0-9]+/locations/global/workloadIdentityPools/[a-z0-9-]+/providers/[a-z0-9-]+$').test(
         env.CIQP182_HOSPITAL0_WIF_PROVIDER || ''
       )) return false;
   try {
@@ -56,7 +56,7 @@ export function isCiqp182ReviewedFederatedCredential(env: NodeJS.ProcessEnv): bo
     const endpoint = String(credentials.service_account_impersonation_url || '');
     return credentials.type === 'external_account' &&
       credentials.audience === expectedAudience &&
-      /^https:\/\/iamcredentials\\.googleapis\\.com\/v1\/projects\/-\/serviceAccounts\//.test(endpoint) &&
+      endpoint.startsWith('https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/') &&
       decodeURIComponent(endpoint).endsWith('/' + WRITER + ':generateAccessToken') &&
       credentials.subject_token_type === 'urn:ietf:params:oauth:token-type:jwt';
   } catch {

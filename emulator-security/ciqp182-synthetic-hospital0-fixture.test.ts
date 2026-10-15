@@ -147,5 +147,124 @@ describe('CIQP-182 synthetic Hospital0 fixture (disposable Firestore emulator on
       expect(serialized).not.toContain(CIQP182_FIXTURE_PATIENT);
       expect(serialized).not.toContain(CIQP182_FIXTURE_TENANT);
     }
+
+    // M2 multi-domain persistence: these additional source rows exist only in
+    // the disposable emulator. They are NOT governed clinical commands and
+    // therefore cannot be used to certify role-based clinical writes.
+    const patientId = CIQP182_FIXTURE_PATIENT;
+    const now = Date.now() + 1000;
+    const provenance = (id: string) => ({
+      provenanceId: 'ciqp-emulator-' + id,
+      tenantId: CIQP182_FIXTURE_TENANT, patientId,
+      sourceEvidenceId: id, sourceType: 'SYNTHETIC_TEST',
+      recordedBy: 'ciqp-emulator-only', recordedAt: now,
+    });
+    const facts: Array<[string, string, Record<string, unknown>]> = [
+      ['clinicalObservations', 'ciqp-vital-001', {
+        observationId: 'ciqp-vital-001', patientId,
+        tenantId: CIQP182_FIXTURE_TENANT, category: 'VITAL_SIGNS',
+        code: { text: 'Heart rate', codings: [{ system: 'LOINC', code: '8867-4' }] },
+        value: { valueType: 'QUANTITY', quantity: { value: 82, unit: '/min' } },
+        status: 'FINAL', effectiveAt: now, updatedAt: now, version: 1,
+        provenance: provenance('ciqp-vital-001'),
+      }],
+      ['clinicalAllergies', 'ciqp-allergy-001', {
+        allergyId: 'ciqp-allergy-001', patientId,
+        tenantId: CIQP182_FIXTURE_TENANT,
+        substance: { text: 'Penicillin', codings: [{ system: 'LOCAL', code: 'PEN' }] },
+        category: 'MEDICATION', type: 'ALLERGY', clinicalStatus: 'ACTIVE',
+        verificationStatus: 'CONFIRMED', criticality: 'HIGH',
+        recordedAt: now, updatedAt: now, version: 1,
+        provenance: provenance('ciqp-allergy-001'),
+      }],
+      ['medicationOrders', 'ciqp-medication-001', {
+        medicationOrderId: 'ciqp-medication-001', patientId,
+        tenantId: CIQP182_FIXTURE_TENANT,
+        medication: { text: 'Synthetic prescription', codings: [{ system: 'LOCAL', code: 'SYN' }] },
+        status: 'ACTIVE', intent: 'ORDER', dosageText: 'Emulator test only',
+        prescribedBy: 'ciqp-emulator-only', authoredAt: now, updatedAt: now, version: 1,
+        provenance: provenance('ciqp-medication-001'),
+      }],
+      ['canonicalDiagnosticOrders', 'ciqp-order-001', {
+        diagnosticOrderId: 'ciqp-order-001', patientId,
+        tenantId: CIQP182_FIXTURE_TENANT,
+        service: { text: 'Synthetic blood test', codings: [{ system: 'LOCAL', code: 'TEST' }] },
+        orderType: 'LAB', status: 'COMPLETED', priority: 'ROUTINE',
+        orderedBy: 'ciqp-emulator-only', orderedAt: now, updatedAt: now, version: 1,
+        provenance: provenance('ciqp-order-001'),
+      }],
+      ['diagnosticReports', 'ciqp-report-001', {
+        diagnosticReportId: 'ciqp-report-001', patientId,
+        tenantId: CIQP182_FIXTURE_TENANT,
+        orderId: 'ciqp-order-001',
+        code: { text: 'Synthetic blood test' }, category: 'LAB',
+        status: 'FINAL', issuedAt: now, resultObservationIds: [],
+        updatedAt: now, version: 1,
+        provenance: provenance('ciqp-report-001'),
+      }],
+      ['clinicalDocuments', 'ciqp-document-001', {
+        clinicalDocumentId: 'ciqp-document-001', patientId,
+        tenantId: CIQP182_FIXTURE_TENANT,
+        documentType: 'SOAP', title: 'Emulator-only signed note',
+        status: 'FINAL', signedBy: 'ciqp-emulator-only', signedAt: now,
+        updatedAt: now, version: 1,
+        provenance: provenance('ciqp-document-001'),
+      }],
+    ];
+    const batch = db.batch();
+    for (const [collection, id, data] of facts) {
+      batch.create(tenant.collection(collection).doc(id), data);
+    }
+    for (const [i, eventType] of [
+      'VITALS_RECORDED', 'CLINICAL_ALLERGY_RECORDED', 'MEDICATION_PRESCRIBED',
+      'INVESTIGATION_ORDERED', 'DIAGNOSTIC_RESULT_VERIFIED', 'CLINICAL_NOTE_SIGNED',
+    ].entries()) {
+      const eventId = 'ciqp-clinical-event-' + String(i + 1);
+      const envelope = {
+        eventId, eventType, patientId, tenantId: CIQP182_FIXTURE_TENANT,
+        aggregateType: 'PATIENT', aggregateId: patientId,
+        payload: { patientId }, occurredAt: now + i, recordedAt: now + i,
+      };
+      batch.create(tenant.collection('events').doc(eventId), envelope);
+      batch.create(tenant.collection('audit_logs').doc(eventId), {
+        ...envelope, auditId: eventId, immutable: true,
+      });
+      batch.create(tenant.collection('outbox').doc(eventId), {
+        ...envelope, outboxId: eventId, status: 'PENDING', createdAt: now + i,
+      });
+    }
+    await batch.commit();
+    const clinicalRebuild = await Patient360ProjectionService.rebuildPatient(
+      CIQP182_FIXTURE_TENANT, patientId
+    );
+    expect(clinicalRebuild.timelineReady).toBe(true);
+    const clinicalSnapshot = await tenant.collection('patient360Projections').doc(patientId).get();
+    const clinical = clinicalSnapshot.data();
+    expect(clinical).toBeDefined();
+    expect(clinical?.latestVitals).toEqual([
+      expect.objectContaining({ observationId: 'ciqp-vital-001' }),
+    ]);
+    expect(clinical?.allergies).toEqual([
+      expect.objectContaining({ allergyId: 'ciqp-allergy-001', criticality: 'HIGH' }),
+    ]);
+    expect(clinical?.currentMedications).toEqual([
+      expect.objectContaining({ medicationOrderId: 'ciqp-medication-001', status: 'ACTIVE' }),
+    ]);
+    expect(clinical?.recentDiagnosticOrders).toEqual([
+      expect.objectContaining({ diagnosticOrderId: 'ciqp-order-001' }),
+    ]);
+    expect(clinical?.recentResults).toEqual([
+      expect.objectContaining({ diagnosticReportId: 'ciqp-report-001' }),
+    ]);
+    expect(clinical?.recentDocuments).toEqual([
+      expect.objectContaining({
+        clinicalDocumentId: 'ciqp-document-001', documentType: 'SOAP',
+        status: 'FINAL', signedBy: 'ciqp-emulator-only',
+      }),
+    ]);
+    expect(clinical?.counts).toMatchObject({
+      observations: 1, allergies: 1, medicationOrders: 1,
+      diagnosticOrders: 1, diagnosticReports: 1, documents: 1,
+    });
   });
 });

@@ -1,0 +1,50 @@
+name: CIQP-182 bounded historical Patient 360 census review
+
+on:
+  push:
+    branches:
+      - qualification/ciqp182-patient360-census-coverage-20261015
+    paths:
+      - lib/clinical/patient360/ciqp-hosted-staging-readonly.ts
+      - tests/ciqp-hosted-staging-readonly.test.ts
+      - docs/clinical-intelligence/CIQP_182_MIGRATION_QUALIFICATION_PROTOCOL.md
+      - .github/workflows/ciqp182-census-coverage-review.yml
+
+permissions:
+  contents: read
+
+jobs:
+  read-only-source:
+    if: github.repository == 'irtizah738/G-HIMS-AI' && github.ref == 'refs/heads/qualification/ciqp182-patient360-census-coverage-20261015'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      NODE_ENV: test
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Verify source is not a hosted clinical operation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'irtizah738/G-HIMS-AI'
+          test "$GITHUB_REF" = 'refs/heads/qualification/ciqp182-patient360-census-coverage-20261015'
+          test -z "${FIRESTORE_EMULATOR_HOST:-}"
+          test -z "${FIREBASE_AUTH_EMULATOR_HOST:-}"
+          test -z "${GOOGLE_APPLICATION_CREDENTIALS:-}"
+          test -z "${FIREBASE_PRIVATE_KEY:-}"
+          test -z "${VERCEL_TOKEN:-}"
+      - name: Install frozen reviewed dependency graph
+        run: bun install --frozen-lockfile
+      - name: Run bounded census, lineage and recovery guard regressions without hosted access
+        run: bun test tests/ciqp-hosted-staging-readonly.test.ts tests/ciqp-snapshot-outbox-audit.test.ts tests/ciqp-restore-rehearsal.test.ts
+      - name: TypeScript qualification for exact source head
+        run: bun run typecheck

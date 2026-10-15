@@ -38,7 +38,7 @@ const METADATA = {
  * Google against the provider's exact repository/ref/workflow conditions.
  */
 export function isCiqp182ReviewedFederatedCredential(env: NodeJS.ProcessEnv): boolean {
-  if (env.FIREBASE_PRIVATE_KEY || env.client_email || env.private_key ||
+  if (env.FIREBASE_PRIVATE_KEY || env.FIREBASE_CLIENT_EMAIL || env.client_email || env.private_key ||
       env.GITHUB_ACTIONS !== 'true' ||
       env.GITHUB_REPOSITORY !== 'irtizah738/G-HIMS-OS' ||
       env.GITHUB_REF !== 'refs/heads/main' ||

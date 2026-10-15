@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
+import { classifyFirebaseModuleLoadFailure } from '@/lib/runtime/firebase-module-health-classifier';
 import { evaluateClinicalIntelligenceProductionConfig } from '@/lib/clinical/intelligence/clinical-intelligence-production-policy';
 import { CLINICAL_SAFETY_POLICY_VERSION } from '@/types/clinical-intelligence-safety';
 import { CI10I_PRODUCTION_POLICY_VERSION } from '@/types/clinical-intelligence-production';
@@ -22,8 +23,9 @@ export async function GET() {
     // Import within GET so failures in Firebase SDK module evaluation are
     // contained, not converted by Next.js into an unclassified HTTP 500.
     admin = await import('@/server/firebase/admin');
-  } catch {
+  } catch (error) {
     blockers.push('CI10I_FIREBASE_ADMIN_MODULE_LOAD_FAILED');
+    blockers.push(classifyFirebaseModuleLoadFailure(error));
   }
 
   let auth: ReturnType<AdminModule['getAdminAuth']> = null;

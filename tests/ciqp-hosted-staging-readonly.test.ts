@@ -3,7 +3,7 @@ import type { Firestore } from 'firebase-admin/firestore';
 import {
   assertCiqpHostedStagingReadOnlyScope, assertCiqpStagingCheckout,
   assertCiqpHostedStagingSyntheticApplyScope,
-  classifyCiqpStagingDiagnosticGate,
+  classifyCiqpStagingDiagnosticGate, classifyCiqpStagingCohortCoverage,
   inspectCiqpHostedStagingReadOnly,
 } from '@/lib/clinical/patient360/ciqp-hosted-staging-readonly';
 
@@ -21,7 +21,7 @@ const good: NodeJS.ProcessEnv = {
   GHIMS_CIQP_STAGING_EXPECTED_SHA: SHA,
 };
 
-function fakeDb(size: number) {
+function fakeDb(projectionSize: number, patientSize = projectionSize) {
   const actions: string[] = [];
   const db = {
     collection(name: string) {
@@ -31,8 +31,10 @@ function fakeDb(size: number) {
         doc() {
           actions.push('doc');
           return {
-            collection() {
+            collection(name: string) {
               actions.push('collection');
+              expect(['patients', 'patient360Projections']).toContain(name);
+              const size = name === 'patients' ? patientSize : projectionSize;
               return {
                 orderBy() {
                   actions.push('orderBy');
@@ -43,8 +45,8 @@ function fakeDb(size: number) {
                       return {
                         async get() {
                           actions.push('get');
-                          return { size, docs: Array.from({ length: size }, () => ({
-                            id: 'not-inspected-when-truncated',
+                          return { size, docs: Array.from({ length: size }, (_, i) => ({
+                            id: 'synthetic-patient-' + i,
                           })) };
                         },
                       };
@@ -114,7 +116,9 @@ describe('CIQP #182 hosted staging READ-ONLY perimeter', () => {
       releaseAuthorization: 'NOT_GRANTED',
     });
     expect(report.aggregateHmac).toMatch(/^[a-f0-9]{64}$/);
-    expect(actions).toEqual(['collection', 'doc', 'collection', 'orderBy', 'limit', 'get']);
+    expect(actions).toEqual(['collection', 'doc',
+      'collection', 'orderBy', 'limit', 'get',
+      'collection', 'orderBy', 'limit', 'get']);
     expect(JSON.stringify(report)).not.toContain('ciqp-synthetic-cohort01');
   });
 
@@ -127,7 +131,42 @@ describe('CIQP #182 hosted staging READ-ONLY perimeter', () => {
       inspected: 0, truncated: true, gate: 'BLOCKED',
       releaseAuthorization: 'NOT_GRANTED', writesPerformed: 0,
     });
-    expect(actions).toEqual(['collection', 'doc', 'collection', 'orderBy', 'limit', 'get']);
+    expect(actions).toEqual(['collection', 'doc',
+      'collection', 'orderBy', 'limit', 'get',
+      'collection', 'orderBy', 'limit', 'get']);
+  });
+
+  test('registry patient lacking a Patient 360 projection blocks historical qualification', async () => {
+    const { db, actions } = fakeDb(0, 1);
+    const report = await inspectCiqpHostedStagingReadOnly(
+      db, assertCiqpHostedStagingReadOnlyScope(good), 'secret'.repeat(9)
+    );
+    expect(report).toMatchObject({
+      registeredPatientsObserved: 1,
+      missingPatientProjections: 1,
+      orphanPatientProjections: 0,
+      cohortCoverage: 'MISSING_PROJECTIONS',
+      gate: 'BLOCKED',
+      writesPerformed: 0,
+      releaseAuthorization: 'NOT_GRANTED',
+    });
+    expect(actions.filter(action => action === 'get')).toHaveLength(2);
+    expect(JSON.stringify(report)).not.toContain('synthetic-patient');
+  });
+
+  test('bounded census detects projection orphans, missing projections and duplicate identifiers', () => {
+    expect(classifyCiqpStagingCohortCoverage(['patient-1'], ['patient-1'], false)
+      .cohortCoverage).toBe('MATCHED');
+    expect(classifyCiqpStagingCohortCoverage(['patient-1'], [], false)
+      .cohortCoverage).toBe('MISSING_PROJECTIONS');
+    expect(classifyCiqpStagingCohortCoverage(['patient-1'], ['patient-1', 'patient-2'], false)
+      .cohortCoverage).toBe('ORPHAN_PROJECTIONS');
+    expect(classifyCiqpStagingCohortCoverage(['patient-1', 'patient-1'], ['patient-1'], false)
+      .cohortCoverage).toBe('AMBIGUOUS_IDENTIFIERS');
+    expect(classifyCiqpStagingCohortCoverage(['patient-1'], ['patient-1'], true)
+      .cohortCoverage).toBe('TRUNCATED');
+    expect(classifyCiqpStagingCohortCoverage([], [], false)
+      .cohortCoverage).toBe('EMPTY');
   });
 
   test('audit HMAC must use a nontrivial secret; source has no Firestore write calls', async () => {

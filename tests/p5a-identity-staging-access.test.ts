@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { classifyFirebaseModuleLoadFailure } from '../lib/runtime/firebase-module-health-classifier';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { AuthorizationPipeline } from '../lib/backend/auth/authorization-pipeline';
@@ -151,6 +152,46 @@ describe('G-HIMS P5A identity and staging access boundary',()=>{
     expect(readiness).toContain('FIRESTORE_CONNECTIVITY_FAILED');
     expect(admin).toContain("!process.env.VERCEL");
     expect(admin).toContain('Use FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY on Vercel');
+  });
+
+  test('hosted Firebase health catches module loading, init, and connectivity failures',async()=>{
+    const ready=await source('app/api/health/ready/route.ts');
+    const clinical=await source('app/api/health/clinical-intelligence/route.ts');
+    for(const route of [ready,clinical]){
+      expect(route).not.toContain("import { getAdminAuth, getAdminFirestore } from '@/server/firebase/admin'");
+      expect(route).toContain("admin = await import('@/server/firebase/admin')");
+      expect(route).toContain('if (admin) try {');
+      expect(route).toContain('auth = admin.getAdminAuth()');
+      expect(route).toContain('db = admin.getAdminFirestore()');
+      expect(route).toContain('classifyFirebaseModuleLoadFailure(error)');
+      expect(route).toContain('status: ready ? 200 : 503');
+      expect(route).not.toContain('error.message,');
+    }
+    expect(ready).toContain('FIREBASE_ADMIN_MODULE_LOAD_FAILED');
+    expect(ready).toContain('FIREBASE_ADMIN_AUTH_INITIALIZATION_FAILED');
+    expect(ready).toContain('FIRESTORE_ADMIN_INITIALIZATION_FAILED');
+    expect(clinical).toContain('CI10I_FIREBASE_ADMIN_MODULE_LOAD_FAILED');
+    expect(clinical).toContain('CI10I_FIREBASE_ADMIN_AUTH_INITIALIZATION_FAILED');
+    expect(clinical).toContain('CI10I_FIRESTORE_ADMIN_INITIALIZATION_FAILED');
+    expect(clinical).toContain('await auth.listUsers(1)');
+  });
+
+  test('Firebase module startup error classification never reflects raw exception text',()=>{
+    const secret='FIREBASE_PRIVATE_KEY=not-for-client-output';
+    expect(classifyFirebaseModuleLoadFailure({code:'MODULE_NOT_FOUND',message:secret}))
+      .toBe('FIREBASE_MODULE_NOT_FOUND');
+    expect(classifyFirebaseModuleLoadFailure({code:'ERR_REQUIRE_ESM',message:secret}))
+      .toBe('FIREBASE_MODULE_ESM_INTEROP_FAILURE');
+    expect(classifyFirebaseModuleLoadFailure({code:'ERR_PACKAGE_PATH_NOT_EXPORTED',message:secret}))
+      .toBe('FIREBASE_MODULE_EXPORT_FAILURE');
+    expect(classifyFirebaseModuleLoadFailure({name:'TypeError',message:secret}))
+      .toBe('FIREBASE_MODULE_TYPE_FAILURE');
+    expect(classifyFirebaseModuleLoadFailure({code:'ENVIRONMENT_PROJECT_COLLISION',message:secret}))
+      .toBe('FIREBASE_MODULE_ENVIRONMENT_GUARD_FAILURE');
+    expect(classifyFirebaseModuleLoadFailure({message:secret}))
+      .toBe('FIREBASE_MODULE_UNCLASSIFIED_FAILURE');
+    expect(classifyFirebaseModuleLoadFailure(null))
+      .toBe('FIREBASE_MODULE_UNCLASSIFIED_FAILURE');
   });
 
   test('bootstrap requires explicit project and production confirmations',async()=>{

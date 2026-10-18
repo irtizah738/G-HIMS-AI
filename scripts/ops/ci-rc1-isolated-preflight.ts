@@ -24,6 +24,9 @@ export type Rc1Preflight = {
 export function evaluateCiRc1IsolatedPreflight(env: NodeJS.ProcessEnv): Rc1Preflight {
   const base = evaluateStagingConfiguration(env);
   const blockers = new Set(base.blockerCodes);
+  if (String(env.VERCEL_ENV ?? '').trim() !== 'preview') {
+    blockers.add('CI_RC1_PROTECTED_PREVIEW_REQUIRED');
+  }
   const requiredSha = String(env.GHIMS_CI_RC1_EXPECTED_SHA ?? '').trim();
   const actualSha = String(env.VERCEL_GIT_COMMIT_SHA ?? '').trim();
   const shaMatching =

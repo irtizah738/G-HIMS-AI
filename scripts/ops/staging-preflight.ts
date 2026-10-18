@@ -122,6 +122,22 @@ export function evaluateStagingConfiguration(
     blockers.add('STAGING_NONPRODUCTION_PROJECT_COLLISION');
   }
 
+  // A non-production Firebase project ID alone is insufficient: the browser
+  // Auth domain and Storage bucket must not silently resolve to production.
+  // Only canonical project-scoped Firebase endpoints are permitted for this
+  // isolated RC candidate; reviewed custom domains need a separate change.
+  const authDomain = normalized(env, 'NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN').toLowerCase();
+  if (staging && authDomain && authDomain !== staging + '.firebaseapp.com') {
+    blockers.add('STAGING_FIREBASE_AUTH_DOMAIN_MISMATCH');
+  }
+  const bucket = normalized(env, 'NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET').toLowerCase();
+  if (staging && bucket && ![
+    staging + '.firebasestorage.app',
+    staging + '.appspot.com',
+  ].includes(bucket)) {
+    blockers.add('STAGING_FIREBASE_STORAGE_BUCKET_MISMATCH');
+  }
+
   const db = normalized(env, 'FIRESTORE_DATABASE_ID');
   const publicDb = normalized(env, 'NEXT_PUBLIC_FIRESTORE_DATABASE_ID');
   if (db && publicDb && db !== publicDb) {

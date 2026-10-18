@@ -1,5 +1,6 @@
 import { getRuntimeMode, inferRuntimeModeFromNodeEnv, type GhimsRuntimeMode } from './runtime-mode';
 import firebaseConfig from '@/firebase-applet-config.json';
+import { assertVercelDeploymentFirebaseIsolation } from './vercel-deployment-isolation';
 
 type ProjectMap = Partial<Record<GhimsRuntimeMode, string>>;
 
@@ -141,6 +142,9 @@ export function assertStagingProjectDistinct(
 }
 
 export function assertServerFirebaseProjectIsolation(actualProjectId: string): void {
+  // Vercel target identity is authoritative independently of the app mode.
+  // Reject shared Preview/Production project access before Admin SDK boot.
+  assertVercelDeploymentFirebaseIsolation(process.env, actualProjectId);
   const mode = getRuntimeMode();
   const projects = serverProjectMap();
   if (mode === 'STAGING') {

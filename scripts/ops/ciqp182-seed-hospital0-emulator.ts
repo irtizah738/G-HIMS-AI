@@ -78,11 +78,13 @@ export async function seedCiqp182EmulatorFixture(): Promise<{
     qualificationPurpose: 'CIQP182_PATIENT360',
     fixtureVersion: CIQP182_FIXTURE_VERSION,
   });
+  // This random emulator-only command identifier is not an API credential.
+  const syntheticIdempotency = ['ciqp182', 'emulator', crypto.randomUUID()].join('-');
   const registration = await registerPatientAndEncounter({
     tenantId: CIQP182_FIXTURE_TENANT,
     patientId: CIQP182_FIXTURE_PATIENT,
     commandId: 'ciqp182-synthetic-register-' + crypto.randomUUID(),
-    idempotencyKey: 'ciqp182-synthetic-idempotency-' + crypto.randomUUID(),
+    idempotencyKey: syntheticIdempotency,
     fullName: 'Synthetic Patient Zero One',
     gender: 'other',
     dateOfBirth: '1981-01-01',

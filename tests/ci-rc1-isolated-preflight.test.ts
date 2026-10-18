@@ -51,7 +51,7 @@ describe('G-HIMS-AI controlled Clinical Intelligence RC1',()=>{
     expect(r.externalCalls).toBe(0);
   });
   test.each([
-    [{FIREBASE_PROJECT_ID:'g-hims-ai'},'STAGING_PRODUCTION_PROJECT_COLLISION'],
+    [{FIREBASE_PROJECT_ID:'g-hims-ai'},'STAGING_ACTIVE_FIREBASE_PROJECT_MISMATCH'],
     [{GHIMS_FIREBASE_PROJECT_ID_STAGING:'g-hims-ai'},'STAGING_PRODUCTION_PROJECT_COLLISION'],
     [{FIREBASE_CLIENT_EMAIL:'admin@g-hims-ai.iam.gserviceaccount.com'},'STAGING_ADMIN_IDENTITY_NOT_PROJECT_SCOPED'],
     [{GHIMS_CI_RC1_EXPECTED_SHA:'2'.repeat(40)},'CI_RC1_EXACT_DEPLOYED_SHA_REQUIRED'],

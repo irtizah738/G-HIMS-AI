@@ -91,6 +91,44 @@ export function evaluateStagingConfiguration(
   const activeClient = normalized(env, 'NEXT_PUBLIC_FIREBASE_PROJECT_ID');
   const production = normalized(env, 'GHIMS_FIREBASE_PROJECT_ID_PRODUCTION');
   const publicProduction = normalized(env, 'NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION');
+  // Physical cloud-project boundaries take precedence over caller-supplied
+  // comparators: an attacker or a stale Preview cannot redefine production,
+  // or repurpose the separate G-HIMS-OS staging environment.
+  const officialProduction = 'g-hims-ai';
+  const separateOsStaging = 'studio-1130431360-48a05';
+  const activeStageProjects = [staging, publicStaging, activeServer, activeClient];
+  if (activeStageProjects.includes(officialProduction)) {
+    blockers.add('STAGING_OFFICIAL_PRODUCTION_FIREBASE_FORBIDDEN');
+  }
+  if (activeStageProjects.includes(separateOsStaging)) {
+    blockers.add('STAGING_GHIMS_OS_FIREBASE_FORBIDDEN');
+  }
+  if (production && production !== officialProduction ||
+      publicProduction && publicProduction !== officialProduction) {
+    blockers.add('STAGING_PRODUCTION_COMPARATOR_UNTRUSTED');
+  }
+
+  // Public SDK configuration is part of the isolation boundary. A browser
+  // pointed at a foreign Auth tenant or Storage bucket may leak test records
+  // even when the Firestore project ID itself is otherwise correct.
+  const authDomain = normalized(env, 'NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN');
+  const storageBucket = normalized(env, 'NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET');
+  if (staging && authDomain && authDomain !== staging + '.firebaseapp.com') {
+    blockers.add('STAGING_AUTH_DOMAIN_PROJECT_MISMATCH');
+  }
+  if (staging && storageBucket &&
+      storageBucket !== staging + '.firebasestorage.app' &&
+      storageBucket !== staging + '.appspot.com') {
+    blockers.add('STAGING_STORAGE_BUCKET_PROJECT_MISMATCH');
+  }
+  if (normalized(env, 'VERCEL_ENV') === 'preview' &&
+      normalized(env, 'GOOGLE_APPLICATION_CREDENTIALS')) {
+    blockers.add('STAGING_VERCEL_FILE_CREDENTIALS_FORBIDDEN');
+  }
+  if (normalized(env, 'VERCEL_ENV') === 'preview' &&
+      normalized(env, 'NEXT_PUBLIC_ENABLE_APPCHECK_DEBUG') === 'true') {
+    blockers.add('STAGING_APPCHECK_DEBUG_FORBIDDEN');
+  }
 
   if (staging && (!/^[a-z][a-z0-9-]{4,62}$/.test(staging) ||
       staging === 'g-hims-ai')) {

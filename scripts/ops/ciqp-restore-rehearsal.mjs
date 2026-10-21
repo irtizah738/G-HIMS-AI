@@ -29,8 +29,11 @@ export function assertCiqpRestoreScope(env) {
     Boolean(env.VERCEL) ||
     Boolean(env.FIRESTORE_EMULATOR_HOST) ||
     Boolean(env.FIREBASE_AUTH_EMULATOR_HOST) ||
-    !source || !production || !destination ||
+    // Never accept caller-supplied production aliases or reuse G-HIMS-OS
+    // as a synthetic migration source, even with matching confirmation IDs.
+    !source || production !== 'g-hims-ai' || !destination ||
     source === production || source === destination || source === 'g-hims-ai' ||
+    source === 'studio-1130431360-48a05' ||
     destination === production || destination === 'g-hims-ai' ||
     !/^[a-z][a-z0-9-]{4,62}$/.test(source) ||
     !/^ciqp-[a-z0-9-]*restore[a-z0-9-]*$/.test(destination) ||

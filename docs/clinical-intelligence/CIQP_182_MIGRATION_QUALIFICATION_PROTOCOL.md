@@ -19,6 +19,25 @@
 6. Repeat the same command and require idempotent `ALREADY_CURRENT` or valid interrupted `RESUMED` results. Inject a crash between policy CAS and timeline completion, simultaneous workers, an intervening signed clinical event and a wrong-tenant attempt; require fail-closed read behavior, no stale publication, and no duplicate ledgers.
 7. Validate restoration to the pre-migration synthetic state and rehearse the procedure for an interrupted deployment. Capture immutable output checksums, exact Actions/emulator job links, run SHA, operator identity and date. Never log MRNs, names, patient IDs or event payloads.
 
+## CIQP-182 trust-boundary guard qualification (source-only, 2026-10-22)
+
+RC1 includes explicit **canonical** project-ID checks across the Patient 360 hosted
+read-only scanner, synthetic APPLY permission gate, restore rehearsal scope, and
+offline qualification evidence checker. The known production project is
+`g-hims-ai`; the separate G-HIMS-OS synthetic staging project
+`studio-1130431360-48a05` is not a valid G-HIMS-AI migration or recovery source.
+An operator-supplied, self-consistent but false production comparator cannot
+substitute for the real production identity. Negative regression tests cover
+all these fail-closed conditions, plus use of the OS project as the
+restoration target in the evidence manifest.
+
+These checks **do not create a new hosted staging environment**, verify live
+GCP project/IAM ownership, perform a Firestore restore, or authorize patient
+access. No third hosted staging has been approved by the owner. Until a
+separately authorized and genuinely isolated G-HIMS-AI hosted qualification
+route exists, CIQP-182's hosted migration and independent clinical approval
+remain **BLOCKED**, even if all source/emulator CI checks pass.
+
 ## Hosted staging prerequisites — NOT SATISFIED by this emulator harness
 - Separate G-HIMS-AI staging Firebase project, explicit approval of test-data provenance, read-only discovery that redacts patient IDs/PHI and confirmed network/project isolation.
 - Reviewed **separate** hosted-staging migration implementation and source/event atomicity controls. The current executor deliberately rejects any non-emulator host; do **not** weaken its guard to make hosted execution work.

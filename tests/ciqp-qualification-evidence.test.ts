@@ -89,6 +89,24 @@ describe('CIQP-05 migration qualification evidence stays fail-closed', () => {
     expect(report.documentationStatus).toBe('INCOMPLETE');
   });
 
+  test('canonical production cannot be spoofed and G-HIMS-OS staging cannot qualify this product', () => {
+    const spoofed = complete();
+    spoofed.productionProjectId = 'fabricated-production';
+    expect(assessCiqpQualificationEvidence(spoofed).missing)
+      .toContain('INDEPENDENT_STAGING_PROJECT');
+    const wrongStaging = complete();
+    wrongStaging.stagingProjectId = 'studio-1130431360-48a05';
+    wrongStaging.restoration!.sourceStagingProject = 'studio-1130431360-48a05';
+    expect(assessCiqpQualificationEvidence(wrongStaging).missing)
+      .toContain('INDEPENDENT_STAGING_PROJECT');
+    const wrongRestore = complete();
+    wrongRestore.restoration!.isolatedRestoreProject = 'studio-1130431360-48a05';
+    expect(assessCiqpQualificationEvidence(wrongRestore).missing)
+      .toContain('INDEPENDENT_BACKUP_RESTORE_AND_INTEGRITY');
+    expect(assessCiqpQualificationEvidence(wrongRestore).clinicalReleaseAuthority)
+      .toBe('NOT_ESTABLISHED');
+  });
+
   test('mismatched event or outbox fingerprints and a same-project restore are rejected', () => {
     const e = complete();
     if (!e.restoration) throw new Error('fixture');

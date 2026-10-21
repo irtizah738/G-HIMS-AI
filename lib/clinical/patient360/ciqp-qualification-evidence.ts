@@ -127,10 +127,14 @@ export function assessCiqpQualificationEvidence(
   if (evidence.repository !== 'irtizah738/G-HIMS-AI' || !sha40(sha)) {
     missing.push('EXACT_GHIMS_AI_CANDIDATE');
   }
-  if (!evidence.stagingProjectId ||
-      !evidence.productionProjectId ||
+  // Exact canonical project trust anchors, not caller-provided comparators.
+  // A syntactically complete evidence manifest for G-HIMS-OS is NOT a
+  // G-HIMS-AI hosted recovery qualification.
+  if (evidence.productionProjectId !== 'g-hims-ai' ||
+      !evidence.stagingProjectId ||
+      !/^[a-z][a-z0-9-]{4,62}$/.test(evidence.stagingProjectId) ||
       evidence.stagingProjectId === evidence.productionProjectId ||
-      evidence.stagingProjectId === 'g-hims-ai') {
+      evidence.stagingProjectId === 'studio-1130431360-48a05') {
     missing.push('INDEPENDENT_STAGING_PROJECT');
   }
   const required: Array<[keyof CiqpQualificationEvidence, boolean]> = [
@@ -191,6 +195,8 @@ export function assessCiqpQualificationEvidence(
       !restore.isolatedRestoreProject ||
       restore.isolatedRestoreProject === evidence.stagingProjectId ||
       restore.isolatedRestoreProject === evidence.productionProjectId ||
+      restore.isolatedRestoreProject === 'studio-1130431360-48a05' ||
+      restore.isolatedRestoreProject === 'g-hims-ai' ||
       !Number.isSafeInteger(restore.sourceEventCount) || restore.sourceEventCount <= 0 ||
       restore.sourceEventCount !== restore.restoredEventCount ||
       !Number.isSafeInteger(restore.sourceOutboxCount) || restore.sourceOutboxCount <= 0 ||

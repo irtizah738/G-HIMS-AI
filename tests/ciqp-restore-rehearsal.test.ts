@@ -97,6 +97,19 @@ describe('CIQP-182 isolated synthetic Firestore restore rehearsal', () => {
       .toThrow('CIQP_RESTORE_ISOLATION_DENIED');
   });
 
+  test('restore cannot use G-HIMS-OS staging or a forged production comparator', () => {
+    const os = 'studio-1130431360-48a05';
+    expect(() => assertCiqpRestoreScope({
+      ...good,
+      GHIMS_CIQP_RESTORE_SOURCE_STAGING: os,
+      GHIMS_FIREBASE_PROJECT_ID_STAGING: os,
+      GHIMS_CIQP_RESTORE_CONFIRM_SOURCE: os,
+    })).toThrow('CIQP_RESTORE_ISOLATION_DENIED');
+    expect(() => assertCiqpRestoreScope({
+      ...good, GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'fabricated-production',
+    })).toThrow('CIQP_RESTORE_ISOLATION_DENIED');
+  });
+
   test('apply requires ticket, named operator and separate attestation', () => {
     expect(() => assertCiqpRestoreScope({ ...apply, GHIMS_CIQP_RESTORE_TICKET: '' }))
       .toThrow('CIQP_RESTORE_APPROVAL_NOT_PRESENT');

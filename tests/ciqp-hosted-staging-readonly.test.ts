@@ -97,6 +97,25 @@ describe('CIQP #182 hosted staging READ-ONLY perimeter', () => {
     })).toThrow('CIQP_STAGING_READ_ONLY_SCOPE_DENIED');
   });
 
+  test('refuses G-HIMS-OS staging despite internally matching project confirmations', () => {
+    const os = 'studio-1130431360-48a05';
+    const forged = {
+      ...good,
+      GHIMS_FIREBASE_PROJECT_ID_STAGING: os,
+      FIREBASE_PROJECT_ID: os,
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: os,
+      GHIMS_CIQP_STAGING_CONFIRM_PROJECT: os,
+    };
+    expect(() => assertCiqpHostedStagingReadOnlyScope(forged))
+      .toThrow('CIQP_STAGING_READ_ONLY_SCOPE_DENIED');
+  });
+
+  test('refuses spoofed production comparator even when source is synthetic', () => {
+    expect(() => assertCiqpHostedStagingReadOnlyScope({
+      ...good, GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'fabricated-production',
+    })).toThrow('CIQP_STAGING_READ_ONLY_SCOPE_DENIED');
+  });
+
   test('source checkout must match the recorded exact SHA and contain no local edits', () => {
     expect(() => assertCiqpStagingCheckout(SHA, SHA + '\n', '')).not.toThrow();
     expect(() => assertCiqpStagingCheckout(SHA, 'b'.repeat(40), ''))

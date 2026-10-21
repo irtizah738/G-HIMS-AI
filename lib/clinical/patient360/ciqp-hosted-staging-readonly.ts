@@ -43,8 +43,11 @@ export function assertCiqpHostedStagingReadOnlyScope(
     Boolean(env.VERCEL) ||
     Boolean(env.FIRESTORE_EMULATOR_HOST) ||
     Boolean(env.FIREBASE_AUTH_EMULATOR_HOST) ||
-    !staging || !production || staging === production ||
+    // Trust anchors cannot be supplied or spoofed by the operator environment.
+    // G-HIMS-OS staging is never an eligible G-HIMS-AI migration target.
+    !staging || production !== 'g-hims-ai' || staging === production ||
     actual !== staging || staging === 'g-hims-ai' ||
+    staging === 'studio-1130431360-48a05' ||
     !/^[a-z][a-z0-9-]{4,62}$/.test(staging) ||
     !/^ciqp-synthetic-[a-z0-9-]{4,64}$/.test(tenantId) ||
     env.GHIMS_CIQP_STAGING_CONFIRM_PROJECT !== staging ||

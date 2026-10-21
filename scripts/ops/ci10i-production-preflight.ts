@@ -1,4 +1,5 @@
 import { evaluateClinicalIntelligenceProductionConfig } from '@/lib/clinical/intelligence/clinical-intelligence-production-policy';
+import { evaluateCi10iProductionTarget } from '@/lib/clinical/intelligence/ci10i-production-target-guard';
 
 const fail = (code: string, details?: Record<string, unknown>): never => {
   process.stderr.write(
@@ -18,6 +19,17 @@ const publicRuntime = String(
 
 if (runtime !== 'PRODUCTION' || publicRuntime !== 'PRODUCTION') {
   fail('CI10I_PRODUCTION_RUNTIME_REQUIRED', { runtime, publicRuntime });
+}
+
+// Verify the official, fixed Firebase production project as an independent
+// source-level safeguard. Do not trust a self-consistent Preview/project alias.
+const exactTarget = evaluateCi10iProductionTarget(process.env);
+if (exactTarget.status === 'BLOCKED') {
+  fail('CI10I_OFFICIAL_PRODUCTION_TARGET_BLOCKED', {
+    blockers: exactTarget.blockers,
+    clinicalReleaseAuthorization: 'NOT_GRANTED',
+    productionDeploymentAuthorization: 'NOT_GRANTED',
+  });
 }
 
 const projectId = String(process.env.FIREBASE_PROJECT_ID || '').trim();
@@ -102,6 +114,14 @@ process.stdout.write(
   JSON.stringify(
     {
       success: true,
+      // This is a CONFIGURATION preflight only, not release approval.
+      clinicalReleaseAuthorization: 'NOT_GRANTED',
+      productionDeploymentAuthorization: 'NOT_GRANTED',
+      sourceCommit: 'UNVERIFIED',
+      deployedCommit: 'UNVERIFIED',
+      institutionalApproval: 'NOT_VERIFIED',
+      patient360MigrationQualification: 'NOT_VERIFIED',
+      productionBackupRestore: 'NOT_VERIFIED',
       runtime,
       projectId,
       databaseId,

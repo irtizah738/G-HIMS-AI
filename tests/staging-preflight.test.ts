@@ -9,8 +9,8 @@ const isolated: NodeJS.ProcessEnv = {
   NEXT_PUBLIC_FIREBASE_PROJECT_ID: 'ghims-ai-synthetic-stage',
   GHIMS_FIREBASE_PROJECT_ID_STAGING: 'ghims-ai-synthetic-stage',
   NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING: 'ghims-ai-synthetic-stage',
-  GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'ghims-ai-live-example',
-  NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'ghims-ai-live-example',
+  GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'g-hims-ai',
+  NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'g-hims-ai',
   FIRESTORE_DATABASE_ID: '(default)',
   NEXT_PUBLIC_FIRESTORE_DATABASE_ID: '(default)',
   FIREBASE_CLIENT_EMAIL: 'reader@ghims-ai-synthetic-stage.iam.gserviceaccount.com',
@@ -78,7 +78,7 @@ describe('G-HIMS-AI Preview isolation configuration preflight', () => {
     [{ NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'unexpected-prod' },
       'STAGING_PRODUCTION_COMPARATOR_MISMATCH'],
     [{ NEXT_PUBLIC_FIRESTORE_DATABASE_ID: 'wrong-db' }, 'STAGING_FIRESTORE_DATABASE_MISMATCH'],
-    [{ FIREBASE_CLIENT_EMAIL: 'admin@ghims-ai-live-example.iam.gserviceaccount.com' },
+    [{ FIREBASE_CLIENT_EMAIL: 'admin@g-hims-ai.iam.gserviceaccount.com' },
       'STAGING_ADMIN_IDENTITY_NOT_PROJECT_SCOPED'],
     [{ GHIMS_INTEGRATION_HL7_STATE: 'ENABLED' }, 'STAGING_UNQUALIFIED_INTEGRATION_ACTIVE'],
   ] as Array<[NodeJS.ProcessEnv, string]>)(
@@ -87,6 +87,62 @@ describe('G-HIMS-AI Preview isolation configuration preflight', () => {
       const report = check(changes);
       expect(report.status).toBe('BLOCKED');
       expect(report.blockerCodes).toContain(code);
+    }
+  );
+
+  test('rejects G-HIMS-OS staging even if browser, server and credential project values agree', () => {
+    const forbidden = 'studio-1130431360-48a05';
+    const report = check({
+      FIREBASE_PROJECT_ID: forbidden,
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: forbidden,
+      GHIMS_FIREBASE_PROJECT_ID_STAGING: forbidden,
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING: forbidden,
+      NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: forbidden + '.firebaseapp.com',
+      NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: forbidden + '.firebasestorage.app',
+      FIREBASE_CLIENT_EMAIL: 'reader@' + forbidden + '.iam.gserviceaccount.com',
+    });
+    expect(report.status).toBe('BLOCKED');
+    expect(report.blockerCodes).toContain('STAGING_GHIMS_OS_FIREBASE_FORBIDDEN');
+    expect(JSON.stringify(report)).not.toContain(forbidden);
+  });
+
+  test('never accepts the real production project as staging even with falsified comparators', () => {
+    const production = 'g-hims-ai';
+    const report = check({
+      GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'different-fake-comparator',
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'different-fake-comparator',
+      GHIMS_FIREBASE_PROJECT_ID_STAGING: production,
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING: production,
+      FIREBASE_PROJECT_ID: production,
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: production,
+      NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: production + '.firebaseapp.com',
+      NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: production + '.firebasestorage.app',
+      FIREBASE_CLIENT_EMAIL: 'reader@' + production + '.iam.gserviceaccount.com',
+    });
+    expect(report.status).toBe('BLOCKED');
+    expect(report.blockerCodes).toContain('STAGING_OFFICIAL_PRODUCTION_FIREBASE_FORBIDDEN');
+    expect(report.blockerCodes).toContain('STAGING_PRODUCTION_COMPARATOR_UNTRUSTED');
+  });
+
+  test.each([
+    [{ NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: 'g-hims-ai.firebaseapp.com' },
+      'STAGING_AUTH_DOMAIN_PROJECT_MISMATCH'],
+    [{ NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: 'g-hims-ai.firebasestorage.app' },
+      'STAGING_STORAGE_BUCKET_PROJECT_MISMATCH'],
+    [{ GOOGLE_APPLICATION_CREDENTIALS: '/tmp/credential.json' },
+      'STAGING_VERCEL_FILE_CREDENTIALS_FORBIDDEN'],
+    [{ NEXT_PUBLIC_ENABLE_APPCHECK_DEBUG: 'true' },
+      'STAGING_APPCHECK_DEBUG_FORBIDDEN'],
+    [{ GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'spoofed-production' },
+      'STAGING_PRODUCTION_COMPARATOR_UNTRUSTED'],
+  ] as Array<[NodeJS.ProcessEnv,string]>)(
+    'rejects inconsistent external Auth, Storage, App Check and comparator %#',
+    (changes, code) => {
+      const report = check(changes);
+      expect(report.status).toBe('BLOCKED');
+      expect(report.blockerCodes).toContain(code);
+      expect(report.writesPerformed).toBe(0);
+      expect(report.firebaseNetworkCalls).toBe(0);
     }
   );
 

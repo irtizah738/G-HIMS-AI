@@ -41,7 +41,10 @@ export function assertCiqpRestoreScope(env) {
     env.GHIMS_CIQP_RESTORE_CONFIRM_DESTINATION !== destination ||
     env.GHIMS_CIQP_RESTORE_CONFIRM_SOURCE !== source ||
     env.GHIMS_CIQP_RESTORE_SYNTHETIC_ACK !== 'SYNTHETIC_ONLY_INDEPENDENT_RESTORE' ||
-    !/^gs:\/\/[a-z0-9._-]+\/[a-zA-Z0-9_./-]+$/.test(gcs) ||
+    // Only a CIQP-namespaced, explicitly synthetic export path can be
+    // considered. The path label is NOT proof the contents are synthetic:
+    // independently retained GCS export/provenance evidence is mandatory.
+    !/^gs:\/\/ciqp-[a-z0-9][a-z0-9._-]{2,61}\/synthetic\/[a-zA-Z0-9_./-]+$/.test(gcs) ||
     gcs.includes('..') ||
     !/^[a-zA-Z0-9()_-]{1,64}$/.test(databaseId) ||
     !['DRY_RUN', 'APPLY_RESTORE'].includes(mode)
@@ -110,9 +113,14 @@ export async function assertEmptyRestoreTarget(s, run = spawnSync, request = fet
     const result = await response.json();
     // Unexpected schema, any root collection, or a remaining page means
     // the database is not independently verified empty.
-    if (!result || typeof result !== 'object' ||
+    // Only the documented listCollectionIds response shape is acceptable.
+    // HTTP 200 with an array, error-shaped JSON, or unexpected data must
+    // NEVER be mistaken for proof that a restore destination is empty.
+    if (!result || typeof result !== 'object' || Array.isArray(result) ||
+        Object.keys(result).some(key => !['collectionIds', 'nextPageToken'].includes(key)) ||
         (result.collectionIds !== undefined && !Array.isArray(result.collectionIds)) ||
         (result.collectionIds?.length || 0) !== 0 ||
+        (result.nextPageToken !== undefined && typeof result.nextPageToken !== 'string') ||
         Boolean(result.nextPageToken)) {
       throw new Error('NOT_EMPTY');
     }

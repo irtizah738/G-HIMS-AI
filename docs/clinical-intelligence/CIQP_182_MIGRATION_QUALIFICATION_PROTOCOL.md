@@ -121,6 +121,29 @@ fingerprints or keys. A zero-patient or over-limit cohort fails closed.
 COHORT_MATCHED_ONLY is not a production patient inventory, migration or
 clinical approval.
 
+### CIQP-182 restore preflight hardening — source review, 2026-10-22
+
+The synthetic restore runner now restricts **source export URIs** to a
+`gs://ciqp-.../synthetic/...` namespace and denies production/unspecified
+exports even if operator confirmation fields are internally consistent.
+This is an additional fail-closed naming restriction: an attacker or operator
+can mislabel real data under a synthetic name, so **the URI alone never proves
+the export contains synthetic data**. Independent GCS bucket/operation origin,
+permissions, attested provenance and privacy review remain mandatory.
+
+The restore target's read-only Firestore root-collection inventory now rejects
+malformed JSON arrays, unexpected fields, wrong-type pagination tokens and
+HTTP-200 error-shaped payloads rather than equating them with an empty
+database. Empty inventory still does **not** prove there is no concurrent
+writer, and the runner does not verify a completed hosted import or its
+canonical-event/outbox/provenance hash parity. Those require actual authorized
+hosted recovery and signed evidence. Tests in
+`tests/ciqp-restore-rehearsal.test.ts` use fabricated responses only;
+**no Google Cloud import or patient-data access is performed by CI**.
+
+The owner has not authorized provisioning a third hosted staging environment;
+keep the hosted restore/migration and clinical approval gates open.
+
 ### Backup/restore and hosted apply design review (not yet executed)
 
 1. Provision an independent restore target, separate from the source staging

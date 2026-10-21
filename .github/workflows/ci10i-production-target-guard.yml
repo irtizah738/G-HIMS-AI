@@ -1,0 +1,52 @@
+name: CI-10I official production target hardening
+
+on:
+  pull_request:
+    paths:
+      - 'lib/clinical/intelligence/ci10i-production-target-guard.ts'
+      - 'scripts/ops/ci10i-production-preflight.ts'
+      - 'tests/ci10i-production-target-guard.test.ts'
+      - '.github/workflows/ci10i-production-target-guard.yml'
+      - 'docs/clinical-intelligence/CI_PRODUCTION_FINAL_RELEASE_HANDOFF.md'
+  push:
+    branches: [main]
+    paths:
+      - 'lib/clinical/intelligence/ci10i-production-target-guard.ts'
+      - 'scripts/ops/ci10i-production-preflight.ts'
+      - 'tests/ci10i-production-target-guard.test.ts'
+      - '.github/workflows/ci10i-production-target-guard.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ghims-ai-ci10i-production-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-only:
+    if: github.repository == 'irtizah738/G-HIMS-AI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact source without hosted credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install pinned Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install frozen dependencies
+        run: bun install --frozen-lockfile
+      - name: Confirm official production-target fail-closed contract
+        run: bun test --timeout 30000 tests/ci10i-production-target-guard.test.ts tests/ci10i-offline-production-qualification.test.ts
+      - name: TypeScript qualification
+        run: bun run typecheck
+      - name: Record limited source-only evidence
+        run: |
+          echo 'CI10I_PRODUCTION_CONFIGURATION_GUARD_PASSED'
+          echo 'LIVE_PRODUCTION_DEPLOYMENT_UNCHANGED'
+          echo 'HOSPITAL_RELEASE_AUTHORIZATION_NOT_GRANTED'
+          echo 'HOSTED_PATIENT360_MIGRATION_NOT_EXECUTED'
+          echo 'NO_PATIENT_DATA_ACCESS_OR_WRITES'

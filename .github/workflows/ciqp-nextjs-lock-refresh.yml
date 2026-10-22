@@ -1,0 +1,64 @@
+name: CIQP security lockfile refresh (temporary)
+on:
+  push:
+    branches:
+      - release/ci-rc1-emulator-clean-20261018
+    paths:
+      - .github/workflows/ciqp-nextjs-lock-refresh.yml
+
+permissions:
+  contents: write
+
+jobs:
+  secure-lockfile:
+    if: github.repository == 'irtizah738/G-HIMS-AI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 1
+      - name: Regenerate Next security lockfile and commit only dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_head='3d0280e77c52b58a69e9aed7ae772e157cf0350b'
+          if [ "$(git rev-parse HEAD)" != "$expected_head" ]; then
+            echo 'STOP: workflow source head is not the reviewed candidate'
+            exit 1
+          fi
+          echo 'SOURCE_HEAD=VERIFIED'
+          node --version
+          npm --version
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund --save-exact next@16.4.1
+          node - <<'NODE'
+          const pkg = require('./package.json');
+          const lock = require('./package-lock.json');
+          if (pkg.dependencies.next !== '16.4.1' ||
+              lock.packages[''].dependencies.next !== '16.4.1' ||
+              lock.packages['node_modules/next']?.version !== '16.4.1') {
+            throw Error('SECURITY_LOCKFILE_VERSION_MISMATCH');
+          }
+          const sharp = lock.packages['node_modules/sharp']?.version || 'NOT_INSTALLED';
+          if (sharp !== 'NOT_INSTALLED') {
+            const parts = sharp.split('.').map(Number);
+            if (parts[0] === 0 && (parts[1] < 35 || (parts[1] === 35 && parts[2] < 5))) {
+              throw Error('VULNERABLE_SHARP_LOCKFILE');
+            }
+          }
+          console.log('NEXT_SECURITY_LOCKFILE=VERIFIED');
+          console.log('SHARP_VERSION=' + sharp);
+          NODE
+          changed="$(git diff --name-only)"
+          echo "$changed"
+          if [ "$changed" != "$(printf 'package-lock.json\npackage.json')" ]; then
+            echo 'STOP: dependency update changed unexpected files'
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- package.json package-lock.json
+          git commit -m 'fix(security): pin Next.js 16.4.1 and regenerate npm lockfile'
+          git push origin HEAD:refs/heads/release/ci-rc1-emulator-clean-20261018
+          echo 'LOCKFILE_REFRESH_PUSH=PASS'

@@ -286,7 +286,7 @@ export async function runCiqp182HostedSourceFixture(): Promise<void> {
       ciqp182HostedSourceGcloudCredential()
     );
     activateCiqp182SyntheticHostedSourceFirestore(
-      ciqp182HostedSourceFirestoreClient()
+      ciqp182HostedSourceFirestoreClient(mintCiqp182HostedSourceToken)
     );
   }
   const db = getAdminFirestore();

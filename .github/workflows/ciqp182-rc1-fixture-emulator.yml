@@ -5,6 +5,7 @@ on:
     paths:
       - scripts/ops/ciqp182-seed-hospital0-emulator.ts
       - emulator-security/ciqp182-synthetic-hospital0-fixture.test.ts
+      - scripts/ops/ciqp182-emulator-restore-parity.ts
       - .github/workflows/ciqp182-rc1-fixture-emulator.yml
       - lib/clinical/patient360/ciqp-hosted-staging-readonly.ts
       - package.json
@@ -63,8 +64,34 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Install pinned Firestore emulator
         run: npm install --global firebase-tools@15.30.2
-      - name: Qualify synthetic fixture and immutable audit in disposable emulator
-        run: timeout --signal=TERM --kill-after=5s 180s firebase emulators:exec --project ghims-p4-ci --only firestore "bun test --timeout 30000 emulator-security/ciqp182-synthetic-hospital0-fixture.test.ts"
+      - name: Qualify fixture, export, fresh emulator import and exact evidence parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${GOOGLE_APPLICATION_CREDENTIALS:-}"
+          test -z "${FIREBASE_PRIVATE_KEY:-}"
+          test "${FIREBASE_PROJECT_ID}" = 'ghims-p4-ci'
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          baseline="$work/baseline.json"
+          snapshot="$work/emulator-export"
+          # First independent emulator process: write fabricated fixture,
+          # read-only fingerprint, and export the disposable Firestore dataset.
+          timeout --signal=TERM --kill-after=5s 300s firebase emulators:exec \
+            --project ghims-p4-ci --only firestore \
+            --export-on-exit="$snapshot" \
+            "bun test --timeout 30000 emulator-security/ciqp182-synthetic-hospital0-fixture.test.ts && bun scripts/ops/ciqp182-emulator-restore-parity.ts capture '$baseline'"
+          test -s "$baseline"
+          test -f "$snapshot/firebase-export-metadata.json"
+          # Second fresh emulator process: import the export and compare
+          # Patient360, snapshots, canonical events and outbox. No hosted IAM.
+          timeout --signal=TERM --kill-after=5s 300s firebase emulators:exec \
+            --project ghims-p4-ci --only firestore \
+            --import="$snapshot" \
+            "bun scripts/ops/ciqp182-emulator-restore-parity.ts verify '$baseline'"
+          echo 'CIQP182_EMULATOR_FRESH_EXPORT_IMPORT_PARITY_PASS'
+          echo 'HOSTED_FIRESTORE_NOT_ACCESSED'
+          echo 'CLINICAL_RELEASE_NOT_AUTHORIZED'
       - name: Check fixture TypeScript
         run: bun run typecheck
       - name: Record no hosted staging fixture population

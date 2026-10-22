@@ -10,6 +10,29 @@
 - Candidate implementation reviewed at SHA `0b84670e28182530faa5d0a806908dc97bf384c8` (2026-10-12). Later commits and test runs must be recorded separately.
 - Audit records are tenant-scoped and client-denied. Preserve all immutable canonical events, outbox records, previous hashes, old checkpoints, and migration ledger records.
 
+## Two-process Firestore emulator export/import recovery rehearsal
+
+The RC1 fixture workflow now performs a real **disposable Firestore emulator**
+export on clean shutdown followed by an import into a **fresh emulator process**
+with the same TEST-only project ID. This adds persistence/recovery evidence to
+the existing in-process Patient 360 projection-rebuild, crash/replay and race tests.
+
+The bounded `scripts/ops/ciqp182-emulator-restore-parity.ts` captures
+non-identifying aggregate counts and keyed event/outbox, clinical-intelligence
+snapshot identity/provenance, projection revision and full Patient 360
+diagnostic HMACs. After import, it verifies equality, tenant fixture metadata,
+registration, multi-domain chart completeness, audit count and ready timeline.
+No raw patient profiles, identifiers, event payloads, emulator exports or HMAC
+baseline files are uploaded as CI artifacts. All temporary data is deleted
+in the workflow's cleanup trap.
+
+**Important limit:** This verifies local emulator export/import only, not
+a GCP Firestore managed export/import, production-style IAM, backup storage
+permissions, host-environment rollback, restored deployed traffic or measured
+cloud RPO/RTO. It does not change the owner's decision against another hosted
+staging environment, and it cannot authorize a hosted migration, production
+deployment or a patient-facing clinical pilot.
+
 ## Emulated rehearsal (no hosted data)
 1. Use a **new, disposable** Firestore emulator instance on loopback; choose a unique tenant containing **synthetic** clinical documents, encounters, signed events, unsigned drafts, out-of-order metadata and historical timeline rows. Never copy real patient or production data into the emulator.
 2. Export only aggregate counts and exact Git SHA. Set `GHIMS_RUNTIME_MODE=TEST`, `NODE_ENV=test`, `FIRESTORE_EMULATOR_HOST=127.0.0.1:8080`, `GHIMS_CIQP_MIGRATION_ACK=SYNTHETIC_EMULATOR_POLICY_MIGRATION_ONLY`, `GHIMS_CIQP_MIGRATION_TENANT_ID=<synthetic-tenant>`. Ensure production Firebase credentials and hosted endpoints are not present.

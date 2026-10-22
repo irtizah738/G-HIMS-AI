@@ -15,7 +15,9 @@ import { execFileSync } from 'node:child_process';
 import { getApp, type Credential } from 'firebase-admin/app';
 import {
   getAdminFirestore, activateCiqp182SyntheticHostedSourceCredential,
+  activateCiqp182SyntheticHostedSourceFirestore,
 } from '@/server/firebase/admin';
+import { ciqp182HostedSourceFirestoreClient } from './ciqp182-hosted-firestore-client';
 import { registerPatientAndEncounter } from '@/server/runtime/registration-orchestrator';
 import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
 import { inspectCiqpSnapshotOutboxEvidence } from '@/lib/clinical/patient360/ciqp-snapshot-outbox-audit';
@@ -282,6 +284,9 @@ export async function runCiqp182HostedSourceFixture(): Promise<void> {
     await inspectCiqp182HostedSourceViaGcloud(false, true);
     activateCiqp182SyntheticHostedSourceCredential(
       ciqp182HostedSourceGcloudCredential()
+    );
+    activateCiqp182SyntheticHostedSourceFirestore(
+      ciqp182HostedSourceFirestoreClient()
     );
   }
   const db = getAdminFirestore();

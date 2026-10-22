@@ -62,11 +62,13 @@ export function ciqp182HostedSourceFirestoreClient(
   };
   renew();
   const getHeaders = oauth.getRequestHeaders.bind(oauth);
-  oauth.getRequestHeaders = async (url?: string | URL) => {
+  oauth.getRequestHeaders = async (url?: string) => {
     if (Date.now() >= expiresAt - 60_000) renew();
+    // google-auth-library v9 types headers as a string map, while the
+    // installed gax gRPC transport requires Fetch Headers.forEach().
     return ciqp182NormalizeGrpcHeaders(
       (await getHeaders(url)) as Headers | Record<string, string>
-    );
+    ) as unknown as Awaited<ReturnType<OAuth2Client['getRequestHeaders']>>;
   };
   const settings = {
     projectId: SOURCE,

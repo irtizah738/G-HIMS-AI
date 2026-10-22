@@ -84,7 +84,8 @@ function isCiqp182SourceCredentialActive(): boolean {
  */
 export function activateCiqp182SyntheticHostedSourceFirestore(firestore: Firestore): void {
   if (!isCiqp182SourceCredentialActive() ||
-      !firestore || firestore.projectId !== CIQP182_DISPOSABLE_SOURCE ||
+      !firestore ||
+      (firestore as unknown as { projectId?: string }).projectId !== CIQP182_DISPOSABLE_SOURCE ||
       Boolean(adminFirestoreInstance)) {
     throw new Error('CIQP182_DISPOSABLE_SOURCE_FIRESTORE_SCOPE_DENIED');
   }

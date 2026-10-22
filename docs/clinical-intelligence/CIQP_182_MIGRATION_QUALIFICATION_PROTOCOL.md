@@ -73,6 +73,16 @@ used impersonation: source `documents:listCollectionIds` HTTP 200, restore
 HTTP 403, then create-only tenant metadata `SYNTHETIC_TENANT_CREATED=PASS`.
 These are **operator-supplied receipts**, not independent sign-off.
 
+Cloud Shell may warn that `gcloud auth application-default login` would
+persist the operator's personal refresh credentials on its VM. **Answer N**.
+For this preflight, use `CIQP182_HOSTED_SOURCE_AUTH_MODE=GCLOUD_IMPERSONATION`
+and ensure `GOOGLE_APPLICATION_CREDENTIALS` is absent. This mode is
+**DRY_RUN only**: it uses the CLI's previously verified session to request
+an ephemeral impersonated source-writer token, verifies exact fictional
+metadata and empty subcollections via read-only Firestore REST, and never
+creates ADC credentials. `APPLY` is rejected for this authentication mode.
+This does not qualify the hosted patient writer or grant release authorization.
+
 New `scripts/ops/ciqp182-hosted-source-fixture.ts` is **DRY_RUN by default**,
 locks the exact source and tenant, requires a clean SHA checkout, no emulator,
 Vercel, GitHub-hosted production job or key-based credential, and validates

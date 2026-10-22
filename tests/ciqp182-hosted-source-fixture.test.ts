@@ -3,6 +3,8 @@ import {
   assertCiqp182HostedSourceScope,
   assertCiqp182SourceKeylessCredential,
   matchesCiqp182SourceTenant,
+  matchesCiqp182HostedRestTenant,
+  isCiqp182EmptyCollectionInventory,
   CIQP182_SOURCE_PROJECT, CIQP182_WRITER,
 } from '@/scripts/ops/ciqp182-hosted-source-fixture';
 
@@ -58,6 +60,55 @@ describe('CIQP-182 hosted G-HIMS AI synthetic-only fixture perimeter', () => {
       { ...metadata, extra: 'unreviewed' },
       { ...metadata, provenanceStatus: 'APPROVED' },
     ]) expect(matchesCiqp182SourceTenant(changed)).toBe(false);
+  });
+
+  test('Cloud Shell impersonation mode is accepted only for read-only DRY_RUN', () => {
+    const cli = {
+      ...valid,
+      GOOGLE_APPLICATION_CREDENTIALS: undefined,
+      CIQP182_HOSTED_SOURCE_AUTH_MODE: 'GCLOUD_IMPERSONATION',
+      CIQP182_HOSTED_SOURCE_MODE: 'DRY_RUN',
+    };
+    expect(assertCiqp182HostedSourceScope(cli, SHA, () => {
+      throw new Error('must not inspect ADC');
+    })).toBe('DRY_RUN');
+    for (const change of [
+      { GOOGLE_APPLICATION_CREDENTIALS: '/tmp/key.json' },
+      { CIQP182_HOSTED_SOURCE_MODE: 'APPLY' },
+      { FIREBASE_PROJECT_ID: 'g-hims-ai' },
+      { GHIMS_RUNTIME_MODE: 'PRODUCTION' },
+      { CIQP182_HOSTED_SOURCE_AUTH_MODE: 'OTHER' },
+    ]) {
+      expect(() => assertCiqp182HostedSourceScope({ ...cli, ...change }, SHA, () => null))
+        .toThrow('CIQP182_HOSTED_SOURCE_SCOPE_DENIED');
+    }
+  });
+
+  test('Cloud Shell metadata and collection responses fail closed', () => {
+    const validRest = { fields: {
+      name: { stringValue: 'CIQP182 Synthetic Hospital 0' },
+      environment: { stringValue: 'STAGING' },
+      syntheticOnly: { booleanValue: true },
+      clinicalUseAllowed: { booleanValue: false },
+      provenanceStatus: { stringValue: 'PENDING_REVIEW' },
+      qualificationPurpose: { stringValue: 'CIQP182_PATIENT360' },
+    }};
+    expect(matchesCiqp182HostedRestTenant(validRest)).toBe(true);
+    for (const modified of [
+      null, [], { fields: {} },
+      { fields: {...validRest.fields, clinicalUseAllowed: {booleanValue: true}} },
+      { fields: {...validRest.fields, unexpected: {stringValue:'1'}} },
+      { fields: {...validRest.fields, syntheticOnly: {stringValue:'true'}} },
+    ]) expect(matchesCiqp182HostedRestTenant(modified)).toBe(false);
+    for (const ok of [{}, {collectionIds: []}, {nextPageToken: ''},
+      {collectionIds: [], nextPageToken: ''}]) {
+      expect(isCiqp182EmptyCollectionInventory(ok)).toBe(true);
+    }
+    for (const bad of [
+      null, [], {error:{code:200}}, {collectionIds:['patients']},
+      {collectionIds:null}, {nextPageToken:'continuation'},
+      {collectionIds:[],unexpected:1},
+    ]) expect(isCiqp182EmptyCollectionInventory(bad)).toBe(false);
   });
 
   test('default is no-write DRY_RUN; explicit APPLY needs independent receipts', () => {
@@ -135,6 +186,9 @@ describe('CIQP-182 hosted G-HIMS AI synthetic-only fixture perimeter', () => {
   test('only canonical writer creates evidence, never directly patches patient records', async () => {
     const source = await Bun.file('scripts/ops/ciqp182-hosted-source-fixture.ts').text();
     expect(source).toContain('registerPatientAndEncounter(');
+    expect(source).toContain('inspectCiqp182HostedSourceViaGcloud();');
+    expect(source).toContain("method: 'GET'");
+    expect(source).toContain("endpoint + ':listCollectionIds'");
     expect(source).toContain('Patient360ProjectionService.rebuildPatient(');
     expect(source).toContain('inspectCiqpSnapshotOutboxEvidence(');
     expect(source).toContain('fingerprintCiqpImmutableTenant(');

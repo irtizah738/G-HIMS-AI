@@ -75,6 +75,12 @@ export function assertCiqp182HostedSourceScope(
   readCredential: (path: string) => unknown = path => JSON.parse(readFileSync(path, 'utf8'))
 ): Mode {
   const mode = String(env.CIQP182_HOSTED_SOURCE_MODE || 'DRY_RUN');
+  const authMode = String(env.CIQP182_HOSTED_SOURCE_AUTH_MODE || 'ADC');
+  // CLI impersonation is read-only; it cannot authorize hosted APPLY.
+  const cliReadOnly = authMode === 'GCLOUD_IMPERSONATION';
+  const supportedCredential = cliReadOnly
+    ? mode === 'DRY_RUN' && !env.GOOGLE_APPLICATION_CREDENTIALS
+    : authMode === 'ADC' && Boolean(env.GOOGLE_APPLICATION_CREDENTIALS);
   // Identity checks happen before reading credential file or initializing SDK.
   if (!['DRY_RUN', 'APPLY'].includes(mode) ||
       env.GHIMS_RUNTIME_MODE !== 'STAGING' ||
@@ -96,13 +102,15 @@ export function assertCiqp182HostedSourceScope(
       env.CIQP182_HOSTED_SOURCE_SYNTHETIC_ACK !== 'FICTIONAL_DATA_ONLY' ||
       !/^[0-9a-f]{40}$/i.test(exactHead) ||
       env.CIQP182_HOSTED_SOURCE_EXPECTED_SHA !== exactHead ||
-      !env.GOOGLE_APPLICATION_CREDENTIALS) {
+      !supportedCredential) {
     throw new Error('CIQP182_HOSTED_SOURCE_SCOPE_DENIED');
   }
-  try {
-    assertCiqp182SourceKeylessCredential(readCredential(env.GOOGLE_APPLICATION_CREDENTIALS));
-  } catch {
-    throw new Error('CIQP182_HOSTED_KEYLESS_CREDENTIAL_REQUIRED');
+  if (!cliReadOnly) {
+    try {
+      assertCiqp182SourceKeylessCredential(readCredential(env.GOOGLE_APPLICATION_CREDENTIALS!));
+    } catch {
+      throw new Error('CIQP182_HOSTED_KEYLESS_CREDENTIAL_REQUIRED');
+    }
   }
 
   if (mode === 'APPLY' && (
@@ -120,6 +128,94 @@ export function assertCiqp182HostedSourceScope(
   return mode as Mode;
 }
 
+/**
+ * Cloud Shell's gcloud identity uses existing CLI authentication to issue a
+ * SHORT-LIVED impersonated token. This path deliberately has no persisted ADC
+ * refresh token, Firebase SDK initialization, exports, imports or document writes.
+ */
+export function matchesCiqp182HostedRestTenant(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const fields = (value as Record<string, unknown>).fields;
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return false;
+  const expected: Record<string, unknown> = {
+    name: { stringValue: 'CIQP182 Synthetic Hospital 0' },
+    environment: { stringValue: 'STAGING' },
+    syntheticOnly: { booleanValue: true },
+    clinicalUseAllowed: { booleanValue: false },
+    provenanceStatus: { stringValue: 'PENDING_REVIEW' },
+    qualificationPurpose: { stringValue: 'CIQP182_PATIENT360' },
+  };
+  const actual = fields as Record<string, unknown>;
+  const keys = Object.keys(expected).sort();
+  return JSON.stringify(Object.keys(actual).sort()) === JSON.stringify(keys) &&
+    keys.every(key => JSON.stringify(actual[key]) === JSON.stringify(expected[key]));
+}
+
+export function isCiqp182EmptyCollectionInventory(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const result = value as Record<string, unknown>;
+  return Object.keys(result).every(
+      key => key === 'collectionIds' || key === 'nextPageToken') &&
+    (!Object.hasOwn(result, 'collectionIds') ||
+      (Array.isArray(result.collectionIds) && result.collectionIds.length === 0)) &&
+    (!Object.hasOwn(result, 'nextPageToken') || result.nextPageToken === '');
+}
+
+async function inspectCiqp182HostedSourceViaGcloud(): Promise<void> {
+  const token = execFileSync('gcloud', [
+    'auth', 'print-access-token',
+    '--impersonate-service-account=' + CIQP182_WRITER,
+    '--project=' + CIQP182_SOURCE_PROJECT,
+    '--billing-project=' + CIQP182_SOURCE_PROJECT,
+    '--quiet',
+  ], {
+    encoding: 'utf8', timeout: 30000, maxBuffer: 16384,
+    stdio: ['ignore', 'pipe', 'ignore'],
+  }).trim();
+  if (!token || !/^[A-Za-z0-9._~-]+$/.test(token)) {
+    throw new Error('CIQP182_HOSTED_SOURCE_IMPERSONATION_FAILED');
+  }
+  const resource = 'projects/' + CIQP182_SOURCE_PROJECT +
+    '/databases/(default)/documents/tenants/' + CIQP182_TENANT;
+  const endpoint = 'https://firestore.googleapis.com/v1/projects/' +
+    CIQP182_SOURCE_PROJECT + '/databases/%28default%29/documents/tenants/' +
+    CIQP182_TENANT;
+  const headers = {
+    Authorization: 'Bearer ' + token,
+    'x-goog-user-project': CIQP182_SOURCE_PROJECT,
+  };
+  const metadata = await fetch(endpoint, {
+    method: 'GET', headers, redirect: 'error', signal: AbortSignal.timeout(30000),
+  });
+  if (metadata.status !== 200) throw new Error('CIQP182_HOSTED_SOURCE_READ_DENIED');
+  const document: unknown = await metadata.json();
+  if (!document || typeof document !== 'object' || Array.isArray(document) ||
+      (document as Record<string, unknown>).name !== resource ||
+      !matchesCiqp182HostedRestTenant(document)) {
+    throw new Error('CIQP182_HOSTED_SOURCE_TENANT_METADATA_INVALID');
+  }
+  const inventory = await fetch(endpoint + ':listCollectionIds', {
+    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(30000),
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pageSize: 100 }),
+  });
+  if (inventory.status !== 200) {
+    throw new Error('CIQP182_HOSTED_SOURCE_COLLECTION_SCAN_DENIED');
+  }
+  const collections: unknown = await inventory.json();
+  if (!isCiqp182EmptyCollectionInventory(collections)) {
+    throw new Error('CIQP182_HOSTED_SOURCE_NOT_EMPTY_NO_RETRY');
+  }
+  console.log(JSON.stringify({
+    action: 'CIQP182_HOSTED_SOURCE_DRY_RUN',
+    sourceTenantMetadata: 'MATCHED',
+    nestedCollections: 0,
+    writesPerformed: 0,
+    releaseAuthorization: 'NOT_GRANTED',
+    authentication: 'KEYLESS_GCLOUD_IMPERSONATION_NO_ADC',
+  }));
+}
+
 export async function runCiqp182HostedSourceFixture(): Promise<void> {
   const head = execFileSync('git', ['rev-parse', 'HEAD'], {
     encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
@@ -129,6 +225,11 @@ export async function runCiqp182HostedSourceFixture(): Promise<void> {
   });
   if (dirty.trim()) throw new Error('CIQP182_HOSTED_SOURCE_CHECKOUT_DIRTY');
   const mode = assertCiqp182HostedSourceScope(process.env, head);
+  if (mode === 'DRY_RUN' &&
+      process.env.CIQP182_HOSTED_SOURCE_AUTH_MODE === 'GCLOUD_IMPERSONATION') {
+    await inspectCiqp182HostedSourceViaGcloud();
+    return;
+  }
   const db = getAdminFirestore();
   if (!db || getApp().options.projectId !== CIQP182_SOURCE_PROJECT) {
     throw new Error('CIQP182_HOSTED_SOURCE_PROJECT_UNVERIFIED');

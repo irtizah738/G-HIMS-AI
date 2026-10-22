@@ -7,6 +7,9 @@ import {
   isCiqp182EmptyCollectionInventory,
   CIQP182_SOURCE_PROJECT, CIQP182_WRITER,
 } from '@/scripts/ops/ciqp182-hosted-source-fixture';
+import {
+  ciqp182NormalizeGrpcHeaders, ciqp182HostedSourceFirestoreClient,
+} from '@/scripts/ops/ciqp182-hosted-firestore-client';
 
 const SHA = 'a'.repeat(40);
 const sampleCredential = {
@@ -42,6 +45,33 @@ const apply: NodeJS.ProcessEnv = {
   CIQP182_HOSTED_SOURCE_PROVENANCE_SHA256: 'c'.repeat(64),
   CIQP182_HOSTED_SOURCE_EVIDENCE_HMAC_KEY: 'synthetic-only-test-hmac-material-example',
 };
+
+describe('CIQP-182 hosted keyless gRPC compatibility', () => {
+  test('normalizes both legacy and iterable authorization headers', () => {
+    const legacy = ciqp182NormalizeGrpcHeaders({
+      authorization: 'Bearer synthetic-test-placeholder',
+    });
+    expect(legacy).toBeInstanceOf(Headers);
+    expect(typeof legacy.forEach).toBe('function');
+    expect(legacy.get('authorization')).toBe('Bearer synthetic-test-placeholder');
+    const alreadyIterable = ciqp182NormalizeGrpcHeaders(
+      new Headers({ authorization: 'Bearer synthetic-test-placeholder' })
+    );
+    expect(alreadyIterable.get('authorization')).toBe('Bearer synthetic-test-placeholder');
+    expect(() => ciqp182NormalizeGrpcHeaders({})).toThrow('CIQP182_GRPC_HEADER_INVALID');
+    expect(() => ciqp182NormalizeGrpcHeaders({ authorization: 'Basic disallowed' }))
+      .toThrow('CIQP182_GRPC_HEADER_INVALID');
+  });
+
+  test('rejects unsafe standalone client initialization BEFORE minting tokens', () => {
+    let mintCalls = 0;
+    expect(() => ciqp182HostedSourceFirestoreClient(() => {
+      mintCalls++;
+      return 'fake-token';
+    })).toThrow('CIQP182_GRPC_SCOPE_DENIED');
+    expect(mintCalls).toBe(0);
+  });
+});
 
 describe('CIQP-182 hosted G-HIMS AI synthetic-only fixture perimeter', () => {
   test('only the existing six-field fictional tenant is accepted', () => {

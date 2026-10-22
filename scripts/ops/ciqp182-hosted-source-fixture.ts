@@ -12,8 +12,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { getApp } from 'firebase-admin/app';
-import { getAdminFirestore } from '@/server/firebase/admin';
+import { getApp, type Credential } from 'firebase-admin/app';
+import {
+  getAdminFirestore, activateCiqp182SyntheticHostedSourceCredential,
+} from '@/server/firebase/admin';
 import { registerPatientAndEncounter } from '@/server/runtime/registration-orchestrator';
 import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
 import { inspectCiqpSnapshotOutboxEvidence } from '@/lib/clinical/patient360/ciqp-snapshot-outbox-audit';
@@ -76,11 +78,15 @@ export function assertCiqp182HostedSourceScope(
 ): Mode {
   const mode = String(env.CIQP182_HOSTED_SOURCE_MODE || 'DRY_RUN');
   const authMode = String(env.CIQP182_HOSTED_SOURCE_AUTH_MODE || 'ADC');
-  // CLI impersonation is read-only; it cannot authorize hosted APPLY.
+  // The same short-lived source identity can power either mode, but the
+  // hosted APPLY path needs the additional independent approvals below.
   const cliReadOnly = authMode === 'GCLOUD_IMPERSONATION';
+  const cliApply = authMode === 'GCLOUD_IMPERSONATION_APPLY';
   const supportedCredential = cliReadOnly
     ? mode === 'DRY_RUN' && !env.GOOGLE_APPLICATION_CREDENTIALS
-    : authMode === 'ADC' && Boolean(env.GOOGLE_APPLICATION_CREDENTIALS);
+    : cliApply
+      ? mode === 'APPLY' && !env.GOOGLE_APPLICATION_CREDENTIALS
+      : authMode === 'ADC' && Boolean(env.GOOGLE_APPLICATION_CREDENTIALS);
   // Identity checks happen before reading credential file or initializing SDK.
   if (!['DRY_RUN', 'APPLY'].includes(mode) ||
       env.GHIMS_RUNTIME_MODE !== 'STAGING' ||
@@ -105,7 +111,7 @@ export function assertCiqp182HostedSourceScope(
       !supportedCredential) {
     throw new Error('CIQP182_HOSTED_SOURCE_SCOPE_DENIED');
   }
-  if (!cliReadOnly) {
+  if (!cliReadOnly && !cliApply) {
     try {
       assertCiqp182SourceKeylessCredential(readCredential(env.GOOGLE_APPLICATION_CREDENTIALS!));
     } catch {
@@ -161,12 +167,17 @@ export function isCiqp182EmptyCollectionInventory(value: unknown): boolean {
     (!Object.hasOwn(result, 'nextPageToken') || result.nextPageToken === '');
 }
 
-async function inspectCiqp182HostedSourceViaGcloud(): Promise<void> {
+/**
+ * Mint ONLY a short-lived token for the exact synthetic-source identity.
+ * No refresh tokens, private keys or access tokens are persisted or logged.
+ */
+export function mintCiqp182HostedSourceToken(): string {
   const token = execFileSync('gcloud', [
     'auth', 'print-access-token',
     '--impersonate-service-account=' + CIQP182_WRITER,
     '--project=' + CIQP182_SOURCE_PROJECT,
     '--billing-project=' + CIQP182_SOURCE_PROJECT,
+    '--lifetime=900',
     '--quiet',
   ], {
     encoding: 'utf8', timeout: 30000, maxBuffer: 16384,
@@ -175,6 +186,25 @@ async function inspectCiqp182HostedSourceViaGcloud(): Promise<void> {
   if (!token || !/^[A-Za-z0-9._~-]+$/.test(token)) {
     throw new Error('CIQP182_HOSTED_SOURCE_IMPERSONATION_FAILED');
   }
+  return token;
+}
+
+/** Firebase Admin Credential; token always comes from the exact CLI identity. */
+export function ciqp182HostedSourceGcloudCredential(): Credential {
+  return {
+    async getAccessToken() {
+      return {
+        access_token: mintCiqp182HostedSourceToken(),
+        expires_in: 900,
+      };
+    },
+  };
+}
+
+async function inspectCiqp182HostedSourceViaGcloud(
+  emitReport = true, enforceRestoreDeny = false
+): Promise<void> {
+  const token = mintCiqp182HostedSourceToken();
   const resource = 'projects/' + CIQP182_SOURCE_PROJECT +
     '/databases/(default)/documents/tenants/' + CIQP182_TENANT;
   const endpoint = 'https://firestore.googleapis.com/v1/projects/' +
@@ -206,6 +236,21 @@ async function inspectCiqp182HostedSourceViaGcloud(): Promise<void> {
   if (!isCiqp182EmptyCollectionInventory(collections)) {
     throw new Error('CIQP182_HOSTED_SOURCE_NOT_EMPTY_NO_RETRY');
   }
+  if (enforceRestoreDeny) {
+    const denied = await fetch(
+      'https://firestore.googleapis.com/v1/projects/' +
+      CIQP182_RESTORE_PROJECT +
+      '/databases/%28default%29/documents:listCollectionIds', {
+        method: 'POST', redirect: 'error', signal: AbortSignal.timeout(30000),
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pageSize: 100 }),
+      }
+    );
+    if (denied.status !== 403) {
+      throw new Error('CIQP182_HOSTED_RESTORE_WRITER_ISOLATION_FAILED');
+    }
+  }
+  if (!emitReport) return;
   console.log(JSON.stringify({
     action: 'CIQP182_HOSTED_SOURCE_DRY_RUN',
     sourceTenantMetadata: 'MATCHED',
@@ -229,6 +274,15 @@ export async function runCiqp182HostedSourceFixture(): Promise<void> {
       process.env.CIQP182_HOSTED_SOURCE_AUTH_MODE === 'GCLOUD_IMPERSONATION') {
     await inspectCiqp182HostedSourceViaGcloud();
     return;
+  }
+  if (mode === 'APPLY' &&
+      process.env.CIQP182_HOSTED_SOURCE_AUTH_MODE === 'GCLOUD_IMPERSONATION_APPLY') {
+    // The independent approval gate ran above, before any SDK initialization.
+    // Check current source data and restore denial without mutating either.
+    await inspectCiqp182HostedSourceViaGcloud(false, true);
+    activateCiqp182SyntheticHostedSourceCredential(
+      ciqp182HostedSourceGcloudCredential()
+    );
   }
   const db = getAdminFirestore();
   if (!db || getApp().options.projectId !== CIQP182_SOURCE_PROJECT) {

@@ -111,6 +111,44 @@ describe('CIQP-182 hosted G-HIMS AI synthetic-only fixture perimeter', () => {
     ]) expect(isCiqp182EmptyCollectionInventory(bad)).toBe(false);
   });
 
+  test('keyless hosted APPLY requires existing independent approval gates', () => {
+    const cliApply = {
+      ...apply,
+      GOOGLE_APPLICATION_CREDENTIALS: undefined,
+      CIQP182_HOSTED_SOURCE_AUTH_MODE: 'GCLOUD_IMPERSONATION_APPLY',
+    };
+    expect(assertCiqp182HostedSourceScope(cliApply, SHA, () => {
+      throw new Error('must not read ADC on keyless CLI mode');
+    })).toBe('APPLY');
+    const missingApproval = {
+      ...cliApply,
+      CIQP182_HOSTED_SOURCE_IAM_RECEIPT_SHA256: undefined,
+    };
+    expect(() => assertCiqp182HostedSourceScope(
+      missingApproval, SHA, () => null
+    )).toThrow('CIQP182_HOSTED_SOURCE_APPLY_APPROVAL_MISSING');
+    for (const unsafe of [
+      { CIQP182_HOSTED_SOURCE_MODE: 'DRY_RUN' },
+      { GOOGLE_APPLICATION_CREDENTIALS: '/tmp/key.json' },
+      { GHIMS_RUNTIME_MODE: 'PRODUCTION' },
+      { FIREBASE_PROJECT_ID: 'g-hims-ai' },
+      { GHIMS_FIREBASE_PROJECT_ID_STAGING: 'studio-1130431360-48a05' },
+      { CIQP182_HOSTED_SOURCE_CONFIRM_TENANT: 'real-hospital' },
+      { GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'fake-prod' },
+    ]) {
+      expect(() => assertCiqp182HostedSourceScope({
+        ...cliApply, ...unsafe,
+      }, SHA, () => null)).toThrow('CIQP182_HOSTED_SOURCE_SCOPE_DENIED');
+    }
+    const oldReadOnly = {
+      ...cliApply,
+      CIQP182_HOSTED_SOURCE_AUTH_MODE: 'GCLOUD_IMPERSONATION',
+    };
+    expect(() => assertCiqp182HostedSourceScope(
+      oldReadOnly, SHA, () => null
+    )).toThrow('CIQP182_HOSTED_SOURCE_SCOPE_DENIED');
+  });
+
   test('default is no-write DRY_RUN; explicit APPLY needs independent receipts', () => {
     expect(assertCiqp182HostedSourceScope(valid, SHA, credentialReader)).toBe('DRY_RUN');
     expect(() => assertCiqp182HostedSourceScope({
@@ -187,6 +225,11 @@ describe('CIQP-182 hosted G-HIMS AI synthetic-only fixture perimeter', () => {
     const source = await Bun.file('scripts/ops/ciqp182-hosted-source-fixture.ts').text();
     expect(source).toContain('registerPatientAndEncounter(');
     expect(source).toContain('inspectCiqp182HostedSourceViaGcloud();');
+    expect(source).toContain('inspectCiqp182HostedSourceViaGcloud(false, true)');
+    expect(source).toContain('activateCiqp182SyntheticHostedSourceCredential(');
+    expect(source).toContain('ciqp182HostedSourceGcloudCredential()');
+    expect(source).toContain("'--lifetime=900'");
+    expect(source).toContain("if (denied.status !== 403)");
     expect(source).toContain("method: 'GET'");
     expect(source).toContain("endpoint + ':listCollectionIds'");
     expect(source).toContain('Patient360ProjectionService.rebuildPatient(');

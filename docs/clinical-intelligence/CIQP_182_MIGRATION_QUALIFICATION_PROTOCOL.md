@@ -83,6 +83,31 @@ metadata and empty subcollections via read-only Firestore REST, and never
 creates ADC credentials. `APPLY` is rejected for this authentication mode.
 This does not qualify the hosted patient writer or grant release authorization.
 
+### G-HIMS-AI hosted source APPLY credential implementation (source only)
+
+An additional `CIQP182_HOSTED_SOURCE_AUTH_MODE=GCLOUD_IMPERSONATION_APPLY`
+mode now supports **short-lived, keyless** Firebase Admin access for the
+dedicated source project without personal ADC login or a persistent key.
+The guarded runner confirms exact git SHA, source project, fictional tenant,
+absence of existing tenant subcollections and non-production runtime, then
+requires the existing change ticket, operator ID, exact SHA, independent
+IAM/provenance evidence digests and evidence HMAC. It performs read-only
+source metadata and restore-denial preflight before activating a temporary
+Firebase Admin credential that mints 900-second access tokens only for the
+specific synthetic source writer. The central Firebase Admin module only
+accepts this in-memory credential under explicit CIQP source-only scope.
+No unrelated Firebase credential pathway changes, production access, or
+schema changes are intended.
+
+**Security limit:** the present digest fields enforce format, NOT independent
+review/signature authenticity. A separate reviewer must inspect the actual
+source IAM, data provenance and change authorization documents before any
+APPLY. Do not fill digest fields with fabricated placeholders from unit tests.
+**The code addition itself does not authorize running APPLY.** The one-time
+APPLY claim is create-only and stops on partial failure, requiring independent
+recovery instead of blind retries. The managed Firestore backup/restore and
+clinical signoff remain outstanding.
+
 New `scripts/ops/ciqp182-hosted-source-fixture.ts` is **DRY_RUN by default**,
 locks the exact source and tenant, requires a clean SHA checkout, no emulator,
 Vercel, GitHub-hosted production job or key-based credential, and validates

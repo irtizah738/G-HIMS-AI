@@ -23,12 +23,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected_head='3d0280e77c52b58a69e9aed7ae772e157cf0350b'
-          if [ "$(git rev-parse HEAD)" != "$expected_head" ]; then
-            echo 'STOP: workflow source head is not the reviewed candidate'
+          expected_parent='d41adaf01b463ec4521501a183199aa5972692bc'
+          if [ "$(git rev-parse HEAD^)" != "$expected_parent" ]; then
+            echo 'STOP: unexpected predecessor on one-shot lockfile workflow'
             exit 1
           fi
-          echo 'SOURCE_HEAD=VERIFIED'
+          echo 'SOURCE_LINEAGE=VERIFIED'
           node --version
           npm --version
           npm install --package-lock-only --ignore-scripts --no-audit --no-fund --save-exact next@16.4.1

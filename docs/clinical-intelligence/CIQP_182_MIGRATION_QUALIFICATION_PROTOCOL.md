@@ -61,6 +61,55 @@ separately authorized and genuinely isolated G-HIMS-AI hosted qualification
 route exists, CIQP-182's hosted migration and independent clinical approval
 remain **BLOCKED**, even if all source/emulator CI checks pass.
 
+## G-HIMS-AI source-only hosted fixture authoring — 2026-10-22
+
+Two separate temporary, budgeted, billed GCP projects have been provisioned by
+the operator: `ciqp-ghims-source-20261022` and `ciqp-ghims-restore-20261022`,
+both `asia-south1` STANDARD/FIRESTORE_NATIVE. The source's
+`tenants/ciqp-synthetic-hospital0` six-field synthetic metadata was verified
+read-only with zero subcollections. The temporary source-only writer
+`ciqp182-synthetic-writer@ciqp-ghims-source-20261022.iam.gserviceaccount.com`
+used impersonation: source `documents:listCollectionIds` HTTP 200, restore
+HTTP 403, then create-only tenant metadata `SYNTHETIC_TENANT_CREATED=PASS`.
+These are **operator-supplied receipts**, not independent sign-off.
+
+New `scripts/ops/ciqp182-hosted-source-fixture.ts` is **DRY_RUN by default**,
+locks the exact source and tenant, requires a clean SHA checkout, no emulator,
+Vercel, GitHub-hosted production job or key-based credential, and validates
+the impersonated-writer ADC credential configuration before Firebase starts.
+The existing emulator-only generator is unchanged, and the historic OS staging
+writer is NOT reused. Before APPLY, the operator must separately validate
+actual source fixture provenance, the IAM review SHA-256 receipts, the source
+SHA and change ticket; supplying made-up hashes is **not** approval.
+
+The APPLY path first checks exact tenant metadata and no subcollections,
+then claims `ciqpQualificationRuns/one-time-20261022` **create-only**.
+It uses real G-HIMS AI registration/orchestration, authoritative Patient360
+rebuild, create-only snapshot, and bounded immutable events/outbox audit.
+Partial failure leaves evidence for manual review and **MUST NOT be retried**.
+No hosted Firestore APPLY, real managed GCS export/import, restore,
+rollback or clinical approval has yet been performed by this code change.
+
+**Run only after source CI, signed provenance and protected operator
+authorization.** For DRY_RUN use a locally generated, impersonated-service-account
+ADC file with `GOOGLE_APPLICATION_CREDENTIALS` pointing at it; the script rejects
+raw service-account JSON keys. Environment controls: `GHIMS_RUNTIME_MODE=STAGING`,
+`FIREBASE_PROJECT_ID=ciqp-ghims-source-20261022`,
+`GHIMS_FIREBASE_PROJECT_ID_STAGING=ciqp-ghims-source-20261022`,
+`GHIMS_FIREBASE_PROJECT_ID_PRODUCTION=g-hims-ai`,
+`FIRESTORE_DATABASE_ID=(default)`,
+`GHIMS_CIQP_STAGING_TENANT_ID=ciqp-synthetic-hospital0`,
+`CIQP182_HOSTED_SOURCE_CONFIRM_PROJECT=ciqp-ghims-source-20261022`,
+`CIQP182_HOSTED_SOURCE_CONFIRM_TENANT=ciqp-synthetic-hospital0`,
+`CIQP182_HOSTED_SOURCE_WRITER_EMAIL=ciqp182-synthetic-writer@ciqp-ghims-source-20261022.iam.gserviceaccount.com`,
+`CIQP182_HOSTED_SOURCE_SYNTHETIC_ACK=FICTIONAL_DATA_ONLY`,
+`CIQP182_HOSTED_SOURCE_EXPECTED_SHA=<exact current RC1 commit>`;
+call `bun scripts/ops/ciqp182-hosted-source-fixture.ts`.
+For APPLY, additional change ticket, exact head confirmation, operator identity,
+independently retained real IAM+provenance SHA-256 receipts, private HMAC key,
+and explicit one-time acknowledgment are required. Never commit credentials
+or evidence HMAC keys. Keep the restore project empty.
+
 ## Hosted staging prerequisites — NOT SATISFIED by this emulator harness
 - Separate G-HIMS-AI staging Firebase project, explicit approval of test-data provenance, read-only discovery that redacts patient IDs/PHI and confirmed network/project isolation.
 - Reviewed **separate** hosted-staging migration implementation and source/event atomicity controls. The current executor deliberately rejects any non-emulator host; do **not** weaken its guard to make hosted execution work.

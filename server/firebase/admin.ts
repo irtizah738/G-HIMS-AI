@@ -75,6 +75,22 @@ function isCiqp182SourceCredentialActive(): boolean {
     !process.env.FIRESTORE_EMULATOR_HOST;
 }
 
+
+/**
+ * CIQP-182 ONLY: install the separately authenticated, short-lived gRPC
+ * Firestore client after the source-project Admin app and runtime checks pass.
+ * Firebase Admin Firestore rejects custom Credentials; never loosen that gate.
+ * No production, G-HIMS-OS or restore project may activate this client.
+ */
+export function activateCiqp182SyntheticHostedSourceFirestore(firestore: Firestore): void {
+  if (!isCiqp182SourceCredentialActive() ||
+      !firestore || firestore.projectId !== CIQP182_DISPOSABLE_SOURCE ||
+      Boolean(adminFirestoreInstance)) {
+    throw new Error('CIQP182_DISPOSABLE_SOURCE_FIRESTORE_SCOPE_DENIED');
+  }
+  adminFirestoreInstance = firestore;
+}
+
 function formatPrivateKey(rawKey: string | undefined): string | null {
   if (!rawKey) return null;
   let key = rawKey.trim();
@@ -258,6 +274,15 @@ export function getAdminAuth(): Auth | null {
 }
 
 export function getAdminFirestore(): Firestore | null {
+  // The CIQP-182 in-memory credential is NOT accepted by Admin getFirestore().
+  // Never silently fall back to ADC: only the explicitly installed,
+  // tenant-scoped gRPC client is eligible for this disposable source run.
+  if (ciqp182SourceCredentialActivated) {
+    if (!isCiqp182SourceCredentialActive()) {
+      throw new Error('CIQP182_DISPOSABLE_SOURCE_CREDENTIAL_SCOPE_DENIED');
+    }
+    return adminFirestoreInstance;
+  }
   if (!hasAdminCredentials() && !canUseFirestoreEmulator()) return null;
   if (adminFirestoreInstance) return adminFirestoreInstance;
 

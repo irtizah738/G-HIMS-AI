@@ -48,7 +48,17 @@ const STUDY_CASES: Array<{ id: string; evidence: ValidationEvidenceItem[]; quest
 export function assertValidationSandbox(runtime: string | undefined, publicRuntime: string | undefined) {
   const server = String(runtime || '').trim().toUpperCase();
   const browser = String(publicRuntime || '').trim().toUpperCase();
-  if (server !== 'TEST' || browser !== 'TEST' || !process.env.FIRESTORE_EMULATOR_HOST) {
+  const project = String(process.env.FIREBASE_PROJECT_ID || '').trim();
+  const testProject = String(process.env.GHIMS_FIREBASE_PROJECT_ID_TEST || '').trim();
+  const clientProject = String(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || '').trim();
+  if (
+    server !== 'TEST' || browser !== 'TEST' ||
+    Boolean(process.env.VERCEL) ||
+    !/^ghims-ciqp-[a-z0-9-]+$/.test(project) ||
+    project === 'g-hims-ai' || project !== testProject || project !== clientProject ||
+    process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8080' ||
+    process.env.FIREBASE_AUTH_EMULATOR_HOST !== '127.0.0.1:9099'
+  ) {
     throw new Error('CIQP_VALIDATION_TEST_EMULATOR_REQUIRED');
   }
 }

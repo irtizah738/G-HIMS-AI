@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { createSyntheticRehearsalCohort, syntheticCohortFingerprint, REHEARSAL_COHORT_ID } from '@/lib/clinical/validation/synthetic-rehearsal-cohort';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { sanitizeForFirestore } from '@/lib/firestore/sanitize';
 import { AuthorizationPipeline } from '@/lib/backend/auth/authorization-pipeline';
@@ -173,23 +174,57 @@ export class ClinicalValidationWorkspaceService {
   public static async cohortReadiness(context: CommandContext) {
     if (!authorizedCoordinator(context)) throw new Error('CIQP_VALIDATION_ADMIN_REQUIRED');
     const tenant = dbFor(context);
-    const study = await tenant.collection('clinicalValidationStudies')
-      .doc('renal-ciqp-synthetic-120-v0').get();
+    const study = await tenant.collection('clinicalValidationStudies').doc(REHEARSAL_COHORT_ID).get();
     if (!study.exists) return {
-      present: false, caseCount: 0,
-      status: 'NOT_STAGED', policyApproved: false,
-      outcomesAvailable: false,
+      present: false, caseCount: 0, status: 'NOT_STAGED',
+      policyApproved: false, outcomesAvailable: false,
     };
-    const item = study.data() || {};
+    const doc = study.data() || {};
     return {
       present: true,
-      caseCount: item.cohortCount === 120 ? 120 : 0,
-      status: 'STAGED_LOCKED_POLICY_UNAPPROVED',
-      sourceHashVerified: item.exactSourceSha256 ===
-        '116596dd531f549873cf026cb0e61209f96554954ca622f53ef3b7fb3adcca9d',
+      caseCount: doc.cohortCount === 120 ? 120 : 0,
+      status: 'STAGED_REHEARSAL_POLICY_UNAPPROVED',
+      sourceHashVerified: doc.sourceHash === syntheticCohortFingerprint(createSyntheticRehearsalCohort()),
       policyApproved: false,
       outcomesAvailable: false,
     };
+  }
+
+  public static async stageRehearsal(context: CommandContext) {
+    if (!authorizedCoordinator(context)) throw new Error('CIQP_VALIDATION_ADMIN_REQUIRED');
+    const tenant = dbFor(context);
+    const cases = createSyntheticRehearsalCohort();
+    const manifest = tenant.collection('clinicalValidationStudies').doc(REHEARSAL_COHORT_ID);
+    // Single transaction atomically locks 120 cases and manifest. No clinical
+    // approvals, algorithm outputs, clinician labels, or assignments are minted.
+    await tenant.firestore.runTransaction(async tx => {
+      const existing = await tx.get(manifest);
+      if (existing.exists) throw new Error('CIQP_VALIDATION_REHEARSAL_ALREADY_STAGED');
+      for (const c of cases) {
+        const ref = tenant.collection('clinicalValidationRehearsalCases').doc(c.caseId);
+        tx.create(ref, sanitizeForFirestore({
+          ...c, studyId: REHEARSAL_COHORT_ID, classification: 'SYNTHETIC_ONLY',
+          clinicalPolicyApproved: false, assignmentsLocked: true,
+          modelOutputsAvailable: false, outcomesAvailable: false,
+        }));
+      }
+      const { event, audit } = auditMutation(context,
+        'CLINICAL_VALIDATION_REHEARSAL_COHORT_STAGED', REHEARSAL_COHORT_ID,
+        { caseCount: cases.length, sourceHash: syntheticCohortFingerprint(cases) });
+      tx.create(manifest, sanitizeForFirestore({
+        studyId: REHEARSAL_COHORT_ID, cohortCount: cases.length,
+        sourceHash: syntheticCohortFingerprint(cases), locked: true,
+        syntheticOnly: true, clinicalPolicyApproved: false,
+        studyStatus: 'ENGINEERING_REHEARSAL_UNAPPROVED',
+        modelOutputsAvailable: false, outcomesAvailable: false,
+        createdAt: Date.now(),
+      }));
+      tx.create(tenant.collection('events').doc(event.eventId), sanitizeForFirestore(event));
+      tx.create(tenant.collection('audit_logs').doc(audit.auditId), sanitizeForFirestore(audit));
+    });
+    return { staged: true, studyId: REHEARSAL_COHORT_ID,
+      caseCount: cases.length, policyApproved: false, clinicalEvaluationStarted: false,
+      fingerprint: syntheticCohortFingerprint(cases) };
   }
 
   public static async seed(

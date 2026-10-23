@@ -95,7 +95,7 @@ export function validateIndependentRoster(actors: unknown[]): asserts actors is 
 }
 
 function sourceHash(input: { evidence: ValidationEvidenceItem[]; question: string }): string {
-  return crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex');
+  return crypto.createHash('sha256').update(JSON.stringify({ evidence: input.evidence, question: input.question })).digest('hex');
 }
 
 function auditMutation(

@@ -20,6 +20,7 @@ interface WorkspaceResponse {
     outcomesAvailable: boolean;
   };
   cases?: ValidationCaseView[];
+  cohort?: { present: boolean; caseCount: number; status: string; sourceHashVerified?: boolean; policyApproved: false; outcomesAvailable: false };
   error?: { code?: string };
 }
 
@@ -27,6 +28,7 @@ function ClinicalValidationWorkspace({ tenantId }: { tenantId: string }) {
   const [cases, setCases] = useState<ValidationCaseView[]>([]);
   const [cohort, setCohort] = useState<WorkspaceResponse['cohort']>(undefined);
   const [role, setRole] = useState<'COORDINATOR' | 'REVIEWER' | null>(null);
+  const [cohort, setCohort] = useState<WorkspaceResponse['cohort']>();
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(true);
@@ -51,6 +53,7 @@ function ClinicalValidationWorkspace({ tenantId }: { tenantId: string }) {
       if (!response.ok || !data.success) throw new Error(data.error?.code || 'Unable to load validation cases.');
       setCases(data.cases || []);
       setRole(data.role || null);
+      setCohort(data.cohort);
       setCohort(data.cohort);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to load cases.');
@@ -124,6 +127,20 @@ function ClinicalValidationWorkspace({ tenantId }: { tenantId: string }) {
       )}
       {role === 'COORDINATOR' && (
         <section className="rounded-xl border bg-white p-5 shadow-sm">
+          <section className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <h2 className="text-sm font-bold">120-case engineering rehearsal (not clinical study)</h2>
+            <p className="mt-1 text-xs text-slate-600">
+              {cohort?.present
+                ? `Staged ${cohort.caseCount} locked synthetic records; hash verified: ${String(cohort.sourceHashVerified)}.`
+                : 'No rehearsal cohort staged. No clinical labels or model results are included.'}
+              {' '}Clinical protocol approval and blinded study assignments remain blocked.
+            </p>
+            <button type="button" disabled={submitting || Boolean(cohort?.present)}
+              onClick={() => void submit({ action: 'STAGE_SYNTHETIC_REHEARSAL' })}
+              className="mt-3 rounded-lg border border-slate-400 px-3 py-2 text-xs font-semibold disabled:opacity-50">
+              Stage 120 synthetic rehearsal cases
+            </button>
+          </section>
           <h2 className="text-lg font-bold">Initialize fixed synthetic study</h2>
           <p className="mb-4 mt-1 text-sm text-slate-600">
             Enter three distinct Firebase staff UIDs with active tenant accounts.

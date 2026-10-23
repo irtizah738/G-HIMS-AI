@@ -1,0 +1,52 @@
+name: CIQP Clinical Validation Workspace
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "app/api/clinical/validation/**"
+      - "app/[tenantId]/clinical-validation/**"
+      - "lib/clinical/validation/**"
+      - "types/clinical-validation-workspace.ts"
+      - "tests/ciqp-clinical-validation-workspace.test.ts"
+      - "components/tenant/tenant-shell-header.tsx"
+      - "firestore.rules"
+      - ".github/workflows/ciqp-clinical-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-review-contract:
+    name: CIQP synthetic review authority and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-ciqp-synthetic
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-ciqp-synthetic
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-ciqp-synthetic
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-ciqp-synthetic
+      FIRESTORE_DATABASE_ID: "(default)"
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: "(default)"
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - name: TypeScript
+        run: bun run typecheck
+      - name: Lint
+        run: bun run lint
+      - name: Blinded validation module tests
+        run: bun test tests/ciqp-clinical-validation-workspace.test.ts
+      - name: Clinical safety/source regressions
+        run: bun run test:ci10d && bun run test:ci10h
+      - name: Build
+        run: bun run build

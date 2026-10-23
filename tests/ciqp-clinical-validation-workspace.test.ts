@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { NextRequest } from 'next/server';
+import { proxy } from '@/proxy';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CommandContext } from '@/lib/backend/types';
@@ -29,6 +31,16 @@ function context(overrides: Partial<CommandContext>): CommandContext {
 }
 
 describe('CIQP synthetic clinical validation review authority', () => {
+  test('IPv4 localhost is not an implicit tenant subdomain on auth/session routes', () => {
+    const session = proxy(new NextRequest('http://127.0.0.1:3000/api/auth/session', {
+      headers: { 'x-ghims-tenant-id': 'ciqp-renal-browser' },
+    }));
+    expect(session.cookies.get('ghims_tenant_id')).toBeUndefined();
+
+    const scoped = proxy(new NextRequest('http://127.0.0.1:3000/ciqp-renal-browser/clinical-validation'));
+    expect(scoped.cookies.get('ghims_tenant_id')?.value).toBe('ciqp-renal-browser');
+  });
+
   test('fails closed outside dual TEST runtime and emulator', () => {
     expect(() => assertValidationSandbox('PRODUCTION', 'PRODUCTION')).toThrow('CIQP_VALIDATION_TEST_EMULATOR_REQUIRED');
     expect(() => assertValidationSandbox('TEST', 'PRODUCTION')).toThrow('CIQP_VALIDATION_TEST_EMULATOR_REQUIRED');

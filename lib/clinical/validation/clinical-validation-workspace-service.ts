@@ -151,8 +151,9 @@ export class ClinicalValidationWorkspaceService {
     adjudicator: unknown
   ) {
     if (!authorizedCoordinator(context)) throw new Error('CIQP_VALIDATION_ADMIN_REQUIRED');
-    validateIndependentRoster([reviewerA, reviewerB, adjudicator]);
-    const [a, b, c] = [reviewerA, reviewerB, adjudicator];
+    const roster: unknown[] = [reviewerA, reviewerB, adjudicator];
+    validateIndependentRoster(roster);
+    const [a, b, c] = roster;
     if ([a, b, c].includes(context.actorId)) {
       throw new Error('CIQP_VALIDATION_COORDINATOR_REVIEWER_CONFLICT');
     }

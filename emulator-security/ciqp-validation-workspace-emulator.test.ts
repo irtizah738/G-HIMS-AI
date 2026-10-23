@@ -102,7 +102,9 @@ async function post(uid: string, body: Record<string, unknown>, tenant = tenantI
 async function get(uid: string, tenant = tenantId) {
   const response = await getValidation(request(uid, 'GET', undefined, tenant));
   const data = await response.json() as {
-    success: boolean; cases?: Array<Record<string, any>>; role?: string; error?: { code: string };
+    success: boolean; cases?: Array<Record<string, any>>; role?: string;
+    cohort?: { present: boolean; caseCount: number; policyApproved: boolean; outcomesAvailable: boolean };
+    error?: { code: string };
   };
   return { status: response.status, ...data };
 }

@@ -18,6 +18,11 @@ on:
       - "scripts/ops/ciqp-validation-browser-fixture.ts"
       - "e2e/ciqp-clinical-validation.browser.spec.ts"
       - "ciqp-playwright.config.ts"
+      - "scripts/ops/ciqp-reproduce-120-synthetic-cohort.py"
+      - "scripts/ops/ciqp-stage-120-blinded-cohort.ts"
+      - "lib/clinical/validation/blinded-renal-study-metrics.ts"
+      - "tests/ciqp-blinded-renal-study-metrics.test.ts"
+      - "emulator-security/ciqp-blinded-cohort-staging-emulator.test.ts"
       - ".github/workflows/ciqp-clinical-validation.yml"
   workflow_dispatch:
 
@@ -57,6 +62,8 @@ jobs:
         run: bun run lint
       - name: Blinded validation module tests
         run: bun test tests/ciqp-clinical-validation-workspace.test.ts
+      - name: Clinical scoring denominator, kappa and safety stop tests
+        run: bun test tests/ciqp-blinded-renal-study-metrics.test.ts
       - name: Clinical safety/source regressions
         run: bun run test:ci10d && bun run test:ci10h
       - name: Build
@@ -68,6 +75,13 @@ jobs:
           npx firebase emulators:exec --project ghims-ciqp-synthetic
           --only firestore,auth
           "bun test emulator-security/ciqp-validation-workspace-emulator.test.ts"
+      - name: Reproduce and stage exact 120-case cohort under locked TEST policy
+        run: >
+          npx firebase emulators:exec --project ghims-ciqp-synthetic
+          --only firestore,auth
+          "python3 scripts/ops/ciqp-reproduce-120-synthetic-cohort.py &&
+          bun scripts/ops/ciqp-stage-120-blinded-cohort.ts &&
+          bun test emulator-security/ciqp-blinded-cohort-staging-emulator.test.ts"
       - name: Install isolated Chromium browser
         run: bunx playwright install --with-deps chromium
       - name: Browser UI with four independent synthetic TEST identities

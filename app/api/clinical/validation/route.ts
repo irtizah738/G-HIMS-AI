@@ -59,6 +59,11 @@ export async function POST(req: NextRequest) {
       );
       return NextResponse.json({ success: true, result }, { status: 201, headers: { 'Cache-Control': 'no-store' } });
     }
+    if (action === 'STAGE_SYNTHETIC_REHEARSAL') {
+      const result = await ClinicalValidationWorkspaceService.stageRehearsal(context);
+      return NextResponse.json({ success: true, result },
+        { status: 201, headers: { 'Cache-Control': 'no-store' } });
+    }
     if (action === 'SUBMIT_ASSESSMENT') {
       const result = await ClinicalValidationWorkspaceService.submit(context, body);
       return NextResponse.json({ success: true, result }, { status: 201, headers: { 'Cache-Control': 'no-store' } });

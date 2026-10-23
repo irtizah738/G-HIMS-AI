@@ -128,8 +128,9 @@ async function main() {
   const c=requireReview(JSON.parse(await readExact(lock.adjudicator_file,lock.adjudicator_sha256)),
     'Adjudicator_C',caseIds);
 
-  const pred=JSON.parse(await readExact(lock.sealed_predictions_file,lock.sealed_predictions_sha256))
-    as ModelRow[];
+  const pred = JSON.parse(await readExact(
+    lock.sealed_predictions_file, lock.sealed_predictions_sha256
+  )) as ModelRow[];
   if(!Array.isArray(pred)||pred.length!==120 ||
      pred.some(p=>!caseIds.has(p.case_id) ||
      ![true,false,null].includes(p.predicted_flag) ||

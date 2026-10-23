@@ -16,7 +16,7 @@ on:
       - "lib/firebase/client.ts"
       - "lib/dev-sandbox/csp.ts"
       - "scripts/ops/ciqp-validation-browser-fixture.ts"
-      - "e2e/ciqp-clinical-validation.browser.spec.ts"
+      - "validation-e2e/ciqp-clinical-validation.browser.spec.ts"
       - "ciqp-playwright.config.ts"
       - "scripts/ops/ciqp-reproduce-120-synthetic-cohort.py"
       - "scripts/ops/ciqp-stage-120-blinded-cohort.ts"

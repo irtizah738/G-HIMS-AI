@@ -20,7 +20,7 @@ export interface ValidationSyntheticCase {
   evidence: ValidationEvidenceItem[];
   question: string;
   sourceHash: string;
-  reviewerUids: [string, string] | [];
+  reviewerUids: [string, string];
   adjudicatorUid: string | null;
   createdAt: number;
   assignedAt?: number;

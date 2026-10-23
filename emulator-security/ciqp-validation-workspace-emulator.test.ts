@@ -262,6 +262,31 @@ describe('CIQP real Auth+Firestore emulator route qualification', () => {
     expect(orderSnap.empty).toBe(true);
   });
 
+  test('stages 120 locked synthetic rehearsal cases without unlocking the clinical study', async () => {
+    const result = await post(users.coord, { action: 'STAGE_SYNTHETIC_REHEARSAL' });
+    expect(result.status).toBe(201);
+    expect((result.result as { caseCount: number }).caseCount).toBe(120);
+    const again = await post(users.coord, { action: 'STAGE_SYNTHETIC_REHEARSAL' });
+    expect(again.status).toBe(409);
+    const denied = await post(users.a, { action: 'STAGE_SYNTHETIC_REHEARSAL' });
+    expect(denied.status).toBe(403);
+    const coordinator = await get(users.coord);
+    const cohort = (coordinator as unknown as {cohort?: {
+      present: boolean; caseCount: number; policyApproved: boolean; outcomesAvailable: boolean;
+    }}).cohort;
+    expect(cohort?.present).toBe(true);
+    expect(cohort?.caseCount).toBe(120);
+    expect(cohort?.policyApproved).toBe(false);
+    expect(cohort?.outcomesAvailable).toBe(false);
+    const db = getAdminFirestore()!;
+    const tenant = db.collection('tenants').doc(tenantId);
+    const records = await tenant.collection('clinicalValidationRehearsalCases').get();
+    expect(records.size).toBe(120);
+    expect(records.docs.every(x => x.data().classification === 'SYNTHETIC_ONLY')).toBe(true);
+    const nonCoordinator = await get(users.a);
+    expect(JSON.stringify(nonCoordinator)).not.toContain('sourceHashVerified');
+  });
+
   test('Firestore rules deny direct review case reads and writes, including authenticated staff', async () => {
     if (!rulesEnv) throw Error('RULES_ENV_REQUIRED');
     for (const uid of [users.a,users.b,users.coord,users.outsider]) {

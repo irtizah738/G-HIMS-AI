@@ -9,6 +9,7 @@ import { validateDevelopmentSandbox, SANDBOX_PROJECT_ID, type SandboxEnvironment
 export type SandboxBrowserEnvironment = SandboxEnvironment & {
   NEXT_PUBLIC_GHIMS_DEV_SANDBOX_EMULATORS?: string;
   NEXT_PUBLIC_GHIMS_RUNTIME_MODE?: string;
+  NEXT_PUBLIC_GHIMS_CIQP_VALIDATION_EMULATORS?: string;
   NEXT_PUBLIC_FIREBASE_PROJECT_ID?: string;
   NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST?: string;
 };
@@ -18,6 +19,25 @@ export function sandboxEmulatorConnectSources(
   hostname: string
 ): string[] {
   if (hostname !== 'localhost' && hostname !== '127.0.0.1') return [];
+
+  // The clinical validation rehearsal uses a different, disposable CI project
+  // and its own explicit opt-in. Never relax the existing DEV sandbox guard.
+  if (env.NEXT_PUBLIC_GHIMS_CIQP_VALIDATION_EMULATORS === 'true') {
+    const project = 'ghims-ciqp-synthetic';
+    return env.NODE_ENV === 'development' &&
+      env.GHIMS_RUNTIME_MODE === 'TEST' &&
+      env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'TEST' &&
+      env.NEXT_PUBLIC_GHIMS_DEV_SANDBOX_EMULATORS !== 'true' &&
+      env.FIREBASE_PROJECT_ID === project &&
+      env.GHIMS_FIREBASE_PROJECT_ID_TEST === project &&
+      env.NEXT_PUBLIC_FIREBASE_PROJECT_ID === project &&
+      env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST === project &&
+      env.FIRESTORE_EMULATOR_HOST === '127.0.0.1:8080' &&
+      env.FIREBASE_AUTH_EMULATOR_HOST === '127.0.0.1:9099' &&
+      !env.VERCEL
+      ? ['http://127.0.0.1:9099', 'http://127.0.0.1:8080']
+      : [];
+  }
   if (env.NODE_ENV !== 'development' ||
       env.NEXT_PUBLIC_GHIMS_DEV_SANDBOX_EMULATORS !== 'true' ||
       env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE !== 'TEST' ||

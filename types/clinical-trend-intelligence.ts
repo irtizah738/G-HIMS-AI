@@ -78,6 +78,26 @@ export interface ClinicalTrendMetric {
   caveats: string[];
 }
 
+/**
+ * Provisional, source-linked numerical screen for clinician review.
+ * Not a diagnostic stage, treatment order, or institutionally approved alarm.
+ */
+export interface ClinicalTrendReviewSignal {
+  code: 'POTENTIAL_ACUTE_CREATININE_RISE';
+  status: 'CLINICAL_REVIEW_REQUIRED_POLICY_UNAPPROVED';
+  criterion: 'RATIO_WITHIN_7_DAYS' | 'ABSOLUTE_RISE_WITHIN_48_HOURS';
+  evidenceRefs: string[];
+  earlierValue: number;
+  latestValue: number;
+  unit: 'mg/dL';
+  ratio: number;
+  elapsedHours: number;
+  warning: string;
+  clinicalApprovalRequired: true;
+  diagnosisEstablished: false;
+  treatmentAuthorized: false;
+}
+
 export interface ClinicalTrendEvidenceIndexItem {
   evidenceId: string;
   sourceType: ClinicalEvidenceSourceType;
@@ -102,14 +122,15 @@ export interface ClinicalTrendIntelligenceArtifact {
   generatedAt: number;
   generatedBy: string;
   immutable: true;
-  schemaVersion: 1;
-  policyVersion: 'ci10d-clinical-trend-v1';
+  schemaVersion: 2;
+  policyVersion: 'ci10d-clinical-trend-v2';
   generationMode: 'DETERMINISTIC_TREND_ENGINE';
   metrics: ClinicalTrendMetric[];
   excludedEvidence: ClinicalTrendExclusion[];
   computedMetricCount: number;
   nonComputableMetricCount: number;
   warnings: string[];
+  reviewSignals: ClinicalTrendReviewSignal[];
   safety: {
     sourceLinked: true;
     deterministicComputation: true;

@@ -44,3 +44,20 @@ The tenant shell also shows a "Clinical validation" navigation link in TEST only
 - A checkbox/typed attestation represents an actor-linked record, **not** a legally binding cryptographic signature or validated clinician license.
 - The 3-case study is initialized only once per tenant and cannot be overwritten from the UI.
 - No production environment variables, secrets, Firestore records, or repository main-branch changes are made by the PR.
+
+## Stage 2 engineering additions — 120-case rehearsal and scorecard
+
+The coordinator can now **stage 120 reproducible synthetic engineering rehearsal cases** in a separate, immutable tenant-scoped `clinicalValidationRehearsalCases` collection, backed by `clinicalValidationStudies/renal-ciqp-generated-rehearsal-120-v1`. Exactly six engineering-input strata contribute 20 cases each. The seeded records contain neither outcome labels nor model predictions. Duplicate staging fails; clinicians cannot assign, read or adjudicate those cases as an approved trial. Firestore browser access to the new study and case collections is denied.
+
+**Important provenance difference:** This generated engineering dataset is intentionally **NOT** the independent `GHIMS_CI10D_120_Synthetic_Blinded_Cases.jsonl` study pack prepared earlier. It has a different deterministic fingerprint and is intended solely for software exercises. The earlier draft 120-case pack must be reviewed and formally locked by the clinical policy reviewers before any actual blinded clinical study begins. Never assert that staging the generated rehearsal cohort means the earlier clinical pack has been imported.
+
+An **offline-only** `calculateStudyConfusionMatrix` function is available for explicitly frozen independent reference decisions and sealed predictions. It reports denominators, misses, sensitivity, false alerts, specificity, indeterminate cases and unavailable predictions; a missing denominator yields `null`. It has no API route or UI that unblinds model predictions, does not store synthetic clinical outcomes, and **cannot authorize patient-facing use**.
+
+### Still pending (not engineering completion claims)
+
+- Credential verification and written specialist/institutional renal policy approval, including target population and escalation rules.
+- Formal dataset freeze and approved-case import/assignment to clinicians; independent reviewer submissions for the **actual** 120-case cohort.
+- Secure sealed model output capture, version lock, after-adjudication-only unblinding, confidence intervals and signed evidence reports. The current offline arithmetic cannot substitute for the clinical evaluation.
+- Final clinical/institutional release decision, approved retrospective cohort access, whole-repository security CI and safe production deployment sequencing.
+
+No real clinical data or production credentials have been accessed. No release is authorized.

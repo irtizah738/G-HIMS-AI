@@ -165,6 +165,33 @@ function auditMutation(
 }
 
 export class ClinicalValidationWorkspaceService {
+
+  /**
+   * Coordinator sees only aggregate status, never unpublished cases, blinded
+   * clinician ratings, model predictions or patient information.
+   */
+  public static async cohortReadiness(context: CommandContext) {
+    if (!authorizedCoordinator(context)) throw new Error('CIQP_VALIDATION_ADMIN_REQUIRED');
+    const tenant = dbFor(context);
+    const study = await tenant.collection('clinicalValidationStudies')
+      .doc('renal-ciqp-synthetic-120-v0').get();
+    if (!study.exists) return {
+      present: false, caseCount: 0,
+      status: 'NOT_STAGED', policyApproved: false,
+      outcomesAvailable: false,
+    };
+    const item = study.data() || {};
+    return {
+      present: true,
+      caseCount: item.cohortCount === 120 ? 120 : 0,
+      status: 'STAGED_LOCKED_POLICY_UNAPPROVED',
+      sourceHashVerified: item.exactSourceSha256 ===
+        '116596dd531f549873cf026cb0e61209f96554954ca622f53ef3b7fb3adcca9d',
+      policyApproved: false,
+      outcomesAvailable: false,
+    };
+  }
+
   public static async seed(
     context: CommandContext,
     reviewerA: unknown,

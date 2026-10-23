@@ -25,7 +25,19 @@ async function login(browser: Browser, role: Role): Promise<{ context: BrowserCo
   // tokens, auth state or API responses are mocked or injected.
   await expect(page.getByTestId('login-email')).toBeHidden({ timeout: 35_000 });
   await page.goto('/' + TENANT + '/clinical-validation');
-  await expect(page.getByRole('heading', { name: 'Clinical Validation & Review' })).toBeVisible();
+  try {
+    await expect(page.getByRole('heading', { name: 'Clinical Validation & Review' })).toBeVisible({ timeout: 15_000 });
+  } catch {
+    const diagnostic = {
+      requestedRole: role,
+      currentPath: new URL(page.url()).pathname,
+      headings: await page.locator('h1,h2,h3').allInnerTexts().catch(() => []),
+      alerts: await page.getByRole('alert').allInnerTexts().catch(() => []),
+      statuses: (await page.getByRole('status').allInnerTexts().catch(() => [])).slice(0, 8),
+      loginFormVisible: await page.getByTestId('login-email').isVisible().catch(() => false),
+    };
+    throw new Error('CIQP_BROWSER_POST_LOGIN_UI_UNAVAILABLE:' + JSON.stringify(diagnostic));
+  }
   await expect(page.getByText('Study renal-ciqp-synthetic-v1')).toBeVisible();
   return { context, page };
 }

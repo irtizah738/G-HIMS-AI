@@ -8,6 +8,7 @@ on:
       - "app/api/clinical/validation/**"
       - "app/[tenantId]/clinical-validation/**"
       - "lib/clinical/validation/**"
+      - "tests/ciqp-rehearsal-cohort.test.ts"
       - "types/clinical-validation-workspace.ts"
       - "tests/ciqp-clinical-validation-workspace.test.ts"
       - "components/tenant/tenant-shell-header.tsx"
@@ -61,7 +62,7 @@ jobs:
       - name: Lint
         run: bun run lint
       - name: Blinded validation module tests
-        run: bun test tests/ciqp-clinical-validation-workspace.test.ts
+        run: bun test tests/ciqp-clinical-validation-workspace.test.ts tests/ciqp-rehearsal-cohort.test.ts
       - name: Clinical scoring denominator, kappa and safety stop tests
         run: bun test tests/ciqp-blinded-renal-study-metrics.test.ts
       - name: Clinical safety/source regressions

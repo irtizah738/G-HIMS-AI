@@ -13,6 +13,11 @@ on:
       - "components/tenant/tenant-shell-header.tsx"
       - "firestore.rules"
       - "emulator-security/ciqp-validation-workspace-emulator.test.ts"
+      - "lib/firebase/client.ts"
+      - "lib/dev-sandbox/csp.ts"
+      - "scripts/ops/ciqp-validation-browser-fixture.ts"
+      - "e2e/ciqp-clinical-validation.browser.spec.ts"
+      - "ciqp-playwright.config.ts"
       - ".github/workflows/ciqp-clinical-validation.yml"
   workflow_dispatch:
 
@@ -23,7 +28,7 @@ jobs:
   synthetic-review-contract:
     name: CIQP synthetic review authority and build
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 55
     env:
       GHIMS_RUNTIME_MODE: TEST
       NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
@@ -63,3 +68,12 @@ jobs:
           npx firebase emulators:exec --project ghims-ciqp-synthetic
           --only firestore,auth
           "bun test emulator-security/ciqp-validation-workspace-emulator.test.ts"
+      - name: Install isolated Chromium browser
+        run: bunx playwright install --with-deps chromium
+      - name: Browser UI with four independent synthetic TEST identities
+        run: >
+          npx firebase emulators:exec --project ghims-ciqp-synthetic
+          --only firestore,auth
+          "bun scripts/ops/ciqp-validation-browser-fixture.ts &&
+          bunx playwright test --config=ciqp-playwright.config.ts"
+

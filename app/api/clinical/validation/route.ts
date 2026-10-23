@@ -11,7 +11,7 @@ function failure(error: unknown) {
   const message = error instanceof Error ? error.message : 'CIQP_VALIDATION_REQUEST_FAILED';
   // Do not disclose source data or identifying staff information in errors.
   const forbidden = /AUTH|SESSION|TENANT|ROLE|REVIEWER_REQUIRED|ADMIN_REQUIRED|ACCESS|NOT_ASSIGNED/i.test(message);
-  const conflict = /ALREADY_INITIALIZED|IMMUTABLE_SUBMISSION|PRIMARY_REVIEWS_NOT_LOCKED/i.test(message);
+  const conflict = /ALREADY_INITIALIZED|IMMUTABLE_SUBMISSION|PRIMARY_REVIEWS_NOT_LOCKED|REHEARSAL_ALREADY_STAGED/i.test(message);
   const notReady = /TEST_EMULATOR_REQUIRED|FIRESTORE_UNAVAILABLE/i.test(message);
   const invalid = /INVALID|UNKNOWN|THREE_DISTINCT|CONFLICT|INTEGRITY/i.test(message);
   const code = /^(CIQP_VALIDATION_[A-Z_]+)$/.test(message) ? message : 'CIQP_VALIDATION_REQUEST_FAILED';

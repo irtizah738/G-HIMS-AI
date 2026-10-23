@@ -12,6 +12,7 @@ on:
       - "tests/ciqp-clinical-validation-workspace.test.ts"
       - "components/tenant/tenant-shell-header.tsx"
       - "firestore.rules"
+      - "emulator-security/ciqp-validation-workspace-emulator.test.ts"
       - ".github/workflows/ciqp-clinical-validation.yml"
   workflow_dispatch:
 
@@ -22,7 +23,7 @@ jobs:
   synthetic-review-contract:
     name: CIQP synthetic review authority and build
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       GHIMS_RUNTIME_MODE: TEST
       NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
@@ -39,6 +40,11 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
+      - name: Setup Java (Firebase emulators)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
       - run: bun install --frozen-lockfile
       - name: TypeScript
         run: bun run typecheck
@@ -50,3 +56,10 @@ jobs:
         run: bun run test:ci10d && bun run test:ci10h
       - name: Build
         run: bun run build
+      - name: Install pinned Firebase emulator tooling
+        run: npm install --no-save --package-lock=false @firebase/rules-unit-testing@5.0.2 firebase-tools@15.30.2
+      - name: Auth, sessions, HCM and Firestore emulator end-to-end
+        run: >
+          npx firebase emulators:exec --project ghims-ciqp-synthetic
+          --only firestore,auth
+          "bun test emulator-security/ciqp-validation-workspace-emulator.test.ts"

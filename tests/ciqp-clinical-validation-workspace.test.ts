@@ -6,6 +6,7 @@ import {
   assertValidationSandbox,
   validateIndependentRoster,
   validationRole,
+  syntheticCaseSourceHash,
 } from '@/lib/clinical/validation/clinical-validation-workspace-service';
 
 const source = (p: string) => readFile(join(process.cwd(), p), 'utf8');
@@ -68,6 +69,12 @@ describe('CIQP synthetic clinical validation review authority', () => {
     expect(route).not.toContain('body.evidence');
   });
 
+  test('frozen synthetic case hash is insensitive to Firestore object key order', () => {
+    const a = { evidence: [{ evidenceId: 'e1', label: 'Synthetic measurement', fact: 'creatinine 1.0 mg/dL' }], question: 'Assess source.' };
+    const b = { question: 'Assess source.', evidence: [{ fact: 'creatinine 1.0 mg/dL', label: 'Synthetic measurement', evidenceId: 'e1' }] };
+    expect(syntheticCaseSourceHash(a)).toBe(syntheticCaseSourceHash(b));
+  });
+
   test('server keeps primary assessments hidden and writes immutable event/audit evidence', async () => {
     const service = await source('lib/clinical/validation/clinical-validation-workspace-service.ts');
     expect(service).toContain("primary.every(s => s.exists)");
@@ -77,7 +84,7 @@ describe('CIQP synthetic clinical validation review authority', () => {
     expect(service).toContain("tx.create(tenant.collection('events')");
     expect(service).toContain("tx.create(tenant.collection('audit_logs')");
     expect(service).toContain("caseSnap.data() as ValidationSyntheticCase");
-    expect(service).toContain("studyCase.sourceHash !== sourceHash(studyCase)");
+    expect(service).toContain("studyCase.sourceHash !== syntheticCaseSourceHash(studyCase)");
   });
 
   test('in-app workspace displays no model-output predictions or real patient lookup', async () => {

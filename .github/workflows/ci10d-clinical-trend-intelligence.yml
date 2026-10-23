@@ -56,7 +56,7 @@ jobs:
         run: bun run lint
 
       - name: CI-10D trend intelligence guards
-        run: bun run test:ci10d
+        run: bun run test:ci10d && bun test tests/ci10d-creatinine-review-screen.test.ts
 
       - name: Preserve CI-10C, CI-10B and CI-10A guarantees
         run: bun run test:ci10c && bun run test:ci10b && bun run test:ci10
@@ -85,7 +85,7 @@ jobs:
             echo "- Mixed-unit fail-closed behavior: PASS"
             echo "- Same-time conflict detection: PASS"
             echo "- Quantitative component series: PASS"
-            echo "- Deterministic direction/magnitude/slope: PASS"
+            echo "- Deterministic direction/magnitude/slope: PASS\n            echo \"- Candidate creatinine change screen and fail-closed negative cases: PASS\""
             echo "- Source abnormality evidence: PASS"
             echo "- CI-10B delegates to CI-10D trend authority: PASS"
             echo "- Every explanation evidence-grounded: PASS"

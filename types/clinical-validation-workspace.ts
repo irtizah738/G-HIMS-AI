@@ -41,6 +41,11 @@ export interface ValidationAssessment {
   schemaVersion: 1;
 }
 
+export type ValidationBlindedAssessment = Pick<
+  ValidationAssessment,
+  'judgment' | 'confidence' | 'evidenceRefs' | 'rationale'
+>;
+
 export interface ValidationCaseView {
   caseId: string;
   studyId: string;
@@ -50,7 +55,7 @@ export interface ValidationCaseView {
   role: 'REVIEWER' | 'ADJUDICATOR' | 'COORDINATOR';
   status: ValidationReviewStatus;
   myAssessment: ValidationAssessment | null;
-  primaryAssessments?: ValidationAssessment[];
+  primaryAssessments?: ValidationBlindedAssessment[];
 }
 
 export const CIQP_VALIDATION_ROLES = [

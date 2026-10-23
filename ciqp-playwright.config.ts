@@ -3,7 +3,7 @@ import { defineConfig } from '@playwright/test';
 // Playwright runs only in a disposable local TEST process with both emulators
 // already started by firebase emulators:exec. Never inherit a hosted origin.
 export default defineConfig({
-  testDir: './e2e',
+  testDir: './validation-e2e',
   testMatch: 'ciqp-clinical-validation.browser.spec.ts',
   timeout: 180_000,
   expect: { timeout: 20_000 },

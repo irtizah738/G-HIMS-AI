@@ -94,8 +94,19 @@ export function validateIndependentRoster(actors: unknown[]): asserts actors is 
   }
 }
 
-function sourceHash(input: { evidence: ValidationEvidenceItem[]; question: string }): string {
-  return crypto.createHash('sha256').update(JSON.stringify({ evidence: input.evidence, question: input.question })).digest('hex');
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return '[' + value.map(canonicalJson).join(',') + ']';
+  const item = value as Record<string, unknown>;
+  return '{' + Object.keys(item).sort().map(
+    key => JSON.stringify(key) + ':' + canonicalJson(item[key])
+  ).join(',') + '}';
+}
+
+export function syntheticCaseSourceHash(input: { evidence: ValidationEvidenceItem[]; question: string }): string {
+  return crypto.createHash('sha256').update(
+    canonicalJson({ evidence: input.evidence, question: input.question })
+  ).digest('hex');
 }
 
 function auditMutation(
@@ -120,7 +131,7 @@ function auditMutation(
     recordedAt: now,
     correlationId: context.correlationId,
     commandId: 'cv_' + crypto.randomUUID(),
-    idempotencyKey: resourceId + ':' + action,
+    idempotencyKey: resourceId + ':' + action + ':' + context.actorId,
     source: 'system',
     schemaVersion: 1,
   };
@@ -173,7 +184,7 @@ export class ClinicalValidationWorkspaceService {
           caseVersion: 1,
           evidence: item.evidence,
           question: item.question,
-          sourceHash: sourceHash(item),
+          sourceHash: syntheticCaseSourceHash(item),
           reviewerUids: [a, b],
           adjudicatorUid: c,
           createdAt: Date.now(),
@@ -250,7 +261,7 @@ export class ClinicalValidationWorkspaceService {
       if (!caseSnap.exists) throw new Error('CIQP_VALIDATION_CASE_NOT_FOUND');
       const studyCase = caseSnap.data() as ValidationSyntheticCase;
       if (studyCase.classification !== 'SYNTHETIC_ONLY' || studyCase.studyId !== CIQP_VALIDATION_STUDY_ID ||
-          studyCase.sourceHash !== sourceHash(studyCase)) throw new Error('CIQP_VALIDATION_CASE_INTEGRITY_FAILED');
+          studyCase.sourceHash !== syntheticCaseSourceHash(studyCase)) throw new Error('CIQP_VALIDATION_CASE_INTEGRITY_FAILED');
       const isPrimary = studyCase.reviewerUids.includes(context.actorId);
       const isAdjudicator = studyCase.adjudicatorUid === context.actorId;
       if (!isPrimary && !isAdjudicator) throw new Error('CIQP_VALIDATION_NOT_ASSIGNED');

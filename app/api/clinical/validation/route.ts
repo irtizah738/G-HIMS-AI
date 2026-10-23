@@ -28,12 +28,16 @@ export async function GET(req: NextRequest) {
     const role = validationRole(context);
     if (!role) throw new Error('CIQP_VALIDATION_ACCESS_DENIED');
     const cases = await ClinicalValidationWorkspaceService.list(context);
+    const cohort = role === 'COORDINATOR'
+      ? await ClinicalValidationWorkspaceService.cohortReadiness(context)
+      : undefined;
     return NextResponse.json({
       success: true,
       study: { id: 'renal-ciqp-synthetic-v1', source: 'CURATED_SYNTHETIC_ONLY', blinded: true,
         clinicalPolicyApproved: false, retrospectiveValidationAuthorized: false },
       role,
       cases,
+      ...(cohort ? { cohort } : {}),
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     return failure(error);

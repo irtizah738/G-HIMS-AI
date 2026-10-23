@@ -20,7 +20,6 @@ interface WorkspaceResponse {
     outcomesAvailable: boolean;
   };
   cases?: ValidationCaseView[];
-  cohort?: { present: boolean; caseCount: number; status: string; sourceHashVerified?: boolean; policyApproved: false; outcomesAvailable: false };
   error?: { code?: string };
 }
 
@@ -28,7 +27,6 @@ function ClinicalValidationWorkspace({ tenantId }: { tenantId: string }) {
   const [cases, setCases] = useState<ValidationCaseView[]>([]);
   const [cohort, setCohort] = useState<WorkspaceResponse['cohort']>(undefined);
   const [role, setRole] = useState<'COORDINATOR' | 'REVIEWER' | null>(null);
-  const [cohort, setCohort] = useState<WorkspaceResponse['cohort']>();
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(true);
@@ -53,7 +51,6 @@ function ClinicalValidationWorkspace({ tenantId }: { tenantId: string }) {
       if (!response.ok || !data.success) throw new Error(data.error?.code || 'Unable to load validation cases.');
       setCases(data.cases || []);
       setRole(data.role || null);
-      setCohort(data.cohort);
       setCohort(data.cohort);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to load cases.');

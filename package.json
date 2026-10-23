@@ -191,6 +191,7 @@
     "security:sast": "bun scripts/ops/security-sast.ts"
   },
   "dependencies": {
+    "@google-cloud/firestore": "9.3.1",
     "@google/genai": "^0.2.0",
     "clsx": "^2.1.1",
     "d3": "^7.9.0",
@@ -198,13 +199,14 @@
     "dexie": "^4.4.6",
     "firebase": "12.19.0",
     "firebase-admin": "14.5.0",
+    "google-auth-library": "9.15.1",
     "idb": "^8.0.3",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
     "jsqr": "^1.4.0",
     "lucide-react": "^0.475.0",
     "motion": "^12.43.0",
-    "next": "16.3.8",
+    "next": "16.4.1",
     "qrcode.react": "^4.2.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
@@ -230,6 +232,9 @@
   "overrides": {
     "@grpc/grpc-js": "1.14.5",
     "source-map-js": "1.2.2",
-    "sharp": "0.35.5"
+    "sharp": "0.35.5",
+    "jwks-rsa": {
+      "jose": "4.15.9"
+    }
   }
 }

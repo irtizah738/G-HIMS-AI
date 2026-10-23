@@ -85,6 +85,9 @@ describe('CIQP synthetic clinical validation review authority', () => {
     expect(service).toContain("tx.create(tenant.collection('audit_logs')");
     expect(service).toContain("caseSnap.data() as ValidationSyntheticCase");
     expect(service).toContain("studyCase.sourceHash !== syntheticCaseSourceHash(studyCase)");
+    expect(service).toContain("primaryAssessments: primary.map");
+    expect(service).toContain("evidenceRefs: data.evidenceRefs, rationale: data.rationale");
+    expect(service).not.toContain("primaryAssessments: primary.map(s => s.data() as ValidationAssessment)");
   });
 
   test('in-app workspace displays no model-output predictions or real patient lookup', async () => {

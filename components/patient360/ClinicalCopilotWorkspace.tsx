@@ -799,6 +799,34 @@ export function ClinicalCopilotWorkspace({
                     Patient 360 changed after this trend artifact was computed.
                   </div>
                 )}
+                {(artifacts.trends.artifact.reviewSignals || []).length > 0 && (
+                  <section
+                    role="status"
+                    aria-label="Provisional renal deterioration screening"
+                    className="rounded-xl border-2 border-amber-400 bg-amber-50 p-4 text-xs text-amber-950"
+                  >
+                    <p className="font-bold">
+                      Renal trend requires clinician review — provisional screening
+                    </p>
+                    <p className="mt-1">
+                      This numerical screen is not a diagnosis or treatment recommendation.
+                      Its escalation criteria and wording require institutional clinical approval.
+                      {artifactState('TRENDS') === 'STALE'
+                        ? ' This artifact is stale; verify the current chart before interpreting it.'
+                        : ''}
+                    </p>
+                    <ul className="mt-2 space-y-2">
+                      {(artifacts.trends.artifact.reviewSignals || []).map((signal) => (
+                        <li key={signal.code + ':' + signal.evidenceRefs.join(':')}>
+                          <p>{signal.warning}</p>
+                          <p className="mt-1 text-[10px]">
+                            Source evidence: {signal.evidenceRefs.join(', ')}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
                 <div className="space-y-2">
                   {artifacts.trends.artifact.metrics.map((metric) => (
                     <details

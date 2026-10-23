@@ -769,7 +769,10 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
         description: nonEmpty.max(2000),
         targetDate: z.number().int().safe().positive().optional(),
       }).strict()).min(1).max(50),
-      baselineScores: z.record(z.number().finite()).optional(),
+      baselineScores: z.record(z.string().min(1).max(120), z.number().finite())
+        .refine(value => Object.keys(value).length <= 100, {
+          message: 'Rehabilitation scores are limited to 100 named measurements.',
+        }).optional(),
     }).strict(),
   },
   RecordRehabilitationSessionCommand: {
@@ -780,7 +783,10 @@ const schemas: Record<string, Record<number, z.ZodType<Record<string, unknown>>>
       discipline: z.enum(['PHYSIOTHERAPY','OCCUPATIONAL_THERAPY','SPEECH_THERAPY','CARDIAC_REHAB','OTHER']),
       goalIds: z.array(nonEmpty.max(200)).max(50),
       performedInterventions: z.array(nonEmpty.max(2000)).max(100).optional(),
-      functionalScores: z.record(z.number().finite()).optional(),
+      functionalScores: z.record(z.string().min(1).max(120), z.number().finite())
+        .refine(value => Object.keys(value).length <= 100, {
+          message: 'Rehabilitation scores are limited to 100 named measurements.',
+        }).optional(),
       outcome: nonEmpty.max(4000),
       status: z.enum(['COMPLETED','NOT_DONE']).optional(),
       notDoneReason: z.string().trim().max(4000).optional(),

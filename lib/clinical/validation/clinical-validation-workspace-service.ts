@@ -220,14 +220,25 @@ export class ClinicalValidationWorkspaceService {
       const own = (assignedPrimary || isAdjudicator) ? await myRef.get() : null;
       const ownRecord = own?.exists ? own.data() as ValidationAssessment : null;
       const roleForCase = role === 'COORDINATOR' ? 'COORDINATOR' : assignedPrimary ? 'REVIEWER' : 'ADJUDICATOR';
-      // Coordinator sees *only* completion, never pre-lock answers.
-      // Adjudicator sees reference judgments only after BOTH independently lock.
+      // Coordinator sees completion metadata only, never individual opinions.
+      const adjudicated = role === 'COORDINATOR' && c.adjudicatorUid
+        ? (await tenant.collection('clinicalValidationAssessments').doc(c.caseId + '_' + c.adjudicatorUid).get()).exists
+        : false;
+      const status = role === 'COORDINATOR'
+        ? (adjudicated ? 'ADJUDICATED' : allPrimaries ? 'SUBMITTED' : 'PENDING')
+        : ownRecord ? (isAdjudicator ? 'ADJUDICATED' : 'SUBMITTED') : 'PENDING';
+      // Adjudicator sees deidentified primary reasoning only after BOTH lock.
       results.push({
         caseId: c.caseId, studyId: c.studyId, classification: c.classification,
         evidence: c.evidence, question: c.question, role: roleForCase,
-        status: ownRecord ? (isAdjudicator && ownRecord.kind === 'ADJUDICATION' ? 'ADJUDICATED' : 'SUBMITTED') : 'PENDING',
-        myAssessment: ownRecord,
-        ...(isAdjudicator && allPrimaries ? { primaryAssessments: primary.map(s => s.data() as ValidationAssessment) } : {}),
+        status, myAssessment: ownRecord,
+        ...(isAdjudicator && allPrimaries ? { primaryAssessments: primary.map(s => {
+          const data = s.data() as ValidationAssessment;
+          return {
+            judgment: data.judgment, confidence: data.confidence,
+            evidenceRefs: data.evidenceRefs, rationale: data.rationale,
+          };
+        }) } : {}),
       });
     }
     return results;

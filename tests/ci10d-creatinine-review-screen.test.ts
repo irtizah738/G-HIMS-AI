@@ -104,7 +104,7 @@ describe('CI-10D provisional renal review screen (NOT clinical approval)', () =>
     });
     expect(signals[0].warning).toContain('baseline');
     expect(signals[0].warning).toContain('qualified clinician');
-    expect(signals[0].warning).toContain('not a confirmed');
+    expect(signals[0].warning).toContain('screening signal only');
   });
 
   test('flags the separate 0.3 mg/dL within 48h criterion without automatic diagnosis', () => {

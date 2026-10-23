@@ -10,6 +10,7 @@ export type SandboxBrowserEnvironment = SandboxEnvironment & {
   NEXT_PUBLIC_GHIMS_DEV_SANDBOX_EMULATORS?: string;
   NEXT_PUBLIC_GHIMS_RUNTIME_MODE?: string;
   NEXT_PUBLIC_GHIMS_CIQP_VALIDATION_EMULATORS?: string;
+  VERCEL?: string;
   NEXT_PUBLIC_FIREBASE_PROJECT_ID?: string;
   NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST?: string;
 };

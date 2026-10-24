@@ -69,6 +69,12 @@ describe('CIQP synthetic clinical validation review authority', () => {
     expect(validationRole(context({ roles: ['RECEPTIONIST'] }))).toBeNull();
     expect(validationRole(context({ roles: ['SYSTEM_ADMIN'], permissions: ['CLINICAL_VALIDATION_ADMIN'] }))).toBe('COORDINATOR');
     expect(validationRole(context({ roles: ['SYSTEM_ADMIN'], permissions: [] }))).toBeNull();
+    // The tenant directory uses ADMINISTRATOR, not just SYSTEM_ADMIN/HOSPITAL_ADMIN.
+    expect(validationRole(context({ roles: ['ADMINISTRATOR'], permissions: ['CLINICAL_VALIDATION_ADMIN'] }))).toBe('COORDINATOR');
+    expect(validationRole(context({ roles: ['ADMINISTRATOR'], permissions: ['*'] }))).toBe('COORDINATOR');
+    expect(validationRole(context({ roles: ['ADMINISTRATOR'], permissions: [] }))).toBeNull();
+    expect(validationRole(context({ roles: ['ADMINISTRATOR'], permissions: ['CLINICAL_VALIDATION_REVIEW'] }))).toBeNull();
+    expect(validationRole(context({ roles: ['DOCTOR'], permissions: ['CLINICAL_VALIDATION_ADMIN'] }))).toBeNull();
   });
 
   test('route uses server-derived identity, does not accept arbitrary uploaded clinical cases', async () => {

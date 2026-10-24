@@ -67,6 +67,9 @@ if [[ "${DEVSHELL_PROJECT_ID:-}" != "$demo_project" ]]; then
   echo 'ERROR: Google Cloud Shell project must be g-hims-ci-demo.' >&2
   exit 1
 fi
+# Cloud Shell shells may define this as an unexported variable. Explicitly
+# propagate the *already verified* value to Bun's Firebase Admin preflight.
+export DEVSHELL_PROJECT_ID="$demo_project"
 active_account="$(gcloud auth list --filter='status:ACTIVE' --format='value(account)' 2>/dev/null)"
 if [[ -z "$active_account" || "$active_account" != *"@"* ]]; then
   echo 'ERROR: authenticated Cloud Shell CLI account not available.' >&2

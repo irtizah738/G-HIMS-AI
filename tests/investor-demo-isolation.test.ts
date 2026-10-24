@@ -98,6 +98,22 @@ describe('G-HIMS AI investor demo target isolation', () => {
     expect(preflight).not.toContain('.create(');
     expect(preflight).not.toContain('.update(');
   });
+  test('hosted DEMO verification never writes synthetic patient or auth data', async () => {
+    const shell = await readFile('scripts/demo/verify-hosted-ci-demo.sh', 'utf8');
+    const verifier = await readFile('scripts/demo/verify-hosted-ci-demo.ts', 'utf8');
+    expect(shell).toContain("demo_project='g-hims-ci-demo'");
+    expect(shell).toContain('bun scripts/demo/verify-hosted-ci-demo.ts');
+    expect(shell).not.toContain('I_ACCEPT_SYNTHETIC_DEMO_WRITES');
+    expect(verifier).toContain("const projectId = 'g-hims-ci-demo'");
+    expect(verifier).toContain("tenantRef.collection('patients').doc(patientId).get()");
+    expect(verifier).toContain("tenantRef.collection('patient360Projections').doc(patientId).get()");
+    expect(verifier).toContain("projectionData.timelineReady !== true");
+    expect(verifier).toContain('CI_DEMO_HOSTED_READ_VERIFICATION=PASS');
+    expect(verifier).not.toContain('.set(');
+    expect(verifier).not.toContain('.create(');
+    expect(verifier).not.toContain('.update(');
+    expect(verifier).not.toContain('rebuildPatient(');
+  });
   test('fundraising landing exists in G-HIMS AI but not in production runtime', async () => {
     const source = await readFile('app/[tenantId]/clinical-intelligence/page.tsx', 'utf8');
     expect(source).toContain("getRuntimeMode() !== 'DEMO'");

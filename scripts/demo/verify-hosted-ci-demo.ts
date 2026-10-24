@@ -5,7 +5,6 @@
  */
 import { getAdminAuth, getAdminFirestore } from '../../server/firebase/admin';
 import { assertDemoRuntime } from '../../lib/runtime/runtime-mode';
-import { assertInvestorDemoFromEnvironment } from '../../lib/runtime/investor-demo-isolation';
 
 const projectId = 'g-hims-ci-demo';
 const tenantId = 'central-metro-hospital';
@@ -54,7 +53,7 @@ if (!patient.exists || patientData?.syntheticDemoRecord !== true ||
 const projectionData = projection.data();
 if (!projection.exists || projectionData?.patientId !== patientId ||
     !Number.isInteger(projectionData?.revision) || projectionData.revision < 10 ||
-    projectionData.projectionVersion !== 6) {
+    projectionData.projectionVersion !== 6 || projectionData.timelineReady !== true) {
   throw new Error('CI_DEMO_PATIENT360_PROJECTION_NOT_QUALIFIED');
 }
 const expectedCounts: Record<string, number> = {

@@ -138,10 +138,13 @@ describe('DRP-11 staging security qualification', () => {
       '.github/workflows/security-supply-chain.yml'
     );
     const manifest = await source('package.json');
-    const lock = await source('bun.lock');
+    const pkg = JSON.parse(manifest);
+    const lock = JSON.parse(await source('package-lock.json'));
 
-    expect(manifest).toContain('"source-map-js": "1.2.2"');
-    expect(lock).toContain('"source-map-js": ["source-map-js@1.2.2"');
+    expect(pkg.overrides['source-map-js']).toBe('1.2.2');
+    expect(lock.lockfileVersion).toBe(3);
+    expect(lock.packages['node_modules/source-map-js'].version).toBe('1.2.2');
+    expect(lock.packages[''].dependencies).toEqual(pkg.dependencies);
     expect(workflow).toContain('bun audit --audit-level=high');
     expect(workflow).not.toContain('--ignore');
     expect(workflow).toContain('repository-secret-scan');

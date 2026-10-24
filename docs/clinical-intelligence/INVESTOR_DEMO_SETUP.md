@@ -218,3 +218,34 @@ project `g-hims-ci-demo`.
 
 **No hosted DEMO environment has been provisioned by this repository change.**
 The public page is intentionally unavailable in PRODUCTION, STAGING and TEST.
+
+## 2026-10-25 hosted provisioning and deployment gate
+
+- Owner confirmed `CI_DEMO_HOSTED_READ_VERIFICATION=PASS` using the
+  read-only hosted verifier (operator-provided result, not independently
+  executed by this repository's CI).
+- Synthetic DEMO has eight Auth accounts and a published Patient 360
+  projection for `central-metro-hospital/demo-ci-patient-001`.
+- Vercel project `g-hims-clinical-intelligence-demo` remains a **separate**
+  SSO-protected deployment target with Firebase Web SDK environment variables.
+- A Git-source deployment was requested with a **preview** target, but the
+  Vercel endpoint returned `target: production`. It was explicitly canceled
+  (`dpl_HguXFjKTyw9YeUyg8y3WN4fNJGaG`) and is **not live**. Never
+  assume the requested target matches the returned target. Do not retry until
+  deployment classification is corrected.
+- A Vercel team-scoped OIDC enablement configuration request was accepted;
+  its actual runtime token exchange with Google STS has **not** been tested.
+- A strictly scoped Cloud Shell IAM bootstrap exists at
+  `scripts/demo/configure-vercel-preview-wif.sh`. It requires explicit
+  operator approval before modifying **only** the `g-hims-ci-demo` GCP
+  project's IAM. It creates pool `ghims-ci-demo-vercel`, provider
+  `vercel-preview`, and service account `ghims-ci-demo-preview` with
+  `roles/datastore.user` and `roles/firebaseauth.viewer`, impersonable
+  only by the exact Vercel demo project's `preview` subject. It creates
+  no service account keys and grants **no production/project-owner rights**.
+- **No runtime WIF client or hosted browser Auth/Firestore check is yet
+  verified.** OIDC IAM trust by itself does not make the investor demo live.
+- GitHub Actions for the latest demo candidate have not supplied a passing
+  release gate. Keep PR #218 draft and the investor URL private until CI
+  resumes and the real clinician/browser review workflow passes.
+

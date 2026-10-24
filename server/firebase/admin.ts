@@ -70,10 +70,25 @@ function canUseFirebaseEmulator(): boolean {
 }
 
 function canUseApplicationDefaultCredentials(): boolean {
-  // Vercel functions do not have a local service-account JSON file unless an
-  // operator explicitly provisions one into the runtime, which G-HIMS does not do.
-  // Use FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY on Vercel.
-  return Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS) && !process.env.VERCEL;
+  // Never infer server credentials merely from DEMO runtime or the presence
+  // of a metadata endpoint. Vercel still requires its own approved identity.
+  if (process.env.VERCEL) return false;
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) return true;
+
+  // A deliberate, short-lived operator-only opt-in for the isolated investor
+  // demo when this script runs on a Google Cloud VM with an attached identity.
+  // The Google Auth library uses the VM metadata server rather than a JSON key.
+  return (
+    process.env.GHIMS_DEMO_USE_VM_IDENTITY === 'true' &&
+    process.env.GHIMS_RUNTIME_MODE === 'DEMO' &&
+    process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO' &&
+    process.env.FIREBASE_PROJECT_ID === 'g-hims-ci-demo' &&
+    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID === 'g-hims-ci-demo' &&
+    process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO === 'g-hims-ci-demo' &&
+    process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_DEMO === 'g-hims-ci-demo' &&
+    !process.env.FIREBASE_AUTH_EMULATOR_HOST &&
+    !process.env.FIRESTORE_EMULATOR_HOST
+  );
 }
 
 function cleanEnvString(raw: string | undefined): string {

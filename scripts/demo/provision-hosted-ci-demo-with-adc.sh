@@ -87,6 +87,11 @@ if ! gcloud firestore databases describe --database='(default)' --project="$demo
   exit 1
 fi
 
+# Firestore initialization only supports the official Firebase Admin ADC
+# credential. Before asking for any demo password or approval, verify that
+# Cloud Shell ADC really works for read-only Auth and Firestore operations.
+bun scripts/demo/verify-cloud-shell-firebase-readiness.ts
+
 printf 'Authorized synthetic-only target: Firebase %s, tenant %s, database (default)\n' "$demo_project" "$demo_tenant"
 printf 'This operation creates 8 DEMO identities, synthetic credentials and a synthetic Patient 360 chart.\n'
 printf 'No clinical validation or real patient data will be created.\n'

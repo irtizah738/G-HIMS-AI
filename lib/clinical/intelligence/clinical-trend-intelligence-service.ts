@@ -3,6 +3,7 @@ import { getAdminFirestore } from '@/server/firebase/admin';
 import { sanitizeForFirestore } from '@/lib/firestore/sanitize';
 import { ClinicalEvidenceService } from '@/lib/clinical/intelligence/clinical-evidence-service';
 import { ClinicalTrendEngine } from '@/lib/clinical/intelligence/clinical-trend-engine';
+import { screenCreatinineRiseForReview } from '@/lib/clinical/intelligence/creatinine-rise-review-screen';
 import type { CommandContext, DomainEventEnvelope } from '@/lib/backend/types';
 import type { ClinicalEvidenceSnapshot } from '@/types/clinical-intelligence-evidence';
 import type {
@@ -11,7 +12,7 @@ import type {
   ClinicalTrendIntelligenceResponse,
 } from '@/types/clinical-trend-intelligence';
 
-const POLICY_VERSION = 'ci10d-clinical-trend-v1' as const;
+const POLICY_VERSION = 'ci10d-clinical-trend-v2' as const;
 
 function canonicalStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') {
@@ -91,6 +92,10 @@ export class ClinicalTrendIntelligenceService {
       );
     }
 
+    const reviewSignals = computed.metrics.flatMap((metric) =>
+      screenCreatinineRiseForReview(metric, snapshot.createdAt)
+    );
+
     const projectionOnly = snapshot.evidenceRefs.filter(
       (item) => item.provenanceStatus === 'PROJECTION_ONLY'
     ).length;
@@ -103,6 +108,7 @@ export class ClinicalTrendIntelligenceService {
     const warnings = Array.from(
       new Set([
         ...snapshot.limitations,
+        ...reviewSignals.map((signal) => signal.warning),
         'Trend output is descriptive only. Direction, magnitude, slope and source abnormality markers require clinician interpretation.',
         'CI-10D does not perform implicit unit conversion. Mixed explicit units suppress trend computation until a governed conversion rule exists.',
         'CI-10D does not infer diagnosis, causality, severity or treatment from a numeric trajectory.',
@@ -127,6 +133,7 @@ export class ClinicalTrendIntelligenceService {
       policyVersion: POLICY_VERSION,
       generationMode: 'DETERMINISTIC_TREND_ENGINE' as const,
       metrics: computed.metrics,
+      reviewSignals,
       excludedEvidence: computed.excludedEvidence,
       computedMetricCount,
       nonComputableMetricCount,
@@ -158,7 +165,7 @@ export class ClinicalTrendIntelligenceService {
       generatedAt,
       generatedBy: actorId,
       immutable: true,
-      schemaVersion: 1,
+      schemaVersion: 2,
       ...body,
       contentHash,
     };

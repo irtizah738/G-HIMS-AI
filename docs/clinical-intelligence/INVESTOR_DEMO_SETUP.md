@@ -132,10 +132,14 @@ The project owner confirmed the following *read-only* environment checks:
 - Firestore: `projects/g-hims-ci-demo/databases/(default)`
 - Repository branch: `fundraising/clinical-intelligence-demo-20261025`
 
-This bootstrap now accepts the existing authenticated Cloud Shell **gcloud CLI**
-session through a tightly scoped Firebase Admin SDK credential adapter. It
-retrieves short-lived OAuth tokens **in memory only**, does not persist tokens
-or create a user ADC file, and never uses a production project or Vercel credentials.
+The previous custom Firebase Admin token credential worked for Auth but was
+**rejected by Firestore's SDK credential requirements**. The bootstrap now uses
+official Firebase Admin `applicationDefault()` from the existing Cloud Shell
+environment, without creating any service-account private key or asking for
+a new interactive personal ADC login. The Bash preflight validates the demo
+project; a separate Bun preflight checks that read-only Firebase Auth and
+Firestore calls work **before asking for a new demo password**. It never
+uses a production Firebase project or Vercel credentials.
 **Never paste any tokens, ADC JSON, passwords, or service account keys into chat.**
 
 From the existing repository checkout in **your own Cloud Shell session**:
@@ -154,6 +158,13 @@ environment before continuing. Stop if the branch/project does not match.
 The bootstrap enforces that the Cloud Shell project variable, selected gcloud
 project and real Firestore target are all exactly `g-hims-ci-demo`.
 It tests token availability without printing the token.
+
+The bootstrap now checks `DEMO_FIREBASE_AUTH_READONLY=PASS` and
+`DEMO_FIRESTORE_READONLY=PASS` before showing the write confirmation prompt.
+If it reports `DEMO_READONLY_PREFLIGHT_ADMIN_SDK_UNAVAILABLE`, stop and
+inspect the ADC discovery/permissions; do not create private keys as a workaround.
+If it reports a Firebase permission error, correct **only the demo project's**
+IAM configuration.
 
 Only after reviewing the script, run:
 

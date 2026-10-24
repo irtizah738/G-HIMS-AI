@@ -16,6 +16,15 @@ fi
 for cmd in bun gcloud git; do
   command -v "$cmd" >/dev/null || { echo "ERROR: required command not found: $cmd" >&2; exit 1; }
 done
+# A previous failed install (ENOSPC) can leave a half-extracted node_modules.
+# Check dependencies BEFORE asking the operator to approve writes or enter a password.
+# This invokes module imports only; no Firebase Auth or Firestore writes.
+if [[ ! -d node_modules ]] ||
+   ! bun -e 'Promise.all([import("firebase-admin/app"),import("firebase-admin/firestore"),import("google-auth-library")]).catch(() => process.exit(1))' >/dev/null 2>&1; then
+  echo 'ERROR: DEMO_DEPENDENCIES_NOT_READY. Complete the dependency installation without ENOSPC first.' >&2
+  exit 1
+fi
+
 if [[ -n "${FIRESTORE_EMULATOR_HOST:-}" || -n "${FIREBASE_AUTH_EMULATOR_HOST:-}" ||
       -n "${GHIMS_DEMO_BOOTSTRAP_PASSWORD:-}" || -n "${GHIMS_DEMO_HOSTED_WRITE_ACK:-}" ||
       -n "${FIREBASE_PRIVATE_KEY:-}" || -n "${FIREBASE_CLIENT_EMAIL:-}" ||

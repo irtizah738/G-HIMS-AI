@@ -125,27 +125,41 @@ known G-HIMS AI production, G-HIMS OS staging, and configured TEST projects.
 
 ### Keyless, operator-run hosted seeding
 
-This is available without the ChatGPT Firebase integration, by the project
-owner running the checked-in script from a terminal with their **own authorized
-Google Cloud ADC identity**, after reviewing it. Never share an OAuth token,
-ADC file, private key or password in chat.
+This is available without the ChatGPT Firebase integration. The
+operator runs the checked-in script on a **private/approved GCE VM with an
+attached least-privilege demo service account**, after reviewing the source.
+Do not perform `gcloud auth application-default login` with a personal
+account on a shared VM and never share tokens or private keys in chat.
 
-1. In a reviewed, up-to-date checkout of the private G-HIMS AI Git repository,
-   switch to the exact demo branch:
-   `fundraising/clinical-intelligence-demo-20261025`.
-2. Use a Google Cloud SDK terminal with `gcloud` and `bun` installed; obtain
-   your own ADC user session, scoped to the new project:
+1. Run from a reviewed checkout of the **private G-HIMS AI** repository,
+   not the home directory or any unrelated repo. On a new VM worktree,
+   use:
+
+   ```bash
+   cd ~
+   git clone --single-branch --branch fundraising/clinical-intelligence-demo-20261025 \\
+     https://github.com/irtizah738/G-HIMS-AI.git G-HIMS-AI-ci-demo
+   cd ~/G-HIMS-AI-ci-demo
+   ```
+
+   For a private repository, use your normal GitHub browser or credential
+   manager sign-in if prompted. Do not paste personal access tokens here.
+
+2. Confirm the **VM's attached service account** has authorized, limited
+   access to **only** `g-hims-ci-demo` (Firestore read/write and Firebase Auth
+   user provisioning); if your environment is shared or untrusted, use a
+   dedicated VM/service account instead:
 
    ```bash
    gcloud config set project g-hims-ci-demo
-   gcloud auth application-default login --project g-hims-ci-demo
+   curl -fsS -H 'Metadata-Flavor: Google' \\
+     http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email
    ```
 
-   The user identity must have legitimate permissions to read and write
-   Firestore and administer Firebase Auth users on **this DEMO project only**.
-   Do not grant its rights on G-HIMS AI production. The script verifies
-   `gcloud`'s selected project, the `(default)` database and the credential
-   file before any write.
+   This prints only the VM service account email, not an access token.
+   Do not use the main G-HIMS AI production VM identity. The guarded
+   script validates `gcloud` project selection, metadata identity,
+   the `(default)` Firestore database and exact demo write targets.
 
 3. From the repository root, execute the guarded script in the operator's
    terminal:
@@ -159,8 +173,8 @@ ADC file, private key or password in chat.
    DEMO-only password privately when prompted. Do not reuse production
    credentials. The script provisions 8 synthetic role identities, the
    Amina Shah chart, and the Patient 360 projection. Keep its output private.
-   It fails closed on mismatch, missing ADC, emulators or production
-   credentials.
+   It fails closed on project mismatch, missing VM identity, emulators
+   or production credentials.
 
 4. Verify seeded records under Firestore `tenants/central-metro-hospital`,
    including `patients/demo-ci-patient-001` and its Patient 360 projection,

@@ -82,12 +82,21 @@ describe('G-HIMS AI investor demo target isolation', () => {
     expect(adminSource).toContain("process.env.FIREBASE_PROJECT_ID === 'g-hims-ci-demo'");
     expect(adminSource).toContain("process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO === 'g-hims-ci-demo'");
     expect(adminSource).toContain('!process.env.VERCEL');
-    expect(adminSource).toContain("['auth', 'print-access-token', '--project=g-hims-ci-demo']");
-    expect(adminSource).not.toContain("console.log(token)");
+    expect(adminSource).toContain('credential: applicationDefault()');
+    expect(adminSource).not.toContain('cloudShellDemoCredential()');
     expect(seedSource).toContain('GHIMS_DEMO_USE_CLOUD_SHELL_CLI=true');
+    expect(seedSource).toContain('bun scripts/demo/verify-cloud-shell-firebase-readiness.ts');
+    expect(seedSource.indexOf('bun scripts/demo/verify-cloud-shell-firebase-readiness.ts'))
+      .toBeLessThan(seedSource.indexOf("read -r -p"));
     expect(seedSource).toContain('gcloud auth print-access-token --project="$demo_project" >/dev/null 2>&1');
     expect(seedSource).not.toContain('gcloud auth application-default login --project');
     expect(seedSource).toContain("demo_project='g-hims-ci-demo'");
+    const preflight = await readFile('scripts/demo/verify-cloud-shell-firebase-readiness.ts', 'utf8');
+    expect(preflight).toContain('await auth.listUsers(1)');
+    expect(preflight).toContain("await firestore.collection('tenants').doc(tenantId).get()");
+    expect(preflight).not.toContain('.set(');
+    expect(preflight).not.toContain('.create(');
+    expect(preflight).not.toContain('.update(');
   });
   test('fundraising landing exists in G-HIMS AI but not in production runtime', async () => {
     const source = await readFile('app/[tenantId]/clinical-intelligence/page.tsx', 'utf8');

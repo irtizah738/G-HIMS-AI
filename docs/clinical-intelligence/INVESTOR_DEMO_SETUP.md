@@ -111,6 +111,74 @@ known G-HIMS AI production, G-HIMS OS staging, and configured TEST projects.
 - In particular do not use `g-hims-ai`, `studio-1130431360-48a05`, or
   the CIQP migration temporary source/restore projects for this demo.
 
+## Hosted Firebase target — created by project owner
+
+- Firebase project name: **G-HIMS CI Demo**.
+- Project ID: `g-hims-ci-demo` (**not** `g-hims-ai`).
+- Firestore Standard Edition / `(default)`: owner reports created.
+- Firebase Authentication / Email and Password: owner reports enabled.
+- The **separate protected Vercel demo project** already has matching Firebase
+  Web SDK config and matching DEMO runtime/project IDs; it is not yet deployed.
+- The Firebase Web `apiKey` is **public browser app configuration**, not a
+  Firebase Admin SDK credential and never sufficient for server-side access.
+- No Cloud IAM principal has been verified for hosted data provisioning yet.
+
+### Keyless, operator-run hosted seeding
+
+This is available without the ChatGPT Firebase integration, by the project
+owner running the checked-in script from a terminal with their **own authorized
+Google Cloud ADC identity**, after reviewing it. Never share an OAuth token,
+ADC file, private key or password in chat.
+
+1. In a reviewed, up-to-date checkout of the private G-HIMS AI Git repository,
+   switch to the exact demo branch:
+   `fundraising/clinical-intelligence-demo-20261025`.
+2. Use a Google Cloud SDK terminal with `gcloud` and `bun` installed; obtain
+   your own ADC user session, scoped to the new project:
+
+   ```bash
+   gcloud config set project g-hims-ci-demo
+   gcloud auth application-default login --project g-hims-ci-demo
+   ```
+
+   The user identity must have legitimate permissions to read and write
+   Firestore and administer Firebase Auth users on **this DEMO project only**.
+   Do not grant its rights on G-HIMS AI production. The script verifies
+   `gcloud`'s selected project, the `(default)` database and the credential
+   file before any write.
+
+3. From the repository root, execute the guarded script in the operator's
+   terminal:
+
+   ```bash
+   bun install --frozen-lockfile
+   bash scripts/demo/provision-hosted-ci-demo-with-adc.sh
+   ```
+
+   Confirm the displayed exact project/tenant and enter a **unique**
+   DEMO-only password privately when prompted. Do not reuse production
+   credentials. The script provisions 8 synthetic role identities, the
+   Amina Shah chart, and the Patient 360 projection. Keep its output private.
+   It fails closed on mismatch, missing ADC, emulators or production
+   credentials.
+
+4. Verify seeded records under Firestore `tenants/central-metro-hospital`,
+   including `patients/demo-ci-patient-001` and its Patient 360 projection,
+   and verify that Firebase Authentication lists only the intended DEMO
+   identities. If any step fails, review the exact error rather than
+   turning off Firestore rules.
+
+5. **Hosted Vercel remains unready** until a *separate authorized runtime
+   identity* for the new DEMO Firebase project has been configured without
+   copying a production service-account key. The demo project currently has
+   Web SDK configuration only, no verified Firebase Admin credentials and
+   no hosted clinical page. Google OIDC/WIF or another approved least-privilege
+   runtime method needs explicit project IAM configuration.
+
+The existing local emulator script intentionally uses a distinct, fictional
+project ID (`ghims-investor-demo-2026`) for zero-hosted-write testing.
+Do **not** replace the emulator's test target with production.
+
 ## Hosted next step — external configuration required
 
 1. Create a **new Firebase project** specifically for investor-demo

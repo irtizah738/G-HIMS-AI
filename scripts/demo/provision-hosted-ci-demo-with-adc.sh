@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Operator-run, one-time synthetic-only seed for the isolated g-hims-ci-demo Firebase project.
-# This requires the human operator's own scoped Google Cloud Application Default
-# Credentials (ADC). It never uses, requests, or prints a service-account private key.
+# Runs using a pre-attached Google Compute Engine service account via the
+# metadata server. No personal gcloud ADC login or private key is required.
+# Access rights must be explicitly scoped to g-hims-ci-demo.
 set -euo pipefail
 umask 077
 
@@ -12,12 +13,13 @@ if [[ "$current_branch" != "fundraising/clinical-intelligence-demo-20261025" ]];
   echo "ERROR: checkout the reviewed G-HIMS-AI investor-demo branch before seeding" >&2
   exit 1
 fi
-for cmd in bun gcloud git; do
+for cmd in bun gcloud git curl; do
   command -v "$cmd" >/dev/null || { echo "ERROR: required command not found: $cmd" >&2; exit 1; }
 done
 if [[ -n "${FIRESTORE_EMULATOR_HOST:-}" || -n "${FIREBASE_AUTH_EMULATOR_HOST:-}" ||
       -n "${GHIMS_DEMO_BOOTSTRAP_PASSWORD:-}" || -n "${GHIMS_DEMO_HOSTED_WRITE_ACK:-}" ||
-      -n "${FIREBASE_PRIVATE_KEY:-}" || -n "${FIREBASE_CLIENT_EMAIL:-}" || -n "${VERCEL:-}" ]]; then
+      -n "${FIREBASE_PRIVATE_KEY:-}" || -n "${FIREBASE_CLIENT_EMAIL:-}" ||
+      -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" || -n "${VERCEL:-}" ]]; then
   echo "ERROR: unsafe/stale emulator, credential, password or hosted-write environment variables present" >&2
   exit 1
 fi
@@ -49,14 +51,18 @@ if [[ "$selected_project" != "$demo_project" || "$actual_project" != "$demo_proj
   exit 1
 fi
 
-# ADC must be obtained by the operator using `gcloud auth application-default login`.
-# The G-HIMS Admin SDK explicitly requires a real path for non-Vercel ADC.
-export GOOGLE_APPLICATION_CREDENTIALS="${GOOGLE_APPLICATION_CREDENTIALS:-$HOME/.config/gcloud/application_default_credentials.json}"
-if [[ ! -r "$GOOGLE_APPLICATION_CREDENTIALS" ]]; then
-  echo 'ERROR: Google Application Default Credentials file is not present or readable.' >&2
-  echo 'Use: gcloud auth application-default login --project g-hims-ci-demo' >&2
+# Use only the service account actually attached to this Google Cloud VM.
+# Do NOT authenticate a personal account onto a shared Compute Engine VM.
+metadata_email="$(curl -fsS --max-time 5 -H 'Metadata-Flavor: Google' \
+  'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email' 2>/dev/null || true)"
+if [[ -z "$metadata_email" || "$metadata_email" != *".gserviceaccount.com" ]]; then
+  echo 'ERROR: no attached Google Cloud VM service-account identity detected.' >&2
+  echo 'Run from a Google Compute Engine VM with a least-privilege demo-scoped service account.' >&2
   exit 1
 fi
+echo "Attached Google VM identity: $metadata_email"
+echo 'Confirm that this identity has demo-project-only Firebase Auth and Firestore access.'
+export GHIMS_DEMO_USE_VM_IDENTITY=true
 
 # Verify the dedicated Firestore database exists before any write. Never
 # create/modify Firestore resources or rules as a side effect of seeding.
@@ -83,10 +89,11 @@ fi
 export GHIMS_DEMO_BOOTSTRAP_PASSWORD
 export GHIMS_DEMO_HOSTED_WRITE_ACK=I_ACCEPT_SYNTHETIC_DEMO_WRITES
 
-# Never log the password, ADC path contents or tokens. The bootstrap makes
+# Never log passwords, access tokens or metadata credentials. The bootstrap makes
 # changes only inside the already-selected synthetic tenant and Firebase project.
 bun run demo:provision-identities
 bun run demo:clinical-intelligence
 unset GHIMS_DEMO_BOOTSTRAP_PASSWORD GHIMS_DEMO_HOSTED_WRITE_ACK
 echo 'G_HIMS_CI_HOSTED_SYNTHETIC_SEED=COMPLETED (verify the printed results)'
+unset GHIMS_DEMO_USE_VM_IDENTITY
 echo 'Important: Vercel still requires independently provisioned server-side Firebase Admin authentication.'

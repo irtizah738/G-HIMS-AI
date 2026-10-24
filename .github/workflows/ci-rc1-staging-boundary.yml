@@ -1,0 +1,59 @@
+name: G-HIMS-AI RC1 isolated staging boundary
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/ops/staging-preflight.ts'
+      - 'tests/staging-preflight.test.ts'
+      - '.github/workflows/ci-rc1-staging-boundary.yml'
+      - 'docs/clinical-intelligence/GHIMS_AI_STAGING_BOUNDARY_V1.md'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/ops/staging-preflight.ts'
+      - 'tests/staging-preflight.test.ts'
+      - '.github/workflows/ci-rc1-staging-boundary.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ghims-ai-rc1-staging-boundary-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pure-isolation:
+    if: github.repository == 'irtizah738/G-HIMS-AI'
+    name: Synthetic-only Firebase boundary preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      GHIMS_INTEGRATION_HL7_STATE: DISABLED
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_INTEGRATION_DICOMWEB_STATE: DISABLED
+      GHIMS_INTEGRATION_DEVICE_TELEMETRY_STATE: DISABLED
+      GHIMS_INTEGRATION_EDI_X12_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - name: Checkout exact G-HIMS-AI source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install pinned Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install frozen dependencies without deployment credentials
+        run: bun install --frozen-lockfile
+      - name: Test fail-closed Preview project and browser identity boundary
+        run: bun test --timeout 30000 tests/staging-preflight.test.ts
+      - name: Validate TypeScript source
+        run: bun run typecheck
+      - name: Record limited safety outcome
+        run: |
+          echo 'GHIMS_AI_STAGING_ISOLATION_SOURCE_TESTS_PASSED'
+          echo 'LIVE_FIREBASE_STAGING_PROJECT_NOT_CREATED_OR_VERIFIED'
+          echo 'LIVE_AUTH_MFA_APPCHECK_IAM_NOT_VERIFIED'
+          echo 'NO_HOSTED_FIRESTORE_OR_PRODUCTION_WRITES'
+          echo 'PRODUCTION_CLINICAL_RELEASE_NOT_AUTHORIZED'

@@ -43,11 +43,15 @@ describe('P0 clinical and telehealth security invariants', () => {
     expect(join).toContain("window.history.replaceState");
   });
 
-  test('Bun frozen-lockfile root manifest dependency ranges are exact', async () => {
+  test('Authoritative npm v3 frozen lockfile matches exact root manifest dependency ranges', async () => {
     const pkg = JSON.parse(await source('package.json'));
-    // bun.lock is JSONC; remove trailing commas for this structural assertion.
-    const lock = JSON.parse((await source('bun.lock')).replace(/,\s*([}\]])/g, '$1'));
-    expect(pkg.dependencies).toEqual(lock.workspaces[''].dependencies);
-    expect(pkg.devDependencies).toEqual(lock.workspaces[''].devDependencies);
+    const lock = JSON.parse(await source('package-lock.json'));
+    expect(lock.lockfileVersion).toBe(3);
+    expect(lock.name).toBe(pkg.name);
+    expect(lock.version).toBe(pkg.version);
+    expect(pkg.dependencies).toEqual(lock.packages[''].dependencies);
+    expect(pkg.devDependencies).toEqual(lock.packages[''].devDependencies);
+    expect(pkg.dependencies['source-map-js']).toBe('1.2.2');
+    expect(lock.packages['node_modules/source-map-js'].version).toBe('1.2.2');
   });
 });

@@ -9,8 +9,8 @@ const isolated: NodeJS.ProcessEnv = {
   NEXT_PUBLIC_FIREBASE_PROJECT_ID: 'ghims-ai-synthetic-stage',
   GHIMS_FIREBASE_PROJECT_ID_STAGING: 'ghims-ai-synthetic-stage',
   NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING: 'ghims-ai-synthetic-stage',
-  GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'ghims-ai-live-example',
-  NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'ghims-ai-live-example',
+  GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'g-hims-ai',
+  NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'g-hims-ai',
   FIRESTORE_DATABASE_ID: '(default)',
   NEXT_PUBLIC_FIRESTORE_DATABASE_ID: '(default)',
   FIREBASE_CLIENT_EMAIL: 'reader@ghims-ai-synthetic-stage.iam.gserviceaccount.com',
@@ -78,7 +78,11 @@ describe('G-HIMS-AI Preview isolation configuration preflight', () => {
     [{ NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'unexpected-prod' },
       'STAGING_PRODUCTION_COMPARATOR_MISMATCH'],
     [{ NEXT_PUBLIC_FIRESTORE_DATABASE_ID: 'wrong-db' }, 'STAGING_FIRESTORE_DATABASE_MISMATCH'],
-    [{ FIREBASE_CLIENT_EMAIL: 'admin@ghims-ai-live-example.iam.gserviceaccount.com' },
+    [{ NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: 'g-hims-ai.firebaseapp.com' }, 'STAGING_FIREBASE_AUTH_DOMAIN_MISMATCH'],
+    [{ NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: 'malicious.example' }, 'STAGING_FIREBASE_AUTH_DOMAIN_MISMATCH'],
+    [{ NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: 'g-hims-ai.firebasestorage.app' }, 'STAGING_FIREBASE_STORAGE_BUCKET_MISMATCH'],
+    [{ NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: 'wrong-bucket.appspot.com' }, 'STAGING_FIREBASE_STORAGE_BUCKET_MISMATCH'],
+    [{ FIREBASE_CLIENT_EMAIL: 'admin@g-hims-ai.iam.gserviceaccount.com' },
       'STAGING_ADMIN_IDENTITY_NOT_PROJECT_SCOPED'],
     [{ GHIMS_INTEGRATION_HL7_STATE: 'ENABLED' }, 'STAGING_UNQUALIFIED_INTEGRATION_ACTIVE'],
   ] as Array<[NodeJS.ProcessEnv, string]>)(
@@ -87,6 +91,59 @@ describe('G-HIMS-AI Preview isolation configuration preflight', () => {
       const report = check(changes);
       expect(report.status).toBe('BLOCKED');
       expect(report.blockerCodes).toContain(code);
+    }
+  );
+
+
+  test('rejects G-HIMS-OS staging even if every browser, server and IAM value agrees', () => {
+    const os = 'studio-1130431360-48a05';
+    const result = check({
+      GHIMS_FIREBASE_PROJECT_ID_STAGING: os,
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING: os,
+      FIREBASE_PROJECT_ID: os,
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: os,
+      NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: os + '.firebaseapp.com',
+      NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: os + '.firebasestorage.app',
+      FIREBASE_CLIENT_EMAIL: 'reader@' + os + '.iam.gserviceaccount.com',
+    });
+    expect(result.status).toBe('BLOCKED');
+    expect(result.blockerCodes).toContain('STAGING_GHIMS_OS_FIREBASE_FORBIDDEN');
+    expect(JSON.stringify(result)).not.toContain(os);
+  });
+
+  test('blocks actual G-HIMS-AI production even with fraudulent production comparators', () => {
+    const production = 'g-hims-ai';
+    const result = check({
+      GHIMS_FIREBASE_PROJECT_ID_STAGING: production,
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING: production,
+      FIREBASE_PROJECT_ID: production,
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: production,
+      GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'fake-production',
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'fake-production',
+    });
+    expect(result.status).toBe('BLOCKED');
+    expect(result.blockerCodes).toContain('STAGING_OFFICIAL_PRODUCTION_FIREBASE_FORBIDDEN');
+    expect(result.blockerCodes).toContain('STAGING_PRODUCTION_COMPARATOR_UNTRUSTED');
+  });
+
+  test.each([
+    [{ GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'spoofed-production' },
+      'STAGING_PRODUCTION_COMPARATOR_UNTRUSTED'],
+    [{ GOOGLE_APPLICATION_CREDENTIALS: '/tmp/credential.json' },
+      'STAGING_VERCEL_FILE_CREDENTIALS_FORBIDDEN'],
+    [{ NEXT_PUBLIC_ENABLE_APPCHECK_DEBUG: 'true' },
+      'STAGING_APPCHECK_DEBUG_FORBIDDEN'],
+    [{ NEXT_PUBLIC_ENABLE_APPCHECK_DEBUG: '1' },
+      'STAGING_APPCHECK_DEBUG_FORBIDDEN'],
+  ] as Array<[NodeJS.ProcessEnv, string]>)(
+    'rejects spoofed staging comparator and unsafe Preview credentials %#',
+    (changes, code) => {
+      const result = check(changes);
+      expect(result.status).toBe('BLOCKED');
+      expect(result.blockerCodes).toContain(code);
+      expect(result.firebaseNetworkCalls).toBe(0);
+      expect(result.writesPerformed).toBe(0);
+      expect(result.clinicalReleaseAuthority).toBe('NOT_GRANTED');
     }
   );
 

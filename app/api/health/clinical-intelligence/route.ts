@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getAdminAuth, getAdminFirestore } from '@/server/firebase/admin';
 import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
+import { classifyFirebaseModuleLoadFailure } from '@/lib/runtime/firebase-module-health-classifier';
 import { evaluateClinicalIntelligenceProductionConfig } from '@/lib/clinical/intelligence/clinical-intelligence-production-policy';
 import { CLINICAL_SAFETY_POLICY_VERSION } from '@/types/clinical-intelligence-safety';
 import { CI10I_PRODUCTION_POLICY_VERSION } from '@/types/clinical-intelligence-production';
@@ -15,11 +15,47 @@ export async function GET() {
   );
   const blockers = [...policy.blockers];
 
-  const auth = getAdminAuth();
-  const db = getAdminFirestore();
+  // Guard initialization as well as network access. Failed Firebase Admin
+  // construction must be a sanitized 503, never an unhandled Next.js 500.
+  type AdminModule = typeof import('@/server/firebase/admin');
+  let admin: AdminModule | null = null;
+  try {
+    // Import within GET so failures in Firebase SDK module evaluation are
+    // contained, not converted by Next.js into an unclassified HTTP 500.
+    admin = await import('@/server/firebase/admin');
+  } catch (error) {
+    blockers.push('CI10I_FIREBASE_ADMIN_MODULE_LOAD_FAILED');
+    blockers.push(classifyFirebaseModuleLoadFailure(error));
+  }
 
-  if (!auth) blockers.push('CI10I_FIREBASE_ADMIN_AUTH_UNAVAILABLE');
-  if (!db) blockers.push('CI10I_FIRESTORE_ADMIN_UNAVAILABLE');
+  let auth: ReturnType<AdminModule['getAdminAuth']> = null;
+  let db: ReturnType<AdminModule['getAdminFirestore']> = null;
+  if (admin) try {
+    auth = admin.getAdminAuth();
+  } catch {
+    blockers.push('CI10I_FIREBASE_ADMIN_AUTH_INITIALIZATION_FAILED');
+  }
+  if (admin) try {
+    db = admin.getAdminFirestore();
+  } catch {
+    blockers.push('CI10I_FIRESTORE_ADMIN_INITIALIZATION_FAILED');
+  }
+
+  if (!auth && !blockers.includes('CI10I_FIREBASE_ADMIN_AUTH_INITIALIZATION_FAILED')) {
+    blockers.push('CI10I_FIREBASE_ADMIN_AUTH_UNAVAILABLE');
+  }
+  if (!db && !blockers.includes('CI10I_FIRESTORE_ADMIN_INITIALIZATION_FAILED')) {
+    blockers.push('CI10I_FIRESTORE_ADMIN_UNAVAILABLE');
+  }
+
+  // Match general readiness: obtaining an SDK object does not verify IAM.
+  if (auth) {
+    try {
+      await auth.listUsers(1);
+    } catch {
+      blockers.push('CI10I_FIREBASE_ADMIN_AUTH_CONNECTIVITY_FAILED');
+    }
+  }
 
   if (db) {
     try {

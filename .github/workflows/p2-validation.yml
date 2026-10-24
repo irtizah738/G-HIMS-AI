@@ -33,7 +33,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.4.2
       - run: bun install --frozen-lockfile
       - name: P2 boundary regression
         run: bun test tests/p2-offline-ai-interop-boundary.test.ts

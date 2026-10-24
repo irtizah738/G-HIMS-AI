@@ -89,12 +89,28 @@ describe('CIQP-182 isolated synthetic Firestore restore rehearsal', () => {
     { GHIMS_CIQP_RESTORE_CONFIRM_DESTINATION: '' },
     { GHIMS_CIQP_RESTORE_EXPORT_URI: 'gs://bucket/../production' },
     { GHIMS_CIQP_RESTORE_EXPORT_URI: 'https://example.com/foo' },
+    { GHIMS_CIQP_RESTORE_EXPORT_URI: 'gs://g-hims-ai-backups/synthetic/20261013' },
+    { GHIMS_CIQP_RESTORE_EXPORT_URI: 'gs://ciqp-test-export/production/20261013' },
+    { GHIMS_CIQP_RESTORE_EXPORT_URI: 'gs://ciqp-test-export/synthetic/../production' },
     { FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080' },
     { FIREBASE_AUTH_EMULATOR_HOST: '127.0.0.1:9099' },
     { VERCEL: '1' },
   ])('fail closes unsafe project or source %j', changes => {
     expect(() => assertCiqpRestoreScope({ ...good, ...changes }))
       .toThrow('CIQP_RESTORE_ISOLATION_DENIED');
+  });
+
+  test('restore cannot use G-HIMS-OS staging or a forged production comparator', () => {
+    const os = 'studio-1130431360-48a05';
+    expect(() => assertCiqpRestoreScope({
+      ...good,
+      GHIMS_CIQP_RESTORE_SOURCE_STAGING: os,
+      GHIMS_FIREBASE_PROJECT_ID_STAGING: os,
+      GHIMS_CIQP_RESTORE_CONFIRM_SOURCE: os,
+    })).toThrow('CIQP_RESTORE_ISOLATION_DENIED');
+    expect(() => assertCiqpRestoreScope({
+      ...good, GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: 'fabricated-production',
+    })).toThrow('CIQP_RESTORE_ISOLATION_DENIED');
   });
 
   test('apply requires ticket, named operator and separate attestation', () => {
@@ -141,6 +157,10 @@ describe('CIQP-182 isolated synthetic Firestore restore rehearsal', () => {
     { label: 'existing collection', body: { collectionIds: ['tenants'] } },
     { label: 'pagination', body: { nextPageToken: 'more' } },
     { label: 'invalid schema', body: { collectionIds: 'invalid' } },
+    { label: 'array response', body: [] },
+    { label: 'HTTP 200 error-shaped response', body: { error: { code: 403 } } },
+    { label: 'unrecognized metadata', body: { unexpected: 'fake-empty' } },
+    { label: 'wrong page token type', body: { nextPageToken: 123 } },
   ])('never imports if read-only inventory contains $label', async ({ body }) => {
     const commands: string[] = [];
     const log = spyOn(console, 'log').mockImplementation(() => undefined);

@@ -39,6 +39,31 @@ describe('G-HIMS P3 operational assurance and adversarial matrix',()=>{
   });
 
 
+  test('STAGING cannot acquire implicit TEST alias of the isolated Firebase project',()=>{
+    delete process.env.VERCEL_ENV;
+    process.env.GHIMS_RUNTIME_MODE = 'STAGING';
+    process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE = 'STAGING';
+    process.env.GHIMS_FIREBASE_PROJECT_ID_STAGING = 'isolated-synthetic-rc1';
+    process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING = 'isolated-synthetic-rc1';
+    process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION = 'g-hims-ai';
+    process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION = 'g-hims-ai';
+    process.env.FIREBASE_PROJECT_ID = 'isolated-synthetic-rc1';
+    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID = 'isolated-synthetic-rc1';
+    delete process.env.GHIMS_FIREBASE_PROJECT_ID_TEST;
+    delete process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST;
+
+    expect(()=>assertServerFirebaseProjectIsolation('isolated-synthetic-rc1')).not.toThrow();
+    expect(()=>assertClientFirebaseProjectIsolation('isolated-synthetic-rc1')).not.toThrow();
+
+    // An *explicit* TEST assignment to STAGING remains a hard collision.
+    process.env.GHIMS_FIREBASE_PROJECT_ID_TEST = 'isolated-synthetic-rc1';
+    process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST = 'isolated-synthetic-rc1';
+    expect(()=>assertServerFirebaseProjectIsolation('isolated-synthetic-rc1'))
+      .toThrow('ENVIRONMENT_PROJECT_COLLISION');
+    expect(()=>assertClientFirebaseProjectIsolation('isolated-synthetic-rc1'))
+      .toThrow('ENVIRONMENT_PROJECT_COLLISION');
+  });
+
   test('production Firebase authority is bound to its declared project',()=>{
     process.env.GHIMS_RUNTIME_MODE='PRODUCTION';
     process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO='ghims-demo';

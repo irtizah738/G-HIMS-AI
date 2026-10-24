@@ -10,6 +10,29 @@
 - Candidate implementation reviewed at SHA `0b84670e28182530faa5d0a806908dc97bf384c8` (2026-10-12). Later commits and test runs must be recorded separately.
 - Audit records are tenant-scoped and client-denied. Preserve all immutable canonical events, outbox records, previous hashes, old checkpoints, and migration ledger records.
 
+## Two-process Firestore emulator export/import recovery rehearsal
+
+The RC1 fixture workflow now performs a real **disposable Firestore emulator**
+export on clean shutdown followed by an import into a **fresh emulator process**
+with the same TEST-only project ID. This adds persistence/recovery evidence to
+the existing in-process Patient 360 projection-rebuild, crash/replay and race tests.
+
+The bounded `scripts/ops/ciqp182-emulator-restore-parity.ts` captures
+non-identifying aggregate counts and keyed event/outbox, clinical-intelligence
+snapshot identity/provenance, projection revision and full Patient 360
+diagnostic HMACs. After import, it verifies equality, tenant fixture metadata,
+registration, multi-domain chart completeness, audit count and ready timeline.
+No raw patient profiles, identifiers, event payloads, emulator exports or HMAC
+baseline files are uploaded as CI artifacts. All temporary data is deleted
+in the workflow's cleanup trap.
+
+**Important limit:** This verifies local emulator export/import only, not
+a GCP Firestore managed export/import, production-style IAM, backup storage
+permissions, host-environment rollback, restored deployed traffic or measured
+cloud RPO/RTO. It does not change the owner's decision against another hosted
+staging environment, and it cannot authorize a hosted migration, production
+deployment or a patient-facing clinical pilot.
+
 ## Emulated rehearsal (no hosted data)
 1. Use a **new, disposable** Firestore emulator instance on loopback; choose a unique tenant containing **synthetic** clinical documents, encounters, signed events, unsigned drafts, out-of-order metadata and historical timeline rows. Never copy real patient or production data into the emulator.
 2. Export only aggregate counts and exact Git SHA. Set `GHIMS_RUNTIME_MODE=TEST`, `NODE_ENV=test`, `FIRESTORE_EMULATOR_HOST=127.0.0.1:8080`, `GHIMS_CIQP_MIGRATION_ACK=SYNTHETIC_EMULATOR_POLICY_MIGRATION_ONLY`, `GHIMS_CIQP_MIGRATION_TENANT_ID=<synthetic-tenant>`. Ensure production Firebase credentials and hosted endpoints are not present.
@@ -18,6 +41,109 @@
 5. Run `GHIMS_CIQP_MIGRATION_MODE=APPLY_SYNTHETIC bun scripts/ops/ciqp-migrate-patient360-legacy.ts`. Compare before/after revision, event checkpoint, canonical source fingerprint, content hash and every timeline row. Confirm no immutable clinical events or outbox messages changed.
 6. Repeat the same command and require idempotent `ALREADY_CURRENT` or valid interrupted `RESUMED` results. Inject a crash between policy CAS and timeline completion, simultaneous workers, an intervening signed clinical event and a wrong-tenant attempt; require fail-closed read behavior, no stale publication, and no duplicate ledgers.
 7. Validate restoration to the pre-migration synthetic state and rehearse the procedure for an interrupted deployment. Capture immutable output checksums, exact Actions/emulator job links, run SHA, operator identity and date. Never log MRNs, names, patient IDs or event payloads.
+
+## CIQP-182 trust-boundary guard qualification (source-only, 2026-10-22)
+
+RC1 includes explicit **canonical** project-ID checks across the Patient 360 hosted
+read-only scanner, synthetic APPLY permission gate, restore rehearsal scope, and
+offline qualification evidence checker. The known production project is
+`g-hims-ai`; the separate G-HIMS-OS synthetic staging project
+`studio-1130431360-48a05` is not a valid G-HIMS-AI migration or recovery source.
+An operator-supplied, self-consistent but false production comparator cannot
+substitute for the real production identity. Negative regression tests cover
+all these fail-closed conditions, plus use of the OS project as the
+restoration target in the evidence manifest.
+
+These checks **do not create a new hosted staging environment**, verify live
+GCP project/IAM ownership, perform a Firestore restore, or authorize patient
+access. No third hosted staging has been approved by the owner. Until a
+separately authorized and genuinely isolated G-HIMS-AI hosted qualification
+route exists, CIQP-182's hosted migration and independent clinical approval
+remain **BLOCKED**, even if all source/emulator CI checks pass.
+
+## G-HIMS-AI source-only hosted fixture authoring — 2026-10-22
+
+Two separate temporary, budgeted, billed GCP projects have been provisioned by
+the operator: `ciqp-ghims-source-20261022` and `ciqp-ghims-restore-20261022`,
+both `asia-south1` STANDARD/FIRESTORE_NATIVE. The source's
+`tenants/ciqp-synthetic-hospital0` six-field synthetic metadata was verified
+read-only with zero subcollections. The temporary source-only writer
+`ciqp182-synthetic-writer@ciqp-ghims-source-20261022.iam.gserviceaccount.com`
+used impersonation: source `documents:listCollectionIds` HTTP 200, restore
+HTTP 403, then create-only tenant metadata `SYNTHETIC_TENANT_CREATED=PASS`.
+These are **operator-supplied receipts**, not independent sign-off.
+
+Cloud Shell may warn that `gcloud auth application-default login` would
+persist the operator's personal refresh credentials on its VM. **Answer N**.
+For this preflight, use `CIQP182_HOSTED_SOURCE_AUTH_MODE=GCLOUD_IMPERSONATION`
+and ensure `GOOGLE_APPLICATION_CREDENTIALS` is absent. This mode is
+**DRY_RUN only**: it uses the CLI's previously verified session to request
+an ephemeral impersonated source-writer token, verifies exact fictional
+metadata and empty subcollections via read-only Firestore REST, and never
+creates ADC credentials. `APPLY` is rejected for this authentication mode.
+This does not qualify the hosted patient writer or grant release authorization.
+
+### G-HIMS-AI hosted source APPLY credential implementation (source only)
+
+An additional `CIQP182_HOSTED_SOURCE_AUTH_MODE=GCLOUD_IMPERSONATION_APPLY`
+mode now supports **short-lived, keyless** Firebase Admin access for the
+dedicated source project without personal ADC login or a persistent key.
+The guarded runner confirms exact git SHA, source project, fictional tenant,
+absence of existing tenant subcollections and non-production runtime, then
+requires the existing change ticket, operator ID, exact SHA, independent
+IAM/provenance evidence digests and evidence HMAC. It performs read-only
+source metadata and restore-denial preflight before activating a temporary
+Firebase Admin credential that mints 900-second access tokens only for the
+specific synthetic source writer. The central Firebase Admin module only
+accepts this in-memory credential under explicit CIQP source-only scope.
+No unrelated Firebase credential pathway changes, production access, or
+schema changes are intended.
+
+**Security limit:** the present digest fields enforce format, NOT independent
+review/signature authenticity. A separate reviewer must inspect the actual
+source IAM, data provenance and change authorization documents before any
+APPLY. Do not fill digest fields with fabricated placeholders from unit tests.
+**The code addition itself does not authorize running APPLY.** The one-time
+APPLY claim is create-only and stops on partial failure, requiring independent
+recovery instead of blind retries. The managed Firestore backup/restore and
+clinical signoff remain outstanding.
+
+New `scripts/ops/ciqp182-hosted-source-fixture.ts` is **DRY_RUN by default**,
+locks the exact source and tenant, requires a clean SHA checkout, no emulator,
+Vercel, GitHub-hosted production job or key-based credential, and validates
+the impersonated-writer ADC credential configuration before Firebase starts.
+The existing emulator-only generator is unchanged, and the historic OS staging
+writer is NOT reused. Before APPLY, the operator must separately validate
+actual source fixture provenance, the IAM review SHA-256 receipts, the source
+SHA and change ticket; supplying made-up hashes is **not** approval.
+
+The APPLY path first checks exact tenant metadata and no subcollections,
+then claims `ciqpQualificationRuns/one-time-20261022` **create-only**.
+It uses real G-HIMS AI registration/orchestration, authoritative Patient360
+rebuild, create-only snapshot, and bounded immutable events/outbox audit.
+Partial failure leaves evidence for manual review and **MUST NOT be retried**.
+No hosted Firestore APPLY, real managed GCS export/import, restore,
+rollback or clinical approval has yet been performed by this code change.
+
+**Run only after source CI, signed provenance and protected operator
+authorization.** For DRY_RUN use a locally generated, impersonated-service-account
+ADC file with `GOOGLE_APPLICATION_CREDENTIALS` pointing at it; the script rejects
+raw service-account JSON keys. Environment controls: `GHIMS_RUNTIME_MODE=STAGING`,
+`FIREBASE_PROJECT_ID=ciqp-ghims-source-20261022`,
+`GHIMS_FIREBASE_PROJECT_ID_STAGING=ciqp-ghims-source-20261022`,
+`GHIMS_FIREBASE_PROJECT_ID_PRODUCTION=g-hims-ai`,
+`FIRESTORE_DATABASE_ID=(default)`,
+`GHIMS_CIQP_STAGING_TENANT_ID=ciqp-synthetic-hospital0`,
+`CIQP182_HOSTED_SOURCE_CONFIRM_PROJECT=ciqp-ghims-source-20261022`,
+`CIQP182_HOSTED_SOURCE_CONFIRM_TENANT=ciqp-synthetic-hospital0`,
+`CIQP182_HOSTED_SOURCE_WRITER_EMAIL=ciqp182-synthetic-writer@ciqp-ghims-source-20261022.iam.gserviceaccount.com`,
+`CIQP182_HOSTED_SOURCE_SYNTHETIC_ACK=FICTIONAL_DATA_ONLY`,
+`CIQP182_HOSTED_SOURCE_EXPECTED_SHA=<exact current RC1 commit>`;
+call `bun scripts/ops/ciqp182-hosted-source-fixture.ts`.
+For APPLY, additional change ticket, exact head confirmation, operator identity,
+independently retained real IAM+provenance SHA-256 receipts, private HMAC key,
+and explicit one-time acknowledgment are required. Never commit credentials
+or evidence HMAC keys. Keep the restore project empty.
 
 ## Hosted staging prerequisites — NOT SATISFIED by this emulator harness
 - Separate G-HIMS-AI staging Firebase project, explicit approval of test-data provenance, read-only discovery that redacts patient IDs/PHI and confirmed network/project isolation.
@@ -85,10 +211,45 @@ Run: bun scripts/ops/ciqp-inspect-staging-readonly.ts
 
 The output contains only aggregate classification counts, a keyed HMAC,
 a bounded coverage marker and permanent releaseAuthorization: NOT_GRANTED.
+
+**Registry coverage safeguard (review candidate):** The bounded synthetic-hosted
+inventory must compare the tenant's authoritative `patients` document IDs
+against `patient360Projections` document IDs before assigning
+`COHORT_MATCHED_ONLY`. Missing patient projections, projections without a
+registered patient, duplicate/ambiguous IDs, zero patients or a cohort above
+the 25-patient cap block the report. It reads only document IDs for registry
+coverage, not patient profile fields, and reports aggregate discrepancy
+counts. This is a **bounded synthetic cohort**, not an exhaustive historical
+event census or proof that unindexed events cannot exist; independently
+reconcile raw events, audit and outbox lineage separately. No hosted scan
+has been authorized or executed by this source change.
 It never prints patient IDs, MRNs, event payloads, individual patient
 fingerprints or keys. A zero-patient or over-limit cohort fails closed.
 COHORT_MATCHED_ONLY is not a production patient inventory, migration or
 clinical approval.
+
+### CIQP-182 restore preflight hardening — source review, 2026-10-22
+
+The synthetic restore runner now restricts **source export URIs** to a
+`gs://ciqp-.../synthetic/...` namespace and denies production/unspecified
+exports even if operator confirmation fields are internally consistent.
+This is an additional fail-closed naming restriction: an attacker or operator
+can mislabel real data under a synthetic name, so **the URI alone never proves
+the export contains synthetic data**. Independent GCS bucket/operation origin,
+permissions, attested provenance and privacy review remain mandatory.
+
+The restore target's read-only Firestore root-collection inventory now rejects
+malformed JSON arrays, unexpected fields, wrong-type pagination tokens and
+HTTP-200 error-shaped payloads rather than equating them with an empty
+database. Empty inventory still does **not** prove there is no concurrent
+writer, and the runner does not verify a completed hosted import or its
+canonical-event/outbox/provenance hash parity. Those require actual authorized
+hosted recovery and signed evidence. Tests in
+`tests/ciqp-restore-rehearsal.test.ts` use fabricated responses only;
+**no Google Cloud import or patient-data access is performed by CI**.
+
+The owner has not authorized provisioning a third hosted staging environment;
+keep the hosted restore/migration and clinical approval gates open.
 
 ### Backup/restore and hosted apply design review (not yet executed)
 

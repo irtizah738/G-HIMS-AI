@@ -1,5 +1,6 @@
 import { getRuntimeMode, inferRuntimeModeFromNodeEnv, type GhimsRuntimeMode } from './runtime-mode';
 import firebaseConfig from '@/firebase-applet-config.json';
+import { assertVercelDeploymentFirebaseIsolation } from './vercel-deployment-isolation';
 
 type ProjectMap = Partial<Record<GhimsRuntimeMode, string>>;
 
@@ -33,11 +34,12 @@ function serverProjectMap(): ProjectMap {
   // Never assign the active TEST project's ambient Firebase ID to DEMO or
   // PRODUCTION: they are separate authority boundaries, not aliases.
   // A deployed mode may use its own ambient ID only when that mode is active.
+  // A STAGING ambient project must not become an implicit TEST alias.
   // Explicit GHIMS_FIREBASE_PROJECT_ID_* values always participate in collision
   // detection regardless of the active mode.
   return {
     DEMO: demo || (runtime === 'DEMO' ? ambient : ''),
-    TEST: test || defaultTest,
+    TEST: test || (runtime === 'TEST' ? defaultTest : ''),
     STAGING: clean(process.env.GHIMS_FIREBASE_PROJECT_ID_STAGING),
     PRODUCTION: prod || (runtime === 'PRODUCTION' ? ambient : ''),
   };
@@ -55,7 +57,7 @@ function clientProjectMap(): ProjectMap {
   const runtime = getPublicRuntimeMode();
   return {
     DEMO: demo || (runtime === 'DEMO' ? ambient : ''),
-    TEST: test || defaultTest,
+    TEST: test || (runtime === 'TEST' ? defaultTest : ''),
     STAGING: clean(process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING),
     PRODUCTION: prod || (runtime === 'PRODUCTION' ? ambient : ''),
   };
@@ -141,6 +143,9 @@ export function assertStagingProjectDistinct(
 }
 
 export function assertServerFirebaseProjectIsolation(actualProjectId: string): void {
+  // Vercel target identity is authoritative independently of the app mode.
+  // Reject shared Preview/Production project access before Admin SDK boot.
+  assertVercelDeploymentFirebaseIsolation(process.env, actualProjectId);
   const mode = getRuntimeMode();
   const projects = serverProjectMap();
   if (mode === 'STAGING') {

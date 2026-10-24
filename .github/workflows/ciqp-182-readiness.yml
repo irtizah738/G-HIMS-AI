@@ -35,6 +35,8 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Hosted staging read-only guards and evidence checker (NO hosted access)
         run: bun run test:ciqp:readiness
+      - name: Validate isolated G-HIMS-AI synthetic hosted fixture (source only)
+        run: bun test tests/ciqp182-hosted-source-fixture.test.ts
       - name: TypeScript
         run: bun run typecheck
 

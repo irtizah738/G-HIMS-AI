@@ -1,5 +1,6 @@
 import {
   App,
+  type Credential,
   applicationDefault,
   cert,
   getApp,
@@ -13,6 +14,83 @@ import { assertServerFirebaseProjectIsolation } from '@/lib/runtime/environment-
 
 let adminApp: App | null = null;
 let adminFirestoreInstance: Firestore | null = null;
+
+// CIQP-182 exception is restricted to a disposable synthetic G-HIMS-AI
+// qualification SOURCE, never g-hims-ai or G-HIMS-OS.
+const CIQP182_DISPOSABLE_SOURCE = 'ciqp-ghims-source-20261022';
+let ciqp182SourceCredentialActivated = false;
+
+/**
+ * Activate an in-memory, short-lived impersonated Credential exclusively in
+ * the standalone CIQP-182 hosted writer. No service-account key / personal
+ * ADC refresh credential. Fail closed on an existing Firebase app.
+ * The writer must validate its exact SHA, approval and tenant before calling.
+ */
+export function activateCiqp182SyntheticHostedSourceCredential(credential: Credential): void {
+  const env = process.env;
+  if (env.CIQP182_HOSTED_SOURCE_AUTH_MODE !== 'GCLOUD_IMPERSONATION_APPLY' ||
+      env.CIQP182_HOSTED_SOURCE_MODE !== 'APPLY' ||
+      env.GHIMS_RUNTIME_MODE !== 'STAGING' ||
+      env.NODE_ENV === 'production' || Boolean(env.VERCEL) ||
+      Boolean(env.GITHUB_ACTIONS) ||
+      env.FIREBASE_PROJECT_ID !== CIQP182_DISPOSABLE_SOURCE ||
+      env.GHIMS_FIREBASE_PROJECT_ID_STAGING !== CIQP182_DISPOSABLE_SOURCE ||
+      env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION !== 'g-hims-ai' ||
+      env.FIRESTORE_DATABASE_ID !== '(default)' ||
+      env.GHIMS_CIQP_STAGING_TENANT_ID !== 'ciqp-synthetic-hospital0' ||
+      env.CIQP182_HOSTED_SOURCE_CONFIRM_PROJECT !== CIQP182_DISPOSABLE_SOURCE ||
+      env.CIQP182_HOSTED_SOURCE_CONFIRM_TENANT !== 'ciqp-synthetic-hospital0' ||
+      env.CIQP182_HOSTED_SOURCE_WRITER_EMAIL !==
+        'ciqp182-synthetic-writer@' + CIQP182_DISPOSABLE_SOURCE + '.iam.gserviceaccount.com' ||
+      Boolean(env.GOOGLE_APPLICATION_CREDENTIALS) ||
+      Boolean(env.FIREBASE_PRIVATE_KEY) ||
+      Boolean(env.FIREBASE_CLIENT_EMAIL) ||
+      Boolean(env.FIRESTORE_EMULATOR_HOST) ||
+      Boolean(env.FIREBASE_AUTH_EMULATOR_HOST) ||
+      !credential || typeof credential.getAccessToken !== 'function' ||
+      Boolean(adminApp) || Boolean(adminFirestoreInstance) ||
+      getApps().length !== 0) {
+    throw new Error('CIQP182_DISPOSABLE_SOURCE_CREDENTIAL_SCOPE_DENIED');
+  }
+  assertServerFirebaseProjectIsolation(CIQP182_DISPOSABLE_SOURCE);
+  adminApp = initializeApp({
+    projectId: CIQP182_DISPOSABLE_SOURCE,
+    credential,
+  });
+  ciqp182SourceCredentialActivated = true;
+}
+
+function isCiqp182SourceCredentialActive(): boolean {
+  return ciqp182SourceCredentialActivated &&
+    adminApp?.options.projectId === CIQP182_DISPOSABLE_SOURCE &&
+    process.env.CIQP182_HOSTED_SOURCE_AUTH_MODE === 'GCLOUD_IMPERSONATION_APPLY' &&
+    process.env.CIQP182_HOSTED_SOURCE_MODE === 'APPLY' &&
+    process.env.GHIMS_RUNTIME_MODE === 'STAGING' &&
+    process.env.FIREBASE_PROJECT_ID === CIQP182_DISPOSABLE_SOURCE &&
+    process.env.GHIMS_FIREBASE_PROJECT_ID_STAGING === CIQP182_DISPOSABLE_SOURCE &&
+    process.env.GHIMS_FIREBASE_PROJECT_ID_PRODUCTION === 'g-hims-ai' &&
+    process.env.FIRESTORE_DATABASE_ID === '(default)' &&
+    process.env.GHIMS_CIQP_STAGING_TENANT_ID === 'ciqp-synthetic-hospital0' &&
+    !process.env.GOOGLE_APPLICATION_CREDENTIALS &&
+    !process.env.FIRESTORE_EMULATOR_HOST;
+}
+
+
+/**
+ * CIQP-182 ONLY: install the separately authenticated, short-lived gRPC
+ * Firestore client after the source-project Admin app and runtime checks pass.
+ * Firebase Admin Firestore rejects custom Credentials; never loosen that gate.
+ * No production, G-HIMS-OS or restore project may activate this client.
+ */
+export function activateCiqp182SyntheticHostedSourceFirestore(firestore: Firestore): void {
+  if (!isCiqp182SourceCredentialActive() ||
+      !firestore ||
+      (firestore as unknown as { projectId?: string }).projectId !== CIQP182_DISPOSABLE_SOURCE ||
+      Boolean(adminFirestoreInstance)) {
+    throw new Error('CIQP182_DISPOSABLE_SOURCE_FIRESTORE_SCOPE_DENIED');
+  }
+  adminFirestoreInstance = firestore;
+}
 
 function formatPrivateKey(rawKey: string | undefined): string | null {
   if (!rawKey) return null;
@@ -113,12 +191,18 @@ export function hasAdminCredentials(): boolean {
 
   return Boolean(
     (clientEmail && privateKey) ||
-    canUseApplicationDefaultCredentials()
+    canUseApplicationDefaultCredentials() ||
+    isCiqp182SourceCredentialActive()
   );
 }
 
 export function getAdminApp(): App | null {
-  if (adminApp) return adminApp;
+  if (adminApp) {
+    if (ciqp182SourceCredentialActivated && !isCiqp182SourceCredentialActive()) {
+      throw new Error('CIQP182_DISPOSABLE_SOURCE_CREDENTIAL_SCOPE_DENIED');
+    }
+    return adminApp;
+  }
 
   const rawProject =
     process.env.FIREBASE_PROJECT_ID ||
@@ -191,6 +275,15 @@ export function getAdminAuth(): Auth | null {
 }
 
 export function getAdminFirestore(): Firestore | null {
+  // The CIQP-182 in-memory credential is NOT accepted by Admin getFirestore().
+  // Never silently fall back to ADC: only the explicitly installed,
+  // tenant-scoped gRPC client is eligible for this disposable source run.
+  if (ciqp182SourceCredentialActivated) {
+    if (!isCiqp182SourceCredentialActive()) {
+      throw new Error('CIQP182_DISPOSABLE_SOURCE_CREDENTIAL_SCOPE_DENIED');
+    }
+    return adminFirestoreInstance;
+  }
   if (!hasAdminCredentials() && !canUseFirestoreEmulator()) return null;
   if (adminFirestoreInstance) return adminFirestoreInstance;
 

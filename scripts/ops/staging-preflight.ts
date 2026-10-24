@@ -92,6 +92,32 @@ export function evaluateStagingConfiguration(
   const production = normalized(env, 'GHIMS_FIREBASE_PROJECT_ID_PRODUCTION');
   const publicProduction = normalized(env, 'NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION');
 
+  // Source-only guard: caller-provided comparators cannot redefine either
+  // actual production or the separate G-HIMS-OS staging trust boundary.
+  const officialProduction = 'g-hims-ai';
+  const separateOsStaging = 'studio-1130431360-48a05';
+  const activeProjects = [staging, publicStaging, activeServer, activeClient];
+  if (activeProjects.includes(officialProduction)) {
+    blockers.add('STAGING_OFFICIAL_PRODUCTION_FIREBASE_FORBIDDEN');
+  }
+  if (activeProjects.includes(separateOsStaging)) {
+    blockers.add('STAGING_GHIMS_OS_FIREBASE_FORBIDDEN');
+  }
+  if ((production && production !== officialProduction) ||
+      (publicProduction && publicProduction !== officialProduction)) {
+    blockers.add('STAGING_PRODUCTION_COMPARATOR_UNTRUSTED');
+  }
+  // Preview is not permitted to load credential files or public App Check
+  // debug tokens. This is a local configuration assessment, not live IAM proof.
+  if (normalized(env, 'VERCEL_ENV') === 'preview' &&
+      normalized(env, 'GOOGLE_APPLICATION_CREDENTIALS')) {
+    blockers.add('STAGING_VERCEL_FILE_CREDENTIALS_FORBIDDEN');
+  }
+  if (normalized(env, 'VERCEL_ENV') === 'preview' &&
+      /^(true|1)$/i.test(normalized(env, 'NEXT_PUBLIC_ENABLE_APPCHECK_DEBUG'))) {
+    blockers.add('STAGING_APPCHECK_DEBUG_FORBIDDEN');
+  }
+
   if (staging && (!/^[a-z][a-z0-9-]{4,62}$/.test(staging) ||
       staging === 'g-hims-ai')) {
     blockers.add('STAGING_FIREBASE_PROJECT_INVALID');
@@ -120,6 +146,22 @@ export function evaluateStagingConfiguration(
   ];
   if (staging && otherModes.some(key => normalized(env, key) === staging)) {
     blockers.add('STAGING_NONPRODUCTION_PROJECT_COLLISION');
+  }
+
+  // A non-production Firebase project ID alone is insufficient: the browser
+  // Auth domain and Storage bucket must not silently resolve to production.
+  // Only canonical project-scoped Firebase endpoints are permitted for this
+  // isolated RC candidate; reviewed custom domains need a separate change.
+  const authDomain = normalized(env, 'NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN').toLowerCase();
+  if (staging && authDomain && authDomain !== staging + '.firebaseapp.com') {
+    blockers.add('STAGING_FIREBASE_AUTH_DOMAIN_MISMATCH');
+  }
+  const bucket = normalized(env, 'NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET').toLowerCase();
+  if (staging && bucket && ![
+    staging + '.firebasestorage.app',
+    staging + '.appspot.com',
+  ].includes(bucket)) {
+    blockers.add('STAGING_FIREBASE_STORAGE_BUCKET_MISMATCH');
   }
 
   const db = normalized(env, 'FIRESTORE_DATABASE_ID');

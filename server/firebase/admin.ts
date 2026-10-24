@@ -8,8 +8,6 @@ import {
 } from 'firebase-admin/app';
 import { Auth, getAuth } from 'firebase-admin/auth';
 import { Firestore, getFirestore } from 'firebase-admin/firestore';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import firebaseConfig from '@/firebase-applet-config.json';
 import { assertServerFirebaseProjectIsolation } from '@/lib/runtime/environment-contract';
 
@@ -71,9 +69,12 @@ function canUseFirebaseEmulator(): boolean {
   return canUseFirestoreEmulator() || canUseAuthEmulator();
 }
 
-const execFileAsync = promisify(execFile);
-
-/** Explicit operator-only synthetic seeding from the authenticated Cloud Shell CLI. */
+/**
+ * Cloud Shell automatically exposes Application Default Credentials without
+ * an extra personal-user login. Use the official Firebase Admin ADC
+ * implementation (required for the Firestore SDK), NEVER a custom access-token
+ * credential, and only for explicitly scoped, operator-run investor DEMO seeding.
+ */
 function canUseDemoCloudShellIdentity(): boolean {
   return (
     !process.env.VERCEL &&
@@ -89,32 +90,6 @@ function canUseDemoCloudShellIdentity(): boolean {
     !process.env.FIREBASE_AUTH_EMULATOR_HOST &&
     !process.env.FIRESTORE_EMULATOR_HOST
   );
-}
-
-function cloudShellDemoCredential() {
-  let cachedToken = '';
-  let cachedUntil = 0;
-  return {
-    getAccessToken: async () => {
-      if (cachedToken && Date.now() < cachedUntil) {
-        return { access_token: cachedToken, expires_in: 300 };
-      }
-      // Google Cloud Shell already has an authenticated gcloud session.
-      // The token is consumed only in process memory; never print or persist it.
-      const { stdout } = await execFileAsync(
-        'gcloud',
-        ['auth', 'print-access-token', '--project=g-hims-ci-demo'],
-        { timeout: 15_000, maxBuffer: 4096 },
-      );
-      const token = stdout.trim();
-      if (!/^[A-Za-z0-9._-]{30,}$/.test(token)) {
-        throw new Error('CI_DEMO_CLOUD_SHELL_TOKEN_UNAVAILABLE');
-      }
-      cachedToken = token;
-      cachedUntil = Date.now() + 240_000;
-      return { access_token: cachedToken, expires_in: 300 };
-    },
-  };
 }
 
 function canUseApplicationDefaultCredentials(): boolean {
@@ -230,15 +205,10 @@ export function getAdminApp(): App | null {
     }
   }
 
-  if (canUseDemoCloudShellIdentity()) {
-    adminApp = initializeApp({
-      credential: cloudShellDemoCredential(),
-      projectId: 'g-hims-ci-demo',
-    });
-    return adminApp;
-  }
-
-  if (canUseApplicationDefaultCredentials()) {
+  // Both Cloud Shell and genuine workload identities must use the supported
+  // Firebase Admin ADC credential. The Firestore SDK rejects custom credential
+  // objects, even if Firebase Auth accepts their getAccessToken() method.
+  if (canUseDemoCloudShellIdentity() || canUseApplicationDefaultCredentials()) {
     try {
       adminApp = initializeApp({
         credential: applicationDefault(),

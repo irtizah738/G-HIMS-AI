@@ -63,6 +63,16 @@ describe('G-HIMS AI investor demo target isolation', () => {
       expect(source).toContain('GHIMS_DEMO_CONFIRM_TENANT');
     }
   });
+  test('local G-HIMS AI DEMO browser uses explicit Firebase emulators without borrowing TEST mode', async () => {
+    const source = await readFile('lib/firebase/client.ts', 'utf8');
+    expect(source).toContain('NEXT_PUBLIC_GHIMS_DEMO_EMULATORS');
+    expect(source).toContain('INVESTOR_DEMO_BROWSER_EMULATOR_SCOPE_INVALID');
+    expect(source).toContain("process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE !== 'DEMO'");
+    expect(source).toContain("projectId !== process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_DEMO");
+    expect(source).toContain("connectAuthEmulator(auth, 'http://127.0.0.1:9099'");
+    expect(source).toContain("connectFirestoreEmulator(db, '127.0.0.1', 8080)");
+    expect(source).toContain('FIREBASE_EMULATOR_MODE_COLLISION');
+  });
   test('fundraising landing exists in G-HIMS AI but not in production runtime', async () => {
     const source = await readFile('app/[tenantId]/clinical-intelligence/page.tsx', 'utf8');
     expect(source).toContain("getRuntimeMode() !== 'DEMO'");

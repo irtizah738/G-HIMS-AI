@@ -8,6 +8,8 @@ import {
 } from 'firebase-admin/app';
 import { Auth, getAuth } from 'firebase-admin/auth';
 import { Firestore, getFirestore } from 'firebase-admin/firestore';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import firebaseConfig from '@/firebase-applet-config.json';
 import { assertServerFirebaseProjectIsolation } from '@/lib/runtime/environment-contract';
 
@@ -69,15 +71,58 @@ function canUseFirebaseEmulator(): boolean {
   return canUseFirestoreEmulator() || canUseAuthEmulator();
 }
 
+const execFileAsync = promisify(execFile);
+
+/** Explicit operator-only synthetic seeding from the authenticated Cloud Shell CLI. */
+function canUseDemoCloudShellIdentity(): boolean {
+  return (
+    !process.env.VERCEL &&
+    process.env.GHIMS_DEMO_USE_CLOUD_SHELL_CLI === 'true' &&
+    process.env.DEVSHELL_PROJECT_ID === 'g-hims-ci-demo' &&
+    process.env.GHIMS_RUNTIME_MODE === 'DEMO' &&
+    process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO' &&
+    process.env.FIREBASE_PROJECT_ID === 'g-hims-ci-demo' &&
+    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID === 'g-hims-ci-demo' &&
+    process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO === 'g-hims-ci-demo' &&
+    process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_DEMO === 'g-hims-ci-demo' &&
+    !process.env.GOOGLE_APPLICATION_CREDENTIALS &&
+    !process.env.FIREBASE_AUTH_EMULATOR_HOST &&
+    !process.env.FIRESTORE_EMULATOR_HOST
+  );
+}
+
+function cloudShellDemoCredential() {
+  let cachedToken = '';
+  let cachedUntil = 0;
+  return {
+    getAccessToken: async () => {
+      if (cachedToken && Date.now() < cachedUntil) {
+        return { access_token: cachedToken, expires_in: 300 };
+      }
+      // Google Cloud Shell already has an authenticated gcloud session.
+      // The token is consumed only in process memory; never print or persist it.
+      const { stdout } = await execFileAsync(
+        'gcloud',
+        ['auth', 'print-access-token', '--project=g-hims-ci-demo'],
+        { timeout: 15_000, maxBuffer: 4096 },
+      );
+      const token = stdout.trim();
+      if (!/^[A-Za-z0-9._-]{30,}$/.test(token)) {
+        throw new Error('CI_DEMO_CLOUD_SHELL_TOKEN_UNAVAILABLE');
+      }
+      cachedToken = token;
+      cachedUntil = Date.now() + 240_000;
+      return { access_token: cachedToken, expires_in: 300 };
+    },
+  };
+}
+
 function canUseApplicationDefaultCredentials(): boolean {
-  // Never infer server credentials merely from DEMO runtime or the presence
-  // of a metadata endpoint. Vercel still requires its own approved identity.
+  // Vercel requires independently authorized hosted runtime credentials.
   if (process.env.VERCEL) return false;
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) return true;
 
-  // A deliberate, short-lived operator-only opt-in for the isolated investor
-  // demo when this script runs on a Google Cloud VM with an attached identity.
-  // The Google Auth library uses the VM metadata server rather than a JSON key.
+  // Explicit demo-only path for a dedicated Google Compute Engine workload.
   return (
     process.env.GHIMS_DEMO_USE_VM_IDENTITY === 'true' &&
     process.env.GHIMS_RUNTIME_MODE === 'DEMO' &&
@@ -128,7 +173,8 @@ export function hasAdminCredentials(): boolean {
 
   return Boolean(
     (clientEmail && privateKey) ||
-    canUseApplicationDefaultCredentials()
+    canUseApplicationDefaultCredentials() ||
+    canUseDemoCloudShellIdentity()
   );
 }
 
@@ -182,6 +228,14 @@ export function getAdminApp(): App | null {
       );
       return null;
     }
+  }
+
+  if (canUseDemoCloudShellIdentity()) {
+    adminApp = initializeApp({
+      credential: cloudShellDemoCredential(),
+      projectId: 'g-hims-ci-demo',
+    });
+    return adminApp;
   }
 
   if (canUseApplicationDefaultCredentials()) {

@@ -28,15 +28,21 @@ function cleanValue(val: string | undefined): string {
 
 // Opt-in only: the browser sandbox must never connect to hosted Firebase.
 const requestedLocalSandbox = process.env.NEXT_PUBLIC_GHIMS_DEV_SANDBOX_EMULATORS === 'true';
+// Dedicated local investor-demo runtime, completely separate from TEST.
+const requestedDemoSandbox = process.env.NEXT_PUBLIC_GHIMS_DEMO_EMULATORS === 'true';
+const requestedAnyEmulator = requestedLocalSandbox || requestedDemoSandbox;
+if (requestedLocalSandbox && requestedDemoSandbox) {
+  throw new Error('FIREBASE_EMULATOR_MODE_COLLISION');
+}
 
 const clientCredentials = {
-  apiKey: requestedLocalSandbox ? 'ghims-local-synthetic-api-key' : (cleanValue(process.env.NEXT_PUBLIC_FIREBASE_API_KEY) || firebaseConfig.apiKey),
-  authDomain: requestedLocalSandbox ? 'ghims-dev-sandbox-local.firebaseapp.com' : (cleanValue(process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN) || firebaseConfig.authDomain),
+  apiKey: requestedAnyEmulator ? 'ghims-local-synthetic-api-key' : (cleanValue(process.env.NEXT_PUBLIC_FIREBASE_API_KEY) || firebaseConfig.apiKey),
+  authDomain: requestedAnyEmulator ? ((cleanValue(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) || 'ghims-demo') + '.firebaseapp.com') : (cleanValue(process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN) || firebaseConfig.authDomain),
   projectId: cleanValue(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) || firebaseConfig.projectId,
-  storageBucket: requestedLocalSandbox ? 'ghims-dev-sandbox-local.appspot.com' : (cleanValue(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET) || firebaseConfig.storageBucket),
-  messagingSenderId: requestedLocalSandbox ? '000000000000' : (cleanValue(process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID) || firebaseConfig.messagingSenderId),
-  appId: requestedLocalSandbox ? '1:000000000000:web:0000000000000000000000' : (cleanValue(process.env.NEXT_PUBLIC_FIREBASE_APP_ID) || firebaseConfig.appId),
-  measurementId: requestedLocalSandbox ? '' : (cleanValue(process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID) || firebaseConfig.measurementId),
+  storageBucket: requestedAnyEmulator ? ((cleanValue(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) || 'ghims-demo') + '.appspot.com') : (cleanValue(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET) || firebaseConfig.storageBucket),
+  messagingSenderId: requestedAnyEmulator ? '000000000000' : (cleanValue(process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID) || firebaseConfig.messagingSenderId),
+  appId: requestedAnyEmulator ? '1:000000000000:web:0000000000000000000000' : (cleanValue(process.env.NEXT_PUBLIC_FIREBASE_APP_ID) || firebaseConfig.appId),
+  measurementId: requestedAnyEmulator ? '' : (cleanValue(process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID) || firebaseConfig.measurementId),
 };
 
 assertClientFirebaseProjectIsolation(String(clientCredentials.projectId || ''));
@@ -64,6 +70,20 @@ export const app: FirebaseApp = existingClientApp || initializeApp(clientCredent
 
 // Authentication Instance
 export const auth: Auth = getAuth(app);
+
+if (requestedDemoSandbox && typeof window !== 'undefined') {
+  const localPage = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+  const projectId = String(clientCredentials.projectId || '');
+  if (!localPage || process.env.NODE_ENV === 'production' ||
+      process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE !== 'DEMO' ||
+      !projectId ||
+      projectId !== process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_DEMO ||
+      projectId === 'g-hims-ai' ||
+      projectId === 'studio-1130431360-48a05') {
+    throw new Error('INVESTOR_DEMO_BROWSER_EMULATOR_SCOPE_INVALID');
+  }
+  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+}
 
 if (requestedLocalSandbox && typeof window !== 'undefined') {
   const localPage = ['localhost', '127.0.0.1'].includes(window.location.hostname);
@@ -96,6 +116,11 @@ export const db: Firestore = (() => {
   }
 })();
 
+if (requestedDemoSandbox && typeof window !== 'undefined') {
+  // The strict DEMO + loopback guard above has already succeeded.
+  connectFirestoreEmulator(db, '127.0.0.1', 8080);
+}
+
 if (requestedLocalSandbox && typeof window !== 'undefined') {
   // The strict TEST and localhost guard above has already succeeded.
   connectFirestoreEmulator(db, '127.0.0.1', 8080);
@@ -105,7 +130,7 @@ if (requestedLocalSandbox && typeof window !== 'undefined') {
 let analyticsInstance: Analytics | null = null;
 
 export async function getFirebaseAnalytics(): Promise<Analytics | null> {
-  if (typeof window === 'undefined' || requestedLocalSandbox) {
+  if (typeof window === 'undefined' || requestedAnyEmulator) {
     return null;
   }
   if (!analyticsInstance) {

@@ -862,12 +862,9 @@ service cloud.firestore {
       match /clinicalValidationRehearsalCases/{id} {
         allow read, write: if false;
       }
-      // 120-case blinded cohort is staged but locked until independently
-      // approved clinical policy, protocol and credentials are verified.
+      // Any future approved-study cohort remains server-only and inaccessible
+      // until independent clinical policy and institutional gates are verified.
       match /clinicalValidationCohortCases/{id} {
-        allow read, write: if false;
-      }
-      match /clinicalValidationStudies/{id} {
         allow read, write: if false;
       }
 

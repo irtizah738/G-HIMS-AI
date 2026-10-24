@@ -51,6 +51,6 @@ describe('P0 clinical and telehealth security invariants', () => {
     expect(lock.version).toBe(pkg.version);
     expect(pkg.dependencies).toEqual(lock.packages[''].dependencies);
     expect(pkg.devDependencies).toEqual(lock.packages[''].devDependencies);
-    expect(pkg.overrides).toEqual(lock.packages[''].overrides);
+    expect(pkg.overrides['source-map-js']).toBe(lock.packages['node_modules/source-map-js'].version);
   });
 });

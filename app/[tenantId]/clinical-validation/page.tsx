@@ -108,21 +108,6 @@ function ClinicalValidationWorkspace({ tenantId }: { tenantId: string }) {
       {status && <div role="status" className="rounded-xl border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900">{status}</div>}
       {loading && <p className="text-sm text-slate-600">Loading authorized study data…</p>}
       {role === 'COORDINATOR' && (
-        <section className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-950">
-          <h2 className="text-sm font-bold">120-case blinded evaluation cohort</h2>
-          <p className="mt-1 text-sm">
-            {cohort?.present
-              ? `${cohort.caseCount} synthetic cases staged · source verified: ${cohort.sourceHashVerified ? 'YES' : 'NO'}`
-              : 'Not staged in this isolated TEST emulator'}
-          </p>
-          <p className="mt-1 text-xs">
-            Locked pending independently documented clinician policy approval,
-            credential verification and hospital governance authorization.
-            No cohort answers, model predictions or performance scores are available.
-          </p>
-        </section>
-      )}
-      {role === 'COORDINATOR' && (
         <section className="rounded-xl border bg-white p-5 shadow-sm">
           <section className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-3">
             <h2 className="text-sm font-bold">120-case engineering rehearsal (not clinical study)</h2>

@@ -69,6 +69,15 @@ evidence that a provider or signed clinical workflow is configured.
 identity provisioning, chart provisioning, sign-in and the demo. Emulator
 storage is ephemeral unless separately exported and reloaded.
 
+## Security baseline for this branch
+
+The 2026-10-25 security remediation pins Next.js to **16.4.1** and Zod
+to **4.6.7** and regenerates the authoritative npm v3 package-lock.
+Those dependency upgrades require a clean TypeScript build, a full
+regression suite and a High/Critical vulnerability audit on the exact
+reviewed commit before the DEMO is declared usable. This documentation
+is not evidence that the browser demo has been exercised.
+
 ## Demo verification before screenshots
 
 1. Synthetic patient exists under `central-metro-hospital` and the Patient 360

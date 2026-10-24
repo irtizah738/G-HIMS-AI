@@ -73,6 +73,19 @@ describe('G-HIMS AI investor demo target isolation', () => {
     expect(source).toContain("connectFirestoreEmulator(db, '127.0.0.1', 8080)");
     expect(source).toContain('FIREBASE_EMULATOR_MODE_COLLISION');
   });
+  test('metadata ADC is explicitly confined to keyless G-HIMS CI DEMO and never Vercel', async () => {
+    const adminSource = await readFile('server/firebase/admin.ts', 'utf8');
+    const seedSource = await readFile('scripts/demo/provision-hosted-ci-demo-with-adc.sh', 'utf8');
+    expect(adminSource).toContain("process.env.GHIMS_DEMO_USE_VM_IDENTITY === 'true'");
+    expect(adminSource).toContain("process.env.GHIMS_RUNTIME_MODE === 'DEMO'");
+    expect(adminSource).toContain("process.env.FIREBASE_PROJECT_ID === 'g-hims-ci-demo'");
+    expect(adminSource).toContain("process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO === 'g-hims-ci-demo'");
+    expect(adminSource).toContain('if (process.env.VERCEL) return false;');
+    expect(seedSource).toContain('GHIMS_DEMO_USE_VM_IDENTITY=true');
+    expect(seedSource).toContain('metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email');
+    expect(seedSource).not.toContain('gcloud auth application-default login');
+    expect(seedSource).toContain("demo_project='g-hims-ci-demo'");
+  });
   test('fundraising landing exists in G-HIMS AI but not in production runtime', async () => {
     const source = await readFile('app/[tenantId]/clinical-intelligence/page.tsx', 'utf8');
     expect(source).toContain("getRuntimeMode() !== 'DEMO'");

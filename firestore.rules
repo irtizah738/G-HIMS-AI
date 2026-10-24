@@ -848,6 +848,26 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      // CIQP synthetic-only human validation remains exclusively behind the
+      // server's authenticated, tenant-scoped command authority.
+      match /clinicalValidationCases/{id} {
+        allow read, write: if false;
+      }
+      match /clinicalValidationAssessments/{id} {
+        allow read, write: if false;
+      }
+      match /clinicalValidationStudies/{id} {
+        allow read, write: if false;
+      }
+      match /clinicalValidationRehearsalCases/{id} {
+        allow read, write: if false;
+      }
+      // Any future approved-study cohort remains server-only and inaccessible
+      // until independent clinical policy and institutional gates are verified.
+      match /clinicalValidationCohortCases/{id} {
+        allow read, write: if false;
+      }
+
       // Security, eventing and configuration stores are server-only.
       match /audit_logs/{id} {
         allow read: if canReadAudit(tenantId);

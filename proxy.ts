@@ -59,11 +59,16 @@ function buildContentSecurityPolicy(nonce: string, hostname: string): string {
 
 function resolveRoutingTenant(request: NextRequest): string | null {
   const { pathname } = request.nextUrl;
-  const hostname = request.headers.get('host') || '';
-
+  // A raw Host such as 127.0.0.1:3000 is NOT a hospital subdomain.
+  // Treating its first octet as a tenant overwrites the verified session
+  // header on /api/auth/session and can log out emulator users on navigation.
+  const hostname = request.nextUrl.hostname.toLowerCase();
+  const isIpLiteral = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostname) ||
+    hostname.startsWith('[') || hostname.includes(':');
   const hostParts = hostname.split('.');
   if (
     hostParts.length > 2 &&
+    !isIpLiteral &&
     !hostname.includes('localhost') &&
     !hostname.includes('run.app')
   ) {

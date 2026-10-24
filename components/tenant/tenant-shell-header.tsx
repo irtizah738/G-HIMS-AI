@@ -132,6 +132,14 @@ export function TenantShellHeader() {
 
         {/* Right: Unified Profile & Sign In Dropdown Menu */}
         <div className="flex items-center gap-2">
+          {process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'TEST' && (
+            <Link
+              href={`/${tenantId}/clinical-validation`}
+              className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-900"
+            >
+              Clinical validation
+            </Link>
+          )}
           <HeaderProfileMenu tenantId={tenantId} />
         </div>
       </div>

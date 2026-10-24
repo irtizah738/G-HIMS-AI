@@ -207,7 +207,7 @@ const siteSignoffSchema = baseEvidenceSchema.extend({
   signedAt: z.string().datetime(),
 });
 
-const schemas: Record<Hospital0EvidenceFile, z.ZodTypeAny> = {
+const schemas: Record<Hospital0EvidenceFile, z.ZodType> = {
   'staging-deployment-evidence.json': stagingDeploymentSchema,
   'staging-smoke.json': smokeSchema,
   'hospital0-identity-provisioning.json': identitySchema,

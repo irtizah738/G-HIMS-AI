@@ -1,8 +1,10 @@
 import { getAdminFirestore } from '../../server/firebase/admin';
 import { assertDemoRuntime } from '../../lib/runtime/runtime-mode';
+import { assertInvestorDemoFromEnvironment } from '../../lib/runtime/investor-demo-isolation';
 import { Patient360ProjectionService } from '../../lib/clinical/patient360/patient360-projection-service';
 
 assertDemoRuntime('Clinical Intelligence demo provisioning');
+assertInvestorDemoFromEnvironment();
 
 const tenantId = String(
   process.env.GHIMS_DEMO_TENANT_ID || 'central-metro-hospital'

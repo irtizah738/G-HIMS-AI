@@ -61,8 +61,11 @@ export interface ValidationCaseView {
 export const CIQP_VALIDATION_ROLES = [
   'DOCTOR', 'CONSULTANT', 'ATTENDING_PHYSICIAN',
 ] as const;
+// Canonical tenant membership uses ADMINISTRATOR for the hospital admin.
+// The explicit CLINICAL_VALIDATION_ADMIN permission is still mandatory;
+// the user's title, email, or claimed founder status alone is not authority.
 export const CIQP_VALIDATION_ADMIN_ROLES = [
-  'SYSTEM_ADMIN', 'HOSPITAL_ADMIN',
+  'SYSTEM_ADMIN', 'HOSPITAL_ADMIN', 'ADMINISTRATOR',
 ] as const;
 
 export const CIQP_VALIDATION_STUDY_ID = 'renal-ciqp-synthetic-v1' as const;

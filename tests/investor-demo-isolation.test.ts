@@ -222,6 +222,32 @@ describe('G-HIMS AI investor demo target isolation', () => {
     expect(ui).not.toContain('triggerDeteriorationAlert');
   });
 
+  test('problem-to-solution transformation is evidence-derived and clinical signoff stays nonauthoritative', async () => {
+    const ui = await readFile('components/demo/DemoClinicianReviewClient.tsx', 'utf8');
+    const reconstruction = await readFile('lib/clinical/intelligence/demo-case-reconstruction.ts', 'utf8');
+    const tests = await readFile('tests/demo-clinical-context.test.ts', 'utf8');
+    expect(ui).toContain('Reconstruct the clinical context');
+    expect(ui).toContain('Before · source categories');
+    expect(ui).toContain('With G-HIMS · reconstructed context');
+    expect(ui).toContain('What remains uncertain?');
+    expect(ui).toContain('reconstruction.chronology.slice(0, 12)');
+    expect(ui).toContain("setComparison('fragments')");
+    expect(ui).toContain("setComparison('context')");
+    expect(ui).toContain("tab === 'review'");
+    expect(ui).toContain('Marks are held');
+    expect(ui).toContain('never written to Firestore');
+    expect(ui).toContain("setInspected([])");
+    expect(reconstruction).toContain('DEMO_CONTEXT_UNTRUSTED_PROJECTION');
+    expect(reconstruction).toContain('DEMO_CONTEXT_UNTRUSTED_OBSERVATIONS');
+    expect(reconstruction).toContain('medicationAdministrations');
+    expect(reconstruction).toContain('External EHR integration has not been demonstrated');
+    expect(reconstruction).toContain("classification: 'CLINICIAN_INTERPRETATION_REQUIRED'");
+    expect(tests).toContain("rejects cross-tenant and stale or incomplete projections");
+    expect(tests).toContain("rejects forged source IDs, non-final labs and nonnumeric measurements");
+    expect(ui).not.toContain('signClinicalNote(');
+    expect(ui).not.toContain('approveClinicalDraft(');
+  });
+
   test('investor first screen is Clinical Intelligence, with Patient360 secondary and write actions disabled', async () => {
     const landing = await readFile('app/clinical-intelligence-demo/page.tsx', 'utf8');
     const legacy = await readFile('app/[tenantId]/clinical-intelligence/page.tsx', 'utf8');

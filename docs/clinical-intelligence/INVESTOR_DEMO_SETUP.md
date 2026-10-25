@@ -380,3 +380,42 @@ AI Patient 360 interface. This has been corrected on the isolated DEMO branch:
   yet been qualified in the investor DEMO. These limitations must not be
   presented as finished capabilities. Independent operator browser review of
   this new deployment remains outstanding.
+
+
+### Intelligence-first investor workspace (October 25, 2026)
+
+Investor feedback identified a positioning error: leading with the familiar EHR
+Patient 360 makes the product look like another hospital information system.
+The fundraising flagship is **Clinical Intelligence**, not the underlying
+G-HIMS OS/EHR. The primary demo entry has therefore been switched to
+`/clinical-intelligence-demo`, still guarded to exact Vercel preview,
+`GHIMS_RUNTIME_MODE=DEMO`, the isolated `g-hims-ci-demo` Firebase project
+and the synthetic tenant.
+
+The protected physician-authenticated workspace now opens on **Intelligence
+overview** and separates three clear areas:
+
+1. **What changed?** Compare the two verified synthetic creatinine observations
+   dynamically (from their source records), show the arithmetical change and
+   additional potassium/blood-pressure evidence. Never create a deterioration
+   warning, apply a provisional escalation threshold, or infer a diagnosis.
+2. **Why trust it?** An interactive **Source provenance** area shows verified
+   canonical observation IDs, recorded dates, LOINC codes, laboratory source
+   and the authoritative Patient 360 event checkpoint.
+3. **How is it governed?** The planned Encounter Preparation, Trend Intelligence,
+   Medication Reconciliation and governed draft lifecycle are described but
+   conspicuously **not enabled**. Clinical approval/signing and AI generation
+   remain unqualified. No UI imitation of a completed clinical action.
+
+The actual, existing G-HIMS AI `Patient360View` is preserved under the
+**Supporting Patient 360** tab, not on the first screen. The existing
+`/<tenantId>/clinical-intelligence` demo-only landing now redirects to
+`/clinical-intelligence-demo`; ordinary production tenant routes are
+unaffected. All existing physician, WIF, synthetic-data and no-write guards
+remain in place. The investor homepage deliberately requires the authorized
+demo physician password and Vercel team SSO.
+
+**Do not claim full clinical intelligence functionality from this design
+change.** Live AI generation, clinically approved trend warnings, governed
+draft approval/signing, GitHub CI and an independent browser test of this
+new homepage remain distinct release requirements.

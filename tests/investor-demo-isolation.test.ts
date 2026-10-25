@@ -152,6 +152,39 @@ describe('G-HIMS AI investor demo target isolation', () => {
     expect(route).not.toContain('return Response.json(record');
   });
 
+  test('clinician review requires both Firebase doctor and DEMO Vercel OIDC', async () => {
+    const server = await readFile('server/demo/preview-clinician-patient360.ts', 'utf8');
+    const api = await readFile('app/api/clinical-intelligence-demo/physician-chart/route.ts', 'utf8');
+    const page = await readFile('app/clinical-intelligence-demo/clinician-review/page.tsx', 'utf8');
+    const ui = await readFile('components/demo/DemoClinicianReviewClient.tsx', 'utf8');
+    expect(server).toContain("process.env.VERCEL_ENV === 'preview'");
+    expect(server).toContain("const PROJECT = 'g-hims-ci-demo'");
+    expect(server).toContain("const TENANT = 'central-metro-hospital'");
+    expect(server).toContain("const PATIENT = 'demo-ci-patient-001'");
+    expect(server).toContain("const PHYSICIAN_EMAIL = 'demo.doctor@example.invalid'");
+    expect(server).toContain("payload.aud !== PROJECT");
+    expect(server).toContain("payload.iss !== \`https://securetoken.google.com/\${PROJECT}\`");
+    expect(server).toContain('new X509Certificate(cert).publicKey');
+    expect(server).toContain("payload.email_verified !== true");
+    expect(server).toContain("membership.role !== 'doctor'");
+    expect(server).toContain("membership.credentialStatus !== 'VERIFIED'");
+    expect(server).toContain("account.disabled === true");
+    expect(server).toContain('authTime < Number(account.validSince)');
+    expect(server).toContain('projection.timelineReady !== true');
+    expect(server).toContain("tenant.syntheticOnly !== true");
+    expect(server).not.toContain('.set(');
+    expect(server).not.toContain('.update(');
+    expect(server).not.toContain('.delete(');
+    expect(server).not.toContain('createUser(');
+    expect(api).toContain('readPhysicianDemoPatient360');
+    expect(api).toContain("status: 403");
+    expect(page).toContain("getRuntimeMode() !== 'DEMO'");
+    expect(page).toContain("process.env.VERCEL_ENV !== 'preview'");
+    expect(ui).toContain('signInWithEmailAndPassword');
+    expect(ui).toContain('getIdToken()');
+    expect(ui).not.toContain('signClinicalNote');
+  });
+
   test('fundraising landing exists in G-HIMS AI but not in production runtime', async () => {
     const source = await readFile('app/[tenantId]/clinical-intelligence/page.tsx', 'utf8');
     expect(source).toContain("getRuntimeMode() !== 'DEMO'");

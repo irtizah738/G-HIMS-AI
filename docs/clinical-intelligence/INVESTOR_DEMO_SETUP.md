@@ -310,3 +310,36 @@ The public page is intentionally unavailable in PRODUCTION, STAGING and TEST.
   workflow. General hospital sessions, clinical AI generation, provenance
   acceptance, physician editing, explicit approval/signing and institutional
   validation remain gated. PR #218 must remain draft; GitHub CI is still red.
+
+
+### Clinician-observed rendering and renal evidence correction (October 25, 2026)
+
+- The operator supplied a screenshot from the authenticated, SSO-protected
+  clinician review page showing Amina Shah (Synthetic), MRN `CI-DEMO-001`,
+  Patient 360 revision 10 and checkpoint
+  `1791276300000:demo-ci-event-10`. Visible categories: conditions,
+  allergies, medications, vital signs, diagnostic reports/orders, procedures,
+  care plans and clinical documents. This qualifies **the read-only
+  physician-authenticated UI rendering**, not the AI clinical workflow.
+- The screenshot exposed a specific limitation: Patient 360 `latestVitals`
+  includes VITAL_SIGNS but intentionally omits LABORATORY observations, so
+  the previously seeded creatinine/potassium evidence was not displayed.
+  The BP COMPONENTS structure also appeared as a placeholder.
+- Fix: the existing, authorized physician + Vercel preview read endpoint
+  reads **exactly three** lab records from the tenant's canonical
+  `clinicalObservations`, checking the tenant/patient IDs, expected LOINC
+  identifiers, FINAL status, lab-system provenance, source evidence IDs,
+  measurement units and numeric values. No new facts, thresholds, alarms,
+  diagnoses, or treatment recommendations are generated.
+- The UI now renders dated creatinine 0.9 → 1.5 mg/dL, potassium 5.6 mmol/L
+  and the source-confirmed BP 148/92 mmHg, with evidence IDs and a
+  synthetic/not clinically validated disclaimer. These are **only**
+  values already in the previously seeded synthetic case.
+- Protected Vercel demo candidate `dpl_5FRo7ytSt1Jc2XhcMzLsAqbg7jQg`
+  (commit `8b09b412ed7a9fa7123eb1b0d16335e6ddf4961b`) is
+  **READY**, `staging` target, Next.js compilation and TypeScript passed.
+  Open `https://g-hims-clinical-intelligence-demo-9g1do5mnq.vercel.app/clinical-intelligence-demo/clinician-review`
+  to independently verify all four measurements and source IDs.
+- This new revision remains a candidate until the operator confirms
+  successful post-change browser rendering. GH Actions remains a separate
+  release blocker, and PR #218 must not be merged or promoted.

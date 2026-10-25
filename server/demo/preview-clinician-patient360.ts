@@ -196,7 +196,7 @@ export async function readPhysicianDemoPatient360(request: Request): Promise<Rec
       projection.projectionVersion !== 6 || projection.revision < 10 ||
       projection.timelineReady !== true ||
       projection.identity?.mrn !== 'CI-DEMO-001' ||
-      projection.counts?.observations < 4) {
+      !Number.isInteger(projection.counts?.observations) || projection.counts.observations < 4) {
     throw new Error('CI_DEMO_PATIENT360_AUTHORITY_OR_PROJECTION_FAILED');
   }
 

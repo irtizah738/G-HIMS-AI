@@ -51,6 +51,12 @@ export type DemoReconstruction = {
   reviewGaps: DemoReviewGap[];
   projectionCheckpoint: string;
   totalFacts: number;
+  /** Deterministic source-backed pre-encounter facts, never a generated diagnosis. */
+  encounterBrief: Array<{
+    id: string;
+    statement: string;
+    evidenceRefs: string[];
+  }>;
 };
 
 /** Fail closed if the DEMO scope, source identity, or numeric evidence is invalid. */
@@ -216,6 +222,42 @@ export function reconstructDemoClinicalContext(
     explanation: 'These source categories are from the isolated synthetic G-HIMS dataset; they do not prove live integration with a third-party EHR.',
   });
 
+  const evidenceRef = (collection: string, id: string) => collection + '/' + id;
+  const activeProblems = projection.activeProblems.filter(p => p.clinicalStatus === 'ACTIVE');
+  const documentedAllergies = projection.allergies;
+  const medications = projection.currentMedications.filter(m => m.status === 'ACTIVE');
+  const encounterBrief = [
+    ...(activeProblems.length ? [{
+      id: 'documented-conditions',
+      statement: 'Documented active conditions: ' + activeProblems.map(i => i.display).join('; ') + '.',
+      evidenceRefs: activeProblems.map(i => evidenceRef('clinicalConditions', i.conditionId)),
+    }] : []),
+    ...(documentedAllergies.length ? [{
+      id: 'documented-allergies',
+      statement: 'Recorded allergies: ' + documentedAllergies.map(i => i.substance).join('; ') +
+        '. Verification and clinical relevance require clinician review.',
+      evidenceRefs: documentedAllergies.map(i => evidenceRef('clinicalAllergies', i.allergyId)),
+    }] : []),
+    ...(medications.length ? [{
+      id: 'medication-orders',
+      statement: 'Active medication orders: ' + medications.map(i => i.medication + ' (' + i.dosageText + ')').join('; ') +
+        '. Administration and adherence are not established.',
+      evidenceRefs: medications.map(i => evidenceRef('medicationOrders', i.medicationOrderId)),
+    }] : []),
+    ...(observationsCompared ? [{
+      id: 'lab-comparison',
+      statement: 'Documented creatinine observations changed from ' +
+        observationsCompared.earlier.value + ' to ' + observationsCompared.later.value +
+        ' mg/dL across two dates (arithmetic difference ' +
+        (observationsCompared.arithmeticDelta > 0 ? '+' : '') +
+        observationsCompared.arithmeticDelta + ' mg/dL). No clinical classification is assigned.',
+      evidenceRefs: [
+        evidenceRef('clinicalObservations', observationsCompared.earlier.sourceEvidenceId),
+        evidenceRef('clinicalObservations', observationsCompared.later.sourceEvidenceId),
+      ],
+    }] : []),
+  ];
+
   return {
     sourceGroups: groups,
     chronology: groups.flatMap(group => group.facts).filter(item => item.recordedAt !== undefined)
@@ -224,5 +266,6 @@ export function reconstructDemoClinicalContext(
     reviewGaps,
     projectionCheckpoint: projection.sourceCheckpoint,
     totalFacts: groups.reduce((sum, group) => sum + group.facts.length, 0),
+    encounterBrief,
   };
 }

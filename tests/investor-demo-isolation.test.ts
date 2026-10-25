@@ -114,6 +114,22 @@ describe('G-HIMS AI investor demo target isolation', () => {
     expect(verifier).not.toContain('.update(');
     expect(verifier).not.toContain('rebuildPatient(');
   });
+  test('Vercel DEMO WIF display names fit Google Cloud limits', async () => {
+    const setup = await readFile('scripts/demo/configure-vercel-preview-wif.sh', 'utf8');
+    const poolName = setup.match(/^pool_display='([^']+)'$/m)?.[1];
+    const providerName = setup.match(/^provider_display='([^']+)'$/m)?.[1];
+    expect(poolName).toBeDefined();
+    expect(providerName).toBeDefined();
+    expect(poolName!.length).toBeLessThanOrEqual(32);
+    expect(providerName!.length).toBeLessThanOrEqual(32);
+    expect(setup).toContain('--display-name="$pool_display"');
+    expect(setup).toContain('--display-name="$provider_display"');
+    expect(setup).toContain("project='g-hims-ci-demo'");
+    expect(setup).toContain("environment='preview'");
+    expect(setup).toContain('roles/iam.workloadIdentityUser');
+    expect(setup).not.toContain('service-accounts keys create');
+  });
+
   test('fundraising landing exists in G-HIMS AI but not in production runtime', async () => {
     const source = await readFile('app/[tenantId]/clinical-intelligence/page.tsx', 'utf8');
     expect(source).toContain("getRuntimeMode() !== 'DEMO'");

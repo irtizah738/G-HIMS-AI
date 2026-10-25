@@ -278,3 +278,35 @@ The public page is intentionally unavailable in PRODUCTION, STAGING and TEST.
   workflow E2E validation, session authorization, provider-backed AI evaluation
   and outstanding GitHub Actions gates remain open.
 
+
+### Authenticated clinician review candidate (2026-10-25)
+
+- The operator independently opened the deployed OIDC identity-check endpoint
+  and returned `{"ready":true,"gcpProject":"g-hims-ci-demo","deploymentEnvironment":"preview","federation":"PASS","firestoreSyntheticRead":"PASS"}`.
+- New DEMO-only read endpoint:
+  `/api/clinical-intelligence-demo/physician-chart`. It requires BOTH
+  (1) a Google STS-validated Vercel OIDC preview subject limited to the demo
+  service account, and (2) a Google-signed Firebase **physician** user ID token
+  from the **same dedicated** `g-hims-ci-demo` project.
+  It also checks the live Firebase account, revocation floor, membership,
+  credential status, synthetic patient and published Patient 360 projection.
+  It returns only the bounded canonical synthetic projection fields.
+  No write, approve, AI-generate, or sign endpoint is provided.
+- New frontend at
+  `/clinical-intelligence-demo/clinician-review` signs into
+  `demo.doctor@example.invalid` using the privately retained DEMO-only
+  password, obtains a Firebase ID token, then reads the exact synthetic chart
+  through the protected, keyless read endpoint.
+- Candidate deployment `dpl_2nXHvH5verjqadA7LSJCMGZmW97v` finished
+  `READY` as non-production `staging` on Vercel,
+  SHA `0c6060a60dbf4c22f909b268faa267c29cd2f461`.
+  URL: `https://g-hims-clinical-intelligence-demo-j8h2ptkmn.vercel.app`;
+  Vercel team SSO remains enabled for all deployment URLs.
+- **Clinician login/end-to-end read NOT YET QUALIFIED:** owner must open the
+  protected page and sign in with the DEMO physician account, check that
+  Patient 360 facts render, and report any `CI_DEMO_CLINICIAN_REVIEW_DENIED`
+  without sharing credentials. Check role-denied cases before investor access.
+- This read-only viewer is *not* the complete governed G-HIMS clinician
+  workflow. General hospital sessions, clinical AI generation, provenance
+  acceptance, physician editing, explicit approval/signing and institutional
+  validation remain gated. PR #218 must remain draft; GitHub CI is still red.

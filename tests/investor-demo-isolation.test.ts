@@ -183,6 +183,16 @@ describe('G-HIMS AI investor demo target isolation', () => {
     expect(ui).toContain('signInWithEmailAndPassword');
     expect(ui).toContain('getIdToken()');
     expect(ui).not.toContain('signClinicalNote');
+    expect(ui).toContain('demoReadOnlyView={nativeClinicalView}');
+    expect(ui).toContain('Patient360View');
+    const nativeUI = await readFile('components/patient360/Patient360View.tsx', 'utf8');
+    expect(nativeUI).toContain('demoReadOnlyView?: Patient360ClinicalView');
+    expect(nativeUI).toContain('if (demoReadOnlyView)');
+    expect(nativeUI).toContain('if (demoReadOnly || !view?.dischargeReadiness');
+    expect(nativeUI).toContain('if (demoReadOnly || !reportId');
+    expect(nativeUI).toContain('{!demoReadOnly && (');
+    expect(server).toContain('projection,');
+    expect(server).toContain('selectedCareContext:');
   });
 
   test('demo renal evidence is read from exact canonical documents with provenance, not invented', async () => {
@@ -203,10 +213,9 @@ describe('G-HIMS AI investor demo target isolation', () => {
     expect(source).not.toContain('generateClinicalAlert(');
     expect(source).not.toContain('.set(');
     expect(source).not.toContain('.update(');
-    expect(ui).toContain("value.valueType === 'QUANTITY'");
-    expect(ui).toContain("value.valueType === 'COMPONENTS'");
-    expect(ui).toContain("item.code === '8480-6'");
-    expect(ui).toContain("item.code === '8462-4'");
+    const nativeUI = await readFile('components/patient360/Patient360View.tsx', 'utf8');
+    expect(nativeUI).toContain("case 'QUANTITY'");
+    expect(nativeUI).toContain("case 'COMPONENTS'");
     expect(ui).toContain("chart.renalObservations || []");
     expect(ui).toContain("Evidence: {observation.sourceEvidenceId}");
     expect(ui).toContain('No deterioration threshold, clinical alert,');

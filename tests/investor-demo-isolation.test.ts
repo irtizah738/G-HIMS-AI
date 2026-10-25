@@ -218,7 +218,7 @@ describe('G-HIMS AI investor demo target isolation', () => {
     expect(nativeUI).toContain("case 'COMPONENTS'");
     expect(ui).toContain("chart.renalObservations || []");
     expect(ui).toContain("Evidence: {observation.sourceEvidenceId}");
-    expect(ui).toContain('No deterioration threshold, clinical alert,');
+    expect(ui).toContain('No deterioration threshold, treatment');
     expect(ui).not.toContain('triggerDeteriorationAlert');
   });
 

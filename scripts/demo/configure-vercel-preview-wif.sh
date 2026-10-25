@@ -11,6 +11,15 @@ environment='preview'
 pool='ghims-ci-demo-vercel'
 provider='vercel-preview'
 sa_id='ghims-ci-demo-preview'
+# Google Cloud constrains WIF pool/provider display names to <=32 chars.
+pool_display='GHIMS CI Vercel Preview'
+provider_display='Vercel CI Demo Preview'
+for display in "$pool_display" "$provider_display"; do
+  if (( ${#display} > 32 )); then
+    echo "ERROR: WIF display name exceeds 32 chars" >&2
+    exit 1
+  fi
+done
 issuer="https://oidc.vercel.com/${team_slug}"
 audience="https://vercel.com/${team_slug}"
 subject="owner:${team_slug}:project:${vercel_project}:environment:${environment}"
@@ -49,7 +58,7 @@ if ! gcloud iam workload-identity-pools describe "$pool" \
    --project="$project" --location=global >/dev/null 2>&1; then
   gcloud iam workload-identity-pools create "$pool" \
     --project="$project" --location=global \
-    --display-name="G-HIMS CI DEMO Vercel (preview only)"
+    --display-name="$pool_display"
 fi
 
 if ! gcloud iam workload-identity-pools providers describe "$provider" \
@@ -58,7 +67,7 @@ if ! gcloud iam workload-identity-pools providers describe "$provider" \
   gcloud iam workload-identity-pools providers create-oidc "$provider" \
     --project="$project" --location=global \
     --workload-identity-pool="$pool" \
-    --display-name="Vercel investor demo preview" \
+    --display-name="$provider_display" \
     --issuer-uri="$issuer" \
     --allowed-audiences="$audience" \
     --attribute-mapping="google.subject=assertion.sub" \

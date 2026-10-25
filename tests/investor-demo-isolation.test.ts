@@ -185,6 +185,34 @@ describe('G-HIMS AI investor demo target isolation', () => {
     expect(ui).not.toContain('signClinicalNote');
   });
 
+  test('demo renal evidence is read from exact canonical documents with provenance, not invented', async () => {
+    const source = await readFile('server/demo/preview-clinician-patient360.ts', 'utf8');
+    const ui = await readFile('components/demo/DemoClinicianReviewClient.tsx', 'utf8');
+    expect(source).toContain("id: 'demo-ci-creatinine-old'");
+    expect(source).toContain("id: 'demo-ci-creatinine-new'");
+    expect(source).toContain("id: 'demo-ci-potassium-new'");
+    expect(source).toContain("fact.sourceEvidenceId !== source.id");
+    expect(source).toContain("fact.provenance?.sourceType !== 'LAB_SYSTEM'");
+    expect(source).toContain("fact.category !== 'LABORATORY'");
+    expect(source).toContain("fact.value?.valueType !== 'QUANTITY'");
+    expect(source).toContain("fact.status !== 'FINAL'");
+    expect(source).toContain("fact.tenantId !== TENANT");
+    expect(source).toContain("fact.patientId !== PATIENT");
+    expect(source).toContain('clinicalObservations/');
+    expect(source).toContain('renalObservations,');
+    expect(source).not.toContain('generateClinicalAlert(');
+    expect(source).not.toContain('.set(');
+    expect(source).not.toContain('.update(');
+    expect(ui).toContain("value.valueType === 'QUANTITY'");
+    expect(ui).toContain("value.valueType === 'COMPONENTS'");
+    expect(ui).toContain("item.code === '8480-6'");
+    expect(ui).toContain("item.code === '8462-4'");
+    expect(ui).toContain("chart.renalObservations || []");
+    expect(ui).toContain("Evidence: {observation.sourceEvidenceId}");
+    expect(ui).toContain('No deterioration threshold, clinical alert,');
+    expect(ui).not.toContain('triggerDeteriorationAlert');
+  });
+
   test('fundraising landing exists in G-HIMS AI but not in production runtime', async () => {
     const source = await readFile('app/[tenantId]/clinical-intelligence/page.tsx', 'utf8');
     expect(source).toContain("getRuntimeMode() !== 'DEMO'");

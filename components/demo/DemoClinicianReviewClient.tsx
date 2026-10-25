@@ -3,6 +3,9 @@
 import { useState, type FormEvent } from 'react';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase/client';
+import { Patient360View } from '@/components/patient360/Patient360View';
+import type { Patient360ClinicalView } from '@/lib/clinical/patient360/patient360-client';
+import type { Patient360Projection, Patient360EncounterSummary } from '@/types/patient360-projection';
 
 const physicianEmail = 'demo.doctor@example.invalid';
 
@@ -10,6 +13,8 @@ type Chart = {
   syntheticOnly: boolean;
   patientId: string;
   tenantId: string;
+  projection: Patient360Projection;
+  selectedCareContext: Patient360EncounterSummary | null;
   revision: number;
   sourceCheckpoint: string;
   counts: Record<string, number>;
@@ -37,60 +42,8 @@ type Chart = {
   recentDocuments?: Array<{ title?: string; status?: string }>;
 };
 
-function formatMeasurement(input: unknown): string {
-  if (input === null || input === undefined) return 'Not supplied';
-  if (typeof input === 'string' || typeof input === 'number') return String(input);
-  if (typeof input !== 'object') return 'Unsupported measurement';
-  const value = input as Record<string, unknown>;
-
-  // Canonical observation values are discriminated unions, not flat numbers.
-  if (value.valueType === 'QUANTITY' && value.quantity && typeof value.quantity === 'object') {
-    const quantity = value.quantity as Record<string, unknown>;
-    if (typeof quantity.value === 'number' && Number.isFinite(quantity.value)) {
-      return `${quantity.value} ${typeof quantity.unit === 'string' ? quantity.unit : ''}`.trim();
-    }
-  }
-  if (value.valueType === 'COMPONENTS' && Array.isArray(value.components)) {
-    const readings = value.components.map(part => {
-      const item = part as Record<string, unknown>;
-      const quantity = (item.value as Record<string, unknown> | undefined)?.quantity as Record<string, unknown> | undefined;
-      const code = (item.code as { codings?: Array<{ code?: string }> } | undefined)?.codings?.[0]?.code;
-      return { code, reading: quantity?.value, unit: quantity?.unit };
-    });
-    const systolic = readings.find(item => item.code === '8480-6');
-    const diastolic = readings.find(item => item.code === '8462-4');
-    if (typeof systolic?.reading === 'number' && typeof diastolic?.reading === 'number' &&
-        Number.isFinite(systolic.reading) && Number.isFinite(diastolic.reading) &&
-        systolic.unit === diastolic.unit) {
-      return `${systolic.reading}/${diastolic.reading} ${systolic.unit || ''}`.trim();
-    }
-  }
-  if (typeof value.value === 'string' || typeof value.value === 'number') {
-    return `${value.value} ${typeof value.unit === 'string' ? value.unit : ''}`.trim();
-  }
-  return 'Value not representable in this view';
-}
-
 function dateOfMeasurement(value: number): string {
   return Number.isFinite(value) ? new Date(value).toISOString().slice(0, 10) : 'Date unavailable';
-}
-
-function Details({ label, rows }: { label: string; rows: Array<{ title: string; description?: string }> }) {
-  return (
-    <section className="rounded-xl border border-slate-700 bg-slate-900 p-5">
-      <h2 className="text-lg font-semibold text-cyan-200">{label}</h2>
-      {rows.length ? (
-        <ul className="mt-3 space-y-3">
-          {rows.map((r, i) => (
-            <li key={`${r.title}-${i}`} className="border-b border-slate-800 pb-3 last:border-none last:pb-0">
-              <p className="text-sm font-medium text-slate-100">{r.title}</p>
-              {r.description && <p className="mt-1 text-xs text-slate-400">{r.description}</p>}
-            </li>
-          ))}
-        </ul>
-      ) : <p className="mt-3 text-sm text-slate-400">No records in this category.</p>}
-    </section>
-  );
 }
 
 export function DemoClinicianReviewClient() {
@@ -116,7 +69,12 @@ export function DemoClinicianReviewClient() {
       });
       if (!response.ok) throw new Error('CLINICIAN_PREVIEW_NOT_AUTHORIZED');
       const payload = await response.json() as Chart;
-      if (payload.syntheticOnly !== true || payload.patientId !== 'demo-ci-patient-001') {
+      if (payload.syntheticOnly !== true || payload.patientId !== 'demo-ci-patient-001' ||
+          payload.tenantId !== 'central-metro-hospital' ||
+          payload.projection?.patientId !== payload.patientId ||
+          payload.projection?.tenantId !== payload.tenantId ||
+          payload.projection?.identity?.mrn !== 'CI-DEMO-001' ||
+          payload.projection?.timelineReady !== true) {
         throw new Error('DEMO_IDENTITY_MISMATCH');
       }
       setChart(payload);
@@ -135,6 +93,31 @@ export function DemoClinicianReviewClient() {
     setError('');
     await signOut(auth).catch(() => undefined);
   }
+
+  // Build the exact native Patient360ClinicalView contract from the already
+  // authorized synthetic canonical projection. No local mock projection or
+  // ordinary hospital-session API fallback is used in read-only mode.
+  const nativeClinicalView: Patient360ClinicalView | null = chart ? {
+    tenantId: chart.tenantId,
+    patientId: chart.patientId,
+    projection: chart.projection,
+    timeline: [],
+    selectedCareContext: chart.selectedCareContext,
+    dischargeReadiness: null,
+    deterioration: null,
+    medicationSafety: null,
+    consultantVisibility: null,
+    source: 'SERVER',
+    freshness: {
+      projectionVersion: chart.projection.projectionVersion,
+      revision: chart.projection.revision,
+      sourceCheckpoint: chart.projection.sourceCheckpoint,
+      projectedAt: chart.projection.projectedAt,
+      contentHash: chart.projection.contentHash,
+      lastEventId: chart.projection.lastEventId,
+      lastEventRecordedAt: chart.projection.lastEventRecordedAt,
+    },
+  } : null;
 
   return (
     <main className="min-h-screen bg-slate-950 px-5 py-10 text-slate-100">
@@ -176,23 +159,28 @@ export function DemoClinicianReviewClient() {
           <>
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-cyan-600/50 bg-slate-900 p-5">
               <div>
-                <p className="text-xs uppercase tracking-wider text-cyan-300">Verified synthetic patient</p>
-                <h2 className="mt-1 text-2xl font-semibold">{chart.identity.fullName || 'Amina Shah (Synthetic)'}</h2>
-                <p className="text-sm text-slate-300">
-                  {chart.identity.mrn} · Projection revision {chart.revision}
-                </p>
-                <p className="mt-1 text-xs text-slate-400">
-                  Source checkpoint: {chart.sourceCheckpoint}
+                <p className="text-xs uppercase tracking-wider text-cyan-300">Authenticated DEMO physician · native application UI</p>
+                <h2 className="mt-1 text-xl font-semibold">{chart.identity.fullName}</h2>
+                <p className="mt-1 text-sm text-slate-300">
+                  MRN {chart.identity.mrn} · revision {chart.revision} · synthetic record
                 </p>
               </div>
               <button onClick={closeReview} className="rounded-md border border-slate-600 px-4 py-2 text-sm">End review</button>
             </div>
+            {nativeClinicalView && (
+              <div className="overflow-hidden rounded-xl border border-slate-600">
+                <Patient360View
+                  tenantId={chart.tenantId}
+                  patientId={chart.patientId}
+                  demoReadOnlyView={nativeClinicalView}
+                />
+              </div>
+            )}
             <section className="rounded-xl border border-cyan-700/60 bg-slate-900 p-5">
-              <h2 className="text-xl font-semibold text-cyan-200">Renal trend — source-verified observations</h2>
+              <h2 className="text-xl font-semibold text-cyan-200">Renal trend — canonical source evidence</h2>
               <p className="mt-2 text-sm text-slate-300">
-                These are the actual synthetic LABORATORY facts stored in the canonical
-                clinical observations collection. Their identifiers, dates, LOINC codes and
-                provenance were checked server-side after physician authorization.
+                Supporting laboratory records retrieved after physician authorization;
+                this supplementary panel is not part of the original G-HIMS AI Patient 360 component.
               </p>
               <div className="mt-4 grid gap-3 md:grid-cols-3">
                 {(chart.renalObservations || []).map(observation => (
@@ -205,7 +193,7 @@ export function DemoClinicianReviewClient() {
                       {observation.value} <span className="text-sm font-normal text-slate-300">{observation.unit}</span>
                     </p>
                     <p className="mt-2 text-xs text-slate-300">
-                      Recorded interpretation: {observation.recordedInterpretation || 'None recorded'} · {observation.status}
+                      Source interpretation: {observation.recordedInterpretation || 'None recorded'} · {observation.status}
                     </p>
                     <p className="mt-2 break-all font-mono text-xs text-slate-400">
                       Evidence: {observation.sourceEvidenceId} · LOINC {observation.loincCode}
@@ -213,51 +201,11 @@ export function DemoClinicianReviewClient() {
                   </article>
                 ))}
               </div>
-              {!chart.renalObservations?.length && (
-                <p className="mt-3 text-sm text-amber-200">
-                  Canonical renal evidence was not returned; no trend can be shown.
-                </p>
-              )}
               <p className="mt-3 text-xs text-slate-400">
-                Observed values only. No deterioration threshold, clinical alert,
-                diagnosis or treatment recommendation has been validated or generated.
+                Observed, synthetic values only. No deterioration threshold, treatment
+                recommendation, or clinical AI warning has been validated here.
               </p>
             </section>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <Details label="Conditions" rows={(chart.activeProblems || []).map(r => ({
-                title: r.display || 'Condition', description: r.clinicalStatus,
-              }))} />
-              <Details label="Allergies" rows={(chart.allergies || []).map(r => ({
-                title: r.substance || 'Allergy', description: r.criticality,
-              }))} />
-              <Details label="Medication Orders" rows={(chart.currentMedications || []).map(r => ({
-                title: r.medication || 'Medication',
-                description: [r.dosageText, r.status].filter(Boolean).join(' · '),
-              }))} />
-              <Details label="Observations" rows={(chart.latestVitals || []).map(r => ({
-                title: r.display || 'Observation', description: formatMeasurement(r.value),
-              }))} />
-              <Details label="Diagnostic Reports" rows={(chart.recentResults || []).map(r => ({
-                title: r.display || 'Diagnostic report',
-                description: [r.conclusion, r.status].filter(Boolean).join(' · '),
-              }))} />
-              <Details label="Diagnostic Orders" rows={(chart.recentDiagnosticOrders || []).map(r => ({
-                title: r.display || 'Order', description: r.status,
-              }))} />
-              <Details label="Procedures" rows={(chart.recentProcedures || []).map(r => ({
-                title: r.display || 'Procedure', description: r.status,
-              }))} />
-              <Details label="Care Plans" rows={(chart.activeCarePlans || []).map(r => ({
-                title: r.title || 'Care plan', description: r.status,
-              }))} />
-              <Details label="Clinical Documents" rows={(chart.recentDocuments || []).map(r => ({
-                title: r.title || 'Clinical document', description: r.status,
-              }))} />
-            </div>
-            <p className="text-sm text-slate-400">
-              Counts: {Object.entries(chart.counts).map(([k, v]) => `${k}: ${v}`).join(' · ')}.
-              Review is read-only and does not constitute clinician approval.
-            </p>
           </>
         )}
       </div>

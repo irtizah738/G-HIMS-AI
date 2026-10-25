@@ -249,3 +249,32 @@ The public page is intentionally unavailable in PRODUCTION, STAGING and TEST.
   release gate. Keep PR #218 draft and the investor URL private until CI
   resumes and the real clinician/browser review workflow passes.
 
+
+### Vercel preview build and WIF read probe (October 25, 2026)
+
+- Cloud Shell operator completed `CI_DEMO_WIF_IAM_CONFIGURED=PASS` after
+  creating the pool `ghims-ci-demo-vercel`, provider `vercel-preview`,
+  and demo-only service account `ghims-ci-demo-preview@g-hims-ci-demo.iam.gserviceaccount.com`.
+  This grants Firestore data access and read-only Firebase Auth lookup solely
+  in `g-hims-ci-demo`. No long-lived JSON key was created.
+- Source commit `e93df975790e36c259dae979ae8ff3db71e09f51`
+  deployed as Vercel ID `dpl_A32hUVjpVFV3cWYYhSkRHCFQzRSi`
+  in the **separate** project `g-hims-clinical-intelligence-demo`, target
+  `staging` (Vercel's non-production staging alias), SSO enabled for
+  all deployments, state `READY`. Deployment URL:
+  `https://g-hims-clinical-intelligence-demo-f3cqfbjzn.vercel.app`.
+- New isolated API
+  `/api/clinical-intelligence-demo/identity-check` validates the real
+  Vercel OIDC token's team/project/preview claims using Google STS, performs
+  a token exchange and read-only impersonation, then checks exactly one fixed,
+  synthetic Firestore patient record. It returns only PASS or a generic error,
+  no access tokens or patient data. It is **not** a replacement for the main
+  G-HIMS AI Firebase Admin runtime authentication.
+- **Not yet verified at the deployed endpoint.** Log into Vercel under the
+  authorized demo team and visit the API path on the deployment URL. Expect
+  `ready:true`, `federation:PASS`, `firestoreSyntheticRead:PASS` before
+  proceeding. A 404/503 remains a blocker, not a reason to relax IAM rules.
+- Do not promote any deployment or share the URL with investors yet. Clinical
+  workflow E2E validation, session authorization, provider-backed AI evaluation
+  and outstanding GitHub Actions gates remain open.
+

@@ -200,6 +200,56 @@ export async function readPhysicianDemoPatient360(request: Request): Promise<Rec
     throw new Error('CI_DEMO_PATIENT360_AUTHORITY_OR_PROJECTION_FAILED');
   }
 
+  // Patient 360's latestVitals intentionally excludes LABORATORY observations.
+  // Read the exact canonical source documents referenced by the synthetic renal
+  // case, after the physician account + membership + projection are verified.
+  // No alert thresholds, AI generation or clinical decisions are computed here.
+  const renalSources = [
+    { id: 'demo-ci-creatinine-old', loinc: '2160-0', label: 'Creatinine' },
+    { id: 'demo-ci-creatinine-new', loinc: '2160-0', label: 'Creatinine' },
+    { id: 'demo-ci-potassium-new', loinc: '2823-3', label: 'Potassium' },
+  ] as const;
+  const renalObservations = await Promise.all(renalSources.map(async source => {
+    const fact = await firestoreDocument(
+      `tenants/${TENANT}/clinicalObservations/${source.id}`,
+      accessToken,
+    );
+    const measurement = fact.value?.quantity;
+    const coding = fact.code?.codings?.[0];
+    if (
+      fact.observationId !== source.id ||
+      fact.sourceEvidenceId !== source.id ||
+      fact.tenantId !== TENANT ||
+      fact.patientId !== PATIENT ||
+      fact.category !== 'LABORATORY' ||
+      fact.status !== 'FINAL' ||
+      fact.value?.valueType !== 'QUANTITY' ||
+      fact.provenance?.sourceEvidenceId !== source.id ||
+      fact.provenance?.sourceType !== 'LAB_SYSTEM' ||
+      fact.provenance?.tenantId !== TENANT ||
+      fact.provenance?.patientId !== PATIENT ||
+      coding?.system !== 'LOINC' ||
+      coding?.code !== source.loinc ||
+      typeof measurement?.value !== 'number' ||
+      !Number.isFinite(measurement.value) ||
+      typeof measurement?.unit !== 'string' ||
+      !['mg/dL', 'mmol/L'].includes(measurement.unit) ||
+      !Number.isFinite(fact.effectiveAt)
+    ) throw new Error('CI_DEMO_RENAL_SOURCE_EVIDENCE_INVALID');
+    return {
+      observationId: fact.observationId as string,
+      display: source.label,
+      value: measurement.value as number,
+      unit: measurement.unit as string,
+      loincCode: coding.code as string,
+      effectiveAt: fact.effectiveAt as number,
+      status: 'FINAL',
+      sourceEvidenceId: fact.sourceEvidenceId as string,
+      sourceType: 'LAB_SYSTEM',
+      recordedInterpretation: fact.interpretation?.[0]?.text || undefined,
+    };
+  }));
+
   return {
     syntheticOnly: true,
     environment: 'DEMO',
@@ -214,6 +264,7 @@ export async function readPhysicianDemoPatient360(request: Request): Promise<Rec
     allergies: projection.allergies,
     currentMedications: projection.currentMedications,
     latestVitals: projection.latestVitals,
+    renalObservations,
     recentResults: projection.recentResults,
     recentDiagnosticOrders: projection.recentDiagnosticOrders,
     recentProcedures: projection.recentProcedures,

@@ -343,3 +343,40 @@ The public page is intentionally unavailable in PRODUCTION, STAGING and TEST.
 - This new revision remains a candidate until the operator confirms
   successful post-change browser rendering. GH Actions remains a separate
   release blocker, and PR #218 must not be merged or promoted.
+
+
+### Native G-HIMS AI Patient 360 visual integration (October 25, 2026)
+
+Following clinician screenshot review, the operator observed that the original
+investor demo was a bespoke dark-card presentation rather than the actual G-HIMS
+AI Patient 360 interface. This has been corrected on the isolated DEMO branch:
+
+- The protected clinician review now mounts the **existing
+  `components/patient360/Patient360View.tsx`** (unchanged visual hierarchy,
+  patient summary, context, knowledge banners, vitals, clinical problem lists,
+  diagnostics, medications, timeline/assessment sections).
+- It receives the **same canonical synthetic Patient 360 projection** that
+  was previously verified in `g-hims-ci-demo`, fetched only after validating
+  the DEMO doctor, membership, Google-signed Firebase ID token and preview
+  Workload Identity Federation. No mock clinical data substituted.
+- A new optional `demoReadOnlyView` prop is entirely absent from the ordinary
+  hospital route. When supplied, it prevents fallback to the ordinary
+  G-HIMS session API, blocks all clinical command handlers, disables encounter
+  switching, hides actionable clinical acknowledgements/reconciliation, and
+  withholds `ClinicalCopilotWorkspace`. This avoids misleading approval/signing
+  buttons and unauthorized writes.
+- The supplementary creatinine/potassium provenance panel remains below the
+  authentic Patient 360 interface (it reads the three previously seeded,
+  canonical laboratory observations; no new alert threshold or clinical AI
+  conclusion is generated).
+- Read-only preview deployment `dpl_HuXQR9iwKmjU8uKmdoMcc1DZ2gi5`
+  SHA `db39f8393e8a761c9ca80cf7bfce500c36a3f498` reached `READY`
+  with Next.js compilation and TypeScript qualification:
+  `https://g-hims-clinical-intelligence-demo-ji8nf07l0.vercel.app/clinical-intelligence-demo/clinician-review`.
+- **Limitations:** This is native **Patient 360 visual reuse**, not a full
+  authenticated G-HIMS hospital session/shell. The application-wide tenant
+  navigation, standard session exchange, live clinical copilot, authoritative
+  clinical command lifecycle, and the full patient-scoped timeline have not
+  yet been qualified in the investor DEMO. These limitations must not be
+  presented as finished capabilities. Independent operator browser review of
+  this new deployment remains outstanding.

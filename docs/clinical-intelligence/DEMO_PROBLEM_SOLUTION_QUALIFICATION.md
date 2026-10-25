@@ -29,6 +29,9 @@ intended to integrate with hospital systems rather than require replacing them.
   G-HIMS dataset**, not proof of different EHR integrations.
 - Explicit evidence IDs, project/tenant/patient scoping, unit/date verification
   and provenance; no fabricated citations.
+- A deterministic, non-authoritative encounter-preparation brief cites its
+  underlying canonical condition, allergy, medication and laboratory IDs;
+  no AI-generated text, diagnosis or escalation is claimed.
 - An uncertainty register distinguishes documented absence, missing or
   unverified information, and matters requiring a qualified clinician.
 - An interactive clinician inspection checklist is local in the browser only.
@@ -110,3 +113,22 @@ substitute for the two Bun test commands or protected browser E2E evaluation.
    escalation or signing occurs without separately qualified governance.
 6. **Why adoption can be lighter:** describe the intended standalone
    integration architecture as the roadmap, not as a verified integration.
+
+## Candidate deployment and current engineering gate
+
+- Protected investor-demo Vercel project: `g-hims-clinical-intelligence-demo`
+  (not production `g-hims-ai`).
+- Latest completed preview/staging deployment:
+  `dpl_3KMVJiQKky2yCd6DvaWMdUATnqPi`, source
+  `7a903d811ee7383e3547ed6464011f4aabb6dc90`, **READY**.
+- Protected URL:
+  `https://g-hims-clinical-intelligence-demo-dn9bhr5ad.vercel.app/clinical-intelligence-demo`.
+- Vercel's Next.js compilation and TypeScript checks passed. GitHub Actions
+  are still failing or queued; these are separate release gates. The newly
+  added Bun source-contract tests have not been independently executed by a
+  working Actions runner, so do **not** describe them as passed.
+- A clinician has not yet independently performed an end-to-end browser
+  assessment of this latest candidate; SSO and DEMO physician credentials
+  remain prerequisites.
+- The signed clinical validation protocol and institutional acceptance are
+  external requirements. No code change can manufacture that evidence.

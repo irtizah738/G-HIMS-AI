@@ -163,7 +163,7 @@ describe('G-HIMS AI investor demo target isolation', () => {
     expect(server).toContain("const PATIENT = 'demo-ci-patient-001'");
     expect(server).toContain("const PHYSICIAN_EMAIL = 'demo.doctor@example.invalid'");
     expect(server).toContain("payload.aud !== PROJECT");
-    expect(server).toContain("payload.iss !== \`https://securetoken.google.com/\${PROJECT}\`");
+    expect(server).toContain('payload.iss !== `https://securetoken.google.com/${PROJECT}`');
     expect(server).toContain('new X509Certificate(cert).publicKey');
     expect(server).toContain("payload.email_verified !== true");
     expect(server).toContain("membership.role !== 'doctor'");

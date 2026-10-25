@@ -3,8 +3,8 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import {
-  Activity, ArrowRight, BookOpenCheck, BrainCircuit, CheckCircle2,
-  ChevronRight, ClipboardCheck, FileText, GitBranch, LockKeyhole,
+  Activity, ArrowRight, BookOpenCheck, BrainCircuit,
+  ChevronRight, ClipboardCheck, GitBranch, LockKeyhole,
   ShieldCheck, Stethoscope, TrendingUp,
 } from 'lucide-react';
 import { auth } from '@/lib/firebase/client';

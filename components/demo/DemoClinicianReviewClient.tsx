@@ -18,6 +18,18 @@ type Chart = {
   allergies?: Array<{ substance?: string; criticality?: string }>;
   currentMedications?: Array<{ medication?: string; dosageText?: string; status?: string }>;
   latestVitals?: Array<{ display?: string; value?: unknown; effectiveAt?: number }>;
+  renalObservations?: Array<{
+    observationId: string;
+    display: string;
+    value: number;
+    unit: string;
+    loincCode: string;
+    effectiveAt: number;
+    status: string;
+    sourceEvidenceId: string;
+    sourceType: string;
+    recordedInterpretation?: string;
+  }>;
   recentResults?: Array<{ display?: string; conclusion?: string; status?: string }>;
   recentDiagnosticOrders?: Array<{ display?: string; status?: string }>;
   recentProcedures?: Array<{ display?: string; status?: string }>;
@@ -28,13 +40,39 @@ type Chart = {
 function formatMeasurement(input: unknown): string {
   if (input === null || input === undefined) return 'Not supplied';
   if (typeof input === 'string' || typeof input === 'number') return String(input);
-  if (typeof input === 'object') {
-    const value = input as Record<string, unknown>;
-    if (typeof value.value === 'number' || typeof value.value === 'string') {
-      return `${value.value} ${typeof value.unit === 'string' ? value.unit : ''}`.trim();
+  if (typeof input !== 'object') return 'Unsupported measurement';
+  const value = input as Record<string, unknown>;
+
+  // Canonical observation values are discriminated unions, not flat numbers.
+  if (value.valueType === 'QUANTITY' && value.quantity && typeof value.quantity === 'object') {
+    const quantity = value.quantity as Record<string, unknown>;
+    if (typeof quantity.value === 'number' && Number.isFinite(quantity.value)) {
+      return `${quantity.value} ${typeof quantity.unit === 'string' ? quantity.unit : ''}`.trim();
     }
   }
-  return 'See canonical source for details';
+  if (value.valueType === 'COMPONENTS' && Array.isArray(value.components)) {
+    const readings = value.components.map(part => {
+      const item = part as Record<string, unknown>;
+      const quantity = (item.value as Record<string, unknown> | undefined)?.quantity as Record<string, unknown> | undefined;
+      const code = (item.code as { codings?: Array<{ code?: string }> } | undefined)?.codings?.[0]?.code;
+      return { code, reading: quantity?.value, unit: quantity?.unit };
+    });
+    const systolic = readings.find(item => item.code === '8480-6');
+    const diastolic = readings.find(item => item.code === '8462-4');
+    if (typeof systolic?.reading === 'number' && typeof diastolic?.reading === 'number' &&
+        Number.isFinite(systolic.reading) && Number.isFinite(diastolic.reading) &&
+        systolic.unit === diastolic.unit) {
+      return `${systolic.reading}/${diastolic.reading} ${systolic.unit || ''}`.trim();
+    }
+  }
+  if (typeof value.value === 'string' || typeof value.value === 'number') {
+    return `${value.value} ${typeof value.unit === 'string' ? value.unit : ''}`.trim();
+  }
+  return 'Value not representable in this view';
+}
+
+function dateOfMeasurement(value: number): string {
+  return Number.isFinite(value) ? new Date(value).toISOString().slice(0, 10) : 'Date unavailable';
 }
 
 function Details({ label, rows }: { label: string; rows: Array<{ title: string; description?: string }> }) {
@@ -149,6 +187,42 @@ export function DemoClinicianReviewClient() {
               </div>
               <button onClick={closeReview} className="rounded-md border border-slate-600 px-4 py-2 text-sm">End review</button>
             </div>
+            <section className="rounded-xl border border-cyan-700/60 bg-slate-900 p-5">
+              <h2 className="text-xl font-semibold text-cyan-200">Renal trend — source-verified observations</h2>
+              <p className="mt-2 text-sm text-slate-300">
+                These are the actual synthetic LABORATORY facts stored in the canonical
+                clinical observations collection. Their identifiers, dates, LOINC codes and
+                provenance were checked server-side after physician authorization.
+              </p>
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                {(chart.renalObservations || []).map(observation => (
+                  <article key={observation.observationId}
+                    className="rounded-lg border border-slate-700 bg-slate-800 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-cyan-300">
+                      {observation.display} · {dateOfMeasurement(observation.effectiveAt)}
+                    </p>
+                    <p className="mt-2 text-2xl font-bold text-white">
+                      {observation.value} <span className="text-sm font-normal text-slate-300">{observation.unit}</span>
+                    </p>
+                    <p className="mt-2 text-xs text-slate-300">
+                      Recorded interpretation: {observation.recordedInterpretation || 'None recorded'} · {observation.status}
+                    </p>
+                    <p className="mt-2 break-all font-mono text-xs text-slate-400">
+                      Evidence: {observation.sourceEvidenceId} · LOINC {observation.loincCode}
+                    </p>
+                  </article>
+                ))}
+              </div>
+              {!chart.renalObservations?.length && (
+                <p className="mt-3 text-sm text-amber-200">
+                  Canonical renal evidence was not returned; no trend can be shown.
+                </p>
+              )}
+              <p className="mt-3 text-xs text-slate-400">
+                Observed values only. No deterioration threshold, clinical alert,
+                diagnosis or treatment recommendation has been validated or generated.
+              </p>
+            </section>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <Details label="Conditions" rows={(chart.activeProblems || []).map(r => ({
                 title: r.display || 'Condition', description: r.clinicalStatus,

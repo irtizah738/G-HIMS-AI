@@ -73,6 +73,23 @@ describe('synthetic clinical-context reconstruction contracts', () => {
     expect(x.projectionCheckpoint).toContain('demo-ci-event-10');
   });
 
+  test('prepares a non-authoritative, source-cited encounter brief without invented claims', () => {
+    const x = reconstructDemoClinicalContext(fixture(), labs);
+    expect(x.encounterBrief.length).toBeGreaterThanOrEqual(3);
+    expect(x.encounterBrief.every(item => item.evidenceRefs.length > 0)).toBe(true);
+    expect(x.encounterBrief.find(item => item.id === 'lab-comparison')?.evidenceRefs)
+      .toEqual([
+        'clinicalObservations/demo-ci-creatinine-old',
+        'clinicalObservations/demo-ci-creatinine-new',
+      ]);
+    expect(x.encounterBrief.find(item => item.id === 'medication-orders')?.statement)
+      .toContain('Administration and adherence are not established');
+    const statements = x.encounterBrief.map(item => item.statement).join(' ');
+    expect(statements).not.toContain('acute kidney injury');
+    expect(statements).not.toContain('urgent treatment');
+    expect(statements).not.toContain('diagnosed');
+  });
+
   test('does not equate prescriptions with actual administrations or arithmetic with diagnosis', () => {
     const x = reconstructDemoClinicalContext(fixture(), labs);
     expect(x.reviewGaps.some(g => g.id === 'admin-not-documented')).toBe(true);

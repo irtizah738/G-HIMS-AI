@@ -130,6 +130,28 @@ describe('G-HIMS AI investor demo target isolation', () => {
     expect(setup).not.toContain('service-accounts keys create');
   });
 
+  test('Vercel OIDC read-only smoke is preview-only and cannot expose tokens or real records', async () => {
+    const route = await readFile('app/api/clinical-intelligence-demo/identity-check/route.ts', 'utf8');
+    expect(route).toContain("process.env.VERCEL_ENV === 'preview'");
+    expect(route).toContain("process.env.FIREBASE_PROJECT_ID === demoProject");
+    expect(route).toContain("process.env.GHIMS_DEMO_TENANT_ID === demoTenant");
+    expect(route).toContain("const demoProject = 'g-hims-ci-demo'");
+    expect(route).toContain("const demoPatient = 'demo-ci-patient-001'");
+    expect(route).toContain("payload.sub !== expectedSubject");
+    expect(route).toContain('https://sts.googleapis.com/v1/token');
+    expect(route).toContain(':generateAccessToken');
+    expect(route).toContain('https://firestore.googleapis.com/v1/projects/');
+    expect(route).toContain("record.fields?.syntheticDemoRecord?.booleanValue !== true");
+    expect(route).toContain('PREVIEW_FEDERATION_OR_READ_FAILED');
+    expect(route).not.toContain('console.log(');
+    expect(route).not.toContain('console.warn(');
+    expect(route).not.toContain('.set(');
+    expect(route).not.toContain('.update(');
+    expect(route).not.toContain('createUser(');
+    expect(route).not.toContain('return Response.json(sts');
+    expect(route).not.toContain('return Response.json(record');
+  });
+
   test('fundraising landing exists in G-HIMS AI but not in production runtime', async () => {
     const source = await readFile('app/[tenantId]/clinical-intelligence/page.tsx', 'utf8');
     expect(source).toContain("getRuntimeMode() !== 'DEMO'");

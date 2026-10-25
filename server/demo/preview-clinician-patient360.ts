@@ -258,6 +258,16 @@ export async function readPhysicianDemoPatient360(request: Request): Promise<Rec
     projectionVersion: projection.projectionVersion,
     revision: projection.revision,
     sourceCheckpoint: projection.sourceCheckpoint,
+    // Provide the exact saved canonical projection to the original G-HIMS AI
+    // Patient360View in a separate fail-closed, read-only DEMO mode.
+    // The canonical event timeline is not yet independently qualified for this
+    // preview route, so it is intentionally empty, never fabricated.
+    projection,
+    timeline: [],
+    selectedCareContext:
+      projection.careContexts?.latestOpdEncounter ||
+      projection.careContexts?.activeOpdEncounters?.[0] ||
+      null,
     identity: projection.identity,
     counts: projection.counts,
     activeProblems: projection.activeProblems,

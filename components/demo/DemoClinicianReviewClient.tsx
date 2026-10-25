@@ -11,9 +11,13 @@ import { auth } from '@/lib/firebase/client';
 import { Patient360View } from '@/components/patient360/Patient360View';
 import type { Patient360ClinicalView } from '@/lib/clinical/patient360/patient360-client';
 import type { Patient360Projection, Patient360EncounterSummary } from '@/types/patient360-projection';
+import {
+  reconstructDemoClinicalContext,
+  type DemoReconstruction,
+} from '@/lib/clinical/intelligence/demo-case-reconstruction';
 
 const PHYSICIAN_EMAIL = 'demo.doctor@example.invalid';
-type WorkspaceTab = 'intelligence' | 'evidence' | 'record';
+type WorkspaceTab = 'intelligence' | 'evidence' | 'review' | 'record';
 
 type RenalEvidence = {
   observationId: string;
@@ -90,7 +94,18 @@ export function DemoClinicianReviewClient() {
   const [tab, setTab] = useState<WorkspaceTab>('intelligence');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [comparison, setComparison] = useState<'fragments' | 'context'>('fragments');
+  const [inspected, setInspected] = useState<string[]>([]);
 
+  const reconstruction: DemoReconstruction | null = useMemo(() => {
+    if (!chart) return null;
+    try {
+      return reconstructDemoClinicalContext(chart.projection, chart.renalObservations || []);
+    } catch {
+      // Never fabricate or partially reconstruct a chart with missing evidence.
+      return null;
+    }
+  }, [chart]);
   const renal = useMemo(() => renalEvidence(chart), [chart]);
   const bp = useMemo(() => chart ? observedBloodPressure(chart) : null, [chart]);
 
@@ -118,6 +133,8 @@ export function DemoClinicianReviewClient() {
         throw new Error('DEMO_IDENTITY_MISMATCH');
       }
       setChart(payload);
+      setComparison('fragments');
+      setInspected([]);
       setTab('intelligence');
     } catch {
       setError('Clinician access or chart loading failed. Verify the DEMO physician account and protected preview permissions.');
@@ -130,6 +147,8 @@ export function DemoClinicianReviewClient() {
 
   async function endReview() {
     setChart(null);
+    setComparison('fragments');
+    setInspected([]);
     setTab('intelligence');
     setPassword('');
     setError('');
@@ -265,6 +284,7 @@ export function DemoClinicianReviewClient() {
               {([
                 ['intelligence', 'Intelligence overview', BrainCircuit],
                 ['evidence', 'Source provenance', GitBranch],
+                ['review', 'Clinician review checklist', ClipboardCheck],
                 ['record', 'Supporting Patient 360', BookOpenCheck],
               ] as const).map(([key, label, Icon]) => (
                 <button type="button" key={key} onClick={() => setTab(key)}
@@ -279,6 +299,97 @@ export function DemoClinicianReviewClient() {
 
             {tab === 'intelligence' && (
               <div className="space-y-6">
+                <section className="rounded-2xl border border-slate-700 bg-slate-900 p-6 md:p-8">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-widest text-cyan-300">
+                        The problem / fragmented records to clinical context
+                      </p>
+                      <h2 className="mt-2 text-2xl font-semibold">A clinician needs the story, not five disconnected record views.</h2>
+                      <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
+                        This simulation separates the same authorized synthetic chart into its
+                        original record categories, then reconstructs a chronological context
+                        with source IDs and explicit uncertainty. It is not a live third-party EHR integration.
+                      </p>
+                    </div>
+                    {reconstruction && (
+                      <span className="rounded-full border border-cyan-800 bg-cyan-950/40 px-3 py-2 text-xs text-cyan-200">
+                        {reconstruction.totalFacts} linked synthetic facts · {reconstruction.sourceGroups.length} categories
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-5 flex flex-wrap gap-2" role="group" aria-label="Compare the same source facts">
+                    <button type="button" onClick={() => setComparison('fragments')}
+                      aria-pressed={comparison === 'fragments'}
+                      className={comparison === 'fragments'
+                        ? 'rounded-lg bg-white px-4 py-2 text-sm font-bold text-slate-950'
+                        : 'rounded-lg border border-slate-600 bg-slate-800 px-4 py-2 text-sm text-slate-200'}>
+                      Before · source categories
+                    </button>
+                    <button type="button" onClick={() => setComparison('context')}
+                      aria-pressed={comparison === 'context'}
+                      className={comparison === 'context'
+                        ? 'rounded-lg bg-cyan-300 px-4 py-2 text-sm font-bold text-slate-950'
+                        : 'rounded-lg border border-slate-600 bg-slate-800 px-4 py-2 text-sm text-slate-200'}>
+                      With G-HIMS · reconstructed context
+                    </button>
+                  </div>
+                  {!reconstruction ? (
+                    <p className="mt-5 rounded-lg border border-rose-600/50 p-4 text-sm text-rose-200">
+                      Verified source records are incomplete or inconsistent. Context reconstruction is withheld.
+                    </p>
+                  ) : comparison === 'fragments' ? (
+                    <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      {reconstruction.sourceGroups.map(group => (
+                        <div key={group.id} className="rounded-xl border border-slate-700 bg-slate-950/50 p-4">
+                          <p className="text-sm font-bold">{group.label}</p>
+                          <p className="mt-1 text-xs text-slate-400">{group.sourceDescription}</p>
+                          <p className="mt-3 text-2xl font-semibold text-cyan-300">{group.facts.length}</p>
+                          <p className="mt-1 text-xs text-slate-400">Linked source records</p>
+                          <p className="mt-3 text-xs text-slate-300">{group.facts.slice(0, 2).map(item => item.label).join(' · ') || 'No records'}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="mt-5 grid gap-4 lg:grid-cols-[1.5fr_1fr]">
+                      <div className="rounded-xl border border-cyan-800/60 bg-slate-950/60 p-5">
+                        <h3 className="text-base font-bold text-cyan-200">Chronological evidence chain</h3>
+                        <ol className="mt-4 space-y-3">
+                          {reconstruction.chronology.slice(0, 12).map(item => (
+                            <li key={item.id} className="border-l-2 border-cyan-700 pl-3">
+                              <p className="text-xs font-medium text-white">{item.label} · {item.value}</p>
+                              <p className="mt-1 text-[11px] text-slate-400">
+                                {item.recordedAt ? dateLabel(item.recordedAt) : 'Date not recorded'}
+                                {' · '}{item.collection}/{item.evidenceId}
+                              </p>
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                      <div className="rounded-xl border border-amber-700/50 bg-amber-950/10 p-5">
+                        <h3 className="text-base font-bold text-amber-200">What remains uncertain?</h3>
+                        <ul className="mt-3 space-y-3">
+                          {reconstruction.reviewGaps.map(gap => (
+                            <li key={gap.id} className="border-b border-slate-800 pb-3 last:border-none">
+                              <p className="text-xs font-semibold text-slate-100">{gap.label}</p>
+                              <p className="mt-1 text-xs leading-5 text-slate-400">{gap.explanation}</p>
+                            </li>
+                          ))}
+                        </ul>
+                        <button onClick={() => setTab('review')} type="button"
+                          className="mt-3 text-xs font-semibold text-cyan-300">
+                          Inspect the reviewer checklist →
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {reconstruction && comparison === 'fragments' && (
+                    <button type="button" onClick={() => setComparison('context')}
+                      className="mt-5 inline-flex items-center gap-2 rounded-lg bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950">
+                      Reconstruct the clinical context <ArrowRight className="h-4 w-4" />
+                    </button>
+                  )}
+                </section>
                 <section className="grid gap-4 xl:grid-cols-[1.65fr_1fr]">
                   <div className="rounded-2xl border border-cyan-800/70 bg-gradient-to-br from-slate-900 via-slate-900 to-cyan-950/50 p-6 md:p-8">
                     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -434,6 +545,57 @@ export function DemoClinicianReviewClient() {
                   className="inline-flex items-center gap-2 text-sm font-semibold text-cyan-300">
                   <ArrowRight className="h-4 w-4 rotate-180" /> Back to Intelligence overview
                 </button>
+              </section>
+            )}
+
+            {tab === 'review' && (
+              <section className="space-y-5 rounded-2xl border border-slate-700 bg-slate-900 p-6">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-widest text-cyan-300">Governance / evaluation</p>
+                  <h2 className="mt-2 text-2xl font-semibold">Clinician evidence-review checklist</h2>
+                  <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
+                    A review exercise, not an authoritative clinical decision. Marks are held
+                    only in this browser view and are never written to Firestore or counted as
+                    external clinical validation.
+                  </p>
+                </div>
+                {!reconstruction ? (
+                  <p className="text-sm text-rose-200">Source verification incomplete. Review is unavailable.</p>
+                ) : (
+                  <>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {[
+                        { id: 'source', title: 'Inspect dated source records', description: 'Check lab source IDs, units, dates, and LOINC codes.' },
+                        { id: 'context', title: 'Reconstruct the chronology', description: 'Compare the prior visit, prescriptions, observations, and current encounter.' },
+                        { id: 'uncertainty', title: 'Inspect uncertainty and missing information', description: 'Confirm gaps are not falsely presented as normal clinical findings.' },
+                        { id: 'governance', title: 'Check clinical authority boundary', description: 'No warnings, treatment recommendations, prescriptions, or signed notes are issued.' },
+                      ].map(task => (
+                        <label key={task.id} className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-700 bg-slate-950/50 p-4">
+                          <input type="checkbox" checked={inspected.includes(task.id)}
+                            onChange={e => setInspected(current =>
+                              e.target.checked ? [...current, task.id] : current.filter(id => id !== task.id))}
+                            className="mt-1 h-4 w-4 accent-cyan-400" />
+                          <span>
+                            <span className="block text-sm font-semibold">{task.title}</span>
+                            <span className="mt-1 block text-xs leading-5 text-slate-400">{task.description}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                    <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-4">
+                      <p className="text-sm font-semibold">Inspected in this browser: {inspected.length}/4</p>
+                      <p className="mt-2 text-xs text-amber-200">
+                        {inspected.length === 4
+                          ? 'All review-exercise steps inspected. This is not clinician sign-off or clinical study evidence.'
+                          : 'The review exercise is incomplete; no approval has been recorded.'}
+                      </p>
+                    </div>
+                    <button onClick={() => { setInspected([]); setTab('intelligence'); }} type="button"
+                      className="rounded-lg border border-slate-600 px-4 py-2 text-xs font-semibold">
+                      Reset exercise and return to the intelligence overview
+                    </button>
+                  </>
+                )}
               </section>
             )}
 

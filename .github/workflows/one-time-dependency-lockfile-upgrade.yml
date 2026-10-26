@@ -1,0 +1,51 @@
+name: One-time verified dependency lockfile remediation
+
+on:
+  push:
+    branches:
+      - feat/official-clinical-intelligence-website-20261027
+
+permissions:
+  contents: write
+
+jobs:
+  upgrade:
+    name: Regenerate authoritative npm v3 lockfile for patched runtime dependencies
+    if: github.repository == 'irtizah738/G-HIMS-AI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Generate reviewed patched Next and Zod dependency graph
+        run: |
+          set -euo pipefail
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund --save-exact next@16.4.1 zod@4.6.6
+          node <<'NODE'
+          const fs = require('node:fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const lock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));
+          if (lock.lockfileVersion !== 3 || pkg.dependencies.next !== '16.4.1' || pkg.dependencies.zod !== '4.6.6') process.exit(1);
+          if (lock.packages['node_modules/next']?.version !== '16.4.1' || lock.packages['node_modules/zod']?.version !== '4.6.6') process.exit(1);
+          if (JSON.stringify(lock.packages[''].dependencies) !== JSON.stringify(pkg.dependencies)) process.exit(1);
+          if (lock.packages['node_modules/source-map-js']?.version !== '1.2.2') process.exit(1);
+          console.log('PATCHED_DEPENDENCY_MANIFEST_AND_LOCK=PASS');
+          NODE
+          git diff --check
+      - name: Commit only generated manifest and lockfile on feature branch
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- package.json package-lock.json; then
+            echo "Already fully patched; no update required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git diff --cached --name-only
+          git commit -m "fix(deps): lock patched Next.js and Zod security releases"
+          git push origin "HEAD:refs/heads/${GITHUB_REF_NAME}"

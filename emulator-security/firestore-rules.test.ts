@@ -110,11 +110,11 @@ beforeAll(async () => {
       mrn: 'LEGACY',
     });
   });
-});
+}, 120_000);
 
 afterAll(async () => {
-  await testEnv.cleanup();
-});
+  if (testEnv) await testEnv.cleanup();
+}, 60_000);
 
 describe('Firestore P0 tenant isolation and server-authoritative writes', () => {
   test('anonymous user cannot read tenant patient PHI', async () => {

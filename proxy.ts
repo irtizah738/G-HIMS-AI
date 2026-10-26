@@ -19,21 +19,7 @@ const RESERVED_ROUTES = new Set([
   'settings',
   'tenant-selection',
   'dashboard',
-  'products',
-  'solutions',
-  'technology',
-  'research',
-  'company',
-  'resources',
-  'contact',
-  'privacy',
-  'terms',
   '_not-found',
-]);
-
-const PUBLIC_SITE_ROUTES = new Set([
-  'products', 'solutions', 'technology', 'research', 'company',
-  'resources', 'contact', 'privacy', 'terms',
 ]);
 
 function runtimeMode(): string {
@@ -73,10 +59,6 @@ function buildContentSecurityPolicy(nonce: string, hostname: string): string {
 
 function resolveRoutingTenant(request: NextRequest): string | null {
   const { pathname } = request.nextUrl;
-  // Public corporate pages must never be treated as tenant identifiers, even
-  // when a staff user has a pre-existing tenant cookie or a tenant subdomain.
-  const firstPathSegment = pathname.split('/')[1]?.toLowerCase();
-  if (PUBLIC_SITE_ROUTES.has(firstPathSegment)) return null;
   const hostname = request.headers.get('host') || '';
 
   const hostParts = hostname.split('.');

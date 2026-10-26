@@ -110,10 +110,10 @@ beforeAll(async () => {
       mrn: 'LEGACY',
     });
   });
-}, 120_000);
+});
 
 afterAll(async () => {
-  if (testEnv) await testEnv.cleanup();
+  await testEnv.cleanup();
 });
 
 describe('Firestore P0 tenant isolation and server-authoritative writes', () => {

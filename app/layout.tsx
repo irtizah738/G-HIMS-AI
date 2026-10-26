@@ -18,10 +18,6 @@ export const metadata: Metadata = {
       'Evidence-linked clinical intelligence. A clearer patient picture with clinicians in control.',
     siteName: 'G-HIMS AI',
   },
-  robots: {
-    index: true,
-    follow: true,
-  },
 };
 
 export default async function RootLayout({

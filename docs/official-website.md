@@ -1,56 +1,42 @@
-# Official G-HIMS AI website
+# Official G-HIMS corporate website
 
-The root URL (`/`) serves the public Clinical Intelligence website to visitors.
-When an authorized hospital session is restored, that same URL continues to show
-the pre-existing `AuthGuard` + `TenantDashboard` application. This is intentional:
-do **not** replace or bypass staff authentication for marketing traffic.
+G-HIMS is the official parent brand and corporate website. Its flagship
+product is G-HIMS CI, integrating longitudinal patient context and
+clinician-reviewable intelligence with existing hospital systems. G-HIMS OS is
+the native event-driven hospital operating platform.
 
-## Positioning
+## Public routes
+Home (/); product pages (/products/clinical-intelligence and
+/products/hospital-os); hospital solutions (/solutions); technology
+(/technology); research (/research); company (/company); resources
+(/resources); contact (/contact); privacy (/privacy); terms (/terms);
+metadata (/robots.txt, /sitemap.xml, /icon.svg).
 
-- **G-HIMS Clinical Intelligence** is the flagship offer: source-linked patient
-  context, longitudinal changes and clinician-reviewed summaries.
-- **G-HIMS OS** is the event-driven native foundation; hospitals can explore
-  Clinical Intelligence without first replacing their existing systems.
-- No clinical approval, regulatory clearance, live deployment or measured
-  patient outcome is claimed by this website.
-- The product visualization is explicitly illustrative, not sourced from a
-  patient, synthetic validation cohort or live clinical environment.
+These public paths are excluded from tenant resolution in proxy.ts. The root
+route retains the original authenticated dashboard behind its existing
+AuthGuard. Marketing components must not import Firebase or call clinical APIs.
 
-## Public enquiry configuration
+## Publishing prerequisites
+- Configure the non-secret NEXT_PUBLIC_GHIMS_CONTACT_EMAIL with a verified
+  monitored official inbox before external hospital outreach. No personal
+  patient records should be sent via generic marketing email.
+- Have appropriate institutional owners and legal counsel approve public
+  privacy, legal, data retention, provider and jurisdiction disclosures.
+- Do not invent customer logos, clinicians, study results, compliance badges,
+  regulatory approvals, or testimonials.
+- Change the canonical site URL only after verifying the official domain.
+- Keep the established vercel.json manual-release policy. Do not enable
+  automatic Git deployments before Preview isolation is qualified.
 
-Set the non-secret deployment variable:
+## Tests
+- bun test tests/official-website-routing.test.ts
+- bun run typecheck
+- bun run lint
+- bun run build
+- bun run test:e2e with browser tooling available
+- Preserve all existing security, clinical, tenant and recovery gates.
 
-```env
-NEXT_PUBLIC_GHIMS_CONTACT_EMAIL=your-verified-company-inbox@example.com
-```
-
-Use an official inbox owned and monitored by G-HIMS. Do **not** use a personal
-clinical sign-in email or a fake address. The public pilot CTA uses a direct
-`mailto:` link **only** when this variable is configured with a plausible
-email address. Otherwise it offers a working educational anchor rather than a
-broken contact form or invented booking link. This is a deployment task before
-using the website for active pilot outreach.
-
-## Release checks
-
-1. `bun test tests/official-website-routing.test.ts`
-2. `bun run typecheck`
-3. `bun run lint`
-4. `bun run build`
-5. Browser review: desktop/mobile, light/dark user preference, keyboard navigation.
-6. Anonymous `/` shows public site; existing authorized session `/` shows
-   guarded dashboard; staff `/login` and tenant switching continue working.
-7. Verify all clinical API, tenant isolation and offline continuity gates remain
-   unchanged. Do not merge if these regress.
-
-## Deployment notes
-
-The official public domain has not been specified. Do not configure DNS, public
-contact information, external analytics, tracking or production deployment
-until separately approved. No marketing interactions persist clinical or
-personal data.
-
-Longer term, consider separate `www` and `app` origins for simpler SEO,
-less Firebase bootstrapping for anonymous traffic, and stronger isolation.
-That split is a separate architectural change and is **not** necessary to
-review this contained landing-page PR.
+## Follow-up architecture
+A separate public www origin and authenticated app origin would simplify
+provider bootstrapping, SEO and clinical isolation, but is a separate migration.
+No clinical authorization or session guards were removed in this project.

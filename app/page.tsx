@@ -1,10 +1,23 @@
 'use client';
 
 import React from 'react';
+import dynamic from 'next/dynamic';
 import { useAuth } from '@/lib/auth/auth-context';
 import { AuthGuard } from '@/components/auth/auth-guard';
-import { TenantDashboard } from '@/components/tenant-dashboard';
 import { ClinicalIntelligenceLanding } from '@/components/marketing/clinical-intelligence-landing';
+
+// Keep the large clinical application out of the anonymous marketing bundle.
+const TenantDashboard = dynamic(
+  () => import('@/components/tenant-dashboard').then((module) => module.TenantDashboard),
+  {
+    ssr: false,
+    loading: () => (
+      <div role="status" className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-sm font-medium text-slate-200">
+        Opening your hospital workspace…
+      </div>
+    ),
+  }
+);
 
 /**
  * The public URL is the official website for visitors.

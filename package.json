@@ -204,14 +204,14 @@
     "jsqr": "^1.4.0",
     "lucide-react": "^0.475.0",
     "motion": "^12.43.0",
-    "next": "16.3.8",
+    "next": "16.4.1",
     "qrcode.react": "^4.2.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-markdown": "^9.1.0",
     "recharts": "^2.15.4",
     "tailwind-merge": "^3.7.0",
-    "zod": "^3.25.76"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

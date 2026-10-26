@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 import {
   Activity,
@@ -45,7 +46,7 @@ const capabilities = [
   },
 ] as const;
 
-const process = [
+const workflowSteps = [
   {
     number: '01',
     title: 'Connect clinical sources',
@@ -94,7 +95,7 @@ function Brand({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
+function SectionLabel({ children }: { children: ReactNode }) {
   return (
     <div className="mb-5 flex items-center gap-3 text-[11px] font-bold uppercase tracking-[0.2em] text-sky-300">
       <span aria-hidden="true" className="h-px w-7 bg-sky-400" />
@@ -306,7 +307,7 @@ export function ClinicalIntelligenceLanding() {
               <p className="max-w-sm text-sm leading-7 text-slate-400">A governed workflow designed to support clinical reasoning, not replace professional judgment.</p>
             </div>
             <div className="mt-12 grid gap-5 md:grid-cols-2 lg:grid-cols-4">
-              {process.map((step) => (
+              {workflowSteps.map((step) => (
                 <div key={step.number} className="relative border-l border-sky-400/40 pl-5">
                   <div className="text-xs font-bold tracking-widest text-sky-300">{step.number}</div>
                   <h3 className="mt-5 text-lg font-semibold leading-snug text-white">{step.title}</h3>

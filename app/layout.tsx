@@ -7,9 +7,21 @@ import { SystemInitializer } from '@/components/common/SystemInitializer';
 import { AppProviders } from '@/components/providers/app-providers';
 
 export const metadata: Metadata = {
-  title: 'G-HIMS OS | Hospital Information System',
+  title: 'G-HIMS AI | Clinical Intelligence for Hospitals',
   description:
-    'Programmable Healthcare + Enterprise Operating System unifying clinical EMR workflows, protocol engines, immutable event store, SAP-style double-entry ERP General Ledger, HCM clinical privileges, diagnostic LIS/RIS, offline-first runtime, and ambient AI intelligence.',
+    'G-HIMS Clinical Intelligence connects longitudinal patient context, clinical trends and source-linked evidence for clinician review. Built to work with existing hospital systems or the event-driven G-HIMS OS.',
+  applicationName: 'G-HIMS AI',
+  openGraph: {
+    type: 'website',
+    title: 'G-HIMS AI | Clinical Intelligence for Hospitals',
+    description:
+      'Evidence-linked clinical intelligence. A clearer patient picture with clinicians in control.',
+    siteName: 'G-HIMS AI',
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
 };
 
 export default async function RootLayout({
@@ -36,4 +48,3 @@ export default async function RootLayout({
     </html>
   );
 }
-

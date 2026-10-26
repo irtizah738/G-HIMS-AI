@@ -13,6 +13,8 @@ describe('Official G-HIMS AI website and application boundaries', () => {
     expect(page).toContain('<ClinicalIntelligenceLanding />');
     expect(page).toContain('<AuthGuard>');
     expect(page).toContain('<TenantDashboard />');
+    expect(page).toContain('dynamic(');
+    expect(page).toContain('ssr: false');
     expect(page).not.toContain('signIn(');
     expect(page).not.toContain('fetch(');
   });

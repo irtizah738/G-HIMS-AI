@@ -1,9 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "git": {
-    "deploymentEnabled": {
-      "**": false,
-      "feat/official-clinical-intelligence-website-20261027": true
-    }
+    "deploymentEnabled": false
   }
 }

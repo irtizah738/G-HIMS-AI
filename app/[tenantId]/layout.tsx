@@ -1,4 +1,5 @@
 import React from 'react';
+import type { Metadata } from 'next';
 import { TenantProvider } from '@/lib/tenant/context';
 import { RbacProvider } from '@/lib/auth/rbac-context';
 import { TenantShellHeader } from '@/components/tenant/tenant-shell-header';
@@ -11,6 +12,9 @@ interface TenantLayoutProps {
     tenantId: string;
   }>;
 }
+
+// Clinical and tenant-specific routes must never appear in public search results.
+export const metadata: Metadata = { robots: { index: false, follow: false } };
 
 export const dynamic = 'force-dynamic';
 

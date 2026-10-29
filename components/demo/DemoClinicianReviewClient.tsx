@@ -8,6 +8,7 @@ import {
   ShieldCheck, Stethoscope, TrendingUp,
 } from 'lucide-react';
 import { auth } from '@/lib/firebase/client';
+import { HelixisDemoBrandMark } from './HelixisDemoBrandMark';
 import { Patient360View } from '@/components/patient360/Patient360View';
 import type { Patient360ClinicalView } from '@/lib/clinical/patient360/patient360-client';
 import type { Patient360Projection, Patient360EncounterSummary } from '@/types/patient360-projection';
@@ -178,18 +179,10 @@ export function DemoClinicianReviewClient() {
   } : null;
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="border-b border-slate-800 bg-slate-950">
+    <main className="min-h-screen bg-[#0B132B] text-[#F8F9FA]">
+      <div className="border-b border-slate-800 bg-[#0B132B]">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-5 py-4 md:px-8">
-          <div className="flex items-center gap-3">
-            <div className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 p-2 text-cyan-300">
-              <BrainCircuit className="h-6 w-6" />
-            </div>
-            <div>
-              <p className="text-[10px] font-extrabold uppercase tracking-[.23em] text-cyan-300">G-HIMS</p>
-              <p className="text-sm font-semibold">Clinical Intelligence</p>
-            </div>
-          </div>
+          <HelixisDemoBrandMark />
           <div className="flex flex-wrap items-center gap-3 text-xs">
             <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 font-semibold text-amber-200">
               SYNTHETIC · NOT CLINICALLY VALIDATED
@@ -211,10 +204,10 @@ export function DemoClinicianReviewClient() {
               <Activity className="h-3.5 w-3.5" /> Evidence-first clinical workspace
             </div>
             <h1 className="max-w-3xl text-3xl font-bold leading-tight tracking-tight sm:text-4xl lg:text-5xl">
-              See what changed.<br /><span className="text-cyan-300">Follow the evidence.</span>
+              See what changed.<br /><span className="text-[#00F5D4]">Follow the evidence.</span>
             </h1>
             <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-300">
-              G-HIMS Clinical Intelligence is designed to turn longitudinal hospital
+              Helixis Clinical Intelligence is designed to turn longitudinal hospital
               data into explainable, clinician-governed review. The underlying EHR is
               supporting evidence—not the product homepage.
             </p>
@@ -331,7 +324,7 @@ export function DemoClinicianReviewClient() {
                       className={comparison === 'context'
                         ? 'rounded-lg bg-cyan-300 px-4 py-2 text-sm font-bold text-slate-950'
                         : 'rounded-lg border border-slate-600 bg-slate-800 px-4 py-2 text-sm text-slate-200'}>
-                      With G-HIMS · reconstructed context
+                      With Helixis · reconstructed context
                     </button>
                   </div>
                   {!reconstruction ? (
@@ -492,7 +485,7 @@ export function DemoClinicianReviewClient() {
                     <h2 className="mt-3 text-xl font-semibold">Evidence, not a black box</h2>
                     <p className="mt-2 text-sm leading-6 text-slate-300">
                       The source measurements, laboratory identifiers, timestamps and
-                      Patient 360 revision remain inspectable. The event-driven G-HIMS OS
+                      Patient 360 revision remain inspectable. The event-driven Helixis Health Platform
                       is the underlying infrastructure—not something a hospital must replace its EHR to adopt.
                     </p>
                     <div className="mt-5 flex flex-wrap gap-2 text-[11px] text-slate-300">
@@ -527,7 +520,7 @@ export function DemoClinicianReviewClient() {
                 </section>
                 <button type="button" onClick={() => setTab('record')}
                   className="inline-flex items-center gap-2 rounded-xl border border-slate-600 bg-slate-900 px-5 py-3 text-sm font-semibold text-slate-100 hover:border-cyan-500">
-                  <BookOpenCheck className="h-4 w-4 text-cyan-300" /> Open the supporting G-HIMS AI Patient 360
+                  <BookOpenCheck className="h-4 w-4 text-cyan-300" /> Open the supporting Helixis AI Patient 360
                   <ArrowRight className="h-4 w-4" />
                 </button>
               </div>
@@ -631,9 +624,9 @@ export function DemoClinicianReviewClient() {
               <section className="space-y-4">
                 <div className="rounded-xl border border-slate-700 bg-slate-900 p-5">
                   <p className="text-xs font-bold uppercase tracking-widest text-cyan-300">Supporting hospital record</p>
-                  <h2 className="mt-2 text-xl font-semibold">Native G-HIMS AI Patient 360</h2>
+                  <h2 className="mt-2 text-xl font-semibold">Native Helixis AI Patient 360</h2>
                   <p className="mt-2 text-sm text-slate-300">
-                    This is the actual Patient 360 component from the G-HIMS AI codebase,
+                    This is the actual Patient 360 component from the Helixis AI codebase,
                     using the same authenticated synthetic projection. Read-only authority
                     applies; clinical commands, AI generation and note signing remain unavailable.
                   </p>
@@ -647,7 +640,7 @@ export function DemoClinicianReviewClient() {
           </>
         )}
         <footer className="border-t border-slate-800 pt-5 text-xs leading-5 text-slate-500">
-          G-HIMS Clinical Intelligence · Synthetic, isolated DEMO · Clinicians retain authority.
+          Helixis Clinical Intelligence · Synthetic, isolated DEMO · Clinicians retain authority.
           <span className="ml-2">No real patient data or validated clinical advice is presented.</span>
         </footer>
       </div>

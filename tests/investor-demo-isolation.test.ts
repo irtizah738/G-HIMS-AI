@@ -258,6 +258,11 @@ describe('G-HIMS AI investor demo target isolation', () => {
     expect(ui).toContain('Helixis Clinical Intelligence');
     expect(ui).toContain('Helixis Health Platform');
     expect(ui).toContain('With Helixis · reconstructed context');
+    expect(ui).toContain('Helixis AI · Verified isolated DEMO environment · Synthetic source data only');
+    expect(ui).not.toContain('Project g-hims-ci-demo');
+    expect(ui).not.toContain('Tenant {chart.tenantId}');
+    expect(ui).toContain('chart.projection.sourceCheckpoint');
+    expect(ui).toContain("payload.tenantId !== 'central-metro-hospital'");
     expect(ui).not.toContain('G-HIMS');
     expect(mark).toContain('Helixis AI Clinical Intelligence');
     expect(mark).toContain('Clinical Intelligence');

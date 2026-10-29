@@ -558,7 +558,7 @@ export function DemoClinicianReviewClient() {
                     <p className="text-sm font-semibold">Canonical Patient 360 checkpoint</p>
                     <p className="mt-2 break-all font-mono text-xs text-slate-400">{chart.projection.sourceCheckpoint}</p>
                     <p className="mt-2 text-xs text-slate-400">
-                      Project g-hims-ci-demo · Tenant {chart.tenantId} · Synthetic source data only
+                      Helixis AI · Verified isolated DEMO environment · Synthetic source data only
                     </p>
                   </div>
                 </div>

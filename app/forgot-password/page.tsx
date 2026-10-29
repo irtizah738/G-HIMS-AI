@@ -3,7 +3,8 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth/auth-context';
-import { Mail, ArrowLeft, CheckCircle2, ActivitySquare, ShieldCheck, AlertCircle } from 'lucide-react';
+import { Mail, ArrowLeft, CheckCircle2, ShieldCheck, AlertCircle } from 'lucide-react';
+import { HelixisMark } from '@/components/branding/HelixisMark';
 
 export default function ForgotPasswordPage() {
   const { sendPasswordReset } = useAuth();
@@ -40,12 +41,12 @@ export default function ForgotPasswordPage() {
       {/* Header Bar */}
       <header className="border-b border-slate-800/80 bg-slate-900/40 backdrop-blur px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
-            <ActivitySquare className="w-5 h-5 text-white" />
+          <div className="w-9 h-9 rounded-xl bg-[#0B132B] border border-[#48CAE4]/40 flex items-center justify-center shadow-lg">
+            <HelixisMark className="w-7 h-7" />
           </div>
           <div>
             <div className="font-bold text-sm tracking-tight text-white flex items-center gap-2">
-              G-HIMS OS
+              Helixis AI
               <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
                 v2026.1 Enterprise
               </span>
@@ -147,7 +148,7 @@ export default function ForgotPasswordPage() {
       </main>
 
       <footer className="border-t border-slate-800/80 bg-slate-900/30 px-6 py-3 text-center text-xs text-slate-400">
-        G-HIMS Security & Recovery System &bull; Zero-Enumeration Protection Active
+        Helixis AI Security & Recovery &bull; Zero-Enumeration Protection Active
       </footer>
     </div>
   );

@@ -136,7 +136,7 @@ export default function BillingTariffAuthorityPage({ params }: PageProps) {
           <div>
             <p className="font-black">Required before OPD registration billing can complete</p>
             <p className="mt-2 leading-relaxed">
-              Registration creates a consultation invoice immediately. G-HIMS therefore
+              Registration creates a consultation invoice immediately. Helixis Health Platform therefore
               refuses to invent a price, currency, tax rate or revenue account. Configure
               those values once for this tenant before retrying registration.
             </p>

@@ -1,9 +1,18 @@
+import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { getRuntimeMode } from '@/lib/runtime/runtime-mode';
 import { getPublicRuntimeMode } from '@/lib/runtime/environment-contract';
 import { DemoClinicianReviewClient } from '@/components/demo/DemoClinicianReviewClient';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = {
+  title: 'Helixis Clinical Intelligence | Synthetic Investor Demo',
+  description: 'Explore an isolated, synthetic, clinician-governed Clinical Intelligence demonstration from Helixis AI.',
+  robots: { index: false, follow: false },
+};
+
+
 
 export default function DemoClinicianReviewPage() {
   if (

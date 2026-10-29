@@ -38,9 +38,9 @@ describe('Helixis AI brand surface and infrastructure boundary', () => {
     };
     for (const [path, requiredLabel] of Object.entries(checks)) {
       const source = read(path);
-      expect(source, path).toContain(requiredLabel);
-      expect(source, path).not.toContain('G-HIMS OS');
-      expect(source, path).not.toContain('Sign In to G-HIMS');
+      expect(source).toContain(requiredLabel);
+      expect(source).not.toContain('G-HIMS OS');
+      expect(source).not.toContain('Sign In to G-HIMS');
     }
   });
 

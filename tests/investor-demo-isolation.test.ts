@@ -228,7 +228,7 @@ describe('G-HIMS AI investor demo target isolation', () => {
     const tests = await readFile('tests/demo-clinical-context.test.ts', 'utf8');
     expect(ui).toContain('Reconstruct the clinical context');
     expect(ui).toContain('Before · source categories');
-    expect(ui).toContain('With G-HIMS · reconstructed context');
+    expect(ui).toContain('With Helixis · reconstructed context');
     expect(ui).toContain('What remains uncertain?');
     expect(ui).toContain('reconstruction.chronology.slice(0, 12)');
     expect(ui).toContain("setComparison('fragments')");
@@ -246,6 +246,33 @@ describe('G-HIMS AI investor demo target isolation', () => {
     expect(tests).toContain("rejects forged source IDs, non-final labs and nonnumeric measurements");
     expect(ui).not.toContain('signClinicalNote(');
     expect(ui).not.toContain('approveClinicalDraft(');
+  });
+
+  test('Helixis investor brand is display-only and preserves synthetic demo guardrails', async () => {
+    const ui = await readFile('components/demo/DemoClinicianReviewClient.tsx', 'utf8');
+    const mark = await readFile('components/demo/HelixisDemoBrandMark.tsx', 'utf8');
+    const entry = await readFile('app/clinical-intelligence-demo/page.tsx', 'utf8');
+    const clinicianEntry = await readFile('app/clinical-intelligence-demo/clinician-review/page.tsx', 'utf8');
+
+    expect(ui).toContain('HelixisDemoBrandMark');
+    expect(ui).toContain('Helixis Clinical Intelligence');
+    expect(ui).toContain('Helixis Health Platform');
+    expect(ui).toContain('With Helixis · reconstructed context');
+    expect(ui).not.toContain('G-HIMS');
+    expect(mark).toContain('Helixis AI Clinical Intelligence');
+    expect(mark).toContain('Clinical Intelligence');
+    expect(mark).toContain('#0B132B');
+    expect(mark).toContain('#48CAE4');
+    expect(mark).toContain('#00F5D4');
+    expect(ui).toContain('SYNTHETIC · NOT CLINICALLY VALIDATED');
+    expect(ui).toContain('signInWithEmailAndPassword');
+    expect(ui).toContain('demoReadOnlyView={nativeClinicalView}');
+    for (const page of [entry, clinicianEntry]) {
+      expect(page).toContain('Helixis Clinical Intelligence | Synthetic Investor Demo');
+      expect(page).toContain('robots: { index: false, follow: false }');
+      expect(page).toContain("process.env.VERCEL_ENV !== 'preview'");
+      expect(page).toContain("process.env.FIREBASE_PROJECT_ID !== 'g-hims-ci-demo'");
+    }
   });
 
   test('investor first screen is Clinical Intelligence, with Patient360 secondary and write actions disabled', async () => {

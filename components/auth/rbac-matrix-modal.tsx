@@ -134,7 +134,7 @@ export function RbacMatrixModal() {
             </div>
             <div>
               <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                G-HIMS Role-Based Access Control (RBAC) Architecture
+                Helixis Health Platform • Role-Based Access Control (RBAC)
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 Formal privilege matrix, module gating, and CRUD authority across 6 organizational tiers
@@ -374,7 +374,7 @@ export function RbacMatrixModal() {
                   <Sliders className="w-4 h-4 text-blue-600" /> Real-Time Zero-Trust Authorization Evaluation
                 </h4>
                 <p className="text-blue-800/90 dark:text-blue-300">
-                  Select a hospital operation below to verify how the G-HIMS authorization engine evaluates privileges for your current role (<strong className="underline">{ROLE_DEFINITIONS[currentRole].displayName}</strong>).
+                  Select a hospital operation below to verify how the Helixis authorization engine evaluates privileges for your current role (<strong className="underline">{ROLE_DEFINITIONS[currentRole].displayName}</strong>).
                 </p>
               </div>
 

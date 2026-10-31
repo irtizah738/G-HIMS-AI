@@ -5,7 +5,8 @@ import { registerPatientAndEncounter } from '@/server/runtime/registration-orche
 import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
 import { ClinicalEvidenceService } from '@/lib/clinical/intelligence/clinical-evidence-service';
 import { clinicalDraftContentHash } from '@/lib/clinical/intelligence/clinical-draft-lifecycle';
-import { CLINICAL_SAFETY_POLICY_VERSION } from '@/types/clinical-intelligence-safety';
+import { CLINICAL_AI_BOUNDARY_VERSION, CLINICAL_SAFETY_POLICY_VERSION } from '@/types/clinical-intelligence-safety';
+import { ClinicalIntelligenceSafetyEvaluator } from '@/lib/clinical/intelligence/clinical-intelligence-safety-evaluator';
 import type { CommandContext, BaseCommand } from '@/lib/backend/types';
 import type { GovernedClinicalDraft, ClinicalDraftRevision } from '@/types/clinical-draft';
 
@@ -62,6 +63,21 @@ describe('CI-10F governed draft persistence (isolated Firestore emulator)', () =
     const title = 'Synthetic SOAP draft';
     const generated = 'Synthetic source evidence; clinician must verify before signing.';
     const generatedHash = clinicalDraftContentHash(title, generated);
+    // Actual policy evaluator executes against a synthetic snapshot, without a model call.
+    // Provider allowlisting here is TEST ONLY and does not change runtime configuration.
+    const safetyEvaluation = ClinicalIntelligenceSafetyEvaluator.evaluate({
+      tenantId, patientId, purpose: 'CLINICAL_DRAFT', snapshot,
+      claims: [], renderedText: [title, generated],
+      currentPatient360Revision: projection.revision,
+      currentPatient360SourceCheckpoint: projection.sourceCheckpoint,
+      generationProvenance: {
+        provider: 'synthetic-emulator-fixture', model: 'no-model-invoked',
+        purpose: 'CLINICAL_GOVERNED_DRAFT', generatedAt,
+        safetyBoundaryVersion: CLINICAL_AI_BOUNDARY_VERSION,
+      },
+      approvedClinicalAIProviders: ['synthetic-emulator-fixture'],
+    });
+    expect(safetyEvaluation.status).toBe('PASSED');
     const base: GovernedClinicalDraft = {
       draftId, tenantId, patientId, encounterId, careSetting: 'OPD',
       draftType: 'SOAP', status: 'GENERATED_REQUIRES_REVIEW',
@@ -74,7 +90,7 @@ describe('CI-10F governed draft persistence (isolated Firestore emulator)', () =
         provider: 'synthetic-emulator-fixture', model: 'no-model-invoked',
         purpose: 'CLINICAL_GOVERNED_DRAFT', generatedAt,
       },
-      safetyEvaluationId: id('synthetic_safety_fixture'),
+      safetyEvaluationId: safetyEvaluation.evaluationId,
       safetyPolicyVersion: CLINICAL_SAFETY_POLICY_VERSION,
       safetyGateStatus: 'PASSED',
       generatedBy: 'synthetic-fixture', generatedAt,
@@ -102,6 +118,10 @@ describe('CI-10F governed draft persistence (isolated Firestore emulator)', () =
     const batch = db.batch();
     batch.create(tenant.collection('clinicalDrafts').doc(draftId), base);
     batch.create(tenant.collection('clinicalDraftRevisions').doc(revisionId), initialRevision);
+    batch.create(
+      tenant.collection('clinicalIntelligenceSafetyEvaluations').doc(safetyEvaluation.evaluationId),
+      safetyEvaluation
+    );
     await batch.commit();
 
     const issue = async (
@@ -177,6 +197,36 @@ describe('CI-10F governed draft persistence (isolated Firestore emulator)', () =
     expect(obsoleteSafetyPolicy.error?.code).toBe('CI10H_SAFETY_EVALUATION_REQUIRED');
     expect((await tenant.collection('clinicalDocuments').get()).empty).toBe(true);
     await draftRef.update({ safetyPolicyVersion: CLINICAL_SAFETY_POLICY_VERSION });
+
+    // A client cannot bypass the persisted safety record by retaining PASS flags.
+    const safetyRef = tenant.collection('clinicalIntelligenceSafetyEvaluations')
+      .doc(safetyEvaluation.evaluationId);
+    await safetyRef.update({ status: 'BLOCKED', blockerCount: 1 });
+    const blockedPersistedEvaluation = await issue('SignClinicalDraftCommand', {
+      draftId, expectedRevisionNumber: 2, signatureAttestation: true,
+    });
+    expect(blockedPersistedEvaluation.success).toBe(false);
+    expect(blockedPersistedEvaluation.error?.code).toBe('CI10H_SAFETY_EVALUATION_RECORD_INVALID');
+    expect((await tenant.collection('clinicalDocuments').get()).empty).toBe(true);
+    await safetyRef.update({ status: 'PASSED', blockerCount: 0 });
+
+    await safetyRef.update({ evidenceSnapshotHash: 'wrong-evidence-snapshot-hash' });
+    const unrelatedEvaluation = await issue('SignClinicalDraftCommand', {
+      draftId, expectedRevisionNumber: 2, signatureAttestation: true,
+    });
+    expect(unrelatedEvaluation.success).toBe(false);
+    expect(unrelatedEvaluation.error?.code).toBe('CI10H_SAFETY_EVALUATION_RECORD_INVALID');
+    expect((await tenant.collection('clinicalDocuments').get()).empty).toBe(true);
+    await safetyRef.update({ evidenceSnapshotHash: snapshot.snapshotHash });
+
+    await safetyRef.delete();
+    const missingPersistedEvaluation = await issue('SignClinicalDraftCommand', {
+      draftId, expectedRevisionNumber: 2, signatureAttestation: true,
+    });
+    expect(missingPersistedEvaluation.success).toBe(false);
+    expect(missingPersistedEvaluation.error?.code).toBe('CI10H_SAFETY_EVALUATION_RECORD_INVALID');
+    expect((await tenant.collection('clinicalDocuments').get()).empty).toBe(true);
+    await safetyRef.create(safetyEvaluation);
 
     const staleSign = await issue('SignClinicalDraftCommand', {
       draftId, expectedRevisionNumber: 1, signatureAttestation: true,

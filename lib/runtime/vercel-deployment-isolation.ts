@@ -24,15 +24,20 @@ export function assertVercelDeploymentFirebaseIsolation(
         mode === 'PRODUCTION') {
       throw new Error('VERCEL_PREVIEW_PRODUCTION_FIREBASE_BLOCKED');
     }
-    if (mode !== 'STAGING' || !stagingProject || active !== stagingProject ||
-        stagingProject === productionProject) {
-      throw new Error('VERCEL_PREVIEW_STAGING_ISOLATION_NOT_VERIFIED');
+    const demoProject = String(env.GHIMS_FIREBASE_PROJECT_ID_DEMO || '').trim();
+    const isStaging = mode === 'STAGING' && stagingProject &&
+      active === stagingProject && stagingProject !== productionProject;
+    const isDemo = mode === 'DEMO' && demoProject &&
+      active === demoProject && demoProject !== productionProject &&
+      (!stagingProject || demoProject !== stagingProject);
+    if (!isStaging && !isDemo) {
+      throw new Error('VERCEL_PREVIEW_NONPRODUCTION_ISOLATION_NOT_VERIFIED');
     }
-    // A Preview Admin credential must be project-scoped. A production
-    // service account must never be imported into a staging preview.
+    // Key-based Preview identities must belong to the selected non-production
+    // project. Keyless WIF identities require independently scoped IAM.
     const email = String(env.FIREBASE_CLIENT_EMAIL || '').trim();
-    if (email && !email.endsWith('@' + stagingProject + '.iam.gserviceaccount.com')) {
-      throw new Error('VERCEL_PREVIEW_ADMIN_IDENTITY_NOT_STAGING');
+    if (email && !email.endsWith('@' + active + '.iam.gserviceaccount.com')) {
+      throw new Error('VERCEL_PREVIEW_ADMIN_IDENTITY_NOT_ISOLATED');
     }
   }
   if (target === 'production') {

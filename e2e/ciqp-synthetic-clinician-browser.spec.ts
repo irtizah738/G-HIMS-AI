@@ -72,12 +72,32 @@ test('authenticated synthetic doctor can establish scoped session and open Patie
 
   // Browser must use the genuine Patient 360 application route, not a mocked
   // component. The route issues its own authenticated request.
+  const browserFailures: string[] = [];
+  const patientRequests: string[] = [];
+  page.on('pageerror', (error) => browserFailures.push(error.message.slice(0, 300)));
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserFailures.push(message.text().slice(0, 300));
+  });
+  page.on('response', (response) => {
+    if (response.url().includes('/api/clinical/patient360/')) {
+      patientRequests.push(`${response.status()} ${new URL(response.url()).pathname}`);
+    }
+  });
   const uiResponsePromise = page.waitForResponse((response) =>
     response.url().includes(`/api/clinical/patient360/${PATIENT}`) &&
-    response.request().method() === 'GET'
+    response.request().method() === 'GET',
+    { timeout: 25_000 }
   );
-  await page.goto(`/${TENANT}/patients/${PATIENT}/360`);
-  const uiResponse = await uiResponsePromise;
+  const uiDocument = await page.goto(`/${TENANT}/patients/${PATIENT}/360`);
+  expect(uiDocument?.status()).toBe(200);
+  let uiResponse: import('@playwright/test').Response;
+  try {
+    uiResponse = await uiResponsePromise;
+  } catch (error) {
+    const pageText = (await page.locator('body').innerText().catch(() => 'unreadable')).slice(0, 1200);
+    // No user tokens, password or patient PHI in diagnostics: synthetic page only.
+    throw new Error(`CIQP_BROWSER_PATIENT360_REQUEST_MISSING: currentURL=${page.url()} document=${uiDocument?.status()} responses=${JSON.stringify(patientRequests)} errors=${JSON.stringify(browserFailures.slice(0, 8))} page=${JSON.stringify(pageText)} cause=${String(error)}`);
+  }
   expect(uiResponse.status()).toBe(200);
   const uiPatient = await uiResponse.json();
   expect(uiPatient.patientId).toBe(PATIENT);

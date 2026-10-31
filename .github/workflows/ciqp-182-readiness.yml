@@ -70,3 +70,51 @@ jobs:
         run: npm install --no-save --package-lock=false @firebase/rules-unit-testing@5.0.2 firebase-tools@15.30.2
       - name: Synthetic policy-epoch crash/race/restore qualification (bounded)
         run: timeout --signal=TERM --kill-after=10s 600s bun run test:ciqp:emulator
+
+  patient360-timeline-recovery:
+    name: Patient 360 synthetic timeline recovery (Firestore emulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      NODE_ENV: test
+      FIREBASE_PROJECT_ID: ghims-p4-ci
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p4-ci
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+      FIRESTORE_DATABASE_ID: '(default)'
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: '(default)'
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - name: Checkout exact proposed commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Setup pinned Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install frozen dependencies
+        run: bun install --frozen-lockfile
+      - name: Setup local Firestore emulator runtime
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install local-only emulator CLI
+        run: npm install --no-save --package-lock=false firebase-tools@15.30.2
+      - name: Qualify source generation, interrupted publication, stale writers and audit exclusion
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GHIMS_RUNTIME_MODE" = TEST
+          test "$FIREBASE_PROJECT_ID" = ghims-p4-ci
+          test "$FIREBASE_PROJECT_ID" != g-hims-ai
+          test "$FIREBASE_PROJECT_ID" != studio-1130431360-48a05
+          test -z "${GOOGLE_APPLICATION_CREDENTIALS:-}"
+          timeout --signal=TERM --kill-after=10s 600s ./node_modules/.bin/firebase emulators:exec --only firestore --project ghims-p4-ci 'bun test --timeout 120000 emulator-security/ciqp-patient360-timeline.test.ts'

@@ -69,11 +69,46 @@ function canUseFirebaseEmulator(): boolean {
   return canUseFirestoreEmulator() || canUseAuthEmulator();
 }
 
+/**
+ * Cloud Shell automatically exposes Application Default Credentials without
+ * an extra personal-user login. Use the official Firebase Admin ADC
+ * implementation (required for the Firestore SDK), NEVER a custom access-token
+ * credential, and only for explicitly scoped, operator-run investor DEMO seeding.
+ */
+function canUseDemoCloudShellIdentity(): boolean {
+  return (
+    !process.env.VERCEL &&
+    process.env.GHIMS_DEMO_USE_CLOUD_SHELL_CLI === 'true' &&
+    process.env.DEVSHELL_PROJECT_ID === 'g-hims-ci-demo' &&
+    process.env.GHIMS_RUNTIME_MODE === 'DEMO' &&
+    process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO' &&
+    process.env.FIREBASE_PROJECT_ID === 'g-hims-ci-demo' &&
+    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID === 'g-hims-ci-demo' &&
+    process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO === 'g-hims-ci-demo' &&
+    process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_DEMO === 'g-hims-ci-demo' &&
+    !process.env.GOOGLE_APPLICATION_CREDENTIALS &&
+    !process.env.FIREBASE_AUTH_EMULATOR_HOST &&
+    !process.env.FIRESTORE_EMULATOR_HOST
+  );
+}
+
 function canUseApplicationDefaultCredentials(): boolean {
-  // Vercel functions do not have a local service-account JSON file unless an
-  // operator explicitly provisions one into the runtime, which G-HIMS does not do.
-  // Use FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY on Vercel.
-  return Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS) && !process.env.VERCEL;
+  // Vercel requires independently authorized hosted runtime credentials.
+  if (process.env.VERCEL) return false;
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) return true;
+
+  // Explicit demo-only path for a dedicated Google Compute Engine workload.
+  return (
+    process.env.GHIMS_DEMO_USE_VM_IDENTITY === 'true' &&
+    process.env.GHIMS_RUNTIME_MODE === 'DEMO' &&
+    process.env.NEXT_PUBLIC_GHIMS_RUNTIME_MODE === 'DEMO' &&
+    process.env.FIREBASE_PROJECT_ID === 'g-hims-ci-demo' &&
+    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID === 'g-hims-ci-demo' &&
+    process.env.GHIMS_FIREBASE_PROJECT_ID_DEMO === 'g-hims-ci-demo' &&
+    process.env.NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_DEMO === 'g-hims-ci-demo' &&
+    !process.env.FIREBASE_AUTH_EMULATOR_HOST &&
+    !process.env.FIRESTORE_EMULATOR_HOST
+  );
 }
 
 function cleanEnvString(raw: string | undefined): string {
@@ -113,7 +148,8 @@ export function hasAdminCredentials(): boolean {
 
   return Boolean(
     (clientEmail && privateKey) ||
-    canUseApplicationDefaultCredentials()
+    canUseApplicationDefaultCredentials() ||
+    canUseDemoCloudShellIdentity()
   );
 }
 
@@ -169,7 +205,10 @@ export function getAdminApp(): App | null {
     }
   }
 
-  if (canUseApplicationDefaultCredentials()) {
+  // Both Cloud Shell and genuine workload identities must use the supported
+  // Firebase Admin ADC credential. The Firestore SDK rejects custom credential
+  // objects, even if Firebase Auth accepts their getAccessToken() method.
+  if (canUseDemoCloudShellIdentity() || canUseApplicationDefaultCredentials()) {
     try {
       adminApp = initializeApp({
         credential: applicationDefault(),

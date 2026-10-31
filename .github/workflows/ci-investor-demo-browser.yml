@@ -1,0 +1,77 @@
+name: G-HIMS AI Investor Demo Emulator Smoke
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/ci-investor-demo-browser.yml'
+      - 'scripts/demo/**'
+      - 'lib/runtime/investor-demo-isolation.ts'
+      - 'lib/firebase/client.ts'
+      - 'app/[tenantId]/clinical-intelligence/**'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Synthetic patient seed, Patient 360 projection and real app screenshot
+    # This is a zero-credential, emulator-only qualification, not a hosted pilot.
+    if: github.repository == 'irtizah738/G-HIMS-AI' && github.head_ref == 'fundraising/clinical-intelligence-demo-20261025' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GHIMS_RUNTIME_MODE: DEMO
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: DEMO
+      GHIMS_DEMO_TENANT_ID: central-metro-hospital
+      GHIMS_DEMO_CONFIRM_TENANT: central-metro-hospital
+      FIREBASE_PROJECT_ID: ghims-investor-demo-2026
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-investor-demo-2026
+      GHIMS_FIREBASE_PROJECT_ID_DEMO: ghims-investor-demo-2026
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_DEMO: ghims-investor-demo-2026
+      GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: g-hims-ai
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_PRODUCTION: g-hims-ai
+      GHIMS_FIREBASE_PROJECT_ID_STAGING: studio-1130431360-48a05
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_STAGING: studio-1130431360-48a05
+      FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+      FIRESTORE_EMULATOR_HOST: 127.0.0.1:8080
+      NEXT_PUBLIC_GHIMS_DEMO_EMULATORS: 'true'
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - name: Checkout proposed PR exactly
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Install Bun 1.4.2
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Frozen dependency install
+        run: bun install --frozen-lockfile
+      - name: Install Java for isolated Firestore emulator
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install local-only Firebase emulator tooling
+        run: npm install --no-save --package-lock=false firebase-tools@15.30.2
+      - name: Install browser for real screenshot
+        run: bunx playwright install --with-deps chromium
+      - name: Seed and qualify local-only synthetic G-HIMS AI workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$FIREBASE_PROJECT_ID" != "g-hims-ai"
+          test "$FIREBASE_PROJECT_ID" != "studio-1130431360-48a05"
+          export GHIMS_DEMO_BOOTSTRAP_PASSWORD
+          GHIMS_DEMO_BOOTSTRAP_PASSWORD="$(node -e "process.stdout.write(require('node:crypto').randomBytes(24).toString('hex'))")"
+          ./node_modules/.bin/firebase emulators:exec --only auth,firestore --project ghims-investor-demo-2026 'bash scripts/demo/verify-emulated-investor-demo.sh'
+      - name: Preserve real-browser synthetic screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghims-investor-demo-synthetic-browser-${{ github.sha }}
+          path: artifacts/investor-demo/clinical-intelligence-landing-synthetic.png
+          if-no-files-found: ignore
+          retention-days: 14

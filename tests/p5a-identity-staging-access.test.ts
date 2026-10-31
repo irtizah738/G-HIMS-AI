@@ -150,7 +150,7 @@ describe('G-HIMS P5A identity and staging access boundary',()=>{
     expect(readiness).toContain('FIREBASE_ADMIN_AUTH_CONNECTIVITY_FAILED');
     expect(readiness).toContain('FIRESTORE_CONNECTIVITY_FAILED');
     expect(admin).toContain("!process.env.VERCEL");
-    expect(admin).toContain('Use FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY on Vercel');
+    expect(admin).toContain('if (process.env.VERCEL) return false;');
   });
 
   test('bootstrap requires explicit project and production confirmations',async()=>{

@@ -148,6 +148,36 @@ describe('CI-10F governed draft persistence (isolated Firestore emulator)', () =
     });
     expect(approval.success).toBe(true);
 
+    // Fault injection in the disposable emulator: even if an approved draft's
+    // persisted metadata becomes invalid, the server must never sign it.
+    const draftRef = tenant.collection('clinicalDrafts').doc(draftId);
+    await draftRef.update({ evidenceSnapshotHash: 'tampered-evidence-hash' });
+    const invalidSnapshot = await issue('SignClinicalDraftCommand', {
+      draftId, expectedRevisionNumber: 2, signatureAttestation: true,
+    });
+    expect(invalidSnapshot.success).toBe(false);
+    expect(invalidSnapshot.error?.code).toBe('CI10F_EVIDENCE_SNAPSHOT_INTEGRITY_FAILURE');
+    expect((await tenant.collection('clinicalDocuments').get()).empty).toBe(true);
+    await draftRef.update({ evidenceSnapshotHash: snapshot.snapshotHash });
+
+    await draftRef.update({ safetyGateStatus: 'BLOCKED' });
+    const safetyBlocked = await issue('SignClinicalDraftCommand', {
+      draftId, expectedRevisionNumber: 2, signatureAttestation: true,
+    });
+    expect(safetyBlocked.success).toBe(false);
+    expect(safetyBlocked.error?.code).toBe('CI10H_SAFETY_EVALUATION_REQUIRED');
+    expect((await tenant.collection('clinicalDocuments').get()).empty).toBe(true);
+    await draftRef.update({ safetyGateStatus: 'PASSED' });
+
+    await draftRef.update({ safetyPolicyVersion: 'obsolete-synthetic-policy' });
+    const obsoleteSafetyPolicy = await issue('SignClinicalDraftCommand', {
+      draftId, expectedRevisionNumber: 2, signatureAttestation: true,
+    });
+    expect(obsoleteSafetyPolicy.success).toBe(false);
+    expect(obsoleteSafetyPolicy.error?.code).toBe('CI10H_SAFETY_EVALUATION_REQUIRED');
+    expect((await tenant.collection('clinicalDocuments').get()).empty).toBe(true);
+    await draftRef.update({ safetyPolicyVersion: CLINICAL_SAFETY_POLICY_VERSION });
+
     const staleSign = await issue('SignClinicalDraftCommand', {
       draftId, expectedRevisionNumber: 1, signatureAttestation: true,
     });
@@ -194,10 +224,53 @@ describe('CI-10F governed draft persistence (isolated Firestore emulator)', () =
     expect((await tenant.collection('events')
       .where('eventType', '==', 'CLINICAL_DRAFT_SIGNED').get()).size).toBe(1);
 
+    const secondSign = await issue('SignClinicalDraftCommand', signPayload);
+    expect(secondSign.success).toBe(false);
+    expect(secondSign.error?.code).toBe('CI10F_SIGNED_DRAFT_IMMUTABLE');
+
+    // Construct a second approved *synthetic fixture* against the older chart.
+    // After the first signature changes Patient 360, a sign attempt on this
+    // still-approved but stale draft must fail transactionally.
+    const staleDraftId = id('stale_chart_draft');
+    const staleRevisionId = `${staleDraftId}_r1`;
+    const staleApprovedDraft: GovernedClinicalDraft = {
+      ...base,
+      draftId: staleDraftId,
+      status: 'APPROVED_FOR_SIGNATURE',
+      currentRevisionId: staleRevisionId,
+      reviewedBy: context.actorId,
+      reviewedAt: generatedAt,
+      approvedBy: context.actorId,
+      approvedAt: generatedAt,
+      approvedRevisionNumber: 1,
+      approvedContentHash: generatedHash,
+    };
+    const staleRevision: ClinicalDraftRevision = {
+      ...initialRevision,
+      draftId: staleDraftId,
+      revisionId: staleRevisionId,
+    };
+    const staleBatch = db.batch();
+    staleBatch.create(tenant.collection('clinicalDrafts').doc(staleDraftId), staleApprovedDraft);
+    staleBatch.create(tenant.collection('clinicalDraftRevisions').doc(staleRevisionId), staleRevision);
+    await staleBatch.commit();
+
     const afterSign = await Patient360ProjectionService.rebuildPatient(tenantId, patientId);
     expect(afterSign.contentHash).not.toBe(projection.contentHash);
     const timeline = await Patient360ProjectionService.getTimeline(tenantId, patientId);
     expect(timeline.some((row) => row.eventId === signed.eventId)).toBe(true);
+
+    const staleClinicalEvidence = await issue('SignClinicalDraftCommand', {
+      draftId: staleDraftId, expectedRevisionNumber: 1, signatureAttestation: true,
+    });
+    expect(staleClinicalEvidence.success).toBe(false);
+    expect(staleClinicalEvidence.error?.code).toBe('CI10H_STALE_DRAFT_EVIDENCE');
+    expect((await tenant.collection('clinicalDrafts').doc(staleDraftId).get()).data()?.status)
+      .toBe('APPROVED_FOR_SIGNATURE');
+    expect((await tenant.collection('clinicalDocuments').get()).size).toBe(1);
+    expect((await tenant.collection('events')
+      .where('eventType', '==', 'CLINICAL_DRAFT_SIGNED').get()).size).toBe(1);
+
     expect((await db.collection('tenants').doc(id('foreign'))
       .collection('clinicalDocuments').doc(documentId).get()).exists).toBe(false);
   });

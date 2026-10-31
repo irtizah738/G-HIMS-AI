@@ -2,7 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-const source = (path: string) => readFile(join(process.cwd(), path), 'utf8');
+const source = async (path: string) =>
+  (await readFile(join(process.cwd(), path), 'utf8')).replace(/\r\n?/g, '\n');
 
 describe('CI-10G clinician-facing copilot workspace', () => {
   test('Patient 360 exposes one canonical CI-10 workspace instead of separate intelligence islands', async () => {

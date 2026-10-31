@@ -1,0 +1,85 @@
+name: CIQP Authenticated Clinician Browser (Synthetic)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'e2e/ciqp-synthetic-clinician-browser.spec.ts'
+      - 'playwright.ciqp-clinician.config.ts'
+      - 'scripts/ci/verify-synthetic-clinician-browser.sh'
+      - 'scripts/ci/seed-synthetic-clinician-browser-patient.ts'
+      - '.github/workflows/ciqp-authenticated-clinician-browser.yml'
+      - 'lib/auth/**'
+      - 'server/auth/**'
+      - 'lib/clinical/patient360/**'
+      - 'app/api/clinical/patient360/**'
+      - 'app/api/auth/**'
+      - 'components/auth/**'
+      - 'components/patient360/**'
+      - 'lib/dev-sandbox/**'
+      - 'scripts/dev-sandbox/**'
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ciqp-clinician-browser-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  authenticated-clinician:
+    name: Real browser login, clinical session and Patient 360 (emulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      NODE_ENV: development
+      FIREBASE_PROJECT_ID: ghims-dev-sandbox-local
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-dev-sandbox-local
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-dev-sandbox-local
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-dev-sandbox-local
+      FIRESTORE_DATABASE_ID: '(default)'
+      NEXT_PUBLIC_FIRESTORE_DATABASE_ID: '(default)'
+      GHIMS_DEV_SANDBOX_TENANT_ID: dev-sandbox-hospital
+      GHIMS_DEV_SANDBOX_ACK: I_CONFIRM_DISPOSABLE_LOCAL_EMULATORS_ONLY
+      NEXT_PUBLIC_GHIMS_DEV_SANDBOX_EMULATORS: 'true'
+      GHIMS_INTEGRATION_AI_STATE: DISABLED
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - name: Checkout exact PR-head source without Git credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Pinned Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Frozen dependency install
+        run: bun install --frozen-lockfile
+      - name: Java for disposable Firebase emulators
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install emulator CLI, no dependency lockfile authority
+        run: npm install --no-save --package-lock=false firebase-tools@15.30.2
+      - name: Install Chromium for actual web UI qualification
+        run: bunx playwright install --with-deps chromium
+      - name: Create private, ephemeral emulator-only password
+        shell: bash
+        run: echo "GHIMS_DEV_SANDBOX_PASSWORD=$(openssl rand -hex 24)" >> "$GITHUB_ENV"
+      - name: Qualify clinician login and scoped Patient 360 through real Next app
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GHIMS_RUNTIME_MODE" = TEST
+          test "$FIREBASE_PROJECT_ID" = ghims-dev-sandbox-local
+          test "$NEXT_PUBLIC_GHIMS_DEV_SANDBOX_EMULATORS" = true
+          test -z "${GOOGLE_APPLICATION_CREDENTIALS:-}"
+          timeout --signal=TERM --kill-after=10s 1500s \
+            ./node_modules/.bin/firebase emulators:exec --only auth,firestore \
+            --project ghims-dev-sandbox-local 'bash scripts/ci/verify-synthetic-clinician-browser.sh'

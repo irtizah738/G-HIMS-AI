@@ -2,6 +2,9 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './e2e',
+  // CIQP's authenticated-browser test requires a dedicated disposable Auth +
+  // Firestore emulator runtime. General e2e jobs must not discover it.
+  testIgnore: '**/ciqp-synthetic-clinician-browser.spec.ts',
   timeout: 30_000,
   fullyParallel: false,
   retries: 0,

@@ -16,7 +16,7 @@ import type {
   ClinicalDraftType,
   GovernedClinicalDraft,
 } from '@/types/clinical-draft';
-import { CLINICAL_SAFETY_POLICY_VERSION } from '@/types/clinical-intelligence-safety';
+import { CLINICAL_SAFETY_POLICY_VERSION, type ClinicalSafetyEvaluation } from '@/types/clinical-intelligence-safety';
 
 export interface ReviewClinicalDraftPayload {
   draftId: string;
@@ -481,6 +481,14 @@ export class ClinicalDraftDomainService {
             entityId: visibleDraft.patientId,
             required: true,
           },
+          // Read in the *same transaction* as the signed document and event writes.
+          // Missing or mutated evaluation records cannot be replaced by a draft flag.
+          ...(visibleDraft.safetyEvaluationId ? [{
+            key: 'safetyEvaluation',
+            entityType: 'CLINICAL_INTELLIGENCE_SAFETY_EVALUATION',
+            entityId: visibleDraft.safetyEvaluationId,
+            required: false,
+          }] : []),
         ],
         prepare: (current) => {
           const draft = current.draft as unknown as GovernedClinicalDraft;
@@ -502,6 +510,31 @@ export class ClinicalDraftDomainService {
                 draftSafetyPolicyVersion: draft.safetyPolicyVersion || null,
                 requiredSafetyPolicyVersion: CLINICAL_SAFETY_POLICY_VERSION,
               }
+            );
+          }
+
+          const evaluation = current.safetyEvaluation as unknown as ClinicalSafetyEvaluation | null;
+          if (
+            !evaluation ||
+            !draft.safetyEvaluationId ||
+            draft.safetyEvaluationId !== visibleDraft.safetyEvaluationId ||
+            evaluation.evaluationId !== draft.safetyEvaluationId ||
+            evaluation.tenantId !== context.tenantId ||
+            evaluation.patientId !== draft.patientId ||
+            evaluation.purpose !== 'CLINICAL_DRAFT' ||
+            evaluation.evidenceSnapshotId !== draft.evidenceSnapshotId ||
+            evaluation.evidenceSnapshotHash !== draft.evidenceSnapshotHash ||
+            evaluation.policyVersion !== CLINICAL_SAFETY_POLICY_VERSION ||
+            evaluation.status !== 'PASSED' ||
+            evaluation.blockerCount !== 0 ||
+            !Array.isArray(evaluation.findings) ||
+            evaluation.findings.some((finding) => finding.severity === 'BLOCKER') ||
+            !Number.isFinite(evaluation.evaluatedAt) ||
+            evaluation.metrics?.claimCount !== draft.claimCount
+          ) {
+            throw new AtomicMutationRejectedError(
+              'CI10H_SAFETY_EVALUATION_RECORD_INVALID',
+              'The persisted clinical safety evaluation is missing, blocked, or not bound to this exact draft and evidence snapshot.'
             );
           }
 

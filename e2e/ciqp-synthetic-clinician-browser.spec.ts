@@ -40,6 +40,27 @@ test('authenticated synthetic doctor can establish scoped session and open Patie
   // The AuthClient must finish caching the authenticated session before route navigation.
   await page.waitForURL('http://127.0.0.1:3000/', { timeout: 20_000 });
 
+  // Verify durable encrypted session metadata without exposing the stored
+  // identity, session ID, ciphertext or credential to test output.
+  const encryptedSessionPresent = await page.evaluate(() => new Promise<boolean>((resolve) => {
+    const open = indexedDB.open('ghims_offline_auth_db', 2);
+    open.onerror = () => resolve(false);
+    open.onsuccess = () => {
+      const db = open.result;
+      if (!db.objectStoreNames.contains('auth_session')) {
+        db.close(); resolve(false); return;
+      }
+      const tx = db.transaction('auth_session', 'readonly');
+      const get = tx.objectStore('auth_session').get('current_active_session');
+      get.onsuccess = () => {
+        const found = Boolean(get.result?.encryptedPayload && get.result?.tenantId === 'dev-sandbox-hospital');
+        db.close(); resolve(found);
+      };
+      get.onerror = () => { db.close(); resolve(false); };
+    };
+  }));
+  expect(encryptedSessionPresent, 'Login must durably encrypt and cache the session before browser reload').toBe(true);
+
   // Firebase Auth emulator verifies the same actual test user. Use the token
   // for an additional protected read to assert the real server-side session.
   const login = await request.post(
@@ -74,6 +95,12 @@ test('authenticated synthetic doctor can establish scoped session and open Patie
   // component. The route issues its own authenticated request.
   const browserFailures: string[] = [];
   const patientRequests: string[] = [];
+  const sessionReloadStatuses: string[] = [];
+  page.on('response', (response) => {
+    if (response.url().includes('/api/auth/session') && response.request().method() === 'GET') {
+      sessionReloadStatuses.push(String(response.status()));
+    }
+  });
   page.on('pageerror', (error) => browserFailures.push(error.message.slice(0, 300)));
   page.on('console', (message) => {
     if (message.type() === 'error') browserFailures.push(message.text().slice(0, 300));

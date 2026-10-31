@@ -109,7 +109,7 @@ describe('Clinical Intelligence standalone context boundary', () => {
       resolve(process.cwd(), 'lib/clinical/intelligence/native-clinical-context-adapter.ts'),
       'utf8'
     );
-    expect(adapter).toContain('Patient360ProjectionService.readOrRebuildClinicalView');
+    expect(adapter).toContain('.readOrRebuildClinicalView(tenantId, patientId)');
     expect(adapter).toContain('Patient360ProjectionService.loadPatientEvents');
     expect(adapter).toContain('Patient360ProjectionService.getProjection');
   });

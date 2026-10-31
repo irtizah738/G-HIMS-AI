@@ -26,9 +26,22 @@ describe('Official G-HIMS-AI Vercel Preview production isolation',()=>{
     expect(()=>assert({GHIMS_RUNTIME_MODE:'PRODUCTION'},'g-hims-ai'))
       .toThrow('VERCEL_PREVIEW_PRODUCTION_FIREBASE_BLOCKED');
   });
+  test('permits explicitly isolated DEMO preview, but not the production Firebase project',()=>{
+    const demo = {...allowed, GHIMS_RUNTIME_MODE:'DEMO',
+      GHIMS_FIREBASE_PROJECT_ID_DEMO:'g-hims-ci-demo',
+      FIREBASE_CLIENT_EMAIL:'preview@g-hims-ci-demo.iam.gserviceaccount.com'};
+    expect(()=>assertVercelDeploymentFirebaseIsolation(demo,'g-hims-ci-demo')).not.toThrow();
+    expect(()=>assertVercelDeploymentFirebaseIsolation(demo,'g-hims-ai'))
+      .toThrow('VERCEL_PREVIEW_PRODUCTION_FIREBASE_BLOCKED');
+    expect(()=>assertVercelDeploymentFirebaseIsolation(demo,'ghims-ai-qualification-only'))
+      .toThrow('VERCEL_PREVIEW_NONPRODUCTION_ISOLATION_NOT_VERIFIED');
+    expect(()=>assertVercelDeploymentFirebaseIsolation({...demo,
+      FIREBASE_CLIENT_EMAIL:'admin@g-hims-ai.iam.gserviceaccount.com'},'g-hims-ci-demo'))
+      .toThrow('VERCEL_PREVIEW_ADMIN_IDENTITY_NOT_ISOLATED');
+  });
   test('refuses production credential reuse even with separate project IDs',()=>{
     expect(()=>assert({FIREBASE_CLIENT_EMAIL:'production@g-hims-ai.iam.gserviceaccount.com'}))
-      .toThrow('VERCEL_PREVIEW_ADMIN_IDENTITY_NOT_STAGING');
+      .toThrow('VERCEL_PREVIEW_ADMIN_IDENTITY_NOT_ISOLATED');
   });
   test.each([
     [{GHIMS_FIREBASE_PROJECT_ID_PRODUCTION:''},'ghims-ai-qualification-only'],

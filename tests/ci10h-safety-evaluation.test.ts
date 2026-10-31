@@ -95,7 +95,8 @@ describe('CI-10H clinical intelligence safety and evaluation framework', () => {
     );
 
     expect(service).toContain('ClinicalIntelligenceSafetyEvaluator.evaluate');
-    expect(service).toContain('Patient360ProjectionService.getProjection');
+    expect(service).toContain('contextReader.getOrRebuildProjection');
+    expect(service).toContain('assertScopedClinicalProjection');
     expect(service).toContain('CI10H_CURRENT_PATIENT360_UNAVAILABLE');
     expect(service).toContain('CI10H_SAFETY_GATE_REJECTED');
     expect(service).toContain("'CLINICAL_INTELLIGENCE_SAFETY_BLOCKED'");

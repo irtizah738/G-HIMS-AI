@@ -59,15 +59,22 @@ function buildContentSecurityPolicy(nonce: string, hostname: string): string {
 
 function resolveRoutingTenant(request: NextRequest): string | null {
   const { pathname } = request.nextUrl;
-  const hostname = request.headers.get('host') || '';
-
+  // nextUrl.hostname excludes ports. IP literals are never tenant subdomains:
+  // 127.0.0.1:3000 was previously interpreted as tenant "127", overriding
+  // the verified session tenant and producing SESSION_NOT_FOUND on reload.
+  const hostname = request.nextUrl.hostname.trim().toLowerCase();
+  const isIpLiteral =
+    /^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$/.test(hostname) ||
+    hostname.includes(':'); // IPv6 literals, optionally bracketed
+  const isLocalHostname = hostname === 'localhost' || hostname.endsWith('.localhost');
   const hostParts = hostname.split('.');
   if (
     hostParts.length > 2 &&
-    !hostname.includes('localhost') &&
+    !isIpLiteral &&
+    !isLocalHostname &&
     !hostname.includes('run.app')
   ) {
-    const subdomain = hostParts[0].toLowerCase();
+    const subdomain = hostParts[0];
     if (subdomain !== 'www' && subdomain !== 'app') {
       return subdomain;
     }

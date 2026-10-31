@@ -133,6 +133,33 @@ describe('CIQP real model-output adjudication integrity (synthetic test fixtures
       .toContain('CIQP_MISSED_CRITICAL_FACT_STOP');
   });
 
+  test('a single reviewer harm flag stops the case before second review', () => {
+    const input = packageWithReviews();
+    input.independentReviews.pop();
+    input.independentReviews[0].claims[0].potentiallyHarmful = true;
+    const result = assessCiqpCaseAdjudication(input);
+    expect(result.status).toBe('SAFETY_STOP');
+    expect(result.blockingReasons).toContain('CIQP_POTENTIALLY_HARMFUL_OUTPUT_STOP');
+    expect(result.clinicallyValidated).toBe(false);
+  });
+
+  test('full-length legitimate model claims are not incorrectly treated as short IDs', () => {
+    const input = packageWithReviews();
+    input.receipt.generatedDraft.claims[0].text = 'Synthetic clinical fact documented. '.repeat(20);
+    const digest = ciqpReceiptSha256(input.receipt);
+    input.independentReviews.forEach((review) => { review.receiptSha256 = digest; });
+    expect(assessCiqpCaseAdjudication(input).status)
+      .toBe('AWAITING_EXTERNAL_INSTITUTIONAL_VERIFICATION');
+  });
+
+  test('altered source-event provenance fails frozen evidence validation', () => {
+    const input = packageWithReviews();
+    input.receipt.frozenEvidence.evidenceRefs[0].sourceEventIds.push('unattributed-event');
+    const digest = ciqpReceiptSha256(input.receipt);
+    input.independentReviews.forEach((review) => { review.receiptSha256 = digest; });
+    expect(assessCiqpCaseAdjudication(input).status).toBe('INVALID');
+  });
+
   test('snapshot hash, reviewer receipt hash, frozen reference and citations fail closed', () => {
     const altered = packageWithReviews();
     altered.receipt.frozenEvidence.evidenceRefs[0].content = { tampered: true };

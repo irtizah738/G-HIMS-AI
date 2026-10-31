@@ -103,7 +103,9 @@ test('authenticated synthetic doctor can establish scoped session and open Patie
   });
   page.on('pageerror', (error) => browserFailures.push(error.message.slice(0, 300)));
   page.on('console', (message) => {
-    if (message.type() === 'error') browserFailures.push(message.text().slice(0, 300));
+    if (message.type() === 'error' && !message.text().includes('Applying inline style violates')) {
+      browserFailures.push(message.text().slice(0, 300));
+    }
   });
   page.on('response', (response) => {
     if (response.url().includes('/api/clinical/patient360/')) {
@@ -122,8 +124,11 @@ test('authenticated synthetic doctor can establish scoped session and open Patie
     uiResponse = await uiResponsePromise;
   } catch (error) {
     const pageText = (await page.locator('body').innerText().catch(() => 'unreadable')).slice(0, 1200);
+    const dbNames = await page.evaluate(async () =>
+      (await indexedDB.databases()).map((db) => db.name || '').sort()
+    ).catch(() => ['INDEXEDDB_LIST_FAILED']);
     // No user tokens, password or patient PHI in diagnostics: synthetic page only.
-    throw new Error(`CIQP_BROWSER_PATIENT360_REQUEST_MISSING: currentURL=${page.url()} document=${uiDocument?.status()} responses=${JSON.stringify(patientRequests)} errors=${JSON.stringify(browserFailures.slice(0, 8))} page=${JSON.stringify(pageText)} cause=${String(error)}`);
+    throw new Error(`CIQP_BROWSER_PATIENT360_REQUEST_MISSING: currentURL=${page.url()} document=${uiDocument?.status()} responses=${JSON.stringify(patientRequests)} sessionRefresh=${JSON.stringify(sessionReloadStatuses)} dbs=${JSON.stringify(dbNames)} errors=${JSON.stringify(browserFailures.slice(0, 8))} page=${JSON.stringify(pageText)} cause=${String(error)}`);
   }
   expect(uiResponse.status()).toBe(200);
   const uiPatient = await uiResponse.json();

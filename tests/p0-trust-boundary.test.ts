@@ -8,7 +8,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { readFile, readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 
 async function source(path: string): Promise<string> {
   return readFile(join(process.cwd(), path), 'utf8');
@@ -23,7 +23,7 @@ async function routeFiles(dir = join(process.cwd(), 'app', 'api')): Promise<stri
     if (entry.isDirectory()) {
       paths.push(...await routeFiles(absolute));
     } else if (entry.name === 'route.ts') {
-      paths.push(absolute.replace(process.cwd() + '/', ''));
+      paths.push(relative(process.cwd(), absolute).split(sep).join('/'));
     }
   }
 

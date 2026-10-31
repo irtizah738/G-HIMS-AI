@@ -2,7 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const source = (file: string) => readFile(path.join(process.cwd(), file), 'utf8');
+const source = async (file: string) =>
+  (await readFile(path.join(process.cwd(), file), 'utf8')).replace(/\r\n?/g, '\n');
 
 describe('G-HIMS P2 offline / AI / interoperability safety boundaries', () => {
   test('legacy offline worker cannot write Firestore or perform client LWW merges', async () => {

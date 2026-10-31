@@ -8,7 +8,8 @@ import {
 import { CI10I_PRODUCTION_POLICY_VERSION } from '@/types/clinical-intelligence-production';
 import { CLINICAL_SAFETY_POLICY_VERSION } from '@/types/clinical-intelligence-safety';
 
-const source = (path: string) => readFile(join(process.cwd(), path), 'utf8');
+const source = async (path: string) =>
+  (await readFile(join(process.cwd(), path), 'utf8')).replace(/\r\n?/g, '\n');
 
 describe('CI-10I offline and production qualification', () => {
   test('production Clinical Intelligence requires explicit live, approved and bounded AI configuration', () => {

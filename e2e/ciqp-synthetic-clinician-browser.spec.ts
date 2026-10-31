@@ -37,6 +37,8 @@ test('authenticated synthetic doctor can establish scoped session and open Patie
   expect(session.authorization.roles).toContain('DOCTOR');
   expect(session.authorization.clinicalPrivileges).toContain('SIGN_CLINICAL_NOTES');
   expect(session.session.sessionId).toBeTruthy();
+  // The AuthClient must finish caching the authenticated session before route navigation.
+  await page.waitForURL('http://127.0.0.1:3000/', { timeout: 20_000 });
 
   // Firebase Auth emulator verifies the same actual test user. Use the token
   // for an additional protected read to assert the real server-side session.

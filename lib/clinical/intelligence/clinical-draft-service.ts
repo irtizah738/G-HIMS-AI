@@ -5,7 +5,8 @@ import { AIGateway } from '@/lib/ai/gateway';
 import { ClinicalEvidenceService } from '@/lib/clinical/intelligence/clinical-evidence-service';
 import { ClinicalIntelligenceSafetyEvaluator } from '@/lib/clinical/intelligence/clinical-intelligence-safety-evaluator';
 import { clinicalDraftContentHash } from '@/lib/clinical/intelligence/clinical-draft-lifecycle';
-import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
+import { getConfiguredClinicalContextReader } from '@/lib/clinical/intelligence/native-clinical-context-adapter';
+import { assertScopedClinicalProjection, type ClinicalContextReader } from '@/lib/clinical/intelligence/clinical-context-port';
 import type { CommandContext, DomainEventEnvelope } from '@/lib/backend/types';
 import type { ClinicalCareSetting } from '@/types/consultant-visibility';
 import type { ClinicalEvidenceSnapshot, CopilotClaim } from '@/types/clinical-intelligence-evidence';
@@ -281,7 +282,8 @@ export class ClinicalDraftService {
     encounterId: string,
     careSetting: ClinicalCareSetting,
     draftType: ClinicalDraftType,
-    idempotencyKey: string
+    idempotencyKey: string,
+    contextReader: ClinicalContextReader = getConfiguredClinicalContextReader()
   ): Promise<ClinicalDraftGenerationResponse> {
     const normalizedIdempotencyKey = normalize(idempotencyKey);
     if (!normalizedIdempotencyKey) throw new Error('CI10F_IDEMPOTENCY_KEY_REQUIRED');
@@ -313,7 +315,8 @@ export class ClinicalDraftService {
       context,
       patientId,
       'CLINICAL_DRAFT',
-      { encounterId, careSetting }
+      { encounterId, careSetting },
+      contextReader
     );
 
     if (snapshot.purpose !== 'CLINICAL_DRAFT') {
@@ -351,23 +354,13 @@ export class ClinicalDraftService {
     const content = contentFromSections(normalized.sections);
     if (!content) throw new Error('CI10F_AI_OUTPUT_CONTENT_REQUIRED');
 
-    let currentProjection = await Patient360ProjectionService.getProjection(
-      context.tenantId,
-      patientId
+    const currentProjection = await contextReader.getOrRebuildProjection(
+      context.tenantId, patientId
     );
-    if (!currentProjection) {
-      try {
-        currentProjection = await Patient360ProjectionService.rebuildPatient(
-          context.tenantId,
-          patientId
-        );
-      } catch {
-        // ignore rebuild failure
-      }
-    }
     if (!currentProjection) {
       throw new Error('CI10H_CURRENT_PATIENT360_UNAVAILABLE');
     }
+    assertScopedClinicalProjection(context.tenantId, patientId, currentProjection);
 
     const safetyEvaluation = ClinicalIntelligenceSafetyEvaluator.evaluate({
       tenantId: context.tenantId,

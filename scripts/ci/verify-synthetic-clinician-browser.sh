@@ -49,4 +49,5 @@ if [ "$ready" -ne 1 ]; then
 fi
 
 bunx playwright test --config playwright.ciqp-clinician.config.ts
+bun scripts/ci/verify-synthetic-clinician-browser-signature.ts
 echo CIQP_AUTHENTICATED_CLINICIAN_BROWSER=PASS

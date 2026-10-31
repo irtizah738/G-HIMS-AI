@@ -173,7 +173,8 @@ describe('G-HIMS AI investor demo target isolation', () => {
     expect(server).toContain('projection.timelineReady !== true');
     expect(server).toContain("tenant.syntheticOnly !== true");
     expect(server).not.toContain('.set(');
-    expect(server).not.toContain('.update(');
+    expect(server).toContain('verifier.update(signed);');
+    expect(server.replace('verifier.update(signed);', '')).not.toContain('.update(');
     expect(server).not.toContain('.delete(');
     expect(server).not.toContain('createUser(');
     expect(api).toContain('readPhysicianDemoPatient360');
@@ -212,7 +213,8 @@ describe('G-HIMS AI investor demo target isolation', () => {
     expect(source).toContain('renalObservations,');
     expect(source).not.toContain('generateClinicalAlert(');
     expect(source).not.toContain('.set(');
-    expect(source).not.toContain('.update(');
+    expect(source).toContain('verifier.update(signed);');
+    expect(source.replace('verifier.update(signed);', '')).not.toContain('.update(');
     const nativeUI = await readFile('components/patient360/Patient360View.tsx', 'utf8');
     expect(nativeUI).toContain("case 'QUANTITY'");
     expect(nativeUI).toContain("case 'COMPONENTS'");

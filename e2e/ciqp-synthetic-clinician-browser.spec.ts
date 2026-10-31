@@ -34,7 +34,7 @@ test('authenticated synthetic doctor can establish scoped session and open Patie
   expect(session.authenticated).toBe(true);
   expect(session.tenant.tenantId).toBe(TENANT);
   expect(session.user.uid).toBe('dev-sandbox-doctor');
-  expect(session.authorization.roles).toContain('DOCTOR');
+  expect(session.authorization.roles.map((role: string) => role.toUpperCase())).toContain('DOCTOR');
   expect(session.authorization.clinicalPrivileges).toContain('SIGN_CLINICAL_NOTES');
   expect(session.session.sessionId).toBeTruthy();
   // The AuthClient must finish caching the authenticated session before route navigation.

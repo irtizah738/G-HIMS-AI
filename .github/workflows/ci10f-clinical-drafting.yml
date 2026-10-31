@@ -55,6 +55,9 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      - name: CI standalone clinical context port and tenant isolation
+        run: bun test tests/ci-standalone-clinical-context-contract.test.ts
+
       - name: CI-10F governed drafting guards
         run: bun run test:ci10f
 

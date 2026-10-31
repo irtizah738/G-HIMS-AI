@@ -3,7 +3,7 @@
  * orchestrator. Structural DEV sandbox patient fixtures intentionally do not
  * prove clinical event or projection persistence.
  */
-import { validateDevelopmentSandbox } from '@/lib/dev-sandbox/safety';
+import { validateDevelopmentSandbox, SANDBOX_ACK, SANDBOX_PROJECT_ID } from '@/lib/dev-sandbox/safety';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { SANDBOX_FACILITY_ID } from '@/lib/dev-sandbox/scenarios';
 import { registerPatientAndEncounter } from '@/server/runtime/registration-orchestrator';
@@ -17,7 +17,8 @@ const tenant = await db.collection('tenants').doc(tenantId).get();
 if (
   tenant.data()?.syntheticOnly !== true ||
   tenant.data()?.environment !== 'TEST' ||
-  tenant.data()?.sandboxFixture === false
+  tenant.data()?.sandboxMarker !== SANDBOX_ACK ||
+  tenant.data()?.projectId !== SANDBOX_PROJECT_ID
 ) throw new Error('CIQP_BROWSER_NOT_SYNTHETIC_TENANT');
 
 const patientId = 'ciqp_browser_patient';

@@ -34,7 +34,7 @@ const created = await registerPatientAndEncounter({
   fullName: 'Synthetic CIQP Browser Patient',
   gender: 'other',
   dateOfBirth: '1985-01-01',
-  identifiers: [{ type: 'CNIC', value: String(Date.now()).slice(-11) }],
+  identifiers: [{ type: 'CNIC', value: String(Date.now()).slice(-11), issuer: tenantId }],
   contactPhone: '+920000000000',
   address: 'Disposable emulator only',
   encounterType: 'OPD',

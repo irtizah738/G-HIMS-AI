@@ -7,6 +7,10 @@ on:
       - 'lib/clinical/intelligence/clinical-evaluation-framework.ts'
       - 'scripts/ops/clinical-intelligence-evaluate.ts'
       - 'tests/clinical-intelligence-evaluation.test.ts'
+      - 'tests/ciqp-live-model-synthetic-guard.test.ts'
+      - 'lib/clinical/intelligence/ciqp-live-model-synthetic-guard.ts'
+      - 'scripts/ops/ciqp-live-model-synthetic-evidence.ts'
+      - 'docs/clinical-intelligence/CIQP_REAL_PROVIDER_SYNTHETIC_EVIDENCE.md'
       - 'docs/clinical-intelligence/CLINICAL_EVALUATION_PROTOCOL.md'
       - 'package.json'
       - 'bun.lock'
@@ -18,6 +22,10 @@ on:
       - 'lib/clinical/intelligence/clinical-evaluation-framework.ts'
       - 'scripts/ops/clinical-intelligence-evaluate.ts'
       - 'tests/clinical-intelligence-evaluation.test.ts'
+      - 'tests/ciqp-live-model-synthetic-guard.test.ts'
+      - 'lib/clinical/intelligence/ciqp-live-model-synthetic-guard.ts'
+      - 'scripts/ops/ciqp-live-model-synthetic-evidence.ts'
+      - 'docs/clinical-intelligence/CIQP_REAL_PROVIDER_SYNTHETIC_EVIDENCE.md'
       - 'docs/clinical-intelligence/CLINICAL_EVALUATION_PROTOCOL.md'
       - 'package.json'
       - 'bun.lock'
@@ -48,6 +56,9 @@ jobs:
 
       - name: Clinical evaluation contract
         run: bun run test:ci-evaluation
+
+      - name: Reject unsafe real-provider qualification environments
+        run: bun test tests/ciqp-live-model-synthetic-guard.test.ts
 
       - name: Preserve CI-10H safety gate
         run: bun run test:ci10h

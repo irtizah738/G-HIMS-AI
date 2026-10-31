@@ -23,7 +23,7 @@ export default function HcmMasterPage() {
             </Link>
             <div>
               <span className="text-[11px] font-mono text-blue-600 uppercase font-bold tracking-wider">
-                G-HIMS OS • Human Capital & Operations
+                Helixis Health Platform • Human Capital & Operations
               </span>
               <h1 className="text-lg font-black text-slate-900 dark:text-slate-100">
                 Hospital Workforce & Resource Management

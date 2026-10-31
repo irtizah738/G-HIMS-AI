@@ -18,7 +18,7 @@ export default function ResourcesMasterPage() {
           </Link>
           <div>
             <span className="text-[11px] font-mono text-purple-600 uppercase font-bold tracking-wider">
-              G-HIMS OS • Hospital Resource Operating System
+              Helixis Health Platform • Hospital Resources
             </span>
             <h1 className="text-lg font-black text-slate-900 dark:text-slate-100">
               Resource, Room & Biomedical Capacity Management

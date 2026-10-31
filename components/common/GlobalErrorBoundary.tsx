@@ -81,7 +81,7 @@ export class GlobalErrorBoundary extends Component<Props, State> {
                   Application Exception Caught
                 </h1>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  G-HIMS resilient runtime shielded the clinical interface.
+                  Helixis Health Platform protected the clinical interface from a runtime error.
                 </p>
               </div>
             </div>

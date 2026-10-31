@@ -789,7 +789,7 @@ export default function TenantUserAdminPage() {
               <div className="flex items-center gap-2">
                 <KeyRound className="w-5 h-5 text-purple-400" />
                 <div>
-                  <h3 className="text-sm font-bold">G-HIMS Zero-Trust RBAC Capability Matrix</h3>
+                  <h3 className="text-sm font-bold">Helixis Health Platform • RBAC Capability Matrix</h3>
                   <p className="text-[10px] text-slate-400">
                     Granular permission boundaries enforced across Firestore Security Rules &amp; API Routes
                   </p>

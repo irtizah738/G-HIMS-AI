@@ -63,10 +63,10 @@ import { CommandPalette } from '@/components/navigation/command-palette';
 import { HeaderProfileMenu } from '@/components/auth/header-profile-menu';
 import { HospitalOperationalContextBar } from '@/components/navigation/hospital-operational-context-bar';
 import { useTenant } from '@/lib/tenant/context';
+import { HelixisMark } from '@/components/branding/HelixisMark';
 import {
   BedDouble,
   Users,
-  HeartPulse,
   Receipt,
   KeyRound,
   FlaskConical,
@@ -152,11 +152,11 @@ export function TenantDashboard() {
               onClick={() => setActiveTab('command')}
               className="flex items-center gap-2.5 cursor-pointer select-none group"
             >
-              <div className="w-8 h-8 rounded-xl bg-blue-600 group-hover:bg-blue-500 text-white flex items-center justify-center font-bold shadow-xs transition-colors shrink-0">
-                <HeartPulse className="w-4 h-4" />
+              <div className="w-8 h-8 rounded-lg bg-[#0B132B] border border-[#48CAE4]/40 flex items-center justify-center shrink-0">
+                <HelixisMark className="w-6 h-6" />
               </div>
               <div className="flex items-center gap-2">
-                <span className="font-extrabold text-slate-900 dark:text-slate-100 text-sm tracking-tight">G-HIMS</span>
+                <span className="font-extrabold text-slate-900 dark:text-slate-100 text-sm tracking-tight">Helixis AI</span>
                 <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium hidden sm:inline border-l border-slate-200 dark:border-slate-700 pl-2">
                   {currentTenant?.name || currentTenantId}
                 </span>

@@ -40,7 +40,7 @@ export default function SCMPage({ params }: PageProps) {
               <div>
                 <div className="flex items-center gap-2">
                   <span className="font-extrabold text-slate-900 dark:text-slate-100 text-sm tracking-tight">
-                    G-HIMS SCM
+                    Helixis Health Platform • Supply Chain
                   </span>
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 font-bold">
                     Enterprise

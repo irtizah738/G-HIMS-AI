@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          properties: { title: title || `G-HIMS Export ${new Date().toISOString()}` },
+          properties: { title: title || `Helixis Export ${new Date().toISOString()}` },
           sheets: (sheetsData || [{ title: 'Sheet1' }]).map((sheet: any) => ({
             properties: { title: sheet.title },
           })),

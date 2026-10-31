@@ -69,9 +69,11 @@ describe('Clinical identity and specialist workflow rework', () => {
     expect(intake).not.toContain('Differential Diagnosis probability matrix, STAT diagnostic orders');
     expect(intake).toContain('immutable artifact and linked to Patient 360');
     const route = await source('app/api/clinical/intake-optimize/route.ts');
-    expect(route).toContain('sourceLimitedBriefSchema');
-    expect(route).toContain('z.literal(true)');
-    expect(route).toContain('.strict()');
+    const schema = await source('lib/clinical/intelligence/source-limited-intake-brief.ts');
+    expect(route).toContain('parseSourceLimitedBrief(response.text');
+    expect(schema).toContain('sourceLimitedBriefSchema');
+    expect(schema).toContain('z.literal(true)');
+    expect(schema).toContain('.strict()');
     const clientRules = await source('lib/clinical/client-clinical-rules.ts');
     expect(clientRules).toContain('No diagnosis or treatment recommendation has been generated.');
     expect(clientRules).not.toContain('differentialDiagnoses');

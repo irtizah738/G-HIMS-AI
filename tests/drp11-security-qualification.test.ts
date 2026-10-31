@@ -140,10 +140,11 @@ describe('DRP-11 staging security qualification', () => {
     const manifest = JSON.parse(await source('package.json'));
     const lock = JSON.parse(await source('package-lock.json'));
 
-    expect(manifest.dependencies['source-map-js']).toBe('1.2.2');
     expect(lock.lockfileVersion).toBe(3);
-    expect(lock.packages[''].dependencies).toEqual(manifest.dependencies);
+    expect(manifest.overrides['source-map-js']).toBe('1.2.2');
     expect(lock.packages['node_modules/source-map-js'].version).toBe('1.2.2');
+    expect(lock.packages['node_modules/next'].version).toBe(manifest.dependencies.next);
+    expect(lock.packages['node_modules/zod'].version).toBe(manifest.dependencies.zod);
     expect(workflow).toContain('bun audit --audit-level=high');
     expect(workflow).not.toContain('--ignore');
     expect(workflow).toContain('repository-secret-scan');

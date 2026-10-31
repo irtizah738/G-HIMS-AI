@@ -1,25 +1,16 @@
 import { GoogleGenAI } from '@google/genai';
 import { NextRequest, NextResponse } from 'next/server';
 import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
-import { z } from 'zod';
-
-const sourceLimitedBriefSchema = z.object({
-  executiveSummary: z.string().min(1).max(4000),
-  sbar: z.object({
-    situation: z.string().min(1).max(2000),
-    background: z.string().min(1).max(3000),
-    assessment: z.string().min(1).max(3000),
-    recommendation: z.string().min(1).max(3000),
-  }).strict(),
-  observedRiskSignals: z.array(z.string().min(1).max(1000)).max(30),
-  missingOrUnverifiedInformation: z.array(z.string().min(1).max(1000)).max(30),
-  sourceLimited: z.literal(true),
-}).strict();
+import {
+  IntakePayloadError,
+  parseSourceLimitedBrief,
+  readBoundedIntakeRequest,
+} from '@/lib/clinical/intelligence/source-limited-intake-brief';
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const tenantId = String(body.tenantId || '').trim().toLowerCase();
+    const body = await readBoundedIntakeRequest(req);
+    const tenantId = typeof body.tenantId === 'string' ? body.tenantId.trim().toLowerCase() : '';
 
     if (!tenantId) {
       return NextResponse.json({ error: 'tenantId is required' }, { status: 400 });
@@ -68,7 +59,8 @@ ${JSON.stringify(body.riskSignals || {}, null, 2)}`;
           config: { responseMimeType: 'application/json', temperature: 0 },
         });
 
-        const result = JSON.parse((response.text || '{}').replace(/```json\n?/g, '').replace(/```\n?/g, '').trim());
+        const result = parseSourceLimitedBrief(response.text || '');
+        if (!result) continue; // No unchecked model JSON may reach clinicians.
         return NextResponse.json({
           status: 'DRAFT_REQUIRES_CLINICIAN_REVIEW',
           model: modelName,
@@ -84,8 +76,12 @@ ${JSON.stringify(body.riskSignals || {}, null, 2)}`;
       { status: 503 }
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Clinical intelligence request failed';
-    const unauthorized = /AUTH|TENANT|UNAUTH/i.test(message);
-    return NextResponse.json({ error: message }, { status: unauthorized ? 403 : 500 });
+    if (error instanceof IntakePayloadError)
+      return NextResponse.json({ error: error.code }, { status: error.status });
+    const unauthorized = error instanceof Error && /AUTH|TENANT|UNAUTH/i.test(error.message);
+    return NextResponse.json(
+      { error: unauthorized ? 'CLINICAL_INTAKE_ACCESS_DENIED' : 'CLINICAL_INTAKE_UNAVAILABLE' },
+      { status: unauthorized ? 403 : 500 },
+    );
   }
 }

@@ -68,7 +68,7 @@ export default function ErpFinanceDashboardPage() {
         <header className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <p className="text-xs font-bold uppercase tracking-wider text-blue-600">G-HIMS Finance</p>
+              <p className="text-xs font-bold uppercase tracking-wider text-blue-600">Helixis Health Platform • Finance</p>
               <h1 className="mt-1 text-2xl font-black">Authoritative Finance Control Center</h1>
               <p className="mt-2 max-w-3xl text-sm text-slate-600 dark:text-slate-400">
                 Finance state is hydrated from governed read models. All mutations are executed through versioned server commands; this page performs no direct Firestore writes.

@@ -213,8 +213,7 @@
     "react-markdown": "^9.1.0",
     "recharts": "^2.15.4",
     "tailwind-merge": "^3.7.0",
-    "zod": "4.6.7",
-    "source-map-js": "1.2.2"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
@@ -234,8 +233,6 @@
     "@grpc/grpc-js": "1.14.5",
     "source-map-js": "1.2.2",
     "sharp": "0.35.5",
-    "jwks-rsa": {
-      "jose": "4.15.9"
-    }
+    "re2js": "2.8.7"
   }
 }

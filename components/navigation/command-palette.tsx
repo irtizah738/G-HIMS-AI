@@ -601,7 +601,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
           </div>
           <div className="flex items-center gap-1.5 font-medium text-slate-600 dark:text-slate-300">
             <Command className="w-3.5 h-3.5" />
-            <span>G-HIMS Universal Palette</span>
+            <span>Helixis Command Palette</span>
           </div>
         </div>
       </div>

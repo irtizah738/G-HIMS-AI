@@ -8,6 +8,10 @@ on:
       - 'scripts/ops/clinical-intelligence-evaluate.ts'
       - 'tests/clinical-intelligence-evaluation.test.ts'
       - 'tests/ciqp-live-model-synthetic-guard.test.ts'
+      - 'tests/ciqp-model-output-adjudication.test.ts'
+      - 'lib/clinical/intelligence/ciqp-model-output-adjudication.ts'
+      - 'scripts/ops/ciqp-assess-model-adjudication.ts'
+      - 'docs/clinical-intelligence/CIQP_MODEL_OUTPUT_ADJUDICATION.md'
       - 'lib/clinical/intelligence/ciqp-live-model-synthetic-guard.ts'
       - 'scripts/ops/ciqp-live-model-synthetic-evidence.ts'
       - 'docs/clinical-intelligence/CIQP_REAL_PROVIDER_SYNTHETIC_EVIDENCE.md'
@@ -23,6 +27,10 @@ on:
       - 'scripts/ops/clinical-intelligence-evaluate.ts'
       - 'tests/clinical-intelligence-evaluation.test.ts'
       - 'tests/ciqp-live-model-synthetic-guard.test.ts'
+      - 'tests/ciqp-model-output-adjudication.test.ts'
+      - 'lib/clinical/intelligence/ciqp-model-output-adjudication.ts'
+      - 'scripts/ops/ciqp-assess-model-adjudication.ts'
+      - 'docs/clinical-intelligence/CIQP_MODEL_OUTPUT_ADJUDICATION.md'
       - 'lib/clinical/intelligence/ciqp-live-model-synthetic-guard.ts'
       - 'scripts/ops/ciqp-live-model-synthetic-evidence.ts'
       - 'docs/clinical-intelligence/CIQP_REAL_PROVIDER_SYNTHETIC_EVIDENCE.md'
@@ -59,6 +67,9 @@ jobs:
 
       - name: Reject unsafe real-provider qualification environments
         run: bun test tests/ciqp-live-model-synthetic-guard.test.ts
+
+      - name: Require independent adjudication and safety stop rules
+        run: bun test tests/ciqp-model-output-adjudication.test.ts
 
       - name: Preserve CI-10H safety gate
         run: bun run test:ci10h

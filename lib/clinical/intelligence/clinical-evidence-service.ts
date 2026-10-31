@@ -4,7 +4,8 @@ import { evidenceEventsAtProjectionCursor } from '@/lib/clinical/intelligence/ev
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { sanitizeForFirestore } from '@/lib/firestore/sanitize';
 import type { CommandContext, DomainEventEnvelope } from '@/lib/backend/types';
-import { Patient360ProjectionService } from '@/lib/clinical/patient360/patient360-projection-service';
+import { getConfiguredClinicalContextReader } from '@/lib/clinical/intelligence/native-clinical-context-adapter';
+import { assertScopedClinicalProjection, type ClinicalContextEvent, type ClinicalContextReader } from '@/lib/clinical/intelligence/clinical-context-port';
 import {
   LongitudinalEvidenceLoader,
   type LongitudinalEvidenceSources,
@@ -46,9 +47,7 @@ import type {
   GovernedClinicalIntelligenceResult,
 } from '@/types/clinical-intelligence-evidence';
 
-type SourceEvent = Awaited<
-  ReturnType<typeof Patient360ProjectionService.loadPatientEvents>
->[number];
+type SourceEvent = ClinicalContextEvent;
 
 type EvidenceCandidate = {
   sourceType: ClinicalEvidenceSourceType;
@@ -510,15 +509,14 @@ export class ClinicalEvidenceService {
     context: CommandContext,
     patientId: string,
     purpose: ClinicalIntelligencePurpose,
-    options: { encounterId?: string; careSetting?: ClinicalCareSetting } = {}
+    options: { encounterId?: string; careSetting?: ClinicalCareSetting } = {},
+    contextReader: ClinicalContextReader = getConfiguredClinicalContextReader()
   ): Promise<ClinicalEvidenceSnapshot> {
     const [{ projection }, events] = await Promise.all([
-      Patient360ProjectionService.readOrRebuildClinicalView(
-        context.tenantId,
-        patientId
-      ),
-      Patient360ProjectionService.loadPatientEvents(context.tenantId, patientId),
+      contextReader.readClinicalContext(context.tenantId, patientId),
+      contextReader.loadPatientEvents(context.tenantId, patientId),
     ]);
+    assertScopedClinicalProjection(context.tenantId, patientId, projection);
 
     if (
       projection.tenantId !== context.tenantId ||
@@ -571,9 +569,10 @@ export class ClinicalEvidenceService {
 
     // A worker may publish a newer generation while supplement evidence is
     // loading. Fail closed instead of recording a mixed-revision evidence set.
-    const latestProjection = await Patient360ProjectionService.getProjection(
-      context.tenantId, patientId
-    );
+    const latestProjection = await contextReader.getProjection(context.tenantId, patientId);
+    if (latestProjection) {
+      assertScopedClinicalProjection(context.tenantId, patientId, latestProjection);
+    }
     if (!latestProjection ||
         latestProjection.contentHash !== projection.contentHash ||
         latestProjection.sourceCheckpoint !== projection.sourceCheckpoint) {

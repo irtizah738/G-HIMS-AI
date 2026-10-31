@@ -1,8 +1,10 @@
 import { getAdminAuth, getAdminFirestore } from '../../server/firebase/admin';
 import { assertDemoRuntime } from '../../lib/runtime/runtime-mode';
+import { assertInvestorDemoFromEnvironment } from '../../lib/runtime/investor-demo-isolation';
 import { UserProvisioningService, type ProvisionableUiRole } from '../../server/auth/user-provisioning-service';
 
 assertDemoRuntime('Demo identity provisioning');
+assertInvestorDemoFromEnvironment();
 
 const password = String(process.env.GHIMS_DEMO_BOOTSTRAP_PASSWORD || '');
 if (password.length < 12) {
@@ -12,6 +14,10 @@ if (password.length < 12) {
 const tenantId = String(process.env.GHIMS_DEMO_TENANT_ID || 'central-metro-hospital')
   .trim()
   .toLowerCase();
+const confirmTenant = String(process.env.GHIMS_DEMO_CONFIRM_TENANT || '').trim().toLowerCase();
+if (!tenantId || tenantId !== confirmTenant) {
+  throw new Error('CI_DEMO_TENANT_CONFIRMATION_REQUIRED');
+}
 const facilityId = 'DEMO_FACILITY';
 
 const personas: Array<{

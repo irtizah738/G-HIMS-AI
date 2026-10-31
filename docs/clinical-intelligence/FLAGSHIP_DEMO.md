@@ -25,17 +25,19 @@ All records are synthetic. The demo must never be described as clinical validati
 
 ## Provision
 
-The script is DEMO-only and refuses non-DEMO runtime.
+Use the guarded setup at [INVESTOR_DEMO_SETUP.md](INVESTOR_DEMO_SETUP.md).
+The real G-HIMS AI Clinical Intelligence Copilot lives inside Patient 360; the
+DEMO-only entry page is `/<tenantId>/clinical-intelligence`.
 
-```bash
-GHIMS_RUNTIME_MODE=DEMO \
-NEXT_PUBLIC_GHIMS_RUNTIME_MODE=DEMO \
-GHIMS_DEMO_TENANT_ID=central-metro-hospital \
-GHIMS_DEMO_CONFIRM_TENANT=central-metro-hospital \
-bun run demo:clinical-intelligence
-```
+Both seeding scripts require an explicitly isolated DEMO Firebase project, matching
+server/browser project IDs, and exact tenant confirmation. On localhost, use the
+Auth and Firestore emulators. Do not connect this demo to the production G-HIMS AI
+Firebase project or the G-HIMS OS staging project. Hosted Firebase writes are
+blocked without an additional explicit synthetic-DEMO-only acknowledgment.
 
-Provision demo identities separately with `bun run demo:provision-identities`.
+For the pre-seeded patient ID `demo-ci-patient-001`, the Patient 360 deep link is
+`/<tenantId>/patients/demo-ci-patient-001/360`. If the chart isn't populated,
+run the verified synthetic seeding workflow rather than editing actual patient data.
 
 ## Seven-minute demo
 

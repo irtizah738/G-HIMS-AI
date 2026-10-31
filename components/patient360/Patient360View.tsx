@@ -180,13 +180,16 @@ function EmptyState({ children }: { children: React.ReactNode }) {
 export function Patient360View({
   tenantId,
   patientId,
+  demoReadOnlyView,
 }: {
   tenantId: string;
   patientId: string;
+  demoReadOnlyView?: Patient360ClinicalView;
 }) {
-  const [view, setView] = useState<Patient360ClinicalView | null>(null);
+  const demoReadOnly = Boolean(demoReadOnlyView);
+  const [view, setView] = useState<Patient360ClinicalView | null>(demoReadOnlyView || null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!demoReadOnlyView);
   const [reviewReason, setReviewReason] = useState('');
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const [reviewMessage, setReviewMessage] = useState<string | null>(null);
@@ -208,6 +211,12 @@ export function Patient360View({
     useState<string | null>(null);
 
   const load = async () => {
+    if (demoReadOnlyView) {
+      setView(demoReadOnlyView);
+      setError(null);
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
@@ -237,12 +246,13 @@ export function Patient360View({
     patientId,
     careContextRequest.careSetting,
     careContextRequest.encounterId,
+    demoReadOnlyView,
   ]);
 
   const submitReadinessReview = async (
     outcome: 'ACKNOWLEDGED' | 'ESCALATE' | 'PROCEED_WITH_WARNINGS'
   ) => {
-    if (!view?.dischargeReadiness || view.source === 'LOCAL_EDGE') return;
+    if (demoReadOnly || !view?.dischargeReadiness || view.source === 'LOCAL_EDGE') return;
     if (outcome === 'ESCALATE' && !reviewReason.trim()) {
       setReviewMessage('A clinical reason is required for escalation.');
       return;
@@ -285,7 +295,7 @@ export function Patient360View({
     reportId: string,
     encounterId: string
   ) => {
-    if (!reportId || !encounterId || view?.source === 'LOCAL_EDGE') return;
+    if (demoReadOnly || !reportId || !encounterId || view?.source === 'LOCAL_EDGE') return;
 
     try {
       setCriticalAckReportId(reportId);
@@ -313,6 +323,7 @@ export function Patient360View({
 
   const completeCurrentMedicationReconciliation = async () => {
     if (
+      demoReadOnly ||
       !view?.selectedCareContext ||
       view.source === 'LOCAL_EDGE' ||
       !medicationReconciliationConfirmed
@@ -357,6 +368,7 @@ export function Patient360View({
 
   const recordCurrentConsultantReview = async () => {
     if (
+      demoReadOnly ||
       !view?.consultantVisibility ||
       !view.selectedCareContext ||
       view.source === 'LOCAL_EDGE'
@@ -456,11 +468,11 @@ export function Patient360View({
       <div className="mx-auto max-w-7xl space-y-5 p-5 md:p-8">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <Link
-            href="/"
+            href={demoReadOnly ? '/clinical-intelligence-demo/clinician-review' : '/'}
             className="inline-flex w-fit items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600"
           >
             <ArrowLeft className="h-4 w-4" />
-            Hospital Dashboard
+            {demoReadOnly ? 'Synthetic clinician review' : 'Hospital Dashboard'}
           </Link>
           <div className="flex flex-wrap items-center gap-2 text-[11px]">
             <span
@@ -488,6 +500,12 @@ export function Patient360View({
           </div>
         </div>
 
+        {demoReadOnly && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-900">
+            SYNTHETIC DEMO — VIEW ONLY. Native G-HIMS AI Patient 360 interface.
+            Clinical approvals, AI generation and signing are disabled.
+          </div>
+        )}
         {offline && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
             You are viewing the last encrypted Patient 360 projection hydrated for this authenticated user.
@@ -609,6 +627,7 @@ export function Patient360View({
                 <button
                   key={encounter.encounterId}
                   type="button"
+                  disabled={demoReadOnly}
                   onClick={() =>
                     setCareContextRequest({
                       careSetting:
@@ -631,16 +650,18 @@ export function Patient360View({
           </div>
         </section>
 
-        <ClinicalCopilotWorkspace
-          tenantId={tenantId}
-          patientId={patientId}
-          encounterId={view.selectedCareContext?.encounterId}
-          careSetting={view.selectedCareContext?.careSetting}
-          offline={offline}
-          currentRevision={freshness.revision}
-          currentSourceCheckpoint={freshness.sourceCheckpoint}
-          onAuthoritativeChange={load}
-        />
+        {!demoReadOnly && (
+          <ClinicalCopilotWorkspace
+            tenantId={tenantId}
+            patientId={patientId}
+            encounterId={view.selectedCareContext?.encounterId}
+            careSetting={view.selectedCareContext?.careSetting}
+            offline={offline}
+            currentRevision={freshness.revision}
+            currentSourceCheckpoint={freshness.sourceCheckpoint}
+            onAuthoritativeChange={load}
+          />
+        )}
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -653,7 +674,7 @@ export function Patient360View({
                 Deterministic changes and unresolved work since this consultant last reviewed the selected care context.
               </p>
             </div>
-            {view.consultantVisibility && !offline && (
+            {view.consultantVisibility && !offline && !demoReadOnly && (
               <button
                 type="button"
                 onClick={() => void recordCurrentConsultantReview()}
@@ -890,7 +911,7 @@ export function Patient360View({
 
               {view.medicationSafety.findings.some(
                 (finding) => finding.type === 'MEDICATION_RECONCILIATION_REQUIRED'
-              ) && (
+              ) && !demoReadOnly && (
                 <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-xs text-indigo-950">
                   <div className="flex items-center gap-2">
                     <ClipboardCheck className="h-4 w-4 text-indigo-700" />
@@ -1215,7 +1236,7 @@ export function Patient360View({
                             </div>
                           ))}
                         </div>
-                        {finding.code === 'CRITICAL_RESULT_UNACKNOWLEDGED' && (() => {
+                        {!demoReadOnly && finding.code === 'CRITICAL_RESULT_UNACKNOWLEDGED' && (() => {
                           const reportId =
                             finding.evidence.find(
                               (item) => item.source === 'DIAGNOSTIC_RESULT'
@@ -1249,6 +1270,7 @@ export function Patient360View({
                   </div>
                 )}
 
+                {!demoReadOnly && (
                 <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
                   <div className="text-xs font-bold text-slate-800">Clinician review</div>
                   <p className="mt-1 text-[11px] text-slate-500">
@@ -1295,6 +1317,7 @@ export function Patient360View({
                   )}
                 </div>
 
+                )}
                 <div className="mt-4 text-[10px] text-slate-400">
                   Evaluation {view.dischargeReadiness.evaluationId} · Patient 360 rev {view.dischargeReadiness.patient360Revision}
                 </div>
@@ -1433,7 +1456,7 @@ export function Patient360View({
                   projection.recentResults.map((item) => (
                     <Link
                       key={item.diagnosticReportId}
-                      href={item.orderId
+                      href={!demoReadOnly && item.orderId
                         ? `/${encodeURIComponent(tenantId)}/diagnostics/results/${encodeURIComponent(item.orderId)}`
                         : '#'}
                       className="block rounded-xl border border-slate-200 p-4 transition hover:bg-slate-50"

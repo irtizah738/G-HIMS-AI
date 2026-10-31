@@ -23,6 +23,7 @@ bun run dev:sandbox:seed >/tmp/ciqp-clinician-seed.log
 bun run dev:sandbox:verify >/tmp/ciqp-clinician-verify.log
 bun run dev:sandbox:rehearse >/tmp/ciqp-clinician-rehearse.log
 bun scripts/ci/seed-synthetic-clinician-browser-patient.ts >/tmp/ciqp-clinician-patient360.log
+bun scripts/ci/seed-synthetic-clinician-browser-draft.ts >/tmp/ciqp-clinician-draft-fixture.log
 
 bun run dev --hostname 127.0.0.1 > /tmp/ciqp-clinician-next.log 2>&1 &
 next_pid=$!

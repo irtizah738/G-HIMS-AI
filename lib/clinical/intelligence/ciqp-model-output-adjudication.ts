@@ -172,7 +172,9 @@ export function assessCiqpCaseAdjudication(input: CiqpCaseAdjudication): CiqpAdj
       snapshot.patient360SourceCheckpoint !== r.patient360SourceCheckpoint ||
       ClinicalIntelligenceSafetyEvaluator.snapshotHash(snapshot) !== snapshot.snapshotHash ||
       snapshot.evidenceRefs.some((item) =>
-        ClinicalIntelligenceSafetyEvaluator.contentHash(item.content) !== item.contentHash
+        ClinicalIntelligenceSafetyEvaluator.contentHash(item.content) !== item.contentHash ||
+        ClinicalIntelligenceSafetyEvaluator.sourceEventSetHash(item.sourceEventIds) !== item.sourceEventSetHash ||
+        item.tenantId !== snapshot.tenantId || item.patientId !== snapshot.patientId
       )) {
     errors.push('CIQP_FROZEN_EVIDENCE_INTEGRITY_FAILURE');
   }
@@ -184,7 +186,7 @@ export function assessCiqpCaseAdjudication(input: CiqpCaseAdjudication): CiqpAdj
   }
   if (claims.length === 0 || !uniqueExact(claimIds, claimIds) ||
       claims.some((claim) => !isValidId(claim.claimId) ||
-        !isValidId(claim.text) ||
+        (typeof claim.text !== 'string' || claim.text.trim().length === 0 || claim.text.length > 20_000) ||
         claim.evidenceRefs.some((evidenceId) => !evidenceIds.has(evidenceId)))) {
     errors.push('CIQP_MODEL_CLAIM_SET_INVALID');
   }
@@ -246,8 +248,8 @@ export function assessCiqpCaseAdjudication(input: CiqpCaseAdjudication): CiqpAdj
   const stop = potentiallyHarmfulObserved || missedCriticalObserved;
   const status: CiqpAdjudicationAssessment['status'] =
     errors.length > 0 ? 'INVALID' :
-    first.length < 2 ? 'AWAITING_INDEPENDENT_REVIEWS' :
     stop ? 'SAFETY_STOP' :
+    first.length < 2 ? 'AWAITING_INDEPENDENT_REVIEWS' :
     disagreementCount > 0 && !third ? 'AWAITING_THIRD_ADJUDICATION' :
     'AWAITING_EXTERNAL_INSTITUTIONAL_VERIFICATION';
 

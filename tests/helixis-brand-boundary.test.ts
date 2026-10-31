@@ -1,19 +1,20 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = process.cwd();
 const read = (path: string) => readFileSync(join(root, path), 'utf8');
 
 describe('Helixis AI brand surface and infrastructure boundary', () => {
-  test('public app identity and install metadata use the approved Helixis names', () => {
+  test('public Helixis identity stays intact without an installable web-app manifest', () => {
     expect(read('app/layout.tsx')).toContain('Helixis AI | Clinical Intelligence & Health Platform');
     expect(read('metadata.json')).toContain('Helixis AI | Clinical Intelligence & Health Platform');
-    const manifest = read('app/manifest.ts');
-    expect(manifest).toContain("name: 'Helixis AI | Helixis Health Platform'");
-    expect(manifest).toContain("short_name: 'Helixis'");
-    expect(manifest).toContain("src: '/icon.svg'");
-    expect(manifest).not.toContain('/icon.png');
+    expect(existsSync(join(root, 'app/manifest.ts'))).toBe(false);
+    const offlineWorker = read('public/sw.js');
+    expect(offlineWorker).not.toContain('/manifest.webmanifest');
+    expect(offlineWorker).not.toContain('/icon.png');
+    expect(offlineWorker).toContain('/icon.svg');
+    expect(offlineWorker).toContain('TRIGGER_SYNC_QUEUE');
   });
 
   test('the original shared icon uses the investor-demo Helixis palette', () => {

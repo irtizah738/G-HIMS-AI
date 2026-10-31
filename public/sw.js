@@ -1,11 +1,9 @@
-// G-HIMS Clinical PWA Service Worker (v1.0.0)
-const CACHE_NAME = 'ghims-clinical-shell-v2';
+// Helixis offline clinical shell and background-sync worker (not an installable PWA)
+const CACHE_NAME = 'ghims-clinical-shell-v3';
 const DATA_CACHE_NAME = 'ghims-clinical-data-v1';
 
 const PRECACHE_ASSETS = [
-  '/manifest.webmanifest',
-  '/icon.png',
-  '/favicon.ico',
+  '/icon.svg',
 ];
 
 // 1. Install Event: Pre-cache core shell
@@ -94,7 +92,7 @@ self.addEventListener('fetch', (event) => {
             const rootShell = await caches.match('/');
             if (rootShell) return rootShell;
             return new Response(
-              '<!doctype html><html><body><main><h1>G-HIMS edge shell unavailable</h1><p>Open G-HIMS once while online on this device before using offline restart.</p></main></body></html>',
+              '<!doctype html><html><body><main><h1>Helixis offline shell unavailable</h1><p>Open Helixis once while online on this device before using offline restart.</p></main></body></html>',
               {
                 status: 503,
                 headers: {
@@ -112,7 +110,7 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(event.request).catch(() =>
         new Response(
-          '<!doctype html><html><body><main><h1>G-HIMS is offline</h1><p>Return to the application home screen to continue from the encrypted edge cache.</p></main></body></html>',
+          '<!doctype html><html><body><main><h1>Helixis is offline</h1><p>Return to the application home screen to continue from the encrypted edge cache.</p></main></body></html>',
           {
             status: 503,
             headers: {

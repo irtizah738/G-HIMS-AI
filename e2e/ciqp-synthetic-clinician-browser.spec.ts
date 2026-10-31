@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 const TENANT = 'dev-sandbox-hospital';
-const PATIENT = 'ds_patient_opd_consult';
+const PATIENT = 'ciqp_browser_patient';
 const PASSWORD = process.env.GHIMS_DEV_SANDBOX_PASSWORD || '';
 
 test('authenticated synthetic doctor can establish scoped session and open Patient 360', async ({ page, request }) => {

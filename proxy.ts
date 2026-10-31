@@ -64,7 +64,7 @@ function resolveRoutingTenant(request: NextRequest): string | null {
   // the verified session tenant and producing SESSION_NOT_FOUND on reload.
   const hostname = request.nextUrl.hostname.trim().toLowerCase();
   const isIpLiteral =
-    /^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$/.test(hostname) ||
+    /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostname) ||
     hostname.includes(':'); // IPv6 literals, optionally bracketed
   const isLocalHostname = hostname === 'localhost' || hostname.endsWith('.localhost');
   const hostParts = hostname.split('.');

@@ -338,7 +338,10 @@ describe('CI-10A evidence and provenance fabric', () => {
       'lib/clinical/intelligence/clinical-evidence-service.ts'
     );
 
-    expect(service).toContain('Patient360ProjectionService.readOrRebuildClinicalView');
+    expect(service).toContain('contextReader.readClinicalContext(context.tenantId, patientId)');
+    const adapter = await source('lib/clinical/intelligence/native-clinical-context-adapter.ts');
+    expect(adapter).toContain('Patient360ProjectionService');
+    expect(adapter).toContain('.readOrRebuildClinicalView(tenantId, patientId)');
     expect(service).not.toContain('CI10_PATIENT360_PROJECTION_NOT_READY');
     expect(service).not.toContain('Patient360ProjectionService.getProjection(context.tenantId, patientId)');
   });
@@ -349,7 +352,8 @@ describe('CI-10A evidence and provenance fabric', () => {
     );
     expect(service).toContain('evidenceEventsAtProjectionCursor(projection, events)');
     expect(service).toContain('scopedEvents,');
-    expect(service).toContain('Patient360ProjectionService.getProjection(');
+    expect(service).toContain('contextReader.getProjection(context.tenantId, patientId)');
+    expect(service).toContain('assertScopedClinicalProjection');
     expect(service).toContain('CI10_EVIDENCE_PROJECTION_REVISION_CHANGED');
   });
 

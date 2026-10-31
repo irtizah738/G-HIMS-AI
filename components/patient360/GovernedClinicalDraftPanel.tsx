@@ -13,6 +13,7 @@ import {
 import {
   approveGovernedClinicalDraft,
   generateGovernedClinicalDraft,
+  loadGovernedClinicalDraft,
   rejectGovernedClinicalDraft,
   reviewGovernedClinicalDraft,
   signGovernedClinicalDraft,
@@ -68,6 +69,7 @@ export function GovernedClinicalDraftPanel({
   onAuthoritativeChange?: () => Promise<void> | void;
 }) {
   const [draftType, setDraftType] = useState<ClinicalDraftType>('SOAP');
+  const [resumeDraftId, setResumeDraftId] = useState('');
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [reviewNote, setReviewNote] = useState('');
@@ -75,7 +77,7 @@ export function GovernedClinicalDraftPanel({
   const [signatureAttestation, setSignatureAttestation] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
   const [busy, setBusy] = useState<
-    'GENERATE' | 'REVIEW' | 'APPROVE' | 'SIGN' | 'REJECT' | null
+    'GENERATE' | 'LOAD' | 'REVIEW' | 'APPROVE' | 'SIGN' | 'REJECT' | null
   >(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -122,6 +124,34 @@ export function GovernedClinicalDraftPanel({
     setError(null);
     setMessage(null);
     onChange(null);
+  };
+
+  const resumeExistingDraft = async () => {
+    const requestedDraftId = resumeDraftId.trim();
+    if (offline || !requestedDraftId || busy !== null) return;
+    try {
+      setBusy('LOAD');
+      setError(null);
+      setMessage(null);
+      const loaded = await loadGovernedClinicalDraft(tenantId, requestedDraftId);
+      // Defense in depth. The server authorizes tenant, patient, encounter
+      // and clinician role; UI also refuses an unrelated chart or care context.
+      if (
+        loaded.draft.tenantId !== tenantId ||
+        loaded.draft.patientId !== patientId ||
+        loaded.draft.encounterId !== encounterId ||
+        loaded.draft.careSetting !== careSetting
+      ) {
+        throw new Error('CI10F_DRAFT_CONTEXT_MISMATCH');
+      }
+      onChange(loaded);
+      setResumeDraftId('');
+      setMessage('Existing governed draft restored from authoritative evidence.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not restore the selected draft.');
+    } finally {
+      setBusy(null);
+    }
   };
 
   const generate = async () => {
@@ -351,6 +381,28 @@ export function GovernedClinicalDraftPanel({
               <FileSignature className="h-4 w-4" />
             )}
             Generate governed draft
+          </button>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white p-3">
+          <label className="grid gap-1 text-xs font-semibold text-slate-700">
+            Resume existing governed draft
+            <input
+              value={resumeDraftId}
+              onChange={(event) => setResumeDraftId(event.target.value)}
+              disabled={offline || busy !== null}
+              placeholder="Existing draft ID"
+              autoComplete="off"
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => void resumeExistingDraft()}
+            disabled={offline || busy !== null || !resumeDraftId.trim()}
+            className="mt-2 rounded-lg border border-indigo-300 px-3 py-2 text-xs font-semibold text-indigo-800 disabled:opacity-40"
+          >
+            {busy === 'LOAD' ? 'Restoring draft…' : 'Resume draft for this encounter'}
           </button>
         </div>
 

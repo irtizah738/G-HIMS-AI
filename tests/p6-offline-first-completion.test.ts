@@ -205,7 +205,9 @@ describe('G-HIMS P6 full offline-first completion', () => {
     const sw = await source('public/sw.js');
     const home = await source('app/page.tsx');
 
-    expect(sw).toContain("const CACHE_NAME = 'ghims-clinical-shell-v2'");
+    expect(sw).toMatch(/const CACHE_NAME = 'ghims-clinical-shell-v\d+'/);
+    expect(sw).not.toContain('/manifest.webmanifest');
+    expect(sw).toContain('/icon.svg');
     expect(sw).toContain("url.pathname === '/' || url.pathname === '/login'");
     expect(sw).toContain('Never cache rendered clinical/deep-link HTML');
     expect(sw).toContain("caches.match('/')");

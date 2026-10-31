@@ -1583,7 +1583,7 @@ export function BedOccupancyView() {
             {/* Footer */}
             <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex items-center justify-between">
               <span className="text-xs text-slate-500">
-                G-HIMS Census Guarantee: Every discharge is atomically archived to prevent silent disappearance.
+                Helixis Census Guarantee: Every discharge is atomically archived to prevent silent disappearance.
               </span>
               <button
                 type="button"

@@ -602,7 +602,7 @@ export function SupplyChainScmView({ tenantId }: SupplyChainScmViewProps) {
               <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
                 Supply Chain & Inventory Management
                 <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 font-semibold">
-                  G-HIMS SCM OS
+                  Helixis Health Platform • Supply Chain
                 </span>
               </h1>
               <p className="text-xs text-slate-500 dark:text-slate-400">

@@ -351,7 +351,7 @@ export function SettingsView() {
                 Enterprise Settings & Governance
               </h1>
               <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                G-HIMS Master
+                Helixis Health Platform
               </span>
             </div>
             <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">

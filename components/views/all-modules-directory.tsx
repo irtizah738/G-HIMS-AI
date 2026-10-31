@@ -1041,14 +1041,14 @@ export function AllModulesDirectory() {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-black text-slate-900 dark:text-slate-100 tracking-tight">
-                  All 52 Enterprise Domains of G-HIMS OS
+                  All 52 Enterprise Domains of Helixis Health Platform
                 </h1>
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
                   52 / 52 Registered
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Architectural registry of the 52 G-HIMS domains. Registry presence does not imply production readiness; qualification comes from executable CI and deployed evidence.
+                Architectural registry of the 52 Helixis Health Platform domains. Registry presence does not imply production readiness; qualification comes from executable CI and deployed evidence.
               </p>
             </div>
           </div>

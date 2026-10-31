@@ -50,7 +50,7 @@ export async function generateAuditPdfReport({
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(13);
   doc.setFont('helvetica', 'bold');
-  doc.text('GLOBAL HEALTH INFORMATION MANAGEMENT SYSTEM (G-HIMS)', 14, 9);
+  doc.text('HELIXIS AI • HOSPITAL AUDIT REPORT', 14, 9);
 
   doc.setFontSize(8.5);
   doc.setFont('helvetica', 'normal');
@@ -247,7 +247,7 @@ export async function generateAuditPdfReport({
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(148, 163, 184);
       doc.text(
-        'STRICTLY CONFIDENTIAL • G-HIMS AUDIT LEDGER EXPORT • VERIFY INTEGRITY STATUS BEFORE RELIANCE',
+        'STRICTLY CONFIDENTIAL • HELIXIS AUDIT LEDGER EXPORT • VERIFY INTEGRITY STATUS BEFORE RELIANCE',
         14,
         pageHeight - 6
       );

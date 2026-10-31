@@ -28,7 +28,7 @@ export default function TelehealthJoinPage() {
       <div className="mx-auto max-w-xl p-8 text-center">
         <h1 className="text-lg font-black">Invalid telehealth join link</h1>
         <p className="mt-2 text-sm text-slate-500">
-          Ask the clinical team to send a fresh G-HIMS telehealth link.
+          Ask the clinical team to send a fresh Helixis telehealth link.
         </p>
       </div>
     );

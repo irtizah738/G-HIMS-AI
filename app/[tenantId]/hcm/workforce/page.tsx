@@ -18,7 +18,7 @@ export default function WorkforceMasterPage() {
           </Link>
           <div>
             <span className="text-[11px] font-mono text-blue-600 uppercase font-bold tracking-wider">
-              G-HIMS OS • Hospital Human Capital Management
+              Helixis Health Platform • Hospital Workforce
             </span>
             <h1 className="text-lg font-black text-slate-900 dark:text-slate-100">
               Workforce, Credentialing & Rostering Operating System

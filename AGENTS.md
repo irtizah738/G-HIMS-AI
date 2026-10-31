@@ -1,6 +1,6 @@
-# G-HIMS OS — MASTER ARCHITECTURAL DOCTRINE & AGENT SPECIFICATION
+# Helixis Health Platform — MASTER ARCHITECTURAL DOCTRINE & AGENT SPECIFICATION
 
-This file establishes the foundational principles, architectural constraints, and engineering response standards for G-HIMS (Generative Healthcare Information Management System).
+This file preserves the foundational architectural constraints and engineering standards for Helixis Health Platform (formerly G-HIMS). Branding changes must never rename existing machine identifiers, tenant paths, event types, audit identifiers, environment keys, or persisted data. The public company brand is Helixis AI; the flagship product is Helixis Clinical Intelligence.
 
 ---
 

@@ -52,6 +52,7 @@ import {
   Shield,
 } from 'lucide-react';
 import { RbacRoleSwitcherModal } from '@/components/auth/rbac-role-switcher';
+import { HelixisMark } from '@/components/branding/HelixisMark';
 
 interface CollapsibleSidebarProps {
   isCollapsed: boolean;
@@ -457,11 +458,11 @@ export function CollapsibleSidebar({
         {/* Mobile / Tablet Drawer Top Header */}
         <div className="lg:hidden p-3.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-850">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-black shadow-xs shrink-0">
-              <HeartPulse className="w-4 h-4" />
+            <div className="w-8 h-8 rounded-lg bg-[#0B132B] border border-[#48CAE4]/40 flex items-center justify-center shrink-0">
+              <HelixisMark className="w-6 h-6" />
             </div>
             <div>
-              <div className="font-extrabold text-slate-900 dark:text-slate-100 text-xs">G-HIMS OS</div>
+              <div className="font-extrabold text-slate-900 dark:text-slate-100 text-xs">Helixis Health Platform</div>
               <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Hospital Subsystems Navigation</div>
             </div>
           </div>

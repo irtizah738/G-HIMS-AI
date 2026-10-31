@@ -7,9 +7,9 @@ import { SystemInitializer } from '@/components/common/SystemInitializer';
 import { AppProviders } from '@/components/providers/app-providers';
 
 export const metadata: Metadata = {
-  title: 'G-HIMS OS | Hospital Information System',
+  title: 'Helixis AI | Clinical Intelligence & Health Platform',
   description:
-    'Programmable Healthcare + Enterprise Operating System unifying clinical EMR workflows, protocol engines, immutable event store, SAP-style double-entry ERP General Ledger, HCM clinical privileges, diagnostic LIS/RIS, offline-first runtime, and ambient AI intelligence.',
+    'Helixis AI delivers clinical intelligence and an offline-first hospital platform with governed clinical workflows, longitudinal records, diagnostics, billing, and auditable operations.',
 };
 
 export default async function RootLayout({

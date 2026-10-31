@@ -7,7 +7,8 @@ import { SettingsView } from '@/components/views/settings-view';
 import { AuthGuard } from '@/components/auth/auth-guard';
 import { HeaderProfileMenu } from '@/components/auth/header-profile-menu';
 import { SyncStatusIndicator } from '@/components/navigation/sync-status-indicator';
-import { HeartPulse, ChevronLeft, Building2 } from 'lucide-react';
+import { ChevronLeft, Building2 } from 'lucide-react';
+import { HelixisMark } from '@/components/branding/HelixisMark';
 import { useTenant } from '@/lib/tenant/context';
 
 export default function TenantSettingsPage() {
@@ -35,12 +36,12 @@ export default function TenantSettingsPage() {
               <div className="h-5 w-px bg-slate-200 dark:bg-slate-700 hidden sm:block" />
 
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold shadow-xs shrink-0">
-                  <HeartPulse className="w-4 h-4" />
+                <div className="w-8 h-8 rounded-lg bg-[#0B132B] border border-[#48CAE4]/40 flex items-center justify-center shrink-0">
+                  <HelixisMark className="w-6 h-6" />
                 </div>
                 <div>
                   <div className="flex items-center gap-1.5">
-                    <span className="font-extrabold text-slate-900 dark:text-white text-sm">G-HIMS OS</span>
+                    <span className="font-extrabold text-slate-900 dark:text-white text-sm">Helixis Health Platform</span>
                     <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
                       Settings
                     </span>

@@ -286,6 +286,7 @@ function collectionForEntityType(entityType: string): string {
     AI_DRAFT: 'aiDrafts',
     CLINICAL_DRAFT: 'clinicalDrafts',
     CLINICAL_DRAFT_REVISION: 'clinicalDraftRevisions',
+    CLINICAL_INTELLIGENCE_SAFETY_EVALUATION: 'clinicalIntelligenceSafetyEvaluations',
     PATIENT360_PROJECTION: 'patient360Projections',
     ITEM_MASTER: 'items',
     BATCH_LOT: 'batches',

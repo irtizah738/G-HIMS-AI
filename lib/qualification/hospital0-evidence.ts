@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v3';
 
 export const HOSPITAL0_EVIDENCE_FILES = [
   'staging-deployment-evidence.json',
@@ -66,13 +66,13 @@ const smokeSchema = baseEvidenceSchema.extend({
   checks: z.array(z.object({
     check: z.string().min(1),
     status: z.number().int(),
-  }).passthrough()).min(4),
+  }).passthrough()).min(4).max(1000),
 });
 
 const identitySchema = baseEvidenceSchema.extend({
   tenantId: z.string().min(1),
   syntheticOnly: z.literal(true),
-  roles: z.array(z.string().min(1)).min(7),
+  roles: z.array(z.string().min(1)).min(7).max(100),
   canonicalMembershipsProvisioned: z.literal(true),
 });
 
@@ -88,7 +88,7 @@ const physicalOfflineSchema = baseEvidenceSchema.extend({
   devices: z.array(z.object({
     deviceId: z.string().min(1),
     physical: z.literal(true),
-  }).passthrough()).min(2),
+  }).passthrough()).min(2).max(1000),
   syntheticToggleOnly: z.literal(false),
   zeroDuplicateReplay: z.literal(true),
   sharedWorkstationActorIsolation: z.literal(true),
@@ -97,7 +97,7 @@ const physicalOfflineSchema = baseEvidenceSchema.extend({
 });
 
 const crossRoleSchema = baseEvidenceSchema.extend({
-  requiredRoles: z.array(z.string().min(1)).min(7),
+  requiredRoles: z.array(z.string().min(1)).min(7).max(100),
   summary: z.object({
     failed: z.literal(0),
     passed: z.number().int().positive(),

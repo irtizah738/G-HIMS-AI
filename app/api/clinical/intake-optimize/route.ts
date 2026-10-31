@@ -1,7 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { NextRequest, NextResponse } from 'next/server';
 import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 
 const sourceLimitedBriefSchema = z.object({
   executiveSummary: z.string().min(1).max(4000),

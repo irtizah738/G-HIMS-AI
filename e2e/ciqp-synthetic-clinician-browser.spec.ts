@@ -96,9 +96,19 @@ test('authenticated synthetic doctor can establish scoped session and open Patie
   const browserFailures: string[] = [];
   const patientRequests: string[] = [];
   const sessionReloadStatuses: string[] = [];
-  page.on('response', (response) => {
+  page.on('response', async (response) => {
     if (response.url().includes('/api/auth/session') && response.request().method() === 'GET') {
-      sessionReloadStatuses.push(String(response.status()));
+      const headers = await response.request().allHeaders();
+      const body = await response.json().catch(() => ({})) as { code?: string };
+      // Log only a server error code and header-presence/match booleans.
+      // Never log bearer tokens, device IDs, session IDs or clinical payloads.
+      sessionReloadStatuses.push([
+        String(response.status()),
+        body.code || 'UNSPECIFIED',
+        headers['x-ghims-session-id'] === session.session.sessionId ? 'SESSION_MATCH' : 'SESSION_MISMATCH',
+        headers['x-ghims-device-id'] === session.session.deviceId ? 'DEVICE_MATCH' : 'DEVICE_MISMATCH',
+        headers.authorization?.startsWith('Bearer ') ? 'BEARER_PRESENT' : 'BEARER_MISSING',
+      ].join(':'));
     }
   });
   page.on('pageerror', (error) => browserFailures.push(error.message.slice(0, 300)));

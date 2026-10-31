@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import type { BaseCommand } from '@/lib/backend/types';
 
 const nonEmpty = z.string().trim().min(1);

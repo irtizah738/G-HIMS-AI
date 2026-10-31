@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v3';
 
 export const VitalSignsSchema = z.object({
   heartRate: z.number().min(30).max(250),
@@ -17,7 +17,7 @@ export const ClinicalNoteParseInputSchema = z.object({
 export const ClinicalNoteParsedOutputSchema = z.object({
   chiefComplaint: z.string(),
   historyOfPresentIllness: z.string().optional(),
-  diagnoses: z.array(z.string()),
+  diagnoses: z.array(z.string()).max(1000),
   medicationsPrescribed: z.array(
     z.object({
       name: z.string(),
@@ -25,8 +25,8 @@ export const ClinicalNoteParsedOutputSchema = z.object({
       frequency: z.string(),
       route: z.string(),
     })
-  ),
-  recommendedProcedures: z.array(z.string()),
+  ).max(1000),
+  recommendedProcedures: z.array(z.string()).max(1000),
   followUpDays: z.number().default(7),
   billingCodes: z.array(
     z.object({
@@ -35,7 +35,7 @@ export const ClinicalNoteParsedOutputSchema = z.object({
       fee: z.number(),
       category: z.string(),
     })
-  ),
+  ).max(1000),
   summary: z.string(),
 });
 

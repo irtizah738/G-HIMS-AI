@@ -246,7 +246,7 @@ function sourcePath(db: Firestore, tenantId: string, sourceId: string) {
 }
 export async function preflightExternalFhirSource(args: {
   db: Firestore; actor: FhirImportActor; sourceId: string;
-  resourceType: string; expectedBaseUrl: string;
+  resourceType: string; expectedBaseUrl?: string;
 }): Promise<FhirSourceRecord> {
   const { db, actor, resourceType, expectedBaseUrl } = args;
   const sourceId = assertFhirIdentifier(args.sourceId, 'FHIR_IMPORT_SOURCE_ID_INVALID');

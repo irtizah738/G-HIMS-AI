@@ -32,9 +32,29 @@ The existing runtime broker derives the target secret from SHA-256 of `JSON.stri
 - The PR containing `oauth.vendorProfile='EPIC_SANDBOX'` must be reviewed/merged before a source with this metadata can be activated. CI-EXT-07 itself does not provide or enable a runtime OAuth broker.
 - Egress policy must be enforced by a separately controlled proxy, with no direct path around it. Application DNS/host checks alone are insufficient.
 
+## Stage 0: identify an explicitly synthetic tenant and facility (read-only)
+
+The GCP project carrying synthetic records does **not** prove each Firestore tenant/facility is marked synthetic-only. The provisioning command intentionally requires an existing tenant with `syntheticOnly: true` and a facility document with `tenantId` matching the tenant plus `syntheticOnly: true` or `sandbox: true`.
+
+This metadata-only inspection uses Cloud Shell's existing `gcloud` identity. It requests only `tenantId`, `syntheticOnly`, `sandbox` and `status` fields, returns eligible **IDs and boolean statuses**, and never accesses clinical/patient collections.
+
+```bash
+git fetch origin
+git checkout feat/ci-ext07-epic-secret-source-provisioning-20261101
+git pull --ff-only origin feat/ci-ext07-epic-secret-source-provisioning-20261101
+
+export GHIMS_RUNTIME_MODE=STAGING
+export HELIXIS_CI_EXT07_CONFIRM_PROJECT=studio-1130431360-48a05
+export HELIXIS_CI_EXT07_TENANT_ID='<existing-synthetic-tenant>'
+gcloud config set project studio-1130431360-48a05
+bun scripts/ops/ci-ext07-inspect-synthetic-tenant.ts
+```
+
+Proceed only if `CI_EXT07_TENANT_SYNTHETIC_ONLY=YES`, at least one `CI_EXT07_ELIGIBLE_FACILITY_ID` is reported, `CI_EXT07_FACILITY_SCAN_COMPLETE=YES`, and the operator independently verifies the selected tenant/facility ownership. No eligible IDs is an explicit **STOP**. Do not add a synthetic flag to a live hospital merely to pass this gate.
+
 ## Stage 1: read-only plan and public-key verification
 
-Clone or pull the CI-EXT-07 branch in Cloud Shell. Set these reviewed **non-secret** identifiers in your terminal:
+With the exact eligible tenant/facility IDs verified, set these reviewed **non-secret** identifiers in Cloud Shell:
 
 ```bash
 export GHIMS_RUNTIME_MODE=STAGING

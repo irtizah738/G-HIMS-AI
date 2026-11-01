@@ -139,3 +139,46 @@ Clinical site approval and a vendor-connected synthetic patient roundtrip
 remain separate and mandatory.
 
 **Do not set** the sandbox qualification flag on production deployments.
+
+## Mandatory hospital site acceptance before patient-data import
+
+A passed sandbox protocol check and an OAuth bearer token **do not**
+authorize importing hospital patient records. Source enrollment additionally
+requires a current independent site approval:
+
+```text
+/tenants/{tenantId}/fhirSiteApprovals/{source.siteApprovalId}
+```
+
+```json
+{
+  "approvalId": "hospital-a-site-approval-v3",
+  "tenantId": "hospital-a",
+  "sourceId": "his-a",
+  "facilityId": "hospital-a-campus",
+  "status": "APPROVED",
+  "credentialRevision": 3,
+  "approvedResourceTypes": ["Patient", "Encounter", "Observation"],
+  "clinicalReviewerId": "hospital-clinical-authority",
+  "securityReviewerId": "hospital-information-security",
+  "sandboxQualificationId": "vendor-sandbox-qualification",
+  "reviewedAt": 1793500000000,
+  "expiresAt": 1796000000000,
+  "immutable": true
+}
+```
+
+The linked source record must contain `siteApprovalId`. The two reviewers
+must be distinct and the approval is limited to 90 days, the registered
+facility, OAuth credential revision and enumerated resource types. On
+credential rotation, create a **new** approval document and reference it
+from the source. Never rewrite an old approval. Client SDK access to
+site approvals is explicitly denied.
+
+Both the server request preflight and the final Firestore ingestion
+transaction validate this approval, including cancellation, source changes
+and key-rotation races. Without it, a valid SMART token cannot initiate
+patient-resource retrieval or append source evidence.
+
+The automated sandbox qualification endpoint does not create this approval
+or change source activation; it requires separate hospital operator review.

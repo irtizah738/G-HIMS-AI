@@ -172,9 +172,15 @@ describe('CI-EXT-06C: Epic synthetic sandbox OAuth compatibility', () => {
         scope: 'system/Observation.r system/Observation.s',
       }), { status: 200 }),
     });
+    // Force a fresh cache identity. The earlier green-token test intentionally
+    // verifies caching for the normal source + credential revision.
+    const isolatedSource = {
+      ...source, sourceId: 'epic-negative-grant',
+      oauth: { ...source.oauth!, credentialRevision: 99 },
+    };
     await expect(broker.getAccessToken({
-      source, tenantId:source.tenantId,sourceId:source.sourceId,
-      resourceType:'Observation',
+      source: isolatedSource, tenantId: isolatedSource.tenantId,
+      sourceId: isolatedSource.sourceId, resourceType: 'Observation',
     })).rejects.toThrow('CI_EXT06C_UNAPPROVED_EPIC_SCOPE');
   });
 });

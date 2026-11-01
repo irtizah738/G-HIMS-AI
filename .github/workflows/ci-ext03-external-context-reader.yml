@@ -1,0 +1,64 @@
+name: CI-EXT-03 External Clinical Evidence Reader
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-ext03-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  external-evidence:
+    name: External evidence authorization, provenance and freshness gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      NODE_ENV: test
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-p4-ci
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p4-ci
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+      GCLOUD_PROJECT: ghims-p4-ci
+      GOOGLE_CLOUD_PROJECT: ghims-p4-ci
+      GHIMS_CI_CONTEXT_SOURCE: NATIVE
+      GHIMS_CI_EXTERNAL_EVIDENCE_READER_ENABLED: "false"
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Dependencies
+        run: bun install --frozen-lockfile
+      - name: TypeScript
+        run: bun run typecheck
+      - name: Source-quality checks
+        run: bun run lint
+      - name: External reader contract tests
+        run: bun test tests/ci-ext03-external-reader-contract.test.ts
+      - name: Compile emulator integration for Node
+        run: |
+          sed "s#from 'bun:test'#from './helixis-node-test-compat'#g" emulator-security/helixis-external-context-reader.test.ts > emulator-security/helixis-external-context-reader.node.test.ts
+          bun build emulator-security/helixis-external-context-reader.node.test.ts --target=node --format=cjs --packages=external --outdir=.tmp/fhir-node
+      - name: Firebase CLI
+        run: npm install --global firebase-tools@14.20.0
+      - name: External context emulator qualification
+        timeout-minutes: 4
+        env:
+          FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080"
+        run: |
+          timeout --signal=TERM --kill-after=5s 110s firebase emulators:exec --project ghims-p4-ci --only firestore "node --test .tmp/fhir-node/helixis-external-context-reader.node.test.js"
+      - name: Diagnose emulator failures
+        if: failure()
+        run: |
+          if test -f firestore-debug.log; then
+            grep -Ein 'deadlock|lock|transaction|exception|error|timeout' firestore-debug.log | tail -n 90 || true
+          fi
+      - name: Existing standalone native context regression
+        run: bun test tests/ci-standalone-context-port.test.ts

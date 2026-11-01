@@ -114,7 +114,11 @@ The first revision may receive **100% routing allocation**, because
 `--no-traffic` is unsupported when **creating** a service. The first deployment
 therefore uses `--scaling=0` to **disable the entire service** immediately,
 `--no-default-url` to disable the default endpoint, `--ingress=internal`,
-`--no-allow-unauthenticated`, and `--invoker-iam-check`.
+`--no-allow-unauthenticated`, `--invoker-iam-check`, and
+`--no-deploy-health-check`. The last option prevents Cloud Run's default
+single-instance deployment readiness check from starting the otherwise
+disabled workload. The operator must separately qualify startup when
+activation becomes authorized.
 No Epic credentials are attached. Deployment success does not qualify live
 outbound Epic connectivity. Do not add a traffic tag: tag-based routing may
 bypass some service-level disabled-instance semantics.

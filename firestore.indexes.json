@@ -830,6 +830,21 @@
       "collectionGroup": "patient360Projections",
       "fieldPath": "counts",
       "indexes": []
+    },
+    {
+      "collectionGroup": "fhirImportedVersions",
+      "fieldPath": "resourceJson",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fhirImportedVersions",
+      "fieldPath": "normalizedEvidence",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fhirImportEvents",
+      "fieldPath": "payload",
+      "indexes": []
     }
   ]
 }

@@ -1,0 +1,50 @@
+name: Helixis External FHIR R4 Import
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [feat/helixis-external-fhir-import-r4]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: helixis-fhir-r4-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fhir-import:
+    name: FHIR R4 authority, replay and emulator isolation
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      NODE_ENV: test
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-p4-ci
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p4-ci
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_CI_EXTERNAL_FHIR_IMPORT_ENABLED: "false"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Source quality gate
+        run: bun run lint
+      - name: Pure authority and FHIR contract tests
+        run: bun test tests/helixis-external-fhir-import.test.ts
+      - name: Install Firebase CLI for isolated emulator
+        run: npm install --global firebase-tools@14.20.0
+      - name: Firestore atomicity, replay and isolation
+        run: firebase emulators:exec --project ghims-p4-ci --only firestore "bun test emulator-security/helixis-external-fhir-import.test.ts"
+      - name: Existing FHIR transport regressions
+        run: bun run test:wave4

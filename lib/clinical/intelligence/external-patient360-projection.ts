@@ -210,13 +210,18 @@ export async function rebuildExternalPatient360(args: {
           receipt.sourceVersionId !== head.sourceVersionId) {
         throw new Error('FHIR_CONTEXT_IMMUTABLE_LINEAGE_MISMATCH');
       }
-      if (!source || source.tenantId !== tenantId || source.sourceId !== head.sourceId ||
-          source.status !== 'ACTIVE' || source.securityReviewStatus !== 'APPROVED') {
-        problems.push('SOURCE_NOT_ACTIVE:' + prefix);
-        continue;
+      // Facility authority must be evaluated even for a suspended/revoked
+      // source. Checking source status first would let an out-of-scope actor
+      // obtain reconciliation metadata for another hospital facility.
+      if (!source || source.tenantId !== tenantId || source.sourceId !== head.sourceId) {
+        throw new Error('FHIR_CONTEXT_SOURCE_SCOPE_UNVERIFIABLE');
       }
       if (!actor.facilityIds.includes(source.facilityId)) {
         throw new Error('FHIR_CONTEXT_FACILITY_DENIED');
+      }
+      if (source.status !== 'ACTIVE' || source.securityReviewStatus !== 'APPROVED') {
+        problems.push('SOURCE_NOT_ACTIVE:' + prefix);
+        continue;
       }
       if (!link || link.tenantId !== tenantId || link.patientId !== patientId ||
           link.sourceId !== head.sourceId || link.facilityId !== source.facilityId ||

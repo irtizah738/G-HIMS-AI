@@ -157,7 +157,8 @@ async function main(): Promise<void> {
   if (!actor || actor === '(unset)' || actor.includes('gserviceaccount.com')) {
     fail('HUMAN_OPERATOR_IDENTITY_REQUIRED');
   }
-  if (cli(['config','get-value','auth/impersonate_service_account']) !== '(unset)') {
+  const impersonated = cli(['config','get-value','auth/impersonate_service_account']);
+  if (impersonated && impersonated !== '(unset)') {
     fail('IMPERSONATION_DISABLED_FOR_BOOTSTRAP');
   }
   const token = cli(['auth','print-access-token']);

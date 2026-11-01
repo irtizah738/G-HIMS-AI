@@ -255,6 +255,8 @@ export class FhirR4Adapter {
         const response = await this.fetchImpl(this.baseUrl + path, {
           ...init,
           signal: controller.signal,
+          // Never forward a hospital bearer credential across HTTP redirects.
+          redirect: 'error',
           headers: {
             Accept: 'application/fhir+json',
             ...(init.body ? { 'Content-Type': 'application/fhir+json' } : {}),

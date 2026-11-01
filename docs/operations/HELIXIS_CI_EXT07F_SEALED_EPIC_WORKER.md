@@ -1,6 +1,6 @@
 # CI-EXT-07F — sealed Epic Cloud Run worker
 
-**Engineering candidate only. Not deployed. Synthetic STAGING only.**
+**Engineering candidate. CI-EXT-07F initial deployment previously failed on an unsupported `--no-traffic` flag; inspect actual service inventory before retry. Synthetic STAGING only.**
 The CI-EXT-07E Cloud Run Job produced `EGRESS_TEST=PASS_NO_TCP_CONNECTION`.
 It proves that TCP connection failed in that job, not whether the cause was
 the firewall or absent NAT. No real Epic HTTPS test has been qualified here.
@@ -14,7 +14,10 @@ the firewall or absent NAT. No real Epic HTTPS test has been qualified here.
 - Existing egress firewall `helixis-epic-deny-egress`: priority 1000,
   DENY all IPv4 traffic. No Cloud NAT, proxy or internet allowance is created.
 - New service `helixis-epic-sealed-worker` only: internal ingress,
-  authenticated invocation, no traffic, zero minimum instances.
+  authenticated invocation with IAM check, default URL disabled, manual
+  scaling **zero instances** (service disabled). Cloud Run may still assign
+  100% route allocation to the first revision; zero-instance manual scaling
+  means it cannot serve requests. This is not a zero-percent-traffic release.
 - Standalone Node built-in HTTP application with only `GET /healthz`;
   all other routes return HTTP 403. No FHIR, OAuth, Secret Manager, Firestore,
   request-body logging, patient identifiers or outbound client.
@@ -107,8 +110,24 @@ unset HELIXIS_CI_EXT07F_CONFIRM_DEPLOY
 ```
 
 This is **first deployment only**. It will not update existing services.
-The revision receives zero traffic and no credentials. Deployment success
-does not qualify live outbound Epic connectivity.
+The first revision may receive **100% routing allocation**, because
+`--no-traffic` is unsupported when **creating** a service. The first deployment
+therefore uses `--scaling=0` to **disable the entire service** immediately,
+`--no-default-url` to disable the default endpoint, `--ingress=internal`,
+`--no-allow-unauthenticated`, and `--invoker-iam-check`.
+No Epic credentials are attached. Deployment success does not qualify live
+outbound Epic connectivity. Do not add a traffic tag: tag-based routing may
+bypass some service-level disabled-instance semantics.
+
+
+### First-deployment failure: `--no-traffic` unsupported
+
+On 2026-11-01 the initial `gcloud run deploy` returned:
+`--no-traffic not supported when creating a new service.` The command was
+rejected, but its response alone does **not** prove zero resources were
+created. First inspect regional service inventory; the operator script itself
+refuses to proceed if the service already exists. Never delete a partially
+created service automatically. Review and document it before any remediation.
 
 ## Mandatory post-deployment inspection
 
@@ -123,9 +142,11 @@ gcloud secrets get-iam-policy helixis-fhir-0db9e82fc4db981ae88c2ffdd1acc15a \
   --project="$PROJECT" --format=json
 ```
 
-Confirm no allUsers/allAuthenticatedUsers grants, no traffic, internal ingress,
+Confirm no allUsers/allAuthenticatedUsers grants, manual scaling=0,
+**no default URL**, no traffic tags, internal ingress, invoker IAM check,
 all-traffic VPC attachment, correct SA, no secret env or volumes, and disabled
-imports. Record output with digest, operator, timestamp and change approval.
+imports. Do not mistake an initial 100% route allocation for a running service.
+If any check fails, halt; do not activate or loosen ingress. Record output with digest, operator, timestamp and change approval.
 
 ## Later, separate CI-EXT-07G gate
 

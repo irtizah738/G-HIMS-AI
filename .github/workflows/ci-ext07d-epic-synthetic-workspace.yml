@@ -1,0 +1,41 @@
+name: CI-EXT-07D Epic Synthetic Workspace Bootstrap
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-ext07d-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  synthetic-workspace:
+    name: Exact-project synthetic bootstrap safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_CI_EXTERNAL_FHIR_IMPORT_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Dependencies
+        run: bun install --frozen-lockfile
+      - name: TypeScript
+        run: bun run typecheck
+      - name: Source quality
+        run: bun run lint
+      - name: Synthetic bootstrap regression
+        run: bun test tests/ci-ext07d-epic-workspace.test.ts tests/ci-ext07-epic-source-provisioning.test.ts
+      - name: Deny creation outside staging before any GCP access
+        run: |
+          if bun scripts/ops/ci-ext07d-epic-workspace.ts create > /tmp/ext07d-denied.txt 2>&1; then
+            echo 'FAIL_OPEN_EPIC_BOOTSTRAP'; exit 1
+          fi
+          grep -q 'CI_EXT07D_STAGING_ENVIRONMENT_REQUIRED' /tmp/ext07d-denied.txt

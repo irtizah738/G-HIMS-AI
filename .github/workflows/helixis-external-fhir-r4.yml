@@ -45,11 +45,12 @@ jobs:
       - name: Install Firebase CLI for isolated emulator
         run: npm install --global firebase-tools@14.20.0
       - name: Firestore atomicity, replay and isolation
-        timeout-minutes: 8
+        timeout-minutes: 4
         env:
+          GHIMS_FHIR_EMULATOR_TRACE: "true"
           FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080"
         run: |
           echo "Running isolated Firestore emulator against project ghims-p4-ci"
-          firebase emulators:exec --project ghims-p4-ci --only firestore "bun test --timeout 45000 emulator-security/helixis-external-fhir-import.test.ts emulator-security/helixis-external-patient360.test.ts"
+          timeout --signal=TERM --kill-after=5s 100s firebase emulators:exec --project ghims-p4-ci --only firestore "bun test --timeout 30000 emulator-security/helixis-external-fhir-import.test.ts emulator-security/helixis-external-patient360.test.ts"
       - name: Existing FHIR transport regressions
         run: bun run test:wave4

@@ -188,7 +188,8 @@ export async function rebuildExternalPatient360(args: {
       const { value: head, ref } = heads[i];
       const receipt = receiptRows[i];
       const source = sources.get(head.sourceId);
-      const link = linkSnaps[i]?.exists ? linkSnaps[i].data() as FhirPatientLink : null;
+      const linkSnap = linkSnaps[i];
+      const link = linkSnap && linkSnap.exists ? linkSnap.data() as FhirPatientLink : null;
       const prefix = ref.id;
       if (!receipt || head.tenantId !== tenantId || head.patientId !== patientId ||
           head.receiptId !== receipt.receiptId || receipt.tenantId !== tenantId ||

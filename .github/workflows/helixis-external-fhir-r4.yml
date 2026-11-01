@@ -52,5 +52,18 @@ jobs:
         run: |
           echo "Running isolated Firestore emulator against project ghims-p4-ci"
           timeout --signal=TERM --kill-after=5s 100s firebase emulators:exec --project ghims-p4-ci --only firestore "bun test --timeout 30000 emulator-security/helixis-external-fhir-import.test.ts emulator-security/helixis-external-patient360.test.ts"
+      - name: Diagnose Firestore emulator transaction stalls
+        if: failure()
+        shell: bash
+        run: |
+          echo 'Firestore emulator error and transaction diagnostics (synthetic-only CI)'
+          if test -f firestore-debug.log; then
+            grep -Ein 'deadlock|lock|transaction|exception|error|failed|timeout|gRPC' firestore-debug.log | tail -n 120 || true
+          else
+            echo 'No firestore-debug.log produced'
+          fi
+          if test -f firebase-debug.log; then
+            tail -n 60 firebase-debug.log || true
+          fi
       - name: Existing FHIR transport regressions
         run: bun run test:wave4

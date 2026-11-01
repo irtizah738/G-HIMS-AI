@@ -42,3 +42,9 @@ jobs:
             echo "FAIL_OPEN_STAGING_PROVISIONER"; exit 1
           fi
           grep -q 'STAGING_RUNTIME_REQUIRED' /tmp/ci-ext07-denied.txt
+      - name: Confirm source registration refuses TEST environment before Firestore
+        run: |
+          if bun scripts/ops/ci-ext07-register-suspended-epic-source.ts > /tmp/ci-ext07-register-denied.txt 2>&1; then
+            echo "FAIL_OPEN_SOURCE_REGISTRATION"; exit 1
+          fi
+          grep -q 'CI_EXT07_STAGING_REGISTRATION_DENIED' /tmp/ci-ext07-register-denied.txt

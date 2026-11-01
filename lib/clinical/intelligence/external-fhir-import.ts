@@ -287,9 +287,11 @@ export async function ingestExternalFhirResource(args: {
     traceFhirStage('TRANSACTION_CALLBACK_STARTED');
     // All reads precede all writes (Firestore transaction requirement).
     traceFhirStage('BEFORE_SOURCE_LINK_RECEIPT_HEAD_READS');
-    const [sourceSnap, linkSnap, receiptSnap, headSnap] = await Promise.all([
-      tx.get(sourceRef), tx.get(linkRef), tx.get(receiptRef), tx.get(headRef),
-    ]);
+    // One BatchGetDocuments RPC is safer than concurrent Transaction.get calls:
+    // each read sees the same transaction snapshot and avoids conflicting
+    // simultaneous transaction-read streams in the Firestore emulator.
+    const [sourceSnap, linkSnap, receiptSnap, headSnap] =
+      await tx.getAll(sourceRef, linkRef, receiptRef, headRef);
     traceFhirStage('AFTER_SOURCE_LINK_RECEIPT_HEAD_READS');
     const source = assertFhirSource(
       sourceSnap.exists ? sourceSnap.data() as FhirSourceRecord : null,

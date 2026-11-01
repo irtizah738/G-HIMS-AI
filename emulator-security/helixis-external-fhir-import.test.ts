@@ -151,4 +151,4 @@ test('external FHIR import: atomic versions, audit, idempotency, revocation and 
     await db.recursiveDelete(root);
     console.info('FHIR_EMULATOR_CLEANUP_COMPLETE');
   }
-}, 120000);
+}, 30000);

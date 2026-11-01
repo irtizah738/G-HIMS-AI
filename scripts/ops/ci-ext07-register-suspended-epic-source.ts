@@ -81,6 +81,7 @@ async function main(): Promise<void> {
     }
     const fd = facility.data();
     if (!facility.exists || fd?.tenantId !== tenantId ||
+        fd?.status !== 'ACTIVE' ||
         (fd.syntheticOnly !== true && fd.sandbox !== true)) {
       throw new Error('CI_EXT07_SYNTHETIC_FACILITY_REQUIRED');
     }

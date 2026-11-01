@@ -91,11 +91,15 @@ test('script uses safe first deployment and keeps secret and imports disabled', 
     'set -Eeuo pipefail', 'helixis-epic-egress',
     'helixis-epic-us-central1', 'all-traffic',
     '--ingress=internal', '--no-allow-unauthenticated',
-    '--no-traffic', 'helixis-epic-staging-runtime',
+    '--scaling=0', '--no-default-url', '--invoker-iam-check',
+    'helixis-epic-staging-runtime',
     'HELIXIS_CI_EXT07F_CONFIRM_DEPLOY',
     'CI_EXT07F_IMPORT_ENABLED=NO', 'CI_EXT07F_SECRET_GRANTS=NOT_CHANGED',
   ]) assert.ok(shell.includes(entry), entry);
-  assert.doesNotMatch(shell, /--(?:set|update)-secrets|secrets add-iam-policy-binding|--ingress=all|--vpc-egress=private-ranges-only/);
+  assert.doesNotMatch(shell, /--(?:set|update)-secrets|secrets add-iam-policy-binding|--ingress=all|--vpc-egress=private-ranges-only|--no-traffic|--min-instances|--max-instances/);
+  // On first create, a revision may receive 100% routing but MUST be disabled.
+  assert.match(shell, /--scaling=0/);
+  assert.match(shell, /--no-default-url/);
 });
 
 

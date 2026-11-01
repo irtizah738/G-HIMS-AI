@@ -11,6 +11,7 @@
 import { createHash } from 'node:crypto';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import type { FhirResource } from '@/lib/interop/fhir-r4-adapter';
+import { siteApprovalDocId, validateFhirSiteApproval, type FhirSiteApproval } from '@/lib/interop/fhir-site-approval';
 
 export const EXTERNAL_FHIR_IMPORT_TYPES = ['Patient', 'Encounter', 'Observation'] as const;
 export type ExternalFhirImportType = typeof EXTERNAL_FHIR_IMPORT_TYPES[number];
@@ -43,6 +44,16 @@ export type FhirSourceRecord = {
   status: 'ACTIVE' | 'SUSPENDED' | 'REVOKED';
   securityReviewStatus: 'APPROVED' | 'PENDING' | 'REVOKED';
   approvedResourceTypes: string[];
+  siteApprovalId?: string;
+  oauth?: {
+    mode: 'SMART_BACKEND';
+    clientId: string;
+    tokenUrl: string;
+    keyId: string;
+    secretVersion: number;
+    credentialRevision: number;
+    scopes: string[];
+  };
 };
 export type FhirPatientLink = {
   tenantId: string;
@@ -237,12 +248,12 @@ function sourcePath(db: Firestore, tenantId: string, sourceId: string) {
 }
 export async function preflightExternalFhirSource(args: {
   db: Firestore; actor: FhirImportActor; sourceId: string;
-  resourceType: string; expectedBaseUrl: string;
-}): Promise<void> {
+  resourceType: string; expectedBaseUrl?: string;
+}): Promise<FhirSourceRecord> {
   const { db, actor, resourceType, expectedBaseUrl } = args;
   const sourceId = assertFhirIdentifier(args.sourceId, 'FHIR_IMPORT_SOURCE_ID_INVALID');
   const snap = await sourcePath(db, actor.tenantId, sourceId).get();
-  assertFhirSource(snap.exists ? snap.data() as FhirSourceRecord : null,
+  return assertFhirSource(snap.exists ? snap.data() as FhirSourceRecord : null,
     actor.tenantId, sourceId, actor, resourceType, expectedBaseUrl);
 }
 function requireLink(
@@ -265,6 +276,8 @@ export async function ingestExternalFhirResource(args: {
   sourceId: string;
   resource: unknown;
   expectedBaseUrl?: string;
+  expectedCredentialRevision?: number;
+  expectedSiteApprovalId?: string;
   now?: () => number;
 }): Promise<ExternalFhirImportResult> {
   const { db, actor } = args;
@@ -297,9 +310,29 @@ export async function ingestExternalFhirResource(args: {
       sourceSnap.exists ? sourceSnap.data() as FhirSourceRecord : null,
       tenantId, sourceId, actor, prepared.resourceType, args.expectedBaseUrl
     );
+    // A key rotation or OAuth policy edit during remote HTTP retrieval
+    // invalidates that import. The next attempt must obtain a fresh token.
+    if (args.expectedCredentialRevision !== undefined &&
+        source.oauth?.credentialRevision !== args.expectedCredentialRevision) {
+      throw new Error('FHIR_IMPORT_OAUTH_CONFIG_CHANGED');
+    }
     const patientId = requireLink(
       linkSnap.exists ? linkSnap.data() as FhirPatientLink : null, source, prepared
     );
+    if (args.expectedCredentialRevision !== undefined) {
+      if (!args.expectedSiteApprovalId ||
+          args.expectedSiteApprovalId !== source.siteApprovalId) {
+        throw new Error('CI_EXT04_SITE_APPROVAL_REQUIRED');
+      }
+      const approvalRef = tenantRef.collection('fhirSiteApprovals')
+        .doc(siteApprovalDocId(source));
+      const approvalSnap = await tx.get(approvalRef);
+      validateFhirSiteApproval(
+        source,
+        approvalSnap.exists ? approvalSnap.data() as FhirSiteApproval : null,
+        prepared.resourceType, (args.now || Date.now)(),
+      );
+    }
     const patientRef = tenantRef.collection('patients').doc(patientId);
     traceFhirStage('BEFORE_PATIENT_READ');
     const patientSnap = await tx.get(patientRef);

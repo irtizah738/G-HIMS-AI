@@ -3,6 +3,9 @@ import { getAdminFirestore } from '@/server/firebase/admin';
 import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
 import { assertIntegrationLive } from '@/lib/interop/integration-state';
 import { FhirR4Adapter } from '@/lib/interop/fhir-r4-adapter';
+import { checkSmartBackendSource, SmartBackendTokenBroker } from '@/lib/interop/fhir-smart-backend-oauth';
+import { createGcpFhirPrivateKeyAccessor } from '@/lib/interop/fhir-smart-secret-manager';
+import { preflightFhirSiteApproval } from '@/lib/interop/fhir-site-approval';
 import {
   EXTERNAL_FHIR_IMPORT_TYPES,
   assertFhirIdentifier,
@@ -19,9 +22,9 @@ export const runtime = 'nodejs';
  * The body only selects a registered source and resource ID. It cannot supply
  * an endpoint, token, patient mapping, actor, or imported clinical payload.
  *
- * Initial deployment contract: one explicitly pinned FHIR source per runtime.
- * A tenant-aware OAuth broker and hospital-specific qualification are required
- * before deploying many independent sources from a shared runtime.
+ * Tenant-scoped SMART Backend Services credentials are resolved server-side
+ * from per-source Secret Manager versions, never from request arguments.
+ * External traffic is still feature-flagged and requires site qualification.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -50,19 +53,12 @@ export async function POST(req: NextRequest) {
     const db = getAdminFirestore();
     if (!db) throw new Error('FHIR_IMPORT_FIRESTORE_UNAVAILABLE');
 
-    // Pinned server-side configuration: never use a client-selected FHIR URL.
-    const pinnedTenant = process.env.GHIMS_CI_FHIR_SOURCE_TENANT || '';
-    const pinnedSource = process.env.GHIMS_CI_FHIR_SOURCE_ID || '';
-    const rawBaseUrl = process.env.GHIMS_CI_FHIR_BASE_URL || '';
-    const token = process.env.GHIMS_CI_FHIR_ACCESS_TOKEN || '';
-    const baseUrl = rawBaseUrl.replace(/\/$/, '');
-    const url = new URL(baseUrl);
-    if (context.tenantId !== pinnedTenant || sourceId !== pinnedSource ||
-        !token.trim() || url.protocol !== 'https:' || url.username || url.password ||
-        url.search || url.hash || !url.hostname) {
-      throw new Error('FHIR_IMPORT_SOURCE_RUNTIME_BINDING_DENIED');
+    // A shared Helixis deployment can host multiple hospital integrations,
+    // but only an explicitly approved source bound to the request's verified
+    // tenant and facility. No URL, client ID, key or token comes from client.
+    if (process.env.GHIMS_CI_FHIR_AUTH_MODE !== 'SMART_BACKEND') {
+      throw new Error('CI_EXT04_SMART_AUTH_NOT_ENABLED');
     }
-
     const actor = {
       actorId: context.actorId,
       tenantId: context.tenantId,
@@ -70,18 +66,36 @@ export async function POST(req: NextRequest) {
       permissions: context.permissions,
       facilityIds: context.facilityIds || [],
     };
-    await preflightExternalFhirSource({
-      db, actor, sourceId, resourceType, expectedBaseUrl: baseUrl,
+    const source = await preflightExternalFhirSource({
+      db, actor, sourceId, resourceType,
     });
-
-    // HTTP retrieval happens outside the Firestore transaction. The adapter
-    // will not retry writes and requires the LIVE activation state.
+    const allowedTokenHosts = (process.env.GHIMS_CI_FHIR_OAUTH_ALLOWED_TOKEN_HOSTS || '')
+      .split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
+    const allowedFhirHosts = (process.env.GHIMS_CI_FHIR_OAUTH_ALLOWED_FHIR_HOSTS || '')
+      .split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
+    const oauth = checkSmartBackendSource(source, context.tenantId, sourceId, {
+      allowedTokenHosts, allowedFhirHosts,
+    });
+    // A successful SMART token exchange is not clinical site authorization.
+    // No patient-bearing HTTP is allowed before two-party site approval.
+    const siteApproval = await preflightFhirSiteApproval({
+      db, source, resourceType,
+    });
+    const projectId = process.env.GHIMS_CI_FHIR_SECRET_PROJECT_ID || '';
+    const tokenBroker = new SmartBackendTokenBroker({
+      getSecret: createGcpFhirPrivateKeyAccessor({ projectId }),
+      allowedTokenHosts, allowedFhirHosts,
+    });
+    // Only the approved resource read is performed, and token exchange uses
+    // a source-specific signed one-time client assertion.
     const adapter = new FhirR4Adapter({
-      baseUrl, state: 'LIVE', accessToken: token,
+      baseUrl: source.baseUrl, state: 'LIVE',
+      getAccessToken: () => tokenBroker.getAccessToken({
+        source, tenantId: context.tenantId, sourceId, resourceType,
+      }),
       approvedResourceTypes: [...EXTERNAL_FHIR_IMPORT_TYPES],
       writableResourceTypes: [],
-      timeoutMs: 12000,
-      maxReadRetries: 1,
+      timeoutMs: 12000, maxReadRetries: 1,
       requireHttpsInProduction: true,
     });
     const resource = await adapter.readResource(resourceType, resourceId);
@@ -89,7 +103,9 @@ export async function POST(req: NextRequest) {
       throw new Error('FHIR_IMPORT_REMOTE_RESOURCE_MISMATCH');
     }
     const result = await ingestExternalFhirResource({
-      db, actor, sourceId, resource, expectedBaseUrl: baseUrl,
+      db, actor, sourceId, resource, expectedBaseUrl: source.baseUrl,
+      expectedCredentialRevision: oauth.credentialRevision,
+      expectedSiteApprovalId: siteApproval.approvalId,
     });
     // Receipt only. Never return PHI or the raw imported resource to caller.
     return NextResponse.json({ success: true, ...result }, { status: result.replay ? 200 : 201 });

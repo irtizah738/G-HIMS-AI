@@ -232,6 +232,8 @@ service cloud.firestore {
       match /externalPatient360Projections/{patientId} { allow read, write: if false; }
       match /externalPatient360Revisions/{revisionId} { allow read, write: if false; }
       match /externalContextAccessAudits/{auditId} { allow read, write: if false; }
+      match /fhirSandboxQualifications/{qualificationId} { allow read, write: if false; }
+      match /fhirSiteApprovals/{approvalId} { allow read, write: if false; }
 
       // Clinical read models. Mutations must go through authenticated server commands.
       // Patient identity/chart state is exposed only through server APIs and

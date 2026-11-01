@@ -1,0 +1,40 @@
+name: CI-EXT-04 SMART FHIR Backend OAuth
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-ext04-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smart-backend:
+    name: Tenant OAuth, SMART scopes and sandbox conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      NODE_ENV: test
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_CI_EXTERNAL_FHIR_IMPORT_ENABLED: "false"
+      GHIMS_CI_FHIR_AUTH_MODE: DISABLED
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install frozen dependencies
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Source quality
+        run: bun run lint
+      - name: SMART Backend Services and sandbox contract tests
+        run: bun test tests/ci-ext04-smart-backend-oauth.test.ts tests/ci-ext04-fhir-sandbox-qualification.test.ts
+      - name: Existing FHIR and standalone regression
+        run: bun test tests/helixis-external-fhir-import.test.ts tests/ci-ext03-external-reader-contract.test.ts

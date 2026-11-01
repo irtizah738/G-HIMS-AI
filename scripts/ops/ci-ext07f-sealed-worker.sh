@@ -70,7 +70,7 @@ gcloud run deploy "$SERVICE" \
   --network="$NETWORK" --subnet="$SUBNET" --network-tags=helixis-epic-worker \
   --vpc-egress=all-traffic --ingress=internal \
   --no-allow-unauthenticated --invoker-iam-check --no-default-url \
-  --scaling=0 --concurrency=1 \
+  --scaling=0 --no-deploy-health-check --concurrency=1 \
   --memory=256Mi --cpu=1 --timeout=10s --port=8080 \
   --set-env-vars="NODE_ENV=production,HELIXIS_EPIC_WORKER_MODE=SEALED,HELIXIS_EPIC_PROJECT=$PROJECT,GHIMS_RUNTIME_MODE=STAGING,GHIMS_CI_EXTERNAL_FHIR_IMPORT_ENABLED=false,GHIMS_INTEGRATION_FHIR_R4_STATE=DISABLED,GHIMS_CI_FHIR_AUTH_MODE=DISABLED" \
   --quiet

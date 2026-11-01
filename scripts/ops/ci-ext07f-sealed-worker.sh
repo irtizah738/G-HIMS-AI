@@ -23,10 +23,26 @@ IMAGE="${HELIXIS_CI_EXT07F_IMAGE:-}"
 [[ "$IMAGE" =~ ^us-central1-docker\.pkg\.dev/studio-1130431360-48a05/helixis-epic-staging/epic-sealed-worker@sha256:[a-f0-9]{64}$ ]] || fail PINNED_ARTIFACT_IMAGE_REQUIRED
 for bin in gcloud jq; do command -v "$bin" >/dev/null || fail "TOOL_MISSING_$bin"; done
 [[ "$(gcloud config get-value project 2>/dev/null)" == "$PROJECT" ]] || fail GCLOUD_PROJECT_MISMATCH
-if output="$(gcloud run services describe "$SERVICE" --project="$PROJECT" --region="$REGION" --format='value(metadata.name)' 2>&1)"; then
+# Require a successful, region-scoped inventory. Never infer absence from
+# variable gcloud NOT_FOUND wording, or confuse IAM/API errors with absence.
+if ! service_inventory="$(gcloud run services list \
+    --project="$PROJECT" --region="$REGION" --platform=managed \
+    --format=json 2>/dev/null)"; then
+  fail SERVICE_INVENTORY_NOT_VERIFIABLE
+fi
+# Malformed responses and unrecognised service records fail closed.
+if ! printf '%s\n' "$service_inventory" | jq -e '
+  type == "array" and
+  all(.[]; ((.metadata.name // .name // null) | type) == "string" and
+           ((.metadata.name // .name) | length) > 0)
+' >/dev/null; then
+  fail SERVICE_INVENTORY_INVALID
+fi
+if printf '%s\n' "$service_inventory" |
+    jq -e --arg service "$SERVICE" '
+      any(.[]; ((.metadata.name // .name) | split("/") | last) == $service)
+    ' >/dev/null; then
   fail SERVICE_ALREADY_EXISTS
-elif [[ "$output" != *NOT_FOUND* && "$output" != *"not found"* ]]; then
-  fail SERVICE_EXISTENCE_NOT_VERIFIABLE
 fi
 [[ "$(gcloud compute networks subnets describe "$SUBNET" --project="$PROJECT" --region="$REGION" --format='value(stackType)')" == IPV4_ONLY ]] || fail SUBNET_NOT_IPV4_ONLY
 [[ "$(gcloud compute networks subnets describe "$SUBNET" --project="$PROJECT" --region="$REGION" --format='value(network)')" == *"/networks/$NETWORK" ]] || fail SUBNET_NETWORK_MISMATCH

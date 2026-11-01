@@ -133,6 +133,17 @@ created. First inspect regional service inventory; the operator script itself
 refuses to proceed if the service already exists. Never delete a partially
 created service automatically. Review and document it before any remediation.
 
+### Second first-deployment failure: gen2 memory lower bound
+
+On 2026-11-01 the next `gcloud run deploy` attempt was rejected:
+`spec.template.spec.containers.resources.limits.memory: Total memory < 512 Mi is not supported with gen2 execution environment.`
+
+The reviewed command now uses `--execution-environment=gen2 --memory=512Mi --cpu=1`.
+For gen2, 512 MiB is the documented minimum; this is a resource bound
+fix only and does not change workload behavior or the published OCI image.
+Do not retry until read-only regional inventory confirms the worker service
+was not partially created and new CI checks have passed.
+
 ## Mandatory post-deployment inspection
 
 ```bash

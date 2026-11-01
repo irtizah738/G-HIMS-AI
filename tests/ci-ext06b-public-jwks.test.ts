@@ -64,6 +64,6 @@ describe('CI-EXT-06B vendor JKU public key publication', () => {
     }).toString(),'weak-key')).toThrow('CI_EXT06B_RSA_KEY_INSUFFICIENT');
     expect(() => assertJwksId('..')).toThrow('CI_EXT06B_JWKS_ID_INVALID');
     expect(() => assertJwksId('../source')).toThrow('CI_EXT06B_JWKS_ID_INVALID');
-    expect(assertJwksId('ss6xewY2VniKUot_D5OkG4')).toBe('ss6xewY2VniKUot_D5OkG4');
+    expect(assertJwksId('ss6xewY2VniKUot_D5OkG4c1ef')).toBe('ss6xewY2VniKUot_D5OkG4c1ef');
   });
 });

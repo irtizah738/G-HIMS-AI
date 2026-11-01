@@ -71,7 +71,7 @@ gcloud run deploy "$SERVICE" \
   --vpc-egress=all-traffic --ingress=internal \
   --no-allow-unauthenticated --invoker-iam-check --no-default-url \
   --scaling=0 --no-deploy-health-check --concurrency=1 \
-  --memory=256Mi --cpu=1 --timeout=10s --port=8080 \
+  --memory=512Mi --cpu=1 --timeout=10s --port=8080 \
   --set-env-vars="NODE_ENV=production,HELIXIS_EPIC_WORKER_MODE=SEALED,HELIXIS_EPIC_PROJECT=$PROJECT,GHIMS_RUNTIME_MODE=STAGING,GHIMS_CI_EXTERNAL_FHIR_IMPORT_ENABLED=false,GHIMS_INTEGRATION_FHIR_R4_STATE=DISABLED,GHIMS_CI_FHIR_AUTH_MODE=DISABLED" \
   --quiet
 printf 'CI_EXT07F_DEPLOY_SUBMITTED=PASS\nCI_EXT07F_MANUAL_SCALING=0\nCI_EXT07F_DEFAULT_URL=DISABLED\nCI_EXT07F_SECRET_GRANTS=NOT_CHANGED\nCI_EXT07F_IMPORT_ENABLED=NO\nCI_EXT07F_POST_DEPLOY_VERIFICATION=REQUIRED\n'

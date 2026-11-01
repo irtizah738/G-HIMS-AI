@@ -163,6 +163,41 @@ all-traffic VPC attachment, correct SA, no secret env or volumes, and disabled
 imports. Do not mistake an initial 100% route allocation for a running service.
 If any check fails, halt; do not activate or loosen ingress. Record output with digest, operator, timestamp and change approval.
 
+## CI-EXT-07F staged deployment evidence — 2026-11-01
+
+**Gate result: STAGING INFRASTRUCTURE CONFIGURATION QUALIFIED (synthetic-only).**
+Evidence below was supplied by the authorized Cloud Shell operator and
+recorded after deployment; these values were not read directly from Google
+Cloud by the GitHub automation. Deployment/change ticket:
+`HELIXIS-EPIC-20261101-001`.
+
+| Verification | Observed state |
+| --- | --- |
+| Project/region | `studio-1130431360-48a05` / `us-central1` |
+| Service/revision | `helixis-epic-sealed-worker` / `helixis-epic-sealed-worker-00001-ccv` |
+| OCI image | `us-central1-docker.pkg.dev/studio-1130431360-48a05/helixis-epic-staging/epic-sealed-worker@sha256:2d17283162720114d8f6721e1bc0f94d0bac8f6755086061858fbbedf414dfd1` |
+| Scaling/default URL | manual `0` / disabled (`status.url=null`) |
+| Ingress / invoker | `internal` / service IAM policy contains no bindings; IAM check not disabled |
+| Traffic | 100% initial revision allocation, no traffic tags; **not** proof of running instances |
+| Service account | `helixis-epic-staging-runtime@studio-1130431360-48a05.iam.gserviceaccount.com` |
+| Resources | gen2 / 1 vCPU / 512Mi |
+| Network | `helixis-epic-egress` / `helixis-epic-us-central1`, network tag `helixis-epic-worker`, `all-traffic` Direct VPC egress |
+| Secrets | no secret env refs, no volumes, no direct secret IAM grants |
+| Effective IAM evaluation | Policy Troubleshooter `overallAccessState=CANNOT_ACCESS`; allow access `ALLOW_ACCESS_STATE_NOT_GRANTED`; deny evaluation `DENY_ACCESS_STATE_UNKNOWN_INFO` |
+| Runtime flags | independent operator `jq -e` checks all passed: SEALED / STAGING / project match / imports disabled / FHIR integration disabled / FHIR auth disabled |
+| Effective firewall, us-central1 | sole reported effective rule `helixis-epic-deny-egress`: EGRESS DENY all protocols, `0.0.0.0/0`, priority 1000, enabled, no target tag restriction; no earlier-priority allow listed |
+| Subnet | IPv4 only (verified in operator preflight) |
+| Live Epic networking | **NOT QUALIFIED** — service deliberately disabled; CI-EXT-07E separate-job no-TCP result is not proof of blocked egress from this service |
+
+**Boundary of this qualification:** This records the effective policy and
+disabled service configuration **as inspected on 2026-11-01**, not a live
+connectivity test from the deployed Cloud Run revision. Any inherited,
+conditional, newly introduced or higher-precedence IAM/network policy must be
+re-evaluated before activation. No FHIR import, Epic OAuth connection,
+service scaling change, public endpoint, or secret access grant is authorized.
+Record a new change approval and runtime-origin negative egress tests as
+separate CI-EXT-07G release gates.
+
 ## Later, separate CI-EXT-07G gate
 
 Specify, cost-review and qualify a controlled HTTPS egress gateway with an

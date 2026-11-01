@@ -49,6 +49,9 @@ export async function assertPublicSandboxEgress(args:{
   if(url.protocol!=='https:'||url.username||url.password||
      url.port||url.hash||url.search||!host||
      isIP(host)!==0||
+     !host.includes('.')||host==='localhost'||
+     host.endsWith('.localhost')||host.endsWith('.local')||
+     host.endsWith('.internal')||
      !args.allowedHosts.some(h=>h.toLowerCase()===host)){
     throw new Error('CI_EXT06_EGRESS_ORIGIN_DENIED');
   }

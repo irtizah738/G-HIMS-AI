@@ -118,3 +118,95 @@ The PR-specific workflow runs these checks. Emulator tests require `FIRESTORE_EM
 ## Rollback
 
 Disable `GHIMS_CI_EXTERNAL_FHIR_IMPORT_ENABLED` or set `GHIMS_INTEGRATION_FHIR_R4_STATE=DISABLED`. Existing immutable version receipts and audit evidence remain available to authorized server operators; no external HIS data is changed. Review source access revocation and secret rotation if endpoint trust is compromised.
+
+## Phase 2B — Versioned external Patient 360 evidence projection and review
+
+The source-of-truth separation remains absolute. External evidence is projected
+into `externalPatient360Projections` and immutable
+`externalPatient360Revisions`, **never** into the native
+`patient360Projections` or native clinical event stream.
+
+The projection is intentionally a dedicated `ExternalPatient360Projection`
+contract, not a cast to `Patient360Projection`. It contains versioned
+source references and `Patient`/`Encounter`/`Observation` facts only.
+Its data-quality status is `UNKNOWN` for allergies, medication history
+and problem list, and `UNVERIFIED` for source completeness. Even
+`EVIDENCE_ONLY` is **not** permission to generate a clinical draft.
+
+### Deterministic rebuild
+
+`rebuildExternalPatient360({db, tenantId, patientId, actor})` performs a
+tenant-scoped Firestore transaction that reads current source heads, versioned
+FHIR imports, current source status, verified patient links, consent and open
+reconciliation cases. It re-hashes every FHIR import payload and checks its
+receipt ID, patient reference, source ID and version against the head.
+
+For each changed set, the transaction writes the next monotonic revision and
+a new immutable snapshot together. An identical rebuild returns
+`unchanged: true`, writes nothing, and preserves the existing revision.
+Only source heads (not late historical backfill) are projected. The initial
+bounded qualification limits are 64 source heads and 64 reconciliation cases
+per patient; over-limit attempts fail closed until paginated rebuilding exists.
+
+Revoked sources, withdrawn consent or invalid patient links suppress the
+affected facts from newly built projections and mark the chart
+`RECONCILIATION_REQUIRED`. Historical immutable source receipts and
+snapshot evidence remain server-only for governed retention and forensic
+requirements; separate retention/erasure policy is needed for real hospitals.
+Source history gaps are not inferred as complete.
+
+### Tied source versions
+
+An imported version with the same `meta.lastUpdated` as the current
+head but a different opaque `meta.versionId` is quarantined and gets a
+deterministic `fhirReconciliationCases` record. It never changes the
+current head. Two different actors must each hold the explicit
+`FHIR_RECONCILE` permission and facility scope, submit a 16+ character
+rationale, and independently choose `SUPPRESS_CONFLICTING_VERSION`.
+Each decision is immutable and separately audited. The case is resolved
+only after the second independent approval. Duplicate decisions by one actor
+are idempotent; changes to an earlier decision are rejected. Source/consent
+repair cannot be bypassed by case approval.
+
+This is not a generic patient-merge or correction-acceptance workflow.
+Unresolved relinks, consent withdrawal, source revocation and unverified
+history continue to block publication. A later import, correction or
+recovered source requires a fresh rebuild. No approval promotes evidence to
+clinical truth.
+
+### Operator API
+
+The opt-in endpoint `POST /api/integrations/fhir/context` (only when
+`GHIMS_CI_EXTERNAL_CONTEXT_REVIEW_ENABLED=true` and the FHIR integration
+is `LIVE`) accepts two actions:
+
+```json
+{"action":"REBUILD","tenantId":"hospital-a","patientId":"patient-123"}
+```
+
+```json
+{"action":"REVIEW_CASE","tenantId":"hospital-a","caseId":"frc_...","rationale":"Independently verified a source version collision and approved suppression."}
+```
+
+Both use the existing Firebase ID token, server session, device validation,
+tenant identity and facility claims. Rebuild needs `FHIR_IMPORT` or
+`FHIR_RECONCILE`; case review requires `FHIR_RECONCILE`. The endpoint
+returns operational status, hashes, counts and case IDs, not raw imported PHI.
+The new toggle is disabled by default and MUST remain disabled in production
+until case-level governance and hospital acceptance pass.
+
+### Dedicated qualification
+
+```sh
+bun run typecheck
+bun run lint
+bun test tests/helixis-external-fhir-import.test.ts
+firebase emulators:exec --project ghims-p4-ci --only firestore \
+  "bun test emulator-security/helixis-external-fhir-import.test.ts emulator-security/helixis-external-patient360.test.ts"
+```
+
+**Still blocked:** Complete identity matching/merge-reversal workflow,
+per-tenant OAuth, live FHIR conformance qualification, large-patient
+pagination, complete coding and units governance, source deletion/tombstones,
+FHIR history recovery, CI `ClinicalContextReader` conversion, formal clinical
+validation, and any decision to release held outbox events.

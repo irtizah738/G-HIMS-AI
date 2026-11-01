@@ -187,7 +187,7 @@ export async function reviewFhirSiteRequest(args:{
     if(row.status!=='PENDING'||row.expiresAt<=now||
        row.sourceConfigHash!==sourceFingerprint(source)) throw new Error('CI_EXT05_REVIEW_STALE');
     const existing=await tx.get(decisionRef);
-    const key=kind==='CLINICAL'?'clinical':'security';
+    const key: 'clinical' | 'security' = kind==='CLINICAL'?'clinical':'security';
     const opposite=kind==='CLINICAL'?row.security:row.clinical;
     if(opposite?.actorId===actor.actorId||row.requestedBy===actor.actorId)
       throw new Error('CI_EXT05_INDEPENDENCE_REQUIRED');

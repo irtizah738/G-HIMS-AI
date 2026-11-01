@@ -7,7 +7,7 @@
  *
  * No service or endpoint here can create or register a private key.
  */
-import { createPublicKey } from 'node:crypto';
+import { createPublicKey, type JsonWebKey } from 'node:crypto';
 
 export type PublicRsaJwk = {
   kty: 'RSA';

@@ -11,6 +11,7 @@
 import { createHash } from 'node:crypto';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import type { FhirResource } from '@/lib/interop/fhir-r4-adapter';
+import { siteApprovalDocId, validateFhirSiteApproval, type FhirSiteApproval } from '@/lib/interop/fhir-site-approval';
 
 export const EXTERNAL_FHIR_IMPORT_TYPES = ['Patient', 'Encounter', 'Observation'] as const;
 export type ExternalFhirImportType = typeof EXTERNAL_FHIR_IMPORT_TYPES[number];
@@ -43,6 +44,7 @@ export type FhirSourceRecord = {
   status: 'ACTIVE' | 'SUSPENDED' | 'REVOKED';
   securityReviewStatus: 'APPROVED' | 'PENDING' | 'REVOKED';
   approvedResourceTypes: string[];
+  siteApprovalId?: string;
   oauth?: {
     mode: 'SMART_BACKEND';
     clientId: string;
@@ -275,6 +277,7 @@ export async function ingestExternalFhirResource(args: {
   resource: unknown;
   expectedBaseUrl?: string;
   expectedCredentialRevision?: number;
+  expectedSiteApprovalId?: string;
   now?: () => number;
 }): Promise<ExternalFhirImportResult> {
   const { db, actor } = args;
@@ -316,6 +319,20 @@ export async function ingestExternalFhirResource(args: {
     const patientId = requireLink(
       linkSnap.exists ? linkSnap.data() as FhirPatientLink : null, source, prepared
     );
+    if (args.expectedCredentialRevision !== undefined) {
+      if (!args.expectedSiteApprovalId ||
+          args.expectedSiteApprovalId !== source.siteApprovalId) {
+        throw new Error('CI_EXT04_SITE_APPROVAL_REQUIRED');
+      }
+      const approvalRef = tenantRef.collection('fhirSiteApprovals')
+        .doc(siteApprovalDocId(source));
+      const approvalSnap = await tx.get(approvalRef);
+      validateFhirSiteApproval(
+        source,
+        approvalSnap.exists ? approvalSnap.data() as FhirSiteApproval : null,
+        prepared.resourceType, (args.now || Date.now)(),
+      );
+    }
     const patientRef = tenantRef.collection('patients').doc(patientId);
     traceFhirStage('BEFORE_PATIENT_READ');
     const patientSnap = await tx.get(patientRef);

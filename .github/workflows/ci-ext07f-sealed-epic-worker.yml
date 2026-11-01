@@ -1,0 +1,34 @@
+name: CI-EXT-07F Sealed Epic Worker
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  sealed-runtime-contract:
+    name: Fail-closed sealed worker and deployment safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      GHIMS_CI_EXTERNAL_FHIR_IMPORT_ENABLED: 'false'
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_CI_FHIR_AUTH_MODE: DISABLED
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Shell syntax
+        run: bash -n scripts/ops/ci-ext07f-sealed-worker.sh
+      - name: Sealed server and safety regression tests
+        run: node --test tests/ci-ext07f-sealed-worker.test.mjs
+      - name: Reject any TEST-mode cloud deployment
+        run: |
+          if bash scripts/ops/ci-ext07f-sealed-worker.sh deploy > /tmp/ci-ext07f-denied.txt 2>&1; then
+            echo 'FAIL_OPEN_CI_EXT07F_DEPLOYMENT'; exit 1
+          fi
+          grep -q 'CI_EXT07F_FAILED=STAGING_RUNTIME_REQUIRED' /tmp/ci-ext07f-denied.txt

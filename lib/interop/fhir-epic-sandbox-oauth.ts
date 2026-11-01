@@ -41,8 +41,8 @@ function allowedCategoryReadGrant(scope: string, approved: ReadonlySet<string>):
 }
 
 /**
- * Return an access token ONLY after confirming that every granted scope is
- * constrained to the server-approved read/search set. '.r' never implies '.s'.
+ * Return a validated list of grant strings ONLY after confirming every grant
+ * is within the server-approved read/search set. '.r' never implies '.s'.
  *
  * This is deliberately stricter than accepting all scopes returned by Epic.
  * If Epic adds an unreviewed scope, reject and perform source-approval revision.

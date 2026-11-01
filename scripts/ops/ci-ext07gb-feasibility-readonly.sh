@@ -17,8 +17,8 @@ for tool in gcloud jq sha256sum; do
 done
 [[ "$(gcloud config get-value project 2>/dev/null)" == "$PROJECT" ]] || fail PROJECT_MISMATCH
 
-EVIDENCE="$HOME/helixis-ci-ext07gb-$(date -u +%Y%m%dT%H%M%SZ)"
-mkdir -m 700 -- "$EVIDENCE" || fail EVIDENCE_DIRECTORY_FAILED
+EVIDENCE="$(mktemp -d "$HOME/helixis-ci-ext07gb-XXXXXXXXXX")" || fail EVIDENCE_DIRECTORY_FAILED
+chmod 700 "$EVIDENCE"
 read_json() {
   local name="$1"
   shift

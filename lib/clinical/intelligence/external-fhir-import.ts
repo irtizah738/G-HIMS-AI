@@ -360,6 +360,25 @@ export async function ingestExternalFhirResource(args: {
       destination: 'CI_EXTERNAL_CONTEXT_QUALIFICATION',
       reason: 'Independent external context projection and clinical review not yet qualified',
     });
+    // Version collisions never silently replace current clinical evidence.
+    // Each conflicting version becomes a durable, reviewable case.
+    if (status === 'RECONCILIATION_REQUIRED') {
+      const caseId = 'frc_' + prepared.receiptId.slice(4);
+      tx.create(tenantRef.collection('fhirReconciliationCases').doc(caseId), {
+        caseId, tenantId, patientId, sourceId,
+        facilityId: source.facilityId,
+        resourceType: prepared.resourceType,
+        resourceId: prepared.resourceId,
+        conflictingReceiptId: prepared.receiptId,
+        currentReceiptId: previous?.receiptId || null,
+        reason: 'SOURCE_VERSION_TIE',
+        status: 'OPEN',
+        recordedAt,
+        approvals: [],
+        resolution: null,
+        immutableSourceVersion: true,
+      });
+    }
     if (status === 'CURRENT') {
       tx.set(headRef, {
         tenantId, patientId, sourceId,

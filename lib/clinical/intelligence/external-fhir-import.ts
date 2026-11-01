@@ -92,7 +92,7 @@ export function fhirImportHeadId(sourceId: string, type: string, id: string): st
 }
 export function assertFhirIdentifier(value: unknown, code: string): string {
   const id = nonEmpty(value);
-  if (!/^[A-Za-z0-9.\-_]{1,64}$/.test(id)) throw new Error(code);
+  if (!/^[A-Za-z0-9.\-_]{1,64}$/.test(id) || id === '.' || id === '..') throw new Error(code);
   return id;
 }
 export function assertFhirImportActor(actor: FhirImportActor, tenantId: string, facilityId: string): void {

@@ -36,7 +36,7 @@ describe('CI-EXT-07 governed Epic key/source staging plan', () => {
     expect(p.sourceMetadata.oauth.scopes).toEqual([
       'system/Patient.r', 'system/Encounter.r', 'system/Observation.r',
     ]);
-    expect(p.sourceMetadata.siteApprovalId).toBeUndefined();
+    expect(Object.hasOwn(p.sourceMetadata, 'siteApprovalId')).toBe(false);
     expect(p.gates.importFeatureEnabled).toBe(false);
     expect(JSON.stringify(p)).not.toContain('PRIVATE KEY');
     expect(JSON.stringify(p)).not.toContain('access_token');

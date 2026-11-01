@@ -106,6 +106,19 @@ test('CI-EXT-03: source-authorized, freshly fenced external evidence remains rev
     expect(next.projectionRevision).toBe(2);
     expect(next.projectionContentHash === first.projectionContentHash).toBe(false);
 
+    // Consent and source authorization must be independently fenced when the
+    // projection still looks fresh and has no outstanding reconciliation.
+    await link.update({ consentStatus: 'WITHDRAWN' });
+    await expect(readExternalClinicalEvidence({
+      db, actor: reviewer, tenantId, patientId,
+    })).rejects.toThrow('CI_EXT03_PATIENT_LINK_OR_CONSENT_REVOKED');
+    await link.update({ consentStatus: 'GRANTED' });
+    await source.update({ status: 'REVOKED' });
+    await expect(readExternalClinicalEvidence({
+      db, actor: reviewer, tenantId, patientId,
+    })).rejects.toThrow('CI_EXT03_SOURCE_REVOKED');
+    await source.update({ status: 'ACTIVE' });
+
     // A future signed-off source version collision must be reconciled before
     // exposing the existing head again.
     await ingestExternalFhirResource({

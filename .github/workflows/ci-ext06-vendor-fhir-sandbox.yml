@@ -1,0 +1,40 @@
+name: CI-EXT-06 Vendor FHIR Sandbox Qualification
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-ext06-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  vendor-qualification:
+    name: Synthetic fixture identity, version replay and egress controls
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NODE_ENV: test
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_CI_FHIR_AUTH_MODE: DISABLED
+      GHIMS_CI_VENDOR_SANDBOX_PROBE_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Frozen dependencies
+        run: bun install --frozen-lockfile
+      - name: TypeScript
+        run: bun run typecheck
+      - name: Source quality
+        run: bun run lint
+      - name: Vendor synthetic fixture qualification
+        run: bun test tests/ci-ext06-vendor-sandbox-probe.test.ts
+      - name: Existing FHIR and site authority regressions
+        run: bun test tests/ci-ext04-smart-backend-oauth.test.ts tests/ci-ext04-fhir-sandbox-qualification.test.ts tests/helixis-external-fhir-import.test.ts tests/ci-ext03-external-reader-contract.test.ts

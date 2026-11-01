@@ -190,8 +190,8 @@ export async function rebuildExternalPatient360(args: {
       const source = sources.get(head.sourceId);
       const link = linkSnaps[i]?.exists ? linkSnaps[i].data() as FhirPatientLink : null;
       const prefix = ref.id;
-      if (head.tenantId !== tenantId || head.patientId !== patientId ||
-          head.receiptId !== receipt?.receiptId || receipt.tenantId !== tenantId ||
+      if (!receipt || head.tenantId !== tenantId || head.patientId !== patientId ||
+          head.receiptId !== receipt.receiptId || receipt.tenantId !== tenantId ||
           receipt.patientId !== patientId || receipt.sourceId !== head.sourceId ||
           receipt.sourceVersionId !== head.sourceVersionId) {
         throw new Error('FHIR_CONTEXT_IMMUTABLE_LINEAGE_MISMATCH');
@@ -239,6 +239,7 @@ export async function rebuildExternalPatient360(args: {
     }
     const activeCases = cases.filter(c => c.status === 'OPEN');
     for (const c of activeCases) problems.push('OPEN_RECONCILIATION:' + c.caseId);
+    if (!heads.length) problems.push('NO_IMPORTED_FHIR_EVIDENCE');
     const sortedIssues = [...new Set(problems)].sort();
     const inputs = {
       tenantId, patientId,

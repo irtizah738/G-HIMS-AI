@@ -86,13 +86,25 @@ gcloud secrets get-iam-policy "$DEST_SECRET" \
 
 Grant `secretAccessor` only on the verified source secret. Separately verify the worker's identity federation and its ability to access **only** this specific secret; confirm a different tenant's secret is denied. Never attach the Epic key to Vercel public/static build environments.
 
-## Stage 4: source registration (still disabled)
+## Stage 4: explicit suspended-source registration (optional, still disabled)
 
-The metadata-only plan contains the exact Firestore path `/tenants/{tenantId}/fhirSources/{sourceId}`, `baseUrl`, `oauth` registration and disabled source state. A separate audited privileged staging-enrollment operation (not added here) must verify that the tenant and facility already exist, confirm absence of source ID collision, check Secret Manager public-key fingerprint and required IAM/egress evidence, then atomically create source metadata and an immutable enrollment event.
+A trusted staging-only script can register the proposed metadata **only** after the source-specific Secret Manager key's public fingerprint matches the registered JWKS, the Firestore tenant document exists and has `syntheticOnly: true`, and the named facility exists with the same tenant ID and `syntheticOnly: true` or `sandbox: true`. The operator must have an independently reviewed change ticket and a recorded identity. The script never accepts a client-provided FHIR URL or private key.
 
-The source **must remain** `status=SUSPENDED` and `securityReviewStatus=PENDING` after registration. Changing to `ACTIVE/APPROVED` requires the explicit site approval and synthetic qualification workflow from CI-EXT-05, not direct Admin SDK edits or a manual Firestore Console toggle.
+```bash
+export FIREBASE_PROJECT_ID=studio-1130431360-48a05
+export HELIXIS_CI_EXT07_OPERATOR_ID='<authorized-staging-operator-id>'
+export HELIXIS_CI_EXT07_CHANGE_TICKET='<approved-change-ticket-id>'
+export HELIXIS_CI_EXT07_CONFIRM_REGISTER=REGISTER_SUSPENDED_EPIC_SOURCE
 
-**Do not apply the plan by directly pasting it into Firestore.**
+bun scripts/ops/ci-ext07-register-suspended-epic-source.ts
+unset HELIXIS_CI_EXT07_CONFIRM_REGISTER
+```
+
+On success it creates only the source metadata `/tenants/{tenantId}/fhirSources/{sourceId}` and an immutable `fhirProvisioningEvents/{eventId}` record atomically, with source `SUSPENDED` and security review `PENDING`. Existing sources never get overwritten, and a project mismatch or a non-synthetic tenant/facility fails closed.
+
+**Do not apply the plan by directly pasting it into Firestore.** If the tenant/facility does not have a trusted synthetic-only designation, stop and enroll a dedicated synthetic workspace using separately governed tenant provisioning.
+
+**Required later transport promotion (NOT implemented in CI-EXT-07):** CI-EXT-04/05 synthetic protocol and site qualification currently require source `ACTIVE` and `securityReviewStatus=APPROVED`. That is a *transport-security* readiness gate, not final hospital approval. A future independently audited promotion operation must verify the exact staging IAM/egress/key/authorization evidence before enabling that state while keeping patient imports disabled. Only then can CI-EXT-05 collect separate clinical and security site decisions and issue final `siteApprovalId`. Neither this script nor direct Firestore Console edits may bypass this sequence.
 
 ## Scope synchronization and next qualification
 

@@ -180,14 +180,15 @@ async function main(): Promise<void> {
     actorEmail: actor,
     changeTicket,
   });
-  const writes = [
+  const documents: Array<readonly [string, Record<string, string | boolean>]> = [
     [paths.tenant, metadata.tenant],
     [paths.facility, metadata.facility],
     [paths.event, metadata.event],
-  ].map(([path, data]) => ({
+  ];
+  const writes = documents.map(([path, data]) => ({
     update: {
       name: `projects/${PROJECT}/databases/(default)/documents/${path}`,
-      fields: firestoreFields(data as Record<string, string | boolean>),
+      fields: firestoreFields(data),
     },
     currentDocument: { exists: false },
   }));

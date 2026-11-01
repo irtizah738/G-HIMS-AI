@@ -6,7 +6,7 @@
  * Cloud IAM should grant the runtime principal secretAccessor for ONLY the
  * exact source-specific secrets provisioned for that deployment.
  */
-import { createHash } from 'node:crypto';
+import { createHash, createPrivateKey } from 'node:crypto';
 import { GoogleAuth } from 'google-auth-library';
 
 const ID = /^[A-Za-z0-9._-]{1,128}$/;
@@ -61,8 +61,16 @@ export function createGcpFhirPrivateKeyAccessor(args: {
         throw new Error('CI_EXT04_SECRET_FORMAT_INVALID');
       }
       const decoded = Buffer.from(data, 'base64').toString('utf8');
-      if (!decoded.includes('-----BEGIN PRIVATE KEY-----') ||
-          decoded.length > 16000) throw new Error('CI_EXT04_SECRET_KEY_INVALID');
+      if (decoded.length > 16000) throw new Error('CI_EXT04_SECRET_KEY_INVALID');
+      try {
+        const parsedKey = createPrivateKey(decoded);
+        if (parsedKey.asymmetricKeyType !== 'rsa' ||
+            (parsedKey.asymmetricKeyDetails?.modulusLength || 0) < 2048) {
+          throw new Error('CI_EXT04_SECRET_KEY_INVALID');
+        }
+      } catch {
+        throw new Error('CI_EXT04_SECRET_KEY_INVALID');
+      }
       return decoded;
     } finally { clearTimeout(timeout); }
   };

@@ -43,6 +43,15 @@ export type FhirSourceRecord = {
   status: 'ACTIVE' | 'SUSPENDED' | 'REVOKED';
   securityReviewStatus: 'APPROVED' | 'PENDING' | 'REVOKED';
   approvedResourceTypes: string[];
+  oauth?: {
+    mode: 'SMART_BACKEND';
+    clientId: string;
+    tokenUrl: string;
+    keyId: string;
+    secretVersion: number;
+    credentialRevision: number;
+    scopes: string[];
+  };
 };
 export type FhirPatientLink = {
   tenantId: string;
@@ -238,11 +247,11 @@ function sourcePath(db: Firestore, tenantId: string, sourceId: string) {
 export async function preflightExternalFhirSource(args: {
   db: Firestore; actor: FhirImportActor; sourceId: string;
   resourceType: string; expectedBaseUrl: string;
-}): Promise<void> {
+}): Promise<FhirSourceRecord> {
   const { db, actor, resourceType, expectedBaseUrl } = args;
   const sourceId = assertFhirIdentifier(args.sourceId, 'FHIR_IMPORT_SOURCE_ID_INVALID');
   const snap = await sourcePath(db, actor.tenantId, sourceId).get();
-  assertFhirSource(snap.exists ? snap.data() as FhirSourceRecord : null,
+  return assertFhirSource(snap.exists ? snap.data() as FhirSourceRecord : null,
     actor.tenantId, sourceId, actor, resourceType, expectedBaseUrl);
 }
 function requireLink(
@@ -265,6 +274,7 @@ export async function ingestExternalFhirResource(args: {
   sourceId: string;
   resource: unknown;
   expectedBaseUrl?: string;
+  expectedCredentialRevision?: number;
   now?: () => number;
 }): Promise<ExternalFhirImportResult> {
   const { db, actor } = args;
@@ -297,6 +307,12 @@ export async function ingestExternalFhirResource(args: {
       sourceSnap.exists ? sourceSnap.data() as FhirSourceRecord : null,
       tenantId, sourceId, actor, prepared.resourceType, args.expectedBaseUrl
     );
+    // A key rotation or OAuth policy edit during remote HTTP retrieval
+    // invalidates that import. The next attempt must obtain a fresh token.
+    if (args.expectedCredentialRevision !== undefined &&
+        source.oauth?.credentialRevision !== args.expectedCredentialRevision) {
+      throw new Error('FHIR_IMPORT_OAUTH_CONFIG_CHANGED');
+    }
     const patientId = requireLink(
       linkSnap.exists ? linkSnap.data() as FhirPatientLink : null, source, prepared
     );

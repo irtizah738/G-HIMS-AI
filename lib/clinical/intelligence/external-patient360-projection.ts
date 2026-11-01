@@ -156,12 +156,17 @@ export async function rebuildExternalPatient360(args: {
   const tenant = db.collection('tenants').doc(tenantId);
   const projectionRef = tenant.collection('externalPatient360Projections').doc(patientId);
   return db.runTransaction(async (tx: Transaction) => {
-    const [patient, current, headPage, casePage] = await Promise.all([
-      tx.get(tenant.collection('patients').doc(patientId)),
-      tx.get(projectionRef),
-      tx.get(tenant.collection('fhirResourceHeads').where('patientId', '==', patientId).limit(MAX_HEADS + 1)),
-      tx.get(tenant.collection('fhirReconciliationCases').where('patientId', '==', patientId).limit(MAX_CASES + 1)),
-    ]);
+    const [patient, current] = await tx.getAll(
+      tenant.collection('patients').doc(patientId), projectionRef
+    );
+    // Reads are deliberately sequential within one transaction, not parallel
+    // independent transaction streams (emulator and server parity).
+    const headPage = await tx.get(
+      tenant.collection('fhirResourceHeads').where('patientId', '==', patientId).limit(MAX_HEADS + 1)
+    );
+    const casePage = await tx.get(
+      tenant.collection('fhirReconciliationCases').where('patientId', '==', patientId).limit(MAX_CASES + 1)
+    );
     if (!patient.exists || patient.get('mergedIntoPatientId')) {
       throw new Error('FHIR_CONTEXT_CANONICAL_PATIENT_UNAVAILABLE');
     }
@@ -174,13 +179,22 @@ export async function rebuildExternalPatient360(args: {
     // Reads are gathered before any writes, including the immutable snapshot.
     const sources = new Map<string, FhirSourceRecord | null>();
     const sourceIds = [...new Set(heads.map(h => h.value.sourceId))];
-    const sourceSnaps = await Promise.all(sourceIds.map(id => tx.get(tenant.collection('fhirSources').doc(id))));
+    const sourceSnaps = sourceIds.length
+      ? await tx.getAll(...sourceIds.map(id => tenant.collection('fhirSources').doc(id)))
+      : [];
     sourceIds.forEach((id, i) => sources.set(id, sourceSnaps[i].exists ? sourceSnaps[i].data() as FhirSourceRecord : null));
-    const receiptSnaps = await Promise.all(heads.map(h => tx.get(tenant.collection('fhirImportedVersions').doc(h.value.receiptId))));
+    const receiptSnaps = heads.length
+      ? await tx.getAll(...heads.map(h => tenant.collection('fhirImportedVersions').doc(h.value.receiptId)))
+      : [];
     const receiptRows = receiptSnaps.map(s => s.exists ? s.data() as Receipt : null);
-    const linkSnaps = await Promise.all(receiptRows.map(r => r?.provenance?.mappedByVerifiedLink
-      ? tx.get(tenant.collection('fhirPatientLinks').doc(r.provenance.mappedByVerifiedLink))
-      : Promise.resolve(null)));
+    const linkIds = [...new Set(receiptRows
+      .map(r => r?.provenance?.mappedByVerifiedLink || '')
+      .filter(Boolean))];
+    const linkDocs = linkIds.length
+      ? await tx.getAll(...linkIds.map(id => tenant.collection('fhirPatientLinks').doc(id)))
+      : [];
+    const links = new Map<string, FhirPatientLink | null>();
+    linkIds.forEach((id, i) => links.set(id, linkDocs[i].exists ? linkDocs[i].data() as FhirPatientLink : null));
     const problems: string[] = [];
     const facts: ExternalFact[] = [];
     const sourceRefs = new Map<string, { sourceId: string; facilityId: string }>();
@@ -188,8 +202,7 @@ export async function rebuildExternalPatient360(args: {
       const { value: head, ref } = heads[i];
       const receipt = receiptRows[i];
       const source = sources.get(head.sourceId);
-      const linkSnap = linkSnaps[i];
-      const link = linkSnap && linkSnap.exists ? linkSnap.data() as FhirPatientLink : null;
+      const link = links.get(receipt?.provenance?.mappedByVerifiedLink || '') || null;
       const prefix = ref.id;
       if (!receipt || head.tenantId !== tenantId || head.patientId !== patientId ||
           head.receiptId !== receipt.receiptId || receipt.tenantId !== tenantId ||

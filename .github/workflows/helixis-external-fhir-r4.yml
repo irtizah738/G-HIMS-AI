@@ -44,6 +44,11 @@ jobs:
         run: bun test tests/helixis-external-fhir-import.test.ts
       - name: Install Firebase CLI for isolated emulator
         run: npm install --global firebase-tools@14.20.0
+      - name: Compile emulator qualification for Node.js runtime
+        run: |
+          sed "s#from 'bun:test'#from './helixis-node-test-compat'#g" emulator-security/helixis-external-fhir-import.test.ts > emulator-security/helixis-external-fhir-import.node.test.ts
+          sed "s#from 'bun:test'#from './helixis-node-test-compat'#g" emulator-security/helixis-external-patient360.test.ts > emulator-security/helixis-external-patient360.node.test.ts
+          bun build emulator-security/helixis-external-fhir-import.node.test.ts emulator-security/helixis-external-patient360.node.test.ts --target=node --format=cjs --packages=external --outdir=.tmp/fhir-node
       - name: Firestore atomicity, replay and isolation
         timeout-minutes: 4
         env:
@@ -51,7 +56,7 @@ jobs:
           FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080"
         run: |
           echo "Running isolated Firestore emulator against project ghims-p4-ci"
-          timeout --signal=TERM --kill-after=5s 100s firebase emulators:exec --project ghims-p4-ci --only firestore "bun test --timeout 30000 emulator-security/helixis-external-fhir-import.test.ts emulator-security/helixis-external-patient360.test.ts"
+          timeout --signal=TERM --kill-after=5s 100s firebase emulators:exec --project ghims-p4-ci --only firestore "node --test .tmp/fhir-node/helixis-external-fhir-import.node.test.js .tmp/fhir-node/helixis-external-patient360.node.test.js"
       - name: Diagnose Firestore emulator transaction stalls
         if: failure()
         shell: bash

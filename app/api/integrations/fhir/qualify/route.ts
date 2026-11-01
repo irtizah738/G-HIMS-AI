@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
     const source = sourceSnap.exists ? sourceSnap.data() as FhirSourceRecord : null;
     if (!source || source.tenantId !== context.tenantId ||
         source.sourceId !== sourceId ||
-        !context.facilityIds.includes(source.facilityId)) {
+        !(context.facilityIds || []).includes(source.facilityId)) {
       throw new Error('CI_EXT04_SOURCE_OR_FACILITY_DENIED');
     }
     const allowedTokenHosts = (process.env.GHIMS_CI_FHIR_OAUTH_ALLOWED_TOKEN_HOSTS || '')

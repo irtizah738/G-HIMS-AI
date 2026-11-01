@@ -39,9 +39,17 @@ CI is TEST-only, runs tests and shell syntax, and cannot deploy.
 
 ## Artifact build (operator approval; billable actions)
 
-`services/epic-sealed-worker/Dockerfile` currently uses `node:24-alpine`
-by tag, which is **not sufficient** for release qualification. Review
-and pin its upstream digest before building. Build only the isolated
+`services/epic-sealed-worker/Dockerfile` is now pinned to the exact
+Docker Official Image **linux/amd64** manifest observed in the operator's
+2026-11-01 Docker inspection:
+
+- AMD64 OCI manifest: `sha256:4eefa1bfce4197942661ef9148247d779ddf1bb0ee006d3294a467609de60724`
+- Multi-platform index: `sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85`
+
+The Dockerfile pins the **AMD64 manifest**, not the multi-platform index.
+Digest pinning prevents tag drift; it is **not** proof of vulnerability-free
+content, safe provenance, or a reviewed SBOM. Independently review the image
+before building a release artifact. Build only the isolated
 `services/epic-sealed-worker` directory, never the complete clinical app.
 Create a dedicated Artifact Registry repository after reviewing the change;
 do not reuse the existing `gcf-artifacts` repository.
@@ -58,7 +66,7 @@ gcloud artifacts repositories create "$REPO" --project="$PROJECT" \
   --location="$REGION" --repository-format=docker \
   --description="Helixis synthetic Epic staging artifacts"
 
-# After approved upstream base image digest pin:
+# After confirming Dockerfile AMD64 digest, provenance and approval:
 gcloud builds submit services/epic-sealed-worker \
   --project="$PROJECT" --region="$REGION" \
   --tag="$IMAGE:ci-ext07f-sealed-v1"

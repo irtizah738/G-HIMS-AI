@@ -36,5 +36,22 @@ jobs:
         run: bun run lint
       - name: SMART Backend Services and sandbox contract tests
         run: bun test tests/ci-ext04-smart-backend-oauth.test.ts tests/ci-ext04-fhir-sandbox-qualification.test.ts
+      - name: Install Firebase CLI for credential-rotation emulator tests
+        run: npm install --global firebase-tools@14.20.0
+      - name: Compile Node.js emulator rotation qualification
+        run: |
+          sed "s#from 'bun:test'#from './helixis-node-test-compat'#g" emulator-security/ci-ext04-smart-credential-revision.test.ts > emulator-security/ci-ext04-smart-credential-revision.node.test.ts
+          bun build emulator-security/ci-ext04-smart-credential-revision.node.test.ts --target=node --format=cjs --packages=external --outdir=.tmp/fhir-node
+      - name: Firestore OAuth revision atomicity and isolation
+        timeout-minutes: 4
+        env:
+          FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080"
+          FIREBASE_PROJECT_ID: ghims-p4-ci
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p4-ci
+          GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+          NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+          GCLOUD_PROJECT: ghims-p4-ci
+        run: |
+          timeout --signal=TERM --kill-after=5s 105s firebase emulators:exec --project ghims-p4-ci --only firestore "node --test .tmp/fhir-node/ci-ext04-smart-credential-revision.node.test.js"
       - name: Existing FHIR and standalone regression
         run: bun test tests/helixis-external-fhir-import.test.ts tests/ci-ext03-external-reader-contract.test.ts

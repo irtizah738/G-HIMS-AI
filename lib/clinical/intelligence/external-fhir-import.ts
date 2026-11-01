@@ -81,6 +81,13 @@ function canonical(value: unknown): string {
   const data = value as Record<string, unknown>;
   return '{' + Object.keys(data).sort().map(k => JSON.stringify(k) + ':' + canonical(data[k])).join(',') + '}';
 }
+function traceFhirStage(stage: string): void {
+  if (process.env.GHIMS_FHIR_EMULATOR_TRACE === 'true' &&
+      process.env.FIRESTORE_EMULATOR_HOST) {
+    // Only static stage labels; no PHI, resource IDs, credentials or patient data.
+    console.info('[FHIR_EMULATOR_TRACE] ' + stage);
+  }
+}
 function sha(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
 }
@@ -275,11 +282,15 @@ export async function ingestExternalFhirResource(args: {
   const outboxRef = tenantRef.collection('fhirImportOutbox').doc('fob_' + prepared.receiptId.slice(4));
   // The payload is untrusted. No FHIR HTTP request occurs inside a retryable
   // Firestore transaction; transaction retries only repeat local validation.
+  traceFhirStage('BEFORE_TRANSACTION');
   return db.runTransaction(async (tx: Transaction) => {
+    traceFhirStage('TRANSACTION_CALLBACK_STARTED');
     // All reads precede all writes (Firestore transaction requirement).
+    traceFhirStage('BEFORE_SOURCE_LINK_RECEIPT_HEAD_READS');
     const [sourceSnap, linkSnap, receiptSnap, headSnap] = await Promise.all([
       tx.get(sourceRef), tx.get(linkRef), tx.get(receiptRef), tx.get(headRef),
     ]);
+    traceFhirStage('AFTER_SOURCE_LINK_RECEIPT_HEAD_READS');
     const source = assertFhirSource(
       sourceSnap.exists ? sourceSnap.data() as FhirSourceRecord : null,
       tenantId, sourceId, actor, prepared.resourceType, args.expectedBaseUrl
@@ -288,7 +299,9 @@ export async function ingestExternalFhirResource(args: {
       linkSnap.exists ? linkSnap.data() as FhirPatientLink : null, source, prepared
     );
     const patientRef = tenantRef.collection('patients').doc(patientId);
+    traceFhirStage('BEFORE_PATIENT_READ');
     const patientSnap = await tx.get(patientRef);
+    traceFhirStage('AFTER_PATIENT_READ');
     if (!patientSnap.exists || patientSnap.get('mergedIntoPatientId')) {
       throw new Error('FHIR_IMPORT_CANONICAL_PATIENT_NOT_ACTIVE');
     }
@@ -335,6 +348,7 @@ export async function ingestExternalFhirResource(args: {
       resourceHash: prepared.resourceHash, receiptId: prepared.receiptId,
       status, provenance, recordedAt,
     };
+    traceFhirStage('BEFORE_ATOMIC_WRITES');
     tx.create(receiptRef, {
       ...common, schemaVersion: 1, resourceJson: prepared.resourceJson,
       normalizedEvidence: prepared.summary, immutable: true,
@@ -388,10 +402,14 @@ export async function ingestExternalFhirResource(args: {
         receiptId: prepared.receiptId, recordedAt,
       });
     }
+    traceFhirStage('TRANSACTION_CALLBACK_DONE_BEFORE_COMMIT');
     return {
       receiptId: prepared.receiptId, eventId, tenantId, patientId, sourceId,
       resourceType: prepared.resourceType, resourceId: prepared.resourceId,
       sourceVersionId: prepared.sourceVersionId, status, replay: false,
     };
+  }).then(result => {
+    traceFhirStage('TRANSACTION_COMMITTED');
+    return result;
   });
 }

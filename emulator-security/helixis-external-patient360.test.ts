@@ -143,4 +143,4 @@ test('external Patient 360: immutable revisions, source fencing, dual review and
     await db.recursiveDelete(root);
     console.info('FHIR_EMULATOR_CLEANUP_COMPLETE');
   }
-}, 120000);
+}, 30000);

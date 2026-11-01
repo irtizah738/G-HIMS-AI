@@ -71,6 +71,29 @@ test('image context has no application dependencies or outbound network client',
   const docker=readFileSync(dir+'Dockerfile','utf8');
   const ignore=readFileSync(dir+'.dockerignore','utf8');
   const code=readFileSync(dir+'server.mjs','utf8').replace(/\/\*[\s\S]*?\*\//g,'').replace(/\/\/[^\n]*/g,'');
+  // Pin exact x86-64 OCI manifest, not a mutable tag or multiarch index.
+  const amd64Digest = '4eefa1bfce4197942661ef9148247d779ddf1bb0ee006d3294a467609de60724';
+  assert.match(docker, new RegExp('^FROM node:24-alpine@sha256:' + amd64Digest + '
+  assert.match(docker, /COPY --chown=node:node server\.mjs/);
+  assert.doesNotMatch(docker, /COPY \./);
+  assert.match(ignore, /\*\n!server\.mjs/);
+  assert.doesNotMatch(code, /from ['"](?:node:)?(?:https|net|tls|dns|child_process)|fetch\(|SecretManager|Firestore|privateKey|client_secret/);
+});
+test('script uses safe first deployment and keeps secret and imports disabled', () => {
+  const shell=readFileSync('scripts/ops/ci-ext07f-sealed-worker.sh','utf8');
+  for (const entry of [
+    'set -Eeuo pipefail', 'helixis-epic-egress',
+    'helixis-epic-us-central1', 'all-traffic',
+    '--ingress=internal', '--no-allow-unauthenticated',
+    '--no-traffic', 'helixis-epic-staging-runtime',
+    'HELIXIS_CI_EXT07F_CONFIRM_DEPLOY',
+    'CI_EXT07F_IMPORT_ENABLED=NO', 'CI_EXT07F_SECRET_GRANTS=NOT_CHANGED',
+  ]) assert.ok(shell.includes(entry), entry);
+  assert.doesNotMatch(shell, /--(?:set|update)-secrets|secrets add-iam-policy-binding|--ingress=all|--vpc-egress=private-ranges-only/);
+});
+, 'm'));
+  assert.doesNotMatch(docker, /^FROM node:24-alpine\s*$/m);
+  assert.match(docker, /linux\/amd64 manifest/);
   assert.match(docker, /USER node/);
   assert.match(docker, /COPY --chown=node:node server\.mjs/);
   assert.doesNotMatch(docker, /COPY \./);

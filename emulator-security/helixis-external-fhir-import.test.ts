@@ -4,8 +4,7 @@
  *   "bun test emulator-security/helixis-external-fhir-import.test.ts"
  */
 import { expect, test } from 'bun:test';
-import { deleteApp, initializeApp } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
+import { getAdminFirestore } from '@/server/firebase/admin';
 import {
   fhirPatientLinkId, fhirImportHeadId, ingestExternalFhirResource,
 } from '@/lib/clinical/intelligence/external-fhir-import';
@@ -25,8 +24,12 @@ test('external FHIR import: atomic versions, audit, idempotency, revocation and 
   if (!process.env.FIRESTORE_EMULATOR_HOST) {
     throw new Error('FHIR_EMULATOR_REQUIRED: refusing to run transaction qualification on a real project');
   }
-  const app = initializeApp({ projectId: 'ghims-p4-ci' }, 'fhir-import-' + crypto.randomUUID());
-  const db = getFirestore(app);
+  if (process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8080' || process.env.FIREBASE_PROJECT_ID !== 'ghims-p4-ci') {
+    throw new Error('FHIR_EMULATOR_ISOLATION_MISMATCH');
+  }
+  const db = getAdminFirestore();
+  if (!db) throw new Error('FHIR_EMULATOR_ADMIN_UNAVAILABLE');
+  console.info('FHIR_EMULATOR_ADMIN_READY');
   const tenantId = 'fhir-synthetic-' + crypto.randomUUID().slice(0, 8);
   const actor = {
     actorId: 'synthetic-integrator',
@@ -41,6 +44,7 @@ test('external FHIR import: atomic versions, audit, idempotency, revocation and 
   const link = root.collection('fhirPatientLinks').doc(fhirPatientLinkId(sourceId, 'his-patient-01'));
   const head = root.collection('fhirResourceHeads').doc(fhirImportHeadId(sourceId, 'Observation', 'lab-1001'));
   try {
+    console.info('FHIR_IMPORT_BEFORE_SYNTHETIC_SEED');
     await Promise.all([
       root.collection('patients').doc('helixis-p1').set({ tenantId, status: 'ACTIVE' }),
       root.collection('patients').doc('helixis-p2').set({ tenantId, status: 'ACTIVE' }),
@@ -56,6 +60,7 @@ test('external FHIR import: atomic versions, audit, idempotency, revocation and 
         verifiedBy: 'synthetic-reviewer',
       }),
     ]);
+    console.info('FHIR_IMPORT_SYNTHETIC_SEED_COMMITTED');
     const first = await ingestExternalFhirResource({
       db, actor, sourceId, expectedBaseUrl: endpoint,
       resource: observation('v-1', '2026-10-20T09:00:00Z', 1.2),
@@ -144,6 +149,6 @@ test('external FHIR import: atomic versions, audit, idempotency, revocation and 
     expect((await root.collection('fhirImportOutbox').get()).size).toBe(4);
   } finally {
     await db.recursiveDelete(root);
-    await deleteApp(app);
+    console.info('FHIR_EMULATOR_CLEANUP_COMPLETE');
   }
 }, 120000);

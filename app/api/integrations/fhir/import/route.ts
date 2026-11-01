@@ -5,6 +5,7 @@ import { assertIntegrationLive } from '@/lib/interop/integration-state';
 import { FhirR4Adapter } from '@/lib/interop/fhir-r4-adapter';
 import { checkSmartBackendSource, SmartBackendTokenBroker } from '@/lib/interop/fhir-smart-backend-oauth';
 import { createGcpFhirPrivateKeyAccessor } from '@/lib/interop/fhir-smart-secret-manager';
+import { preflightFhirSiteApproval } from '@/lib/interop/fhir-site-approval';
 import {
   EXTERNAL_FHIR_IMPORT_TYPES,
   assertFhirIdentifier,
@@ -75,6 +76,11 @@ export async function POST(req: NextRequest) {
     const oauth = checkSmartBackendSource(source, context.tenantId, sourceId, {
       allowedTokenHosts, allowedFhirHosts,
     });
+    // A successful SMART token exchange is not clinical site authorization.
+    // No patient-bearing HTTP is allowed before two-party site approval.
+    const siteApproval = await preflightFhirSiteApproval({
+      db, source, resourceType,
+    });
     const projectId = process.env.GHIMS_CI_FHIR_SECRET_PROJECT_ID || '';
     const tokenBroker = new SmartBackendTokenBroker({
       getSecret: createGcpFhirPrivateKeyAccessor({ projectId }),
@@ -99,6 +105,7 @@ export async function POST(req: NextRequest) {
     const result = await ingestExternalFhirResource({
       db, actor, sourceId, resource, expectedBaseUrl: source.baseUrl,
       expectedCredentialRevision: oauth.credentialRevision,
+      expectedSiteApprovalId: siteApproval.approvalId,
     });
     // Receipt only. Never return PHI or the raw imported resource to caller.
     return NextResponse.json({ success: true, ...result }, { status: result.replay ? 200 : 201 });

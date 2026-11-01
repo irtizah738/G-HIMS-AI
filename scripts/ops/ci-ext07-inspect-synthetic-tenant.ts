@@ -134,6 +134,7 @@ async function main(): Promise<void> {
     const fs = fieldsOf(doc);
     const id = documentId(doc);
     if (id && stringField(fs, 'tenantId') === tenantId &&
+        stringField(fs, 'status') === 'ACTIVE' &&
         (boolField(fs,'syntheticOnly') || boolField(fs,'sandbox'))) {
       console.log('CI_EXT07_ELIGIBLE_FACILITY_ID=' + id);
       count++;

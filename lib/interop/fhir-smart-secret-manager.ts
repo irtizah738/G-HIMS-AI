@@ -36,10 +36,11 @@ export function createGcpFhirPrivateKeyAccessor(args: {
   });
   return async (tenantId, sourceId, version) => {
     const secretName = smartSecretResource({ projectId: args.projectId, tenantId, sourceId, version });
+    // Always ask the ADC/WIF client for a current token; a cached credentials
+    // field may contain an expired value after a long-lived deployment.
     const accessToken = args.getGcpAccessToken
       ? await args.getGcpAccessToken()
-      : (await googleAuth.getClient()).credentials.access_token ||
-        (await (await googleAuth.getClient()).getAccessToken()).token;
+      : (await (await googleAuth.getClient()).getAccessToken()).token;
     if (!accessToken) throw new Error('CI_EXT04_SECRET_IAM_UNAVAILABLE');
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8_000);

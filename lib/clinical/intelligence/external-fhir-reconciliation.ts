@@ -63,10 +63,9 @@ export async function approveFhirReconciliation(args: {
     if (row.reason !== 'SOURCE_VERSION_TIE') {
       throw new Error('FHIR_RECONCILIATION_REQUIRES_SOURCE_REPAIR');
     }
-    const [sourceSnap, existing] = await Promise.all([
-      tx.get(root.collection('fhirSources').doc(row.sourceId)),
-      tx.get(decisionRef),
-    ]);
+    const [sourceSnap, existing] = await tx.getAll(
+      root.collection('fhirSources').doc(row.sourceId), decisionRef
+    );
     const source = sourceSnap.exists ? sourceSnap.data() as FhirSourceRecord : null;
     if (!source || source.tenantId !== actor.tenantId ||
         source.sourceId !== row.sourceId || source.facilityId !== row.facilityId ||

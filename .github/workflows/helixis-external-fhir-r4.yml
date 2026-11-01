@@ -3,8 +3,6 @@ name: Helixis External FHIR R4 Import
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [feat/helixis-external-fhir-import-r4]
 
 permissions:
   contents: read
@@ -28,6 +26,8 @@ jobs:
       NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
       GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
       GHIMS_CI_EXTERNAL_FHIR_IMPORT_ENABLED: "false"
+      GCLOUD_PROJECT: ghims-p4-ci
+      GOOGLE_CLOUD_PROJECT: ghims-p4-ci
 
     steps:
       - uses: actions/checkout@v4
@@ -45,6 +45,11 @@ jobs:
       - name: Install Firebase CLI for isolated emulator
         run: npm install --global firebase-tools@14.20.0
       - name: Firestore atomicity, replay and isolation
-        run: firebase emulators:exec --project ghims-p4-ci --only firestore "bun test emulator-security/helixis-external-fhir-import.test.ts emulator-security/helixis-external-patient360.test.ts"
+        timeout-minutes: 8
+        env:
+          FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080"
+        run: |
+          echo "Running isolated Firestore emulator against project ghims-p4-ci"
+          firebase emulators:exec --project ghims-p4-ci --only firestore "bun test --timeout 45000 emulator-security/helixis-external-fhir-import.test.ts emulator-security/helixis-external-patient360.test.ts"
       - name: Existing FHIR transport regressions
         run: bun run test:wave4

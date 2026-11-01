@@ -1,0 +1,53 @@
+name: CI-EXT-05 Governed Hospital FHIR Site Onboarding
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-ext05-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify-onboarding:
+    name: Site evidence, independent review and revoke qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      NODE_ENV: test
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-p4-ci
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p4-ci
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_CI_FHIR_SITE_ONBOARDING_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Source quality
+        run: bun run lint
+      - name: Existing SMART OAuth and FHIR boundary regressions
+        run: bun test tests/ci-ext04-smart-backend-oauth.test.ts tests/ci-ext04-fhir-sandbox-qualification.test.ts tests/ci-ext03-external-reader-contract.test.ts
+      - name: Install Firebase CLI
+        run: npm install --global firebase-tools@14.20.0
+      - name: Compile Node-only Firestore integration
+        run: |
+          sed "s#from 'bun:test'#from './helixis-node-test-compat'#g" emulator-security/ci-ext05-site-onboarding.test.ts > emulator-security/ci-ext05-site-onboarding.node.test.ts
+          bun build emulator-security/ci-ext05-site-onboarding.node.test.ts --target=node --format=cjs --packages=external --outdir=.tmp/fhir-node
+      - name: Site onboarding Firestore replay and isolation
+        timeout-minutes: 4
+        env:
+          FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080"
+        run: |
+          timeout --signal=TERM --kill-after=5s 110s firebase emulators:exec --project ghims-p4-ci --only firestore "node --test .tmp/fhir-node/ci-ext05-site-onboarding.node.test.js"

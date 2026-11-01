@@ -104,7 +104,7 @@ test('CI-EXT-03: source-authorized, freshly fenced external evidence remains rev
     });
     expect(next.facts[0].sourceVersionId).toBe('v2');
     expect(next.projectionRevision).toBe(2);
-    expect(next.projectionContentHash).not.toBe(first.projectionContentHash);
+    expect(next.projectionContentHash === first.projectionContentHash).toBe(false);
 
     // A future signed-off source version collision must be reconciled before
     // exposing the existing head again.

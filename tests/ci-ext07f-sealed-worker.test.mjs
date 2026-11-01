@@ -93,6 +93,7 @@ test('script uses safe first deployment and keeps secret and imports disabled', 
     '--ingress=internal', '--no-allow-unauthenticated',
     '--scaling=0', '--no-default-url', '--invoker-iam-check',
     '--no-deploy-health-check',
+    '--execution-environment=gen2', '--memory=512Mi --cpu=1',
     'helixis-epic-staging-runtime',
     'HELIXIS_CI_EXT07F_CONFIRM_DEPLOY',
     'CI_EXT07F_IMPORT_ENABLED=NO', 'CI_EXT07F_SECRET_GRANTS=NOT_CHANGED',
@@ -101,6 +102,7 @@ test('script uses safe first deployment and keeps secret and imports disabled', 
   // On first create, a revision may receive 100% routing but MUST be disabled.
   assert.match(shell, /--scaling=0/);
   assert.match(shell, /--no-default-url/);
+  assert.doesNotMatch(shell, /--memory=(?:128|256)Mi/);
 });
 
 

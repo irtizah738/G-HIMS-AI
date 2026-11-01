@@ -45,6 +45,6 @@ jobs:
       - name: Install Firebase CLI for isolated emulator
         run: npm install --global firebase-tools@14.20.0
       - name: Firestore atomicity, replay and isolation
-        run: firebase emulators:exec --project ghims-p4-ci --only firestore "bun test emulator-security/helixis-external-fhir-import.test.ts"
+        run: firebase emulators:exec --project ghims-p4-ci --only firestore "bun test emulator-security/helixis-external-fhir-import.test.ts emulator-security/helixis-external-patient360.test.ts"
       - name: Existing FHIR transport regressions
         run: bun run test:wave4

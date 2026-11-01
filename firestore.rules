@@ -218,6 +218,16 @@ service cloud.firestore {
         allow read, write: if false;
       }
 
+      // External FHIR credential bindings, verified patient links and imported
+      // clinical evidence are Admin-SDK only. No browser read/write access,
+      // including to patients' versioned source records or held outbox.
+      match /fhirSources/{sourceId} { allow read, write: if false; }
+      match /fhirPatientLinks/{linkId} { allow read, write: if false; }
+      match /fhirImportedVersions/{receiptId} { allow read, write: if false; }
+      match /fhirResourceHeads/{headId} { allow read, write: if false; }
+      match /fhirImportEvents/{eventId} { allow read, write: if false; }
+      match /fhirImportOutbox/{outboxId} { allow read, write: if false; }
+
       // Clinical read models. Mutations must go through authenticated server commands.
       // Patient identity/chart state is exposed only through server APIs and
       // scoped encrypted hydration, where patient/care-team ABAC can be enforced.

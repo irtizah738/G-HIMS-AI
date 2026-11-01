@@ -6,8 +6,6 @@
  * Scope expressions must remain server-owned (FHIR source onboarding), not
  * supplied by a browser or inferred from an OAuth response.
  */
-import { validateSmartTokenResponse, type SmartTokenResponse } from './fhir-smart-backend-oauth';
-
 export const EPIC_SANDBOX_FHIR_BASE =
   'https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4/';
 export const EPIC_SANDBOX_TOKEN_URL =
@@ -49,11 +47,11 @@ function allowedCategoryReadGrant(scope: string, approved: ReadonlySet<string>):
  * This is deliberately stricter than accepting all scopes returned by Epic.
  * If Epic adds an unreviewed scope, reject and perform source-approval revision.
  */
-export function validateEpicSandboxTokenResponse(
+export function validateEpicSandboxGrantedScopes(
   value: unknown,
   approvedScopes: readonly string[],
   resourceType: 'Patient' | 'Encounter' | 'Observation',
-): SmartTokenResponse {
+): string[] {
   if (!isEpicSandboxScopeConfiguration(approvedScopes)) {
     throw new Error('CI_EXT06C_APPROVED_SCOPES_INVALID');
   }
@@ -75,7 +73,6 @@ export function validateEpicSandboxTokenResponse(
   if (!returned.includes(requiredRead)) {
     throw new Error('CI_EXT06C_REQUIRED_READ_SCOPE_MISSING');
   }
-  // Reuse the existing token-envelope validation; never publish bearer tokens
-  // to clients, logs, Firestore or qualification receipts.
-  return validateSmartTokenResponse(value, returned);
+  // The caller must still verify token type, expiry and exact returned grants.
+  return returned;
 }

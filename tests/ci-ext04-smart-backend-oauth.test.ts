@@ -7,6 +7,7 @@ import {
   validateSmartTokenResponse,
 } from '@/lib/interop/fhir-smart-backend-oauth';
 import { smartSecretResource } from '@/lib/interop/fhir-smart-secret-manager';
+import { validateFhirSiteApproval } from '@/lib/interop/fhir-site-approval';
 import type { FhirSourceRecord } from '@/lib/clinical/intelligence/external-fhir-import';
 
 const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -135,5 +136,37 @@ describe('CI-EXT-04 asymmetric tenant-scoped SMART Backend OAuth', () => {
     expect(secretRequests).toEqual(['hospital-a/ehr-one/2','hospital-a/ehr-one/3']);
     await expect(broker.getAccessToken({ ...args, resourceType: 'DiagnosticReport' as 'Observation' }))
       .rejects.toThrow('CI_EXT04_RESOURCE_SCOPE_DENIED');
+  });
+});
+
+describe('CI-EXT-04 site authorization distinct from OAuth', () => {
+  test('requires separate clinical/security approval and current credential revision', () => {
+    const scopedSource = { ...source, siteApprovalId: 'approval-v1' };
+    const now = 1_800_000_000_000;
+    const valid = {
+      approvalId: 'approval-v1', tenantId: source.tenantId,
+      sourceId: source.sourceId, facilityId: source.facilityId,
+      status: 'APPROVED' as const, credentialRevision: 1,
+      approvedResourceTypes: ['Observation'],
+      clinicalReviewerId: 'clinician-a', securityReviewerId: 'security-b',
+      sandboxQualificationId: 'sandbox-qualification-1',
+      reviewedAt: now-1000, expiresAt: now+86400_000,
+    };
+    expect(validateFhirSiteApproval(scopedSource, valid, 'Observation', now).status).toBe('APPROVED');
+    expect(() => validateFhirSiteApproval(scopedSource,
+      { ...valid, securityReviewerId: 'clinician-a' }, 'Observation', now))
+      .toThrow('CI_EXT04_SITE_APPROVAL_REQUIRED');
+    expect(() => validateFhirSiteApproval(scopedSource,
+      { ...valid, credentialRevision: 2 }, 'Observation', now))
+      .toThrow('CI_EXT04_SITE_APPROVAL_REQUIRED');
+    expect(() => validateFhirSiteApproval(scopedSource,
+      { ...valid, status: 'REVOKED' }, 'Observation', now))
+      .toThrow('CI_EXT04_SITE_APPROVAL_REQUIRED');
+    expect(() => validateFhirSiteApproval(scopedSource,
+      valid, 'Patient', now))
+      .toThrow('CI_EXT04_SITE_APPROVAL_REQUIRED');
+    expect(() => validateFhirSiteApproval(scopedSource,
+      valid, 'Observation', now+86400_000))
+      .toThrow('CI_EXT04_SITE_APPROVAL_REQUIRED');
   });
 });

@@ -1,0 +1,49 @@
+name: CI-EXT-07G-B read-only feasibility
+
+on:
+  pull_request:
+    paths:
+      - 'config/ci-ext07gb-lab-gates.json'
+      - 'scripts/ops/ci-ext07gb-feasibility-readonly.sh'
+      - 'tests/ci-ext07gb-feasibility-readonly.test.mjs'
+      - 'docs/operations/HELIXIS_CI_EXT07GB_FEASIBILITY_RUNBOOK.md'
+      - '.github/workflows/ci-ext07gb-feasibility.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'config/ci-ext07gb-lab-gates.json'
+      - 'scripts/ops/ci-ext07gb-feasibility-readonly.sh'
+      - 'tests/ci-ext07gb-feasibility-readonly.test.mjs'
+      - 'docs/operations/HELIXIS_CI_EXT07GB_FEASIBILITY_RUNBOOK.md'
+      - '.github/workflows/ci-ext07gb-feasibility.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  no-cloud-feasibility-contract:
+    name: Read-only feasibility and anti-bypass safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Inspect read-only shell syntax
+        run: bash -n scripts/ops/ci-ext07gb-feasibility-readonly.sh
+      - name: Run synthetic mocked-gcloud contract tests
+        run: node --test tests/ci-ext07gb-feasibility-readonly.test.mjs
+      - name: Ensure TEST environment cannot query Cloud
+        env:
+          GHIMS_RUNTIME_MODE: TEST
+          HELIXIS_CI_EXT07GB_CONFIRM_PROJECT: studio-1130431360-48a05
+        run: |
+          if bash scripts/ops/ci-ext07gb-feasibility-readonly.sh >/tmp/ci-ext07gb-blocked.out 2>&1; then
+            echo 'UNSAFE_TEST_CLOUD_ACCESS' >&2
+            exit 1
+          fi
+          grep -q 'CI_EXT07GB_FAILED=STAGING_REQUIRED' /tmp/ci-ext07gb-blocked.out
+          echo 'CI_EXT07GB_NO_CLOUD_GATE=PASS'

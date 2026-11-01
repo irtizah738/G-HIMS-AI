@@ -33,7 +33,11 @@ export async function POST(req: NextRequest) {
     if (!Number.isFinite(bytes) || bytes > 4096) {
       return NextResponse.json({ success: false, code: 'FHIR_IMPORT_REQUEST_TOO_LARGE' }, { status: 413 });
     }
-    const body = await req.json() as Record<string, unknown>;
+    const raw = await req.text();
+    if (Buffer.byteLength(raw, 'utf8') > 4096) {
+      return NextResponse.json({ success: false, code: 'FHIR_IMPORT_REQUEST_TOO_LARGE' }, { status: 413 });
+    }
+    const body = JSON.parse(raw) as Record<string, unknown>;
     const requestedTenant = assertFhirIdentifier(body.tenantId, 'FHIR_IMPORT_TENANT_INVALID');
     const sourceId = assertFhirIdentifier(body.sourceId, 'FHIR_IMPORT_SOURCE_ID_INVALID');
     const resourceType = String(body.resourceType || '') as ExternalFhirImportType;

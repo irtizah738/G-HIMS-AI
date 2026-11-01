@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync, chmodSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { request } from 'node:http';
 import { assertSealedConfig, createSealedServer } from '../services/epic-sealed-worker/server.mjs';
@@ -93,4 +96,68 @@ test('script uses safe first deployment and keeps secret and imports disabled', 
     'CI_EXT07F_IMPORT_ENABLED=NO', 'CI_EXT07F_SECRET_GRANTS=NOT_CHANGED',
   ]) assert.ok(shell.includes(entry), entry);
   assert.doesNotMatch(shell, /--(?:set|update)-secrets|secrets add-iam-policy-binding|--ingress=all|--vpc-egress=private-ranges-only/);
+});
+
+
+test('regional inventory proves absence; existing service, malformed listing and IAM errors fail closed', () => {
+  const work = mkdtempSync(join(tmpdir(), 'helixis-epic-inventory-'));
+  const script = join(work, 'gcloud');
+  // Mock gcloud; never authenticates to a real Google Cloud project.
+  const mockCode = [
+    '#!/usr/bin/env bash',
+    'set -euo pipefail',
+    'case "$1 $2" in',
+    '  "config get-value") echo studio-1130431360-48a05 ;;',
+    '  "run services")',
+    '    if [[ "$MOCK_LIST_DENIED" == true ]]; then echo PERMISSION_DENIED >&2; exit 1; fi',
+    '    printf "%s\n" "$MOCK_SERVICE_INVENTORY" ;;',
+    '  "compute networks")',
+    '    if [[ "$*" == *value\\(stackType\\)* ]]; then echo IPV4_ONLY;',
+    '    else echo projects/p/global/networks/helixis-epic-egress; fi ;;',
+    '  "iam service-accounts")',
+    '    if [[ "$3" == describe ]]; then echo False; fi ;;',
+    '  "compute firewall-rules")',
+    '    echo "{\"direction\":\"EGRESS\",\"priority\":1000,\"network\":\"projects/p/global/networks/helixis-epic-egress\",\"destinationRanges\":[\"0.0.0.0/0\"],\"denied\":[{\"IPProtocol\":\"all\"}]}" ;;',
+    '  "secrets get-iam-policy" | "projects get-iam-policy") echo "{\"bindings\":[]}" ;;',
+    '  *) echo "MOCK_UNEXPECTED_GCLOUD_CALL:$1:$2" >&2; exit 91 ;;',
+    'esac',
+  ].join('\n');
+  writeFileSync(script, mockCode + '\n');
+  chmodSync(script, 0o700);
+  const invoke = (inventory, denied = false) =>
+    spawnSync('bash', ['scripts/ops/ci-ext07f-sealed-worker.sh', 'plan'], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: work + ':' + process.env.PATH,
+        MOCK_SERVICE_INVENTORY: JSON.stringify(inventory),
+        MOCK_LIST_DENIED: String(denied),
+        GHIMS_RUNTIME_MODE: 'STAGING',
+        HELIXIS_CI_EXT07F_CONFIRM_PROJECT: 'studio-1130431360-48a05',
+        GHIMS_CI_EXTERNAL_FHIR_IMPORT_ENABLED: 'false',
+        GHIMS_INTEGRATION_FHIR_R4_STATE: 'DISABLED',
+        GHIMS_CI_FHIR_AUTH_MODE: 'DISABLED',
+        HELIXIS_CI_EXT07F_IMAGE:
+          'us-central1-docker.pkg.dev/studio-1130431360-48a05/helixis-epic-staging/epic-sealed-worker@sha256:' + 'a'.repeat(64),
+      },
+    });
+  try {
+    const absent = invoke([{ metadata: { name: 'unrelated-service' } }]);
+    assert.equal(absent.status, 0, absent.stderr);
+    assert.match(absent.stdout, /CI_EXT07F_ACTION=PLAN_ONLY/);
+    const exists = invoke([{ metadata: { name: 'helixis-epic-sealed-worker' } }]);
+    assert.notEqual(exists.status, 0);
+    assert.match(exists.stderr, /CI_EXT07F_FAILED=SERVICE_ALREADY_EXISTS/);
+    const denied = invoke([], true);
+    assert.notEqual(denied.status, 0);
+    assert.match(denied.stderr, /CI_EXT07F_FAILED=SERVICE_INVENTORY_NOT_VERIFIABLE/);
+    const malformed = invoke({ unexpected: true });
+    assert.notEqual(malformed.status, 0);
+    assert.match(malformed.stderr, /CI_EXT07F_FAILED=SERVICE_INVENTORY_INVALID/);
+    const unknown = invoke([{ type: 'service-without-name' }]);
+    assert.notEqual(unknown.status, 0);
+    assert.match(unknown.stderr, /CI_EXT07F_FAILED=SERVICE_INVENTORY_INVALID/);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
 });

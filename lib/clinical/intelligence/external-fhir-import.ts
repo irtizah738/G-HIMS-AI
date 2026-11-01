@@ -306,7 +306,7 @@ export async function ingestExternalFhirResource(args: {
       };
     }
     const previous = headSnap.exists ? headSnap.data() as {
-      sourceLastUpdatedAt: number; sourceVersionId: string; patientId: string;
+      sourceLastUpdatedAt: number; sourceVersionId: string; patientId: string; receiptId: string;
     } : null;
     if (previous && previous.patientId !== patientId) {
       throw new Error('FHIR_IMPORT_RESOURCE_PATIENT_RELINK_REQUIRES_RECONCILIATION');

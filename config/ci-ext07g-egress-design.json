@@ -1,0 +1,116 @@
+{
+  "schema": "helixis.ci-ext07g.egress-design.v1",
+  "status": "DESIGN_ONLY",
+  "project": "studio-1130431360-48a05",
+  "region": "us-central1",
+  "tenant": "helixis-epic-sandbox",
+  "source": {
+    "service": "helixis-epic-sealed-worker",
+    "revision": "helixis-epic-sealed-worker-00001-ccv",
+    "runtimeServiceAccount": "helixis-epic-staging-runtime@studio-1130431360-48a05.iam.gserviceaccount.com",
+    "expectedManualInstanceCount": 0,
+    "expectedMode": "SEALED",
+    "fhirImportEnabled": false,
+    "fhirAuthEnabled": false,
+    "serviceEnabled": false
+  },
+  "network": {
+    "vpc": "helixis-epic-egress",
+    "subnet": "helixis-epic-us-central1",
+    "egress": "all-traffic",
+    "addressFamily": "IPV4_ONLY",
+    "denyRule": "helixis-epic-deny-egress",
+    "denyRulePriority": 1000,
+    "denyAllEgressMustRemain": true,
+    "globalAllowAllExceptionPermitted": false,
+    "anyVPCWideAllowExceptionPermitted": false,
+    "firewallOrRouteChangesApproved": false
+  },
+  "gateway": {
+    "product": "GOOGLE_CLOUD_SECURE_WEB_PROXY",
+    "candidateMode": "NEXT_HOP_ROUTING_MODE",
+    "gatewayResourceCreated": false,
+    "defaultPolicy": "DENY",
+    "tlsInspection": "DISABLED",
+    "sessionMatch": "EXACT_SNI_AND_PORT",
+    "sniRequired": true,
+    "missingSni": "DENY",
+    "encryptedClientHello": "DENY_UNLESS_PROVEN_FILTERABLE",
+    "proxyBypass": "DENY",
+    "routingCompatibility": "UNQUALIFIED",
+    "firewallCompatibility": "UNQUALIFIED",
+    "alternateExplicitProxyWithTlsInspection": "REQUIRES_SEPARATE_PRIVACY_REVIEW",
+    "deploymentApproved": false
+  },
+  "epic": {
+    "sandboxOnly": true,
+    "allowedHosts": [
+      "fhir.epic.com"
+    ],
+    "allowedDestinationPorts": [
+      443
+    ],
+    "uriScheme": "https",
+    "methodsAllowedByApplication": [
+      "GET",
+      "POST_TOKEN_ONLY"
+    ],
+    "redirects": "DENY",
+    "tokenExchange": "DISABLED",
+    "requests": "DISABLED",
+    "patientImports": "DISABLED",
+    "productionDomainsAllowed": false
+  },
+  "security": {
+    "secretsAccess": "DENIED",
+    "credentialMounts": false,
+    "logRequestBodies": false,
+    "logAuthHeaders": false,
+    "logTokenValues": false,
+    "logPatientIdentifiers": false,
+    "clinicalDataTransferEnabled": false,
+    "automaticRetryOfMutations": false,
+    "separateChangeApprovalRequired": true,
+    "costApprovalRequired": true,
+    "networkNegativeProofRequired": true,
+    "policyDriftMonitoringRequired": true
+  },
+  "externalCosts": {
+    "source": "https://cloud.google.com/secure-web-proxy/pricing",
+    "priceUSDPerGatewayHour": 1.25,
+    "priceUSDPerGiB": 0.0193,
+    "estimate730hGatewayUSD": 912.5,
+    "excludedCosts": [
+      "Cloud NAT",
+      "egress bandwidth",
+      "logging",
+      "Cloud Run",
+      "TLS inspection/CAS if later enabled"
+    ],
+    "costCapApproved": false
+  },
+  "qualification": {
+    "phase": "DESIGN",
+    "stagingDeploymentEnabled": false,
+    "onWorkerActivation": "REQUIRES_SEPARATE_CHANGE",
+    "necessaryNegativeCases": [
+      "UNAUTHORIZED_HOST",
+      "SUBDOMAIN_MISMATCH",
+      "MISSING_SNI",
+      "ENCRYPTED_CLIENT_HELLO",
+      "UNAPPROVED_PORT",
+      "IP_LITERAL",
+      "DNS_REBIND",
+      "PROXY_DOWN",
+      "DIRECT_IP_BYPASS",
+      "ROUTE_REMOVED",
+      "FIREWALL_OVERRIDE",
+      "HTTP3_UDP",
+      "REDIRECT_CROSS_HOST",
+      "MUTUAL_TLS_OR_CA_FAILURE",
+      "TOKEN_AND_PHI_LOGGING",
+      "POLICY_DRIFT",
+      "INSTANCE_COLD_START"
+    ]
+  }
+}

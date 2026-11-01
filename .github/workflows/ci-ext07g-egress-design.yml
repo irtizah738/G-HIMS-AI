@@ -1,0 +1,41 @@
+name: CI-EXT-07G egress architecture safety
+
+on:
+  pull_request:
+    paths:
+      - 'config/ci-ext07g-egress-design.json'
+      - 'docs/architecture/HELIXIS_CI_EXT07G_EGRESS_GATEWAY_ADR.md'
+      - 'tests/ci-ext07g-egress-design.test.mjs'
+      - '.github/workflows/ci-ext07g-egress-design.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'config/ci-ext07g-egress-design.json'
+      - 'docs/architecture/HELIXIS_CI_EXT07G_EGRESS_GATEWAY_ADR.md'
+      - 'tests/ci-ext07g-egress-design.test.mjs'
+      - '.github/workflows/ci-ext07g-egress-design.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  design-only-fail-closed-contract:
+    name: Design-only no-cloud egress qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Set up Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Assert sandbox-only default deny architecture
+        run: node --test tests/ci-ext07g-egress-design.test.mjs
+      - name: Verify no cloud provisioner exists in milestone
+        run: |
+          if grep -Eq '"(deploymentApproved|firewallOrRouteChangesApproved|stagingDeploymentEnabled|costCapApproved)": true' config/ci-ext07g-egress-design.json; then
+            echo "Unsafe egress approval enabled" >&2
+            exit 1
+          fi
+          echo 'CI_EXT07G_DESIGN_ONLY=PASS'

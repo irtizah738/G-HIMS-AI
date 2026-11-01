@@ -1,0 +1,92 @@
+{
+  "schema": "helixis.ci-ext07gb.feasibility.v1",
+  "status": "READ_ONLY_FEASIBILITY_NOT_ROUTING_APPROVAL",
+  "sourceProject": "studio-1130431360-48a05",
+  "region": "us-central1",
+  "protectedResources": {
+    "vpc": "helixis-epic-egress",
+    "subnet": "helixis-epic-us-central1",
+    "service": "helixis-epic-sealed-worker",
+    "secretAccess": "DENIED",
+    "cloudRunManualInstanceCount": 0,
+    "imports": "DISABLED",
+    "denyRule": "helixis-epic-deny-egress",
+    "existingFirewallChangesApproved": false,
+    "serviceRevisionChangesApproved": false
+  },
+  "lab": {
+    "separateDisposableVPC": true,
+    "distinctSubnet": true,
+    "noEpicCredentials": true,
+    "noPatientData": true,
+    "noSourceWorkerActivation": true,
+    "noDefaultNATExceptManagedProxyDependency": true,
+    "noBroadEgressAllow": true,
+    "zeroDefaultExternalReachability": true,
+    "isolatedProbeIdentity": true,
+    "gatewayProvisioned": false,
+    "liveLabAuthorized": false,
+    "teardownPlanApproved": false,
+    "securityReviewApproved": false,
+    "financeApproval": false,
+    "budgetAlertsConfigured": false,
+    "firstExperiment": "ROUTING_AND_FIREWALL_NON_BYPASS_BEFORE_ANY_EPIC_DESTINATION",
+    "costModel": {
+      "pricingUrl": "https://cloud.google.com/secure-web-proxy/pricing",
+      "hourlyGatewayUSD": 1.25,
+      "illustrative730hBaseUSD": 912.5,
+      "excludes": [
+        "auto-generated Cloud NAT",
+        "traffic processing",
+        "bandwidth",
+        "Cloud Run probe",
+        "logging"
+      ],
+      "hardBudgetEnforcementAvailable": false,
+      "absoluteTestSpendUSD": null,
+      "maxRuntimeHours": null
+    }
+  },
+  "decisions": {
+    "swpNextHopCompatibility": "UNVERIFIED",
+    "directVpcFirewallPolicyCompatibility": "UNVERIFIED",
+    "egressFirewallPriorityModel": "UNVERIFIED",
+    "cloudRunSourceIdentityMatcher": "UNVERIFIED",
+    "sourceTagScope": "UNVERIFIED",
+    "routeFailoverCannotBypass": "UNVERIFIED",
+    "automaticCloudNatResourceImpact": "UNVERIFIED",
+    "sourceEgressCannotReachInternetDirectly": "UNVERIFIED",
+    "positiveAllowHost": "fhir.epic.com",
+    "positiveAllowPort": 443,
+    "tlsInspectionEnabled": false,
+    "epicOAuthRequestEnabled": false
+  },
+  "mandatoryNegativeTests": [
+    "DEFAULT_ROUTE_FALLBACK",
+    "NEXT_HOP_ROUTE_REMOVED",
+    "GATEWAY_UNHEALTHY",
+    "FIREWALL_HIGHER_PRIORITY_ALLOW",
+    "CLOUD_NAT_DIRECT_BYPASS",
+    "PUBLIC_IP_LITERAL",
+    "UNAPPROVED_DOMAIN",
+    "WRONG_SNI",
+    "SNI_ABSENT",
+    "IPV6",
+    "UDP_443_QUIC",
+    "UNAPPROVED_PORT",
+    "CLOUD_RUN_SOURCE_IDENTITY_MISMATCH",
+    "ROUTE_SCOPE_CROSS_TENANT",
+    "POLICY_REMOVED_OR_DISABLED",
+    "DNS_REBINDING",
+    "REDIRECT_NEW_HOST"
+  ],
+  "acceptance": {
+    "evidenceRequiresRuntimePacketTests": true,
+    "allowWhenRouteBroken": false,
+    "produceImmutableEvidence": true,
+    "blockDeploymentIfAnyUnknown": true,
+    "noGoIfBroadAllowRequired": true,
+    "costApprovedBeforeGatewayCreation": true,
+    "clinicalApprovalBeforePatientLikePayload": true
+  }
+}

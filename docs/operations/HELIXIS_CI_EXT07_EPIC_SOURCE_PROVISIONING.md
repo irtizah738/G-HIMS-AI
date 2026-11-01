@@ -42,6 +42,7 @@ This metadata-only inspection uses Cloud Shell's existing `gcloud` identity. It 
 git fetch origin
 git checkout feat/ci-ext07-epic-secret-source-provisioning-20261101
 git pull --ff-only origin feat/ci-ext07-epic-secret-source-provisioning-20261101
+bun install --frozen-lockfile
 
 export GHIMS_RUNTIME_MODE=STAGING
 export HELIXIS_CI_EXT07_CONFIRM_PROJECT=studio-1130431360-48a05

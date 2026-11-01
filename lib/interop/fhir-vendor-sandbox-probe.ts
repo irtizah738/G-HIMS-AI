@@ -95,8 +95,10 @@ export function validateVendorFixtureManifest(
     throw new Error('CI_EXT06_FIXTURE_INVALID');
   }
   for (const t of ['Patient', 'Encounter', 'Observation'] as const) {
+    const requiredRead = 'system/' + t +
+      (source.oauth.vendorProfile === 'EPIC_SANDBOX' ? '.r' : '.rs');
     if (!source.approvedResourceTypes.includes(t) ||
-        !source.oauth.scopes.includes('system/' + t + '.rs')) {
+        !source.oauth.scopes.includes(requiredRead)) {
       throw new Error('CI_EXT06_SOURCE_SCOPE_INCOMPLETE');
     }
   }

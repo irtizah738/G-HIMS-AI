@@ -108,3 +108,34 @@ bun test tests/ci-ext04-smart-backend-oauth.test.ts tests/ci-ext04-fhir-sandbox-
 ```
 
 Remaining work: tested vendor-specific connection, GCP IAM policy and WIF principal qualification, private-network gateway/egress restrictions, OAuth discovery metadata pinning at onboarding, operational rotation and revocation drills, cross-tenant concurrency stress, retry jitter and 429 handling, clinical normalizer conformance, verified real HIS data and clinical sign-off. The existing clinical evidence reader remains review-only and the native drafting path still rejects EXTERNAL mode.
+
+## Staging-only qualification endpoint and audit
+
+`POST /api/integrations/fhir/qualify` accepts **only** `tenantId` and `sourceId`.
+It requires the existing authenticated tenant membership, active session and device,
+an explicit `FHIR_INTEGRATION_QUALIFY` grant, and the registered source's facility.
+It is unavailable unless **all** of the following hold:
+
+- `GHIMS_RUNTIME_MODE=STAGING`
+- `GHIMS_CI_FHIR_SANDBOX_QUALIFICATION_ENABLED=true`
+- `GHIMS_CI_FHIR_AUTH_MODE=SMART_BACKEND`
+- `GHIMS_INTEGRATION_FHIR_R4_STATE=INTEGRATION_READY`
+
+The server retrieves the source from tenant-scoped Firestore, enforces exact
+source/token host allowlists, checks SMART discovery, obtains the resource-scoped
+backend OAuth token, and checks a read-only FHIR R4 CapabilityStatement. It does
+**not** issue any Patient/Encounter/Observation `GET` requests.
+
+The qualification is written to
+`/tenants/{tenantId}/fhirSandboxQualifications/{qualificationId}` as an immutable
+`PROTOCOL_PASSED_SITE_PENDING` or `FAILED` receipt, tied to the reviewer, source,
+facility and OAuth credential revision. The server rechecks source status,
+OAuth metadata, approved facility and credential revision before committing.
+Browser Firestore reads/writes are denied.
+
+Even a successful report explicitly retains
+`qualifiedForPatientData=false` and `qualifiedForProduction=false`.
+Clinical site approval and a vendor-connected synthetic patient roundtrip
+remain separate and mandatory.
+
+**Do not set** the sandbox qualification flag on production deployments.

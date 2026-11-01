@@ -1,0 +1,74 @@
+name: Helixis External FHIR R4 Import
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: helixis-fhir-r4-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fhir-import:
+    name: FHIR R4 authority, replay and emulator isolation
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      NODE_ENV: test
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-p4-ci
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p4-ci
+      GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+      NEXT_PUBLIC_GHIMS_FIREBASE_PROJECT_ID_TEST: ghims-p4-ci
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_CI_EXTERNAL_FHIR_IMPORT_ENABLED: "false"
+      GCLOUD_PROJECT: ghims-p4-ci
+      GOOGLE_CLOUD_PROJECT: ghims-p4-ci
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Source quality gate
+        run: bun run lint
+      - name: Pure authority and FHIR contract tests
+        run: bun test tests/helixis-external-fhir-import.test.ts
+      - name: Install Firebase CLI for isolated emulator
+        run: npm install --global firebase-tools@14.20.0
+      - name: Compile emulator qualification for Node.js runtime
+        run: |
+          sed "s#from 'bun:test'#from './helixis-node-test-compat'#g" emulator-security/helixis-external-fhir-import.test.ts > emulator-security/helixis-external-fhir-import.node.test.ts
+          sed "s#from 'bun:test'#from './helixis-node-test-compat'#g" emulator-security/helixis-external-patient360.test.ts > emulator-security/helixis-external-patient360.node.test.ts
+          bun build emulator-security/helixis-external-fhir-import.node.test.ts emulator-security/helixis-external-patient360.node.test.ts --target=node --format=cjs --packages=external --outdir=.tmp/fhir-node
+      - name: Firestore atomicity, replay and isolation
+        timeout-minutes: 4
+        env:
+          GHIMS_FHIR_EMULATOR_TRACE: "true"
+          FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080"
+        run: |
+          echo "Running isolated Firestore emulator against project ghims-p4-ci"
+          timeout --signal=TERM --kill-after=5s 100s firebase emulators:exec --project ghims-p4-ci --only firestore "node --test .tmp/fhir-node/helixis-external-fhir-import.node.test.js .tmp/fhir-node/helixis-external-patient360.node.test.js"
+      - name: Diagnose Firestore emulator transaction stalls
+        if: failure()
+        shell: bash
+        run: |
+          echo 'Firestore emulator error and transaction diagnostics (synthetic-only CI)'
+          if test -f firestore-debug.log; then
+            grep -Ein 'deadlock|lock|transaction|exception|error|failed|timeout|gRPC' firestore-debug.log | tail -n 120 || true
+          else
+            echo 'No firestore-debug.log produced'
+          fi
+          if test -f firebase-debug.log; then
+            tail -n 60 firebase-debug.log || true
+          fi
+      - name: Existing FHIR transport regressions
+        run: bun run test:wave4

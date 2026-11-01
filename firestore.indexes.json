@@ -830,6 +830,46 @@
       "collectionGroup": "patient360Projections",
       "fieldPath": "counts",
       "indexes": []
+    },
+    {
+      "collectionGroup": "fhirImportedVersions",
+      "fieldPath": "resourceJson",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fhirImportedVersions",
+      "fieldPath": "normalizedEvidence",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fhirImportEvents",
+      "fieldPath": "payload",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "externalPatient360Projections",
+      "fieldPath": "facts",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "externalPatient360Revisions",
+      "fieldPath": "facts",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "externalPatient360Projections",
+      "fieldPath": "sourceRefs",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "externalPatient360Revisions",
+      "fieldPath": "sourceRefs",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fhirReconciliationDecisions",
+      "fieldPath": "rationale",
+      "indexes": []
     }
   ]
 }

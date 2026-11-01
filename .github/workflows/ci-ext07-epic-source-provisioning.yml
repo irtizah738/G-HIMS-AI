@@ -48,3 +48,9 @@ jobs:
             echo "FAIL_OPEN_SOURCE_REGISTRATION"; exit 1
           fi
           grep -q 'CI_EXT07_STAGING_REGISTRATION_DENIED' /tmp/ci-ext07-register-denied.txt
+      - name: Confirm metadata inspection refuses TEST environment before cloud access
+        run: |
+          if bun scripts/ops/ci-ext07-inspect-synthetic-tenant.ts > /tmp/ci-ext07-inspect-denied.txt 2>&1; then
+            echo "FAIL_OPEN_TENANT_INSPECTION"; exit 1
+          fi
+          grep -q 'CI_EXT07_READONLY_ENVIRONMENT_INVALID' /tmp/ci-ext07-inspect-denied.txt

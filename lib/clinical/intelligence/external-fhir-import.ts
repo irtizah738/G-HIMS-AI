@@ -100,9 +100,9 @@ export function assertFhirImportActor(actor: FhirImportActor, tenantId: string, 
     throw new Error('FHIR_IMPORT_TENANT_ACCESS_DENIED');
   }
   const grants = actor.permissions.map(p => p.toUpperCase());
-  const roles = actor.roles.map(r => r.toUpperCase());
-  if (!grants.includes('FHIR_IMPORT') && !grants.includes('MANAGE_INTEGRATIONS') &&
-      !roles.includes('SYSTEM_ADMIN')) {
+  // Importing protected patient data requires a distinct explicit grant.
+  // Being an administrator or managing configuration is not sufficient.
+  if (!grants.includes('FHIR_IMPORT')) {
     throw new Error('FHIR_IMPORT_PERMISSION_DENIED');
   }
   if (!actor.facilityIds.includes(facilityId)) {

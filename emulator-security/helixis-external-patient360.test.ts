@@ -3,8 +3,7 @@
  * reconciliation. Refuses to run without a Firestore emulator.
  */
 import { test, expect } from 'bun:test';
-import { initializeApp, deleteApp } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
+import { getAdminFirestore } from '@/server/firebase/admin';
 import { fhirPatientLinkId, fhirImportHeadId, ingestExternalFhirResource } from '@/lib/clinical/intelligence/external-fhir-import';
 import { rebuildExternalPatient360 } from '@/lib/clinical/intelligence/external-patient360-projection';
 import { approveFhirReconciliation } from '@/lib/clinical/intelligence/external-fhir-reconciliation';
@@ -21,8 +20,12 @@ function obs(versionId: string, lastUpdated: string, value: number) {
 }
 test('external Patient 360: immutable revisions, source fencing, dual review and consent replay', async () => {
   if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error('FHIR_EMULATOR_REQUIRED');
-  const app = initializeApp({ projectId: 'ghims-p4-ci' }, 'fhir360-' + crypto.randomUUID());
-  const db = getFirestore(app);
+  if (process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8080' || process.env.FIREBASE_PROJECT_ID !== 'ghims-p4-ci') {
+    throw new Error('FHIR_EMULATOR_ISOLATION_MISMATCH');
+  }
+  const db = getAdminFirestore();
+  if (!db) throw new Error('FHIR_EMULATOR_ADMIN_UNAVAILABLE');
+  console.info('FHIR360_EMULATOR_ADMIN_READY');
   const tenantId = 'fhir360-' + crypto.randomUUID().slice(0, 10);
   const patientId = 'helixis-p1';
   const sourceId = 'his-a';
@@ -34,6 +37,7 @@ test('external Patient 360: immutable revisions, source fencing, dual review and
   const linkRef = root.collection('fhirPatientLinks').doc(fhirPatientLinkId(sourceId, 'ext-p1'));
   const headRef = root.collection('fhirResourceHeads').doc(fhirImportHeadId(sourceId, 'Observation', 'creatinine-1'));
   try {
+    console.info('FHIR360_BEFORE_SYNTHETIC_SEED');
     await Promise.all([
       root.collection('patients').doc(patientId).set({ tenantId, status: 'ACTIVE' }),
       sourceRef.set({ tenantId, sourceId, facilityId: 'site-1', baseUrl,
@@ -43,6 +47,7 @@ test('external Patient 360: immutable revisions, source fencing, dual review and
         externalPatientId: 'ext-p1', patientId,
         matchStatus: 'VERIFIED', consentStatus: 'GRANTED', verifiedBy: 'clinical-reviewer' }),
     ]);
+    console.info('FHIR360_SYNTHETIC_SEED_COMMITTED');
     const imported1 = await ingestExternalFhirResource({
       db, actor, sourceId, expectedBaseUrl: baseUrl,
       resource: obs('v1', '2026-10-20T09:00:00Z', 1.2),
@@ -136,6 +141,6 @@ test('external Patient 360: immutable revisions, source fencing, dual review and
     expect((await root.collection('externalPatient360Revisions').get()).size).toBe(7);
   } finally {
     await db.recursiveDelete(root);
-    await deleteApp(app);
+    console.info('FHIR_EMULATOR_CLEANUP_COMPLETE');
   }
 }, 120000);

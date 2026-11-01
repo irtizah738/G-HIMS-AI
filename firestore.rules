@@ -196,6 +196,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Public JWKS is served only through a server-filtered HTTP projection.
+    // Even the non-secret registration metadata is never readable via SDK.
+    match /fhirPublicJwks/{keySetId} {
+      allow read, write: if false;
+    }
+
     // Tenant metadata is visible only inside an active tenant membership.
     // Tenant and membership authority are server-managed; browser clients cannot
     // self-provision, widen roles, or browse another tenant's membership graph.

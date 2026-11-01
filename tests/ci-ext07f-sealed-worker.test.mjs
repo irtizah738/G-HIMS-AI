@@ -73,7 +73,10 @@ test('image context has no application dependencies or outbound network client',
   const code=readFileSync(dir+'server.mjs','utf8').replace(/\/\*[\s\S]*?\*\//g,'').replace(/\/\/[^\n]*/g,'');
   // Pin exact x86-64 OCI manifest, not a mutable tag or multiarch index.
   const amd64Digest = '4eefa1bfce4197942661ef9148247d779ddf1bb0ee006d3294a467609de60724';
-  assert.match(docker, new RegExp('^FROM node:24-alpine@sha256:' + amd64Digest + '
+  assert.ok(docker.split('\n').some(line => line.trim() === 'FROM node:24-alpine@sha256:' + amd64Digest));
+  assert.ok(!docker.split('\n').some(line => line.trim() === 'FROM node:24-alpine'));
+  assert.ok(docker.includes('linux/amd64 manifest'));
+  assert.match(docker, /USER node/);
   assert.match(docker, /COPY --chown=node:node server\.mjs/);
   assert.doesNotMatch(docker, /COPY \./);
   assert.match(ignore, /\*\n!server\.mjs/);

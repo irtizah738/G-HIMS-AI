@@ -227,6 +227,10 @@ service cloud.firestore {
       match /fhirResourceHeads/{headId} { allow read, write: if false; }
       match /fhirImportEvents/{eventId} { allow read, write: if false; }
       match /fhirImportOutbox/{outboxId} { allow read, write: if false; }
+      match /fhirReconciliationCases/{caseId} { allow read, write: if false; }
+      match /fhirReconciliationDecisions/{decisionId} { allow read, write: if false; }
+      match /externalPatient360Projections/{patientId} { allow read, write: if false; }
+      match /externalPatient360Revisions/{revisionId} { allow read, write: if false; }
 
       // Clinical read models. Mutations must go through authenticated server commands.
       // Patient identity/chart state is exposed only through server APIs and

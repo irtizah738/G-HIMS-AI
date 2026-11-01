@@ -235,6 +235,8 @@ service cloud.firestore {
       match /fhirSandboxQualifications/{qualificationId} { allow read, write: if false; }
       match /fhirSiteApprovals/{approvalId} { allow read, write: if false; }
       match /fhirSyntheticQualifications/{evidenceId} { allow read, write: if false; }
+      match /fhirSyntheticFixtureManifests/{sourceId} { allow read, write: if false; }
+      match /fhirVendorProbes/{probeId} { allow read, write: if false; }
       match /fhirSiteReviewRequests/{requestId} { allow read, write: if false; }
       match /fhirSiteReviewDecisions/{decisionId} { allow read, write: if false; }
       match /fhirSiteReviewEvents/{eventId} { allow read, write: if false; }

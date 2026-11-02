@@ -47,6 +47,7 @@ export type FhirSourceRecord = {
   siteApprovalId?: string;
   oauth?: {
     mode: 'SMART_BACKEND';
+    vendorProfile?: 'EPIC_SANDBOX';
     clientId: string;
     tokenUrl: string;
     keyId: string;

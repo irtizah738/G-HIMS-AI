@@ -12,7 +12,11 @@ Status: **prepared only**. No job, gateway, NAT, routes, IAM grants or cloud pro
 ## Build just the probe (after review)
 
 ```bash
-cd "$HOME/helixis-epic-lab-20261102" || exit
+REPO_DIR="$HOME/helixis-epic-probe-20261102"
+git clone --depth=1 --single-branch \
+  --branch feat/ci-ext07gd-direct-vpc-deny-probe-20261102 \
+  https://github.com/irtizah738/G-HIMS-AI.git "$REPO_DIR"
+cd "$REPO_DIR" || exit
 node --test tests/ci-ext07gd-deny-only-probe.test.mjs
 PROJECT=studio-1130431360-48a05
 REGION=us-central1

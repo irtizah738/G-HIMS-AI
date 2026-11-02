@@ -1,0 +1,26 @@
+name: CI-EXT-07GF Exact-Host SWP Lab Policy
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/ops/ci-ext07gf-epic-swp-policy.sh'
+      - 'docs/operations/HELIXIS_CI_EXT07GF_EPIC_SWP_POLICY.md'
+      - '.github/workflows/ci-ext07gf-swp-policy.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  policy-shell:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax check
+        run: bash -n scripts/ops/ci-ext07gf-epic-swp-policy.sh
+      - name: Check policy is exact-host, port-bound, and non-gateway
+        run: |
+          grep -Fq 'host() == "fhir.epic.com" && destination.port == 443' scripts/ops/ci-ext07gf-epic-swp-policy.sh
+          ! grep -Fq 'gcloud network-services gateways import' scripts/ops/ci-ext07gf-epic-swp-policy.sh
+          ! grep -Fq 'gcloud compute firewall-rules create' scripts/ops/ci-ext07gf-epic-swp-policy.sh

@@ -9,9 +9,14 @@
  */
 import { createHash, createPrivateKey, randomUUID, sign as signJwt } from 'node:crypto';
 import type { FhirSourceRecord } from '@/lib/clinical/intelligence/external-fhir-import';
+import {
+  EPIC_SANDBOX_FHIR_BASE, EPIC_SANDBOX_TOKEN_URL, EPIC_SANDBOX_JWKS_URL,
+  isEpicSandboxScopeConfiguration, validateEpicSandboxGrantedScopes,
+} from './fhir-epic-sandbox-oauth';
 
 export type SmartBackendConfig = {
   mode: 'SMART_BACKEND';
+  vendorProfile?: 'EPIC_SANDBOX';
   clientId: string;
   tokenUrl: string;
   keyId: string;
@@ -64,23 +69,37 @@ export function checkSmartBackendSource(
       !Number.isSafeInteger(config.credentialRevision) || config.credentialRevision < 1 ||
       !Array.isArray(config.scopes) || !config.scopes.length ||
       new Set(config.scopes).size !== config.scopes.length ||
-      config.scopes.some(s => !ALLOWED_SCOPES.has(s))) {
+      (config.vendorProfile !== undefined && config.vendorProfile !== 'EPIC_SANDBOX') ||
+      (config.vendorProfile === 'EPIC_SANDBOX'
+        ? !isEpicSandboxScopeConfiguration(config.scopes)
+        : config.scopes.some(s => !ALLOWED_SCOPES.has(s)))) {
     throw new Error('CI_EXT04_OAUTH_CONFIGURATION_INVALID');
   }
   canonicalHost(config.tokenUrl, options.allowedTokenHosts, 'CI_EXT04_TOKEN_ORIGIN_DENIED');
+  if (config.vendorProfile === 'EPIC_SANDBOX' &&
+      (source.baseUrl.replace(/\/$/, '') !== EPIC_SANDBOX_FHIR_BASE.replace(/\/$/, '') ||
+       config.tokenUrl !== EPIC_SANDBOX_TOKEN_URL ||
+       process.env.GHIMS_RUNTIME_MODE === 'PRODUCTION')) {
+    throw new Error('CI_EXT06C_EPIC_SANDBOX_CONFIG_DENIED');
+  }
   return config;
 }
 
 export function makeSmartClientAssertion(args: {
   clientId: string; keyId: string; tokenUrl: string; privateKeyPem: string;
-  nowSeconds: number; nonce?: string;
+  nowSeconds: number; nonce?: string; jku?: string;
 }): string {
   const { clientId, keyId, tokenUrl, privateKeyPem, nowSeconds } = args;
   if (!Number.isSafeInteger(nowSeconds) || nowSeconds < 0) {
     throw new Error('CI_EXT04_CLOCK_INVALID');
   }
   const nonce = args.nonce || randomUUID();
-  const header = { alg: 'RS384', typ: 'JWT', kid: keyId };
+  if (args.jku && args.jku !== EPIC_SANDBOX_JWKS_URL) {
+    throw new Error('CI_EXT06C_JKU_NOT_APPROVED');
+  }
+  const header = args.jku
+    ? { alg: 'RS384', typ: 'JWT', kid: keyId, jku: args.jku }
+    : { alg: 'RS384', typ: 'JWT', kid: keyId };
   const payload = {
     iss: clientId, sub: clientId, aud: tokenUrl,
     iat: nowSeconds, exp: nowSeconds + 300, jti: nonce,
@@ -138,7 +157,8 @@ export class SmartBackendTokenBroker {
   }): Promise<string> {
     const { tenantId, sourceId, source, resourceType } = args;
     const config = checkSmartBackendSource(source, tenantId, sourceId, this.dependencies);
-    const requiredScope = 'system/' + resourceType + '.rs';
+    const epicSandbox = config.vendorProfile === 'EPIC_SANDBOX';
+    const requiredScope = 'system/' + resourceType + (epicSandbox ? '.r' : '.rs');
     if (!source.approvedResourceTypes.includes(resourceType) || !config.scopes.includes(requiredScope)) {
       throw new Error('CI_EXT04_RESOURCE_SCOPE_DENIED');
     }
@@ -147,7 +167,8 @@ export class SmartBackendTokenBroker {
     // Credentials and grants are bound to the exact source + configuration
     // revision; no token can cross a tenant, source or key-rotation boundary.
     const cacheKey = sha(JSON.stringify([
-      tenantId, sourceId, config.clientId, config.tokenUrl,
+      tenantId, sourceId, config.vendorProfile ?? 'SMART_STANDARD',
+      config.clientId, config.tokenUrl,
       config.keyId, config.secretVersion, config.credentialRevision,
       [...config.scopes].sort(), requiredScope,
     ]));
@@ -161,13 +182,16 @@ export class SmartBackendTokenBroker {
         clientId: config.clientId, keyId: config.keyId,
         tokenUrl: config.tokenUrl, privateKeyPem: pem,
         nowSeconds: Math.floor(now() / 1000),
+        jku: epicSandbox ? EPIC_SANDBOX_JWKS_URL : undefined,
       });
       const requestBody = new URLSearchParams({
         grant_type: 'client_credentials',
         client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
         client_assertion: assertion,
-        scope: requiredScope,
       });
+      // Epic's verified sandbox flow returns registered grants without a
+      // requested scope. Never infer authorization from this omission.
+      if (!epicSandbox) requestBody.set('scope', requiredScope);
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 12_000);
       try {
@@ -188,7 +212,10 @@ export class SmartBackendTokenBroker {
         }
         let payload: unknown;
         try { payload = JSON.parse(body); } catch { throw new Error('CI_EXT04_TOKEN_JSON_INVALID'); }
-        const granted = validateSmartTokenResponse(payload, [requiredScope]);
+        const scopesToValidate = epicSandbox
+          ? validateEpicSandboxGrantedScopes(payload, config.scopes, resourceType)
+          : [requiredScope];
+        const granted = validateSmartTokenResponse(payload, scopesToValidate);
         const expiresAt = now() + granted.expires_in * 1000;
         const ttl = Math.min(60_000, Math.max(0, expiresAt - now() - 60_000));
         if (ttl > 0) cache.set(cacheKey, { value: granted.access_token, expiresAt: now() + ttl });

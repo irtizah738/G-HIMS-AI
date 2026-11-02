@@ -35,7 +35,7 @@ jobs:
       - name: Source quality
         run: bun run lint
       - name: SMART Backend Services and sandbox contract tests
-        run: bun test tests/ci-ext04-smart-backend-oauth.test.ts tests/ci-ext04-fhir-sandbox-qualification.test.ts
+        run: bun test tests/ci-ext04-smart-backend-oauth.test.ts tests/ci-ext04-fhir-sandbox-qualification.test.ts tests/ci-ext06c-epic-oauth-compatibility.test.ts
       - name: Install Firebase CLI for credential-rotation emulator tests
         run: npm install --global firebase-tools@14.20.0
       - name: Compile Node.js emulator rotation qualification

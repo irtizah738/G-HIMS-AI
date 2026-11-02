@@ -1,0 +1,25 @@
+name: CI-EXT-07GD Isolated Deny-Only Egress Probe
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/epic-egress-probe/**'
+      - 'tests/ci-ext07gd-deny-only-probe.test.mjs'
+      - '.github/workflows/ci-ext07gd-deny-only-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-probe:
+    name: Bounded public TCP deny probe (local mocks only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check services/epic-egress-probe/egress-probe.mjs
+      - run: node --test tests/ci-ext07gd-deny-only-probe.test.mjs

@@ -1,0 +1,27 @@
+name: CI-EXT-07GG SWP TLS Probe Qualification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/epic-egress-probe/swp-tls-probe.mjs'
+      - 'services/epic-egress-probe/Dockerfile.swp-tls'
+      - 'services/epic-egress-probe/cloudbuild.swp-tls.yaml'
+      - 'tests/ci-ext07gg-swp-tls-probe.test.mjs'
+      - '.github/workflows/ci-ext07gg-swp-tls-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-probe:
+    name: TLS-only probe unit qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check services/epic-egress-probe/swp-tls-probe.mjs
+      - run: node --test tests/ci-ext07gg-swp-tls-probe.test.mjs

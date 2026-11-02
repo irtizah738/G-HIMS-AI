@@ -1,0 +1,7 @@
+# CI-EXT-07G-G: isolated SWP TLS reachability probe with no credentials or HTTP requests.
+FROM node:24-alpine@sha256:4eefa1bfce4197942661ef9148247d779ddf1bb0ee006d3294a467609de60724
+ENV NODE_ENV=production
+WORKDIR /opt/helixis-swp-probe
+COPY --chown=node:node swp-tls-probe.mjs ./swp-tls-probe.mjs
+USER node
+CMD ["node", "/opt/helixis-swp-probe/swp-tls-probe.mjs"]

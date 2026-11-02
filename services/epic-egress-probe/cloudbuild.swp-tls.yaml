@@ -1,0 +1,10 @@
+# Build only an isolated synthetic, no-credential TLS probe.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --file=Dockerfile.swp-tls
+      - --tag=us-central1-docker.pkg.dev/studio-1130431360-48a05/helixis-epic-staging/epic-swp-tls-probe:ci-ext07gg-v1
+      - .
+images:
+  - us-central1-docker.pkg.dev/studio-1130431360-48a05/helixis-epic-staging/epic-swp-tls-probe:ci-ext07gg-v1

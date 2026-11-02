@@ -1,0 +1,56 @@
+name: CI-EXT-07 Epic Staging Source Provisioning
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-ext07-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  epic-source-plan:
+    name: Staging-only key/source plan and safety contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_CI_EXTERNAL_FHIR_IMPORT_ENABLED: "false"
+      GHIMS_CI_FHIR_AUTH_MODE: DISABLED
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install frozen dependencies
+        run: bun install --frozen-lockfile
+      - name: TypeScript
+        run: bun run typecheck
+      - name: Source quality
+        run: bun run lint
+      - name: Shell parse qualification (no GCP calls)
+        run: bash -n scripts/ops/ci-ext07-epic-key-copy.sh
+      - name: Exact Epic staging/secret/source plan contracts
+        run: bun test tests/ci-ext07-epic-source-provisioning.test.ts tests/ci-ext04-smart-backend-oauth.test.ts
+      - name: Confirm staging copy refuses TEST environment
+        run: |
+          if bash scripts/ops/ci-ext07-epic-key-copy.sh copy > /tmp/ci-ext07-denied.txt 2>&1; then
+            echo "FAIL_OPEN_STAGING_PROVISIONER"; exit 1
+          fi
+          grep -q 'STAGING_RUNTIME_REQUIRED' /tmp/ci-ext07-denied.txt
+      - name: Confirm source registration refuses TEST environment before Firestore
+        run: |
+          if bun scripts/ops/ci-ext07-register-suspended-epic-source.ts > /tmp/ci-ext07-register-denied.txt 2>&1; then
+            echo "FAIL_OPEN_SOURCE_REGISTRATION"; exit 1
+          fi
+          grep -q 'CI_EXT07_STAGING_REGISTRATION_DENIED' /tmp/ci-ext07-register-denied.txt
+      - name: Confirm metadata inspection refuses TEST environment before cloud access
+        run: |
+          if bun scripts/ops/ci-ext07-inspect-synthetic-tenant.ts > /tmp/ci-ext07-inspect-denied.txt 2>&1; then
+            echo "FAIL_OPEN_TENANT_INSPECTION"; exit 1
+          fi
+          grep -q 'CI_EXT07_READONLY_ENVIRONMENT_INVALID' /tmp/ci-ext07-inspect-denied.txt

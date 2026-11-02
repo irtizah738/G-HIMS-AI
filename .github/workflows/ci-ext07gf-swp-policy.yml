@@ -7,6 +7,7 @@ on:
       - 'scripts/ops/ci-ext07gf-epic-swp-policy.sh'
       - 'docs/operations/HELIXIS_CI_EXT07GF_EPIC_SWP_POLICY.md'
       - '.github/workflows/ci-ext07gf-swp-policy.yml'
+      - 'tests/ci-ext07gf-policy-verification.test.sh'
 
 permissions:
   contents: read
@@ -24,3 +25,5 @@ jobs:
           grep -Fq 'host() == "fhir.epic.com" && destination.port == 443' scripts/ops/ci-ext07gf-epic-swp-policy.sh
           ! grep -Fq 'gcloud network-services gateways import' scripts/ops/ci-ext07gf-epic-swp-policy.sh
           ! grep -Fq 'gcloud compute firewall-rules create' scripts/ops/ci-ext07gf-epic-swp-policy.sh
+      - name: Policy verification with mock GCP inventory
+        run: bash tests/ci-ext07gf-policy-verification.test.sh

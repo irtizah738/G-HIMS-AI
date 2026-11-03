@@ -167,6 +167,13 @@ function isProductionRuntime(): boolean {
     .toUpperCase() === 'PRODUCTION';
 }
 
+function isRetryableTransportError(error: unknown): boolean {
+  // An injected fetch wrapper can throw policy/size errors. Those are not
+  // network failures and must never consume a GET retry budget.
+  return error instanceof TypeError ||
+    (error instanceof Error && error.name === 'AbortError');
+}
+
 function shouldRetryRead(status: number): boolean {
   return status === 429 || status === 502 || status === 503 || status === 504;
 }
@@ -299,22 +306,23 @@ export class FhirR4Adapter {
         let response: Response;
         try {
           response = await this.fetchImpl(this.baseUrl + path, {
-          ...init,
-          signal: controller.signal,
-          // Never forward a hospital bearer credential across HTTP redirects.
-          redirect: 'error',
-          headers: {
-            Accept: 'application/fhir+json',
-            ...(init.body ? { 'Content-Type': 'application/fhir+json' } : {}),
-            ...(token ? { Authorization: 'Bearer ' + token } : {}),
-            ...(init.headers || {}),
-          },
+            ...init,
+            signal: controller.signal,
+            // Never forward a hospital bearer credential across HTTP redirects.
+            redirect: 'error',
+            headers: {
+              Accept: 'application/fhir+json',
+              ...(init.body ? { 'Content-Type': 'application/fhir+json' } : {}),
+              ...(token ? { Authorization: 'Bearer ' + token } : {}),
+              ...(init.headers || {}),
+            },
           });
         } catch (error) {
           // A transport failure on a GET may be retried; invalid payloads,
           // authorization failures, and non-transient HTTP statuses may not.
           lastError = error;
-          if (!retrySafeRead || attempt + 1 >= attempts) throw error;
+          if (!retrySafeRead || attempt + 1 >= attempts ||
+              !isRetryableTransportError(error)) throw error;
           continue;
         }
 

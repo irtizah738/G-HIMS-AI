@@ -69,6 +69,8 @@ export interface FhirR4AdapterConfig {
   getAccessToken?: () => Promise<string>;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /** Maximum bytes read from any upstream HTTP response before JSON parsing (default 256 KiB). */
+  maxResponseBytes?: number;
   maxReadRetries?: number;
   approvedResourceTypes?: string[];
   writableResourceTypes?: string[];
@@ -124,6 +126,41 @@ function outcomeMessage(value: unknown): string {
   }
 }
 
+/** Never buffer an untrusted HIS response without enforcing its byte budget. */
+async function readBoundedFhirBody(response: Response, limit: number): Promise<string> {
+  const declared = response.headers.get('content-length');
+  if (declared !== null) {
+    if (!/^\\d+$/.test(declared) || !Number.isSafeInteger(Number(declared)) ||
+        Number(declared) > limit) {
+      await response.body?.cancel().catch(() => {});
+      throw new Error('FHIR_RESPONSE_TOO_LARGE');
+    }
+  }
+  if (!response.body) return '';
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  let totalBytes = 0;
+  let text = '';
+  let finished = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        finished = true;
+        break;
+      }
+      totalBytes += value.byteLength;
+      if (totalBytes > limit) throw new Error('FHIR_RESPONSE_TOO_LARGE');
+      text += decoder.decode(value, { stream: true });
+    }
+    return text + decoder.decode();
+  } finally {
+    if (!finished) await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
+
 function isProductionRuntime(): boolean {
   return String(process.env.GHIMS_RUNTIME_MODE || process.env.NODE_ENV || '')
     .trim()
@@ -147,6 +184,7 @@ export class FhirR4Adapter {
   private readonly getAccessToken?: () => Promise<string>;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
+  private readonly maxResponseBytes: number;
   private readonly maxReadRetries: number;
   private readonly approvedResourceTypes: Set<string>;
   private readonly writableResourceTypes: Set<string>;
@@ -160,6 +198,12 @@ export class FhirR4Adapter {
     this.getAccessToken = config.getAccessToken;
     this.fetchImpl = config.fetchImpl || fetch;
     this.timeoutMs = config.timeoutMs || 15000;
+    const responseLimit = config.maxResponseBytes ?? 256 * 1024;
+    if (!Number.isSafeInteger(responseLimit) || responseLimit < 1024 ||
+        responseLimit > 512 * 1024) {
+      throw new Error('FHIR_CONFIG_INVALID: maxResponseBytes must be between 1024 and 524288.');
+    }
+    this.maxResponseBytes = responseLimit;
     this.maxReadRetries = Math.max(0, Math.min(3, config.maxReadRetries ?? 1));
     this.approvedResourceTypes = new Set(
       config.approvedResourceTypes || [...DEFAULT_APPROVED_FHIR_R4_RESOURCES]
@@ -252,7 +296,9 @@ export class FhirR4Adapter {
       const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
       try {
-        const response = await this.fetchImpl(this.baseUrl + path, {
+        let response: Response;
+        try {
+          response = await this.fetchImpl(this.baseUrl + path, {
           ...init,
           signal: controller.signal,
           // Never forward a hospital bearer credential across HTTP redirects.
@@ -263,9 +309,16 @@ export class FhirR4Adapter {
             ...(token ? { Authorization: 'Bearer ' + token } : {}),
             ...(init.headers || {}),
           },
-        });
+          });
+        } catch (error) {
+          // A transport failure on a GET may be retried; invalid payloads,
+          // authorization failures, and non-transient HTTP statuses may not.
+          lastError = error;
+          if (!retrySafeRead || attempt + 1 >= attempts) throw error;
+          continue;
+        }
 
-        const text = await response.text();
+        const text = await readBoundedFhirBody(response, this.maxResponseBytes);
         let payload: unknown = {};
         if (text) {
           try {
@@ -276,23 +329,18 @@ export class FhirR4Adapter {
         }
 
         if (!response.ok) {
-          if (
-            retrySafeRead &&
-            shouldRetryRead(response.status) &&
-            attempt + 1 < attempts
-          ) {
-            lastError = new Error('FHIR_HTTP_' + response.status);
-            continue;
-          }
-          throw new Error(
+          const failure = new Error(
             'FHIR_HTTP_' + response.status + ': ' + outcomeMessage(payload)
           );
+          if (retrySafeRead && shouldRetryRead(response.status) &&
+              attempt + 1 < attempts) {
+            lastError = failure;
+            continue;
+          }
+          throw failure;
         }
 
         return assertResource(payload, expectedType) as T;
-      } catch (error) {
-        lastError = error;
-        if (!retrySafeRead || attempt + 1 >= attempts) throw error;
       } finally {
         clearTimeout(timeout);
       }

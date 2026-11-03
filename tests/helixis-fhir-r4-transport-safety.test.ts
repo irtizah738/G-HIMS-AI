@@ -104,6 +104,17 @@ describe('Helixis FHIR R4 transport safety — synthetic-only', () => {
     }
   });
 
+  test('never retries policy errors thrown by a protective fetch wrapper', async () => {
+    let calls = 0;
+    const fetchImpl: typeof fetch = async () => {
+      calls++;
+      throw new Error('CI_EXT06_RESPONSE_TOO_LARGE');
+    };
+    await expect(adapter(fetchImpl).readResource('Patient', 'synthetic-p1'))
+      .rejects.toThrow('CI_EXT06_RESPONSE_TOO_LARGE');
+    expect(calls).toBe(1);
+  });
+
   test('retries only configured transient HTTP statuses on safe GETs', async () => {
     for (const transient of [429, 502, 503, 504]) {
       let calls = 0;

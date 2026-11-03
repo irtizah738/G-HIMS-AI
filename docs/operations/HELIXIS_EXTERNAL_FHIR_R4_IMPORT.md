@@ -95,6 +95,33 @@ Returns a scoped import receipt without the raw resource. Duplicate exact versio
 - The remote server's `meta.lastUpdated` is *source evidence*, not proof of completeness or clinical accuracy.
 - The full FHIR resource is preserved as a bounded, server-only versioned JSON payload with SHA-256. Protected evidence has indexing exemptions and is never returned through the import API.
 
+## Phase 2C — bounded FHIR HTTP transport (synthetic qualification)
+
+The shared `FhirR4Adapter` imposes a conservative **256 KiB default response
+byte limit**, enforced before JSON parsing through both the declared
+`Content-Length` and actual streaming bytes. A server cannot bypass this
+budget by omitting or understating its response length. A configurable
+`maxResponseBytes` is accepted only in the range **1 KiB–512 KiB**.
+The import domain's tighter **120,000-byte canonical-resource limit** remains
+authoritative for immutable Firestore receipts; transport bounds are an earlier
+memory-safety boundary, **not** a replacement for import validation.
+
+A safe FHIR `GET` retries only on transport errors or HTTP
+`429/502/503/504`, within the configured retry budget. An HTTP
+`401/403/404`, malformed JSON, an oversized body, or a wrong resource type
+fails without another remote request. FHIR `POST` and `PUT` requests are
+**never automatically retried**, because an ambiguous write result may already
+have mutated the hospital HIS. Transport still blocks redirects before
+credentials are forwarded.
+
+Synthetic regression coverage:
+`bun test tests/helixis-fhir-r4-transport-safety.test.ts`
+
+**Not qualified by this milestone:** DNS-to-socket pinning, complete egress
+anti-bypass, remote site conformance, refresh/revocation races across network
+read boundaries, or a production-approved Epic channel. Keep SWP source
+identity matching unresolved and all live import toggles disabled.
+
 ## Qualification
 
 - `bun test tests/helixis-external-fhir-import.test.ts`

@@ -41,7 +41,7 @@ jobs:
       - name: Source quality gate
         run: bun run lint
       - name: Pure authority and FHIR contract tests
-        run: bun test tests/helixis-external-fhir-import.test.ts
+        run: bun test tests/helixis-external-fhir-import.test.ts tests/helixis-fhir-r4-transport-safety.test.ts
       - name: Install Firebase CLI for isolated emulator
         run: npm install --global firebase-tools@14.20.0
       - name: Compile emulator qualification for Node.js runtime

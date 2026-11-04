@@ -195,8 +195,10 @@ test('CI-EXT-09: 404/410 quarantine, replay, stale response and verified recover
     await root.collection('fhirPatientLinks')
       .doc(fhirPatientLinkId(sourceId, 'source-p1'))
       .update({ consentStatus: 'WITHDRAWN' });
+    // Exercise the consent gate with the current head, not the superseded
+    // v2 receipt; an old receipt must fail earlier at the head-version fence.
     await expect(reconcileFhirReadAvailability({
-      ...args, expectedHeadReceiptId: v2.receiptId,
+      ...args, expectedHeadReceiptId: v3.receiptId,
       probeId: randomUUID(), probeStartedAt: startedAt + 50, httpStatus: 410,
     })).rejects.toThrow('FHIR_ABSENCE_LINK_OR_CONSENT_INVALID');
     await expect(reconcileFhirReadAvailability({

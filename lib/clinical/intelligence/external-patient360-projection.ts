@@ -8,6 +8,7 @@
  */
 import { createHash } from 'node:crypto';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
+import type { FhirAvailabilityState } from './external-fhir-availability';
 import {
   fhirImportHeadId,
   fhirPatientLinkId,
@@ -176,6 +177,12 @@ export async function rebuildExternalPatient360(args: {
     const heads = headPage.docs.map(d => ({ ref: d.ref, value: d.data() as Head }))
       .sort((a,b) => a.ref.id.localeCompare(b.ref.id));
     const cases = casePage.docs.map(d => ({ ...d.data() as Case, caseId: d.id }));
+    const availabilitySnaps = heads.length
+      ? await tx.getAll(...heads.map(h =>
+        tenant.collection('fhirAvailabilityStates').doc(h.ref.id)))
+      : [];
+    const availability = availabilitySnaps.map(s =>
+      s.exists ? s.data() as FhirAvailabilityState : null);
     // Reads are gathered before any writes, including the immutable snapshot.
     const sources = new Map<string, FhirSourceRecord | null>();
     const sourceIds = [...new Set(heads.map(h => h.value.sourceId))];
@@ -200,6 +207,7 @@ export async function rebuildExternalPatient360(args: {
     const sourceRefs = new Map<string, { sourceId: string; facilityId: string }>();
     for (let i = 0; i < heads.length; i++) {
       const { value: head, ref } = heads[i];
+      const observedAvailability = availability[i];
       const receipt = receiptRows[i];
       const source = sources.get(head.sourceId);
       const link = links.get(receipt?.provenance?.mappedByVerifiedLink || '') || null;
@@ -227,6 +235,18 @@ export async function rebuildExternalPatient360(args: {
           link.sourceId !== head.sourceId || link.facilityId !== source.facilityId ||
           link.matchStatus !== 'VERIFIED' || link.consentStatus !== 'GRANTED') {
         problems.push('PATIENT_LINK_OR_CONSENT_INVALID:' + prefix);
+        continue;
+      }
+      if (observedAvailability &&
+          (observedAvailability.tenantId !== tenantId ||
+           observedAvailability.patientId !== patientId ||
+           observedAvailability.headId !== ref.id ||
+           observedAvailability.sourceId !== head.sourceId ||
+           !['SUSPECTED_ABSENCE', 'AVAILABLE_CONFIRMED'].includes(observedAvailability.status))) {
+        throw new Error('FHIR_CONTEXT_AVAILABILITY_SCOPE_INVALID');
+      }
+      if (observedAvailability?.status === 'SUSPECTED_ABSENCE') {
+        problems.push('SOURCE_RETRIEVAL_UNVERIFIED:' + prefix);
         continue;
       }
       // Check the imported immutable record against its canonical, hashed FHIR
@@ -274,6 +294,12 @@ export async function rebuildExternalPatient360(args: {
       tenantId, patientId,
       headIds: heads.map(h => [h.ref.id,h.value.receiptId,h.value.sourceVersionId]),
       currentEvidence: facts.map(f => [f.id,f.resourceHash]),
+      availabilitySignals: heads.map((h, i) => [
+        h.ref.id,
+        availability[i]?.status || null,
+        availability[i]?.revision || 0,
+        availability[i]?.sourceReceiptId || null,
+      ]),
       openCases: activeCases.map(c => c.caseId).sort(),
       issues: sortedIssues,
     };

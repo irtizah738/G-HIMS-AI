@@ -70,7 +70,7 @@ export async function reconcileFhirReadAvailability(
   const headId = fhirImportHeadId(args.sourceId, args.resourceType, args.resourceId);
   const headRef = root.collection('fhirResourceHeads').doc(headId);
   const stateRef = root.collection('fhirAvailabilityStates').doc(headId);
-  const kind = args.httpStatus === 200 ? 'READ_RECOVERED' : 'READ_UNAVAILABLE';
+  const kind = args.httpStatus === 200 ? 'READ_VERIFIED' : 'READ_UNAVAILABLE';
   const eventId = 'fae_' + sha([tenantId, args.sourceId, args.resourceType,
     args.resourceId, args.probeId, kind]);
   const eventRef = root.collection('fhirAvailabilityEvents').doc(eventId);
@@ -150,7 +150,9 @@ export async function reconcileFhirReadAvailability(
       }
       return { status: 'UNCHANGED', eventId, replay: true };
     }
-    if (args.httpStatus === 200 && (!state || state.status !== 'SUSPECTED_ABSENCE')) {
+    if (args.httpStatus === 200 && (!state ||
+        (state.status === 'AVAILABLE_CONFIRMED' &&
+         state.sourceReceiptId === head.receiptId))) {
       return { status: 'UNCHANGED', eventId: null, replay: false };
     }
     // An older in-flight read cannot undo a newer observation.
@@ -164,9 +166,10 @@ export async function reconcileFhirReadAvailability(
     const caseId = args.httpStatus === 200 || stale ? (state?.caseId || '') :
       repeated ? state!.caseId : 'frc_' + sha([headId, episode, 'REMOTE_ABSENCE']);
     const caseRef = caseId ? root.collection('fhirReconciliationCases').doc(caseId) : null;
-    const caseSnap = caseRef && (args.httpStatus === 200 || repeated)
+    const recoveryOfAbsence = args.httpStatus === 200 && state?.status === 'SUSPECTED_ABSENCE';
+    const caseSnap = caseRef && (recoveryOfAbsence || repeated)
       ? await tx.get(caseRef) : null;
-    if ((args.httpStatus === 200 || repeated) &&
+    if ((recoveryOfAbsence || repeated) &&
         (!caseSnap?.exists || caseSnap.get('status') !== 'OPEN' ||
          caseSnap.get('reason') !== 'REMOTE_RESOURCE_UNAVAILABLE' ||
          caseSnap.get('patientId') !== head.patientId ||
@@ -175,7 +178,9 @@ export async function reconcileFhirReadAvailability(
     }
     const recordedAt = clock();
     const disposition = stale ? 'STALE_IGNORED' :
-      args.httpStatus === 200 ? 'READ_VERIFIED' : 'PENDING_RECONCILIATION';
+      args.httpStatus === 200
+        ? (recoveryOfAbsence ? 'READ_RECOVERED' : 'NEW_HEAD_VERIFIED')
+        : 'PENDING_RECONCILIATION';
     const common = {
       tenantId, patientId: head.patientId,
       sourceId: args.sourceId, resourceType: args.resourceType,
@@ -184,8 +189,8 @@ export async function reconcileFhirReadAvailability(
       httpStatus: args.httpStatus, disposition, caseId, recordedAt, eventId,
     };
     tx.create(eventRef, {
-      ...common, eventType: kind === 'READ_RECOVERED'
-        ? 'EXTERNAL_FHIR_READ_RECOVERED' : 'EXTERNAL_FHIR_READ_UNAVAILABLE',
+      ...common, eventType: kind === 'READ_VERIFIED'
+        ? 'EXTERNAL_FHIR_READ_VERIFIED' : 'EXTERNAL_FHIR_READ_UNAVAILABLE',
       immutable: true, clinicalAuthority: false,
     });
     tx.create(root.collection('auditLogs').doc('fau_' + eventId), {
@@ -197,7 +202,7 @@ export async function reconcileFhirReadAvailability(
       reason: 'Source read state is non-authoritative and cannot imply clinical deletion',
     });
     if (!stale) {
-      if (args.httpStatus === 200) {
+      if (recoveryOfAbsence) {
         tx.update(caseRef!, {
           status: 'RESOLVED', resolution: 'READ_VERIFIED_RECOVERY',
           resolvedAt: recordedAt, resolvedBy: [args.actor.actorId],

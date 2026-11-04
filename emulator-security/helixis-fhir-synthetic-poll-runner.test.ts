@@ -201,3 +201,30 @@ test('CI-EXT-12: 404 is held without checkpoint, verified later 200 recovers; 40
     await db.recursiveDelete(root);
   }
 }, 45000);
+
+test('CI-EXT-12: erroneous source revision is retained immutably but not checkpointed', async () => {
+  testIsolation();
+  const tenantId = 'synthetic-error-' + randomUUID().slice(0, 10);
+  const { db, root, actor } = await fixtureTenant(tenantId);
+  const manifest = makeManifest(0, [
+    { workId: randomUUID(), id: 'lab-e', version: 'error-v1' },
+  ]);
+  const incorrect = {
+    ...obs('lab-e', 'error-v1', '2026-10-22T09:00:00Z', 3.2),
+    status: 'entered-in-error',
+  };
+  try {
+    await expect(runSyntheticFhirPoll({
+      db, actor, manifest, readFixture: async () => incorrect,
+    })).rejects.toThrow('FHIR_POLL_ERRONEOUS_RESOURCE_REQUIRES_REVIEW');
+    expect((await root.collection('fhirImportedVersions').get()).size).toBe(1);
+    expect((await root.collection('fhirImportEvents').get()).size).toBe(1);
+    expect((await root.collection('fhirImportOutbox').get()).docs[0]
+      .get('status')).toBe('HELD');
+    expect((await root.collection('fhirSourcePollLeases').doc(sourceId).get())
+      .get('checkpointSequence')).toBe(0);
+    expect((await root.collection('patient360Projections').get()).empty).toBe(true);
+  } finally {
+    await db.recursiveDelete(root);
+  }
+}, 45000);

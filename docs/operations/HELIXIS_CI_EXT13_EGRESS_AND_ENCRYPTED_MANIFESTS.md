@@ -24,20 +24,13 @@ export GHIMS_RUNTIME_MODE=STAGING
 export HELIXIS_CI_EXT13_CONFIRM_PROJECT=studio-1130431360-48a05
 export GHIMS_CI_EXTERNAL_FHIR_IMPORT_ENABLED=false
 export GHIMS_INTEGRATION_FHIR_R4_STATE=DISABLED
-gcloud config set project studio-1130431360-48a05  # optional, outside the script; alters local CLI config only
+gcloud config get-value project
+# Run the next command ONLY if it already prints studio-1130431360-48a05:
 bash scripts/ops/ci-ext13-cloud-run-egress-readonly.sh
 ```
 
-To avoid any local gcloud configuration change, run the following before
-executing the script:
-
-```bash
-gcloud config get-value project
-```
-
-The active project must *already* be `studio-1130431360-48a05`. Do not
-run `gcloud config set` unless the operator explicitly chooses to change
-their local CLI configuration.
+The active project must already be `studio-1130431360-48a05`.
+The inspection script never modifies even the local gcloud configuration.
 
 Expected output includes a structured
 `helixis.ci-ext13.cloud-run-readonly.v1` assessment with the current

@@ -1,0 +1,33 @@
+name: Helixis G1 Cloud Run SWP qualification contracts
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/g1-swp-probe/**'
+      - 'scripts/ops/ci-ext14-*.mjs'
+      - 'tests/ci-ext14-*.test.mjs'
+      - 'docs/operations/HELIXIS_CI_EXT14_FULL_G1_CLOUD_RUN_SWP_QUALIFICATION.md'
+      - '.github/workflows/helixis-g1-swp-qualification.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  static-g1-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GHIMS_RUNTIME_MODE: TEST
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_CI_EXTERNAL_FHIR_IMPORT_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Full G1 probe safety and evidence contract qualification (no GCP access)
+        run: node --test tests/ci-ext14-g1-swp-probe-contract.test.mjs tests/ci-ext14-g1-acceptance-evidence.test.mjs
+      - name: Confirm probe includes no cloud-deployment commands
+        run: |
+          ! grep -Ein 'gcloud (run jobs execute|network-services gateways import|compute routes (create|delete)|compute firewall-rules (create|delete))' services/g1-swp-probe/probe.mjs scripts/ops/ci-ext14-assess-g1-evidence.mjs

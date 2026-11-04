@@ -36,8 +36,9 @@ if ($missing.Count -gt 0) {
   Write-Output "MISSING_REQUIRED_APIS=$($missing -join ',')"
   Fail 'G1_APIS_NOT_ENABLED_NO_AUTOMATIC_CHANGE'
 }
-$existing = & gcloud compute networks describe $LAB_VPC --project=$PROJECT --format=json 2>$null
-if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace(($existing | Out-String))) {
+$networks = & gcloud compute networks list --project=$PROJECT '--format=value(name)'
+if ($LASTEXITCODE -ne 0) { Fail 'NETWORK_INVENTORY_UNAVAILABLE' }
+if (@($networks) -contains $LAB_VPC) {
   Fail 'DISPOSABLE_VPC_ALREADY_EXISTS_RECONCILE_FIRST'
 }
 Write-Output '=== AVAILABLE REGIONAL SUBNET CIDRS (READ ONLY) ==='

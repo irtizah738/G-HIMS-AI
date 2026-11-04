@@ -16,7 +16,10 @@ import {
   assertFhirIdentifier, assertFhirSource,
   type FhirImportActor, type FhirSourceRecord,
 } from './external-fhir-import';
-import type { SyntheticPollManifest } from './external-fhir-synthetic-poll-runner';
+import {
+  runSyntheticFhirPoll,
+  type SyntheticPollManifest, type SyntheticPollRead, type SyntheticPollResult,
+} from './external-fhir-synthetic-poll-runner';
 import { siteApprovalDocId, validateFhirSiteApproval, type FhirSiteApproval } from '@/lib/interop/fhir-site-approval';
 
 export type FhirManifestCipherEnvelope = {
@@ -327,4 +330,28 @@ export async function openFhirPollManifest(args: {
     throw new Error('FHIR_MANIFEST_PLAINTEXT_SCOPE_INVALID');
   }
   return manifest;
+}
+
+/**
+ * Emulator-only bridge that exercises the real encrypted Firestore manifest
+ * path before CI-EXT-12's synthetic FHIR import/checkpoint flow. It inherits
+ * CI-EXT-12's strict TEST/emulator guard; it is not a production job.
+ */
+export async function runPersistedSyntheticFhirPoll(args: {
+  db: Firestore; actor: FhirImportActor; sourceId: string; manifestId: string;
+  cipher: FhirPollManifestCipher; readFixture: SyntheticPollRead;
+  afterImportCommitted?: (index: number, receiptId: string) => Promise<void>;
+}): Promise<SyntheticPollResult> {
+  if (process.env.GHIMS_RUNTIME_MODE !== 'TEST' ||
+      process.env.FIREBASE_PROJECT_ID !== 'ghims-p4-ci' ||
+      process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8080' ||
+      process.env.GHIMS_INTEGRATION_FHIR_R4_STATE !== 'DISABLED' ||
+      process.env.GHIMS_CI_EXTERNAL_FHIR_IMPORT_ENABLED !== 'false') {
+    throw new Error('FHIR_POLL_SYNTHETIC_EMULATOR_ONLY');
+  }
+  const manifest = await openFhirPollManifest(args);
+  return runSyntheticFhirPoll({
+    db: args.db, actor: args.actor, manifest,
+    readFixture: args.readFixture, afterImportCommitted: args.afterImportCommitted,
+  });
 }

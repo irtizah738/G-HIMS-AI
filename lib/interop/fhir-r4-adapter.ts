@@ -442,6 +442,32 @@ export class FhirR4Adapter {
     );
   }
 
+  /**
+   * Read only the first bounded instance-history page from an approved source.
+   * Caller must validate every entry against the expected resource identity,
+   * and independently qualify pagination and source-head freshness.
+   * Never follow vendor-supplied continuation URLs automatically.
+   */
+  public async readResourceHistory(
+    resourceType: string, id: string, count = 32
+  ): Promise<FhirBundle> {
+    const type = this.assertApproved(resourceType);
+    if (!/^[A-Za-z0-9._-]{1,64}$/.test(id) || id === '.' || id === '..' ||
+        !Number.isSafeInteger(count) || count < 1 || count > 64) {
+      throw new Error('FHIR_HISTORY_REQUEST_INVALID');
+    }
+    const bundle = await this.request<FhirBundle>(
+      '/' + encodeURIComponent(type) + '/' + encodeURIComponent(id) +
+        '/_history?_count=' + count,
+      { method: 'GET' }, 'Bundle', true
+    );
+    if (bundle.type !== 'history' || !Array.isArray(bundle.entry) ||
+        bundle.entry.length > count) {
+      throw new Error('FHIR_HISTORY_RESPONSE_INVALID');
+    }
+    return bundle;
+  }
+
   public async search<T extends FhirResource>(
     resourceType: string,
     params: Record<string, string | number | boolean | undefined>

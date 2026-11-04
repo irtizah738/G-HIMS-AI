@@ -17,6 +17,7 @@ import { fhirImportHeadId, fhirPatientLinkId, prepareFhirImport } from './extern
 import type { FhirImportActor, FhirPatientLink, FhirSourceRecord } from './external-fhir-import';
 import type { ExternalFact, ExternalPatient360Projection } from './external-patient360-projection';
 import type { FhirAvailabilityState } from './external-fhir-availability';
+import type { FhirHistoryState } from './external-fhir-history';
 
 export const EXTERNAL_EVIDENCE_MAX_AGE_MS = 5 * 60_000;
 const MAX_HEADS = 64;
@@ -175,6 +176,12 @@ export async function readExternalClinicalEvidence(args: {
       : [];
     const availability = availabilitySnaps.map(s =>
       s.exists ? s.data() as FhirAvailabilityState : null);
+    const historySnaps = heads.length
+      ? await tx.getAll(...heads.map(h =>
+        tenant.collection('fhirHistoryStates').doc(h.id)))
+      : [];
+    const histories = historySnaps.map(s =>
+      s.exists ? s.data() as FhirHistoryState : null);
     for (let i = 0; i < heads.length; i++) {
       const row = availability[i];
       if (row && (row.tenantId !== tenantId || row.patientId !== patientId ||
@@ -191,6 +198,18 @@ export async function readExternalClinicalEvidence(args: {
       if (row?.status === 'AVAILABLE_CONFIRMED' &&
           row.sourceReceiptId !== (heads[i].data() as ResourceHead).receiptId) {
         throw new Error('CI_EXT03_SOURCE_NEW_HEAD_NOT_REVERIFIED');
+      }
+      const history = histories[i];
+      if (history && (history.tenantId !== tenantId ||
+          history.patientId !== patientId ||
+          history.sourceId !== (heads[i].data() as ResourceHead).sourceId ||
+          history.headId !== heads[i].id ||
+          !['WINDOW_ANCHORED', 'REVIEW_REQUIRED'].includes(history.status))) {
+        throw new Error('CI_EXT03_HISTORY_SCOPE_INVALID');
+      }
+      if (history?.status === 'REVIEW_REQUIRED' ||
+          (history && history.headReceiptId !== (heads[i].data() as ResourceHead).receiptId)) {
+        throw new Error('CI_EXT03_SOURCE_HISTORY_NOT_QUALIFIED');
       }
     }
     if (heads.length !== projection.facts.length) {
@@ -314,6 +333,13 @@ export async function readExternalClinicalEvidence(args: {
         availability[i]?.status || null,
         availability[i]?.revision || 0,
         availability[i]?.sourceReceiptId || null,
+      ]),
+      historySignals: heads.map((h, i) => [
+        h.id,
+        histories[i]?.status || null,
+        histories[i]?.revision || 0,
+        histories[i]?.headReceiptId || null,
+        histories[i]?.historyHash || null,
       ]),
       openCases: [],
       issues: [],

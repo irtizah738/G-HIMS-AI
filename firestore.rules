@@ -239,6 +239,9 @@ service cloud.firestore {
       match /fhirHistoryStates/{headId} { allow read, write: if false; }
       match /fhirHistoryEvents/{eventId} { allow read, write: if false; }
       match /fhirHistoryOutbox/{outboxId} { allow read, write: if false; }
+      match /fhirSourcePollLeases/{sourceId} { allow read, write: if false; }
+      match /fhirSourcePollEvents/{eventId} { allow read, write: if false; }
+      match /fhirSourcePollOutbox/{outboxId} { allow read, write: if false; }
       match /fhirReconciliationCases/{caseId} { allow read, write: if false; }
       match /fhirReconciliationDecisions/{decisionId} { allow read, write: if false; }
       match /externalPatient360Projections/{patientId} { allow read, write: if false; }

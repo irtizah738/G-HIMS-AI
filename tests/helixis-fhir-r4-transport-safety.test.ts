@@ -152,6 +152,46 @@ describe('Helixis FHIR R4 transport safety — synthetic-only', () => {
     expect(writeCalls).toBe(1);
   });
 
+  test('reads only a bounded, approved FHIR history page with redirect protection', async () => {
+    const seen: string[] = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      seen.push(String(input));
+      expect(init?.method).toBe('GET');
+      expect(init?.redirect).toBe('error');
+      return jsonResponse({
+        resourceType: 'Bundle', type: 'history', entry: [{
+          request: { method: 'PUT', url: 'Patient/synthetic-p1' },
+          resource: { ...patient(), meta: {
+            versionId: 'v1', lastUpdated: '2026-10-20T09:00:00Z',
+          } },
+        }],
+      });
+    };
+    const result = await adapter(fetchImpl).readResourceHistory('Patient', 'synthetic-p1', 4);
+    expect(result.type).toBe('history');
+    expect(result.entry?.length).toBe(1);
+    expect(seen).toEqual([baseUrl + '/Patient/synthetic-p1/_history?_count=4']);
+  });
+
+  test('history transport rejects cross-type inputs, invalid ids, count and wrong bundle kind', async () => {
+    let calls = 0;
+    const fetchImpl: typeof fetch = async () => {
+      calls++;
+      return jsonResponse({ resourceType: 'Bundle', type: 'searchset', entry: [] });
+    };
+    const transport = adapter(fetchImpl);
+    await expect(transport.readResourceHistory('Patient', 'path/escape'))
+      .rejects.toThrow('FHIR_HISTORY_REQUEST_INVALID');
+    await expect(transport.readResourceHistory('Patient', 'synthetic-p1', 65))
+      .rejects.toThrow('FHIR_HISTORY_REQUEST_INVALID');
+    await expect(transport.readResourceHistory('Condition', 'synthetic-p1'))
+      .rejects.toThrow('FHIR_RESOURCE_NOT_APPROVED');
+    expect(calls).toBe(0);
+    await expect(transport.readResourceHistory('Patient', 'synthetic-p1'))
+      .rejects.toThrow('FHIR_HISTORY_RESPONSE_INVALID');
+    expect(calls).toBe(1);
+  });
+
   test('rejects an unsafe response-size configuration before any network call', () => {
     const neverFetch: typeof fetch = async () => { throw Error('NETWORK_MUST_NOT_RUN'); };
     expect(() => adapter(neverFetch, { maxResponseBytes: 99999999 }))

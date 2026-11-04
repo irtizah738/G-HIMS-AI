@@ -244,6 +244,16 @@ export async function rebuildExternalPatient360(args: {
         throw new Error('FHIR_CONTEXT_RESOURCE_INTEGRITY_FAILURE');
       }
       sourceRefs.set(head.sourceId, { sourceId: head.sourceId, facilityId: source.facilityId });
+      // FHIR entered-in-error explicitly retracts a clinical resource's validity.
+      // Preserve the imported version, head and immutable lineage, but do not
+      // expose an erroneous Observation/Encounter as current patient evidence.
+      // A subsequent verified source version can restore evidence through a
+      // fresh rebuild; no historical source receipt is overwritten.
+      if ((prepared.resourceType === 'Observation' || prepared.resourceType === 'Encounter') &&
+          str(obj(parsed).status) === 'entered-in-error') {
+        problems.push('SOURCE_RESOURCE_ENTERED_IN_ERROR:' + prefix);
+        continue;
+      }
       facts.push({
         type: prepared.resourceType,
         id: ref.id, sourceId: head.sourceId, resourceId: head.resourceId,

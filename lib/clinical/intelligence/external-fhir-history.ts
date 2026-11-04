@@ -10,6 +10,7 @@
  */
 import { createHash } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
+import { assertSourcePollFenceInTransaction, type FhirSourcePollOperationFence } from './external-fhir-sync-coordinator';
 import {
   assertFhirIdentifier, assertFhirSource, fhirImportHeadId, fhirPatientLinkId,
   type ExternalFhirImportType, type FhirImportActor, type FhirPatientLink,
@@ -39,6 +40,7 @@ export type FhirHistoryState = {
   historyHash: string;
   revision: number;
   probeStartedAt: number;
+  lastOperationSequence?: number;
   observedAt: number;
   eventId: string;
   caseId: string | null;
@@ -54,6 +56,7 @@ export type FhirHistoryObservationArgs = {
   /** Server-generated UUID per HTTP history retrieval. */
   probeId: string;
   probeStartedAt: number;
+  syncFence?: FhirSourcePollOperationFence;
   bundle: unknown;
   expectedBaseUrl?: string;
   expectedCredentialRevision?: number;
@@ -223,6 +226,14 @@ export async function recordFhirHistoryObservation(
         source.oauth?.credentialRevision !== args.expectedCredentialRevision) {
       throw new Error('FHIR_HISTORY_CREDENTIAL_CHANGED');
     }
+    // A coordinated source's operation reservation must still belong to the
+    // active epoch at the exact evidence transaction commit.
+    if (source.syncMode === 'FENCED' && !args.syncFence?.operationSequence) {
+      throw new Error('FHIR_SYNC_OPERATION_NOT_RESERVED');
+    }
+    await assertSourcePollFenceInTransaction({
+      tx, db, source, fence: args.syncFence,
+    });
     const head = headSnap.exists ? headSnap.data() as Head : null;
     if (!head || head.tenantId !== tenantId || head.sourceId !== sourceId ||
         head.resourceType !== args.resourceType || head.resourceId !== resourceId ||
@@ -276,7 +287,8 @@ export async function recordFhirHistoryObservation(
       const old = existingEvent.data()!;
       if (old.historyHash !== analysis.historyHash ||
           old.headReceiptId !== head.receiptId ||
-          old.probeStartedAt !== args.probeStartedAt) {
+          old.probeStartedAt !== args.probeStartedAt ||
+          old.operationSequence !== (args.syncFence?.operationSequence || null)) {
         throw new Error('FHIR_HISTORY_REPLAY_CONFLICT');
       }
       return {
@@ -284,7 +296,9 @@ export async function recordFhirHistoryObservation(
         assessmentId, replay: true, reasons: analysis.reasons,
       };
     }
-    const stale = !!previous && args.probeStartedAt <= previous.probeStartedAt;
+    const stale = !!previous && (source.syncMode === 'FENCED'
+      ? args.syncFence!.operationSequence <= (previous.lastOperationSequence || 0)
+      : args.probeStartedAt <= previous.probeStartedAt);
     const issueHash = sha([headId, head.receiptId, analysis.reasons]);
     const caseId = analysis.status === 'REVIEW_REQUIRED'
       ? 'frc_' + issueHash : null;
@@ -306,6 +320,8 @@ export async function recordFhirHistoryObservation(
       historyHash: analysis.historyHash, entryCount: analysis.entryCount,
       paginated: analysis.paginated, reasons: analysis.reasons,
       probeId: args.probeId, probeStartedAt: args.probeStartedAt,
+      operationSequence: args.syncFence?.operationSequence || null,
+      fencingEpoch: args.syncFence?.epoch || null,
       disposition, recordedAt, caseId,
     };
     tx.create(eventRef, {
@@ -343,6 +359,8 @@ export async function recordFhirHistoryObservation(
         historyHash: analysis.historyHash,
         revision: (previous?.revision || 0) + 1,
         probeStartedAt: args.probeStartedAt,
+        lastOperationSequence: args.syncFence?.operationSequence ||
+          previous?.lastOperationSequence || 0,
         observedAt: recordedAt,
         eventId: assessmentId,
         caseId,

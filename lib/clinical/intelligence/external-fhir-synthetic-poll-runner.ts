@@ -102,10 +102,6 @@ function verifyReturnedResource(input: unknown, item: SyntheticPollItem): void {
       meta?.versionId !== item.expectedVersionId) {
     throw new Error('FHIR_POLL_FIXTURE_VERSION_OR_SCOPE_MISMATCH');
   }
-  if ((item.resourceType === 'Observation' || item.resourceType === 'Encounter') &&
-      value.status === 'entered-in-error') {
-    throw new Error('FHIR_POLL_ERRONEOUS_RESOURCE_REQUIRES_REVIEW');
-  }
 }
 
 export async function runSyntheticFhirPoll(args: {
@@ -192,6 +188,12 @@ export async function runSyntheticFhirPoll(args: {
     });
     if (imported.status !== 'CURRENT') {
       throw new Error('FHIR_POLL_IMPORT_RECONCILIATION_REQUIRED');
+    }
+    // Persist the erroneous version and its audit/outbox first, but never
+    // checkpoint it as a qualified clinical observation.
+    if ((item.resourceType === 'Observation' || item.resourceType === 'Encounter') &&
+        (resource as Record<string, unknown>).status === 'entered-in-error') {
+      throw new Error('FHIR_POLL_ERRONEOUS_RESOURCE_REQUIRES_REVIEW');
     }
     const headAfterImport = await headRef.get();
     if (!headAfterImport.exists ||

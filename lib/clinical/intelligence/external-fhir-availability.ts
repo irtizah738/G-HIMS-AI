@@ -208,7 +208,7 @@ export async function reconcileFhirReadAvailability(
           resolvedAt: recordedAt, resolvedBy: [args.actor.actorId],
           recoveryReceiptId: head.receiptId, recoveryEventId: eventId,
         });
-      } else if (!repeated) {
+      } else if (args.httpStatus !== 200 && !repeated) {
         tx.create(caseRef!, {
           caseId, tenantId, patientId: head.patientId,
           sourceId: args.sourceId, facilityId: source.facilityId,

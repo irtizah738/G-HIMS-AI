@@ -26,6 +26,25 @@ wrong destination, route failure and application-level forwarding attacks
 fail closed. Cloud Run TLS success alone and SWP hostname-only denials
 **do not satisfy G1**.
 
+## Windows PowerShell operator preflight (read-only)
+
+This is the first action that can be run from the user's local Windows
+terminal instead of Cloud Shell. It checks active project, billing, required
+enabled APIs, disposable VPC name collision, regional CIDR inventory and
+regional SWP gateways. It never runs `gcloud ... create/update/delete`.
+
+```powershell
+# From G-HIMS-AI working tree with CI-EXT-14 branch checked out:
+$env:HELIXIS_G1_PREFLIGHT_CONFIRM_PROJECT = 'studio-1130431360-48a05'
+gcloud config get-value project
+& .\scripts\ops\ci-ext14-g1-windows-preflight.ps1
+```
+
+If the project differs or preflight emits `CI_EXT14_PREFLIGHT_NO_GO`,
+stop. Do not change the active GCP project or enable APIs automatically.
+A result ending `GCP_RESOURCE_MUTATIONS=NONE` is only prerequisite
+evidence, not the actual workload test.
+
 ## Operational preconditions (block deployment until every one exists)
 
 - [ ] Approved isolated disposable lab VPC name beginning `helixis-g1-`,

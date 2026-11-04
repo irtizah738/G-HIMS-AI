@@ -111,6 +111,32 @@ test('FHIR entered-in-error correction suppresses evidence without erasing histo
     expect(third.projection.facts[0].sourceVersionId).toBe('v3');
     expect((await root.collection('fhirImportedVersions').get()).size).toBe(3);
     expect((await root.collection('externalPatient360Revisions').get()).size).toBe(3);
+
+    // An erroneous Encounter must also be held, without hiding unrelated
+    // valid Observation evidence or promoting it into native Patient 360.
+    const badEncounter = await ingestExternalFhirResource({
+      db, actor, sourceId,
+      resource: {
+        resourceType: 'Encounter', id: 'encounter-error-1',
+        meta: { versionId: 'e1', lastUpdated: '2026-10-23T09:00:00Z' },
+        subject: { reference: 'Patient/external-p1' },
+        status: 'entered-in-error',
+        class: { system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode', code: 'AMB' },
+        period: { start: '2026-10-23T08:00:00Z' },
+      },
+    });
+    expect(badEncounter.status).toBe('CURRENT');
+    const withEncounterError = await rebuildExternalPatient360({ db, tenantId, patientId, actor });
+    expect(withEncounterError.projection.revision).toBe(4);
+    expect(withEncounterError.projection.status).toBe('RECONCILIATION_REQUIRED');
+    expect(withEncounterError.projection.facts).toHaveLength(1);
+    expect(withEncounterError.projection.facts[0].type).toBe('Observation');
+    expect(withEncounterError.projection.reconciliationIssues).toContain(
+      'SOURCE_RESOURCE_ENTERED_IN_ERROR:' +
+        fhirImportHeadId(sourceId, 'Encounter', 'encounter-error-1'),
+    );
+    expect((await root.collection('patient360Projections').get()).empty).toBe(true);
+    expect((await root.collection('externalPatient360Revisions').get()).size).toBe(4);
   } finally {
     await db.recursiveDelete(root);
   }

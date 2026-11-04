@@ -182,6 +182,16 @@ snapshot evidence remain server-only for governed retention and forensic
 requirements; separate retention/erasure policy is needed for real hospitals.
 Source history gaps are not inferred as complete.
 
+**Correction safety (CI-EXT-08):** If the current imported `Observation` or
+`Encounter` carries FHIR status `entered-in-error`, its immutable version
+and head remain preserved but its fact is omitted from the external Patient 360
+evidence projection. The projection records
+`SOURCE_RESOURCE_ENTERED_IN_ERROR:<headId>` and is
+`RECONCILIATION_REQUIRED`. A later imported valid source version may restore
+an evidence-only fact through a new monotonic revision. This does **not**
+authorize source deletions, clinician-authoritative promotion or AI drafting;
+404/410 tombstones remain an open integration workflow.
+
 ### Tied source versions
 
 An imported version with the same `meta.lastUpdated` as the current

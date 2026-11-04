@@ -75,7 +75,7 @@ export async function reconcileFhirReadAvailability(
     args.resourceId, args.probeId, kind]);
   const eventRef = root.collection('fhirAvailabilityEvents').doc(eventId);
   const clock = args.now || Date.now;
-  return args.db.runTransaction(async tx => {
+  return args.db.runTransaction<FhirAvailabilityResult>(async tx => {
     const [sourceSnap, headSnap, stateSnap, existingEvent] = await tx.getAll(
       root.collection('fhirSources').doc(args.sourceId), headRef, stateRef, eventRef,
     );

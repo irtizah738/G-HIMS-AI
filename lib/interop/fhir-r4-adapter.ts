@@ -452,7 +452,7 @@ export class FhirR4Adapter {
     resourceType: string, id: string, count = 32
   ): Promise<FhirBundle> {
     const type = this.assertApproved(resourceType);
-    if (!/^[A-Za-z0-9.\\-_]{1,64}$/.test(id) || id === '.' || id === '..' ||
+    if (!/^[A-Za-z0-9._-]{1,64}$/.test(id) || id === '.' || id === '..' ||
         !Number.isSafeInteger(count) || count < 1 || count > 64) {
       throw new Error('FHIR_HISTORY_REQUEST_INVALID');
     }

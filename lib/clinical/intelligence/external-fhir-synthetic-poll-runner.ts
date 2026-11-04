@@ -45,7 +45,8 @@ export type SyntheticPollResult = {
 export type SyntheticPollRead = (item: Readonly<SyntheticPollItem>) => Promise<unknown>;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const WORK_ID = /^[A-Za-z0-9._-]{1,96}$/;
+// UUID-only work IDs prevent storing free-form patient identifiers in poll events.
+const WORK_ID = UUID;
 function sha(input: unknown): string {
   return createHash('sha256').update(JSON.stringify(input)).digest('hex');
 }

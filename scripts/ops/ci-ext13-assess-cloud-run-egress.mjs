@@ -106,7 +106,7 @@ export function assessCloudRunEgressInventory(data, expected) {
   };
 }
 function run(args) {
-  if (args.length !== 11 || !args.slice(5).every(safeId)) {
+  if (args.length !== 11 || !args.slice(5, 10).every(safeId)) {
     throw new Error('CI_EXT13_READONLY_ARGUMENTS_INVALID');
   }
   const [serviceFile, subnetFile, routesFile, firewallsFile, effectiveFile,

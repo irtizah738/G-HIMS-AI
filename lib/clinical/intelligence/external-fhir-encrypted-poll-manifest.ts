@@ -20,7 +20,7 @@ import {
   runSyntheticFhirPoll,
   type SyntheticPollManifest, type SyntheticPollRead, type SyntheticPollResult,
 } from './external-fhir-synthetic-poll-runner';
-import { siteApprovalDocId, validateFhirSiteApproval, type FhirSiteApproval } from '@/lib/interop/fhir-site-approval';
+import { siteApprovalDocId, validateFhirSiteApproval, preflightFhirSiteApproval, type FhirSiteApproval } from '@/lib/interop/fhir-site-approval';
 
 export type FhirManifestCipherEnvelope = {
   suite: 'AES-256-GCM';
@@ -180,6 +180,20 @@ export async function sealFhirPollManifest(args: {
   const tenantId = assertFhirIdentifier(actor.tenantId, 'FHIR_MANIFEST_TENANT_INVALID');
   const sourceId = manifest.sourceId;
   const digest = hash(Buffer.concat([Buffer.from('CI_EXT13_MANIFEST_V1:'), Buffer.from(data)]));
+  // Avoid invoking a billable KMS operation for an already unauthorized
+  // source/actor. A subsequent Firestore transaction repeats every check.
+  const preflightSnap = await db.collection('tenants').doc(tenantId)
+    .collection('fhirSources').doc(sourceId).get();
+  const preflightSource = authorize(actor,
+    preflightSnap.exists ? preflightSnap.data() as FhirSourceRecord : null,
+    sourceId);
+  if (preflightSource.oauth) {
+    for (const type of new Set(manifest.items.map(item => item.resourceType))) {
+      await preflightFhirSiteApproval({
+        db, source: preflightSource, resourceType: type,
+      });
+    }
+  }
   const additionalData = aad({tenantId,sourceId,manifestId:manifest.manifestId,start:manifest.startCheckpointSequence});
   const envelope = await cipher.encrypt(data, additionalData);
   validateEnvelope(envelope, cipher.provider);

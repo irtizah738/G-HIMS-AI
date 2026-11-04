@@ -249,6 +249,11 @@ export async function rebuildExternalPatient360(args: {
         problems.push('SOURCE_RETRIEVAL_UNVERIFIED:' + prefix);
         continue;
       }
+      if (observedAvailability?.status === 'AVAILABLE_CONFIRMED' &&
+          observedAvailability.sourceReceiptId !== head.receiptId) {
+        problems.push('SOURCE_NEW_HEAD_NOT_REVERIFIED:' + prefix);
+        continue;
+      }
       // Check the imported immutable record against its canonical, hashed FHIR
       // payload. Compromised evidence must never turn into a read projection.
       let parsed: unknown;

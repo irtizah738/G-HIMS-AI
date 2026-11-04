@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'node:crypto';
 import { getAdminFirestore } from '@/server/firebase/admin';
 import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
 import { assertIntegrationLive } from '@/lib/interop/integration-state';
@@ -10,9 +11,11 @@ import {
   EXTERNAL_FHIR_IMPORT_TYPES,
   assertFhirIdentifier,
   ingestExternalFhirResource,
+  fhirImportHeadId,
   preflightExternalFhirSource,
   type ExternalFhirImportType,
 } from '@/lib/clinical/intelligence/external-fhir-import';
+import { reconcileFhirReadAvailability } from '@/lib/clinical/intelligence/external-fhir-availability';
 
 export const runtime = 'nodejs';
 
@@ -98,7 +101,39 @@ export async function POST(req: NextRequest) {
       timeoutMs: 12000, maxReadRetries: 1,
       requireHttpsInProduction: true,
     });
-    const resource = await adapter.readResource(resourceType, resourceId);
+    // Only existing imported heads can be associated with a verified patient.
+    // A new resource's 404/410 must not create an identity or a fake deletion.
+    const headRef = db.collection('tenants').doc(context.tenantId)
+      .collection('fhirResourceHeads')
+      .doc(fhirImportHeadId(sourceId, resourceType, resourceId));
+    const headBeforeFetch = await headRef.get();
+    const priorReceiptId = headBeforeFetch.exists
+      ? String(headBeforeFetch.get('receiptId') || '') : null;
+    const probeId = randomUUID();
+    const probeStartedAt = Date.now();
+    const availabilityArgs = {
+      db, actor, sourceId, resourceType, resourceId,
+      probeId, probeStartedAt, expectedBaseUrl: source.baseUrl,
+      expectedCredentialRevision: oauth.credentialRevision,
+      expectedSiteApprovalId: siteApproval.approvalId,
+    };
+    let resource;
+    try {
+      resource = await adapter.readResource(resourceType, resourceId);
+    } catch (error) {
+      const status = error instanceof Error &&
+        /^FHIR_HTTP_(404|410):/.exec(error.message)?.[1];
+      if (status && priorReceiptId) {
+        // A missing read is NOT a deletion. The transaction rechecks live
+        // consent, source approval, patient linkage, and unchanged head.
+        await reconcileFhirReadAvailability({
+          ...availabilityArgs,
+          expectedHeadReceiptId: priorReceiptId,
+          httpStatus: status === '404' ? 404 : 410,
+        });
+      }
+      throw error;
+    }
     if (resource.id !== resourceId || resource.resourceType !== resourceType) {
       throw new Error('FHIR_IMPORT_REMOTE_RESOURCE_MISMATCH');
     }
@@ -107,6 +142,18 @@ export async function POST(req: NextRequest) {
       expectedCredentialRevision: oauth.credentialRevision,
       expectedSiteApprovalId: siteApproval.approvalId,
     });
+    // Recovery is a separate fail-closed transaction. The import is durable
+    // first; a failed recovery cannot disclose quarantined external evidence.
+    if (result.status === 'CURRENT') {
+      const headAfterImport = await headRef.get();
+      if (headAfterImport.exists &&
+          headAfterImport.get('receiptId') === result.receiptId) {
+        await reconcileFhirReadAvailability({
+          ...availabilityArgs, expectedHeadReceiptId: result.receiptId,
+          httpStatus: 200,
+        });
+      }
+    }
     // Receipt only. Never return PHI or the raw imported resource to caller.
     return NextResponse.json({ success: true, ...result }, { status: result.replay ? 200 : 201 });
   } catch (error) {

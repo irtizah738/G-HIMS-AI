@@ -24,6 +24,10 @@ export type FhirSourcePollFence = {
   epoch: number;
 };
 
+export type FhirSourcePollOperationFence = FhirSourcePollFence & {
+  operationSequence: number;
+};
+
 export type FhirSourcePollLease = {
   tenantId: string;
   sourceId: string;
@@ -34,6 +38,8 @@ export type FhirSourcePollLease = {
   epoch: number;
   expiresAtMs: number;
   renewalSequence: number;
+  /** Monotonic sequence assigned BEFORE an external request is made. */
+  issuedSequence: number;
   checkpointSequence: number;
   checkpointDigest: string | null;
   checkpointWorkId: string | null;
@@ -49,7 +55,7 @@ export type FhirSourcePollAcquisition = {
   replay: boolean;
 };
 
-type Operation = 'ACQUIRED' | 'RENEWED' | 'RELEASED' | 'CHECKPOINTED';
+type Operation = 'ACQUIRED' | 'RENEWED' | 'RELEASED' | 'CHECKPOINTED' | 'RESERVED';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST = /^[0-9a-f]{64}$/;
 function sha(input: unknown): string {
@@ -81,6 +87,7 @@ function validateRecord(
       !['ACTIVE', 'RELEASED'].includes(record.status) ||
       !Number.isSafeInteger(record.epoch) || record.epoch < 1 ||
       !Number.isSafeInteger(record.renewalSequence) || record.renewalSequence < 0 ||
+      !Number.isSafeInteger(record.issuedSequence) || record.issuedSequence < 0 ||
       !Number.isSafeInteger(record.checkpointSequence) || record.checkpointSequence < 0 ||
       !Number.isSafeInteger(record.expiresAtMs) ||
       !Number.isSafeInteger(record.updatedAtMs))) {
@@ -129,6 +136,12 @@ export async function assertSourcePollFenceInTransaction(args: {
       lease.claimId !== fence.claimId || lease.epoch !== fence.epoch ||
       lease.expiresAtMs <= serverReadMs(snapshot)) {
     throw new Error('FHIR_SYNC_FENCE_STALE_OR_EXPIRED');
+  }
+  if ('operationSequence' in fence &&
+      (!Number.isSafeInteger(fence.operationSequence) ||
+       (fence.operationSequence as number) < 1 ||
+       (fence.operationSequence as number) > lease.issuedSequence)) {
+    throw new Error('FHIR_SYNC_OPERATION_NOT_RESERVED');
   }
 }
 function auditEvent(args: {
@@ -208,6 +221,7 @@ export async function acquireSourcePollLease(args: {
       tenantId, sourceId, facilityId: source.facilityId,
       status: 'ACTIVE', workerId: args.workerId, claimId: args.claimId,
       epoch, expiresAtMs, renewalSequence: 0,
+      issuedSequence: old?.issuedSequence || 0,
       checkpointSequence: old?.checkpointSequence || 0,
       checkpointDigest: old?.checkpointDigest || null,
       checkpointWorkId: old?.checkpointWorkId || null,
@@ -227,6 +241,45 @@ export async function acquireSourcePollLease(args: {
     };
   });
 }
+/**
+ * Reserve one globally increasing source operation sequence before HTTP I/O.
+ * A sequence is never reused, including after lease expiry/takeover.
+ */
+export async function reserveSourcePollOperation(args: {
+  db: Firestore; actor: FhirImportActor; fence: FhirSourcePollFence;
+  workId: string;
+}): Promise<FhirSourcePollOperationFence> {
+  const { db, actor, fence } = args;
+  if (!/^[A-Za-z0-9._-]{1,96}$/.test(args.workId)) {
+    throw new Error('FHIR_SYNC_WORK_ID_INVALID');
+  }
+  const ref = leaseRef(db, fence.tenantId, fence.sourceId);
+  return db.runTransaction(async tx => {
+    const [sourceSnap, leaseSnap] = await tx.getAll(
+      db.collection('tenants').doc(fence.tenantId)
+        .collection('fhirSources').doc(fence.sourceId), ref,
+    );
+    const source = sourceSnap.exists ? sourceSnap.data() as FhirSourceRecord : null;
+    if (!source) throw new Error('FHIR_SYNC_SOURCE_NOT_FOUND');
+    authorizeCoordinator(actor, source, fence.sourceId);
+    if (actor.tenantId !== fence.tenantId) {
+      throw new Error('FHIR_SYNC_FENCE_SCOPE_DENIED');
+    }
+    await assertSourcePollFenceInTransaction({ tx, db, source, fence });
+    const lease = leaseSnap.data() as FhirSourcePollLease;
+    const operationSequence = lease.issuedSequence + 1;
+    if (!Number.isSafeInteger(operationSequence)) {
+      throw new Error('FHIR_SYNC_SEQUENCE_OVERFLOW');
+    }
+    const now = serverReadMs(leaseSnap);
+    tx.update(ref, { issuedSequence: operationSequence, updatedAtMs: now });
+    auditEvent({ tx, db, tenantId: fence.tenantId, sourceId: fence.sourceId,
+      epoch: fence.epoch, type: 'RESERVED', sequence: operationSequence,
+      actorId: actor.actorId, recordedAtMs: now, workId: args.workId });
+    return { ...fence, operationSequence };
+  });
+}
+
 export async function renewSourcePollLease(args: {
   db: Firestore; actor: FhirImportActor; fence: FhirSourcePollFence;
   ttlMs: number;

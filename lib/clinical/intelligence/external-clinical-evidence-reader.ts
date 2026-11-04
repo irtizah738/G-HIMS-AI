@@ -188,6 +188,10 @@ export async function readExternalClinicalEvidence(args: {
       if (row?.status === 'SUSPECTED_ABSENCE') {
         throw new Error('CI_EXT03_SOURCE_RETRIEVAL_UNVERIFIED');
       }
+      if (row?.status === 'AVAILABLE_CONFIRMED' &&
+          row.sourceReceiptId !== (heads[i].data() as ResourceHead).receiptId) {
+        throw new Error('CI_EXT03_SOURCE_NEW_HEAD_NOT_REVERIFIED');
+      }
     }
     if (heads.length !== projection.facts.length) {
       throw new Error('CI_EXT03_PROJECTION_SOURCE_ADVANCED');

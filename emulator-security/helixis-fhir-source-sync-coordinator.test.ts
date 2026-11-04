@@ -218,7 +218,7 @@ test('CI-EXT-11: leases, fencing epochs, global ordering, atomic checkpoints and
     expect((await leaseRef.get()).get('checkpointWorkId')).toBe('resume-after-crash');
 
     const audit = await root.collection('fhirSourcePollEvents').get();
-    expect(audit.size).toBeGreaterThan(0);
+    expect(audit.size > 0).toBe(true);
     for (const doc of (await root.collection('fhirSourcePollOutbox').get()).docs) {
       expect(doc.get('status')).toBe('HELD');
     }

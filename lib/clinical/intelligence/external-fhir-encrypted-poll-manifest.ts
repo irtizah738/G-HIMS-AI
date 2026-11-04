@@ -11,7 +11,7 @@
  * facility approval and requires an explicit poll-coordinate grant.
  */
 import { createHash } from 'node:crypto';
-import type { Firestore } from 'firebase-admin/firestore';
+import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import {
   assertFhirIdentifier, assertFhirSource,
   type FhirImportActor, type FhirSourceRecord,
@@ -38,6 +38,7 @@ export type StoredFhirPollManifest = {
   sourceFacilityId: string;
   startCheckpointSequence: number;
   itemCount: number;
+  resourceTypes: string[];
   plaintextDigest: string;
   ciphertextDigest: string;
   cipherProvider: FhirPollManifestCipher['provider'];
@@ -148,7 +149,7 @@ function authorize(actor: FhirImportActor, source: FhirSourceRecord | null, sour
   if (active.syncMode !== 'FENCED') throw new Error('FHIR_MANIFEST_SOURCE_NOT_FENCED');
   return active;
 }
-async function verifyApprovals(tx: FirebaseFirestore.Transaction, db: Firestore,
+async function verifyApprovals(tx: Transaction, db: Firestore,
   source: FhirSourceRecord, resourceTypes: readonly string[]) {
   if (!source.oauth) return;
   if (!source.siteApprovalId) throw new Error('FHIR_MANIFEST_SITE_APPROVAL_MISSING');
@@ -178,10 +179,11 @@ export async function sealFhirPollManifest(args: {
   const ciphertextDigest = hash(Buffer.from(envelope.ciphertextB64, 'base64'));
   const root = db.collection('tenants').doc(tenantId);
   const ref = manifestRef(db, tenantId, manifest.manifestId);
+  const headRef = root.collection('fhirPollManifestHeads').doc(sourceId);
   return db.runTransaction(async tx => {
-    const [sourceSnap, existing, leaseSnap] = await tx.getAll(
+    const [sourceSnap, existing, leaseSnap, headSnap] = await tx.getAll(
       root.collection('fhirSources').doc(sourceId), ref,
-      root.collection('fhirSourcePollLeases').doc(sourceId),
+      root.collection('fhirSourcePollLeases').doc(sourceId), headRef,
     );
     const source = authorize(actor,
       sourceSnap.exists ? sourceSnap.data() as FhirSourceRecord : null, sourceId);
@@ -202,17 +204,35 @@ export async function sealFhirPollManifest(args: {
     if (!Number.isSafeInteger(seq) || seq !== manifest.startCheckpointSequence) {
       throw new Error('FHIR_MANIFEST_CHECKPOINT_START_INVALID');
     }
+    if (headSnap.exists) {
+      const previousHead = headSnap.data()!;
+      if (previousHead.tenantId !== tenantId || previousHead.sourceId !== sourceId ||
+          !UUID.test(previousHead.manifestId) ||
+          !Number.isSafeInteger(previousHead.startCheckpointSequence) ||
+          !Number.isSafeInteger(previousHead.itemCount) ||
+          previousHead.itemCount < 1 ||
+          previousHead.startCheckpointSequence + previousHead.itemCount > seq) {
+        throw new Error('FHIR_MANIFEST_PREVIOUS_WORK_NOT_COMPLETE');
+      }
+    }
     const createdAt = Date.now();
     const record: StoredFhirPollManifest = {
       tenantId, sourceId, manifestId: manifest.manifestId,
       schemaVersion: 1, status: 'SEALED', sourceFacilityId: source.facilityId,
       startCheckpointSequence: manifest.startCheckpointSequence,
       itemCount: manifest.items.length,
+      resourceTypes: [...new Set(manifest.items.map(i => i.resourceType))],
       plaintextDigest: digest, ciphertextDigest,
       cipherProvider: cipher.provider,
       encrypted: envelope, createdBy: actor.actorId, createdAt,
     };
     tx.create(ref, record);
+    tx.set(headRef, {
+      tenantId, sourceId, manifestId: manifest.manifestId,
+      startCheckpointSequence: manifest.startCheckpointSequence,
+      itemCount: manifest.items.length, manifestDigest: digest,
+      updatedAt: createdAt,
+    });
     const eventId = 'fpm_' + manifest.manifestId;
     const event = {
       tenantId, sourceId, manifestId: manifest.manifestId, eventId,
@@ -248,14 +268,26 @@ export async function openFhirPollManifest(args: {
   const sourceId = assertFhirIdentifier(args.sourceId, 'FHIR_MANIFEST_SOURCE_INVALID');
   const root = args.db.collection('tenants').doc(tenantId);
   const record = await args.db.runTransaction(async tx => {
-    const [sourceSnap, manifestSnap] = await tx.getAll(
+    const [sourceSnap, manifestSnap, headSnap] = await tx.getAll(
       root.collection('fhirSources').doc(sourceId),
       manifestRef(args.db, tenantId, args.manifestId),
+      root.collection('fhirPollManifestHeads').doc(sourceId),
     );
     const source = authorize(args.actor,
       sourceSnap.exists ? sourceSnap.data() as FhirSourceRecord : null, sourceId);
-    await verifyApprovals(tx, args.db, source, source.approvedResourceTypes);
     const saved = manifestSnap.exists ? manifestSnap.data() as StoredFhirPollManifest : null;
+    if (!headSnap.exists || headSnap.get('tenantId') !== tenantId ||
+        headSnap.get('sourceId') !== sourceId ||
+        headSnap.get('manifestId') !== args.manifestId) {
+      throw new Error('FHIR_MANIFEST_NOT_ACTIVE_FOR_SOURCE');
+    }
+    if (!saved || !Array.isArray(saved.resourceTypes) ||
+        saved.resourceTypes.length < 1 ||
+        saved.resourceTypes.some(t => !['Patient', 'Encounter', 'Observation'].includes(t) ||
+          !source.approvedResourceTypes.includes(t))) {
+      throw new Error('FHIR_MANIFEST_RESOURCE_SCOPE_INVALID');
+    }
+    await verifyApprovals(tx, args.db, source, saved.resourceTypes);
     if (!saved || saved.schemaVersion !== 1 || saved.status !== 'SEALED' ||
         saved.tenantId !== tenantId || saved.sourceId !== sourceId ||
         saved.sourceFacilityId !== source.facilityId ||
@@ -289,7 +321,9 @@ export async function openFhirPollManifest(args: {
       manifest.manifestId !== record.manifestId ||
       manifest.sourceId !== record.sourceId ||
       manifest.startCheckpointSequence !== record.startCheckpointSequence ||
-      manifest.items.length !== record.itemCount) {
+      manifest.items.length !== record.itemCount ||
+      JSON.stringify([...new Set(manifest.items.map(i => i.resourceType))]) !==
+        JSON.stringify(record.resourceTypes)) {
     throw new Error('FHIR_MANIFEST_PLAINTEXT_SCOPE_INVALID');
   }
   return manifest;

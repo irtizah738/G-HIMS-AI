@@ -62,6 +62,7 @@ test('CI-EXT-09: 404/410 quarantine, replay, stale response and verified recover
       resource: observation('v1', '2026-10-20T09:00:00Z', 1.2),
     });
     expect(v1.status).toBe('CURRENT');
+    console.info('CI_EXT09_STAGE=INITIAL_IMPORT');
     const first = await rebuildExternalPatient360({ db, actor, tenantId, patientId });
     expect(first.projection.status).toBe('EVIDENCE_ONLY');
     expect(first.projection.facts.length).toBe(1);
@@ -77,6 +78,7 @@ test('CI-EXT-09: 404/410 quarantine, replay, stale response and verified recover
     };
     const absent = await reconcileFhirReadAvailability({ ...args, httpStatus: 404 });
     expect(absent.status).toBe('SUSPECTED_ABSENCE');
+    console.info('CI_EXT09_STAGE=ABSENCE_RECORDED');
     expect(absent.replay).toBe(false);
     expect((await stateRef.get()).get('status')).toBe('SUSPECTED_ABSENCE');
     expect((await headRef.get()).get('receiptId')).toBe(v1.receiptId);
@@ -92,6 +94,7 @@ test('CI-EXT-09: 404/410 quarantine, replay, stale response and verified recover
     );
     const replay = await reconcileFhirReadAvailability({ ...args, httpStatus: 404 });
     expect(replay.replay).toBe(true);
+    console.info('CI_EXT09_STAGE=REPLAY_VERIFIED');
     expect((await root.collection('fhirAvailabilityEvents').get()).size).toBe(1);
     await expect(reconcileFhirReadAvailability({
       ...args, httpStatus: 410,
@@ -102,6 +105,7 @@ test('CI-EXT-09: 404/410 quarantine, replay, stale response and verified recover
       httpStatus: 410,
     });
     expect(gone.status).toBe('SUSPECTED_ABSENCE');
+    console.info('CI_EXT09_STAGE=GONE_RECORDED');
     expect((await stateRef.get()).get('episode')).toBe(1);
     expect((await root.collection('fhirReconciliationCases').get()).size).toBe(1);
 
@@ -110,6 +114,7 @@ test('CI-EXT-09: 404/410 quarantine, replay, stale response and verified recover
       httpStatus: 200,
     });
     expect(staleRecovery.status).toBe('STALE_IGNORED');
+    console.info('CI_EXT09_STAGE=STALE_RECOVERY_IGNORED');
     expect((await stateRef.get()).get('status')).toBe('SUSPECTED_ABSENCE');
 
     const v2 = await ingestExternalFhirResource({
@@ -117,6 +122,7 @@ test('CI-EXT-09: 404/410 quarantine, replay, stale response and verified recover
       resource: observation('v2', '2026-10-21T09:00:00Z', 1.3),
     });
     expect(v2.status).toBe('CURRENT');
+    console.info('CI_EXT09_STAGE=V2_IMPORTED');
     await expect(reconcileFhirReadAvailability({
       ...args, probeId: randomUUID(), probeStartedAt: startedAt + 20,
       httpStatus: 404,
@@ -128,6 +134,7 @@ test('CI-EXT-09: 404/410 quarantine, replay, stale response and verified recover
       httpStatus: 200,
     });
     expect(recovered.status).toBe('AVAILABLE_CONFIRMED');
+    console.info('CI_EXT09_STAGE=RECOVERY_RECORDED');
     expect((await stateRef.get()).get('status')).toBe('AVAILABLE_CONFIRMED');
     const cases = await root.collection('fhirReconciliationCases').get();
     expect(cases.docs[0].get('status')).toBe('RESOLVED');
@@ -148,6 +155,7 @@ test('CI-EXT-09: 404/410 quarantine, replay, stale response and verified recover
       httpStatus: 404,
     });
     expect(late404.status).toBe('STALE_IGNORED');
+    console.info('CI_EXT09_STAGE=LATE_ABSENCE_IGNORED');
     expect((await stateRef.get()).get('status')).toBe('AVAILABLE_CONFIRMED');
     expect((await root.collection('fhirReconciliationCases').get()).size).toBe(1);
     const outbox = await root.collection('fhirAvailabilityOutbox').get();
@@ -162,6 +170,7 @@ test('CI-EXT-09: 404/410 quarantine, replay, stale response and verified recover
       resource: observation('v3', '2026-10-22T09:00:00Z', 1.4),
     });
     expect(v3.status).toBe('CURRENT');
+    console.info('CI_EXT09_STAGE=V3_IMPORTED');
     const unreverified = await rebuildExternalPatient360({ db, actor, tenantId, patientId });
     expect(unreverified.projection.status).toBe('RECONCILIATION_REQUIRED');
     expect(unreverified.projection.facts).toEqual([]);
@@ -174,6 +183,7 @@ test('CI-EXT-09: 404/410 quarantine, replay, stale response and verified recover
       httpStatus: 200,
     });
     expect(confirmed.status).toBe('AVAILABLE_CONFIRMED');
+    console.info('CI_EXT09_STAGE=V3_REVERIFIED');
     expect((await stateRef.get()).get('sourceReceiptId')).toBe(v3.receiptId);
     const afterConfirm = await rebuildExternalPatient360({ db, actor, tenantId, patientId });
     expect(afterConfirm.projection.status).toBe('EVIDENCE_ONLY');

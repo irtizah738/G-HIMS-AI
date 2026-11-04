@@ -12,6 +12,7 @@ import { createHash } from 'node:crypto';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import type { FhirResource } from '@/lib/interop/fhir-r4-adapter';
 import { siteApprovalDocId, validateFhirSiteApproval, type FhirSiteApproval } from '@/lib/interop/fhir-site-approval';
+import { assertSourcePollFenceInTransaction, type FhirSourcePollFence } from './external-fhir-sync-coordinator';
 
 export const EXTERNAL_FHIR_IMPORT_TYPES = ['Patient', 'Encounter', 'Observation'] as const;
 export type ExternalFhirImportType = typeof EXTERNAL_FHIR_IMPORT_TYPES[number];
@@ -44,6 +45,8 @@ export type FhirSourceRecord = {
   status: 'ACTIVE' | 'SUSPENDED' | 'REVOKED';
   securityReviewStatus: 'APPROVED' | 'PENDING' | 'REVOKED';
   approvedResourceTypes: string[];
+  /** Enforces server-only transaction fencing when explicitly enabled per HIS source. */
+  syncMode?: 'FENCED';
   siteApprovalId?: string;
   oauth?: {
     mode: 'SMART_BACKEND';
@@ -279,6 +282,7 @@ export async function ingestExternalFhirResource(args: {
   expectedBaseUrl?: string;
   expectedCredentialRevision?: number;
   expectedSiteApprovalId?: string;
+  syncFence?: FhirSourcePollFence;
   now?: () => number;
 }): Promise<ExternalFhirImportResult> {
   const { db, actor } = args;
@@ -320,6 +324,11 @@ export async function ingestExternalFhirResource(args: {
     const patientId = requireLink(
       linkSnap.exists ? linkSnap.data() as FhirPatientLink : null, source, prepared
     );
+    // Managed poll sources cannot commit an import from an expired/replaced
+    // worker: read the same source lease inside this Firestore transaction.
+    await assertSourcePollFenceInTransaction({
+      tx, db, source, fence: args.syncFence,
+    });
     if (args.expectedCredentialRevision !== undefined) {
       if (!args.expectedSiteApprovalId ||
           args.expectedSiteApprovalId !== source.siteApprovalId) {

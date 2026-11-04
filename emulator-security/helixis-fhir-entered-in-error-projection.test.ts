@@ -72,7 +72,7 @@ test('FHIR entered-in-error correction suppresses evidence without erasing histo
     expect(initial.status).toBe('CURRENT');
     const first = await rebuildExternalPatient360({ db, tenantId, patientId, actor });
     expect(first.projection.status).toBe('EVIDENCE_ONLY');
-    expect(first.projection.facts).toHaveLength(1);
+    expect(first.projection.facts.length).toBe(1);
 
     const correction = await ingestExternalFhirResource({
       db, actor, sourceId,
@@ -107,7 +107,7 @@ test('FHIR entered-in-error correction suppresses evidence without erasing histo
     const third = await rebuildExternalPatient360({ db, tenantId, patientId, actor });
     expect(third.projection.revision).toBe(3);
     expect(third.projection.status).toBe('EVIDENCE_ONLY');
-    expect(third.projection.facts).toHaveLength(1);
+    expect(third.projection.facts.length).toBe(1);
     expect(third.projection.facts[0].sourceVersionId).toBe('v3');
     expect((await root.collection('fhirImportedVersions').get()).size).toBe(3);
     expect((await root.collection('externalPatient360Revisions').get()).size).toBe(3);
@@ -129,7 +129,7 @@ test('FHIR entered-in-error correction suppresses evidence without erasing histo
     const withEncounterError = await rebuildExternalPatient360({ db, tenantId, patientId, actor });
     expect(withEncounterError.projection.revision).toBe(4);
     expect(withEncounterError.projection.status).toBe('RECONCILIATION_REQUIRED');
-    expect(withEncounterError.projection.facts).toHaveLength(1);
+    expect(withEncounterError.projection.facts.length).toBe(1);
     expect(withEncounterError.projection.facts[0].type).toBe('Observation');
     expect(withEncounterError.projection.reconciliationIssues).toContain(
       'SOURCE_RESOURCE_ENTERED_IN_ERROR:' +

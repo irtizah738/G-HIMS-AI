@@ -108,7 +108,7 @@ test('CI-EXT-10: source history anchors, deletion review and head/consent fences
       .facts.length).toBe(1);
 
     await expect(recordFhirHistoryObservation({
-      ...args, bundle: history([v1,v2]),
+      ...args, bundle: history([v2,v1]),
     })).rejects.toThrow('FHIR_HISTORY_REPLAY_CONFLICT');
     await expect(recordFhirHistoryObservation({
       ...args, probeId: randomUUID(), probeStartedAt: startedAt + 1,

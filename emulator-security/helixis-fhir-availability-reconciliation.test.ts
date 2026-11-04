@@ -155,6 +155,33 @@ test('CI-EXT-09: 404/410 quarantine, replay, stale response and verified recover
     expect((await root.collection('fhirImportedVersions').get()).size).toBe(2);
     expect((await root.collection('patient360Projections').get()).empty).toBe(true);
 
+    // A new head imported through an internal backfill is not automatically
+    // treated as a recovered source read until a fresh 200 is witnessed.
+    const v3 = await ingestExternalFhirResource({
+      db, actor, sourceId,
+      resource: observation('v3', '2026-10-22T09:00:00Z', 1.4),
+    });
+    expect(v3.status).toBe('CURRENT');
+    const unreverified = await rebuildExternalPatient360({ db, actor, tenantId, patientId });
+    expect(unreverified.projection.status).toBe('RECONCILIATION_REQUIRED');
+    expect(unreverified.projection.facts).toEqual([]);
+    expect(unreverified.projection.reconciliationIssues).toContain(
+      'SOURCE_NEW_HEAD_NOT_REVERIFIED:' + headId,
+    );
+    const confirmed = await reconcileFhirReadAvailability({
+      ...args, expectedHeadReceiptId: v3.receiptId,
+      probeId: randomUUID(), probeStartedAt: startedAt + 40,
+      httpStatus: 200,
+    });
+    expect(confirmed.status).toBe('AVAILABLE_CONFIRMED');
+    expect((await stateRef.get()).get('sourceReceiptId')).toBe(v3.receiptId);
+    const afterConfirm = await rebuildExternalPatient360({ db, actor, tenantId, patientId });
+    expect(afterConfirm.projection.status).toBe('EVIDENCE_ONLY');
+    expect(afterConfirm.projection.facts[0].sourceVersionId).toBe('v3');
+    expect((await readExternalClinicalEvidence({ db, actor, tenantId, patientId }))
+      .facts.length).toBe(1);
+    expect((await root.collection('fhirImportedVersions').get()).size).toBe(3);
+
     await root.collection('fhirPatientLinks')
       .doc(fhirPatientLinkId(sourceId, 'source-p1'))
       .update({ consentStatus: 'WITHDRAWN' });

@@ -79,6 +79,10 @@ function assertCipherProvider(cipher: FhirPollManifestCipher): void {
     }
   } else if (cipher.provider !== 'CLOUD_KMS_ENVELOPE_V1') {
     throw new Error('FHIR_MANIFEST_CIPHER_PROVIDER_UNSUPPORTED');
+  } else if (process.env.GHIMS_CI_FHIR_POLL_MANIFESTS_ENABLED !== 'true') {
+    // The production provider is an interface only in CI-EXT-13. Deploying
+    // this module must never turn on an unqualified KMS/backend path.
+    throw new Error('FHIR_MANIFEST_PRODUCTION_PROVIDER_NOT_ENABLED');
   }
 }
 function validateEnvelope(

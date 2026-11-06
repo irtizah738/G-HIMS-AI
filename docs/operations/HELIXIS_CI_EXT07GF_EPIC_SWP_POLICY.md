@@ -73,3 +73,19 @@ References:
 - https://docs.cloud.google.com/secure-web-proxy/docs/deploy-next-hop
 - https://docs.cloud.google.com/secure-web-proxy/docs/quickstart
 - https://cloud.google.com/secure-web-proxy/pricing
+
+## Verification recovery after successful create followed by unsupported CLI command
+
+On 2026-11-02 Cloud Shell successfully imported the policy and the sole rule, but the following **read-only verification step failed** because `gcloud network-security gateway-security-policies describe` **does not exist** in the stable Google Cloud CLI.
+
+**Do not rerun the `create` action**: the remote policy/rule exist. The corrected verifier uses the stable, supported `gateway-security-policies list` and `rules list` commands, checks the exact full regional resource name, exactly one approved allow rule, and rejects TLS inspection drift. It makes **zero GCP writes**:
+
+```bash
+GHIMS_RUNTIME_MODE=STAGING \
+HELIXIS_CI_EXT07GF_CONFIRM_PROJECT=studio-1130431360-48a05 \
+bash scripts/ops/ci-ext07gf-epic-swp-policy.sh verify
+```
+
+Only run the corrected verified file from this fix PR or a subsequent main merge. The earlier script hash `9a8679dce2d7f692571faf6fc32cc30d869b02df` is no longer valid for this verification. A failing verify must not delete, replace, import or broaden policies, and should not lead to gateway creation.
+
+Official CLI reference: [policy commands](https://docs.cloud.google.com/sdk/gcloud/reference/network-security/gateway-security-policies), [rule list](https://docs.cloud.google.com/sdk/gcloud/reference/network-security/gateway-security-policies/rules/list).

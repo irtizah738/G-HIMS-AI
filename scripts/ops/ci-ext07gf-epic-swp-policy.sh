@@ -54,10 +54,15 @@ require_no_policy_collision() {
 }
 verify() {
   local p r
-  p="$(gcloud network-security gateway-security-policies describe "$POLICY" --project="$PROJECT" --location="$REGION" --format=json)" ||
-    fail POLICY_LOOKUP_FAILED
-  printf '%s' "$p" | jq -e --arg tail "/gatewaySecurityPolicies/$POLICY" '
-    .name|endswith($tail)' >/dev/null || fail POLICY_IDENTITY_MISMATCH
+  # This gcloud command group intentionally has NO "describe" subcommand.
+  # Read the regional policy inventory and require exactly one matching policy.
+  p="$(policies)" || fail POLICY_INVENTORY_UNAVAILABLE
+  printf '%s' "$p" |
+    jq -e --arg name "projects/$PROJECT/locations/$REGION/gatewaySecurityPolicies/$POLICY" '
+      type=="array" and
+      ([.[] | select(.name==$name)] | length==1) and
+      (all(.[] | select(.name==$name); (.tlsInspectionPolicy//"")==""))
+    ' >/dev/null || fail POLICY_IDENTITY_OR_TLS_MISMATCH
   r="$(rules)" || fail RULE_INVENTORY_UNAVAILABLE
   printf '%s' "$r" | jq -e --arg id "/rules/$RULE" --arg match "$MATCH" '
     type=="array" and length==1 and
@@ -66,7 +71,8 @@ verify() {
     (.[0].priority==100) and
     (.[0].basicProfile=="ALLOW") and
     (.[0].sessionMatcher==$match) and
-    ((.[0].applicationMatcher//"")=="")
+    ((.[0].applicationMatcher//"")=="") and
+    ((.[0].tlsInspectionEnabled//false)==false)
   ' >/dev/null || fail POLICY_RULES_NOT_EXACT
   echo 'CI_EXT07GF_POLICY=PASS'
   echo 'CI_EXT07GF_ALLOW_RULE=EPIC_SANDBOX_HTTPS_ONLY'

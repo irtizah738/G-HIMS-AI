@@ -3,6 +3,7 @@ import {deriveAuthoritativeContext} from '@/lib/backend/security/authoritative-c
 import {getAdminFirestore} from '@/server/firebase/admin';
 import {assertIntegrationLive} from '@/lib/interop/integration-state';
 import {readExternalClinicalEvidence} from '@/lib/clinical/intelligence/external-clinical-evidence-reader';
+import type {ExternalClinicianReviewInput} from '@/lib/clinical/intelligence/external-clinician-review-policy';
 
 export const runtime='nodejs';
 
@@ -29,7 +30,8 @@ function statusFor(code:string):number{
  */
 export async function POST(req:NextRequest){
   try{
-    if(process.env.GHIMS_RUNTIME_MODE==='PRODUCTION')
+    if(!['TEST','STAGING'].includes(
+      String(process.env.GHIMS_RUNTIME_MODE||'').trim().toUpperCase()))
       throw new Error('CI_EXT15_PRODUCTION_NOT_QUALIFIED');
     if(process.env.GHIMS_CI_EXTERNAL_CLINICAL_REVIEW_ENABLED!=='true')
       throw new Error('CI_EXT15_REVIEW_NOT_ENABLED');
@@ -64,7 +66,7 @@ export async function POST(req:NextRequest){
         roles:context.roles,permissions:context.permissions,
         facilityIds:context.facilityIds||[],
       },
-      review:body.review as never,
+      review:body.review as ExternalClinicianReviewInput,
     });
     if(!result.review)throw new Error('CI_EXT15_REVIEW_NOT_RECORDED');
     return NextResponse.json(

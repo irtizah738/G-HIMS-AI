@@ -566,3 +566,36 @@ test('G2: recovery cannot reuse the held work, send cursor, or run in production
     expect((await f.root.collection('fhirG2SyntheticFreshRecoveries').get()).size).toBe(0);
   }finally{await f.scope.db.recursiveDelete(f.root);}
 },60000);
+
+test('G2: stale source generation, absent recovery privilege and merged patient deny recovery',async()=>{
+  const f=await fixture();
+  try{
+    const recovery=await approvedRecoveryFixture(f);
+    await expect(recoverSyntheticG2FreshManifest({
+      ...recovery,expectedSourceRevision:recovery.oldManifest.sourceRevision,
+    })).rejects.toThrow('SOURCE_OR_CREDENTIAL_REVISION_INVALID');
+    await expect(recoverSyntheticG2FreshManifest({
+      ...recovery,actor:{...recovery.actor,
+        permissions:recovery.actor.permissions.filter(p=>p!=='FHIR_POLL_RECOVERY')},
+    })).rejects.toThrow('SCOPE_OR_MANIFEST_INVALID');
+    const patient=f.root.collection('patients').doc('g2-local-patient');
+    await patient.update({mergedIntoPatientId:'different-patient'});
+    await expect(recoverSyntheticG2FreshManifest(recovery))
+      .rejects.toThrow('CANONICAL_PATIENT_INVALID');
+    expect((await f.root.collection('fhirG2SyntheticFreshRecoveries').get()).size).toBe(0);
+  }finally{await f.scope.db.recursiveDelete(f.root);}
+},60000);
+test('G2: recovered manifest replay never bypasses subsequently withdrawn consent',async()=>{
+  const f=await fixture();
+  try{
+    const recovery=await approvedRecoveryFixture(f);
+    await recoverSyntheticG2FreshManifest(recovery);
+    const link=f.root.collection('fhirPatientLinks')
+      .doc(fhirPatientLinkId(sourceId,recovery.externalPatientId));
+    await link.update({consentStatus:'WITHDRAWN'});
+    await expect(recoverSyntheticG2FreshManifest(recovery))
+      .rejects.toThrow('PATIENT_LINK_OR_CONSENT_REVOKED');
+    expect((await f.root.collection('fhirG2SyntheticFreshRecoveries').get()).size).toBe(1);
+    expect((await f.root.collection('fhirPollWorkManifests').get()).size).toBe(2);
+  }finally{await f.scope.db.recursiveDelete(f.root);}
+},60000);

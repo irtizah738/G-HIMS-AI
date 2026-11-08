@@ -63,7 +63,7 @@ test('CI-EXT-11: leases, fencing epochs, global ordering, atomic checkpoints and
         tenantId, sourceId, facilityId, baseUrl,
         status: 'ACTIVE', securityReviewStatus: 'APPROVED',
         approvedResourceTypes: ['Patient', 'Encounter', 'Observation'],
-        syncMode: 'FENCED',
+        syncMode: 'FENCED', syntheticOnly: true,
       }),
       root.collection('fhirPatientLinks')
         .doc(fhirPatientLinkId(sourceId, 'external-p1')).set({
@@ -121,6 +121,14 @@ test('CI-EXT-11: leases, fencing epochs, global ordering, atomic checkpoints and
     expect((await root.collection('fhirHistoryStates')
       .doc('fhd_' + digest(JSON.stringify([sourceId, resourceType, resourceId]))).get())
       .get('lastOperationSequence')).toBe(op2.operationSequence);
+
+    // The legacy checkpoint API must not accept an otherwise authorized LIVE source.
+    await root.collection('fhirSources').doc(sourceId).update({syntheticOnly: false});
+    await expect(checkpointSourcePollLease({
+      db, actor, fence: claimed.fence, sequence: 1,
+      workId: 'history-newer', digest: digest('v1-validated'),
+    })).rejects.toThrow('FHIR_SYNC_LEGACY_CHECKPOINT_SYNTHETIC_SOURCE_REQUIRED');
+    await root.collection('fhirSources').doc(sourceId).update({syntheticOnly: true});
 
     const checkpoint = await checkpointSourcePollLease({
       db, actor, fence: claimed.fence, sequence: 1,

@@ -250,6 +250,8 @@ service cloud.firestore {
       match /fhirG2SyntheticWorkEvents/{eventId} { allow read, write: if false; }
       match /fhirG2SyntheticWorkOutbox/{outboxId} { allow read, write: if false; }
       match /fhirG2SyntheticWorkReviews/{reviewId} { allow read, write: if false; }
+      match /fhirG2SyntheticFreshRecoveries/{recoveryId} { allow read, write: if false; }
+      match /fhirG2SyntheticRecoveryEvents/{eventId} { allow read, write: if false; }
       match /fhirPollMigrationRehearsals/{rehearsalId} { allow read, write: if false; }
       match /fhirPollMigrationEvents/{eventId} { allow read, write: if false; }
       match /fhirPollMigrationOutbox/{outboxId} { allow read, write: if false; }

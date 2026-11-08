@@ -6,7 +6,6 @@
  * --live requires a GitHub token with read-only pull-request, checks,
  * contents and repository-rules permissions. The token is never logged.
  */
-import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 
 export const REQUIRED_CI_CONTEXTS = Object.freeze([
@@ -113,6 +112,7 @@ export function assessG1G2ReviewEvidence(facts) {
   const approved = [...effective.values()].filter(review =>
     review.state === 'APPROVED' &&
     !isBot(review.user) &&
+    ['OWNER','MEMBER','COLLABORATOR'].includes(review.authorAssociation) &&
     review.user.login.toLowerCase() !== p.author.toLowerCase() &&
     validSha(review.commitSha) && review.commitSha === p.headSha,
   );
@@ -207,6 +207,7 @@ export async function getLiveG1G2ReviewEvidence({token, repo, prNumber}) {
     reviews:reviews.map(v => ({
       user:{login:v.user?.login,type:v.user?.type},
       state:v.state,commitSha:v.commit_id,submittedAt:v.submitted_at,
+      authorAssociation:v.author_association,
     })),
     checkRuns:checks.map(v => ({
       name:v.name,headSha:v.head_sha,status:v.status,conclusion:v.conclusion,

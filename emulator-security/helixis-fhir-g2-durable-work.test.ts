@@ -370,3 +370,38 @@ test('G2: source revocation invalidates prior reviews and reconciliation',async(
       .rejects.toThrow('SOURCE_REVOKED_OR_REVISED');
   }finally{await f.scope.db.recursiveDelete(f.root);}
 },60000);
+
+test('G2: missing Stage D reservation invalidates checkpoint provenance',async()=>{
+  const f=await fixture();
+  try{
+    await pendingG2(f);
+    const checkpointEventId=await genuineStageDEvidence(f);
+    const reservations=await f.root.collection('fhirSourcePollEvents')
+      .where('eventType','==','FHIR_SOURCE_POLL_RESERVED').get();
+    expect(reservations.size).toBe(1);
+    await reservations.docs[0].ref.update({workId:'forged-different-work'});
+    await expect(reconcileSyntheticG2Checkpoint({...f.scope,checkpointEventId}))
+      .rejects.toThrow('STAGE_D_RESERVATION_PROOF_INVALID');
+    expect((await f.root.collection('fhirG2SyntheticWorkStates').get()).docs[0]
+      .get('status')).toBe('EVIDENCE_PENDING');
+  }finally{await f.scope.db.recursiveDelete(f.root);}
+},60000);
+test('G2: wrong tenant, facility or absent production guard cannot reconcile',async()=>{
+  const f=await fixture();
+  try{
+    await pendingG2(f);
+    const checkpointEventId=await genuineStageDEvidence(f);
+    await expect(reconcileSyntheticG2Checkpoint({
+      ...f.scope,actor:{...f.scope.actor,tenantId:'different-tenant'},checkpointEventId,
+    })).rejects.toThrow('SCOPE_DENIED');
+    await expect(reconcileSyntheticG2Checkpoint({
+      ...f.scope,actor:{...f.scope.actor,facilityIds:['another-facility']},checkpointEventId,
+    })).rejects.toThrow('SCOPE_DENIED');
+    const prev=process.env.GHIMS_RUNTIME_MODE;
+    try{
+      process.env.GHIMS_RUNTIME_MODE='PRODUCTION';
+      await expect(reconcileSyntheticG2Checkpoint({...f.scope,checkpointEventId}))
+        .rejects.toThrow('EMULATOR_ONLY');
+    }finally{process.env.GHIMS_RUNTIME_MODE=prev;}
+  }finally{await f.scope.db.recursiveDelete(f.root);}
+},60000);

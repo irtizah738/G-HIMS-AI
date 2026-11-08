@@ -10,6 +10,7 @@ import {
   assertStageFEmulatorOnly, assertStageFMultiRecoveryEvidence,
   stageFAnchorFingerprint, type EmulatorOnlyStageFRecoverySigner,
   type StageFMultiAnchor, type StageFReview, type StageFStepEvidence,
+  type StageFMultiEvidence,
 } from './external-fhir-poll-multi-recovery';
 import { fhirImportHeadId, fhirPatientLinkId, type FhirImportActor } from './external-fhir-import';
 import {EmulatorOnlyG2DetachedRestoreSigner,g2RestoreCertificateFingerprint,
@@ -45,10 +46,13 @@ export async function rehearseSyntheticMultiPageRecovery(args: {
     signer:EmulatorOnlyG2DetachedRestoreSigner;
     expectedCertificate?:G2DetachedRestoreCertificate;
   }>;
+  /** Capture validated synthetic snapshots for encryption OUTSIDE Firestore. PHI in memory. */
+  captureValidatedEvidenceForBackup?:true;
   /** Synthetic pre-commit abort: must leave no rehearsal, event, audit, outbox. */
   afterValidationBeforeCommit?:()=>Promise<void>;
 }):Promise<{status:'REHEARSAL_ONLY';fingerprint:string;replay:boolean;
-  detachedRestoreCertificate?:G2DetachedRestoreCertificate}> {
+  detachedRestoreCertificate?:G2DetachedRestoreCertificate;
+  validatedEvidenceForBackup?:StageFMultiEvidence}> {
   assertStageFEmulatorOnly();
   const a=args.anchor;
   args.signer.verify(a);
@@ -230,6 +234,7 @@ export async function rehearseSyntheticMultiPageRecovery(args: {
       }
       return {status:'REHEARSAL_ONLY' as const,fingerprint,replay:true,
         ...(restoreCertificate?{detachedRestoreCertificate:restoreCertificate}:{}),
+        ...(args.captureValidatedEvidenceForBackup?{validatedEvidenceForBackup:verifiedEvidence}:{}),
       };
     }
     const common={schemaVersion:1,tenantId:a.tenantId,sourceId:a.sourceId,
@@ -258,6 +263,7 @@ export async function rehearseSyntheticMultiPageRecovery(args: {
       destination:'CI_EXTERNAL_CONTEXT_QUALIFICATION'});
     return {status:'REHEARSAL_ONLY' as const,fingerprint,replay:false,
       ...(restoreCertificate?{detachedRestoreCertificate:restoreCertificate}:{}),
+      ...(args.captureValidatedEvidenceForBackup?{validatedEvidenceForBackup:verifiedEvidence}:{}),
     };
   });
 }

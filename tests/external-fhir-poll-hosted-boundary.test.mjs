@@ -134,6 +134,17 @@ rejects('wrong pinned Stage F anchor',f=>f.args.trustedStageFAnchorFingerprint='
 rejects('untrusted Stage G signature',f=>f.args.stageGVerifier=new EmulatorOnlyStageGWitnessVerifier(keys().publicKey),/FHIR_POLL_G_SIGNATURE_INVALID/);
 rejects('endpoint is not HTTPS',f=>f.args.scope={...f.scope,configuredVendorEndpoint:'http://example.test'},/SCOPE_OR_FLOOR/);
 rejects('endpoint contains credentials',f=>f.args.scope={...f.scope,configuredVendorEndpoint:'https://user:pw@example.test/r4'},/SCOPE_OR_FLOOR/);
+rejects('endpoint uses loopback IPv4',f=>f.args.scope={...f.scope,configuredVendorEndpoint:'https://127.0.0.1/r4'},/SCOPE_OR_FLOOR/);
+rejects('endpoint uses private IPv4',f=>f.args.scope={...f.scope,configuredVendorEndpoint:'https://10.20.30.40/r4'},/SCOPE_OR_FLOOR/);
+rejects('endpoint uses IPv6 literal',f=>f.args.scope={...f.scope,configuredVendorEndpoint:'https://[::1]/r4'},/SCOPE_OR_FLOOR/);
+rejects('endpoint uses alternative numeric IP notation',f=>f.args.scope={...f.scope,configuredVendorEndpoint:'https://2130706433/r4'},/SCOPE_OR_FLOOR/);
+rejects('endpoint uses localhost domain',f=>f.args.scope={...f.scope,configuredVendorEndpoint:'https://fhir.localhost/r4'},/SCOPE_OR_FLOOR/);
+rejects('endpoint uses metadata internal domain',f=>f.args.scope={...f.scope,configuredVendorEndpoint:'https://metadata.google.internal/r4'},/SCOPE_OR_FLOOR/);
+rejects('endpoint uses local LAN domain',f=>f.args.scope={...f.scope,configuredVendorEndpoint:'https://hospital.lan/r4'},/SCOPE_OR_FLOOR/);
+rejects('endpoint uses trailing dot alias',f=>f.args.scope={...f.scope,configuredVendorEndpoint:'https://fhir.example.test./r4'},/SCOPE_OR_FLOOR/);
+rejects('endpoint is single label',f=>f.args.scope={...f.scope,configuredVendorEndpoint:'https://hospital/r4'},/SCOPE_OR_FLOOR/);
+rejects('endpoint supplies query',f=>f.args.scope={...f.scope,configuredVendorEndpoint:'https://fhir.example.test/r4?q=1'},/SCOPE_OR_FLOOR/);
+rejects('endpoint supplies nonstandard port',f=>f.args.scope={...f.scope,configuredVendorEndpoint:'https://fhir.example.test:8443/r4'},/SCOPE_OR_FLOOR/);
 rejects('endpoint silently changes in witness proof',f=>f.settings.witnessScope={...f.scope,configuredVendorEndpoint:'https://other.example.test/r4'},/REMOTE_WITNESS_MISMATCH/);
 rejects('endpoint silently changes in vendor proof',f=>f.settings.vendorScope={...f.scope,configuredVendorEndpoint:'https://other.example.test/r4'},/VENDOR_PROVENANCE_NOT_BOUND/);
 rejects('zero challenge',f=>f.args.newChallenge=()=>'0'.repeat(64),/CHALLENGE_INVALID/);

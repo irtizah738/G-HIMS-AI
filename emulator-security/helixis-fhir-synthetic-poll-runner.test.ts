@@ -51,7 +51,7 @@ async function fixtureTenant(tenantId: string) {
       tenantId, sourceId, facilityId, baseUrl,
       status: 'ACTIVE', securityReviewStatus: 'APPROVED',
       approvedResourceTypes: ['Patient', 'Encounter', 'Observation'],
-      syncMode: 'FENCED',
+      syncMode: 'FENCED', syntheticOnly: true,
     }),
     root.collection('fhirPatientLinks')
       .doc(fhirPatientLinkId(sourceId, 'external-patient')).set({

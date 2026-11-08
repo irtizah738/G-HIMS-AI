@@ -361,6 +361,16 @@ export async function reconcileSyntheticG2Checkpoint(args:Scope & {
          (lease.checkpointDigest!==expectedDigest || lease.checkpointWorkId!==args.workId))) {
       fail('STAGE_D_CHECKPOINT_PROOF_INVALID');
     }
+    // The Stage D checkpoint must link to a committed source operation
+    // reservation; a fabricated checkpoint event alone is not proof of work.
+    const reservedId='fse_'+sha([m.tenantId,m.sourceId,cp.epoch,'RESERVED',cp.operationSequence]);
+    const reserved=(await tx.get(root.collection('fhirSourcePollEvents').doc(reservedId))).data();
+    if(!reserved || reserved.eventId!==reservedId ||
+       reserved.eventType!=='FHIR_SOURCE_POLL_RESERVED' ||
+       reserved.operation!=='RESERVED' || reserved.immutable!==true ||
+       reserved.tenantId!==m.tenantId || reserved.sourceId!==m.sourceId ||
+       reserved.epoch!==cp.epoch || reserved.sequence!==cp.operationSequence ||
+       reserved.workId!==args.workId) fail('STAGE_D_RESERVATION_PROOF_INVALID');
     if(receiptData.tenantId!==m.tenantId || receiptData.sourceId!==m.sourceId ||
        receiptData.receiptId!==expectedReceiptId || receiptData.resourceType!==item.resourceType ||
        receiptData.resourceId!==item.resourceId ||

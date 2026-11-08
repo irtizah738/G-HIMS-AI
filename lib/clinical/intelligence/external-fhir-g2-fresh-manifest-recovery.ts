@@ -248,7 +248,8 @@ export async function recoverSyntheticG2FreshManifest(
     const eventId='fpme_'+next.manifestId;
     const metadata={
       tenantId:next.tenantId,facilityId:next.facilityId,sourceId:next.sourceId,
-      manifestId:next.manifestId,sourceRevision:next.sourceRevision,
+      manifestId:next.manifestId,newManifestId:next.manifestId,
+      sourceRevision:next.sourceRevision,
       credentialRevision:args.expectedCredentialRevision,
       reviewId:args.reviewId,oldManifestId:old.manifestId,
       oldWorkId:args.oldWorkId,newWorkId:next.items[0].workId,

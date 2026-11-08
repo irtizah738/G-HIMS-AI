@@ -1,0 +1,47 @@
+name: Helixis G1-G2 Post-Merge Governance Audit (Read Only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_numbers:
+        description: 'Comma-separated merged PR IDs to inspect; no mutation'
+        required: true
+        default: '274,277,278'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  postmerge-audit:
+    name: G1-G2 retrospective governance exceptions
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      # Always uses main, NEVER checks out untrusted PR head code.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - name: Read-only audit of merged PR evidence
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO_SLUG: ${{ github.repository }}
+          PR_IDS: ${{ inputs.pr_numbers }}
+        shell: bash
+        run: |
+          if [[ ! "$PR_IDS" =~ ^[0-9]+(,[0-9]+){0,19}$ ]]; then
+            echo 'POSTMERGE_AUDIT_INPUT_INVALID'
+            exit 2
+          fi
+          node scripts/ops/helixis-merged-pr-governance-audit.mjs \
+            --live "--repo=$REPO_SLUG" "--prs=$PR_IDS"
+      - name: Confirm hosted and production remain unqualified
+        if: always()
+        run: |
+          echo 'G1_HOSTED=NO_GO'
+          echo 'G2_HOSTED=NO_GO'
+          echo 'PRODUCTION_RELEASE=NO_GO'

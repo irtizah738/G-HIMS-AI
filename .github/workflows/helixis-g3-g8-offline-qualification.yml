@@ -11,6 +11,7 @@ on:
       - 'scripts/ops/helixis-g3-g8-*'
       - '.github/workflows/helixis-g3-g8-offline-qualification.yml'
       - 'firestore.rules'
+      - 'bunfig.toml'
 
 permissions:
   contents: read

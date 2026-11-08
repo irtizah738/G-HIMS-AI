@@ -110,3 +110,25 @@ test('up to 50 well-scoped merged PRs are accepted as evidence, never release',(
   assert.equal(result.pullRequests.length,50);
   assert.equal(result.productionRelease,'NO_GO');
 });
+
+test('dismissed approval never counts toward prior merge governance',()=>{
+  const f=valid();
+  f.pullRequests[0].reviews.push({
+    state:'DISMISSED',commitSha:A,
+    submittedAt:'2026-11-09T00:59:30Z',
+    user:{login:'security-reviewer',type:'User'},
+  });
+  denied(f,'FEWER_THAN_TWO_PREMERGE_EXACT_HEAD_HUMAN_APPROVALS');
+});
+test('current ruleset with no pull request rule is never evidence ready',()=>{
+  const f=valid();f.currentRules=[];
+  denied(f,'CURRENT_RULESET_REQUIRES_FEWER_THAN_TWO_APPROVALS');
+});
+test('post-merge review records do not erase pre-merge decisions',()=>{
+  const f=valid();f.pullRequests[0].reviews.push({
+    state:'CHANGES_REQUESTED',commitSha:A,
+    submittedAt:'2026-11-09T01:01:00Z',
+    user:{login:'security-reviewer',type:'User'},
+  });
+  assert.equal(assessMergedPrGovernance(f).decision,'EVIDENCE_SNAPSHOT_ONLY');
+});

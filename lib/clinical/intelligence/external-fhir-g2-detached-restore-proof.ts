@@ -96,7 +96,7 @@ export function g2RestoreCertificateFingerprint(cert:G2DetachedRestoreCertificat
      cert.entries.length>MAX_SLOTS||
      cert.entries.some(e=>!exactFields(e,['slot','tagHex'])||
        typeof e.slot!=='string'||e.slot.length>64||
-       !/^[a-z0-9:]+$/.test(e.slot)||!HEX.test(e.tagHex))||
+       !/^[A-Za-z0-9:]+$/.test(e.slot)||!HEX.test(e.tagHex))||
      new Set(cert.entries.map(e=>e.slot)).size!==cert.entries.length)
     deny('CERTIFICATE_INVALID');
   return createHash('sha256').update(canonical(cert),'utf8').digest('hex');

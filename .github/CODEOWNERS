@@ -1,14 +1,23 @@
-# Helixis — Code Ownership
+# Helixis — Security Code Ownership
+# Security code owner: Areeba Batool (@AB2412), repository write access verified.
+# Clinical safety review is a separate controlled signoff by Dr Ufaq Waqas.
+# Dr Ufaq does not have a GitHub account and is NOT a GitHub code owner.
+# CODEOWNERS approval does NOT replace clinical signoff or independent
+# release authorization.
 
-# Protect governance configuration
-/.github/CODEOWNERS @SECURITY_REVIEWER
-/.github/workflows/ @SECURITY_REVIEWER
+# Governance configuration and GitHub Actions
+/.github/CODEOWNERS @AB2412
+/.github/workflows/ @AB2412
 
-# Firestore security
-/firestore.rules @SECURITY_REVIEWER
+# Firestore security and access boundary
+/firestore.rules @AB2412
 
-# FHIR integration and clinical intelligence
-/lib/clinical/intelligence/external-fhir-* @SECURITY_REVIEWER @CLINICAL_REVIEWER
+# FHIR integration and provenance contracts
+/lib/clinical/intelligence/external-fhir-* @AB2412
 
-# Clinical integration security tests
-/emulator-security/helixis-fhir-* @SECURITY_REVIEWER @CLINICAL_REVIEWER
+# FHIR integration security and emulator qualification
+/emulator-security/helixis-fhir-* @AB2412
+/emulator-security/helixis-external-* @AB2412
+
+# Security qualification scripts
+/scripts/ops/helixis-g3-g8-* @AB2412

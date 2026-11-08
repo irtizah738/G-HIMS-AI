@@ -6,6 +6,7 @@ on:
     paths:
       - 'lib/clinical/intelligence/external-fhir-*'
       - 'tests/external-fhir-*'
+      - 'tests/helixis-g3-g8-pr-review-evidence.test.mjs'
       - 'emulator-security/helixis-fhir-*'
       - 'emulator-security/helixis-external-*'
       - 'scripts/ops/helixis-g3-g8-*'
@@ -59,6 +60,8 @@ jobs:
             tests/external-fhir-poll-vendor-cursor.test.mjs \
             tests/external-fhir-poll-hosted-boundary.test.mjs \
             tests/external-fhir-g2-offline-outcome.test.mjs
+      - name: GitHub review-evidence fail-closed contract (offline only)
+        run: node --test tests/helixis-g3-g8-pr-review-evidence.test.mjs
       - name: FHIR import and transport contracts
         run: bun test tests/helixis-external-fhir-import.test.ts tests/helixis-fhir-r4-transport-safety.test.ts
       - name: Existing interoperability regression

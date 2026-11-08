@@ -1,0 +1,113 @@
+name: Helixis G3-G8 Synthetic Offline Qualification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'lib/clinical/intelligence/external-fhir-*'
+      - 'tests/external-fhir-*'
+      - 'emulator-security/helixis-fhir-*'
+      - 'emulator-security/helixis-external-*'
+      - 'scripts/ops/helixis-g3-g8-*'
+      - '.github/workflows/helixis-g3-g8-offline-qualification.yml'
+      - 'firestore.rules'
+      - 'bunfig.toml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: helixis-g3-g8-offline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  synthetic-contracts:
+    name: G3-G8 offline contracts, security and typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    env:
+      NODE_ENV: test
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-p4-ci
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p4-ci
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_CI_EXTERNAL_FHIR_IMPORT_ENABLED: 'false'
+      FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: Install pinned dependencies
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Source quality
+        run: bun run lint
+      - name: Stage A-H local-only contracts
+        run: |
+          node --experimental-strip-types --test \
+            tests/external-fhir-g3-g8-qualification.test.mjs \
+            tests/external-fhir-poll-manifest-seal.test.mjs \
+            tests/external-fhir-poll-atomic-checkpoint.test.mjs \
+            tests/external-fhir-poll-recovery-guard.test.mjs \
+            tests/external-fhir-poll-multi-recovery.test.mjs \
+            tests/external-fhir-poll-vendor-cursor.test.mjs \
+            tests/external-fhir-poll-hosted-boundary.test.mjs
+      - name: FHIR import and transport contracts
+        run: bun test tests/helixis-external-fhir-import.test.ts tests/helixis-fhir-r4-transport-safety.test.ts
+      - name: Existing interoperability regression
+        run: bun run test:wave4
+      - name: Legacy security regression (ephemeral persistence only)
+        env:
+          FIRESTORE_EMULATOR_HOST: ''
+        run: bun run test:security
+      - name: Confirm release never authorized
+        run: |
+          echo 'STAGE_H_HOSTED_KMS=NOT_QUALIFIED'
+          echo 'VENDOR_CURSOR_ORIGIN_AUTHENTICITY=NOT_QUALIFIED'
+          echo 'PRODUCTION_RELEASE=NO_GO'
+
+  firestore-emulator:
+    name: G3-G8 atomicity and synthetic recovery emulator
+    needs: synthetic-contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 28
+    env:
+      NODE_ENV: test
+      GHIMS_RUNTIME_MODE: TEST
+      NEXT_PUBLIC_GHIMS_RUNTIME_MODE: TEST
+      FIREBASE_PROJECT_ID: ghims-p4-ci
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ghims-p4-ci
+      GCLOUD_PROJECT: ghims-p4-ci
+      GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
+      GHIMS_CI_EXTERNAL_FHIR_IMPORT_ENABLED: 'false'
+      FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: Install pinned dependencies
+        run: bun install --frozen-lockfile
+      - name: Install pinned Firebase emulator CLI (no Google login)
+        run: npm install --global firebase-tools@14.20.0
+      - name: Build and execute ten emulator suites
+        timeout-minutes: 12
+        run: node scripts/ops/helixis-g3-g8-ci-emulator.mjs
+      - name: Release gate
+        run: |
+          echo 'GOOGLE_CLOUD_MUTATIONS=NONE'
+          echo 'SOURCE_FENCED_MIGRATION=NOT_PERFORMED'
+          echo 'PRODUCTION_RELEASE=NO_GO'

@@ -134,9 +134,27 @@ export async function readGitHubMergedPrEvidence({token,repo,numbers}) {
       })),
     });
   }
-  // CODEOWNERS state is not authoritative without checking every supported
-  // location. Treat it unknown; never turn absence of an API check into PASS.
-  return {schema:SCHEMA,currentRules,pullRequests:prs,codeOwnersConfigured:false};
+  // Check GitHub's three supported CODEOWNERS locations; a filename alone
+  // does not prove that requested specialists have write/review permission.
+  let codeOwnersConfigured=false;
+  for (const path of ['.github/CODEOWNERS','CODEOWNERS','docs/CODEOWNERS']) {
+    try {
+      const record=(await get(token,prefix+'/contents/'+path+'?ref=main')).body;
+      if(record?.encoding!=='base64'||typeof record.content!=='string')
+        throw new Error('POSTMERGE_AUDIT_CODEOWNERS_SHAPE');
+      const lines=Buffer.from(record.content.replace(/\\s/g,''),'base64')
+        .toString('utf8').split(/\\r?\\n/);
+      codeOwnersConfigured=lines.some(line=>{
+        const trimmed=line.trim();
+        return trimmed.length>0&&!trimmed.startsWith('#')&&
+          trimmed.split(/\\s+/).length>=2;
+      });
+      break;
+    } catch(e) {
+      if(e.message!=='POSTMERGE_AUDIT_HTTP_404')throw e;
+    }
+  }
+  return {schema:SCHEMA,currentRules,pullRequests:prs,codeOwnersConfigured};
 }
 async function main() {
   const args=process.argv.slice(2);

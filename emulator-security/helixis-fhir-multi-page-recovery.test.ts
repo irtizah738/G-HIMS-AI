@@ -712,3 +712,17 @@ scenario('synthetic encryption and readback are unavailable in PRODUCTION mode',
     }),/FHIR_POLL_F_EMULATOR_ONLY/);
   }finally{process.env.GHIMS_RUNTIME_MODE=mode;}
 });
+
+scenario('no out-of-band archive head or malformed local key ever qualifies readback',async f=>{
+  const backup=await syntheticColdFixture(f);
+  assert.throws(()=>coldReadbackVerifiedSyntheticG2Evidence({
+    ...backup,envelope:backup.envelope,expectedArchiveFingerprint:'',
+  }),/G2_COLD_READBACK_INDEPENDENT_ARCHIVE_HEAD_MISMATCH/);
+  assert.throws(()=>coldReadbackVerifiedSyntheticG2Evidence({
+    ...backup,envelope:backup.envelope,decryptionKey:randomBytes(16),
+  }),/G2_COLD_READBACK_AES_KEY_INVALID/);
+  assert.throws(()=>coldReadbackVerifiedSyntheticG2Evidence({
+    ...backup,envelope:backup.envelope,expectedArchiveId:randomUUID(),
+  }),/G2_COLD_READBACK_EXPECTED_SCOPE_MISMATCH/);
+  assert.deepEqual(await counts(f),[1,1,1]);
+});

@@ -1,4 +1,5 @@
 import {describe,expect,test} from 'bun:test';
+import {randomUUID} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {
@@ -9,7 +10,7 @@ import {
 } from '@/lib/clinical/intelligence/external-clinician-review-policy';
 
 const input={
-  idempotencyKey:'81a7d5f2-c1a9-4f2d-8b64-73b1f4383e15',
+  idempotencyKey:randomUUID(),
   expectedProjectionRevision:2,
   expectedProjectionContentHash:'a'.repeat(64),
   expectedSourceCheckpoint:'b'.repeat(64),

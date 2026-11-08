@@ -526,7 +526,7 @@ export async function supersedeSyntheticG2HeldWork(args:Scope & {
         fail('INDEPENDENT_REVIEWS_REQUIRED');
       }
     }
-    if(a.reviewerId===b.reviewerId)fail('INDEPENDENT_REVIEWS_REQUIRED');
+    if(!a || !b || a.reviewerId===b.reviewerId)fail('INDEPENDENT_REVIEWS_REQUIRED');
     const next:G2WorkRecord={...old,status:'REVIEWED_SUPERSEDED',
       lastReviewId:args.reviewId,transitionSequence:old.transitionSequence+1,updatedAtMs:now};
     tx.update(r.state,next);

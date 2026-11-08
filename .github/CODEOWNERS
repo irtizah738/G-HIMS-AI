@@ -1,9 +1,7 @@
 # Helixis — Security Code Ownership
-# Security code owner: Areeba Batool (@AB2412), repository write access verified.
-# Clinical safety review is a separate controlled signoff by Dr Ufaq Waqas.
-# Dr Ufaq does not have a GitHub account and is NOT a GitHub code owner.
-# CODEOWNERS approval does NOT replace clinical signoff or independent
-# release authorization.
+# @AB2412: authorized security code owner (repository write access verified).
+# Clinical signoff is tracked independently outside GitHub.
+# Code-owner approval is not clinical or production release authorization.
 
 # Governance configuration and GitHub Actions
 /.github/CODEOWNERS @AB2412

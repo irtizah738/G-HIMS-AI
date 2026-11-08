@@ -32,7 +32,7 @@ No composite indexes are introduced: reads/writes use deterministic IDs and the 
   "tenantId": "synthetic-tenant",
   "patientId": "synthetic-patient",
   "review": {
-    "idempotencyKey": "81a7d5f2-c1a9-4f2d-8b64-73b1f4383e15",
+    "idempotencyKey": "<fresh UUID v4 from the review client>",
     "expectedProjectionRevision": 2,
     "expectedProjectionContentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "expectedSourceCheckpoint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",

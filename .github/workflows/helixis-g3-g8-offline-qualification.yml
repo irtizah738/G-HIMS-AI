@@ -56,6 +56,8 @@ jobs:
         run: node --test tests/helixis-g3-g8-pr-review-evidence.test.mjs
       - name: Assert G3-G8 job availability for every main PR
         run: node --test tests/helixis-g3-g8-check-availability.test.mjs
+      - name: Retrospective merged-PR governance contract (offline facts)
+        run: node --test tests/helixis-merged-pr-governance-audit.test.mjs
       - name: FHIR import and transport contracts
         run: bun test tests/helixis-external-fhir-import.test.ts tests/helixis-fhir-r4-transport-safety.test.ts
       - name: Existing interoperability regression

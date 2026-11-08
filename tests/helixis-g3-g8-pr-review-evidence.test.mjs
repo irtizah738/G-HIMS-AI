@@ -14,9 +14,9 @@ function evidence() {
     },
     reviews:[
       {user:{login:'security-reviewer',type:'User'},state:'APPROVED',
-        commitSha:SHA_A,submittedAt:'2026-11-09T08:00:00Z'},
+        commitSha:SHA_A,submittedAt:'2026-11-09T08:00:00Z',authorAssociation:'COLLABORATOR'},
       {user:{login:'clinical-reviewer',type:'User'},state:'APPROVED',
-        commitSha:SHA_A,submittedAt:'2026-11-09T08:05:00Z'},
+        commitSha:SHA_A,submittedAt:'2026-11-09T08:05:00Z',authorAssociation:'MEMBER'},
     ],
     checkRuns:REQUIRED_CI_CONTEXTS.map(name=>({
       name,status:'completed',conclusion:'success',headSha:SHA_A,
@@ -76,14 +76,14 @@ test('newer CHANGES_REQUESTED negates earlier approval',()=>{
   f.reviews.push({
     user:{login:'security-reviewer',type:'User'},
     state:'CHANGES_REQUESTED',commitSha:SHA_A,
-    submittedAt:'2026-11-09T08:10:00Z',
+    submittedAt:'2026-11-09T08:10:00Z',authorAssociation:'COLLABORATOR',
   });
   checkNoGo(f,'INSUFFICIENT_FRESH_INDEPENDENT_APPROVALS');
 });
 test('newer COMMENTED does not alter the decisive review state',()=>{
   const f=evidence();f.reviews.push({
     user:{login:'security-reviewer',type:'User'},
-    state:'COMMENTED',commitSha:SHA_A,submittedAt:'2026-11-09T08:10:00Z',
+    state:'COMMENTED',commitSha:SHA_A,submittedAt:'2026-11-09T08:10:00Z',authorAssociation:'COLLABORATOR',
   });
   assert.equal(assessG1G2ReviewEvidence(f).decision,'REVIEW_EVIDENCE_READY_ONLY');
 });
@@ -154,4 +154,11 @@ test('invalid or synthetic reviewer records never count as human approvals',()=>
   const f=evidence();f.reviews[0].submittedAt='not-a-date';
   checkNoGo(f,'REVIEW_RECORD_INVALID');
   checkNoGo(f,'INSUFFICIENT_FRESH_INDEPENDENT_APPROVALS');
+});
+
+test('review from a non-collaborator or with untrusted association does not satisfy approval',()=>{
+  for(const association of ['NONE','CONTRIBUTOR','FIRST_TIMER',undefined]){
+    const f=evidence();f.reviews[0].authorAssociation=association;
+    checkNoGo(f,'INSUFFICIENT_FRESH_INDEPENDENT_APPROVALS');
+  }
 });

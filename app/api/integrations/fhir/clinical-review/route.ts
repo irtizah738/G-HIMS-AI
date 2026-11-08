@@ -3,7 +3,7 @@ import {deriveAuthoritativeContext} from '@/lib/backend/security/authoritative-c
 import {getAdminFirestore} from '@/server/firebase/admin';
 import {assertIntegrationLive} from '@/lib/interop/integration-state';
 import {readExternalClinicalEvidence} from '@/lib/clinical/intelligence/external-clinical-evidence-reader';
-import type {ExternalClinicianReviewInput} from '@/lib/clinical/intelligence/external-clinician-review-policy';
+import {assertExternalClinicianReviewInput} from '@/lib/clinical/intelligence/external-clinician-review-policy';
 
 export const runtime='nodejs';
 
@@ -56,6 +56,8 @@ export async function POST(req:NextRequest){
     if(!SCOPE.test(tenantId)||tenantId==='.'||tenantId==='..'||
        !SCOPE.test(patientId)||patientId==='.'||patientId==='..')
       throw new Error('CI_EXT15_SCOPE_INVALID');
+    // Reject malformed review commands before doing an audited patient read.
+    assertExternalClinicianReviewInput(body.review);
     const {context}=await deriveAuthoritativeContext(req,tenantId);
     const db=getAdminFirestore();
     if(!db)throw new Error('CI_EXT15_FIRESTORE_UNAVAILABLE');
@@ -66,7 +68,7 @@ export async function POST(req:NextRequest){
         roles:context.roles,permissions:context.permissions,
         facilityIds:context.facilityIds||[],
       },
-      review:body.review as ExternalClinicianReviewInput,
+      review:body.review,
     });
     if(!result.review)throw new Error('CI_EXT15_REVIEW_NOT_RECORDED');
     return NextResponse.json(

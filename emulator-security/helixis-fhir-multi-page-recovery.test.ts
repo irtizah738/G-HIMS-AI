@@ -204,6 +204,24 @@ scenario('second-page crash cannot skip checkpoint and resumes under a third epo
   assert.equal(result.status,'REHEARSAL_ONLY');
   assert.deepEqual(await counts(f),[1,1,1]);
 },false,true);
+scenario('accepted detached anchor must fail after restored checkpoint rollback',async f=>{
+  await rehearseSyntheticMultiPageRecovery(f.args);
+  const before=await counts(f);
+  await f.root.collection('fhirSourcePollLeases').doc(sourceId)
+    .update({checkpointSequence:2});
+  await assert.rejects(rehearseSyntheticMultiPageRecovery(f.args),
+    /RESTORED_OR_INFLIGHT_LEASE_INVALID/);
+  assert.deepEqual(await counts(f),before);
+  assert.equal((await f.root.collection('patient360Projections').get()).size,0);
+});
+scenario('accepted detached anchor must fail after partial receipt loss',async f=>{
+  await rehearseSyntheticMultiPageRecovery(f.args);
+  const before=await counts(f);
+  await f.root.collection('fhirImportedVersions').doc(f.anchor.steps[1].receiptId).delete();
+  await assert.rejects(rehearseSyntheticMultiPageRecovery(f.args),
+    /IMPORT_EVIDENCE_INVALID|LINK_OR_PATIENT_ID_MISSING/);
+  assert.deepEqual(await counts(f),before);
+});
 scenario('missing middle checkpoint audit blocks whole rehearsal',async f=>{
   await f.root.collection('auditLogs').doc('fau_'+f.anchor.steps[1].checkpointEventId).delete();
   await assert.rejects(rehearseSyntheticMultiPageRecovery(f.args),/CHECKPOINT_CHAIN_INVALID/);

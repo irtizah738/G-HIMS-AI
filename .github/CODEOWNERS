@@ -1,0 +1,14 @@
+# Helixis — Code Ownership
+
+# Protect governance configuration
+/.github/CODEOWNERS @SECURITY_REVIEWER
+/.github/workflows/ @SECURITY_REVIEWER
+
+# Firestore security
+/firestore.rules @SECURITY_REVIEWER
+
+# FHIR integration and clinical intelligence
+/lib/clinical/intelligence/external-fhir-* @SECURITY_REVIEWER @CLINICAL_REVIEWER
+
+# Clinical integration security tests
+/emulator-security/helixis-fhir-* @SECURITY_REVIEWER @CLINICAL_REVIEWER

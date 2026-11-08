@@ -504,6 +504,18 @@ scenario('certificate alteration or unrelated key cannot qualify backup replay',
     },
   }),/G2_DETACHED_RESTORE_INVENTORY_OR_SIGNATURE_MISMATCH/);
   assert.ok(row);
+  // Reject unbound fields even if the existing tags and MAC remain valid.
+  await assert.rejects(rehearseSyntheticMultiPageRecovery({
+    ...f.args,rehearsalId:randomUUID(),detachedRestore:{
+      signer,expectedCertificate:{...cert,patientId:'MUST_NOT_BE_EMITTED'},
+    },
+  }),/G2_DETACHED_RESTORE_CERTIFICATE_INVALID/);
+  await assert.rejects(rehearseSyntheticMultiPageRecovery({
+    ...f.args,rehearsalId:randomUUID(),detachedRestore:{
+      signer,expectedCertificate:{...cert,entries:cert.entries.map((x,i)=>
+        i===0?{...x,patientId:'MUST_NOT_BE_EMITTED'}:x)},
+    },
+  }),/G2_DETACHED_RESTORE_CERTIFICATE_INVALID/);
   const wrongSigner=new EmulatorOnlyG2DetachedRestoreSigner(randomBytes(32));
   await assert.rejects(rehearseSyntheticMultiPageRecovery({
     ...f.args,rehearsalId:randomUUID(),detachedRestore:{

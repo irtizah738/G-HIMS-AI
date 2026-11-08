@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { guardNativeClinicalIntelligenceRoute } from '@/lib/clinical/intelligence/clinical-context-route-gate';
 import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
 import { AuthorizationPipeline } from '@/lib/backend/auth/authorization-pipeline';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
@@ -62,6 +63,8 @@ function statusFor(message: string) {
 
 export async function POST(req: NextRequest) {
   try {
+    const sourceGate = guardNativeClinicalIntelligenceRoute();
+    if (sourceGate) return sourceGate;
     const body = (await req.json()) as Record<string, unknown>;
     const tenantId = tenantFrom(req, body);
     const { context } = await deriveAuthoritativeContext(req, tenantId || undefined);
@@ -128,6 +131,8 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   try {
+    const sourceGate = guardNativeClinicalIntelligenceRoute();
+    if (sourceGate) return sourceGate;
     const tenantId = tenantFrom(req);
     const draftId = String(req.nextUrl.searchParams.get('draftId') || '').trim();
     if (!draftId) {

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { guardNativeClinicalIntelligenceRoute } from '@/lib/clinical/intelligence/clinical-context-route-gate';
 import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
 import { AuthorizationPipeline } from '@/lib/backend/auth/authorization-pipeline';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
@@ -18,6 +19,8 @@ const PURPOSES = new Set<ClinicalIntelligencePurpose>([
 
 export async function POST(req: NextRequest) {
   try {
+    const sourceGate = guardNativeClinicalIntelligenceRoute();
+    if (sourceGate) return sourceGate;
     const body = await req.json();
     const tenantId = String(
       body?.tenantId ||

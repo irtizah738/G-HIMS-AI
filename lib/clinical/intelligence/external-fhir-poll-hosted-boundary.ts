@@ -7,6 +7,7 @@
  * vendor-origin authenticity, disaster recovery, or production readiness.
  */
 import { createHash, createPublicKey, randomBytes, verify } from 'node:crypto';
+import { isIP } from 'node:net';
 import type { StageGCursorCertificate, StageGPageCursorProof, StageGTrustedHead } from './external-fhir-poll-vendor-cursor';
 import type { EmulatorOnlyStageGWitnessVerifier } from './external-fhir-poll-vendor-cursor';
 
@@ -215,6 +216,29 @@ function assertSigned<T>(args: {
   }
 }
 function sameScope(a:StageHScope,b:StageHScope):boolean {return canonical(a)===canonical(b);}
+/**
+ * Offline syntax guard: a registered FHIR endpoint must be an absolute HTTPS
+ * URL with a DNS hostname, never an IP literal, local hostname, or hostname
+ * alias that would bypass source registration. Real DNS response address
+ * validation MUST happen at the egress broker; this is not an anti-rebinding
+ * or network-egress proof.
+ */
+function validExternalFhirHost(hostname: string): boolean {
+  if (typeof hostname !== 'string' || hostname.length < 4 ||
+      hostname.length > 253 || hostname.endsWith('.') || isIP(hostname) !== 0) {
+    return false;
+  }
+  const h = hostname.toLowerCase();
+  if (h === 'localhost' || h.endsWith('.localhost') ||
+      h.endsWith('.local') || h.endsWith('.internal') ||
+      h.endsWith('.home.arpa') || h.endsWith('.lan')) return false;
+  const labels = h.split('.');
+  return labels.length >= 2 &&
+    !/^[0-9]+$/.test(labels[labels.length - 1]) &&
+    labels.every(label =>
+      label.length >= 1 && label.length <= 63 &&
+      /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label));
+}
 function validScope(scope:StageHScope):boolean {
   if (!exactKeys(scope,['tenantId','sourceId','facilityId','sourceRevision','configuredVendorEndpoint']) ||
       ![scope.tenantId,scope.sourceId,scope.facilityId].every(x=>typeof x==='string' && ID.test(x)) ||
@@ -222,8 +246,8 @@ function validScope(scope:StageHScope):boolean {
       typeof scope.configuredVendorEndpoint!=='string' || scope.configuredVendorEndpoint.length > 2048) return false;
   try {
     const u = new URL(scope.configuredVendorEndpoint);
-    return u.protocol==='https:' && !!u.hostname && !u.username && !u.password &&
-      !u.hash && !u.search && !u.port;
+    return u.protocol==='https:' && validExternalFhirHost(u.hostname) &&
+      !u.username && !u.password && !u.hash && !u.search && !u.port;
   } catch { return false; }
 }
 function validHead(head:StageGTrustedHead):boolean {

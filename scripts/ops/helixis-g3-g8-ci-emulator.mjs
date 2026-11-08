@@ -14,6 +14,7 @@ const suites = Object.freeze([
   'helixis-fhir-persistent-manifest',
   'helixis-fhir-migration-rehearsal',
   'helixis-fhir-multi-page-recovery',
+  'helixis-fhir-g2-durable-work',
 ]);
 const required = {
   NODE_ENV: 'test', GHIMS_RUNTIME_MODE: 'TEST', FIREBASE_PROJECT_ID: 'ghims-p4-ci',
@@ -60,7 +61,7 @@ try {
     if(!existsSync(dest)) throw new Error('CI_EMULATOR_BUNDLE_MISSING_'+name);
     compiled.push(dest);
   }
-  if(compiled.length!==10) throw new Error('CI_EMULATOR_SUITE_INCOMPLETE');
+  if(compiled.length!==11) throw new Error('CI_EMULATOR_SUITE_INCOMPLETE');
   console.info('CI_EMULATOR_COMPILED_SUITES='+compiled.length);
   const testCommand='node --test '+compiled.map(p=>JSON.stringify(p)).join(' ');
   run('firebase',['emulators:exec','--project','ghims-p4-ci','--only','firestore',testCommand]);

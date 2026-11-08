@@ -94,7 +94,8 @@ export function classifyG2OfflinePollResponse(input: G2OfflinePollResponse): G2O
   if (s === 200) return result('VERIFY_IMMUTABLE_RECEIPT');
   if (s === 401 || s === 403) return result('PAUSE_SOURCE_FOR_AUTH_REVIEW');
   if (s === 404 || s === 410) return result('HOLD_ABSENCE_FOR_RECONCILIATION');
-  if (s >= 300 && s < 400) return result('REJECT_UNEXPECTED_REDIRECT');
+  // 304 is a cache validator response, not a redirect or new immutable receipt.
+  if (s >= 300 && s < 400 && s !== 304) return result('REJECT_UNEXPECTED_REDIRECT');
 
   // A Retry-After beyond the safe bounded window MUST NOT be truncated into
   // an earlier retry, as that would violate the vendor's rate limit.

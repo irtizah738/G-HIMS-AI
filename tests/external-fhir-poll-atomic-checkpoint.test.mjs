@@ -1,8 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { assertStageDCheckpointEvidence } from '../lib/clinical/intelligence/external-fhir-poll-checkpoint-policy.ts';
 
 function valid() {
+  const resourceJson=JSON.stringify({
+    resourceType:'Observation',id:'observation-a',meta:{versionId:'v1'},
+  });
+  const resourceHash=createHash('sha256').update(resourceJson,'utf8').digest('hex');
   const expected = {
     tenantId:'synthetic-tenant',sourceId:'synthetic-source',facilityId:'synthetic-facility',
     manifestId:'47eedc4e-2f4c-48a8-80e4-bd980cb86c22',
@@ -31,16 +36,16 @@ function valid() {
     receipt:{tenantId:expected.tenantId,sourceId:expected.sourceId,resourceType:'Observation',
       resourceId:expected.resourceId,sourceVersionId:'v1',receiptId:expected.receiptId,
       patientId:'local-patient',status:'CURRENT',immutable:true,
-      projectionAuthority:'UNVERIFIED_EXTERNAL_EVIDENCE',resourceHash:'c'.repeat(64),
-      provenance:{mappedByVerifiedLink:'fpl_'+'d'.repeat(64)}},
+      projectionAuthority:'UNVERIFIED_EXTERNAL_EVIDENCE',resourceHash,resourceJson,
+      provenance:{mappedByVerifiedLink:'fpl_'+'d'.repeat(64),contentSha256:resourceHash}},
     head:{receiptId:expected.receiptId,sourceId:expected.sourceId,tenantId:expected.tenantId,
       patientId:'local-patient',resourceType:'Observation',resourceId:expected.resourceId,
       sourceVersionId:'v1'},
     importEvent:{eventType:'EXTERNAL_FHIR_VERSION_IMPORTED',receiptId:expected.receiptId,
-      resourceHash:'c'.repeat(64),patientId:'local-patient'},
+      resourceHash,patientId:'local-patient'},
     importAudit:{action:'EXTERNAL_FHIR_IMPORT',targetId:expected.receiptId,
-      resourceHash:'c'.repeat(64),immutable:true,result:'CURRENT'},
-    importOutbox:{receiptId:expected.receiptId,resourceHash:'c'.repeat(64),
+      resourceHash,immutable:true,result:'CURRENT'},
+    importOutbox:{receiptId:expected.receiptId,resourceHash,
       status:'HELD',destination:'CI_EXTERNAL_CONTEXT_QUALIFICATION'},
     availability:null,
     patientLink:{tenantId:expected.tenantId,sourceId:expected.sourceId,
@@ -76,6 +81,17 @@ const cases = [
   ['historical version',e=>e.receipt.status='HISTORICAL',/IMPORTED_RECEIPT_INVALID/],
   ['reconciliation version',e=>e.receipt.status='RECONCILIATION_REQUIRED',/IMPORTED_RECEIPT_INVALID/],
   ['receipt wrong source version',e=>e.receipt.sourceVersionId='v2',/IMPORTED_RECEIPT_INVALID/],
+  ['receipt body tampered after import',e=>e.receipt.resourceJson='{"resourceType":"Patient"}',/RECEIPT_PAYLOAD_INTEGRITY/],
+  ['receipt content hash changed',e=>e.receipt.resourceHash='e'.repeat(64),/RECEIPT_PAYLOAD_INTEGRITY/],
+  ['receipt provenance digest changed',e=>e.receipt.provenance.contentSha256='e'.repeat(64),/RECEIPT_PAYLOAD_INTEGRITY/],
+  ['receipt payload exceeds import limit',e=>e.receipt.resourceJson='A'.repeat(120001),/RECEIPT_PAYLOAD_INTEGRITY/],
+  ['receipt resource identity substituted with coherent hashes',e=>{
+    const body=JSON.stringify({resourceType:'Observation',id:'other',meta:{versionId:'v1'}});
+    const hash=createHash('sha256').update(body,'utf8').digest('hex');
+    e.receipt.resourceJson=body;e.receipt.resourceHash=hash;
+    e.receipt.provenance.contentSha256=hash;
+    e.importEvent.resourceHash=hash;e.importAudit.resourceHash=hash;e.importOutbox.resourceHash=hash;
+  },/RECEIPT_PAYLOAD_INTEGRITY/],
   ['current head moved',e=>e.head.receiptId='other',/CURRENT_HEAD_CHANGED/],
   ['import event missing',e=>e.importEvent=null,/EVIDENCE_MISSING/],
   ['import audit missing',e=>e.importAudit=null,/EVIDENCE_MISSING/],

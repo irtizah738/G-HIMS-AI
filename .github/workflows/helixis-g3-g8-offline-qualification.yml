@@ -1,18 +1,10 @@
 name: Helixis G3-G8 Synthetic Offline Qualification
 
 on:
+  # This workflow must emit BOTH stable job contexts for every PR to main.
+  # A required status check + paths-filtered workflow can remain Pending forever.
   pull_request:
     branches: [main]
-    paths:
-      - 'lib/clinical/intelligence/external-fhir-*'
-      - 'tests/external-fhir-*'
-      - 'tests/helixis-g3-g8-pr-review-evidence.test.mjs'
-      - 'emulator-security/helixis-fhir-*'
-      - 'emulator-security/helixis-external-*'
-      - 'scripts/ops/helixis-g3-g8-*'
-      - '.github/workflows/helixis-g3-g8-offline-qualification.yml'
-      - 'firestore.rules'
-      - 'bunfig.toml'
 
 permissions:
   contents: read
@@ -62,6 +54,8 @@ jobs:
             tests/external-fhir-g2-offline-outcome.test.mjs
       - name: GitHub review-evidence fail-closed contract (offline only)
         run: node --test tests/helixis-g3-g8-pr-review-evidence.test.mjs
+      - name: Assert G3-G8 job availability for every main PR
+        run: node --test tests/helixis-g3-g8-check-availability.test.mjs
       - name: FHIR import and transport contracts
         run: bun test tests/helixis-external-fhir-import.test.ts tests/helixis-fhir-r4-transport-safety.test.ts
       - name: Existing interoperability regression

@@ -296,6 +296,26 @@ test('Stage D: checkpoint event cryptographically binds sealed manifest and exac
   } finally { await f.db.recursiveDelete(f.root); }
 }, 60000);
 
+test('Stage D: tampered receipt bytes cannot advance a sealed manifest checkpoint', async () => {
+  const f = await tenantFixture();
+  try {
+    await persistSealedSyntheticPollManifest(f);
+    await assert.rejects(runPersistedSyntheticFhirPoll({
+      db: f.db, actor: f.actor, sourceId, manifestId: f.manifest.manifestId,
+      cipher: f.cipher,
+      readFixture: async () => observation('observation-a','v1','2026-10-21T10:00:00Z',1.1),
+      afterImportCommitted: async (_index, receiptId) => {
+        await f.root.collection('fhirImportedVersions').doc(receiptId)
+          .update({resourceJson: '{"resourceType":"Observation","id":"tampered"}'});
+      },
+    }), /FHIR_POLL_D_RECEIPT_PAYLOAD_INTEGRITY_INVALID/);
+    const lease = await f.root.collection('fhirSourcePollLeases').doc(sourceId).get();
+    assert.equal(lease.get('checkpointSequence'),0);
+    assert.equal((await f.root.collection('fhirSourcePollEvents')
+      .where('eventType','==','FHIR_SOURCE_POLL_CHECKPOINTED').get()).size,0);
+  } finally { await f.db.recursiveDelete(f.root); }
+}, 60000);
+
 test('Stage D: post-receipt consent withdrawal prevents checkpoint; reverified replay recovers', async () => {
   const f = await tenantFixture();
   const link = f.root.collection('fhirPatientLinks').doc(fhirPatientLinkId(sourceId, externalPatientId));

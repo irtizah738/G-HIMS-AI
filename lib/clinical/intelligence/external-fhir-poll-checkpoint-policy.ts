@@ -3,6 +3,44 @@
  * These assertions run over documents read in ONE Firestore transaction by the
  * persisted synthetic checkpoint writer. They never use a worker clock.
  */
+import { createHash } from 'node:crypto';
+
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+const MAX_FHIR_RECEIPT_BYTES = 120_000;
+
+/**
+ * Re-hash the exact persisted FHIR bytes before advancing a checkpoint.
+ * Metadata agreement alone is insufficient when a privileged writer can
+ * accidentally or maliciously corrupt the immutable receipt document.
+ */
+function verifiedReceiptPayload(
+  receipt: Record<string, unknown>,
+  expected: {resourceType: string; resourceId: string; expectedVersionId: string},
+): boolean {
+  const serialized = receipt.resourceJson;
+  const hash = receipt.resourceHash;
+  if (typeof serialized !== 'string' || typeof hash !== 'string' ||
+      !SHA256_HEX.test(hash) ||
+      Buffer.byteLength(serialized, 'utf8') > MAX_FHIR_RECEIPT_BYTES ||
+      createHash('sha256').update(serialized, 'utf8').digest('hex') !== hash) {
+    return false;
+  }
+  const provenance = receipt.provenance;
+  if (!provenance || typeof provenance !== 'object' || Array.isArray(provenance) ||
+      (provenance as Record<string, unknown>).contentSha256 !== hash) {
+    return false;
+  }
+  let parsed: unknown;
+  try { parsed = JSON.parse(serialized); } catch { return false; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+  const resource = parsed as Record<string, unknown>;
+  const meta = resource.meta;
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return false;
+  return resource.resourceType === expected.resourceType &&
+    resource.id === expected.resourceId &&
+    (meta as Record<string, unknown>).versionId === expected.expectedVersionId;
+}
+
 export type StageDCheckpointEvidence = Readonly<{
   expected: {
     tenantId: string; sourceId: string; facilityId: string;
@@ -85,6 +123,9 @@ export function assertStageDCheckpointEvidence(e: StageDCheckpointEvidence): voi
       typeof r.patientId !== 'string' || !r.patientId ||
       !r.provenance || typeof r.provenance !== 'object') {
     throw new Error('FHIR_POLL_D_IMPORTED_RECEIPT_INVALID');
+  }
+  if (!verifiedReceiptPayload(r, x)) {
+    throw new Error('FHIR_POLL_D_RECEIPT_PAYLOAD_INTEGRITY_INVALID');
   }
   if (e.head.receiptId !== x.receiptId ||
       e.head.sourceId !== x.sourceId || e.head.tenantId !== x.tenantId ||

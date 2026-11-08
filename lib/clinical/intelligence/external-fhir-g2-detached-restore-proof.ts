@@ -45,7 +45,7 @@ function canonical(value:unknown):string{
   return '{'+keys.map(k=>JSON.stringify(k)+':'+canonical(o[k])).join(',')+'}';
 }
 function normalized(value:unknown):string{
-  let raw:string;
+  let raw:string|undefined;
   try{raw=JSON.stringify(value,(_k,v)=>{
     if(typeof v==='bigint'||typeof v==='function'||typeof v==='symbol'||
        typeof v==='number'&&!Number.isFinite(v))deny('NON_JSON_VALUE');

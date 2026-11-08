@@ -390,14 +390,14 @@ export async function readExternalClinicalEvidence(args: {
         const snap=sourceSnaps[i],row=sources.get(sourceId);
         if(!snap.exists||!snap.updateTime||!row)
           throw new Error('CI_EXT15_SOURCE_FENCE_UNAVAILABLE');
-        return [sourceId,snap.updateTime.toMillis(),row.facilityId,
+        return [sourceId,[snap.updateTime.seconds,snap.updateTime.nanoseconds],row.facilityId,
           row.siteApprovalId||null,row.oauth?.credentialRevision||null];
       });
       const consentFences=linkIds.map((linkId,i)=>{
         const snap=linkSnaps[i],row=links.get(linkId);
         if(!snap.exists||!snap.updateTime||!row)
           throw new Error('CI_EXT15_CONSENT_FENCE_UNAVAILABLE');
-        return [linkId,snap.updateTime.toMillis(),row.patientId,
+        return [linkId,[snap.updateTime.seconds,snap.updateTime.nanoseconds],row.patientId,
           row.matchStatus,row.consentStatus,row.facilityId];
       });
       const authorityFenceHash=hash(canonical({

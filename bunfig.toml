@@ -1,2 +1,8 @@
 [install]
 backend = "copyfile"
+
+# Node.js node:test G3-G8 offline contracts run explicitly in their own
+# isolated qualification workflow. Bun's shared-process legacy suite must
+# not discover these files or inherit their synthetic ghims-p4-ci environment.
+[test]
+pathIgnorePatterns = ["tests/external-fhir-*.test.mjs"]

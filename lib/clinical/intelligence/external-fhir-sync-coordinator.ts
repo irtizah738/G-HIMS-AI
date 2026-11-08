@@ -311,10 +311,28 @@ export async function renewSourcePollLease(args: {
     return { expiresAtMs, renewalSequence };
   });
 }
+/**
+ * Legacy source-only checkpointing is permitted solely for CI-EXT-11/12
+ * synthetic emulator fixtures. This function cannot establish that a versioned
+ * receipt, sealed manifest, audit, and HELD outbox exist in the same snapshot.
+ * A hosted worker must use a new, independently reviewed evidence-bound writer.
+ */
+function assertLegacyCheckpointEmulatorOnly(): void {
+  if (process.env.NODE_ENV !== 'test' ||
+      process.env.GHIMS_RUNTIME_MODE !== 'TEST' ||
+      process.env.FIREBASE_PROJECT_ID !== 'ghims-p4-ci' ||
+      process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8080' ||
+      process.env.GHIMS_CI_EXTERNAL_FHIR_IMPORT_ENABLED !== 'false' ||
+      process.env.GHIMS_INTEGRATION_FHIR_R4_STATE !== 'DISABLED') {
+    throw new Error('FHIR_SYNC_LEGACY_CHECKPOINT_TEST_ONLY');
+  }
+}
+
 export async function checkpointSourcePollLease(args: {
   db: Firestore; actor: FhirImportActor; fence: FhirSourcePollFence;
   sequence: number; workId: string; digest: string;
 }): Promise<{ checkpointSequence: number; replay: boolean }> {
+  assertLegacyCheckpointEmulatorOnly();
   const { db, actor, fence } = args;
   if (!Number.isSafeInteger(args.sequence) || args.sequence < 1 ||
       !/^[A-Za-z0-9._-]{1,96}$/.test(args.workId) ||
@@ -330,6 +348,9 @@ export async function checkpointSourcePollLease(args: {
     const source = sourceSnap.exists ? sourceSnap.data() as FhirSourceRecord : null;
     if (!source) throw new Error('FHIR_SYNC_SOURCE_NOT_FOUND');
     authorizeCoordinator(actor, source, fence.sourceId);
+    if (source.syntheticOnly !== true) {
+      throw new Error('FHIR_SYNC_LEGACY_CHECKPOINT_SYNTHETIC_SOURCE_REQUIRED');
+    }
     if (actor.tenantId !== fence.tenantId) throw new Error('FHIR_SYNC_FENCE_SCOPE_DENIED');
     await assertSourcePollFenceInTransaction({ tx, db, source, fence });
     const lease = leaseSnap.data() as FhirSourcePollLease;

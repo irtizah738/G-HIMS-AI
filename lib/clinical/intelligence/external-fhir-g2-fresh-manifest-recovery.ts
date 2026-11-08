@@ -110,7 +110,7 @@ export async function recoverSyntheticG2FreshManifest(
   const reviewId=(role:string)=>'fg2r_'+sha([oldStateId,args.reviewId,role]);
   return args.db.runTransaction(async tx=>{
     const [sourceSnap,oldManifestSnap,oldStateSnap,securitySnap,clinicalSnap,
-      recoverySnap,newManifestSnap,sourceLeaseSnap,supersessionSnap]=await tx.getAll(
+      recoverySnap,newManifestSnap,sourceLeaseSnap]=await tx.getAll(
       sourceRef,
       root.collection('fhirPollWorkManifests').doc(old.manifestId),
       root.collection('fhirG2SyntheticWorkStates').doc(oldStateId),
@@ -119,8 +119,6 @@ export async function recoverSyntheticG2FreshManifest(
       root.collection('fhirG2SyntheticFreshRecoveries').doc(recoveryId),
       newManifestRef,
       root.collection('fhirSourcePollLeases').doc(old.sourceId),
-      root.collection('fhirG2SyntheticWorkEvents').doc(
-        'fg2e_'+sha([oldStateId,(oldStateSnapPlaceholder:unknown)=>oldStateSnapPlaceholder])),
     );
     // The supersession event ID depends on the persisted transition sequence.
     // It is read after state verification and BEFORE any write.
@@ -176,7 +174,7 @@ export async function recoverSyntheticG2FreshManifest(
       root.collection('auditLogs').doc('fau_'+supersedeId),
       root.collection('fhirG2SyntheticWorkOutbox').doc('fg2o_'+supersedeId),
     );
-    validateFhirSiteApproval(source,approvalSnap.data() as FhirSiteApproval|undefined ?? null,
+    validateFhirSiteApproval(source,(approvalSnap.data() as FhirSiteApproval|undefined)??null,
       fresh.items[0].resourceType,now);
     const a=superAudit.data(),o=superOutbox.data();
     if(!a||a.action!=='FHIR_G2_SYNTHETIC_WORK_REVIEWED_SUPERSEDED'||

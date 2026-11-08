@@ -605,3 +605,112 @@ test('G2: recovered manifest replay never bypasses subsequently withdrawn consen
     expect((await f.root.collection('fhirPollWorkManifests').get()).size).toBe(2);
   }finally{await f.scope.db.recursiveDelete(f.root);}
 },60000);
+
+function sourceRevisionFromSnapshot(snap: {updateTime?: {seconds:number;nanoseconds:number}}):string {
+  if(!snap.updateTime)throw new Error('SYNTHETIC_SOURCE_REVISION_ABSENT');
+  return snap.updateTime.seconds+'.'+String(snap.updateTime.nanoseconds).padStart(9,'0');
+}
+test('G2: same credentialRevision cannot mask rotated token URL, client, key, secret or scopes',async()=>{
+  const f=await fixture();
+  try{
+    const recovery=await approvedRecoveryFixture(f);
+    const sourceBase=(await f.source.get()).data();
+    if(!sourceBase||!sourceBase.oauth)throw new Error('G2_OAUTH_FIXTURE_MISSING');
+    const altered=[
+      {oauth:{...sourceBase.oauth,tokenUrl:'https://auth2.example.test/token'}},
+      {oauth:{...sourceBase.oauth,clientId:'other-oauth-client'}},
+      {oauth:{...sourceBase.oauth,keyId:'other-key-id'}},
+      {oauth:{...sourceBase.oauth,secretVersion:3}},
+      {oauth:{...sourceBase.oauth,scopes:['system/Patient.read']}},
+      {baseUrl:'https://other-fhir.example.test/r4'},
+    ];
+    for(const patch of altered){
+      await f.source.update(patch);
+      const current=await f.source.get();
+      await expect(recoverSyntheticG2FreshManifest({
+        ...recovery,expectedSourceRevision:sourceRevisionFromSnapshot(current),
+      })).rejects.toThrow('CREDENTIAL_APPROVAL_BINDING_INVALID');
+      expect((await f.root.collection('fhirG2SyntheticFreshRecoveries').get()).size).toBe(0);
+    }
+    // Restoring the exact approved non-secret configuration uses a fresh
+    // source generation but does not require a new credential approval.
+    await f.source.update({oauth:sourceBase.oauth,baseUrl:sourceBase.baseUrl});
+    const valid=await f.source.get();
+    const created=await recoverSyntheticG2FreshManifest({
+      ...recovery,expectedSourceRevision:sourceRevisionFromSnapshot(valid),
+    });
+    expect(created.replay).toBe(false);
+    expect(created.productionRelease).toBe('NO_GO');
+  }finally{await f.scope.db.recursiveDelete(f.root);}
+},60000);
+test('G2: credential revision must be reapproved with an exact rotated config binding',async()=>{
+  const f=await fixture();
+  try{
+    const recovery=await approvedRecoveryFixture(f);
+    const original=(await f.source.get()).data();
+    if(!original||!original.oauth)throw new Error('G2_OAUTH_FIXTURE_MISSING');
+    await f.source.update({oauth:{...original.oauth,credentialRevision:3,secretVersion:3}});
+    const rotated=await f.source.get();
+    const next={...recovery,expectedCredentialRevision:3,
+      expectedSourceRevision:sourceRevisionFromSnapshot(rotated)};
+    await expect(recoverSyntheticG2FreshManifest(next))
+      .rejects.toThrow('CI_EXT04_SITE_APPROVAL_REQUIRED');
+    const approval=f.root.collection('fhirSiteApprovals').doc('g2-recovery-site-approval');
+    await approval.update({credentialRevision:3});
+    await expect(recoverSyntheticG2FreshManifest(next))
+      .rejects.toThrow('CREDENTIAL_APPROVAL_BINDING_INVALID');
+    await approval.update({recoveryBindingSha256:syntheticG2RecoveryCredentialBinding(
+      rotated.data() as Parameters<typeof syntheticG2RecoveryCredentialBinding>[0])});
+    const accepted=await recoverSyntheticG2FreshManifest(next);
+    expect(accepted.credentialRevision).toBe(3);
+    expect(accepted.checkpointAuthorized).toBe(false);
+    expect((await f.root.collection('fhirG2SyntheticFreshRecoveries').get()).size).toBe(1);
+  }finally{await f.scope.db.recursiveDelete(f.root);}
+},60000);
+test('G2: synthetic precommit power loss leaves zero partial writes; retry commits once',async()=>{
+  const f=await fixture();
+  try{
+    const recovery=await approvedRecoveryFixture(f);
+    const before={
+      manifests:(await f.root.collection('fhirPollWorkManifests').get()).size,
+      events:(await f.root.collection('fhirPollManifestEvents').get()).size,
+      audits:(await f.root.collection('auditLogs').get()).size,
+      outboxes:(await f.root.collection('fhirPollManifestOutbox').get()).size,
+    };
+    await expect(recoverSyntheticG2FreshManifest({
+      ...recovery,afterValidationBeforeCommit:async()=>{
+        throw new Error('SYNTHETIC_POWER_LOSS_BEFORE_COMMIT');
+      },
+    })).rejects.toThrow('SYNTHETIC_POWER_LOSS_BEFORE_COMMIT');
+    expect((await f.root.collection('fhirG2SyntheticFreshRecoveries').get()).size).toBe(0);
+    expect((await f.root.collection('fhirG2SyntheticRecoveryEvents').get()).size).toBe(0);
+    expect((await f.root.collection('fhirPollWorkManifests').get()).size).toBe(before.manifests);
+    expect((await f.root.collection('fhirPollManifestEvents').get()).size).toBe(before.events);
+    expect((await f.root.collection('auditLogs').get()).size).toBe(before.audits);
+    expect((await f.root.collection('fhirPollManifestOutbox').get()).size).toBe(before.outboxes);
+    const committed=await recoverSyntheticG2FreshManifest(recovery);
+    expect(committed.replay).toBe(false);
+    const lostResponseReplay=await recoverSyntheticG2FreshManifest(recovery);
+    expect(lostResponseReplay.replay).toBe(true);
+    expect((await f.root.collection('fhirG2SyntheticFreshRecoveries').get()).size).toBe(1);
+    expect((await f.root.collection('fhirG2SyntheticRecoveryEvents').get()).size).toBe(1);
+    expect((await f.root.collection('fhirPollWorkManifests').get()).size).toBe(before.manifests+1);
+    expect((await f.root.collection('patient360Projections').get()).size).toBe(0);
+  }finally{await f.scope.db.recursiveDelete(f.root);}
+},60000);
+test('G2: source active lease and checkpoint cursor inconsistency block fresh manifest',async()=>{
+  const f=await fixture();
+  try{
+    const recovery=await approvedRecoveryFixture(f);
+    const lease=f.root.collection('fhirSourcePollLeases').doc(sourceId);
+    await lease.set({tenantId:recovery.oldManifest.tenantId,
+      sourceId,facilityId,status:'ACTIVE',expiresAtMs:Date.now()+120000,
+      checkpointSequence:0});
+    await expect(recoverSyntheticG2FreshManifest(recovery))
+      .rejects.toThrow('CHECKPOINT_SEQUENCE_OR_ACTIVE_LEASE');
+    await lease.update({status:'RELEASED',expiresAtMs:0,checkpointSequence:2});
+    await expect(recoverSyntheticG2FreshManifest(recovery))
+      .rejects.toThrow('CHECKPOINT_SEQUENCE_OR_ACTIVE_LEASE');
+    expect((await f.root.collection('fhirG2SyntheticFreshRecoveries').get()).size).toBe(0);
+  }finally{await f.scope.db.recursiveDelete(f.root);}
+},60000);

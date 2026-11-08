@@ -1,0 +1,21 @@
+# Helixis — Security Code Ownership
+# @AB2412: authorized security code owner (repository write access verified).
+# Clinical signoff is tracked independently outside GitHub.
+# Code-owner approval is not clinical or production release authorization.
+
+# Governance configuration and GitHub Actions
+/.github/CODEOWNERS @AB2412
+/.github/workflows/ @AB2412
+
+# Firestore security and access boundary
+/firestore.rules @AB2412
+
+# FHIR integration and provenance contracts
+/lib/clinical/intelligence/external-fhir-* @AB2412
+
+# FHIR integration security and emulator qualification
+/emulator-security/helixis-fhir-* @AB2412
+/emulator-security/helixis-external-* @AB2412
+
+# Security qualification scripts
+/scripts/ops/helixis-g3-g8-* @AB2412

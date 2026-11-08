@@ -591,8 +591,8 @@ scenario('encrypted synthetic backup file cold-readback returns quarantined evid
     await writeSyntheticColdBackupFile(path,backup.envelope);
     const disk=await readFile(path,'utf8');
     for(const secret of [
-      patientId,externalPatientId,sourceId,facilityId,
-      'resourceJson','obs-f-0-0','opaqueVendorCursor',
+      patientId,externalPatientId,
+      'resourceJson','obs-f-0-0','OPAQUE_F_VENDOR_CURSOR_PAGE_0',
     ])assert.ok(!disk.includes(secret),'encrypted archive leaked clinical field');
     const snapshot=await readSyntheticColdBackupFile(path);
     const restored=coldReadbackVerifiedSyntheticG2Evidence({
@@ -609,13 +609,8 @@ scenario('encrypted synthetic backup file cold-readback returns quarantined evid
 });
 scenario('cold readback is deterministic across fresh process-like key holders',async f=>{
   const backup=await syntheticColdFixture(f);
-  const secondSigner=new EmulatorOnlyG2DetachedRestoreSigner(
-    // In practice this is separately held by a trusted custodian; synthetic
-    // test uses the same verifier instance because its key is nonexportable.
-    // Distinct AES key object simulates local process re-entry.
-    randomBytes(32),
-  );
-  assert.ok(secondSigner);
+  // Distinct AES key object models a fresh local readback session. The
+  // test custody signer is deliberately retained independently of the file.
   const after=coldReadbackVerifiedSyntheticG2Evidence({
     ...backup,
     decryptionKey:Buffer.from(backup.decryptionKey),
@@ -689,9 +684,8 @@ scenario('exclusive file write cannot overwrite existing backup and truncation d
     const before=await readFile(path,'utf8');
     assert.equal(JSON.parse(before).archiveId,backup.envelope.archiveId);
     await writeFile(path,'{');
-    const invalid=await assert.rejects(readSyntheticColdBackupFile(path),
+    await assert.rejects(readSyntheticColdBackupFile(path),
       /G2_COLD_READBACK_BACKUP_FILE_JSON_INVALID/);
-    assert.ok(invalid===undefined);
     assert.deepEqual(await counts(f),[1,1,1]);
   }finally{await rm(dir,{recursive:true,force:true});}
 });

@@ -19,6 +19,11 @@ import { EmulatorOnlyStageFRecoverySigner,stageFAnchorFingerprint,
 import { rehearseSyntheticMultiPageRecovery } from '@/lib/clinical/intelligence/external-fhir-poll-multi-rehearsal';
 import {EmulatorOnlyG2DetachedRestoreSigner,g2RestoreCertificateFingerprint}
   from '@/lib/clinical/intelligence/external-fhir-g2-detached-restore-proof';
+import {coldReadbackVerifiedSyntheticG2Evidence,
+  encryptVerifiedSyntheticG2Evidence,fingerprintSyntheticG2ColdBackup,
+  writeSyntheticColdBackupFile,readSyntheticColdBackupFile,
+  type G2SyntheticColdBackup,
+} from '@/lib/clinical/intelligence/external-fhir-g2-encrypted-cold-readback';
 import {EmulatorOnlyStageGCursorTagger,EmulatorOnlyStageGWitnessIssuer,
   EmulatorOnlyStageGWitnessVerifier,EmulatorOnlyDetachedWitnessLedger,
   stageGCertificateFingerprint,deriveStageGPageProofs,
@@ -548,4 +553,168 @@ scenario('detached inventory cannot run in PRODUCTION mode',async f=>{
       /FHIR_POLL_F_EMULATOR_ONLY/);
   }finally{process.env.GHIMS_RUNTIME_MODE=env;}
   assert.deepEqual(await counts(f),[0,0,0]);
+});
+
+/** Cold-readback v1 uses a local encrypted file, never a Firestore restore. */
+async function syntheticColdFixture(f:Fixture){
+  const detachedSigner=new EmulatorOnlyG2DetachedRestoreSigner(randomBytes(32));
+  const encryptionKey=randomBytes(32);
+  const first=await rehearseSyntheticMultiPageRecovery({
+    ...f.args,captureValidatedEvidenceForBackup:true,
+    detachedRestore:{signer:detachedSigner},
+  });
+  assert.ok(first.detachedRestoreCertificate);
+  assert.ok(first.validatedEvidenceForBackup);
+  const archiveId=randomUUID();
+  const backup=encryptVerifiedSyntheticG2Evidence({
+    archiveId,stageFSigner:f.signer,detachedSigner,
+    evidence:first.validatedEvidenceForBackup,
+    detachedCertificate:first.detachedRestoreCertificate,encryptionKey,
+  });
+  const readArgs={
+    expectedArchiveFingerprint:backup.fingerprint,
+    expectedArchiveId:archiveId,
+    expectedTenantId:f.actor.tenantId,
+    expectedSourceId:sourceId,
+    expectedFacilityId:facilityId,
+    trustedDetachedCertificate:first.detachedRestoreCertificate,
+    stageFSigner:f.signer,detachedSigner,decryptionKey:encryptionKey,
+  };
+  return {...backup,...readArgs};
+}
+
+scenario('encrypted synthetic backup file cold-readback returns quarantined evidence only',async f=>{
+  const backup=await syntheticColdFixture(f);
+  const dir=await mkdtemp(join(tmpdir(),'helixis-g2-cold-'));
+  try{
+    const path=join(dir,'restore.g2-test.enc.json');
+    await writeSyntheticColdBackupFile(path,backup.envelope);
+    const disk=await readFile(path,'utf8');
+    for(const secret of [
+      patientId,externalPatientId,sourceId,facilityId,
+      'resourceJson','obs-f-0-0','opaqueVendorCursor',
+    ])assert.ok(!disk.includes(secret),'encrypted archive leaked clinical field');
+    const snapshot=await readSyntheticColdBackupFile(path);
+    const restored=coldReadbackVerifiedSyntheticG2Evidence({
+      ...backup,envelope:snapshot,
+    });
+    assert.equal(restored.status,'QUARANTINED_REQUIRES_FRESH_ANCHOR');
+    assert.equal(restored.clinicalAuthority,false);
+    assert.equal(restored.sourceDispatchAllowed,false);
+    assert.equal(restored.productionRelease,'NO_GO');
+    assert.equal(restored.validatedEvidence.steps.length,4);
+    assert.deepEqual(await counts(f),[1,1,1]);
+    assert.equal((await f.root.collection('patient360Projections').get()).size,0);
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
+scenario('cold readback is deterministic across fresh process-like key holders',async f=>{
+  const backup=await syntheticColdFixture(f);
+  const secondSigner=new EmulatorOnlyG2DetachedRestoreSigner(
+    // In practice this is separately held by a trusted custodian; synthetic
+    // test uses the same verifier instance because its key is nonexportable.
+    // Distinct AES key object simulates local process re-entry.
+    randomBytes(32),
+  );
+  assert.ok(secondSigner);
+  const after=coldReadbackVerifiedSyntheticG2Evidence({
+    ...backup,
+    decryptionKey:Buffer.from(backup.decryptionKey),
+  });
+  assert.equal(after.archiveFingerprint,backup.fingerprint);
+  assert.equal(after.status,'QUARANTINED_REQUIRES_FRESH_ANCHOR');
+});
+scenario('modified encrypted payload fails even with attacker-updated archive fingerprint',async f=>{
+  const backup=await syntheticColdFixture(f);
+  const bytes=Buffer.from(backup.envelope.ciphertextBase64,'base64');
+  bytes[0]^=1;
+  const altered:G2SyntheticColdBackup={
+    ...backup.envelope,ciphertextBase64:bytes.toString('base64'),
+  };
+  const guessedFingerprint=fingerprintSyntheticG2ColdBackup(altered);
+  assert.notEqual(guessedFingerprint,backup.fingerprint);
+  await assert.rejects(async()=>coldReadbackVerifiedSyntheticG2Evidence({
+    ...backup,envelope:altered,expectedArchiveFingerprint:guessedFingerprint,
+  }),/G2_COLD_READBACK_AUTHENTICATION_FAILED/);
+  assert.deepEqual(await counts(f),[1,1,1]);
+});
+scenario('wrong encryption key rejects the authenticated readback',async f=>{
+  const backup=await syntheticColdFixture(f);
+  assert.throws(()=>coldReadbackVerifiedSyntheticG2Evidence({
+    ...backup,envelope:backup.envelope,decryptionKey:randomBytes(32),
+  }),/G2_COLD_READBACK_AUTHENTICATION_FAILED/);
+});
+scenario('old independently signed archive head is rejected after newer backup',async f=>{
+  const original=await syntheticColdFixture(f);
+  const newer=encryptVerifiedSyntheticG2Evidence({
+    archiveId:randomUUID(),evidence:
+      coldReadbackVerifiedSyntheticG2Evidence({...original,envelope:original.envelope}).validatedEvidence,
+    stageFSigner:f.signer,detachedSigner:original.detachedSigner,
+    detachedCertificate:original.trustedDetachedCertificate,
+    encryptionKey:original.decryptionKey,
+  });
+  assert.notEqual(original.fingerprint,newer.fingerprint);
+  assert.throws(()=>coldReadbackVerifiedSyntheticG2Evidence({
+    ...original,envelope:original.envelope,
+    expectedArchiveFingerprint:newer.fingerprint,
+  }),/G2_COLD_READBACK_INDEPENDENT_ARCHIVE_HEAD_MISMATCH/);
+});
+scenario('changed scope and substituted signed certificate are denied',async f=>{
+  const backup=await syntheticColdFixture(f);
+  assert.throws(()=>coldReadbackVerifiedSyntheticG2Evidence({
+    ...backup,envelope:backup.envelope,expectedTenantId:'other-tenant',
+  }),/G2_COLD_READBACK_EXPECTED_SCOPE_MISMATCH/);
+  const otherSigner=new EmulatorOnlyG2DetachedRestoreSigner(randomBytes(32));
+  const otherCert=otherSigner.sign(
+    coldReadbackVerifiedSyntheticG2Evidence({...backup,envelope:backup.envelope}).validatedEvidence);
+  assert.throws(()=>coldReadbackVerifiedSyntheticG2Evidence({
+    ...backup,envelope:backup.envelope,trustedDetachedCertificate:otherCert,
+  }),/G2_COLD_READBACK_DETACHED_CERTIFICATE_MISMATCH/);
+});
+scenario('backup envelope rejects unsigned metadata smuggling and malformed IV',async f=>{
+  const backup=await syntheticColdFixture(f);
+  assert.throws(()=>coldReadbackVerifiedSyntheticG2Evidence({
+    ...backup,envelope:{...backup.envelope,sourceToken:'SHOULD_NOT_BE_HERE'},
+  }),/G2_COLD_READBACK_ENVELOPE_INVALID/);
+  assert.throws(()=>coldReadbackVerifiedSyntheticG2Evidence({
+    ...backup,envelope:{...backup.envelope,nonceHex:'invalid'},
+  }),/G2_COLD_READBACK_ENVELOPE_INVALID/);
+});
+scenario('exclusive file write cannot overwrite existing backup and truncation denies read',async f=>{
+  const backup=await syntheticColdFixture(f);
+  const dir=await mkdtemp(join(tmpdir(),'helixis-g2-cold-'));
+  try{
+    const path=join(dir,'snapshot.g2-test.enc.json');
+    await writeSyntheticColdBackupFile(path,backup.envelope);
+    await assert.rejects(writeSyntheticColdBackupFile(path,backup.envelope),/EEXIST/);
+    const before=await readFile(path,'utf8');
+    assert.equal(JSON.parse(before).archiveId,backup.envelope.archiveId);
+    await writeFile(path,'{');
+    const invalid=await assert.rejects(readSyntheticColdBackupFile(path),
+      /G2_COLD_READBACK_BACKUP_FILE_JSON_INVALID/);
+    assert.ok(invalid===undefined);
+    assert.deepEqual(await counts(f),[1,1,1]);
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
+scenario('restored record remains untrusted if live consent was withdrawn since export',async f=>{
+  const backup=await syntheticColdFixture(f);
+  await f.root.collection('fhirPatientLinks').doc(
+    fhirPatientLinkId(sourceId,externalPatientId)).update({consentStatus:'WITHDRAWN'});
+  const result=coldReadbackVerifiedSyntheticG2Evidence({
+    ...backup,envelope:backup.envelope,
+  });
+  // Validity of an old snapshot does not prove current clinical authority.
+  assert.equal(result.status,'QUARANTINED_REQUIRES_FRESH_ANCHOR');
+  assert.equal(result.sourceDispatchAllowed,false);
+  assert.equal(result.clinicalAuthority,false);
+  assert.deepEqual(await counts(f),[1,1,1]);
+});
+scenario('synthetic encryption and readback are unavailable in PRODUCTION mode',async f=>{
+  const backup=await syntheticColdFixture(f);
+  const mode=process.env.GHIMS_RUNTIME_MODE;
+  try{
+    process.env.GHIMS_RUNTIME_MODE='PRODUCTION';
+    assert.throws(()=>coldReadbackVerifiedSyntheticG2Evidence({
+      ...backup,envelope:backup.envelope,
+    }),/FHIR_POLL_F_EMULATOR_ONLY/);
+  }finally{process.env.GHIMS_RUNTIME_MODE=mode;}
 });

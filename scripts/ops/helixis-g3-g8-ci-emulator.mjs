@@ -62,7 +62,7 @@ try {
     if(!existsSync(dest)) throw new Error('CI_EMULATOR_BUNDLE_MISSING_'+name);
     compiled.push(dest);
   }
-  if(compiled.length!==11) throw new Error('CI_EMULATOR_SUITE_INCOMPLETE');
+  if(suites.length!==12 || compiled.length!==suites.length) throw new Error('CI_EMULATOR_SUITE_INCOMPLETE');
   console.info('CI_EMULATOR_COMPILED_SUITES='+compiled.length);
   const testCommand='node --test '+compiled.map(p=>JSON.stringify(p)).join(' ');
   run('firebase',['emulators:exec','--project','ghims-p4-ci','--only','firestore',testCommand]);

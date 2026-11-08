@@ -10,8 +10,11 @@ import {
   assertStageFEmulatorOnly, assertStageFMultiRecoveryEvidence,
   stageFAnchorFingerprint, type EmulatorOnlyStageFRecoverySigner,
   type StageFMultiAnchor, type StageFReview, type StageFStepEvidence,
+  type StageFMultiEvidence,
 } from './external-fhir-poll-multi-recovery';
 import { fhirImportHeadId, fhirPatientLinkId, type FhirImportActor } from './external-fhir-import';
+import {EmulatorOnlyG2DetachedRestoreSigner,g2RestoreCertificateFingerprint,
+  type G2DetachedRestoreCertificate} from './external-fhir-g2-detached-restore-proof';
 import { assertStageGCursorContinuity, stageGCertificateFingerprint,
   type StageGCursorAttestation,
 } from './external-fhir-poll-vendor-cursor';
@@ -38,9 +41,18 @@ export async function rehearseSyntheticMultiPageRecovery(args: {
   rehearsalId:string;
   /** Optional Stage G detached cursor attestation (LOCAL TEST-ONLY). */
   stageG?:StageGCursorAttestation;
+  /** Optional signed PHI-free inventory retained OUTSIDE Firestore. TEST only. */
+  detachedRestore?:Readonly<{
+    signer:EmulatorOnlyG2DetachedRestoreSigner;
+    expectedCertificate?:G2DetachedRestoreCertificate;
+  }>;
+  /** Capture validated synthetic snapshots for encryption OUTSIDE Firestore. PHI in memory. */
+  captureValidatedEvidenceForBackup?:true;
   /** Synthetic pre-commit abort: must leave no rehearsal, event, audit, outbox. */
   afterValidationBeforeCommit?:()=>Promise<void>;
-}):Promise<{status:'REHEARSAL_ONLY';fingerprint:string;replay:boolean}> {
+}):Promise<{status:'REHEARSAL_ONLY';fingerprint:string;replay:boolean;
+  detachedRestoreCertificate?:G2DetachedRestoreCertificate;
+  validatedEvidenceForBackup?:StageFMultiEvidence}> {
   assertStageFEmulatorOnly();
   const a=args.anchor;
   args.signer.verify(a);
@@ -58,7 +70,7 @@ export async function rehearseSyntheticMultiPageRecovery(args: {
   const anchorFingerprint=stageFAnchorFingerprint(a);
   const cursorWitnessFingerprint=args.stageG?
     stageGCertificateFingerprint(args.stageG.certificate):null;
-  const fingerprint=sha(args.stageG?
+  const baseFingerprint=sha(args.stageG?
     ['STAGE_F_SYNTHETIC_MULTI_REHEARSAL_WITH_STAGE_G_V1',
       a.tenantId,a.sourceId,anchorFingerprint,args.rehearsalId,actor.actorId,
       reviewers,cursorWitnessFingerprint]:
@@ -183,6 +195,19 @@ export async function rehearseSyntheticMultiPageRecovery(args: {
       pages,steps,abandonedReservations:abandonedSnaps.map(record),reviews:reviewers,
     };
     assertStageFMultiRecoveryEvidence(verifiedEvidence);
+    // Derive an opaque, keyed record-by-record inventory exclusively from
+    // Stage F-validated transaction snapshots. An externally retained prior
+    // certificate must match BEFORE any rehearsal evidence can be written.
+    const restoreCertificate=args.detachedRestore?.signer.sign(verifiedEvidence);
+    if(args.detachedRestore?.expectedCertificate){
+      args.detachedRestore.signer.verify(verifiedEvidence,
+        args.detachedRestore.expectedCertificate);
+    }
+    const restoreFingerprint=restoreCertificate?
+      g2RestoreCertificateFingerprint(restoreCertificate):null;
+    const fingerprint=restoreFingerprint?
+      sha(['STAGE_F_DETACHED_RESTORE_INVENTORY_V1',baseFingerprint,restoreFingerprint]):
+      baseFingerprint;
     // The detached witness is read only AFTER every Stage F clinical receipt,
     // consent, lease and immutable audit has been reverified in THIS same
     // Firestore transaction, but BEFORE any evidence write.  It is not a
@@ -207,7 +232,10 @@ export async function rehearseSyntheticMultiPageRecovery(args: {
           oldOutbox.get('status')!=='HELD') {
         throw new Error('FHIR_POLL_F_REPLAY_CONFLICT');
       }
-      return {status:'REHEARSAL_ONLY' as const,fingerprint,replay:true};
+      return {status:'REHEARSAL_ONLY' as const,fingerprint,replay:true,
+        ...(restoreCertificate?{detachedRestoreCertificate:restoreCertificate}:{}),
+        ...(args.captureValidatedEvidenceForBackup?{validatedEvidenceForBackup:verifiedEvidence}:{}),
+      };
     }
     const common={schemaVersion:1,tenantId:a.tenantId,sourceId:a.sourceId,
       facilityId:a.facilityId,rehearsalId:args.rehearsalId,
@@ -216,6 +244,10 @@ export async function rehearseSyntheticMultiPageRecovery(args: {
       endCheckpointSequence:a.endCheckpointSequence,
       issuedSequence:a.issuedSequence,clinicalAuthority:false,
       immutable:true,dryRunOnly:true,productionAuthorization:'NO_GO',
+      ...(restoreFingerprint?{
+        detachedRestoreFingerprint:restoreFingerprint,
+        detachedRestoreQualification:'LOCAL_DATA_INTEGRITY_ONLY',
+      }:{}),
       ...(cursorWitnessFingerprint?{
         vendorCursorWitnessFingerprint:cursorWitnessFingerprint,
         vendorCursorQualification:'LOCAL_SYNTHETIC_WITNESS_ONLY',
@@ -229,6 +261,9 @@ export async function rehearseSyntheticMultiPageRecovery(args: {
       action:'FHIR_SYNTHETIC_MULTI_PAGE_RECOVERY_REHEARSED'});
     tx.create(outboxRef,{...common,eventId,status:'HELD',
       destination:'CI_EXTERNAL_CONTEXT_QUALIFICATION'});
-    return {status:'REHEARSAL_ONLY' as const,fingerprint,replay:false};
+    return {status:'REHEARSAL_ONLY' as const,fingerprint,replay:false,
+      ...(restoreCertificate?{detachedRestoreCertificate:restoreCertificate}:{}),
+      ...(args.captureValidatedEvidenceForBackup?{validatedEvidenceForBackup:verifiedEvidence}:{}),
+    };
   });
 }

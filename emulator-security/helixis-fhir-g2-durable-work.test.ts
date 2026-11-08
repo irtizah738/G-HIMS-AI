@@ -9,6 +9,7 @@ import {getAdminFirestore} from '@/server/firebase/admin';
 import {EmulatorOnlyAesGcmCipher} from '@/lib/clinical/intelligence/external-fhir-poll-manifest-seal';
 import {fhirPatientLinkId} from '@/lib/clinical/intelligence/external-fhir-import';
 import {recoverSyntheticG2FreshManifest} from '@/lib/clinical/intelligence/external-fhir-g2-fresh-manifest-recovery';
+import {syntheticG2RecoveryCredentialBinding} from '@/lib/clinical/intelligence/external-fhir-g2-recovery-credential-binding';
 import {
   persistSealedSyntheticPollManifest,runPersistedSyntheticFhirPoll, type NewPollWorkManifest,
 } from '@/lib/clinical/intelligence/external-fhir-poll-manifest-store';
@@ -427,10 +428,15 @@ async function approvedRecoveryFixture(f:Awaited<ReturnType<typeof fixture>>){
       scopes:['system/Observation.read']},
   });
   const reviewedAt=Date.now()-10_000;
+  const sourceForApproval=(await f.source.get()).data();
+  if(!sourceForApproval)throw new Error('G2_SOURCE_APPROVAL_MISSING');
+  const recoveryBindingSha256=syntheticG2RecoveryCredentialBinding(
+    sourceForApproval as Parameters<typeof syntheticG2RecoveryCredentialBinding>[0]);
   await f.root.collection('fhirSiteApprovals').doc('g2-recovery-site-approval').set({
     tenantId:f.scope.manifest.tenantId,sourceId,facilityId,
     approvalId:'g2-recovery-site-approval',status:'APPROVED',
     credentialRevision:2,approvedResourceTypes:['Observation'],
+    recoveryBindingSha256,
     clinicalReviewerId:'site-clinician',securityReviewerId:'site-security',
     sandboxQualificationId:'g2-synthetic-qual',reviewedAt,
     expiresAt:reviewedAt+86_400_000,

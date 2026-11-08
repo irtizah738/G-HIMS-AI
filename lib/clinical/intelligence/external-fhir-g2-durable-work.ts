@@ -19,7 +19,8 @@ import {
 
 type G2WorkStatus =
   | 'QUEUED' | 'LEASED' | 'RETRY_WAIT' | 'EVIDENCE_PENDING'
-  | 'PAUSED_AUTH' | 'HELD_ABSENCE' | 'QUARANTINED';
+  | 'PAUSED_AUTH' | 'HELD_ABSENCE' | 'QUARANTINED'
+  | 'EVIDENCE_RECONCILED' | 'REVIEWED_SUPERSEDED';
 type SourceRecord = {
   tenantId?: string; facilityId?: string; sourceId?: string;
   status?: string; securityReviewStatus?: string; syncMode?: string;
@@ -32,6 +33,10 @@ export type G2WorkRecord = Readonly<{
   workerId: string | null; claimId: string | null;
   leaseExpiresAtMs: number; attempts: number; retryNotBeforeMs: number;
   lastOutcomeDigest: string | null; updatedAtMs: number;
+  /** Persisted Stage D checkpoint event independently reread during reconciliation. */
+  reconciledCheckpointEventId?: string | null;
+  /** Immutable dual-review dossier authorizing supersession only, never requeue. */
+  lastReviewId?: string | null;
 }>;
 export type G2WorkClaim = Readonly<{
   tenantId: string; sourceId: string; manifestId: string; workId: string;
@@ -118,13 +123,18 @@ function validateState(value: unknown, args: Scope, manifestRevision: string): G
       s.workId!==args.workId || s.sourceRevision!==m.sourceRevision ||
       s.manifestRevision!==manifestRevision ||
       !['QUEUED','LEASED','RETRY_WAIT','EVIDENCE_PENDING',
-        'PAUSED_AUTH','HELD_ABSENCE','QUARANTINED'].includes(s.status) ||
+        'PAUSED_AUTH','HELD_ABSENCE','QUARANTINED',
+        'EVIDENCE_RECONCILED','REVIEWED_SUPERSEDED'].includes(s.status) ||
       !Number.isSafeInteger(s.transitionSequence) || s.transitionSequence < 1 ||
       !Number.isSafeInteger(s.leaseEpoch) || s.leaseEpoch < 0 ||
       !Number.isSafeInteger(s.attempts) || s.attempts < 0 || s.attempts > MAX_ATTEMPTS ||
       !Number.isSafeInteger(s.leaseExpiresAtMs) ||
       !Number.isSafeInteger(s.retryNotBeforeMs) ||
-      !Number.isSafeInteger(s.updatedAtMs)) fail('STATE_CORRUPT');
+      !Number.isSafeInteger(s.updatedAtMs) ||
+      (s.reconciledCheckpointEventId != null && !/^fse_[0-9a-f]{64}$/.test(s.reconciledCheckpointEventId)) ||
+      (s.lastReviewId != null && !UUID.test(s.lastReviewId)) ||
+      (s.status==='EVIDENCE_RECONCILED' && !s.reconciledCheckpointEventId) ||
+      (s.status==='REVIEWED_SUPERSEDED' && !s.lastReviewId)) fail('STATE_CORRUPT');
   return s;
 }
 function emit(tx: Transaction, r: ReturnType<typeof refs>, actor: FhirImportActor,
@@ -137,6 +147,8 @@ function emit(tx: Transaction, r: ReturnType<typeof refs>, actor: FhirImportActo
     transitionSequence:state.transitionSequence,leaseEpoch:state.leaseEpoch,
     status:state.status,transition,recordedAtMs:now,eventId,
     immutable:true,clinicalAuthority:false,
+    reconciledCheckpointEventId:state.reconciledCheckpointEventId??null,
+    governanceReviewId:state.lastReviewId??null,
   };
   tx.create(r.root.collection('fhirG2SyntheticWorkEvents').doc(eventId),{
     ...common,eventType:'FHIR_G2_SYNTHETIC_WORK_'+transition,
@@ -274,6 +286,261 @@ export async function settleSyntheticG2Work(args:Scope & {
        !Number.isSafeInteger(next.retryNotBeforeMs))fail('SEQUENCE_OVERFLOW');
     tx.update(r.state,next);
     emit(tx,r,args.actor,next,'OUTCOME_'+decision.action,now);
+    return response(next);
+  });
+}
+
+/** Stage D establishes the checkpoint; this reconciliation only verifies it. */
+export async function reconcileSyntheticG2Checkpoint(args:Scope & {
+  checkpointEventId:string;
+}):Promise<G2WorkTransition> {
+  identity(args);
+  if (typeof args.checkpointEventId!=='string' ||
+      !/^fse_[0-9a-f]{64}$/.test(args.checkpointEventId)) fail('CHECKPOINT_REFERENCE_INVALID');
+  const r=refs(args),m=args.manifest;
+  const itemIndex=m.items.findIndex(item=>item.workId===args.workId);
+  const item=m.items[itemIndex];
+  const sequence=m.startCheckpointSequence+itemIndex+1;
+  const expectedReceiptId='fir_'+sha([m.sourceId,item.resourceType,item.resourceId,item.expectedVersionId]);
+  const expectedDigest=sha(['CI_EXT12_CHECKPOINT_V1',m.tenantId,m.sourceId,
+    m.manifestId,m.startCheckpointSequence,itemIndex+1,item.workId,
+    item.resourceType,item.resourceId,item.expectedVersionId]);
+  const receiptSuffix=expectedReceiptId.slice(4);
+  const headId='fhd_'+sha([m.sourceId,item.resourceType,item.resourceId]);
+  return args.db.runTransaction(async tx=>{
+    const {stateSnap,now,manifestRevision}=await verifiedSnapshot(tx,args,r);
+    if(!stateSnap.exists)fail('WORK_NOT_ENQUEUED');
+    const old=validateState(stateSnap.data(),args,manifestRevision);
+    if(!['EVIDENCE_PENDING','EVIDENCE_RECONCILED'].includes(old.status))
+      fail('WORK_NOT_AWAITING_EVIDENCE');
+    if(old.status==='EVIDENCE_RECONCILED' &&
+       old.reconciledCheckpointEventId!==args.checkpointEventId) fail('CHECKPOINT_REPLAY_CONFLICT');
+    const root=r.root;
+    const [checkpoint,audit,outbox,sourceLease,receipt,head,
+      importEvent,importAudit,importOutbox]=await tx.getAll(
+      root.collection('fhirSourcePollEvents').doc(args.checkpointEventId),
+      root.collection('auditLogs').doc('fau_'+args.checkpointEventId),
+      root.collection('fhirSourcePollOutbox').doc('fso_'+args.checkpointEventId),
+      root.collection('fhirSourcePollLeases').doc(m.sourceId),
+      root.collection('fhirImportedVersions').doc(expectedReceiptId),
+      root.collection('fhirResourceHeads').doc(headId),
+      root.collection('fhirImportEvents').doc('fev_'+receiptSuffix),
+      root.collection('auditLogs').doc('fau_'+receiptSuffix),
+      root.collection('fhirImportOutbox').doc('fob_'+receiptSuffix),
+    );
+    const cp=checkpoint.data(),ca=audit.data(),co=outbox.data(),lease=sourceLease.data();
+    const receiptData=receipt.data(),hd=head.data();
+    const ie=importEvent.data(),ia=importAudit.data(),io=importOutbox.data();
+    if(!cp || !ca || !co || !lease || !receiptData || !hd || !ie || !ia || !io)
+      fail('STAGE_D_EVIDENCE_MISSING');
+    if(!Number.isSafeInteger(cp.epoch) || cp.epoch<1 ||
+       args.checkpointEventId!=='fse_'+sha([m.tenantId,m.sourceId,cp.epoch,'CHECKPOINTED',sequence]) ||
+       cp.eventId!==args.checkpointEventId ||
+       cp.eventType!=='FHIR_SOURCE_POLL_CHECKPOINTED' ||
+       cp.operation!=='CHECKPOINTED' || cp.immutable!==true ||
+       cp.clinicalAuthority!==false || cp.tenantId!==m.tenantId ||
+       cp.sourceId!==m.sourceId || cp.facilityId!==m.facilityId ||
+       cp.manifestId!==m.manifestId || cp.manifestRevision!==manifestRevision ||
+       cp.manifestSourceRevision!==m.sourceRevision || cp.sequence!==sequence ||
+       cp.workId!==args.workId || cp.receiptId!==expectedReceiptId ||
+       cp.checkpointDigest!==expectedDigest ||
+       !Number.isSafeInteger(cp.operationSequence) || cp.operationSequence<1 ||
+       ca.action!=='FHIR_SOURCE_POLL_CHECKPOINTED' ||
+       ca.actorId===undefined || ca.eventId!==args.checkpointEventId ||
+       ca.checkpointDigest!==expectedDigest || ca.receiptId!==expectedReceiptId ||
+       ca.immutable!==true || ca.tenantId!==m.tenantId ||
+       co.eventId!==args.checkpointEventId ||
+       co.checkpointDigest!==expectedDigest || co.receiptId!==expectedReceiptId ||
+       co.status!=='HELD' || co.immutable!==true || co.tenantId!==m.tenantId ||
+       co.destination!=='CI_EXTERNAL_CONTEXT_QUALIFICATION' ||
+       lease.tenantId!==m.tenantId || lease.sourceId!==m.sourceId ||
+       lease.facilityId!==m.facilityId || !Number.isSafeInteger(lease.epoch) ||
+       lease.epoch<cp.epoch || !Number.isSafeInteger(lease.checkpointSequence) ||
+       lease.checkpointSequence<sequence ||
+       (lease.checkpointSequence===sequence &&
+         (lease.checkpointDigest!==expectedDigest || lease.checkpointWorkId!==args.workId))) {
+      fail('STAGE_D_CHECKPOINT_PROOF_INVALID');
+    }
+    // The Stage D checkpoint must link to a committed source operation
+    // reservation; a fabricated checkpoint event alone is not proof of work.
+    const reservedId='fse_'+sha([m.tenantId,m.sourceId,cp.epoch,'RESERVED',cp.operationSequence]);
+    const reserved=(await tx.get(root.collection('fhirSourcePollEvents').doc(reservedId))).data();
+    if(!reserved || reserved.eventId!==reservedId ||
+       reserved.eventType!=='FHIR_SOURCE_POLL_RESERVED' ||
+       reserved.operation!=='RESERVED' || reserved.immutable!==true ||
+       reserved.tenantId!==m.tenantId || reserved.sourceId!==m.sourceId ||
+       reserved.epoch!==cp.epoch || reserved.sequence!==cp.operationSequence ||
+       reserved.workId!==args.workId) fail('STAGE_D_RESERVATION_PROOF_INVALID');
+    if(receiptData.tenantId!==m.tenantId || receiptData.sourceId!==m.sourceId ||
+       receiptData.receiptId!==expectedReceiptId || receiptData.resourceType!==item.resourceType ||
+       receiptData.resourceId!==item.resourceId ||
+       receiptData.sourceVersionId!==item.expectedVersionId ||
+       receiptData.status!=='CURRENT' || receiptData.immutable!==true ||
+       receiptData.projectionAuthority!=='UNVERIFIED_EXTERNAL_EVIDENCE' ||
+       typeof receiptData.resourceJson!=='string' ||
+       Buffer.byteLength(receiptData.resourceJson,'utf8')>120_000 ||
+       typeof receiptData.resourceHash!=='string' ||
+       !/^[0-9a-f]{64}$/.test(receiptData.resourceHash) ||
+       createHash('sha256').update(receiptData.resourceJson,'utf8').digest('hex')!==receiptData.resourceHash ||
+       receiptData.provenance?.contentSha256!==receiptData.resourceHash ||
+       hd.receiptId!==expectedReceiptId || hd.patientId!==receiptData.patientId ||
+       hd.tenantId!==m.tenantId || hd.sourceId!==m.sourceId ||
+       hd.resourceType!==item.resourceType || hd.resourceId!==item.resourceId ||
+       hd.sourceVersionId!==item.expectedVersionId ||
+       ie.eventType!=='EXTERNAL_FHIR_VERSION_IMPORTED' ||
+       ie.tenantId!==m.tenantId || ie.sourceId!==m.sourceId ||
+       ie.receiptId!==expectedReceiptId || ie.patientId!==receiptData.patientId ||
+       ie.resourceHash!==receiptData.resourceHash ||
+       ia.action!=='EXTERNAL_FHIR_IMPORT' || ia.targetId!==expectedReceiptId ||
+       ia.tenantId!==m.tenantId || ia.sourceId!==m.sourceId ||
+       ia.resourceHash!==receiptData.resourceHash || ia.immutable!==true ||
+       ia.result!=='CURRENT' || io.receiptId!==expectedReceiptId ||
+       io.resourceHash!==receiptData.resourceHash || io.status!=='HELD' ||
+       io.tenantId!==m.tenantId || io.sourceId!==m.sourceId ||
+       io.destination!=='CI_EXTERNAL_CONTEXT_QUALIFICATION') {
+      fail('STAGE_D_RECEIPT_INTEGRITY_INVALID');
+    }
+    let parsed:unknown;
+    try{parsed=JSON.parse(receiptData.resourceJson);}catch{fail('STAGE_D_RECEIPT_INTEGRITY_INVALID');}
+    if(!parsed || typeof parsed!=='object' || Array.isArray(parsed) ||
+       (parsed as Record<string,unknown>).resourceType!==item.resourceType ||
+       (parsed as Record<string,unknown>).id!==item.resourceId ||
+       ((parsed as Record<string,unknown>).meta as Record<string,unknown>|undefined)?.versionId!==item.expectedVersionId) {
+      fail('STAGE_D_RECEIPT_INTEGRITY_INVALID');
+    }
+    const linkId=receiptData.provenance?.mappedByVerifiedLink;
+    const patientId=receiptData.patientId;
+    if(typeof linkId!=='string' || !/^fpl_[0-9a-f]{64}$/.test(linkId) ||
+       typeof patientId!=='string' || !/^[A-Za-z0-9._-]{1,64}$/.test(patientId)) {
+      fail('PATIENT_LINK_REQUIRED');
+    }
+    const [link,patient]=await tx.getAll(
+      root.collection('fhirPatientLinks').doc(linkId),
+      root.collection('patients').doc(patientId),
+    );
+    const l=link.data(),p=patient.data();
+    if(!l || !p || l.tenantId!==m.tenantId || l.sourceId!==m.sourceId ||
+       l.facilityId!==m.facilityId || l.patientId!==patientId ||
+       l.matchStatus!=='VERIFIED' || l.consentStatus!=='GRANTED' ||
+       typeof l.externalPatientId!=='string' ||
+       linkId!=='fpl_'+sha([m.sourceId,l.externalPatientId]) ||
+       p.tenantId!==m.tenantId || p.status!=='ACTIVE' || p.mergedIntoPatientId) {
+      fail('PATIENT_LINK_OR_CONSENT_REVOKED');
+    }
+    if(old.status==='EVIDENCE_RECONCILED')return response(old,true);
+    const next:G2WorkRecord={...old,status:'EVIDENCE_RECONCILED',
+      transitionSequence:old.transitionSequence+1,
+      reconciledCheckpointEventId:args.checkpointEventId,updatedAtMs:now};
+    tx.update(r.state,next);
+    emit(tx,r,args.actor,next,'STAGE_D_EVIDENCE_RECONCILED',now);
+    return response(next);
+  });
+}
+
+type G2ReviewRole='SECURITY'|'CLINICAL';
+type G2ReviewReason='REQUIRES_NEW_MANIFEST';
+function reviewDocId(r:ReturnType<typeof refs>,reviewId:string,role:G2ReviewRole):string{
+  return 'fg2r_'+sha([r.id,reviewId,role]);
+}
+function reviewerAllowed(actor:FhirImportActor,scope:Scope,role:G2ReviewRole):boolean{
+  return !!actor && actor.tenantId===scope.manifest.tenantId &&
+    actor.actorId!==scope.actor.actorId &&
+    typeof actor.actorId==='string' && /^[A-Za-z0-9._-]{1,64}$/.test(actor.actorId) &&
+    Array.isArray(actor.facilityIds) && actor.facilityIds.includes(scope.manifest.facilityId) &&
+    Array.isArray(actor.permissions) &&
+    actor.permissions.includes(role==='SECURITY'?'FHIR_POLL_SECURITY_REVIEW':'FHIR_POLL_CLINICAL_REVIEW');
+}
+function held(s:G2WorkRecord):boolean{
+  return ['PAUSED_AUTH','HELD_ABSENCE','QUARANTINED'].includes(s.status);
+}
+
+/** A review is an immutable, scope/revision/status-bound record, never a requeue. */
+export async function recordSyntheticG2HeldReview(args:Scope & {
+  reviewId:string;reviewer:FhirImportActor;
+  role:G2ReviewRole;reason:G2ReviewReason;
+}):Promise<{reviewId:string;role:G2ReviewRole;replay:boolean;productionRelease:'NO_GO'}>{
+  identity(args);
+  if(!UUID.test(args.reviewId) ||
+     !['SECURITY','CLINICAL'].includes(args.role) ||
+     args.reason!=='REQUIRES_NEW_MANIFEST' ||
+     !reviewerAllowed(args.reviewer,args,args.role)) fail('REVIEW_AUTHORIZATION_DENIED');
+  const r=refs(args),id=reviewDocId(r,args.reviewId,args.role);
+  return args.db.runTransaction(async tx=>{
+    const {stateSnap,now,manifestRevision}=await verifiedSnapshot(tx,args,r);
+    if(!stateSnap.exists)fail('WORK_NOT_ENQUEUED');
+    const old=validateState(stateSnap.data(),args,manifestRevision);
+    if(!held(old))fail('WORK_NOT_HELD');
+    const docRef=r.root.collection('fhirG2SyntheticWorkReviews').doc(id);
+    const auditRef=r.root.collection('auditLogs').doc('fau_'+id);
+    const outboxRef=r.root.collection('fhirG2SyntheticWorkOutbox').doc('fg2o_'+id);
+    const [existing]=await tx.getAll(docRef);
+    if(existing.exists){
+      const prev=existing.data();
+      if(prev?.reviewerId===args.reviewer.actorId && prev?.role===args.role &&
+         prev?.reviewId===args.reviewId && prev?.transitionSequence===old.transitionSequence &&
+         prev?.heldStatus===old.status && prev?.reason===args.reason) {
+        return {reviewId:args.reviewId,role:args.role,replay:true,productionRelease:'NO_GO'};
+      }
+      fail('REVIEW_REPLAY_CONFLICT');
+    }
+    const fields={
+      tenantId:old.tenantId,facilityId:old.facilityId,sourceId:old.sourceId,
+      manifestId:old.manifestId,workId:old.workId,sourceRevision:old.sourceRevision,
+      manifestRevision:old.manifestRevision,transitionSequence:old.transitionSequence,
+      heldStatus:old.status,leaseEpoch:old.leaseEpoch,
+      reviewId:args.reviewId,role:args.role,reason:args.reason,
+      reviewerId:args.reviewer.actorId,recordedAtMs:now,immutable:true,clinicalAuthority:false,
+    };
+    tx.create(docRef,{...fields,eventType:'FHIR_G2_HELD_REVIEW_RECORDED'});
+    tx.create(auditRef,{...fields,action:'FHIR_G2_HELD_REVIEW_RECORDED',actorId:args.reviewer.actorId});
+    tx.create(outboxRef,{...fields,status:'HELD',destination:'CI_EXTERNAL_CONTEXT_QUALIFICATION'});
+    return {reviewId:args.reviewId,role:args.role,replay:false,productionRelease:'NO_GO'};
+  });
+}
+
+/**
+ * Distinct security and clinical reviewers can close an unsafe work attempt
+ * with a mandatory new-manifest requirement. Old work is never requeued.
+ */
+export async function supersedeSyntheticG2HeldWork(args:Scope & {
+  reviewId:string;
+}):Promise<G2WorkTransition>{
+  identity(args);
+  if(!UUID.test(args.reviewId))fail('REVIEW_REFERENCE_INVALID');
+  const r=refs(args);
+  return args.db.runTransaction(async tx=>{
+    const {stateSnap,now,manifestRevision}=await verifiedSnapshot(tx,args,r);
+    if(!stateSnap.exists)fail('WORK_NOT_ENQUEUED');
+    const old=validateState(stateSnap.data(),args,manifestRevision);
+    if(old.status==='REVIEWED_SUPERSEDED'){
+      if(old.lastReviewId===args.reviewId)return response(old,true);
+      fail('REVIEW_REPLAY_CONFLICT');
+    }
+    if(!held(old))fail('WORK_NOT_HELD');
+    const [security,clinical]=await tx.getAll(
+      r.root.collection('fhirG2SyntheticWorkReviews').doc(reviewDocId(r,args.reviewId,'SECURITY')),
+      r.root.collection('fhirG2SyntheticWorkReviews').doc(reviewDocId(r,args.reviewId,'CLINICAL')),
+    );
+    const a=security.data(),b=clinical.data();
+    for(const [review,role] of [[a,'SECURITY'],[b,'CLINICAL']] as const){
+      if(!review || review.role!==role || review.reviewId!==args.reviewId ||
+         review.tenantId!==old.tenantId || review.sourceId!==old.sourceId ||
+         review.facilityId!==old.facilityId || review.manifestId!==old.manifestId ||
+         review.workId!==old.workId || review.sourceRevision!==old.sourceRevision ||
+         review.manifestRevision!==old.manifestRevision ||
+         review.transitionSequence!==old.transitionSequence ||
+         review.leaseEpoch!==old.leaseEpoch || review.heldStatus!==old.status ||
+         review.reason!=='REQUIRES_NEW_MANIFEST' ||
+         review.immutable!==true || review.clinicalAuthority!==false ||
+         typeof review.reviewerId!=='string' || review.reviewerId===args.actor.actorId) {
+        fail('INDEPENDENT_REVIEWS_REQUIRED');
+      }
+    }
+    if(!a || !b || a.reviewerId===b.reviewerId)fail('INDEPENDENT_REVIEWS_REQUIRED');
+    const next:G2WorkRecord={...old,status:'REVIEWED_SUPERSEDED',
+      lastReviewId:args.reviewId,transitionSequence:old.transitionSequence+1,updatedAtMs:now};
+    tx.update(r.state,next);
+    emit(tx,r,args.actor,next,'REVIEWED_SUPERSEDED',now);
     return response(next);
   });
 }

@@ -25,6 +25,13 @@ const MAX_SLOTS=256;
 const MAX_SLOT_BYTES=512_000;
 const MAX_BYTES=12_000_000;
 function deny(code:string):never{throw new Error('G2_DETACHED_RESTORE_'+code);}
+function exactFields(value:unknown,keys:readonly string[]):boolean{
+  if(!value||typeof value!=='object'||Array.isArray(value))return false;
+  const present=Object.keys(value).sort();
+  const expected=[...keys].sort();
+  return present.length===expected.length&&
+    present.every((field,i)=>field===expected[i]);
+}
 function canonical(value:unknown):string{
   if(value===null||typeof value!=='object'){
     const encoded=JSON.stringify(value);
@@ -81,12 +88,14 @@ function contentSlots(e:StageFMultiEvidence):readonly [string,unknown][]{
   return slots;
 }
 export function g2RestoreCertificateFingerprint(cert:G2DetachedRestoreCertificate):string{
-  if(!cert||cert.schemaVersion!==1||
+  if(!exactFields(cert,['schemaVersion','kind','stageFAnchorFingerprint','entries','macHex'])||
+     cert.schemaVersion!==1||
      cert.kind!=='SYNTHETIC_DETACHED_RESTORE_DATA_INVENTORY'||
      !HEX.test(cert.macHex)||!HEX.test(cert.stageFAnchorFingerprint)||
      !Array.isArray(cert.entries)||cert.entries.length<1||
      cert.entries.length>MAX_SLOTS||
-     cert.entries.some(e=>!e||typeof e.slot!=='string'||e.slot.length>64||
+     cert.entries.some(e=>!exactFields(e,['slot','tagHex'])||
+       typeof e.slot!=='string'||e.slot.length>64||
        !/^[a-z0-9:]+$/.test(e.slot)||!HEX.test(e.tagHex))||
      new Set(cert.entries.map(e=>e.slot)).size!==cert.entries.length)
     deny('CERTIFICATE_INVALID');

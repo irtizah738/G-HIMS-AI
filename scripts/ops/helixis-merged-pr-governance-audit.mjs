@@ -49,7 +49,7 @@ export function assessMergedPrGovernance(facts) {
       }
       // A review recorded AFTER merge is not pre-merge approval.
       if (Date.parse(review.submittedAt) > Date.parse(item.mergedAt)) continue;
-      if (['COMMENTED','PENDING','DISMISSED'].includes(review.state)) continue;
+      if (['COMMENTED','PENDING'].includes(review.state)) continue;
       const key = review.user.login.toLowerCase();
       const older = effective.get(key);
       if (older && Date.parse(older.submittedAt) >= Date.parse(review.submittedAt)) continue;

@@ -245,6 +245,10 @@ service cloud.firestore {
       match /fhirPollWorkManifests/{manifestId} { allow read, write: if false; }
       match /fhirPollManifestEvents/{eventId} { allow read, write: if false; }
       match /fhirPollManifestOutbox/{outboxId} { allow read, write: if false; }
+      // G2 synthetic queue: server transaction only, no browser reads or writes.
+      match /fhirG2SyntheticWorkStates/{workId} { allow read, write: if false; }
+      match /fhirG2SyntheticWorkEvents/{eventId} { allow read, write: if false; }
+      match /fhirG2SyntheticWorkOutbox/{outboxId} { allow read, write: if false; }
       match /fhirPollMigrationRehearsals/{rehearsalId} { allow read, write: if false; }
       match /fhirPollMigrationEvents/{eventId} { allow read, write: if false; }
       match /fhirPollMigrationOutbox/{outboxId} { allow read, write: if false; }

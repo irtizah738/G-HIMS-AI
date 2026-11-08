@@ -306,7 +306,7 @@ export async function reconcileSyntheticG2Checkpoint(args:Scope & {
     m.manifestId,m.startCheckpointSequence,itemIndex+1,item.workId,
     item.resourceType,item.resourceId,item.expectedVersionId]);
   const receiptSuffix=expectedReceiptId.slice(4);
-  const headId='fih_'+sha([m.sourceId,item.resourceType,item.resourceId]);
+  const headId='fhd_'+sha([m.sourceId,item.resourceType,item.resourceId]);
   return args.db.runTransaction(async tx=>{
     const {stateSnap,now,manifestRevision}=await verifiedSnapshot(tx,args,r);
     if(!stateSnap.exists)fail('WORK_NOT_ENQUEUED');
@@ -351,7 +351,7 @@ export async function reconcileSyntheticG2Checkpoint(args:Scope & {
        ca.immutable!==true || ca.tenantId!==m.tenantId ||
        co.eventId!==args.checkpointEventId ||
        co.checkpointDigest!==expectedDigest || co.receiptId!==expectedReceiptId ||
-       co.status!=='HELD' || co.immutable!==true ||
+       co.status!=='HELD' || co.immutable!==true || co.tenantId!==m.tenantId ||
        co.destination!=='CI_EXTERNAL_CONTEXT_QUALIFICATION' ||
        lease.tenantId!==m.tenantId || lease.sourceId!==m.sourceId ||
        lease.facilityId!==m.facilityId || !Number.isSafeInteger(lease.epoch) ||
@@ -378,12 +378,15 @@ export async function reconcileSyntheticG2Checkpoint(args:Scope & {
        hd.resourceType!==item.resourceType || hd.resourceId!==item.resourceId ||
        hd.sourceVersionId!==item.expectedVersionId ||
        ie.eventType!=='EXTERNAL_FHIR_VERSION_IMPORTED' ||
+       ie.tenantId!==m.tenantId || ie.sourceId!==m.sourceId ||
        ie.receiptId!==expectedReceiptId || ie.patientId!==receiptData.patientId ||
        ie.resourceHash!==receiptData.resourceHash ||
        ia.action!=='EXTERNAL_FHIR_IMPORT' || ia.targetId!==expectedReceiptId ||
+       ia.tenantId!==m.tenantId || ia.sourceId!==m.sourceId ||
        ia.resourceHash!==receiptData.resourceHash || ia.immutable!==true ||
        ia.result!=='CURRENT' || io.receiptId!==expectedReceiptId ||
        io.resourceHash!==receiptData.resourceHash || io.status!=='HELD' ||
+       io.tenantId!==m.tenantId || io.sourceId!==m.sourceId ||
        io.destination!=='CI_EXTERNAL_CONTEXT_QUALIFICATION') {
       fail('STAGE_D_RECEIPT_INTEGRITY_INVALID');
     }

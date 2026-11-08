@@ -57,7 +57,8 @@ jobs:
             tests/external-fhir-poll-recovery-guard.test.mjs \
             tests/external-fhir-poll-multi-recovery.test.mjs \
             tests/external-fhir-poll-vendor-cursor.test.mjs \
-            tests/external-fhir-poll-hosted-boundary.test.mjs
+            tests/external-fhir-poll-hosted-boundary.test.mjs \
+            tests/external-fhir-g2-offline-outcome.test.mjs
       - name: FHIR import and transport contracts
         run: bun test tests/helixis-external-fhir-import.test.ts tests/helixis-fhir-r4-transport-safety.test.ts
       - name: Existing interoperability regression

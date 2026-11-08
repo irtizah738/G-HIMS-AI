@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { guardNativeClinicalIntelligenceRoute } from '@/lib/clinical/intelligence/clinical-context-route-gate';
 import { deriveAuthoritativeContext } from '@/lib/backend/security/authoritative-context';
 import { AuthorizationPipeline } from '@/lib/backend/auth/authorization-pipeline';
 import { DomainStateRepository } from '@/server/repositories/domain-state-repository';
@@ -74,6 +75,8 @@ async function assertTrendAccess(
 
 export async function POST(req: NextRequest) {
   try {
+    const sourceGate = guardNativeClinicalIntelligenceRoute();
+    if (sourceGate) return sourceGate;
     const body = await req.json();
     const tenantId = String(
       body?.tenantId ||
@@ -186,6 +189,8 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   try {
+    const sourceGate = guardNativeClinicalIntelligenceRoute();
+    if (sourceGate) return sourceGate;
     const tenantId = String(
       req.nextUrl.searchParams.get('tenantId') ||
         req.headers.get('x-ghims-tenant-id') ||

@@ -714,3 +714,28 @@ test('G2: source active lease and checkpoint cursor inconsistency block fresh ma
     expect((await f.root.collection('fhirG2SyntheticFreshRecoveries').get()).size).toBe(0);
   }finally{await f.scope.db.recursiveDelete(f.root);}
 },60000);
+
+test('G2: absent approval fingerprint and metadata/local FHIR origin fail closed',async()=>{
+  const f=await fixture();
+  try{
+    const recovery=await approvedRecoveryFixture(f);
+    const approval=f.root.collection('fhirSiteApprovals').doc('g2-recovery-site-approval');
+    await approval.update({recoveryBindingSha256:null});
+    await expect(recoverSyntheticG2FreshManifest(recovery))
+      .rejects.toThrow('CREDENTIAL_APPROVAL_BINDING_INVALID');
+    for(const badOrigin of [
+      'http://127.0.0.1/fhir',
+      'https://metadata.google.internal/fhir',
+      'https://127.0.0.1/fhir',
+      'https://fhir.example.test:8443/fhir',
+    ]){
+      await f.source.update({baseUrl:badOrigin});
+      const current=await f.source.get();
+      await expect(recoverSyntheticG2FreshManifest({
+        ...recovery,expectedSourceRevision:sourceRevisionFromSnapshot(current),
+      })).rejects.toThrow('FHIR_G2_RECOVERY_CREDENTIAL_BINDING_INVALID');
+    }
+    expect((await f.root.collection('fhirPollWorkManifests').get()).size).toBe(1);
+    expect((await f.root.collection('fhirG2SyntheticFreshRecoveries').get()).size).toBe(0);
+  }finally{await f.scope.db.recursiveDelete(f.root);}
+},60000);

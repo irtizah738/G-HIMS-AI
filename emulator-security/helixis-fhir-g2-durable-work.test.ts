@@ -8,6 +8,7 @@ import {randomBytes,randomUUID} from 'node:crypto';
 import {getAdminFirestore} from '@/server/firebase/admin';
 import {EmulatorOnlyAesGcmCipher} from '@/lib/clinical/intelligence/external-fhir-poll-manifest-seal';
 import {fhirPatientLinkId} from '@/lib/clinical/intelligence/external-fhir-import';
+import {recoverSyntheticG2FreshManifest} from '@/lib/clinical/intelligence/external-fhir-g2-fresh-manifest-recovery';
 import {
   persistSealedSyntheticPollManifest,runPersistedSyntheticFhirPoll, type NewPollWorkManifest,
 } from '@/lib/clinical/intelligence/external-fhir-poll-manifest-store';
@@ -403,5 +404,165 @@ test('G2: wrong tenant, facility or absent production guard cannot reconcile',as
       await expect(reconcileSyntheticG2Checkpoint({...f.scope,checkpointEventId}))
         .rejects.toThrow('EMULATOR_ONLY');
     }finally{process.env.GHIMS_RUNTIME_MODE=prev;}
+  }finally{await f.scope.db.recursiveDelete(f.root);}
+},60000);
+
+async function approvedRecoveryFixture(f:Awaited<ReturnType<typeof fixture>>){
+  await heldG2(f);
+  const reviewId=randomUUID();
+  await recordSyntheticG2HeldReview({...f.scope,reviewId,
+    reviewer:reviewer(f,'g2-security-recovery-reviewer','SECURITY'),
+    role:'SECURITY',reason:'REQUIRES_NEW_MANIFEST'});
+  await recordSyntheticG2HeldReview({...f.scope,reviewId,
+    reviewer:reviewer(f,'g2-clinical-recovery-reviewer','CLINICAL'),
+    role:'CLINICAL',reason:'REQUIRES_NEW_MANIFEST'});
+  await supersedeSyntheticG2HeldWork({...f.scope,reviewId});
+  // Simulate a separately authorized, synthetic credential rotation and
+  // site review, without creating or using any OAuth secret.
+  await f.source.update({
+    siteApprovalId:'g2-recovery-site-approval',
+    oauth:{mode:'SMART_BACKEND',vendorProfile:'EPIC_SANDBOX',
+      clientId:'synthetic-only',tokenUrl:'https://fhir.example.test/oauth',
+      keyId:'synthetic-key-not-a-secret',secretVersion:2,credentialRevision:2,
+      scopes:['system/Observation.read']},
+  });
+  const reviewedAt=Date.now()-10_000;
+  await f.root.collection('fhirSiteApprovals').doc('g2-recovery-site-approval').set({
+    tenantId:f.scope.manifest.tenantId,sourceId,facilityId,
+    approvalId:'g2-recovery-site-approval',status:'APPROVED',
+    credentialRevision:2,approvedResourceTypes:['Observation'],
+    clinicalReviewerId:'site-clinician',securityReviewerId:'site-security',
+    sandboxQualificationId:'g2-synthetic-qual',reviewedAt,
+    expiresAt:reviewedAt+86_400_000,
+  });
+  const snap=await f.source.get();
+  const t=snap.updateTime!;
+  const expectedSourceRevision=t.seconds+'.'+String(t.nanoseconds).padStart(9,'0');
+  const freshManifest={
+    tenantId:f.scope.manifest.tenantId,facilityId,sourceId,
+    manifestId:randomUUID(),startCheckpointSequence:0,vendorCursor:null,
+    items:[{workId:randomUUID(),resourceType:'Observation' as const,
+      resourceId:'test-observation',expectedVersionId:'v2'}],
+  };
+  const actor={...f.scope.actor,
+    permissions:[...f.scope.actor.permissions,'FHIR_POLL_RECOVERY']};
+  return {...f.scope,oldManifest:f.scope.manifest,oldWorkId:f.scope.workId,
+    reviewId,freshManifest,expectedCredentialRevision:2,expectedSourceRevision,
+    externalPatientId:'g2-external-patient',actor};
+}
+test('G2: independently approved recovery seals one new manifest atomically and replays once',async()=>{
+  const f=await fixture();
+  try{
+    const recovery=await approvedRecoveryFixture(f);
+    const [one,two]=await Promise.all([
+      recoverSyntheticG2FreshManifest(recovery),
+      recoverSyntheticG2FreshManifest(recovery),
+    ]);
+    expect([one.replay,two.replay].sort()).toEqual([false,true]);
+    expect(one.newManifestId).toBe(recovery.freshManifest.manifestId);
+    expect(one.credentialRevision).toBe(2);
+    expect(one.clinicalAuthority).toBe(false);
+    expect(one.checkpointAuthorized).toBe(false);
+    expect(one.importAuthorized).toBe(false);
+    expect(one.productionRelease).toBe('NO_GO');
+    expect((await f.root.collection('fhirG2SyntheticFreshRecoveries').get()).size).toBe(1);
+    expect((await f.root.collection('fhirG2SyntheticRecoveryEvents').get()).size).toBe(1);
+    expect((await f.root.collection('fhirPollWorkManifests').get()).size).toBe(2);
+    expect((await f.root.collection('fhirPollManifestOutbox').get()).size).toBe(2);
+    expect((await f.root.collection('patient360Projections').get()).size).toBe(0);
+    const old=(await f.root.collection('fhirG2SyntheticWorkStates').get()).docs[0];
+    expect(old.get('status')).toBe('REVIEWED_SUPERSEDED');
+    const resumed=await enqueueSyntheticG2Work({
+      ...f.scope,actor:recovery.actor,manifest:{
+        ...recovery.freshManifest,sourceRevision:one.sourceRevision,
+      },workId:one.newWorkId,
+    });
+    expect(resumed.state.status).toBe('QUEUED');
+    expect((await f.root.collection('fhirSourcePollEvents').get()).size).toBe(0);
+  }finally{await f.scope.db.recursiveDelete(f.root);}
+},60000);
+test('G2: old credential revision or conflicting new manifest cannot recover',async()=>{
+  const f=await fixture();
+  try{
+    const recovery=await approvedRecoveryFixture(f);
+    await expect(recoverSyntheticG2FreshManifest({
+      ...recovery,expectedCredentialRevision:1,
+    })).rejects.toThrow('SOURCE_OR_CREDENTIAL_REVISION_INVALID');
+    const first=await recoverSyntheticG2FreshManifest(recovery);
+    expect(first.replay).toBe(false);
+    await expect(recoverSyntheticG2FreshManifest({
+      ...recovery,freshManifest:{...recovery.freshManifest,
+        manifestId:randomUUID(),items:[{...recovery.freshManifest.items[0],
+          workId:randomUUID()}]},
+    })).rejects.toThrow('RECOVERY_REPLAY_CONFLICT');
+    expect((await f.root.collection('fhirG2SyntheticFreshRecoveries').get()).size).toBe(1);
+  }finally{await f.scope.db.recursiveDelete(f.root);}
+},60000);
+test('G2: withdrawn consent, wrong tenant or facility, and expired site approval reject recovery',async()=>{
+  const f=await fixture();
+  try{
+    const recovery=await approvedRecoveryFixture(f);
+    await expect(recoverSyntheticG2FreshManifest({
+      ...recovery,actor:{...recovery.actor,tenantId:'different-tenant'},
+    })).rejects.toThrow('SCOPE_OR_MANIFEST_INVALID');
+    await expect(recoverSyntheticG2FreshManifest({
+      ...recovery,actor:{...recovery.actor,facilityIds:['wrong-facility']},
+    })).rejects.toThrow('SCOPE_OR_MANIFEST_INVALID');
+    const link=f.root.collection('fhirPatientLinks')
+      .doc(fhirPatientLinkId(sourceId,recovery.externalPatientId));
+    await link.update({consentStatus:'WITHDRAWN'});
+    await expect(recoverSyntheticG2FreshManifest(recovery))
+      .rejects.toThrow('PATIENT_LINK_OR_CONSENT_REVOKED');
+    await link.update({consentStatus:'GRANTED'});
+    await f.root.collection('fhirSiteApprovals')
+      .doc('g2-recovery-site-approval').update({status:'REVOKED'});
+    await expect(recoverSyntheticG2FreshManifest(recovery))
+      .rejects.toThrow('CI_EXT04_SITE_APPROVAL_REQUIRED');
+    expect((await f.root.collection('fhirG2SyntheticFreshRecoveries').get()).size).toBe(0);
+  }finally{await f.scope.db.recursiveDelete(f.root);}
+},60000);
+test('G2: old review or supersession corruption and changed source reject recovery',async()=>{
+  const f=await fixture();
+  try{
+    const recovery=await approvedRecoveryFixture(f);
+    const reviewDocs=await f.root.collection('fhirG2SyntheticWorkReviews').get();
+    expect(reviewDocs.size).toBe(2);
+    await reviewDocs.docs[0].ref.update({reason:'UNAUTHORIZED_REOPEN'});
+    await expect(recoverSyntheticG2FreshManifest(recovery))
+      .rejects.toThrow('REVIEW_PROOF_INVALID');
+    await reviewDocs.docs[0].ref.update({reason:'REQUIRES_NEW_MANIFEST'});
+    const event=(await f.root.collection('fhirG2SyntheticWorkEvents')
+      .where('transition','==','REVIEWED_SUPERSEDED').get()).docs[0];
+    await event.ref.update({governanceReviewId:'different'});
+    await expect(recoverSyntheticG2FreshManifest(recovery))
+      .rejects.toThrow('SUPERSESSION_EVENT_INVALID');
+    await event.ref.update({governanceReviewId:recovery.reviewId});
+    await f.source.update({status:'REVOKED'});
+    await expect(recoverSyntheticG2FreshManifest(recovery))
+      .rejects.toThrow('SOURCE_OR_CREDENTIAL_REVISION_INVALID');
+  }finally{await f.scope.db.recursiveDelete(f.root);}
+},60000);
+test('G2: recovery cannot reuse the held work, send cursor, or run in production',async()=>{
+  const f=await fixture();
+  try{
+    const recovery=await approvedRecoveryFixture(f);
+    for(const freshManifest of [
+      {...recovery.freshManifest,manifestId:recovery.oldManifest.manifestId},
+      {...recovery.freshManifest,items:[{...recovery.freshManifest.items[0],
+        workId:recovery.oldWorkId}]},
+      {...recovery.freshManifest,vendorCursor:'opaque-cursor'},
+      {...recovery.freshManifest,items:[{...recovery.freshManifest.items[0],
+        resourceId:'other-observation'}]},
+    ]){
+      await expect(recoverSyntheticG2FreshManifest({...recovery,freshManifest}))
+        .rejects.toThrow('SCOPE_OR_MANIFEST_INVALID');
+    }
+    const prev=process.env.GHIMS_RUNTIME_MODE;
+    try{
+      process.env.GHIMS_RUNTIME_MODE='PRODUCTION';
+      await expect(recoverSyntheticG2FreshManifest(recovery))
+        .rejects.toThrow('EMULATOR_ONLY');
+    }finally{process.env.GHIMS_RUNTIME_MODE=prev;}
+    expect((await f.root.collection('fhirG2SyntheticFreshRecoveries').get()).size).toBe(0);
   }finally{await f.scope.db.recursiveDelete(f.root);}
 },60000);

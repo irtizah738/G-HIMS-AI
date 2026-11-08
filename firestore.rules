@@ -242,6 +242,15 @@ service cloud.firestore {
       match /fhirSourcePollLeases/{sourceId} { allow read, write: if false; }
       match /fhirSourcePollEvents/{eventId} { allow read, write: if false; }
       match /fhirSourcePollOutbox/{outboxId} { allow read, write: if false; }
+      match /fhirPollWorkManifests/{manifestId} { allow read, write: if false; }
+      match /fhirPollManifestEvents/{eventId} { allow read, write: if false; }
+      match /fhirPollManifestOutbox/{outboxId} { allow read, write: if false; }
+      match /fhirPollMigrationRehearsals/{rehearsalId} { allow read, write: if false; }
+      match /fhirPollMigrationEvents/{eventId} { allow read, write: if false; }
+      match /fhirPollMigrationOutbox/{outboxId} { allow read, write: if false; }
+      match /fhirPollMultiRecoveryRehearsals/{rehearsalId} { allow read, write: if false; }
+      match /fhirPollMultiRecoveryEvents/{eventId} { allow read, write: if false; }
+      match /fhirPollMultiRecoveryOutbox/{outboxId} { allow read, write: if false; }
       match /fhirReconciliationCases/{caseId} { allow read, write: if false; }
       match /fhirReconciliationDecisions/{decisionId} { allow read, write: if false; }
       match /externalPatient360Projections/{patientId} { allow read, write: if false; }

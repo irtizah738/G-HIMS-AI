@@ -17,6 +17,7 @@ import {
 import {
   acquireSourcePollLease, reserveSourcePollOperation,
   checkpointSourcePollLease, releaseSourcePollLease,
+  type FhirSourcePollOperationFence,
 } from './external-fhir-sync-coordinator';
 import { reconcileFhirReadAvailability } from './external-fhir-availability';
 
@@ -112,6 +113,11 @@ export async function runSyntheticFhirPoll(args: {
   /** Test-only crash injection after immutable import, before checkpoint. */
   afterImportCommitted?: (index: number, receiptId: string) => Promise<void>;
   leaseTtlMs?: number;
+  /** Stage D sealed-manifest checkpoint. Only the emulator-only persisted runner supplies this. */
+  checkpointWriter?: (input: {
+    fence: FhirSourcePollOperationFence;
+    sequence: number; workId: string; receiptId: string; digest: string;
+  }) => Promise<void>;
 }): Promise<SyntheticPollResult> {
   assertSyntheticIsolation();
   validateManifest(args.manifest);
@@ -211,14 +217,19 @@ export async function runSyntheticFhirPoll(args: {
     }
     await args.afterImportCommitted?.(i, imported.receiptId);
     const sequence = start + i + 1;
-    await checkpointSourcePollLease({
-      db, actor, fence: claim.fence,
-      sequence, workId: item.workId,
-      digest: checkpointDigest({
-        tenantId: actor.tenantId, manifest,
-        index: i + 1, item,
-      }),
+    const digest = checkpointDigest({
+      tenantId: actor.tenantId, manifest, index: i + 1, item,
     });
+    if (args.checkpointWriter) {
+      await args.checkpointWriter({
+        fence: operation, sequence, workId: item.workId,
+        receiptId: imported.receiptId, digest,
+      });
+    } else {
+      await checkpointSourcePollLease({
+        db, actor, fence: claim.fence, sequence, workId: item.workId, digest,
+      });
+    }
     processed++;
     if (imported.replay) replayedImports++;
   }

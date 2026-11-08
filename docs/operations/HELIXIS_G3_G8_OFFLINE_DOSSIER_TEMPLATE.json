@@ -1,0 +1,728 @@
+{
+  "scope": {
+    "tenantId": "synthetic-tenant",
+    "facilityId": "synthetic-facility",
+    "sourceId": "synthetic-epic",
+    "environment": "STAGING_SYNTHETIC"
+  },
+  "evidence": [
+    {
+      "gate": "G3",
+      "control": "SOURCE_BASELINE_FINGERPRINT",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G3",
+      "control": "MIGRATION_PLAN_DUAL_REVIEW",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G3",
+      "control": "SYNTHETIC_ORCHESTRATOR_E2E",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G3",
+      "control": "ONE_OFF_IMPORT_FAILS_CLOSED",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G3",
+      "control": "SOURCE_REVISION_PRECONDITION",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G3",
+      "control": "STAGING_REHEARSAL_AND_RECOVERY",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G4",
+      "control": "DEDICATED_WORKLOAD_IDENTITY",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G4",
+      "control": "SOURCE_SCOPED_SECRET_ACCESS",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G4",
+      "control": "NO_BROWSER_LEASE_EVENT_OUTBOX_ACCESS",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G4",
+      "control": "HOSPITAL_SITE_CONTRACT_APPROVED",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G4",
+      "control": "APPROVED_READ_ONLY_FHIR_SCOPES",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G4",
+      "control": "PATIENT_LINK_AND_CONSENT_AT_COMMIT",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G4",
+      "control": "MFA_AND_DUAL_CLINICAL_REVIEW",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G5",
+      "control": "TWO_WORKER_LEASE_CONTENTION",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G5",
+      "control": "EXPIRATION_TAKEOVER_STALE_EPOCH",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G5",
+      "control": "CLOCK_SKEW_AND_RESTART",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G5",
+      "control": "HTTP_401_403_429_5XX",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G5",
+      "control": "REGIONAL_OUTAGE_AND_OFFLINE_BACKFILL",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G5",
+      "control": "STALLED_HEAD_DELETE_TOMBSTONE",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G5",
+      "control": "CONSENT_REVOCATION_AND_SOURCE_SUSPENSION",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G5",
+      "control": "DUPLICATE_AND_REPLAY",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G5",
+      "control": "RECEIPT_BEFORE_CHECKPOINT_CRASH",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G5",
+      "control": "ROLLBACK_AND_RESTORE_PARITY",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G5",
+      "control": "IMMUTABLE_RECEIPT_AUDIT_OUTBOX_PARITY",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G6",
+      "control": "SOURCE_VERSION_PROVENANCE",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G6",
+      "control": "HELD_EVENTS_UNDISPATCHED",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G6",
+      "control": "RECONCILIATION_FENCE",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G6",
+      "control": "NO_NATIVE_PATIENT360_PROMOTION",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G6",
+      "control": "NO_EXTERNAL_AI_DRAFTING_AUTHORITY",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G6",
+      "control": "BLINDED_SYNTHETIC_CLINICAL_EVALUATION",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G6",
+      "control": "CLINICAL_LEADERSHIP_EMERGENCY_DISCLOSURE",
+      "status": "NOT_RUN",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G7",
+      "control": "ARCHITECTURE_SECURITY_CLINICAL_SIGNOFF",
+      "status": "SKIPPED_COST",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G7",
+      "control": "EXACT_GIT_SHA_AND_IMAGE_DIGEST",
+      "status": "SKIPPED_COST",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G7",
+      "control": "CI_AND_SUPPLY_CHAIN_ATTESTATION",
+      "status": "SKIPPED_COST",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G7",
+      "control": "IAM_MINIMUM_PRIVILEGE_PROOF",
+      "status": "SKIPPED_COST",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G7",
+      "control": "PHI_FREE_EGRESS_LOG_EVIDENCE",
+      "status": "SKIPPED_COST",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G7",
+      "control": "ALERTS_SLOS_AND_QUOTAS",
+      "status": "SKIPPED_COST",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G7",
+      "control": "BUDGET_AND_CAPACITY_BOUNDARIES",
+      "status": "SKIPPED_COST",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G7",
+      "control": "BACKUP_RESTORE_RPO_RTO",
+      "status": "SKIPPED_COST",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G7",
+      "control": "ROLLBACK_REHEARSAL",
+      "status": "SKIPPED_COST",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G7",
+      "control": "INDEPENDENT_CHANGE_AUTHORIZATION",
+      "status": "SKIPPED_COST",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G8",
+      "control": "NAMED_TENANT_FACILITY_SOURCE",
+      "status": "SKIPPED_COST",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G8",
+      "control": "CLOSED_G1_G2_DEPENDENCIES",
+      "status": "SKIPPED_COST",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G8",
+      "control": "SIGNED_NARROW_CANARY_WINDOW",
+      "status": "SKIPPED_COST",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G8",
+      "control": "FLAGS_DISABLED_BY_DEFAULT",
+      "status": "SKIPPED_COST",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G8",
+      "control": "SIGNED_STOP_AND_ROLLBACK_CONDITIONS",
+      "status": "SKIPPED_COST",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    },
+    {
+      "gate": "G8",
+      "control": "INDEPENDENT_FINAL_REVIEW",
+      "status": "SKIPPED_COST",
+      "scope": {
+        "tenantId": "synthetic-tenant",
+        "facilityId": "synthetic-facility",
+        "sourceId": "synthetic-epic",
+        "environment": "STAGING_SYNTHETIC"
+      },
+      "artifactSha256": null,
+      "artifactRef": null,
+      "reviewerId": null,
+      "assessedAtUtc": null
+    }
+  ],
+  "signoffs": [],
+  "gitSha": null,
+  "imageDigest": null,
+  "changeRequestId": null,
+  "canaryStartUtc": null,
+  "canaryEndUtc": null,
+  "flags": {
+    "externalFhirImport": false,
+    "externalPatient360Promotion": false,
+    "externalClinicalAiDrafting": false
+  },
+  "externalG1Status": "BLOCKED",
+  "externalG2Status": "BLOCKED"
+}

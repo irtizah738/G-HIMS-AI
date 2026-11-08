@@ -48,7 +48,7 @@ type Scope = {
   db: Firestore; actor: FhirImportActor;
   manifest: PollWorkManifest; cipher: ManifestCipher; workId: string;
 };
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_ATTEMPTS = 5;
 function sha(x: unknown): string {return createHash('sha256').update(JSON.stringify(x)).digest('hex');}
 function fail(code: string): never {throw new Error('FHIR_G2_DURABLE_' + code);}
@@ -68,7 +68,7 @@ function revision(s: DocumentSnapshot): string {
 }
 function nowMs(s: DocumentSnapshot): number {
   const t=s.readTime?.toMillis();
-  if (!Number.isSafeInteger(t) || !t || t < 1) fail('SERVER_TIME_REQUIRED');
+  if (typeof t !== 'number' || !Number.isSafeInteger(t) || t < 1) fail('SERVER_TIME_REQUIRED');
   return t;
 }
 function identity(args: Scope): void {

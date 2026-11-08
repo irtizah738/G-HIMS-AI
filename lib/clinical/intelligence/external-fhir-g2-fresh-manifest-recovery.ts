@@ -15,6 +15,7 @@ import { fhirPatientLinkId } from './external-fhir-import';
 import {siteApprovalDocId,validateFhirSiteApproval,type FhirSiteApproval}
   from '@/lib/interop/fhir-site-approval';
 import type { G2WorkRecord } from './external-fhir-g2-durable-work';
+import { syntheticG2RecoveryCredentialBinding } from './external-fhir-g2-recovery-credential-binding';
 
 type Scope = Readonly<{
   db:Firestore; actor:FhirImportActor; cipher:ManifestCipher;
@@ -22,6 +23,8 @@ type Scope = Readonly<{
   freshManifest:Omit<PollWorkManifest,'sourceRevision'>;
   expectedSourceRevision:string; expectedCredentialRevision:number;
   externalPatientId:string;
+  /** TEST-only crash injection, before any transaction writes. */
+  afterValidationBeforeCommit?: () => Promise<void>;
 }>;
 export type G2FreshManifestRecoveryResult = Readonly<{
   newManifestId:string; newWorkId:string; sourceRevision:string;
@@ -195,8 +198,16 @@ export async function recoverSyntheticG2FreshManifest(
          outbox.destination!=='CI_EXTERNAL_CONTEXT_QUALIFICATION')
          deny('REVIEW_AUDIT_INCOMPLETE');
     }
-    validateFhirSiteApproval(source,(approvalSnap.data() as FhirSiteApproval|undefined)??null,
+    const siteApproval = validateFhirSiteApproval(
+      source,(approvalSnap.data() as FhirSiteApproval|undefined)??null,
       fresh.items[0].resourceType,now);
+    // The approval must be reissued whenever any endpoint, OAuth client,
+    // key ID, secret-version reference or scope changes, even if an operator
+    // mistakenly leaves the numeric credentialRevision unchanged.
+    if ((siteApproval as FhirSiteApproval & {recoveryBindingSha256?:string})
+          .recoveryBindingSha256 !== syntheticG2RecoveryCredentialBinding(source)) {
+      deny('CREDENTIAL_APPROVAL_BINDING_INVALID');
+    }
     const a=superAudit.data(),o=superOutbox.data();
     if(!a||a.action!=='FHIR_G2_SYNTHETIC_WORK_REVIEWED_SUPERSEDED'||
        a.eventId!==supersedeId||a.immutable!==true||a.tenantId!==old.tenantId||
@@ -244,6 +255,9 @@ export async function recoverSyntheticG2FreshManifest(
       return result(next,args.expectedCredentialRevision,true);
     }
     if(newManifestSnap.exists)deny('NEW_MANIFEST_ALREADY_EXISTS');
+    // Synthetic crash injection: throw here to prove the transaction writes
+    // no manifest, event, audit, outbox or recovery record on interruption.
+    if (args.afterValidationBeforeCommit) await args.afterValidationBeforeCommit();
     const sealed=sealPollWorkManifest(next,args.cipher);
     const eventId='fpme_'+next.manifestId;
     const metadata={

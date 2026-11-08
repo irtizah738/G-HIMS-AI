@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node
 import { resolve, join } from 'node:path';
 const suites = Object.freeze([
   'helixis-external-fhir-import',
+  'helixis-external-clinician-review',
   'helixis-external-patient360',
   'helixis-fhir-entered-in-error-projection',
   'helixis-fhir-availability-reconciliation',

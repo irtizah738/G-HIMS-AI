@@ -47,6 +47,8 @@ export type FhirSourceRecord = {
   approvedResourceTypes: string[];
   /** Enforces server-only transaction fencing when explicitly enabled per HIS source. */
   syncMode?: 'FENCED';
+  /** Synthetic qualification marker; never grants production authority. */
+  syntheticOnly?: boolean;
   siteApprovalId?: string;
   oauth?: {
     mode: 'SMART_BACKEND';

@@ -60,5 +60,7 @@ jobs:
           if test -f firestore-debug.log; then
             grep -Ein 'deadlock|lock|transaction|exception|error|timeout' firestore-debug.log | tail -n 90 || true
           fi
+      - name: Native CI route isolation under external HIS mode
+        run: bun test tests/ci-external-native-route-gate.test.ts
       - name: Existing standalone native context regression
         run: bun test tests/ci-standalone-clinical-context-contract.test.ts

@@ -179,9 +179,9 @@ export async function recoverSyntheticG2FreshManifest(
       root.collection('fhirG2SyntheticWorkOutbox').doc('fg2o_'+reviewId('SECURITY')),
       root.collection('fhirG2SyntheticWorkOutbox').doc('fg2o_'+reviewId('CLINICAL')),
     );
-    for(const [role,reviewer,audit,outbox,reviewKey] of [
-      ['SECURITY',reviewerA,securityAudit.data(),securityOutbox.data(),reviewId('SECURITY')],
-      ['CLINICAL',reviewerB,clinicalAudit.data(),clinicalOutbox.data(),reviewId('CLINICAL')],
+    for(const [role,reviewer,audit,outbox] of [
+      ['SECURITY',reviewerA,securityAudit.data(),securityOutbox.data()],
+      ['CLINICAL',reviewerB,clinicalAudit.data(),clinicalOutbox.data()],
     ] as const){
       if(!audit||audit.action!=='FHIR_G2_HELD_REVIEW_RECORDED'||
          audit.actorId!==reviewer||audit.reviewId!==args.reviewId||

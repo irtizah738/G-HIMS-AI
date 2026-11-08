@@ -25,9 +25,6 @@ const MAX_SLOTS=256;
 const MAX_SLOT_BYTES=512_000;
 const MAX_BYTES=12_000_000;
 function deny(code:string):never{throw new Error('G2_DETACHED_RESTORE_'+code);}
-function object(x:unknown):x is Record<string,unknown>{
-  return x!==null&&typeof x==='object'&&!Array.isArray(x);
-}
 function canonical(value:unknown):string{
   if(value===null||typeof value!=='object'){
     const encoded=JSON.stringify(value);

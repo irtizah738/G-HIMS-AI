@@ -17,6 +17,8 @@ import { EmulatorOnlyStageFRecoverySigner,stageFAnchorFingerprint,
   type StageFMultiAnchor,type StageFReview,
 } from '@/lib/clinical/intelligence/external-fhir-poll-multi-recovery';
 import { rehearseSyntheticMultiPageRecovery } from '@/lib/clinical/intelligence/external-fhir-poll-multi-rehearsal';
+import {EmulatorOnlyG2DetachedRestoreSigner,g2RestoreCertificateFingerprint}
+  from '@/lib/clinical/intelligence/external-fhir-g2-detached-restore-proof';
 import {EmulatorOnlyStageGCursorTagger,EmulatorOnlyStageGWitnessIssuer,
   EmulatorOnlyStageGWitnessVerifier,EmulatorOnlyDetachedWitnessLedger,
   stageGCertificateFingerprint,deriveStageGPageProofs,
@@ -421,4 +423,117 @@ gScenario('self-provided reviewer cannot bypass detached witness binding',async 
     reviews:[{...f.reviews[0],reviewerId:f.actor.actorId},f.reviews[1]]}),
     /FHIR_POLL_F_ACTOR_OR_SCOPE_DENIED|FHIR_POLL_F_REVIEW/);
   await assertNoGRecorded(f);
+});
+
+/** G2 detached restore certificate uses a separately held TEST key, never Firestore. */
+scenario('detached inventory contains no patient, vendor cursor, or clinical payload',async f=>{
+  const signer=new EmulatorOnlyG2DetachedRestoreSigner(randomBytes(32));
+  const result=await rehearseSyntheticMultiPageRecovery({
+    ...f.args,detachedRestore:{signer},
+  });
+  const cert=result.detachedRestoreCertificate;
+  assert.ok(cert);
+  assert.equal(cert.kind,'SYNTHETIC_DETACHED_RESTORE_DATA_INVENTORY');
+  assert.ok(cert.entries.length>=40);
+  assert.equal(cert.entries.length,new Set(cert.entries.map(x=>x.slot)).size);
+  const printed=JSON.stringify(cert);
+  for(const confidential of [
+    patientId,externalPatientId,'resourceJson','resourceHash',
+    'OPAQUE_F_VENDOR_CURSOR_PAGE_1','obs-f-0-0',
+    f.actor.tenantId,sourceId,facilityId,
+  ])assert.ok(!printed.includes(confidential),'inventory leaked identifier or payload');
+  assert.match(g2RestoreCertificateFingerprint(cert),/^[a-f0-9]{64}$/);
+  const event=(await f.root.collection('fhirPollMultiRecoveryRehearsals').get()).docs[0];
+  assert.equal(event.get('detachedRestoreQualification'),'LOCAL_DATA_INTEGRITY_ONLY');
+  assert.equal(event.get('productionAuthorization'),'NO_GO');
+  assert.equal((await f.root.collection('patient360Projections').get()).size,0);
+});
+scenario('exact detached inventory replay is idempotent and cannot be downgraded',async f=>{
+  const signer=new EmulatorOnlyG2DetachedRestoreSigner(randomBytes(32));
+  const first=await rehearseSyntheticMultiPageRecovery({...f.args,detachedRestore:{signer}});
+  assert.equal(first.replay,false);
+  assert.ok(first.detachedRestoreCertificate);
+  const second=await rehearseSyntheticMultiPageRecovery({...f.args,detachedRestore:{
+    signer,expectedCertificate:first.detachedRestoreCertificate,
+  }});
+  assert.equal(second.replay,true);
+  assert.deepEqual(second.detachedRestoreCertificate,first.detachedRestoreCertificate);
+  await assert.rejects(rehearseSyntheticMultiPageRecovery(f.args),/FHIR_POLL_F_REPLAY_CONFLICT/);
+  assert.deepEqual(await counts(f),[1,1,1]);
+});
+scenario('post-export added audit metadata fails independent inventory proof',async f=>{
+  const signer=new EmulatorOnlyG2DetachedRestoreSigner(randomBytes(32));
+  const first=await rehearseSyntheticMultiPageRecovery({...f.args,detachedRestore:{signer}});
+  assert.ok(first.detachedRestoreCertificate);
+  const audit=f.root.collection('auditLogs').doc('fau_'+f.anchor.steps[1].checkpointEventId);
+  await audit.update({syntheticChangedAuditMetadata:'unexpected-edit'});
+  // Base Stage F checks necessary fields, but the inventory pins the WHOLE
+  // record and rejects unauthorized extra fields before any new write.
+  await assert.rejects(rehearseSyntheticMultiPageRecovery({
+    ...f.args,rehearsalId:randomUUID(),detachedRestore:{
+      signer,expectedCertificate:first.detachedRestoreCertificate,
+    },
+  }),/G2_DETACHED_RESTORE_INVENTORY_OR_SIGNATURE_MISMATCH/);
+  assert.deepEqual(await counts(f),[1,1,1]);
+});
+scenario('post-export modified resource body fails inventory and Stage F',async f=>{
+  const signer=new EmulatorOnlyG2DetachedRestoreSigner(randomBytes(32));
+  const first=await rehearseSyntheticMultiPageRecovery({...f.args,detachedRestore:{signer}});
+  assert.ok(first.detachedRestoreCertificate);
+  const receipt=f.root.collection('fhirImportedVersions').doc(f.anchor.steps[1].receiptId);
+  await receipt.update({resourceJson:'{"resourceType":"Observation","id":"forged"}'});
+  await assert.rejects(rehearseSyntheticMultiPageRecovery({
+    ...f.args,rehearsalId:randomUUID(),detachedRestore:{
+      signer,expectedCertificate:first.detachedRestoreCertificate,
+    },
+  }),/FHIR_POLL_F_IMPORT_EVIDENCE_INVALID/);
+  assert.deepEqual(await counts(f),[1,1,1]);
+});
+scenario('certificate alteration or unrelated key cannot qualify backup replay',async f=>{
+  const signer=new EmulatorOnlyG2DetachedRestoreSigner(randomBytes(32));
+  const {detachedRestoreCertificate:cert}=await rehearseSyntheticMultiPageRecovery({
+    ...f.args,detachedRestore:{signer},
+  });
+  assert.ok(cert);
+  const row=cert.entries[3];
+  const changed={...cert,entries:cert.entries.map((x,i)=>
+    i===3?{...x,tagHex:x.tagHex==='a'.repeat(64)?'b'.repeat(64):'a'.repeat(64)}:x)};
+  await assert.rejects(rehearseSyntheticMultiPageRecovery({
+    ...f.args,rehearsalId:randomUUID(),detachedRestore:{
+      signer,expectedCertificate:changed,
+    },
+  }),/G2_DETACHED_RESTORE_INVENTORY_OR_SIGNATURE_MISMATCH/);
+  assert.ok(row);
+  const wrongSigner=new EmulatorOnlyG2DetachedRestoreSigner(randomBytes(32));
+  await assert.rejects(rehearseSyntheticMultiPageRecovery({
+    ...f.args,rehearsalId:randomUUID(),detachedRestore:{
+      signer:wrongSigner,expectedCertificate:cert,
+    },
+  }),/G2_DETACHED_RESTORE_INVENTORY_OR_SIGNATURE_MISMATCH/);
+  assert.deepEqual(await counts(f),[1,1,1]);
+});
+scenario('restored byte-identical manifest fails original revision fence',async f=>{
+  const signer=new EmulatorOnlyG2DetachedRestoreSigner(randomBytes(32));
+  const first=await rehearseSyntheticMultiPageRecovery({...f.args,detachedRestore:{signer}});
+  assert.ok(first.detachedRestoreCertificate);
+  const ref=f.root.collection('fhirPollWorkManifests').doc(f.manifests[0].manifestId);
+  const copy=(await ref.get()).data();
+  assert.ok(copy);
+  await ref.delete();
+  await ref.create(copy);
+  await assert.rejects(rehearseSyntheticMultiPageRecovery({
+    ...f.args,rehearsalId:randomUUID(),detachedRestore:{
+      signer,expectedCertificate:first.detachedRestoreCertificate,
+    },
+  }),/FHIR_POLL_F_PAGE_REVISION_OR_PAYLOAD_INVALID/);
+  assert.deepEqual(await counts(f),[1,1,1]);
+});
+scenario('detached inventory cannot run in PRODUCTION mode',async f=>{
+  const env=process.env.GHIMS_RUNTIME_MODE;
+  try{
+    process.env.GHIMS_RUNTIME_MODE='PRODUCTION';
+    assert.throws(()=>new EmulatorOnlyG2DetachedRestoreSigner(randomBytes(32)),
+      /FHIR_POLL_F_EMULATOR_ONLY/);
+  }finally{process.env.GHIMS_RUNTIME_MODE=env;}
+  assert.deepEqual(await counts(f),[0,0,0]);
 });

@@ -122,6 +122,19 @@ test('CI-EXT-11: leases, fencing epochs, global ordering, atomic checkpoints and
       .doc('fhd_' + digest(JSON.stringify([sourceId, resourceType, resourceId]))).get())
       .get('lastOperationSequence')).toBe(op2.operationSequence);
 
+    // A production runtime cannot use the legacy checkpoint even with an emulator.
+    const savedMode = process.env.GHIMS_RUNTIME_MODE;
+    try {
+      process.env.GHIMS_RUNTIME_MODE = 'PRODUCTION';
+      await expect(checkpointSourcePollLease({
+        db, actor, fence: claimed.fence, sequence: 1,
+        workId: 'history-newer', digest: digest('v1-validated'),
+      })).rejects.toThrow('FHIR_SYNC_LEGACY_CHECKPOINT_TEST_ONLY');
+    } finally {
+      if (savedMode === undefined) delete process.env.GHIMS_RUNTIME_MODE;
+      else process.env.GHIMS_RUNTIME_MODE = savedMode;
+    }
+
     // The legacy checkpoint API must not accept an otherwise authorized LIVE source.
     await root.collection('fhirSources').doc(sourceId).update({syntheticOnly: false});
     await expect(checkpointSourcePollLease({

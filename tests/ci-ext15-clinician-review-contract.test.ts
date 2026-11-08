@@ -80,7 +80,7 @@ describe('CI-EXT-15 external clinical review anti-promotion policy',()=>{
     const route=await readFile(resolve(process.cwd(),
       'app/api/integrations/fhir/clinical-review/route.ts'),'utf8');
     expect(route).toContain("GHIMS_CI_EXTERNAL_CLINICAL_REVIEW_ENABLED!=='true'");
-    expect(route).toContain("process.env.GHIMS_RUNTIME_MODE==='PRODUCTION'");
+    expect(route).toContain("!['TEST','STAGING'].includes(");
     expect(route).toContain('deriveAuthoritativeContext');
     expect(route).toContain('readExternalClinicalEvidence');
     expect(route).toContain('clinicalUseAuthorized:false,aiDraftingEligible:false');

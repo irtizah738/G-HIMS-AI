@@ -168,12 +168,33 @@ export async function recoverSyntheticG2FreshManifest(
        superseded.status!=='REVIEWED_SUPERSEDED')deny('SUPERSESSION_EVENT_INVALID');
     const approvalId=siteApprovalDocId(source);
     const linkId=fhirPatientLinkId(old.sourceId,args.externalPatientId);
-    const [approvalSnap,linkSnap,superAudit,superOutbox]=await tx.getAll(
+    const [approvalSnap,linkSnap,superAudit,superOutbox,
+      securityAudit,clinicalAudit,securityOutbox,clinicalOutbox]=await tx.getAll(
       root.collection('fhirSiteApprovals').doc(approvalId),
       root.collection('fhirPatientLinks').doc(linkId),
       root.collection('auditLogs').doc('fau_'+supersedeId),
       root.collection('fhirG2SyntheticWorkOutbox').doc('fg2o_'+supersedeId),
+      root.collection('auditLogs').doc('fau_'+reviewId('SECURITY')),
+      root.collection('auditLogs').doc('fau_'+reviewId('CLINICAL')),
+      root.collection('fhirG2SyntheticWorkOutbox').doc('fg2o_'+reviewId('SECURITY')),
+      root.collection('fhirG2SyntheticWorkOutbox').doc('fg2o_'+reviewId('CLINICAL')),
     );
+    for(const [role,reviewer,audit,outbox,reviewKey] of [
+      ['SECURITY',reviewerA,securityAudit.data(),securityOutbox.data(),reviewId('SECURITY')],
+      ['CLINICAL',reviewerB,clinicalAudit.data(),clinicalOutbox.data(),reviewId('CLINICAL')],
+    ] as const){
+      if(!audit||audit.action!=='FHIR_G2_HELD_REVIEW_RECORDED'||
+         audit.actorId!==reviewer||audit.reviewId!==args.reviewId||
+         audit.role!==role||audit.immutable!==true||
+         audit.tenantId!==old.tenantId||audit.sourceId!==old.sourceId||
+         audit.transitionSequence!==oldState.transitionSequence-1||
+         !outbox||outbox.reviewId!==args.reviewId||
+         outbox.role!==role||outbox.reviewerId!==reviewer||
+         outbox.status!=='HELD'||outbox.immutable!==true||
+         outbox.tenantId!==old.tenantId||outbox.sourceId!==old.sourceId||
+         outbox.destination!=='CI_EXTERNAL_CONTEXT_QUALIFICATION')
+         deny('REVIEW_AUDIT_INCOMPLETE');
+    }
     validateFhirSiteApproval(source,(approvalSnap.data() as FhirSiteApproval|undefined)??null,
       fresh.items[0].resourceType,now);
     const a=superAudit.data(),o=superOutbox.data();

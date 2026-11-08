@@ -142,12 +142,12 @@ export async function readGitHubMergedPrEvidence({token,repo,numbers}) {
       const record=(await get(token,prefix+'/contents/'+path+'?ref=main')).body;
       if(record?.encoding!=='base64'||typeof record.content!=='string')
         throw new Error('POSTMERGE_AUDIT_CODEOWNERS_SHAPE');
-      const lines=Buffer.from(record.content.replace(/\\s/g,''),'base64')
-        .toString('utf8').split(/\\r?\\n/);
+      const lines=Buffer.from(record.content.replace(/\s/g,''),'base64')
+        .toString('utf8').split(/\r?\n/);
       codeOwnersConfigured=lines.some(line=>{
         const trimmed=line.trim();
         return trimmed.length>0&&!trimmed.startsWith('#')&&
-          trimmed.split(/\\s+/).length>=2;
+          trimmed.split(/\s+/).length>=2;
       });
       break;
     } catch(e) {

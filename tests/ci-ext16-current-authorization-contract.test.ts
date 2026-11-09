@@ -3,6 +3,8 @@ import type {DocumentReference,Transaction} from 'firebase-admin/firestore';
 import {readFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {externalReviewFactDigest} from '@/lib/clinical/intelligence/external-clinician-review-policy';
+import {approvalEventHash} from '@/lib/clinical/intelligence/external-fact-approval-event-integrity';
+import type {ApprovalEventPayload} from '@/lib/clinical/intelligence/external-fact-approval-events';
 import {
   assessCurrentExternalClinicalApproval,
   externalFactApprovalHeadId,
@@ -81,17 +83,29 @@ function fixture(){
     validFrom,validUntil,revokedAt:null,
   });
   const approvalId=externalFactApprovalHeadId(REVIEW_ID,FACT.evidenceReceiptId);
-  put('externalClinicalFactApprovalHeads',approvalId,{
-    tenantId:TENANT,patientId:PATIENT,reviewId:REVIEW_ID,
-    evidenceReceiptId:FACT.evidenceReceiptId,
+  const eventId='efae_synthetic_seed';
+  const payload:ApprovalEventPayload={
+    schemaVersion:1,tenantId:TENANT,patientId:PATIENT,reviewId:REVIEW_ID,
+    headId:approvalId,evidenceReceiptId:FACT.evidenceReceiptId,
     sourceVersionId:FACT.sourceVersionId,
     resourceHash:FACT.resourceHash,sourceId:FACT.sourceId,
-    factualDigest:DIGEST,authorityFenceHash:FENCE,
-    status:'APPROVED',approvalEventId:'event-approval',
-    revision:1,siteAuthorityRevision:4,
-    reviewerCredentialRevision:1,
-    approverCredentialRevision:1,approvedByActorId:APPROVER,
-    validFrom,validUntil,revokedAt:null,
+    facilityId:SOURCE.facilityId,factualDigest:DIGEST,authorityFenceHash:FENCE,
+    status:'APPROVED',eventType:'EXTERNAL_FACT_APPROVAL_ISSUED',
+    revision:1,approvedByActorId:APPROVER,reviewerActorId:REVIEWER,
+    reviewerCredentialRevision:1,approverCredentialRevision:1,
+    siteAuthorityRevision:4,validFrom,validUntil,revokedAt:null,
+    actorId:APPROVER,recordedAt:NOW,reasonCode:null,
+    previousEventId:null,previousEventHash:null,
+  };
+  const eventHash=approvalEventHash(payload);
+  put('externalClinicalFactApprovalEvents',eventId,{
+    eventId,eventHash,immutable:true,payload,
+    clinicalUseAuthorized:false,aiDraftingEligible:false,
+  });
+  put('externalClinicalFactApprovalHeads',approvalId,{
+    ...payload,approvalEventId:eventId,eventHash,
+    immutableSourceEvent:true,evidenceOnly:true,
+    clinicalUseAuthorized:false,aiDraftingEligible:false,
   });
   const args={
     tx,tenant,tenantId:TENANT,patientId:PATIENT,actorId:REVIEWER,
@@ -167,6 +181,18 @@ describe('CI-EXT-16 current clinical authority preflight is non-promoting',()=>{
       siteAuthorityRevision:4,resourceHash:'0'.repeat(64),
     });
     expect((await g.assess()).state).toBe('DENIED');
+  });
+  test('a forged mutable approval head without immutable event is denied',async()=>{
+    const f=fixture();
+    f.mutate('externalClinicalFactApprovalHeads',f.approvalId,{
+      eventHash:'0'.repeat(64),
+    });
+    expect((await f.assess()).reasonCode)
+      .toBe('CI_EXT17_APPROVAL_EVENT_CHAIN_INVALID');
+    const g=fixture();
+    g.records.delete('externalClinicalFactApprovalEvents/efae_synthetic_seed');
+    expect((await g.assess()).reasonCode)
+      .toBe('CI_EXT17_APPROVAL_EVENT_CHAIN_INVALID');
   });
   test('requires independently credentialed clinical approver, never reviewer self-approval',async()=>{
     const f=fixture();

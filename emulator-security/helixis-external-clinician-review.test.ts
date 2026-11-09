@@ -331,6 +331,21 @@ test('CI-EXT-17 exact-event issuance, idempotency, non-promotion, emergency revo
     expect(current.currentAuthorization?.state).toBe('PREQUALIFIED_NON_PROMOTING');
     expect(current.currentAuthorization?.clinicalUseAuthorized).toBe(false);
     expect(current.currentAuthorization?.aiDraftingEligible).toBe(false);
+    // A stored "VERIFIED" head does not help once the hospital signature
+    // provenance is withdrawn. The source and clinical data stay untouched.
+    const firstEvidence=f.root.collection('externalClinicalAuthorityEvidence')
+      .doc(bundles[0].evidenceId);
+    await firstEvidence.update({issuerAttestationId:null});
+    const unsigned=await readExternalClinicalEvidence({
+      db:f.db,actor:f.clinician,tenantId:f.tenantId,
+      patientId:f.patientId,currentAuthorizationReviewId:reviewId,
+    });
+    expect(unsigned.currentAuthorization?.state).toBe('DENIED');
+    expect(unsigned.currentAuthorization?.reasonCode)
+      .toBe('CI_EXT21_UNSIGNED_LEGACY_RECORD');
+    await firstEvidence.update({
+      issuerAttestationId:bundles[0].signedDocuments[0].attestationId,
+    });
     // Expiration/revocation of a hospital governance grant denies even
     // prequalification, regardless of unchanged mutable credential heads.
     await f.root.collection('externalClinicalGovernanceGrants')

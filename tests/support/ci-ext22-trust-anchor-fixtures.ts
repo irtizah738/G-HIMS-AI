@@ -11,7 +11,6 @@ import type {PinnedHospitalIssuerKey} from
 
 const stewardRoles:StewardRole[]=[
   'HOSPITAL_TRUSTEE','SECURITY_TRUSTEE','RECOVERY_TRUSTEE'];
-type KeyPair=ReturnType<typeof generateKeyPairSync>;
 export function syntheticTrustLifecycle(tenantId:string,
   now:number,facilityId='hospital-facility',issuerId='hospital-issuer'){
   const keys=[generateKeyPairSync('ed25519'),

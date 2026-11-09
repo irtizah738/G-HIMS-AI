@@ -82,8 +82,6 @@ function publicKey(pem:string,fingerprint:string){
     fail('PUBLIC_KEY_INVALID');
   try{
     const key=createPublicKey(pem);
-    if(key.asymmetricKeyType!=='ed25519'||sha(key.export({type:'spki',format:'der'}))===fingerprint)
-      { /* The actual SPKI fingerprint check below uses bytes, not JSON. */ }
     if(key.asymmetricKeyType!=='ed25519')fail('KEY_ALGORITHM_INVALID');
     const observed=createHash('sha256')
       .update(key.export({type:'spki',format:'der'})).digest('hex');
@@ -306,6 +304,7 @@ export async function applyHospitalTrustLifecycle(args:Readonly<{
 export async function inspectCurrentHospitalTrust(args:Readonly<{
   tx:Transaction;tenant:DocumentReference;issuerId:string;
   tenantId:string;facilityId:string;now:number;
+  independentlyPinnedStewards:readonly PinnedHospitalTrustSteward[];
 }>):Promise<{valid:boolean;reasonCode:string;pin:PinnedHospitalIssuerKey|null}>{
   if(!testOnly())return {valid:false,reasonCode:'CI_EXT22_NOT_COMMISSIONED',pin:null};
   const {tx,tenant,issuerId,tenantId,facilityId,now}=args;
@@ -321,6 +320,24 @@ export async function inspectCurrentHospitalTrust(args:Readonly<{
     .doc(data.currentEventId as string));
   if(!e.exists||!verifyTrustHead(data,e.data() as Row,data.currentEventId as string))
     return {valid:false,reasonCode:'CI_EXT22_ROOT_EVENT_TAMPERED',pin:null};
+  const evt=e.data() as Row;
+  const payload=evt.payload as TrustEventPayload;
+  if(payload.command.tenantId!==tenantId||
+     payload.command.facilityId!==facilityId||
+     payload.command.issuerId!==issuerId||
+     payload.status!=='ACTIVE'||payload.revision!==data.revision||
+     payload.command.issuedAt>now||
+     !Array.isArray(evt.endorsements))
+    return {valid:false,reasonCode:'CI_EXT22_ROOT_EVENT_SCOPE_INVALID',pin:null};
+  try{
+    const signers=verifiedStewards(payload.command,
+      evt.endorsements as HospitalTrustEndorsement[],
+      args.independentlyPinnedStewards,now);
+    if(canonical(signers)!==canonical(payload.stewardIds))
+      return {valid:false,reasonCode:'CI_EXT22_ROOT_STEWARD_TAMPERED',pin:null};
+  }catch{
+    return {valid:false,reasonCode:'CI_EXT22_STEWARD_QUORUM_NOT_CURRENT',pin:null};
+  }
   const pin=data.currentPin as PinnedHospitalIssuerKey|null;
   if(!pin||pin.status!=='ACTIVE'||pin.tenantId!==tenantId||
     pin.facilityId!==facilityId||pin.issuerId!==issuerId||

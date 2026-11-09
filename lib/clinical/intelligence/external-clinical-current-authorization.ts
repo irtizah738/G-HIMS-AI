@@ -44,8 +44,6 @@ export const EXTERNAL_CURRENT_AUTH_MAX_PRIVILEGES=32;
 const REVIEW=/^ecr_[a-f0-9]{64}$/;
 const CLINICAL_ROLES=new Set(['DOCTOR','CONSULTANT','ATTENDING_PHYSICIAN']);
 const ELIGIBLE_PRIVILEGES=new Set(['CONSULT_OPD','SIGN_CLINICAL_NOTE']);
-const isObject=(x:unknown):x is Record<string,unknown>=>
-  x!==null&&typeof x==='object'&&!Array.isArray(x);
 function normalized(value:unknown):string{
   return typeof value==='string'?value.trim().toUpperCase():'';
 }
@@ -112,6 +110,8 @@ export function assessCurrentExternalClinicalReview(args:Readonly<{
   if(!member||member.status!=='ACTIVE'||
      (member.userId&&member.userId!==uid)||
      !roles.some(role=>CLINICAL_ROLES.has(normalized(role)))||
+     !contains(member.permissions,'FHIR_EVIDENCE_REVIEW')||
+     !contains(member.permissions,'FHIR_CLINICAL_EVIDENCE_REVIEW')||
      args.sourceRefs.some(ref=>!contains(member.facilityIds,ref.facilityId)))
     return denied(reviewId,'CLINICIAN_MEMBERSHIP_INACTIVE',true);
   const employee=args.employees.length===1?args.employees[0]:null;

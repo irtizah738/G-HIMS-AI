@@ -71,3 +71,16 @@ export function syntheticCurrentHospitalTrustRoot(
   };
   return {stewards,command,eventId,event,head};
 }
+
+/** Test-only signing; never import into production modules. */
+export function syntheticStewardEndorsements(
+  command:HospitalTrustCommand,
+):HospitalTrustEndorsement[]{
+  const indices=command.operation==='RECOVER'?[0,1,2]:
+    command.operation==='REVOKE'?[1,2]:[0,1];
+  return indices.map(i=>({
+    stewardId:'ci23-independent-'+roles[i].toLowerCase(),
+    signatureBase64Url:sign(null,trustCommandBytes(command),
+      pairs[i].privateKey).toString('base64url'),
+  }));
+}

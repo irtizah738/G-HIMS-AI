@@ -39,7 +39,7 @@ export function syntheticSignedAuthorityRows(args:Readonly<{
   const validUntil=record.validUntil as number;
   const claimId='synthetic-claim-'+stable(tenantId,kind,recordId).slice(0,36);
   const claim:HospitalIssuerClaim={
-    schemaVersion:1,tenantId,facilityId,issuerId,keyId,
+    schemaVersion:1,tenantId,facilityId,issuerId,keyId,kind,
     subjectId,claimId,verifiedByActorId,
     issuedAt:kind==='GOVERNANCE_GRANT'?now-1000:record.verifiedAt as number,
     validFrom,validUntil,
@@ -72,7 +72,8 @@ export function syntheticSignedAuthorityRows(args:Readonly<{
     immutable:true,clinicalUseAuthorized:false,aiDraftingEligible:false,
   };
   const signed={
-    ...record,issuerAttestationId:attestationId,
+    ...record,revokedAt:record.revokedAt??null,
+    issuerAttestationId:attestationId,
     issuerId,issuerKeyId:keyId,issuerKeyRevision:pin.keyRevision,
     issuerSpkiFingerprint:fingerprint,issuerClaimDigest:claimDigest,
     immutableSourceEvent:true,

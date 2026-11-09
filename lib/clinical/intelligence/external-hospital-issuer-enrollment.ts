@@ -124,7 +124,8 @@ export async function enrollSignedHospitalIssuerClaim(args:Readonly<{
   });
   if(!result.verified||!result.claimDigest||!result.fingerprint)
     fail(result.reasonCode);
-  const claimDigest=result.claimDigest;
+  const claimDigest:string=result.claimDigest;
+  const fingerprint:string=result.fingerprint;
   const idSuffix=stableId('HELIXIS_CI_EXT20_ATTESTATION_V1',
     tenantId,c.issuerId,c.claimId);
   const attestationId='eia_'+idSuffix;
@@ -146,7 +147,7 @@ export async function enrollSignedHospitalIssuerClaim(args:Readonly<{
         commandSnap.get('claimDigest')!==claimDigest||
         attestationSnap.get('recordId')!==recordId||
         commandSnap.get('recordId')!==recordId||
-        attestationSnap.get('issuerSpkiFingerprint')!==result.fingerprint||
+        attestationSnap.get('issuerSpkiFingerprint')!==fingerprint||
         !recordSnap.exists||!replayState(recordSnap.data() as Row,
           c,attestationId,claimDigest,recordId))
         fail('IDEMPOTENCY_CONFLICT_OR_REVOKED');
@@ -159,7 +160,7 @@ export async function enrollSignedHospitalIssuerClaim(args:Readonly<{
       claimId:c.claimId,claimDigest,issuerId:c.issuerId,
       issuerKeyId:c.keyId,
       issuerKeyRevision:trustedPin.keyRevision,
-      issuerSpkiFingerprint:result.fingerprint,
+      issuerSpkiFingerprint:fingerprint,
       kind:c.kind,subjectId:c.subjectId,facilityId:c.facilityId,
       issuedAt:c.issuedAt,validFrom:c.validFrom,validUntil:c.validUntil,
       immutable:true,clinicalUseAuthorized:false,aiDraftingEligible:false,
@@ -173,7 +174,7 @@ export async function enrollSignedHospitalIssuerClaim(args:Readonly<{
       ...common,eventType:'EXTERNAL_HOSPITAL_ISSUER_CLAIM_ENROLLED',
     });
     tx.create(ref,record(c,attestationId,claimDigest,
-      result.fingerprint,trustedPin.keyRevision,recordId));
+      fingerprint,trustedPin.keyRevision,recordId));
     tx.create(tenant.collection('externalClinicalIssuerOutbox')
       .doc(attestationId),{
         ...common,status:'HELD',destination:'CI_EXTERNAL_ISSUER_GOVERNANCE',

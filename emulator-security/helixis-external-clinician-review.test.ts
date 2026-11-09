@@ -334,6 +334,8 @@ test('CI-EXT-17 exact-event issuance, idempotency, non-promotion, emergency revo
     expect(denied.currentAuthorization?.state).toBe('DENIED');
     expect(denied.currentAuthorization?.reasonCode)
       .toBe('CI_EXT19_HOSPITAL_GRANT_NOT_CURRENT');
+    await expect(issue()).rejects.toThrow(
+      'CI_EXT17_GOVERNED_AUTHORITY_INVALID_CI_EXT19_HOSPITAL_GRANT_NOT_CURRENT');
     await f.root.collection('externalClinicalGovernanceGrants')
       .doc(bundles[1].approverId).update({status:'ACTIVE'});
     await expect(issue({...issueCommand,idempotencyKey:randomUUID()}))

@@ -9,6 +9,7 @@ import type {Firestore,DocumentReference,Transaction} from 'firebase-admin/fires
 import type {FhirImportActor} from './external-fhir-import';
 import {externalReviewFactDigest} from './external-clinician-review-policy';
 import {approvalEventHash,verifyApprovalEventHead} from './external-fact-approval-event-integrity';
+import {verifyCurrentExternalGovernanceAuthority} from './external-governance-authority-consumer';
 import {externalFactApprovalHeadId,type CurrentFactReference,type CurrentSourceReference}
   from './external-current-authorization-preflight';
 
@@ -270,6 +271,18 @@ export async function issueExternalFactApproval(args:Readonly<{
     !currentCredential(approver,tenantId,actor.actorId,source.facilityId,now))
     fail('CLINICIAN_CREDENTIAL_NOT_CURRENT');
   if(!currentSite(site,tenantId,source,now))fail('SITE_POLICY_NOT_CURRENT');
+  const governance=await verifyCurrentExternalGovernanceAuthority({
+    tx,tenant,tenantId,now,authorities:[
+      {kind:'CLINICIAN',targetId:reviewerId,
+        facilityId:source.facilityId,siteApprovalId:null,head:reviewer},
+      {kind:'CLINICIAN',targetId:actor.actorId,
+        facilityId:source.facilityId,siteApprovalId:null,head:approver},
+      {kind:'SITE',targetId:source.sourceId,
+        facilityId:source.facilityId,siteApprovalId:source.siteApprovalId,
+        head:site},
+    ],
+  });
+  if(!governance.valid)fail('GOVERNED_AUTHORITY_INVALID_'+governance.reasonCode);
   const validUntil=Math.min(
     reviewer.validUntil as number,approver.validUntil as number,
     site.validUntil as number,now+TEN_MIN);

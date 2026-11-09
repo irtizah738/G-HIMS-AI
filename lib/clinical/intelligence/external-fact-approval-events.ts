@@ -214,7 +214,8 @@ export async function issueExternalFactApproval(args:Readonly<{
   const ref=tenant.collection('externalClinicalFactApprovalHeads').doc(headId);
   const cmdRef=tenant.collection('externalClinicalFactApprovalCommands').doc(cmdId);
   const requestHash=digest(['HELIXIS_FACT_APPROVAL_ISSUE_REQUEST_V1',
-    tenantId,patientId,actor.actorId,command]);
+    tenantId,patientId,actor.actorId,
+    {...command,idempotencyKey:command.idempotencyKey.toLowerCase()}]);
   const [cmd,head,reviewSnap,approverSnap,siteSnap]=await tx.getAll(
     cmdRef,ref,tenant.collection('externalClinicianEvidenceReviews').doc(command.reviewId),
     tenant.collection('externalClinicalCredentialHeads').doc(actor.actorId),
@@ -223,6 +224,10 @@ export async function issueExternalFactApproval(args:Readonly<{
     if(cmd.get('requestHash')!==requestHash||
       cmd.get('headId')!==headId||cmd.get('status')!=='APPROVED')
       fail('IDEMPOTENCY_CONFLICT');
+    // Never report an old approval as current after safety revocation.
+    if(!head.exists||head.get('status')!=='APPROVED'||
+      head.get('approvalEventId')!==cmd.get('eventId'))
+      fail('APPROVAL_SUPERSEDED');
     return response(headId,cmd.get('eventId'),cmd.get('revision'),'APPROVED',true);
   }
   if(head.exists)fail('ALREADY_ISSUED_REQUIRES_NEW_REVIEW');
@@ -311,26 +316,32 @@ export async function revokeExternalFactApproval(args:Readonly<{
     command.evidenceReceiptId,actor.actorId,command.idempotencyKey);
   const commandRef=tenant.collection('externalClinicalFactApprovalCommands').doc(cmdId);
   const requestHash=digest(['HELIXIS_FACT_APPROVAL_REVOKE_REQUEST_V1',
-    tenantId,patientId,actor.actorId,command]);
+    tenantId,patientId,actor.actorId,
+    {...command,idempotencyKey:command.idempotencyKey.toLowerCase()}]);
   return db.runTransaction(async tx=>{
     const [priorCommand,headSnap]=await tx.getAll(commandRef,headRef);
-    if(priorCommand.exists){
-      if(priorCommand.get('requestHash')!==requestHash||
-        priorCommand.get('headId')!==headId||
-        priorCommand.get('status')!=='REVOKED')
-        fail('IDEMPOTENCY_CONFLICT');
-      return response(headId,priorCommand.get('eventId'),
-        priorCommand.get('revision'),'REVOKED',true);
-    }
     if(!headSnap.exists)fail('APPROVAL_MISSING');
     const head=headSnap.data() as Row;
     if(head.tenantId!==tenantId||head.patientId!==patientId||
       head.reviewId!==command.reviewId||head.headId!==headId||
-      !validId(head.facilityId)||head.status!=='APPROVED'||
+      !validId(head.facilityId))
+      fail('APPROVAL_SCOPE_INVALID');
+    // Re-authorization is required even for an idempotent replay.
+    actorScope(actor,tenantId,head.facilityId as string,'FHIR_CLINICAL_FACT_REVOKE');
+    if(priorCommand.exists){
+      if(priorCommand.get('requestHash')!==requestHash||
+        priorCommand.get('headId')!==headId||
+        priorCommand.get('status')!=='REVOKED'||
+        head.status!=='REVOKED'||
+        head.approvalEventId!==priorCommand.get('eventId'))
+        fail('IDEMPOTENCY_CONFLICT');
+      return response(headId,priorCommand.get('eventId'),
+        priorCommand.get('revision'),'REVOKED',true);
+    }
+    if(head.status!=='APPROVED'||
       head.revision!==command.expectedRevision||
       !validId(head.approvalEventId))
       fail('APPROVAL_NOT_CURRENT');
-    actorScope(actor,tenantId,head.facilityId as string,'FHIR_CLINICAL_FACT_REVOKE');
     const oldEventSnap=await tx.get(tenant.collection('externalClinicalFactApprovalEvents')
       .doc(head.approvalEventId as string));
     if(!oldEventSnap.exists||

@@ -60,11 +60,12 @@ function activeWindow(row:Row,now:number):boolean{
 }
 function currentCredential(row:Credential|undefined,tenantId:string,
   actorId:string,facilityIds:readonly string[],now:number):boolean{
+  const currentFacilities=row?.facilityIds;
   return !!row&&row.tenantId===tenantId&&row.actorId===actorId&&
     row.status==='VERIFIED'&&row.identityAssurance==='HOSPITAL_VERIFIED'&&
     row.licenseVerified===true&&Number.isSafeInteger(row.revision)&&
-    Number(row.revision)>0&&Array.isArray(row.facilityIds)&&
-    facilityIds.every(f=>row.facilityIds!.includes(f))&&
+    Number(row.revision)>0&&Array.isArray(currentFacilities)&&
+    facilityIds.every(f=>currentFacilities.includes(f))&&
     activeWindow(row,now);
 }
 function denied(reasonCode:string):CurrentExternalPreflight{

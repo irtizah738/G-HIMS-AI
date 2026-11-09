@@ -2,7 +2,7 @@ name: CI-EXT-03 External Clinical Evidence Reader
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feat/helixis-ci-external-clinician-review-clean-20261109]
 
 permissions:
   contents: read
@@ -28,6 +28,9 @@ jobs:
       GOOGLE_CLOUD_PROJECT: ghims-p4-ci
       GHIMS_CI_CONTEXT_SOURCE: NATIVE
       GHIMS_CI_EXTERNAL_EVIDENCE_READER_ENABLED: "false"
+      GHIMS_CI_EXTERNAL_FHIR_IMPORT_ENABLED: "false"
+      GHIMS_CI_EXTERNAL_CLINICAL_REVIEW_ENABLED: "false"
+      GHIMS_CI_EXTERNAL_FACT_APPROVAL_ENABLED: "true" # emulator-only runtime + project guard
       GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
     steps:
       - uses: actions/checkout@v4
@@ -40,12 +43,14 @@ jobs:
         run: bun run typecheck
       - name: Source-quality checks
         run: bun run lint
-      - name: External reader contract tests
-        run: bun test tests/ci-ext03-external-reader-contract.test.ts
+      - name: External reader and clinician review contract tests
+        run: bun test tests/ci-ext03-external-reader-contract.test.ts tests/ci-ext15-clinician-review-contract.test.ts tests/ci-ext16-current-authorization-contract.test.ts tests/ci-ext17-approval-contract.test.ts
       - name: Compile emulator integration for Node
         run: |
           sed "s#from 'bun:test'#from './helixis-node-test-compat'#g" emulator-security/helixis-external-context-reader.test.ts > emulator-security/helixis-external-context-reader.node.test.ts
           bun build emulator-security/helixis-external-context-reader.node.test.ts --target=node --format=cjs --packages=external --outdir=.tmp/fhir-node
+          sed "s#from 'bun:test'#from './helixis-node-test-compat'#g" emulator-security/helixis-external-clinician-review.test.ts > emulator-security/helixis-external-clinician-review.node.test.ts
+          bun build emulator-security/helixis-external-clinician-review.node.test.ts --target=node --format=cjs --packages=external --outdir=.tmp/fhir-node
       - name: Firebase CLI
         run: npm install --global firebase-tools@14.20.0
       - name: External context emulator qualification
@@ -53,7 +58,7 @@ jobs:
         env:
           FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080"
         run: |
-          timeout --signal=TERM --kill-after=5s 110s firebase emulators:exec --project ghims-p4-ci --only firestore "node --test .tmp/fhir-node/helixis-external-context-reader.node.test.js"
+          timeout --signal=TERM --kill-after=5s 110s firebase emulators:exec --project ghims-p4-ci --only firestore "node --test .tmp/fhir-node/helixis-external-context-reader.node.test.js .tmp/fhir-node/helixis-external-clinician-review.node.test.js"
       - name: Diagnose emulator failures
         if: failure()
         run: |

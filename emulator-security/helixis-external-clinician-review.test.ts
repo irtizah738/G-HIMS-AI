@@ -286,6 +286,10 @@ test('CI-EXT-17 exact-event issuance, idempotency, non-promotion, emergency revo
     expect(first.factApproval?.aiDraftingEligible).toBe(false);
     const replay=await issue();
     expect(replay.factApproval?.replay).toBe(true);
+    const caseNormalized=await issue({
+      ...issueCommand,idempotencyKey:issueCommand.idempotencyKey.toUpperCase(),
+    });
+    expect(caseNormalized.factApproval?.replay).toBe(true);
     const headId=externalFactApprovalHeadId(reviewId,fact.evidenceReceiptId);
     const heads=f.root.collection('externalClinicalFactApprovalHeads');
     const events=f.root.collection('externalClinicalFactApprovalEvents');
@@ -323,12 +327,23 @@ test('CI-EXT-17 exact-event issuance, idempotency, non-promotion, emergency revo
       patientId:f.patientId,command:revokeCommand,
     });
     expect(again.replay).toBe(true);
+    await expect(revokeExternalFactApproval({
+      db:f.db,actor:{...safetyOfficer,permissions:[]},
+      tenantId:f.tenantId,patientId:f.patientId,command:revokeCommand,
+    })).rejects.toThrow('CI_EXT17_EXPLICIT_PERMISSION_REQUIRED');
+    await expect(revokeExternalFactApproval({
+      db:f.db,actor:safetyOfficer,tenantId:f.tenantId,
+      patientId:f.patientId,command:{...revokeCommand,idempotencyKey:randomUUID()},
+    })).rejects.toThrow('CI_EXT17_APPROVAL_NOT_CURRENT');
     expect((await events.get()).size).toBe(2);
     expect((await f.root.collection('externalClinicalFactApprovalOutbox').get()).size).toBe(2);
     const updated=await heads.doc(headId).get();
     expect(updated.get('status')).toBe('REVOKED');
     expect(updated.get('revision')).toBe(2);
     expect(updated.get('previousEventId')).toBe(first.factApproval?.eventId);
+    await f.source.update({status:'ACTIVE'});
+    await f.link.update({consentStatus:'GRANTED'});
+    await expect(issue()).rejects.toThrow('CI_EXT17_APPROVAL_SUPERSEDED');
     expect((await f.root.collection('patient360Projections').get()).size).toBe(0);
     expect((await f.root.collection('externalPatient360Projections').doc(f.patientId)
       .get()).get('dataQuality.externalEvidenceVerifiedByClinician')).toBe(false);

@@ -221,17 +221,17 @@ export async function issueExternalFactApproval(args:Readonly<{
     cmdRef,ref,tenant.collection('externalClinicianEvidenceReviews').doc(command.reviewId),
     tenant.collection('externalClinicalCredentialHeads').doc(actor.actorId),
     tenant.collection('externalClinicalSiteAuthorityHeads').doc(source.sourceId));
-  if(cmd.exists){
+  const isReplay=cmd.exists;
+  if(isReplay){
     if(cmd.get('requestHash')!==requestHash||
       cmd.get('headId')!==headId||cmd.get('status')!=='APPROVED')
       fail('IDEMPOTENCY_CONFLICT');
-    // Never report an old approval as current after safety revocation.
     if(!head.exists||head.get('status')!=='APPROVED'||
       head.get('approvalEventId')!==cmd.get('eventId'))
       fail('APPROVAL_SUPERSEDED');
-    return response(headId,cmd.get('eventId'),cmd.get('revision'),'APPROVED',true);
-  }
-  if(head.exists)fail('ALREADY_ISSUED_REQUIRES_NEW_REVIEW');
+    // A replay still needs current reviewer, issuer, source, evidence and
+    // hospital grants. Do not return before the checks below.
+  }else if(head.exists)fail('ALREADY_ISSUED_REQUIRES_NEW_REVIEW');
   if(!reviewSnap.exists)fail('REVIEW_MISSING');
   const review=reviewSnap.data() as Row;
   const digestFacts=externalReviewFactDigest(facts.map(f=>({
@@ -283,6 +283,11 @@ export async function issueExternalFactApproval(args:Readonly<{
     ],
   });
   if(!governance.valid)fail('GOVERNED_AUTHORITY_INVALID_'+governance.reasonCode);
+  if(isReplay){
+    // Current authorization has now been re-evaluated in the same
+    // transaction as exact source/consent provenance.
+    return response(headId,cmd.get('eventId'),cmd.get('revision'),'APPROVED',true);
+  }
   const validUntil=Math.min(
     reviewer.validUntil as number,approver.validUntil as number,
     site.validUntil as number,now+TEN_MIN);

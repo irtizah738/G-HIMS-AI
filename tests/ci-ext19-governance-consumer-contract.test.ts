@@ -123,6 +123,25 @@ describe('CI-EXT-19 verifiable current governance at consumption',()=>{
     });
     expect((await i.assess()).reasonCode).toBe('CI_EXT19_PROPOSAL_CHAIN_INVALID');
   });
+  test('unsigned legacy clinician evidence and hospital grant cannot be accepted',async()=>{
+    const f=fixture();
+    const changed={...f.bundles[0].evidence};
+    delete changed.issuerAttestationId;
+    f.mutate('externalClinicalAuthorityEvidence',f.bundles[0].evidenceId,
+      {issuerAttestationId:undefined});
+    expect((await f.assess()).reasonCode)
+      .toBe('CI_EXT21_UNSIGNED_LEGACY_RECORD');
+    const g=fixture();
+    g.mutate('externalClinicalGovernanceGrants',g.bundles[0].proposerId,
+      {issuerAttestationId:undefined});
+    expect((await g.assess()).reasonCode)
+      .toBe('CI_EXT21_UNSIGNED_LEGACY_RECORD');
+    const h=fixture();
+    h.records.delete('externalClinicalIssuerAttestations/'+
+      h.bundles[2].signedDocuments[0].attestationId);
+    expect((await h.assess()).reasonCode)
+      .toBe('CI_EXT21_SIGNED_ATTESTATION_MISSING');
+  });
   test('scope refuses wrong tenant and duplicated or unbound source',async()=>{
     const f=fixture();
     expect((await f.assess([f.authorities[0],f.authorities[0]])).reasonCode)

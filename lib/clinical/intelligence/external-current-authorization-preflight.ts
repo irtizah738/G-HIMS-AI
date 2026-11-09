@@ -12,6 +12,7 @@
 import {createHash} from 'node:crypto';
 import type {DocumentReference,Transaction} from 'firebase-admin/firestore';
 import {externalReviewFactDigest} from './external-clinician-review-policy';
+import {verifyApprovalEventHead} from './external-fact-approval-event-integrity';
 
 const ID=/^[A-Za-z0-9._-]{1,128}$/;
 const HEX=/^[a-f0-9]{64}$/;
@@ -75,7 +76,7 @@ function denied(reasonCode:string):CurrentExternalPreflight{
 /**
  * Stable IDs are never supplied by a browser: approval heads are retrieved
  * using the exact review/fact lineage. Distinct immutable approval events
- * must back these mutable heads in a later independently reviewed milestone.
+ * now back these mutable heads in CI-EXT-17 synthetic qualification.
  */
 export function externalFactApprovalHeadId(
   reviewId:string,evidenceReceiptId:string,
@@ -201,6 +202,17 @@ export async function assessCurrentExternalClinicalApproval(args:Readonly<{
     approvals.push(row);
   }
 
+  // A mutable read model is never sufficient proof of issuance. Each current
+  // APPROVED head must match a domain-hashed, immutable issuance event.
+  const eventSnaps=await tx.getAll(...approvals.map(a=>
+    tenant.collection('externalClinicalFactApprovalEvents')
+      .doc(a.approvalEventId as string)));
+  for(let i=0;i<approvals.length;i++){
+    if(!eventSnaps[i].exists||
+      !verifyApprovalEventHead(approvals[i],
+        eventSnaps[i].data() as Row,approvals[i].approvalEventId as string))
+      return denied('CI_EXT17_APPROVAL_EVENT_CHAIN_INVALID');
+  }
   const approverIds=[...approvers].sort();
   const approverSnaps=await tx.getAll(...approverIds.map(id=>
     tenant.collection('externalClinicalCredentialHeads').doc(id)));

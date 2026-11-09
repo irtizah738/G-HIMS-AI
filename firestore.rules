@@ -273,6 +273,9 @@ service cloud.firestore {
       match /externalClinicalCredentialHeads/{actorId} { allow read, write: if false; }
       match /externalClinicalSiteAuthorityHeads/{sourceId} { allow read, write: if false; }
       match /externalClinicalFactApprovalHeads/{approvalId} { allow read, write: if false; }
+      match /externalClinicalFactApprovalEvents/{eventId} { allow read, write: if false; }
+      match /externalClinicalFactApprovalOutbox/{eventId} { allow read, write: if false; }
+      match /externalClinicalFactApprovalCommands/{commandId} { allow read, write: if false; }
       match /fhirSandboxQualifications/{qualificationId} { allow read, write: if false; }
       match /fhirSiteApprovals/{approvalId} { allow read, write: if false; }
       match /fhirSyntheticQualifications/{evidenceId} { allow read, write: if false; }

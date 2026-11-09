@@ -52,6 +52,10 @@ function fixture(){
         signed.attestationId,signed.journal);
       put('externalClinicalIssuerOutbox',
         signed.attestationId,signed.outbox);
+      put('externalClinicalHospitalTrustHeads',
+        signed.pin.issuerId,signed.root.head);
+      put('externalClinicalHospitalTrustEvents',
+        signed.root.eventId,signed.root.event);
     }
   }
   const tenant={
@@ -68,6 +72,7 @@ function fixture(){
     };
   };
   const tx={
+    get:async(ref:{path:string})=>snapshot(ref),
     getAll:async(...refs:{path:string}[])=>refs.map(snapshot),
   } as unknown as Transaction;
   const assess=(entries=authorities)=>verifyCurrentExternalGovernanceAuthority({

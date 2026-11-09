@@ -2,7 +2,7 @@ name: CI-EXT-03 External Clinical Evidence Reader
 
 on:
   pull_request:
-    branches: [main, feat/helixis-ci-external-clinician-review-clean-20261109, feat/ci-ext17-immutable-fact-approval-20261109]
+    branches: [main, feat/helixis-ci-external-clinician-review-clean-20261109, feat/ci-ext17-immutable-fact-approval-20261109, feat/ci-ext20-hospital-issuer-attestation-20261109]
 
 permissions:
   contents: read

@@ -35,7 +35,7 @@ export type HospitalTrustResult=Readonly<{
   replay:boolean;clinicalUseAuthorized:false;aiDraftingEligible:false;
 }>;
 type Row=Record<string,unknown>;
-type TrustEventPayload=Readonly<{
+export type TrustEventPayload=Readonly<{
   schemaVersion:1;command:HospitalTrustCommand;
   revision:number;status:'ACTIVE'|'REVOKED';
   previousEventId:string|null;previousEventHash:string|null;
@@ -67,7 +67,7 @@ export function trustCommandBytes(command:HospitalTrustCommand):Buffer{
 export function trustCommandHash(command:HospitalTrustCommand):string{
   return createHash('sha256').update(trustCommandBytes(command)).digest('hex');
 }
-function eventHash(p:TrustEventPayload):string{
+export function hospitalTrustEventHash(p:TrustEventPayload):string{
   return sha(['HELIXIS_CI_EXT22_TRUST_EVENT_V1',p]);
 }
 function testOnly():boolean{
@@ -188,7 +188,7 @@ export function verifyTrustHead(head:Row,event:Row,eventIdValue:string):boolean{
     event.eventId!==eventIdValue||event.immutable!==true||
     event.clinicalUseAuthorized!==false||
     event.aiDraftingEligible!==false||
-    event.eventHash!==eventHash(p)||head.currentEventId!==eventIdValue||
+    event.eventHash!==hospitalTrustEventHash(p)||head.currentEventId!==eventIdValue||
     head.currentEventHash!==event.eventHash)return false;
   const e=headFromEvent(p,eventIdValue,event.eventHash as string);
   return Object.keys(e).every(k=>canonical(head[k])===canonical(e[k]));
@@ -271,7 +271,7 @@ export async function applyHospitalTrustLifecycle(args:Readonly<{
       previousEventHash:prior?.currentEventHash as string||null,
       stewardIds:signers,recordedAt:now,
     };
-    const ehash=eventHash(payload);
+    const ehash=hospitalTrustEventHash(payload);
     const envelope={eventId:eid,eventHash:ehash,payload,endorsements,
       immutable:true,clinicalUseAuthorized:false,aiDraftingEligible:false};
     tx.create(evtRef,envelope);

@@ -20,6 +20,7 @@ import {
   externalReviewFactDigest,
   type ExternalClinicianReviewInput,
 } from './external-clinician-review-policy';
+import {assessCurrentExternalClinicalApproval, type CurrentExternalPreflight} from './external-current-authorization-preflight';
 import { fhirImportHeadId, fhirPatientLinkId, prepareFhirImport } from './external-fhir-import';
 import type { FhirImportActor, FhirPatientLink, FhirSourceRecord } from './external-fhir-import';
 import type { ExternalFact, ExternalPatient360Projection } from './external-patient360-projection';
@@ -60,6 +61,7 @@ export type ExternalClinicalEvidenceResult = {
   status: 'EVIDENCE_ONLY';
   historyCompleteness: 'UNVERIFIED';
   facts: ExternalFact[];
+  currentAuthorization?:CurrentExternalPreflight;
   review?:Readonly<{
     reviewId:string; replay:boolean; disposition:
       'SOURCE_EVIDENCE_REVIEWED'|'CLINICAL_CONCERN_RECORDED';
@@ -150,8 +152,12 @@ export async function readExternalClinicalEvidence(args: {
   maxAgeMs?: number;
   /** Server-only. Atomic review of the exact same verified transaction snapshot. */
   review?: ExternalClinicianReviewInput;
+  /** Trusted server-only diagnostic; never a clinical-use authorization. */
+  currentAuthorizationReviewId?: string;
 }): Promise<ExternalClinicalEvidenceResult> {
   const { db, actor, tenantId, patientId } = args;
+  if(args.review&&args.currentAuthorizationReviewId)
+    throw new Error('CI_EXT16_REVIEW_AND_PREFLIGHT_MUTUALLY_EXCLUSIVE');
   assertExternalEvidenceReadAuthority(actor, tenantId, patientId);
   if(args.review){
     assertExternalClinicianReviewAuthority(actor);
@@ -365,6 +371,42 @@ export async function readExternalClinicalEvidence(args: {
     if (fingerprint !== projection.sourceFingerprint) {
       throw new Error('CI_EXT03_PROJECTION_CHECKPOINT_STALE');
     }
+    // The optional diagnostic reads current credential, site and per-fact
+    // approval heads inside this SAME transaction as source, consent and
+    // immutable evidence verification. It never enables clinical AI.
+    let currentAuthorization:CurrentExternalPreflight|undefined;
+    if(args.currentAuthorizationReviewId){
+      const sourceFences=sourceIds.map((sourceId,i)=>{
+        const snap=sourceSnaps[i],row=sources.get(sourceId);
+        if(!snap.exists||!snap.updateTime||!row)
+          throw new Error('CI_EXT16_SOURCE_FENCE_UNAVAILABLE');
+        return [sourceId,[snap.updateTime.seconds,snap.updateTime.nanoseconds],
+          row.facilityId,row.siteApprovalId||null,row.oauth?.credentialRevision||null];
+      });
+      const consentFences=linkIds.map((linkId,i)=>{
+        const snap=linkSnaps[i],row=links.get(linkId);
+        if(!snap.exists||!snap.updateTime||!row)
+          throw new Error('CI_EXT16_CONSENT_FENCE_UNAVAILABLE');
+        return [linkId,[snap.updateTime.seconds,snap.updateTime.nanoseconds],
+          row.patientId,row.matchStatus,row.consentStatus,row.facilityId];
+      });
+      currentAuthorization=await assessCurrentExternalClinicalApproval({
+        tx,tenant,tenantId,patientId,actorId:actor.actorId,
+        reviewId:args.currentAuthorizationReviewId,now,
+        revision:projection.revision,contentHash:projection.contentHash,
+        sourceCheckpoint:projection.sourceCheckpoint,
+        authorityFenceHash:hash(canonical({
+          sourceCheckpoint:projection.sourceCheckpoint,sourceFences,consentFences,
+        })),
+        facts:facts.map(f=>({
+          evidenceReceiptId:f.evidenceReceiptId,sourceVersionId:f.sourceVersionId,
+          resourceHash:f.resourceHash,sourceId:f.sourceId,
+        })),
+        sources:expectedSources.map(s=>({
+          ...s,siteApprovalId:sources.get(s.sourceId)?.siteApprovalId||null,
+        })),
+      });
+    }
     // An explicit clinician review binds to this fully verified transaction
     // snapshot, including consent and source document revisions. This does
     // NOT mutate the external projection, patient chart, or clinical authority.
@@ -489,6 +531,7 @@ export async function readExternalClinicalEvidence(args: {
       clinicalUseAuthorized: false, status: 'EVIDENCE_ONLY',
       historyCompleteness: 'UNVERIFIED', facts,
       ...(reviewResult?{review:reviewResult}:{}),
+      ...(currentAuthorization?{currentAuthorization}:{}),
     };
   });
 }

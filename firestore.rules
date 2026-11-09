@@ -283,6 +283,10 @@ service cloud.firestore {
       match /externalClinicalAuthorityEvents/{eventId} { allow read, write: if false; }
       match /externalClinicalAuthorityOutbox/{eventId} { allow read, write: if false; }
       match /externalClinicalAuthorityCommands/{commandId} { allow read, write: if false; }
+      // CI-EXT-20: issuer evidence is never submitted by browser/offline clients.
+      match /externalClinicalIssuerAttestations/{attestationId} { allow read, write: if false; }
+      match /externalClinicalIssuerEnrollmentCommands/{attestationId} { allow read, write: if false; }
+      match /externalClinicalIssuerOutbox/{attestationId} { allow read, write: if false; }
       match /fhirSandboxQualifications/{qualificationId} { allow read, write: if false; }
       match /fhirSiteApprovals/{approvalId} { allow read, write: if false; }
       match /fhirSyntheticQualifications/{evidenceId} { allow read, write: if false; }

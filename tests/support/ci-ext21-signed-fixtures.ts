@@ -9,8 +9,8 @@ import {
   type HospitalIssuerRole,type HospitalIssuerPrivilege,
   type PinnedHospitalIssuerKey,
 } from '@/lib/clinical/intelligence/external-hospital-issuer-attestation';
-import {installEmulatorHospitalTrustPins} from
-  '@/lib/clinical/intelligence/external-signed-authority-consumer';
+import {syntheticCurrentHospitalTrustRoot} from
+  './ci-ext23-current-root-fixtures';
 
 type Row=Record<string,unknown>;
 const pair=generateKeyPairSync('ed25519');
@@ -25,6 +25,7 @@ function stable(...parts:string[]):string{
 export type SyntheticSignedRows=Readonly<{
   record:Row;pin:PinnedHospitalIssuerKey;
   attestationId:string;attestation:Row;journal:Row;outbox:Row;
+  root:ReturnType<typeof syntheticCurrentHospitalTrustRoot>;
 }>;
 export function syntheticSignedAuthorityRows(args:Readonly<{
   tenantId:string;facilityId:string;kind:HospitalIssuerKind;
@@ -59,7 +60,7 @@ export function syntheticSignedAuthorityRows(args:Readonly<{
     permittedKinds:['CLINICIAN','SITE','GOVERNANCE_GRANT'],
     validFrom:now-600000,validUntil:now+3600000,
   };
-  installEmulatorHospitalTrustPins([pin]);
+  const root=syntheticCurrentHospitalTrustRoot(pin,now);
   const claimDigest=hospitalIssuerClaimDigest(claim);
   const attestationId='eia_'+stable('HELIXIS_CI_EXT20_ATTESTATION_V1',
     tenantId,issuerId,claimId);
@@ -80,7 +81,7 @@ export function syntheticSignedAuthorityRows(args:Readonly<{
     clinicalUseAuthorized:false,aiDraftingEligible:false,
   };
   return {
-    record:signed,pin,attestationId,
+    record:signed,pin,attestationId,root,
     attestation:{...base,signatureAlgorithm:'Ed25519',claim,
       signatureBase64Url:sign(null,hospitalIssuerSigningBytes(claim),
         pair.privateKey).toString('base64url')},

@@ -18,6 +18,8 @@ import {revokeExternalFactApproval} from
   '@/lib/clinical/intelligence/external-fact-approval-events';
 import {externalFactApprovalHeadId} from
   '@/lib/clinical/intelligence/external-current-authorization-preflight';
+import {syntheticGovernanceAuthority} from
+  '@/tests/support/ci-ext19-governance-fixtures';
 
 function observation(version:string,date:string,value:number){
   return {
@@ -239,12 +241,6 @@ test('CI-EXT-17 exact-event issuance, idempotency, non-promotion, emergency revo
     const reviewId=reviewed.review?.reviewId;
     if(!reviewId)throw new Error('CI_EXT17_SYNTHETIC_REVIEW_MISSING');
     const now=Date.now();
-    const cred=(actorId:string)=>({
-      tenantId:f.tenantId,actorId,facilityIds:['facility-a'],
-      status:'VERIFIED',identityAssurance:'HOSPITAL_VERIFIED',
-      licenseVerified:true,revision:1,validFrom:now-60_000,
-      validUntil:now+900_000,revokedAt:null,
-    });
     const approver={
       ...f.clinician,actorId:'independent-fact-approver',
       permissions:['FHIR_EVIDENCE_REVIEW','FHIR_CLINICAL_FACT_APPROVE'],
@@ -254,20 +250,42 @@ test('CI-EXT-17 exact-event issuance, idempotency, non-promotion, emergency revo
       roles:['CLINICAL_SAFETY_OFFICER'],
       permissions:['FHIR_CLINICAL_FACT_REVOKE'],
     };
-    await Promise.all([
-      f.root.collection('externalClinicalCredentialHeads')
-        .doc(f.clinician.actorId).set(cred(f.clinician.actorId)),
-      f.root.collection('externalClinicalCredentialHeads')
-        .doc(approver.actorId).set(cred(approver.actorId)),
-      f.root.collection('externalClinicalSiteAuthorityHeads')
-        .doc(f.sourceId).set({
-          tenantId:f.tenantId,sourceId:f.sourceId,facilityId:'facility-a',
-          siteApprovalId:'site-approved-v1',status:'APPROVED',
-          clinicalUseReviewStatus:'APPROVED',
-          revision:1,validFrom:now-60_000,validUntil:now+900_000,
-          revokedAt:null,
-        }),
-    ]);
+    const bundles=[
+      syntheticGovernanceAuthority({
+        tenantId:f.tenantId,kind:'CLINICIAN',
+        targetId:f.clinician.actorId,facilityId:'facility-a',now,
+      }),
+      syntheticGovernanceAuthority({
+        tenantId:f.tenantId,kind:'CLINICIAN',
+        targetId:approver.actorId,facilityId:'facility-a',now,
+      }),
+      syntheticGovernanceAuthority({
+        tenantId:f.tenantId,kind:'SITE',
+        targetId:f.sourceId,facilityId:'facility-a',
+        siteApprovalId:'site-approved-v1',now,
+      }),
+    ];
+    await Promise.all(bundles.flatMap((x,i)=>{
+      const authority=i===2?'externalClinicalSiteAuthorityHeads':
+        'externalClinicalCredentialHeads';
+      const targetId=i===0?f.clinician.actorId:
+        i===1?approver.actorId:f.sourceId;
+      return [
+        f.root.collection(authority).doc(targetId).set(x.head),
+        f.root.collection('externalClinicalAuthorityEvents')
+          .doc(x.eventId).set(x.event),
+        f.root.collection('externalClinicalAuthorityEvents')
+          .doc(x.proposalEventId).set(x.proposalEvent),
+        f.root.collection('externalClinicalAuthorityProposals')
+          .doc(x.proposalId).set(x.proposal),
+        f.root.collection('externalClinicalAuthorityEvidence')
+          .doc(x.evidenceId).set(x.evidence),
+        f.root.collection('externalClinicalGovernanceGrants')
+          .doc(x.proposerId).set(x.proposerGrant),
+        f.root.collection('externalClinicalGovernanceGrants')
+          .doc(x.approverId).set(x.approverGrant),
+      ];
+    }));
     const fact=reviewed.facts[0];
     const issueCommand={
       reviewId,evidenceReceiptId:fact.evidenceReceiptId,
@@ -305,6 +323,19 @@ test('CI-EXT-17 exact-event issuance, idempotency, non-promotion, emergency revo
     expect(current.currentAuthorization?.state).toBe('PREQUALIFIED_NON_PROMOTING');
     expect(current.currentAuthorization?.clinicalUseAuthorized).toBe(false);
     expect(current.currentAuthorization?.aiDraftingEligible).toBe(false);
+    // Expiration/revocation of a hospital governance grant denies even
+    // prequalification, regardless of unchanged mutable credential heads.
+    await f.root.collection('externalClinicalGovernanceGrants')
+      .doc(bundles[1].approverId).update({status:'REVOKED'});
+    const denied=await readExternalClinicalEvidence({
+      db:f.db,actor:f.clinician,tenantId:f.tenantId,
+      patientId:f.patientId,currentAuthorizationReviewId:reviewId,
+    });
+    expect(denied.currentAuthorization?.state).toBe('DENIED');
+    expect(denied.currentAuthorization?.reasonCode)
+      .toBe('CI_EXT19_HOSPITAL_GRANT_NOT_CURRENT');
+    await f.root.collection('externalClinicalGovernanceGrants')
+      .doc(bundles[1].approverId).update({status:'ACTIVE'});
     await expect(issue({...issueCommand,idempotencyKey:randomUUID()}))
       .rejects.toThrow('CI_EXT17_ALREADY_ISSUED_REQUIRES_NEW_REVIEW');
     await f.source.update({status:'REVOKED'});

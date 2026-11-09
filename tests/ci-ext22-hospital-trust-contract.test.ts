@@ -9,8 +9,8 @@ describe('CI-EXT-22 governed synthetic hospital issuer trust roots',()=>{
     const f=syntheticTrustLifecycle('tenant-a',NOW);
     const c=f.command('ENROLL',0,0);
     expect(()=>assertHospitalTrustCommand(c)).not.toThrow();
-    expect(trustCommandBytes(c).toString('utf8'))
-      .toStartWith('HELIXIS_CI_EXT22_TRUST_COMMAND_V1');
+    expect(trustCommandBytes(c).toString('utf8')
+      .startsWith('HELIXIS_CI_EXT22_TRUST_COMMAND_V1')).toBe(true);
     expect(trustCommandHash(c)).toMatch(/^[a-f0-9]{64}$/);
     expect(trustCommandHash({...c,evidenceDigest:'b'.repeat(64)}))
       .not.toBe(trustCommandHash(c));

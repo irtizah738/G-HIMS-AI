@@ -12,6 +12,10 @@ import {
   type HospitalIssuerClaim,type PinnedHospitalIssuerKey,
   type HospitalIssuerKind,type SignedHospitalIssuerClaim,
 } from './external-hospital-issuer-attestation';
+import {
+  inspectCurrentHospitalTrust,
+  type PinnedHospitalTrustSteward,
+} from './external-hospital-trust-anchor';
 
 type Row=Record<string,unknown>;
 export type SignedAuthorityKind=HospitalIssuerKind;
@@ -36,33 +40,41 @@ function testOnly():boolean{
     process.env.FIREBASE_PROJECT_ID==='ghims-p4-ci'&&
     process.env.GHIMS_CI_EXTERNAL_SIGNED_CONSUMER_ENABLED==='true';
 }
-const trustPins=new Map<string,PinnedHospitalIssuerKey>();
-function pinIndex(tenantId:string,facilityId:string,issuerId:string,keyId:string):string{
-  return JSON.stringify([tenantId,facilityId,issuerId,keyId]);
-}
 /**
- * Qualification-only installer: synthetic root keys are never persisted to
- * Firestore or transmitted by clients. No default key or production fallback.
+ * Only independently pinned stewardship keys can attest a current CI-EXT-22
+ * root. The hospital issuer's public key is NEVER trusted from this map.
+ * The public issuer pin MUST come from the transactionally validated,
+ * steward-signed current root event and head.
  */
-export function installEmulatorHospitalTrustPins(
-  pins:readonly PinnedHospitalIssuerKey[],
+const stewardPins=new Map<string,readonly PinnedHospitalTrustSteward[]>();
+function stewardIndex(tenantId:string,facilityId:string,issuerId:string):string{
+  return JSON.stringify([tenantId,facilityId,issuerId]);
+}
+export function installEmulatorHospitalTrustStewards(
+  stewards:readonly PinnedHospitalTrustSteward[],
 ):void{
-  if(!testOnly())throw new Error('CI_EXT21_EMULATOR_ONLY');
-  for(const pin of pins){
-    if(!id(pin.tenantId)||!id(pin.facilityId)||!id(pin.issuerId)||
-      !id(pin.keyId)||!ts(pin.keyRevision))
-      throw new Error('CI_EXT21_INVALID_SYNTHETIC_PIN');
-    trustPins.set(pinIndex(pin.tenantId,pin.facilityId,pin.issuerId,pin.keyId),pin);
-  }
+  if(!testOnly())throw new Error('CI_EXT23_EMULATOR_ONLY');
+  if(stewards.length<2||stewards.length>3||
+    !stewards.every(s=>
+      id(s.stewardId)&&id(s.tenantId)&&id(s.facilityId)&&
+      Array.isArray(s.permittedIssuerIds)&&s.permittedIssuerIds.length===1&&
+      id(s.permittedIssuerIds[0])))
+    throw new Error('CI_EXT23_INVALID_SYNTHETIC_STEWARDS');
+  const first=stewards[0];
+  if(stewards.some(s=>
+    s.tenantId!==first.tenantId||
+    s.facilityId!==first.facilityId||
+    s.permittedIssuerIds[0]!==first.permittedIssuerIds[0]||
+    s.stewardId===first.permittedIssuerIds[0])||
+    new Set(stewards.map(s=>s.stewardId)).size!==stewards.length||
+    new Set(stewards.map(s=>s.role)).size!==stewards.length)
+    throw new Error('CI_EXT23_STEWARD_SCOPE_CONFLICT');
+  stewardPins.set(stewardIndex(first.tenantId,first.facilityId,
+    first.permittedIssuerIds[0]),Object.freeze([...stewards]));
 }
-export function clearEmulatorHospitalTrustPins():void{
-  if(!testOnly())throw new Error('CI_EXT21_EMULATOR_ONLY');
-  trustPins.clear();
-}
-function currentPin(tenantId:string,facilityId:string,
-  issuerId:string,keyId:string):PinnedHospitalIssuerKey|null{
-  if(!testOnly())return null;
-  return trustPins.get(pinIndex(tenantId,facilityId,issuerId,keyId))||null;
+export function clearEmulatorHospitalTrustStewards():void{
+  if(!testOnly())throw new Error('CI_EXT23_EMULATOR_ONLY');
+  stewardPins.clear();
 }
 function sameList(a:unknown,b:readonly string[]):boolean{
   return Array.isArray(a)&&a.length===b.length&&
@@ -132,10 +144,25 @@ export async function verifyCurrentSignedAuthorityRecord(args:Readonly<{
     typeof record.issuerClaimDigest!=='string'||
     typeof record.issuerSpkiFingerprint!=='string')
     return denied('CI_EXT21_UNSIGNED_LEGACY_RECORD');
-  const pin=currentPin(tenantId,facilityId,
-    record.issuerId as string,record.issuerKeyId as string);
-  if(!pin||pin.keyRevision!==record.issuerKeyRevision)
-    return denied('CI_EXT21_CURRENT_TRUST_PIN_REQUIRED');
+  // CI-EXT-23: resolve current issuer key only from a steward-signed,
+  // immutable CI-EXT-22 head/event in THIS SAME Firestore transaction.
+  // No client-supplied, Firestore-only or legacy in-memory issuer-key fallback.
+  const independentStewards=stewardPins.get(stewardIndex(
+    tenantId,facilityId,record.issuerId as string));
+  if(!independentStewards)
+    return denied('CI_EXT23_INDEPENDENT_STEWARDS_REQUIRED');
+  const currentRoot=await inspectCurrentHospitalTrust({
+    tx,tenant,issuerId:record.issuerId as string,
+    tenantId,facilityId,now,
+    independentlyPinnedStewards:independentStewards,
+  });
+  if(!currentRoot.valid||!currentRoot.pin)
+    return denied('CI_EXT23_'+currentRoot.reasonCode);
+  const pin=currentRoot.pin;
+  if(pin.keyId!==record.issuerKeyId||
+    pin.keyRevision!==record.issuerKeyRevision||
+    pin.sha256SpkiFingerprint!==record.issuerSpkiFingerprint)
+    return denied('CI_EXT23_KEY_SUPERSEDED_OR_MISMATCH');
   const attestationId=record.issuerAttestationId as string;
   const [att,command,outbox]=await tx.getAll(
     tenant.collection('externalClinicalIssuerAttestations').doc(attestationId),

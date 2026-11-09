@@ -4,7 +4,7 @@ import {
   syntheticSignedAuthorityRows,
 } from './support/ci-ext21-signed-fixtures';
 import {
-  installEmulatorHospitalTrustPins,verifyCurrentSignedAuthorityRecord,
+  installEmulatorHospitalTrustStewards,verifyCurrentSignedAuthorityRecord,
 } from '@/lib/clinical/intelligence/external-signed-authority-consumer';
 
 const NOW=1794200000000;
@@ -37,6 +37,10 @@ function fixture(){
   put('externalClinicalIssuerEnrollmentCommands',signed.attestationId,
     signed.journal);
   put('externalClinicalIssuerOutbox',signed.attestationId,signed.outbox);
+  put('externalClinicalHospitalTrustHeads',
+    signed.pin.issuerId,signed.root.head);
+  put('externalClinicalHospitalTrustEvents',
+    signed.root.eventId,signed.root.event);
   const tenant={
     collection:(collection:string)=>({
       doc:(id:string)=>({path:collection+'/'+id}),
@@ -47,8 +51,10 @@ function fixture(){
     return {exists:row!==undefined,get:(f:string)=>row?.[f],
       data:()=>row};
   };
-  const tx=({getAll:async(...refs:{path:string}[])=>refs.map(snapshot)}
-    ) as unknown as Transaction;
+  const tx=({
+    get:async(ref:{path:string})=>snapshot(ref),
+    getAll:async(...refs:{path:string}[])=>refs.map(snapshot),
+  }) as unknown as Transaction;
   const verify=(record:Row|undefined=signed.record,
     time=NOW)=>verifyCurrentSignedAuthorityRecord({
     tx,tenant,tenantId:TENANT,facilityId,
@@ -99,20 +105,41 @@ describe('CI-EXT-21 signed current hospital authority consumption',()=>{
     expect((await i.verify()).reasonCode)
       .toBe('CI_EXT21_SIGNED_RECORD_LINEAGE_INVALID');
   });
-  test('revoked issuer pin, changed key revision and expiry deny',async()=>{
+  test('revoked root, superseded credential revision and expiry deny',async()=>{
     const f=fixture();
-    installEmulatorHospitalTrustPins([
-      {...f.signed.pin,status:'REVOKED'},
-    ]);
+    f.records.set('externalClinicalHospitalTrustHeads/'+f.signed.pin.issuerId,{
+      ...f.signed.root.head,status:'REVOKED',currentPin:null,
+    });
     expect((await f.verify()).reasonCode)
-      .toBe('CI_EXT21_CI_EXT20_ISSUER_NOT_TRUSTED_CURRENT');
+      .toBe('CI_EXT23_CI_EXT22_ROOT_REVOKED_OR_SCOPE_INVALID');
     const g=fixture();
-    installEmulatorHospitalTrustPins([
-      {...g.signed.pin,keyRevision:2},
-    ]);
-    expect((await g.verify()).reasonCode)
-      .toBe('CI_EXT21_CURRENT_TRUST_PIN_REQUIRED');
+    expect((await g.verify({
+      ...g.signed.record,issuerKeyRevision:2,
+    })).reasonCode).toBe('CI_EXT23_KEY_SUPERSEDED_OR_MISMATCH');
     const h=fixture();
     expect((await h.verify(h.signed.record,NOW+60_001)).valid).toBe(false);
+  });
+  test('CI-EXT-23 requires event-backed root, current independent signer and exact scoped key',async()=>{
+    const f=fixture();
+    f.records.delete('externalClinicalHospitalTrustHeads/'+
+      f.signed.pin.issuerId);
+    expect((await f.verify()).reasonCode)
+      .toBe('CI_EXT23_CI_EXT22_ROOT_MISSING');
+    const g=fixture();
+    g.records.set('externalClinicalHospitalTrustEvents/'+g.signed.root.eventId,{
+      ...g.signed.root.event,eventHash:'0'.repeat(64),
+    });
+    expect((await g.verify()).reasonCode)
+      .toBe('CI_EXT23_CI_EXT22_ROOT_EVENT_TAMPERED');
+    const h=fixture();
+    installEmulatorHospitalTrustStewards(
+      h.signed.root.stewards.map(s=>
+        s.role==='SECURITY_TRUSTEE'?{...s,status:'REVOKED' as const}:s));
+    expect((await h.verify()).reasonCode)
+      .toBe('CI_EXT23_CI_EXT22_STEWARD_QUORUM_NOT_CURRENT');
+    const i=fixture();
+    expect((await i.verify({...i.signed.record,
+      issuerKeyId:'unrecognized-key'})).reasonCode)
+      .toBe('CI_EXT23_KEY_SUPERSEDED_OR_MISMATCH');
   });
 });

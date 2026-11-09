@@ -13,6 +13,7 @@ import {createHash} from 'node:crypto';
 import type {DocumentReference,Transaction} from 'firebase-admin/firestore';
 import {externalReviewFactDigest} from './external-clinician-review-policy';
 import {verifyApprovalEventHead} from './external-fact-approval-event-integrity';
+import {verifyCurrentExternalGovernanceAuthority} from './external-governance-authority-consumer';
 
 const ID=/^[A-Za-z0-9._-]{1,128}$/;
 const HEX=/^[a-f0-9]{64}$/;
@@ -227,6 +228,29 @@ export async function assessCurrentExternalClinicalApproval(args:Readonly<{
       approval.approverCredentialRevision!==approver!.revision)
       return denied('CI_EXT16_APPROVER_CREDENTIAL_NOT_CURRENT');
   }
+  // CI-EXT-19: a mutable VERIFIED/APPROVED head and a fact-approval
+  // event cannot grant even non-promoting prequalification without its
+  // live hospital credential/site event, original proposal, independent
+  // verification evidence, and active proposer/approver grant lineage.
+  const governance=await verifyCurrentExternalGovernanceAuthority({
+    tx,tenant,tenantId,now,
+    authorities:[
+      {kind:'CLINICIAN',targetId:actorId,facilityId:facilities[0],
+        siteApprovalId:null,head:reviewer as Row},
+      ...approverIds.map(id=>({
+        kind:'CLINICIAN' as const,targetId:id,siteApprovalId:null,
+        facilityId:sources.find(s=>approvals.some(x=>
+          x.approvedByActorId===id&&x.sourceId===s.sourceId))!.facilityId,
+        head:approverMap.get(id) as Row,
+      })),
+      ...sources.map((s,i)=>({
+        kind:'SITE' as const,targetId:s.sourceId,
+        facilityId:s.facilityId,siteApprovalId:s.siteApprovalId,
+        head:siteSnaps[i].data() as Row,
+      })),
+    ],
+  });
+  if(!governance.valid)return denied(governance.reasonCode);
   // Even all these derived heads cannot substitute for independently
   // qualified source trust, hospital signature verification, the clinical
   // approval issuance service, and external AI context release governance.

@@ -268,6 +268,9 @@ service cloud.firestore {
       match /externalClinicianEvidenceReviews/{reviewId} { allow read, write: if false; }
       match /externalClinicianEvidenceReviewEvents/{eventId} { allow read, write: if false; }
       match /externalClinicianEvidenceReviewOutbox/{outboxId} { allow read, write: if false; }
+      // Reserved for future independently signed clinical approval. No writer
+      // or trust root is installed; browser clients must never mint approvals.
+      match /externalClinicalUseApprovals/{reviewId} { allow read, write: if false; }
       match /fhirSandboxQualifications/{qualificationId} { allow read, write: if false; }
       match /fhirSiteApprovals/{approvalId} { allow read, write: if false; }
       match /fhirSyntheticQualifications/{evidenceId} { allow read, write: if false; }

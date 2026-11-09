@@ -197,3 +197,187 @@ test('CI-EXT-15 consent/source revisions, patient relink, and new import invalid
     expect((await f.root.collection('patient360Projections').get()).size).toBe(0);
   }finally{await f.db.recursiveDelete(f.root);}
 },60000);
+
+/** All current eligibility data is deliberately server-authoritative HCM. */
+async function seedCurrentClinicianAuthority(f:Awaited<ReturnType<typeof fixture>>){
+  const uid=f.clinician.actorId,employeeId='employee-ext16';
+  await Promise.all([
+    f.root.collection('users').doc(uid).set({
+      userId:uid,status:'ACTIVE',roles:['DOCTOR'],
+      permissions:['FHIR_EVIDENCE_REVIEW','FHIR_CLINICAL_EVIDENCE_REVIEW'],
+      facilityIds:['facility-a'],departmentIds:['clinical-a'],
+    }),
+    f.root.collection('employees').doc(employeeId).set({
+      tenantId:f.tenantId,employeeId,userId:uid,
+      employmentStatus:'ACTIVE',
+      facilityIds:['facility-a'],departmentIds:['clinical-a'],
+    }),
+    f.root.collection('clinicalCredentials').doc('license-ext16').set({
+      credentialId:'license-ext16',employeeId,
+      isMandatoryForPractice:true,verificationStatus:'VERIFIED',
+      verifiedByActorId:'independent-hcm-verifier',
+      verifiedAt:'2026-10-01T10:00:00Z',
+      issueDate:'2025-01-01',expiryDate:'2099-12-31',
+    }),
+    f.root.collection('clinicalPrivileges').doc('priv-ext16').set({
+      privilegeId:'priv-ext16',employeeId,
+      privilegeType:'CONSULT_OPD',facilityId:'facility-a',
+      departmentId:'clinical-a',status:'GRANTED',
+      grantedByActorId:'privilege-governance-officer',
+      effectiveFrom:'2025-01-01',effectiveUntil:'2099-12-31',
+    }),
+  ]);
+}
+function evaluationActor(f:Awaited<ReturnType<typeof fixture>>){
+  return {...f.clinician,actorId:'evaluation-operator',
+    permissions:['FHIR_EVIDENCE_REVIEW','FHIR_CLINICAL_EVIDENCE_EVALUATE']};
+}
+async function evaluateCurrent(f:Awaited<ReturnType<typeof fixture>>,
+  reviewId:string,actor=evaluationActor(f)){
+  return readExternalClinicalEvidence({
+    db:f.db,tenantId:f.tenantId,patientId:f.patientId,actor,
+    evaluateReviewId:reviewId,
+  });
+}
+test('CI-EXT-16 review-only assessment requires current HCM credentials and separate approval',async()=>{
+  const f=await fixture();
+  try{
+    const completed=await f.submit();
+    const reviewId=completed.review!.reviewId;
+    const beforeHcm=await evaluateCurrent(f,reviewId);
+    expect(beforeHcm.currentAuthorization?.reason).toBe('CLINICIAN_MEMBERSHIP_INACTIVE');
+    expect(beforeHcm.currentAuthorization?.reviewCurrent).toBe(true);
+    await seedCurrentClinicianAuthority(f);
+    const result=await evaluateCurrent(f,reviewId);
+    expect(result.currentAuthorization?.reason).toBe('CLINICAL_APPROVAL_MISSING');
+    expect(result.currentAuthorization?.reviewCurrent).toBe(true);
+    expect(result.currentAuthorization?.clinicianCurrentlyQualified).toBe(true);
+    expect(result.currentAuthorization?.clinicalApprovalVerified).toBe(false);
+    expect(result.currentAuthorization?.clinicalUseAuthorized).toBe(false);
+    expect(result.currentAuthorization?.aiDraftingEligible).toBe(false);
+    const review=(await f.root.collection('externalClinicianEvidenceReviews')
+      .doc(reviewId).get()).data()!;
+    await f.root.collection('externalClinicalUseApprovals').doc(reviewId).set({
+      schemaVersion:1,tenantId:f.tenantId,patientId:f.patientId,reviewId,
+      status:'APPROVED',approvedByActorId:'another-clinician',
+      projectionContentHash:review.projectionContentHash,
+      sourceCheckpoint:review.sourceCheckpoint,
+      authorityFenceHash:review.authorityFenceHash,
+      factualDigest:review.factualDigest,
+      expiresAt:Date.now()+100_000,
+      signature:'unverified-string-is-not-trusted',
+    });
+    const untrusted=await evaluateCurrent(f,reviewId);
+    expect(untrusted.currentAuthorization?.reason).toBe(
+      'CLINICAL_APPROVAL_PROOF_UNAVAILABLE');
+    expect(untrusted.currentAuthorization?.clinicalUseAuthorized).toBe(false);
+    expect(untrusted.currentAuthorization?.aiDraftingEligible).toBe(false);
+    expect((await f.root.collection('patient360Projections').get()).size).toBe(0);
+    expect((await f.root.collection('externalClinicianEvidenceReviewEvents').get()).size).toBe(1);
+  }finally{await f.db.recursiveDelete(f.root);}
+},45000);
+
+test('CI-EXT-16 current clinician eligibility revokes on credential or privilege change',async()=>{
+  const f=await fixture();
+  try{
+    const reviewId=(await f.submit()).review!.reviewId;
+    await seedCurrentClinicianAuthority(f);
+    expect((await evaluateCurrent(f,reviewId)).currentAuthorization?.reason)
+      .toBe('CLINICAL_APPROVAL_MISSING');
+    await f.root.collection('clinicalCredentials').doc('license-ext16')
+      .update({verificationStatus:'REVOKED'});
+    expect((await evaluateCurrent(f,reviewId)).currentAuthorization?.reason)
+      .toBe('CLINICIAN_CREDENTIALS_INVALID');
+    await f.root.collection('clinicalCredentials').doc('license-ext16')
+      .update({verificationStatus:'VERIFIED',expiryDate:'2020-01-01'});
+    expect((await evaluateCurrent(f,reviewId)).currentAuthorization?.reason)
+      .toBe('CLINICIAN_CREDENTIALS_INVALID');
+    await f.root.collection('clinicalCredentials').doc('license-ext16')
+      .update({expiryDate:'2099-12-31'});
+    await f.root.collection('clinicalPrivileges').doc('priv-ext16')
+      .update({status:'REVOKED'});
+    expect((await evaluateCurrent(f,reviewId)).currentAuthorization?.reason)
+      .toBe('CLINICIAN_PRIVILEGES_INVALID');
+    await f.root.collection('clinicalPrivileges').doc('priv-ext16')
+      .update({status:'GRANTED',facilityId:'other-facility'});
+    expect((await evaluateCurrent(f,reviewId)).currentAuthorization?.reason)
+      .toBe('CLINICIAN_PRIVILEGES_INVALID');
+    await f.root.collection('users').doc(f.clinician.actorId)
+      .update({status:'SUSPENDED'});
+    expect((await evaluateCurrent(f,reviewId)).currentAuthorization?.reason)
+      .toBe('CLINICIAN_MEMBERSHIP_INACTIVE');
+    expect((await f.root.collection('externalClinicalUseApprovals').get()).size).toBe(0);
+  }finally{await f.db.recursiveDelete(f.root);}
+},60000);
+
+test('CI-EXT-16 consent/source/site and new FHIR versions invalidate historical review',async()=>{
+  const f=await fixture();
+  try{
+    const reviewId=(await f.submit()).review!.reviewId;
+    await seedCurrentClinicianAuthority(f);
+    await f.link.update({consentStatus:'WITHDRAWN'});
+    await expect(evaluateCurrent(f,reviewId))
+      .rejects.toThrow('CI_EXT03_PATIENT_LINK_OR_CONSENT_REVOKED');
+    await f.link.update({consentStatus:'GRANTED'});
+    expect((await evaluateCurrent(f,reviewId)).currentAuthorization?.reason)
+      .toBe('REVIEW_NOT_CURRENT');
+    await f.source.update({status:'REVOKED'});
+    await expect(evaluateCurrent(f,reviewId))
+      .rejects.toThrow('CI_EXT03_SOURCE_REVOKED');
+    await f.source.update({status:'ACTIVE'});
+    expect((await evaluateCurrent(f,reviewId)).currentAuthorization?.reason)
+      .toBe('REVIEW_NOT_CURRENT');
+    await ingestExternalFhirResource({
+      db:f.db,actor:f.importer,sourceId:f.sourceId,
+      resource:observation('v2','2026-10-21T12:00:00Z',1.7),
+    });
+    await expect(evaluateCurrent(f,reviewId))
+      .rejects.toThrow('CI_EXT03_PROJECTION_FACT_LINEAGE_INVALID');
+    await rebuildExternalPatient360({
+      db:f.db,actor:f.importer,tenantId:f.tenantId,patientId:f.patientId,
+    });
+    expect((await evaluateCurrent(f,reviewId)).currentAuthorization?.reason)
+      .toBe('REVIEW_NOT_CURRENT');
+    expect((await f.root.collection('externalClinicianEvidenceReviews').get()).size).toBe(1);
+    expect((await f.root.collection('externalClinicianEvidenceReviewEvents').get()).size).toBe(1);
+    expect((await f.root.collection('externalClinicianEvidenceReviewOutbox').get()).size).toBe(1);
+  }finally{await f.db.recursiveDelete(f.root);}
+},60000);
+
+test('CI-EXT-16 rejects unauthorized consumers and forged approval scope',async()=>{
+  const f=await fixture();
+  try{
+    const reviewId=(await f.submit()).review!.reviewId;
+    await seedCurrentClinicianAuthority(f);
+    await expect(evaluateCurrent(f,reviewId,{
+      ...evaluationActor(f),permissions:['FHIR_EVIDENCE_REVIEW'],
+    })).rejects.toThrow('CI_EXT16_EVALUATION_PERMISSION_REQUIRED');
+    await expect(evaluateCurrent(f,'not-an-opaque-review-id'))
+      .rejects.toThrow('CI_EXT16_REVIEW_ID_INVALID');
+    await expect(evaluateCurrent(f,reviewId,{
+      ...evaluationActor(f),facilityIds:[],
+    })).rejects.toThrow('CI_EXT03_FACILITY_ACCESS_DENIED');
+    await expect(evaluateCurrent(f,reviewId,{
+      ...evaluationActor(f),tenantId:'different-tenant',
+    })).rejects.toThrow('CI_EXT03_TENANT_ACCESS_DENIED');
+    const absent='ecr_'+ 'a'.repeat(64);
+    expect((await evaluateCurrent(f,absent)).currentAuthorization?.reason)
+      .toBe('REVIEW_NOT_FOUND');
+    const review=(await f.root.collection('externalClinicianEvidenceReviews')
+      .doc(reviewId).get()).data()!;
+    await f.root.collection('externalClinicalUseApprovals').doc(reviewId).set({
+      schemaVersion:1,tenantId:f.tenantId,patientId:'wrong-patient',reviewId,
+      status:'APPROVED',approvedByActorId:'other-clinician',
+      projectionContentHash:review.projectionContentHash,
+      sourceCheckpoint:review.sourceCheckpoint,
+      authorityFenceHash:review.authorityFenceHash,
+      factualDigest:review.factualDigest,expiresAt:Date.now()+100_000,
+    });
+    expect((await evaluateCurrent(f,reviewId)).currentAuthorization?.reason)
+      .toBe('CLINICAL_APPROVAL_SCOPE_INVALID');
+    const denied=(await evaluateCurrent(f,reviewId)).currentAuthorization!;
+    expect(denied.clinicalApprovalVerified).toBe(false);
+    expect(denied.clinicalUseAuthorized).toBe(false);
+    expect((await f.root.collection('patient360Projections').get()).size).toBe(0);
+  }finally{await f.db.recursiveDelete(f.root);}
+},60000);

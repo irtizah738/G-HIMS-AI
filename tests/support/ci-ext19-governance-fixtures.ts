@@ -1,6 +1,8 @@
 /** CI-EXT-19 synthetic-only, deterministic event-backed authority fixtures.
  * Must NEVER be imported from a production route or real credential issuer. */
 import {createHash} from 'node:crypto';
+import {syntheticSignedAuthorityRows,type SyntheticSignedRows}
+  from './ci-ext21-signed-fixtures';
 import {governanceEventHash,
   type GovernanceEventPayload} from
   '@/lib/clinical/intelligence/external-authority-governance';
@@ -14,6 +16,7 @@ export type SyntheticAuthorityBundle=Readonly<{
   evidenceId:string;evidence:Row;
   proposerId:string;proposerGrant:Row;
   approverId:string;approverGrant:Row;
+  signedDocuments:readonly SyntheticSignedRows[];
 }>;
 
 export function syntheticGovernanceAuthority(args:Readonly<{
@@ -99,10 +102,24 @@ export function syntheticGovernanceAuthority(args:Readonly<{
     status:'ACTIVE',identityAssurance:'HOSPITAL_VERIFIED',
     mfaStatus:'VERIFIED',validFrom,validUntil,revokedAt:null,
   });
+  const proposerGrant=grant(proposerId,prefix+'PROPOSE');
+  const approverGrant=grant(approverId,prefix+'ACTIVATE');
+  const proof=syntheticSignedAuthorityRows({
+    tenantId,facilityId,kind,recordId:evidenceId,record:evidence,now,
+  });
+  const proposerProof=syntheticSignedAuthorityRows({
+    tenantId,facilityId,kind:'GOVERNANCE_GRANT',
+    recordId:proposerId,record:proposerGrant,now,
+  });
+  const approverProof=syntheticSignedAuthorityRows({
+    tenantId,facilityId,kind:'GOVERNANCE_GRANT',
+    recordId:approverId,record:approverGrant,now,
+  });
   return {
     head,eventId,event,proposalEventId,proposalEvent,
-    proposalId,proposal,evidenceId,evidence,
-    proposerId,proposerGrant:grant(proposerId,prefix+'PROPOSE'),
-    approverId,approverGrant:grant(approverId,prefix+'ACTIVATE'),
+    proposalId,proposal,evidenceId,evidence:proof.record,
+    proposerId,proposerGrant:proposerProof.record,
+    approverId,approverGrant:approverProof.record,
+    signedDocuments:[proof,proposerProof,approverProof],
   };
 }

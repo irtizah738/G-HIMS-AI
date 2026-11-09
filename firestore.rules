@@ -276,6 +276,13 @@ service cloud.firestore {
       match /externalClinicalFactApprovalEvents/{eventId} { allow read, write: if false; }
       match /externalClinicalFactApprovalOutbox/{eventId} { allow read, write: if false; }
       match /externalClinicalFactApprovalCommands/{commandId} { allow read, write: if false; }
+      // CI-EXT-18 independent hospital authority governance is server-only.
+      match /externalClinicalGovernanceGrants/{actorId} { allow read, write: if false; }
+      match /externalClinicalAuthorityEvidence/{evidenceId} { allow read, write: if false; }
+      match /externalClinicalAuthorityProposals/{proposalId} { allow read, write: if false; }
+      match /externalClinicalAuthorityEvents/{eventId} { allow read, write: if false; }
+      match /externalClinicalAuthorityOutbox/{eventId} { allow read, write: if false; }
+      match /externalClinicalAuthorityCommands/{commandId} { allow read, write: if false; }
       match /fhirSandboxQualifications/{qualificationId} { allow read, write: if false; }
       match /fhirSiteApprovals/{approvalId} { allow read, write: if false; }
       match /fhirSyntheticQualifications/{evidenceId} { allow read, write: if false; }

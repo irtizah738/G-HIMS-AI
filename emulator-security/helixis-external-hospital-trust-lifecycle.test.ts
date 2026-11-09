@@ -41,10 +41,11 @@ test('CI-EXT-22 dual-steward enroll/rotate/revoke and 3-steward recovery',async(
   try{
     const enroll=x.f.command('ENROLL',0,0);
     const first=await x.issue(enroll);
-    expect(first).toMatchObject({
-      status:'ACTIVE',revision:1,replay:false,
-      clinicalUseAuthorized:false,aiDraftingEligible:false,
-    });
+    expect(first.status).toBe('ACTIVE');
+    expect(first.revision).toBe(1);
+    expect(first.replay).toBe(false);
+    expect(first.clinicalUseAuthorized).toBe(false);
+    expect(first.aiDraftingEligible).toBe(false);
     const active=await x.inspect();
     expect(active.valid).toBe(true);
     expect(active.pin?.keyId).toBe('hospital-ed25519-key-0');

@@ -70,6 +70,14 @@ function fixture(){
     put('externalClinicalAuthorityEvidence',x.evidenceId,x.evidence);
     put('externalClinicalGovernanceGrants',x.proposerId,x.proposerGrant);
     put('externalClinicalGovernanceGrants',x.approverId,x.approverGrant);
+    for(const signed of x.signedDocuments){
+      put('externalClinicalIssuerAttestations',
+        signed.attestationId,signed.attestation);
+      put('externalClinicalIssuerEnrollmentCommands',
+        signed.attestationId,signed.journal);
+      put('externalClinicalIssuerOutbox',
+        signed.attestationId,signed.outbox);
+    }
     return x;
   };
   put('externalClinicianEvidenceReviews',REVIEW_ID,{

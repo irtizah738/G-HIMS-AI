@@ -183,11 +183,21 @@ test('CI-EXT-18 cannot self-attest, use revised evidence, bypass grant or reopen
   const f=await fixture();
   try{
     const command=f.cmd('CLINICIAN');
+    const forgedProposer={...f.credentialProposer,actorId:'evidence-validator'};
     await expect(proposeExternalClinicalAuthority({
-      db:f.db,tenantId:f.tenantId,
-      actor:{...f.credentialProposer,actorId:'evidence-validator'},
-      command,
-    })).rejects.toThrow('CI_EXT18_ACTOR_SCOPE_DENIED');
+      db:f.db,tenantId:f.tenantId,actor:forgedProposer,command,
+    })).rejects.toThrow('CI_EXT18_CURRENT_GOVERNANCE_GRANT_REQUIRED');
+    await f.root.collection('externalClinicalGovernanceGrants')
+      .doc('evidence-validator').set({
+        tenantId:f.tenantId,actorId:'evidence-validator',
+        facilityIds:['facility-a'],roles:['HOSPITAL_CREDENTIAL_OFFICER'],
+        permissions:['FHIR_CREDENTIAL_PROPOSE'],status:'ACTIVE',
+        identityAssurance:'HOSPITAL_VERIFIED',mfaStatus:'VERIFIED',
+        validFrom:f.now-60_000,validUntil:f.now+900_000,revokedAt:null,
+      });
+    await expect(proposeExternalClinicalAuthority({
+      db:f.db,tenantId:f.tenantId,actor:forgedProposer,command,
+    })).rejects.toThrow('CI_EXT18_INDEPENDENT_EVIDENCE_REQUIRED');
     const p=await proposeExternalClinicalAuthority({
       db:f.db,tenantId:f.tenantId,actor:f.credentialProposer,command,
     });

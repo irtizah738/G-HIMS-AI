@@ -21,6 +21,8 @@ import {
   type ExternalClinicianReviewInput,
 } from './external-clinician-review-policy';
 import {assessCurrentExternalClinicalApproval, type CurrentExternalPreflight} from './external-current-authorization-preflight';
+import {assertApprovalIssue,issueExternalFactApproval,type FactApprovalIssue,
+  type ApprovalResult} from './external-fact-approval-events';
 import { fhirImportHeadId, fhirPatientLinkId, prepareFhirImport } from './external-fhir-import';
 import type { FhirImportActor, FhirPatientLink, FhirSourceRecord } from './external-fhir-import';
 import type { ExternalFact, ExternalPatient360Projection } from './external-patient360-projection';
@@ -62,6 +64,7 @@ export type ExternalClinicalEvidenceResult = {
   historyCompleteness: 'UNVERIFIED';
   facts: ExternalFact[];
   currentAuthorization?:CurrentExternalPreflight;
+  factApproval?:ApprovalResult;
   review?:Readonly<{
     reviewId:string; replay:boolean; disposition:
       'SOURCE_EVIDENCE_REVIEWED'|'CLINICAL_CONCERN_RECORDED';
@@ -154,10 +157,14 @@ export async function readExternalClinicalEvidence(args: {
   review?: ExternalClinicianReviewInput;
   /** Trusted server-only diagnostic; never a clinical-use authorization. */
   currentAuthorizationReviewId?: string;
+  /** TEST+emulator-only server command; no public write endpoint. */
+  factApprovalIssue?: FactApprovalIssue;
 }): Promise<ExternalClinicalEvidenceResult> {
   const { db, actor, tenantId, patientId } = args;
-  if(args.review&&args.currentAuthorizationReviewId)
-    throw new Error('CI_EXT16_REVIEW_AND_PREFLIGHT_MUTUALLY_EXCLUSIVE');
+  if([args.review,args.currentAuthorizationReviewId,args.factApprovalIssue]
+    .filter(Boolean).length>1)
+    throw new Error('CI_EXT17_MUTUALLY_EXCLUSIVE_INTENT');
+  if(args.factApprovalIssue)assertApprovalIssue(args.factApprovalIssue);
   assertExternalEvidenceReadAuthority(actor, tenantId, patientId);
   if(args.review){
     assertExternalClinicianReviewAuthority(actor);
@@ -407,6 +414,43 @@ export async function readExternalClinicalEvidence(args: {
         })),
       });
     }
+    let factApproval:ApprovalResult|undefined;
+    if(args.factApprovalIssue){
+      if(receiptValues.some(receipt=>
+        !receipt?.provenance?.ingestedBy||
+        receipt.provenance.ingestedBy===actor.actorId))
+        throw new Error('CI_EXT17_INDEPENDENT_APPROVER_REQUIRED');
+      const sourceFences=sourceIds.map((sourceId,i)=>{
+        const snap=sourceSnaps[i],row=sources.get(sourceId);
+        if(!snap.exists||!snap.updateTime||!row)
+          throw new Error('CI_EXT17_SOURCE_FENCE_UNAVAILABLE');
+        return [sourceId,[snap.updateTime.seconds,snap.updateTime.nanoseconds],
+          row.facilityId,row.siteApprovalId||null,row.oauth?.credentialRevision||null];
+      });
+      const consentFences=linkIds.map((linkId,i)=>{
+        const snap=linkSnaps[i],row=links.get(linkId);
+        if(!snap.exists||!snap.updateTime||!row)
+          throw new Error('CI_EXT17_CONSENT_FENCE_UNAVAILABLE');
+        return [linkId,[snap.updateTime.seconds,snap.updateTime.nanoseconds],
+          row.patientId,row.matchStatus,row.consentStatus,row.facilityId];
+      });
+      factApproval=await issueExternalFactApproval({
+        tx,tenant,actor,tenantId,patientId,now,
+        revision:projection.revision,contentHash:projection.contentHash,
+        sourceCheckpoint:projection.sourceCheckpoint,
+        authorityFenceHash:hash(canonical({
+          sourceCheckpoint:projection.sourceCheckpoint,sourceFences,consentFences,
+        })),
+        facts:facts.map(f=>({
+          evidenceReceiptId:f.evidenceReceiptId,sourceVersionId:f.sourceVersionId,
+          resourceHash:f.resourceHash,sourceId:f.sourceId,
+        })),
+        sources:expectedSources.map(s=>({
+          ...s,siteApprovalId:sources.get(s.sourceId)?.siteApprovalId||null,
+        })),
+        command:args.factApprovalIssue,
+      });
+    }
     // An explicit clinician review binds to this fully verified transaction
     // snapshot, including consent and source document revisions. This does
     // NOT mutate the external projection, patient chart, or clinical authority.
@@ -522,6 +566,10 @@ export async function readExternalClinicalEvidence(args: {
       revision: projection.revision, contentHash: projection.contentHash,
       sourceCheckpoint: projection.sourceCheckpoint, recordedAt: now,
       immutable: true, clinicalUseAuthorized: false,
+      ...(factApproval?{
+        factApprovalEventId:factApproval.eventId,
+        factApprovalStatus:factApproval.status,
+      }:{}),
       ...(currentAuthorization?{
         currentAuthorizationPreflight:currentAuthorization.state,
         currentAuthorizationReasonCode:currentAuthorization.reasonCode,
@@ -536,6 +584,7 @@ export async function readExternalClinicalEvidence(args: {
       historyCompleteness: 'UNVERIFIED', facts,
       ...(reviewResult?{review:reviewResult}:{}),
       ...(currentAuthorization?{currentAuthorization}:{}),
+      ...(factApproval?{factApproval}:{}),
     };
   });
 }

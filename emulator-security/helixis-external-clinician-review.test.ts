@@ -20,8 +20,7 @@ import {externalFactApprovalHeadId} from
   '@/lib/clinical/intelligence/external-current-authorization-preflight';
 import {syntheticGovernanceAuthority} from
   '@/tests/support/ci-ext19-governance-fixtures';
-import {installEmulatorHospitalTrustPins} from
-  '@/lib/clinical/intelligence/external-signed-authority-consumer';
+
 
 function observation(version:string,date:string,value:number){
   return {
@@ -267,6 +266,13 @@ test('CI-EXT-17 exact-event issuance, idempotency, non-promotion, emergency revo
         siteApprovalId:'site-approved-v1',now,
       }),
     ];
+    const rootProof=bundles[0].signedDocuments[0].root;
+    await Promise.all([
+      f.root.collection('externalClinicalHospitalTrustHeads')
+        .doc(bundles[0].signedDocuments[0].pin.issuerId).set(rootProof.head),
+      f.root.collection('externalClinicalHospitalTrustEvents')
+        .doc(rootProof.eventId).set(rootProof.event),
+    ]);
     await Promise.all(bundles.flatMap((x,i)=>{
       const authority=i===2?'externalClinicalSiteAuthorityHeads':
         'externalClinicalCredentialHeads';
@@ -350,18 +356,19 @@ test('CI-EXT-17 exact-event issuance, idempotency, non-promotion, emergency revo
     });
     // CI-EXT-21: a current head and unchanged immutable approval event
     // cannot override a hospital signing key that is now REVOKED.
-    const currentPin=bundles[0].signedDocuments[0].pin;
-    installEmulatorHospitalTrustPins([{...currentPin,status:'REVOKED'}]);
+    const trustHead=f.root.collection('externalClinicalHospitalTrustHeads')
+      .doc(bundles[0].signedDocuments[0].pin.issuerId);
+    await trustHead.update({status:'REVOKED'});
     const revokedIssuer=await readExternalClinicalEvidence({
       db:f.db,actor:f.clinician,tenantId:f.tenantId,
       patientId:f.patientId,currentAuthorizationReviewId:reviewId,
     });
     expect(revokedIssuer.currentAuthorization?.state).toBe('DENIED');
     expect(revokedIssuer.currentAuthorization?.reasonCode)
-      .toBe('CI_EXT21_CI_EXT20_ISSUER_NOT_TRUSTED_CURRENT');
+      .toBe('CI_EXT23_CI_EXT22_ROOT_REVOKED_OR_SCOPE_INVALID');
     await expect(issue()).rejects.toThrow(
-      'CI_EXT17_GOVERNED_AUTHORITY_INVALID_CI_EXT21_CI_EXT20_ISSUER_NOT_TRUSTED_CURRENT');
-    installEmulatorHospitalTrustPins([currentPin]);
+      'CI_EXT17_GOVERNED_AUTHORITY_INVALID_CI_EXT23_CI_EXT22_ROOT_REVOKED_OR_SCOPE_INVALID');
+    await trustHead.update({status:'ACTIVE'});
     // Expiration/revocation of a hospital governance grant denies even
     // prequalification, regardless of unchanged mutable credential heads.
     await f.root.collection('externalClinicalGovernanceGrants')

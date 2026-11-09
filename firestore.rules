@@ -268,6 +268,11 @@ service cloud.firestore {
       match /externalClinicianEvidenceReviews/{reviewId} { allow read, write: if false; }
       match /externalClinicianEvidenceReviewEvents/{eventId} { allow read, write: if false; }
       match /externalClinicianEvidenceReviewOutbox/{outboxId} { allow read, write: if false; }
+      // CI-EXT-16 server-derived heads; a browser cannot forge approvals,
+      // clinician licenses or site authority (including in offline replay).
+      match /externalClinicalCredentialHeads/{actorId} { allow read, write: if false; }
+      match /externalClinicalSiteAuthorityHeads/{sourceId} { allow read, write: if false; }
+      match /externalClinicalFactApprovalHeads/{approvalId} { allow read, write: if false; }
       match /fhirSandboxQualifications/{qualificationId} { allow read, write: if false; }
       match /fhirSiteApprovals/{approvalId} { allow read, write: if false; }
       match /fhirSyntheticQualifications/{evidenceId} { allow read, write: if false; }

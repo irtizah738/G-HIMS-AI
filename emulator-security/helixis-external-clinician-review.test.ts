@@ -284,6 +284,14 @@ test('CI-EXT-17 exact-event issuance, idempotency, non-promotion, emergency revo
           .doc(x.proposerId).set(x.proposerGrant),
         f.root.collection('externalClinicalGovernanceGrants')
           .doc(x.approverId).set(x.approverGrant),
+        ...x.signedDocuments.flatMap(signed=>[
+          f.root.collection('externalClinicalIssuerAttestations')
+            .doc(signed.attestationId).set(signed.attestation),
+          f.root.collection('externalClinicalIssuerEnrollmentCommands')
+            .doc(signed.attestationId).set(signed.journal),
+          f.root.collection('externalClinicalIssuerOutbox')
+            .doc(signed.attestationId).set(signed.outbox),
+        ]),
       ];
     }));
     const fact=reviewed.facts[0];

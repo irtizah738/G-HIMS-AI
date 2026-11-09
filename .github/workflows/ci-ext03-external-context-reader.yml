@@ -34,6 +34,7 @@ jobs:
       GHIMS_CI_EXTERNAL_AUTHORITY_GOVERNANCE_ENABLED: "true" # emulator-only guards
       GHIMS_CI_EXTERNAL_ISSUER_ENROLLMENT_ENABLED: "true" # only TEST with Firestore emulator
       GHIMS_CI_EXTERNAL_SIGNED_CONSUMER_ENABLED: "true" # no external hospital trust store
+      GHIMS_CI_EXTERNAL_TRUST_LIFECYCLE_ENABLED: "true" # TEST-only steward governance
       GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
     steps:
       - uses: actions/checkout@v4
@@ -51,7 +52,7 @@ jobs:
         # enables test-only pinned keys, but no emulator endpoint is contacted.
         env:
           FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080"
-        run: bun test tests/ci-ext03-external-reader-contract.test.ts tests/ci-ext15-clinician-review-contract.test.ts tests/ci-ext16-current-authorization-contract.test.ts tests/ci-ext17-approval-contract.test.ts tests/ci-ext18-governance-contract.test.ts tests/ci-ext19-governance-consumer-contract.test.ts tests/ci-ext20-hospital-issuer-attestation-contract.test.ts tests/ci-ext21-signed-consumer-contract.test.ts
+        run: bun test tests/ci-ext03-external-reader-contract.test.ts tests/ci-ext15-clinician-review-contract.test.ts tests/ci-ext16-current-authorization-contract.test.ts tests/ci-ext17-approval-contract.test.ts tests/ci-ext18-governance-contract.test.ts tests/ci-ext19-governance-consumer-contract.test.ts tests/ci-ext20-hospital-issuer-attestation-contract.test.ts tests/ci-ext21-signed-consumer-contract.test.ts tests/ci-ext22-hospital-trust-contract.test.ts
       - name: Compile emulator integration for Node
         run: |
           sed "s#from 'bun:test'#from './helixis-node-test-compat'#g" emulator-security/helixis-external-context-reader.test.ts > emulator-security/helixis-external-context-reader.node.test.ts
@@ -62,6 +63,8 @@ jobs:
           bun build emulator-security/helixis-external-authority-governance.node.test.ts --target=node --format=cjs --packages=external --outdir=.tmp/fhir-node
           sed "s#from 'bun:test'#from './helixis-node-test-compat'#g" emulator-security/helixis-external-hospital-issuer-enrollment.test.ts > emulator-security/helixis-external-hospital-issuer-enrollment.node.test.ts
           bun build emulator-security/helixis-external-hospital-issuer-enrollment.node.test.ts --target=node --format=cjs --packages=external --outdir=.tmp/fhir-node
+          sed "s#from 'bun:test'#from './helixis-node-test-compat'#g" emulator-security/helixis-external-hospital-trust-lifecycle.test.ts > emulator-security/helixis-external-hospital-trust-lifecycle.node.test.ts
+          bun build emulator-security/helixis-external-hospital-trust-lifecycle.node.test.ts --target=node --format=cjs --packages=external --outdir=.tmp/fhir-node
       - name: Firebase CLI
         run: npm install --global firebase-tools@14.20.0
       - name: External context emulator qualification
@@ -69,7 +72,7 @@ jobs:
         env:
           FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080"
         run: |
-          timeout --signal=TERM --kill-after=5s 110s firebase emulators:exec --project ghims-p4-ci --only firestore "node --test .tmp/fhir-node/helixis-external-context-reader.node.test.js .tmp/fhir-node/helixis-external-clinician-review.node.test.js .tmp/fhir-node/helixis-external-authority-governance.node.test.js .tmp/fhir-node/helixis-external-hospital-issuer-enrollment.node.test.js"
+          timeout --signal=TERM --kill-after=5s 110s firebase emulators:exec --project ghims-p4-ci --only firestore "node --test .tmp/fhir-node/helixis-external-context-reader.node.test.js .tmp/fhir-node/helixis-external-clinician-review.node.test.js .tmp/fhir-node/helixis-external-authority-governance.node.test.js .tmp/fhir-node/helixis-external-hospital-issuer-enrollment.node.test.js .tmp/fhir-node/helixis-external-hospital-trust-lifecycle.node.test.js"
       - name: Diagnose emulator failures
         if: failure()
         run: |

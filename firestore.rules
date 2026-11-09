@@ -287,6 +287,12 @@ service cloud.firestore {
       match /externalClinicalIssuerAttestations/{attestationId} { allow read, write: if false; }
       match /externalClinicalIssuerEnrollmentCommands/{attestationId} { allow read, write: if false; }
       match /externalClinicalIssuerOutbox/{attestationId} { allow read, write: if false; }
+      // CI-EXT-22: only server-side hospital trust governance may access these.
+      match /externalClinicalHospitalTrustHeads/{issuerId} { allow read, write: if false; }
+      match /externalClinicalHospitalTrustEvents/{eventId} { allow read, write: if false; }
+      match /externalClinicalHospitalTrustCommands/{commandId} { allow read, write: if false; }
+      match /externalClinicalHospitalTrustOutbox/{eventId} { allow read, write: if false; }
+      match /externalClinicalHospitalTrustKeyUsage/{keyId} { allow read, write: if false; }
       match /fhirSandboxQualifications/{qualificationId} { allow read, write: if false; }
       match /fhirSiteApprovals/{approvalId} { allow read, write: if false; }
       match /fhirSyntheticQualifications/{evidenceId} { allow read, write: if false; }

@@ -33,6 +33,7 @@ jobs:
       GHIMS_CI_EXTERNAL_FACT_APPROVAL_ENABLED: "true" # emulator-only runtime + project guard
       GHIMS_CI_EXTERNAL_AUTHORITY_GOVERNANCE_ENABLED: "true" # emulator-only guards
       GHIMS_CI_EXTERNAL_ISSUER_ENROLLMENT_ENABLED: "true" # only TEST with Firestore emulator
+      GHIMS_CI_EXTERNAL_SIGNED_CONSUMER_ENABLED: "true" # no external hospital trust store
       GHIMS_INTEGRATION_FHIR_R4_STATE: DISABLED
     steps:
       - uses: actions/checkout@v4
@@ -46,7 +47,11 @@ jobs:
       - name: Source-quality checks
         run: bun run lint
       - name: External reader and clinician review contract tests
-        run: bun test tests/ci-ext03-external-reader-contract.test.ts tests/ci-ext15-clinician-review-contract.test.ts tests/ci-ext16-current-authorization-contract.test.ts tests/ci-ext17-approval-contract.test.ts tests/ci-ext18-governance-contract.test.ts tests/ci-ext19-governance-consumer-contract.test.ts tests/ci-ext20-hospital-issuer-attestation-contract.test.ts
+        # The contract suite uses mocked Firestore transactions: this host
+        # enables test-only pinned keys, but no emulator endpoint is contacted.
+        env:
+          FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080"
+        run: bun test tests/ci-ext03-external-reader-contract.test.ts tests/ci-ext15-clinician-review-contract.test.ts tests/ci-ext16-current-authorization-contract.test.ts tests/ci-ext17-approval-contract.test.ts tests/ci-ext18-governance-contract.test.ts tests/ci-ext19-governance-consumer-contract.test.ts tests/ci-ext20-hospital-issuer-attestation-contract.test.ts tests/ci-ext21-signed-consumer-contract.test.ts
       - name: Compile emulator integration for Node
         run: |
           sed "s#from 'bun:test'#from './helixis-node-test-compat'#g" emulator-security/helixis-external-context-reader.test.ts > emulator-security/helixis-external-context-reader.node.test.ts

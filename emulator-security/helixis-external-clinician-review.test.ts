@@ -197,3 +197,31 @@ test('CI-EXT-15 consent/source revisions, patient relink, and new import invalid
     expect((await f.root.collection('patient360Projections').get()).size).toBe(0);
   }finally{await f.db.recursiveDelete(f.root);}
 },60000);
+
+
+test('CI-EXT-16 reader transaction denies unissued credentials, stale review and withdrawn consent',async()=>{
+  const f=await fixture();
+  try{
+    const recorded=await f.submit();
+    const reviewId=recorded.review?.reviewId;
+    expect(typeof reviewId).toBe('string');
+    const evaluate=()=>readExternalClinicalEvidence({
+      db:f.db,actor:f.clinician,tenantId:f.tenantId,
+      patientId:f.patientId,currentAuthorizationReviewId:reviewId,
+    });
+    const initial=await evaluate();
+    expect(initial.currentAuthorization?.state).toBe('DENIED');
+    expect(initial.currentAuthorization?.reasonCode)
+      .toBe('CI_EXT16_REVIEWER_CREDENTIAL_NOT_CURRENT');
+    expect(initial.currentAuthorization?.clinicalUseAuthorized).toBe(false);
+    expect(initial.currentAuthorization?.aiDraftingEligible).toBe(false);
+    await f.source.update({siteApprovalId:'revised-hospital-site-policy'});
+    const stale=await evaluate();
+    expect(stale.currentAuthorization?.reasonCode)
+      .toBe('CI_EXT16_REVIEW_STALE_OR_CONTESTED');
+    await f.link.update({consentStatus:'WITHDRAWN'});
+    await expect(evaluate()).rejects.toThrow('CI_EXT03_PATIENT_LINK_OR_CONSENT_REVOKED');
+    expect((await f.root.collection('patient360Projections').get()).size).toBe(0);
+    expect((await f.root.collection('externalClinicalFactApprovalHeads').get()).size).toBe(0);
+  }finally{await f.db.recursiveDelete(f.root);}
+},60000);

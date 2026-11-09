@@ -6,6 +6,7 @@
 import {createHash} from 'node:crypto';
 import type {Firestore,DocumentReference,Transaction} from 'firebase-admin/firestore';
 import type {FhirImportActor} from './external-fhir-import';
+import {verifyCurrentSignedAuthorityRecord} from './external-signed-authority-consumer';
 
 type Row=Record<string,unknown>;
 export type AuthorityKind='CLINICIAN'|'SITE';
@@ -136,6 +137,11 @@ async function authorize(tx:Transaction,tenant:DocumentReference,
     now<grant.validFrom||now>=grant.validUntil||
     (grant.revokedAt!==null&&grant.revokedAt!==undefined))
     deny('CURRENT_GOVERNANCE_GRANT_REQUIRED');
+  const signed=await verifyCurrentSignedAuthorityRecord({
+    tx,tenant,tenantId,facilityId,
+    kind:'GOVERNANCE_GRANT',recordId:actor.actorId,record:grant,now,
+  });
+  if(!signed.valid)deny('SIGNED_GRANT_REQUIRED_'+signed.reasonCode);
   return grant;
 }
 function evidenceValid(row:Row|undefined,tenantId:string,
@@ -266,6 +272,11 @@ export async function proposeExternalClinicalAuthority(args:Readonly<{
     if(!evidenceValid(evidence,tenantId,command,now)||
       evidence!.verifiedByActorId===actor.actorId)
       deny('INDEPENDENT_EVIDENCE_REQUIRED');
+    const signedEvidence=await verifyCurrentSignedAuthorityRecord({
+      tx,tenant,tenantId,facilityId:command.facilityId,
+      kind:command.kind,recordId:command.evidenceId,record:evidence,now,
+    });
+    if(!signedEvidence.valid)deny('SIGNED_EVIDENCE_REQUIRED_'+signedEvidence.reasonCode);
     const expiresAt=Math.min(now+PROPOSAL_TTL_MS,evidence!.validUntil as number,proposerGrant.validUntil as number);
     const payload:GovernanceEventPayload={
       schemaVersion:1,tenantId,kind:command.kind,targetId:command.targetId,
@@ -344,6 +355,17 @@ export async function activateExternalClinicalAuthority(args:Readonly<{
       evidence!.evidenceHash!==p.evidenceHash||
       evidence!.verifiedByActorId!==p.verifiedByActorId)
       deny('EVIDENCE_REVISED_OR_EXPIRED');
+    const signedEvidence=await verifyCurrentSignedAuthorityRecord({
+      tx,tenant,tenantId,facilityId:p.facilityId as string,
+      kind:p.kind,recordId:p.evidenceId as string,record:evidence,now,
+    });
+    if(!signedEvidence.valid)deny('SIGNED_EVIDENCE_REQUIRED_'+signedEvidence.reasonCode);
+    const signedProposer=await verifyCurrentSignedAuthorityRecord({
+      tx,tenant,tenantId,facilityId:p.facilityId as string,
+      kind:'GOVERNANCE_GRANT',recordId:p.proposedByActorId as string,
+      record:proposerGrantSnap.exists?proposerGrantSnap.data() as Row:undefined,now,
+    });
+    if(!signedProposer.valid)deny('SIGNED_PROPOSER_REQUIRED_'+signedProposer.reasonCode);
     const proposalEvent=proposeEventSnap.exists?proposeEventSnap.data() as Row:undefined;
     const original=proposalEvent?.payload as GovernanceEventPayload|undefined;
     if(!proposalEvent||proposalEvent.immutable!==true||

@@ -77,6 +77,10 @@ function fixture(){
         signed.attestationId,signed.journal);
       put('externalClinicalIssuerOutbox',
         signed.attestationId,signed.outbox);
+      put('externalClinicalHospitalTrustHeads',
+        signed.pin.issuerId,signed.root.head);
+      put('externalClinicalHospitalTrustEvents',
+        signed.root.eventId,signed.root.event);
     }
     return x;
   };

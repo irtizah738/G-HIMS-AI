@@ -47,8 +47,8 @@ function fixture(){
     return {exists:row!==undefined,get:(f:string)=>row?.[f],
       data:()=>row};
   };
-  const tx={getAll:async(...refs:{path:string}[])=>refs.map(snapshot)}
-    as unknown as Transaction;
+  const tx=({getAll:async(...refs:{path:string}[])=>refs.map(snapshot)}
+    ) as unknown as Transaction;
   const verify=(record:Row|undefined=signed.record,
     time=NOW)=>verifyCurrentSignedAuthorityRecord({
     tx,tenant,tenantId:TENANT,facilityId,

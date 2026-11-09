@@ -13,6 +13,15 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
+import type {ClinicalPrivilege,EmployeeCredential,EmployeeMaster}
+  from '@/types/hcm-advanced';
+import {
+  assertCurrentExternalReviewEvaluationAuthority,
+  assessCurrentExternalClinicalReview,
+  EXTERNAL_CURRENT_AUTH_MAX_CREDENTIALS,
+  EXTERNAL_CURRENT_AUTH_MAX_PRIVILEGES,
+  type CurrentExternalAuthorizationResult,
+} from './external-clinical-current-authorization';
 import {
   assertExternalClinicianReviewAuthority,
   assertExternalClinicianReviewInput,
@@ -65,6 +74,8 @@ export type ExternalClinicalEvidenceResult = {
       'SOURCE_EVIDENCE_REVIEWED'|'CLINICAL_CONCERN_RECORDED';
     clinicalUseAuthorized:false; aiDraftingEligible:false;
   }>;
+  /** Historical approval does not grant clinical use. */
+  currentAuthorization?:CurrentExternalAuthorizationResult;
 };
 function hash(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
@@ -150,13 +161,19 @@ export async function readExternalClinicalEvidence(args: {
   maxAgeMs?: number;
   /** Server-only. Atomic review of the exact same verified transaction snapshot. */
   review?: ExternalClinicianReviewInput;
+  /** Server-only fresh evaluation, never a clinical/AI release grant. */
+  evaluateReviewId?:string;
 }): Promise<ExternalClinicalEvidenceResult> {
   const { db, actor, tenantId, patientId } = args;
   assertExternalEvidenceReadAuthority(actor, tenantId, patientId);
+  if(args.review&&args.evaluateReviewId)
+    throw new Error('CI_EXT16_MUTUALLY_EXCLUSIVE_COMMANDS');
   if(args.review){
     assertExternalClinicianReviewAuthority(actor);
     assertExternalClinicianReviewInput(args.review);
   }
+  if(args.evaluateReviewId!==undefined)
+    assertCurrentExternalReviewEvaluationAuthority(actor,args.evaluateReviewId);
   const now = (args.now || Date.now)();
   const tenant = db.collection('tenants').doc(tenantId);
   const auditId = 'cea_' + randomUUID();
@@ -365,6 +382,29 @@ export async function readExternalClinicalEvidence(args: {
     if (fingerprint !== projection.sourceFingerprint) {
       throw new Error('CI_EXT03_PROJECTION_CHECKPOINT_STALE');
     }
+    // Source/consent authority is checked against full Firestore updateTime,
+    // not wall-clock freshness alone. Shared by record and evaluate paths.
+    let authorityFenceHash:string|null=null;
+    if(args.review||args.evaluateReviewId){
+      const sourceFences=sourceIds.map((sourceId,i)=>{
+        const snap=sourceSnaps[i],row=sources.get(sourceId);
+        if(!snap.exists||!snap.updateTime||!row)
+          throw new Error('CI_EXT16_SOURCE_FENCE_UNAVAILABLE');
+        return [sourceId,[snap.updateTime.seconds,snap.updateTime.nanoseconds],
+          row.facilityId,row.siteApprovalId||null,row.oauth?.credentialRevision||null];
+      });
+      const consentFences=linkIds.map((linkId,i)=>{
+        const snap=linkSnaps[i],row=links.get(linkId);
+        if(!snap.exists||!snap.updateTime||!row)
+          throw new Error('CI_EXT16_CONSENT_FENCE_UNAVAILABLE');
+        return [linkId,[snap.updateTime.seconds,snap.updateTime.nanoseconds],
+          row.patientId,row.matchStatus,row.consentStatus,row.facilityId];
+      });
+      authorityFenceHash=hash(canonical({
+        sourceCheckpoint:projection.sourceCheckpoint,
+        sourceFences,consentFences,
+      }));
+    }
     // An explicit clinician review binds to this fully verified transaction
     // snapshot, including consent and source document revisions. This does
     // NOT mutate the external projection, patient chart, or clinical authority.
@@ -386,24 +426,6 @@ export async function readExternalClinicalEvidence(args: {
         !receipt?.provenance?.ingestedBy||
         receipt.provenance.ingestedBy===actor.actorId))
         throw new Error('CI_EXT15_INDEPENDENT_CLINICIAN_REQUIRED');
-      const sourceFences=sourceIds.map((sourceId,i)=>{
-        const snap=sourceSnaps[i],row=sources.get(sourceId);
-        if(!snap.exists||!snap.updateTime||!row)
-          throw new Error('CI_EXT15_SOURCE_FENCE_UNAVAILABLE');
-        return [sourceId,[snap.updateTime.seconds,snap.updateTime.nanoseconds],row.facilityId,
-          row.siteApprovalId||null,row.oauth?.credentialRevision||null];
-      });
-      const consentFences=linkIds.map((linkId,i)=>{
-        const snap=linkSnaps[i],row=links.get(linkId);
-        if(!snap.exists||!snap.updateTime||!row)
-          throw new Error('CI_EXT15_CONSENT_FENCE_UNAVAILABLE');
-        return [linkId,[snap.updateTime.seconds,snap.updateTime.nanoseconds],row.patientId,
-          row.matchStatus,row.consentStatus,row.facilityId];
-      });
-      const authorityFenceHash=hash(canonical({
-        sourceCheckpoint:projection.sourceCheckpoint,
-        sourceFences,consentFences,
-      }));
       const reviewId=externalClinicianReviewId(
         tenantId,patientId,actor.actorId,req.idempotencyKey);
       const reviewRef=tenant.collection('externalClinicianEvidenceReviews').doc(reviewId);
@@ -472,6 +494,65 @@ export async function readExternalClinicalEvidence(args: {
         };
       }
     }
+    // CI-EXT-16: all current HCM, review and clinical-approval reads occur
+    // inside the SAME Firestore transaction as verified FHIR evidence.
+    let currentAuthorization:CurrentExternalAuthorizationResult|undefined;
+    if(args.evaluateReviewId){
+      const reviewId=args.evaluateReviewId;
+      const reviewSnap=await tx.get(
+        tenant.collection('externalClinicianEvidenceReviews').doc(reviewId));
+      const row=reviewSnap.exists?reviewSnap.data() as Record<string,unknown>:null;
+      const reviewerUid=typeof row?.actorId==='string'&&
+        /^[A-Za-z0-9._-]{1,128}$/.test(row.actorId) &&
+        row.actorId!=='.'&&row.actorId!=='..' ? row.actorId : null;
+      let membership:Record<string,unknown>|null=null;
+      let employees:EmployeeMaster[]=[];
+      let credentials:EmployeeCredential[]=[];
+      let privileges:ClinicalPrivilege[]=[];
+      if(reviewerUid){
+        const [memberSnap,employeeDocs]=await Promise.all([
+          tx.get(tenant.collection('users').doc(reviewerUid)),
+          tx.get(tenant.collection('employees')
+            .where('userId','==',reviewerUid).limit(2)),
+        ]);
+        membership=memberSnap.exists?memberSnap.data() as Record<string,unknown>:null;
+        employees=employeeDocs.docs.map(d=>d.data() as EmployeeMaster);
+        if(employees.length===1&&
+           employees[0].userId===reviewerUid&&
+           employees[0].tenantId===tenantId&&
+           /^[A-Za-z0-9._-]{1,128}$/.test(employees[0].employeeId)){
+          const employeeId=employees[0].employeeId;
+          const [credentialsDocs,privilegesDocs]=await Promise.all([
+            tx.get(tenant.collection('clinicalCredentials')
+              .where('employeeId','==',employeeId)
+              .limit(EXTERNAL_CURRENT_AUTH_MAX_CREDENTIALS+1)),
+            tx.get(tenant.collection('clinicalPrivileges')
+              .where('employeeId','==',employeeId)
+              .limit(EXTERNAL_CURRENT_AUTH_MAX_PRIVILEGES+1)),
+          ]);
+          credentials=credentialsDocs.docs.map(d=>d.data() as EmployeeCredential);
+          privileges=privilegesDocs.docs.map(d=>d.data() as ClinicalPrivilege);
+        }
+      }
+      const approvalSnap=await tx.get(
+        tenant.collection('externalClinicalUseApprovals').doc(reviewId));
+      currentAuthorization=assessCurrentExternalClinicalReview({
+        reviewId,tenantId,patientId,
+        projectionRevision:projection.revision,
+        projectionContentHash:projection.contentHash,
+        sourceCheckpoint:projection.sourceCheckpoint,
+        authorityFenceHash:authorityFenceHash!,
+        factRefs:facts.map(f=>({
+          evidenceReceiptId:f.evidenceReceiptId,
+          sourceVersionId:f.sourceVersionId,resourceHash:f.resourceHash,
+        })),
+        sourceRefs:expectedSources,
+        review:row,membership,employees,credentials,privileges,
+        approval:approvalSnap.exists?
+          approvalSnap.data() as Record<string,unknown>:null,
+        now,
+      });
+    }
     // All reads have finished: an audit is committed in the same transaction
     // as the authorized disclosure decision, with no raw payload or PHI.
     tx.create(auditRef, {
@@ -489,6 +570,7 @@ export async function readExternalClinicalEvidence(args: {
       clinicalUseAuthorized: false, status: 'EVIDENCE_ONLY',
       historyCompleteness: 'UNVERIFIED', facts,
       ...(reviewResult?{review:reviewResult}:{}),
+      ...(currentAuthorization?{currentAuthorization}:{}),
     };
   });
 }

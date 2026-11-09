@@ -37,6 +37,10 @@ function fixture(){
   put('externalClinicalIssuerEnrollmentCommands',signed.attestationId,
     signed.journal);
   put('externalClinicalIssuerOutbox',signed.attestationId,signed.outbox);
+  put('externalClinicalHospitalTrustHeads',
+    signed.pin.issuerId,signed.root.head);
+  put('externalClinicalHospitalTrustEvents',
+    signed.root.eventId,signed.root.event);
   const tenant={
     collection:(collection:string)=>({
       doc:(id:string)=>({path:collection+'/'+id}),
@@ -47,8 +51,10 @@ function fixture(){
     return {exists:row!==undefined,get:(f:string)=>row?.[f],
       data:()=>row};
   };
-  const tx=({getAll:async(...refs:{path:string}[])=>refs.map(snapshot)}
-    ) as unknown as Transaction;
+  const tx=({
+    get:async(ref:{path:string})=>snapshot(ref),
+    getAll:async(...refs:{path:string}[])=>refs.map(snapshot),
+  }) as unknown as Transaction;
   const verify=(record:Row|undefined=signed.record,
     time=NOW)=>verifyCurrentSignedAuthorityRecord({
     tx,tenant,tenantId:TENANT,facilityId,

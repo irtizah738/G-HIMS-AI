@@ -5,6 +5,7 @@ import {resolve} from 'node:path';
 import {externalReviewFactDigest} from '@/lib/clinical/intelligence/external-clinician-review-policy';
 import {approvalEventHash} from '@/lib/clinical/intelligence/external-fact-approval-event-integrity';
 import type {ApprovalEventPayload} from '@/lib/clinical/intelligence/external-fact-approval-events';
+import {syntheticGovernanceAuthority} from './support/ci-ext19-governance-fixtures';
 import {
   assessCurrentExternalClinicalApproval,
   externalFactApprovalHeadId,
@@ -55,11 +56,21 @@ function fixture(){
   } as unknown as Transaction;
   const validFrom=NOW-60_000;
   const validUntil=NOW+60_000;
-  const credential=(actorId:string):Mutable=>({
-    tenantId:TENANT,actorId,facilityIds:['facility-a'],
-    status:'VERIFIED',identityAssurance:'HOSPITAL_VERIFIED',
-    licenseVerified:true,revision:1,validFrom,validUntil,revokedAt:null,
-  });
+  const seed=(kind:'CLINICIAN'|'SITE',targetId:string)=>{
+    const x=syntheticGovernanceAuthority({
+      tenantId:TENANT,kind,targetId,facilityId:SOURCE.facilityId,
+      siteApprovalId:kind==='SITE'?SOURCE.siteApprovalId:null,now:NOW,
+    });
+    put(kind==='CLINICIAN'?'externalClinicalCredentialHeads':
+      'externalClinicalSiteAuthorityHeads',targetId,x.head);
+    put('externalClinicalAuthorityEvents',x.eventId,x.event);
+    put('externalClinicalAuthorityEvents',x.proposalEventId,x.proposalEvent);
+    put('externalClinicalAuthorityProposals',x.proposalId,x.proposal);
+    put('externalClinicalAuthorityEvidence',x.evidenceId,x.evidence);
+    put('externalClinicalGovernanceGrants',x.proposerId,x.proposerGrant);
+    put('externalClinicalGovernanceGrants',x.approverId,x.approverGrant);
+    return x;
+  };
   put('externalClinicianEvidenceReviews',REVIEW_ID,{
     schemaVersion:1,reviewId:REVIEW_ID,tenantId:TENANT,patientId:PATIENT,
     actorId:REVIEWER,disposition:'SOURCE_EVIDENCE_REVIEWED',
@@ -74,14 +85,9 @@ function fixture(){
       sourceVersionId:FACT.sourceVersionId,resourceHash:FACT.resourceHash,
     }],
   });
-  put('externalClinicalCredentialHeads',REVIEWER,credential(REVIEWER));
-  put('externalClinicalCredentialHeads',APPROVER,credential(APPROVER));
-  put('externalClinicalSiteAuthorityHeads',SOURCE.sourceId,{
-    tenantId:TENANT,sourceId:SOURCE.sourceId,facilityId:SOURCE.facilityId,
-    siteApprovalId:SOURCE.siteApprovalId,status:'APPROVED',
-    clinicalUseReviewStatus:'APPROVED',revision:4,
-    validFrom,validUntil,revokedAt:null,
-  });
+  const reviewerGovernance=seed('CLINICIAN',REVIEWER);
+  const approverGovernance=seed('CLINICIAN',APPROVER);
+  const siteGovernance=seed('SITE',SOURCE.sourceId);
   const approvalId=externalFactApprovalHeadId(REVIEW_ID,FACT.evidenceReceiptId);
   const eventId='efae_synthetic_seed';
   const payload:ApprovalEventPayload={
@@ -93,7 +99,7 @@ function fixture(){
     status:'APPROVED',eventType:'EXTERNAL_FACT_APPROVAL_ISSUED',
     revision:1,approvedByActorId:APPROVER,reviewerActorId:REVIEWER,
     reviewerCredentialRevision:1,approverCredentialRevision:1,
-    siteAuthorityRevision:4,validFrom,validUntil,revokedAt:null,
+    siteAuthorityRevision:1,validFrom,validUntil,revokedAt:null,
     actorId:APPROVER,recordedAt:NOW,reasonCode:null,
     previousEventId:null,previousEventHash:null,
   };
@@ -119,7 +125,8 @@ function fixture(){
     records.set(path(collection,id),{...original,...changes});
   };
   const assess=()=>assessCurrentExternalClinicalApproval(args);
-  return {records,put,mutate,assess,args,approvalId};
+  return {records,put,mutate,assess,args,approvalId,
+    reviewerGovernance,approverGovernance,siteGovernance};
 }
 describe('CI-EXT-16 current clinical authority preflight is non-promoting',()=>{
   test('prequalifies exact current heads but NEVER authorizes clinical use or drafting',async()=>{
@@ -174,11 +181,11 @@ describe('CI-EXT-16 current clinical authority preflight is non-promoting',()=>{
     g.mutate('externalClinicalFactApprovalHeads',g.approvalId,{revokedAt:NOW-1});
     expect((await g.assess()).state).toBe('DENIED');
     g.mutate('externalClinicalFactApprovalHeads',g.approvalId,{
-      revokedAt:null,siteAuthorityRevision:3,
+      revokedAt:null,siteAuthorityRevision:0,
     });
     expect((await g.assess()).state).toBe('DENIED');
     g.mutate('externalClinicalFactApprovalHeads',g.approvalId,{
-      siteAuthorityRevision:4,resourceHash:'0'.repeat(64),
+      siteAuthorityRevision:1,resourceHash:'0'.repeat(64),
     });
     expect((await g.assess()).state).toBe('DENIED');
   });
@@ -203,6 +210,34 @@ describe('CI-EXT-16 current clinical authority preflight is non-promoting',()=>{
     const g=fixture();
     g.mutate('externalClinicalCredentialHeads',APPROVER,{licenseVerified:false});
     expect((await g.assess()).reasonCode).toBe('CI_EXT16_APPROVER_CREDENTIAL_NOT_CURRENT');
+  });
+  test('CI-EXT-19 requires event-backed credentials and current hospital grants',async()=>{
+    const f=fixture();
+    f.records.delete('externalClinicalAuthorityEvents/'+f.reviewerGovernance.eventId);
+    expect((await f.assess()).reasonCode).toBe('CI_EXT19_CURRENT_EVENT_INVALID');
+    const g=fixture();
+    g.mutate('externalClinicalGovernanceGrants',
+      g.approverGovernance.approverId,{status:'REVOKED'});
+    expect((await g.assess()).reasonCode).toBe('CI_EXT19_HOSPITAL_GRANT_NOT_CURRENT');
+    const h=fixture();
+    h.records.delete('externalClinicalAuthorityProposals/'+h.siteGovernance.proposalId);
+    expect((await h.assess()).reasonCode).toBe('CI_EXT19_PROPOSAL_CHAIN_INVALID');
+  });
+  test('CI-EXT-19 denies site evidence withdrawal, forged head and tampered proposal',async()=>{
+    const f=fixture();
+    f.mutate('externalClinicalAuthorityEvidence',
+      f.siteGovernance.evidenceId,{status:'REVOKED'});
+    expect((await f.assess()).reasonCode)
+      .toBe('CI_EXT19_VERIFICATION_EVIDENCE_NOT_CURRENT');
+    const g=fixture();
+    g.mutate('externalClinicalCredentialHeads',REVIEWER,{
+      governanceEventHash:'0'.repeat(64),
+    });
+    expect((await g.assess()).reasonCode).toBe('CI_EXT19_CURRENT_EVENT_INVALID');
+    const h=fixture();
+    h.mutate('externalClinicalAuthorityEvents',
+      h.siteGovernance.proposalEventId,{eventHash:'0'.repeat(64)});
+    expect((await h.assess()).reasonCode).toBe('CI_EXT19_PROPOSAL_CHAIN_INVALID');
   });
   test('source enforces same-transaction integration and browser-deny rules',async()=>{
     const reader=await readFile(resolve(process.cwd(),

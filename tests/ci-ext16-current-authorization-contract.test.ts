@@ -25,7 +25,11 @@ const SOURCE={
 const CONTENT_HASH='d'.repeat(64);
 const CHECKPOINT='e'.repeat(64);
 const FENCE='f'.repeat(64);
-const DIGEST=externalReviewFactDigest([FACT]);
+const DIGEST=externalReviewFactDigest([{
+  evidenceReceiptId:FACT.evidenceReceiptId,
+  sourceVersionId:FACT.sourceVersionId,
+  resourceHash:FACT.resourceHash,
+}]);
 
 type Mutable=Record<string,unknown>;
 function fixture(){

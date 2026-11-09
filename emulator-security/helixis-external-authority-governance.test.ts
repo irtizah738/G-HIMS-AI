@@ -64,6 +64,13 @@ async function fixture(){
     root.collection('externalClinicalIssuerOutbox')
       .doc(signed.attestationId).set(signed.outbox),
   ];
+  const rootProof=signedGrantRows[0].root;
+  await Promise.all([
+    root.collection('externalClinicalHospitalTrustHeads')
+      .doc(signedGrantRows[0].pin.issuerId).set(rootProof.head),
+    root.collection('externalClinicalHospitalTrustEvents')
+      .doc(rootProof.eventId).set(rootProof.event),
+  ]);
   await Promise.all(signedGrantRows.flatMap((signed,i)=>[
     root.collection('externalClinicalGovernanceGrants')
       .doc(others[i].actorId).set(signed.record),

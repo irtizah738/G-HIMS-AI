@@ -48,7 +48,8 @@ function fixture(){
   } as unknown as DocumentReference;
   const snapshot=(reference:{path:string})=>{
     const data=records.get(reference.path);
-    return {exists:data!==undefined,data:()=>data};
+    return {exists:data!==undefined,data:()=>data,
+      get:(field:string)=>data?.[field]};
   };
   const tx={
     get:async(reference:{path:string})=>snapshot(reference),

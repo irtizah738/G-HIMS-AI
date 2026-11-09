@@ -1,5 +1,4 @@
 import {describe,expect,test} from 'bun:test';
-import {randomUUID} from 'node:crypto';
 import {syntheticTrustLifecycle} from './support/ci-ext22-trust-anchor-fixtures';
 import {
   assertHospitalTrustCommand,trustCommandHash,trustCommandBytes,

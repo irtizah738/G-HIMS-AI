@@ -118,7 +118,8 @@ export function assertInstitutionalEvidenceDossier(v:unknown):
     !d.stewards.every(s=>exact(s,
       ['stewardId','role','appointmentEvidenceDigest','validUntil'])&&
       id(s.stewardId)&&s.stewardId!==d.issuerId&&
-      s.stewardId!==d.institutionId&&STEWARD_ROLES.includes(s.role)&&
+      s.stewardId!==d.institutionId&&
+      typeof s.role==='string'&&STEWARD_ROLES.includes(s.role)&&
       typeof s.appointmentEvidenceDigest==='string'&&
       HEX.test(s.appointmentEvidenceDigest)&&stamp(s.validUntil)&&
       s.validUntil>=d.validUntil)||

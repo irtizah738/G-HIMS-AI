@@ -222,14 +222,27 @@ test('CI-EXT-18 cannot self-attest, use revised evidence, bypass grant or reopen
     await expect(proposeExternalClinicalAuthority({
       db:f.db,tenantId:f.tenantId,actor:forgedProposer,command,
     })).rejects.toThrow('CI_EXT18_CURRENT_GOVERNANCE_GRANT_REQUIRED');
-    await f.root.collection('externalClinicalGovernanceGrants')
-      .doc('evidence-validator').set({
+    const signedVerifierGrant=syntheticSignedAuthorityRows({
+      tenantId:f.tenantId,facilityId:'facility-a',
+      kind:'GOVERNANCE_GRANT',recordId:'evidence-validator',now:f.now,
+      record:{
         tenantId:f.tenantId,actorId:'evidence-validator',
         facilityIds:['facility-a'],roles:['HOSPITAL_CREDENTIAL_OFFICER'],
         permissions:['FHIR_CREDENTIAL_PROPOSE'],status:'ACTIVE',
         identityAssurance:'HOSPITAL_VERIFIED',mfaStatus:'VERIFIED',
         validFrom:f.now-60_000,validUntil:f.now+900_000,revokedAt:null,
-      });
+      },
+    });
+    await Promise.all([
+      f.root.collection('externalClinicalGovernanceGrants')
+        .doc('evidence-validator').set(signedVerifierGrant.record),
+      f.root.collection('externalClinicalIssuerAttestations')
+        .doc(signedVerifierGrant.attestationId).set(signedVerifierGrant.attestation),
+      f.root.collection('externalClinicalIssuerEnrollmentCommands')
+        .doc(signedVerifierGrant.attestationId).set(signedVerifierGrant.journal),
+      f.root.collection('externalClinicalIssuerOutbox')
+        .doc(signedVerifierGrant.attestationId).set(signedVerifierGrant.outbox),
+    ]);
     await expect(proposeExternalClinicalAuthority({
       db:f.db,tenantId:f.tenantId,actor:forgedProposer,command,
     })).rejects.toThrow('CI_EXT18_INDEPENDENT_EVIDENCE_REQUIRED');

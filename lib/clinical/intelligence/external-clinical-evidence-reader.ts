@@ -522,6 +522,10 @@ export async function readExternalClinicalEvidence(args: {
       revision: projection.revision, contentHash: projection.contentHash,
       sourceCheckpoint: projection.sourceCheckpoint, recordedAt: now,
       immutable: true, clinicalUseAuthorized: false,
+      ...(currentAuthorization?{
+        currentAuthorizationPreflight:currentAuthorization.state,
+        currentAuthorizationReasonCode:currentAuthorization.reasonCode,
+      }:{}),
     });
     return {
       source: 'EXTERNAL_FHIR', tenantId, patientId,

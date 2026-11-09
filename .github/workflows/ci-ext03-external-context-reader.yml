@@ -45,7 +45,7 @@ jobs:
       - name: Source-quality checks
         run: bun run lint
       - name: External reader and clinician review contract tests
-        run: bun test tests/ci-ext03-external-reader-contract.test.ts tests/ci-ext15-clinician-review-contract.test.ts tests/ci-ext16-current-authorization-contract.test.ts tests/ci-ext17-approval-contract.test.ts tests/ci-ext18-governance-contract.test.ts
+        run: bun test tests/ci-ext03-external-reader-contract.test.ts tests/ci-ext15-clinician-review-contract.test.ts tests/ci-ext16-current-authorization-contract.test.ts tests/ci-ext17-approval-contract.test.ts tests/ci-ext18-governance-contract.test.ts tests/ci-ext19-governance-consumer-contract.test.ts
       - name: Compile emulator integration for Node
         run: |
           sed "s#from 'bun:test'#from './helixis-node-test-compat'#g" emulator-security/helixis-external-context-reader.test.ts > emulator-security/helixis-external-context-reader.node.test.ts

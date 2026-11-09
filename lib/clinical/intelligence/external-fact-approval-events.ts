@@ -9,6 +9,7 @@ import type {Firestore,DocumentReference,Transaction} from 'firebase-admin/fires
 import type {FhirImportActor} from './external-fhir-import';
 import {externalReviewFactDigest} from './external-clinician-review-policy';
 import {approvalEventHash,verifyApprovalEventHead} from './external-fact-approval-event-integrity';
+import {verifyCurrentExternalGovernanceAuthority} from './external-governance-authority-consumer';
 import {externalFactApprovalHeadId,type CurrentFactReference,type CurrentSourceReference}
   from './external-current-authorization-preflight';
 
@@ -220,17 +221,17 @@ export async function issueExternalFactApproval(args:Readonly<{
     cmdRef,ref,tenant.collection('externalClinicianEvidenceReviews').doc(command.reviewId),
     tenant.collection('externalClinicalCredentialHeads').doc(actor.actorId),
     tenant.collection('externalClinicalSiteAuthorityHeads').doc(source.sourceId));
-  if(cmd.exists){
+  const isReplay=cmd.exists;
+  if(isReplay){
     if(cmd.get('requestHash')!==requestHash||
       cmd.get('headId')!==headId||cmd.get('status')!=='APPROVED')
       fail('IDEMPOTENCY_CONFLICT');
-    // Never report an old approval as current after safety revocation.
     if(!head.exists||head.get('status')!=='APPROVED'||
       head.get('approvalEventId')!==cmd.get('eventId'))
       fail('APPROVAL_SUPERSEDED');
-    return response(headId,cmd.get('eventId'),cmd.get('revision'),'APPROVED',true);
-  }
-  if(head.exists)fail('ALREADY_ISSUED_REQUIRES_NEW_REVIEW');
+    // A replay still needs current reviewer, issuer, source, evidence and
+    // hospital grants. Do not return before the checks below.
+  }else if(head.exists)fail('ALREADY_ISSUED_REQUIRES_NEW_REVIEW');
   if(!reviewSnap.exists)fail('REVIEW_MISSING');
   const review=reviewSnap.data() as Row;
   const digestFacts=externalReviewFactDigest(facts.map(f=>({
@@ -270,6 +271,23 @@ export async function issueExternalFactApproval(args:Readonly<{
     !currentCredential(approver,tenantId,actor.actorId,source.facilityId,now))
     fail('CLINICIAN_CREDENTIAL_NOT_CURRENT');
   if(!currentSite(site,tenantId,source,now))fail('SITE_POLICY_NOT_CURRENT');
+  const governance=await verifyCurrentExternalGovernanceAuthority({
+    tx,tenant,tenantId,now,authorities:[
+      {kind:'CLINICIAN',targetId:reviewerId,
+        facilityId:source.facilityId,siteApprovalId:null,head:reviewer},
+      {kind:'CLINICIAN',targetId:actor.actorId,
+        facilityId:source.facilityId,siteApprovalId:null,head:approver},
+      {kind:'SITE',targetId:source.sourceId,
+        facilityId:source.facilityId,siteApprovalId:source.siteApprovalId,
+        head:site},
+    ],
+  });
+  if(!governance.valid)fail('GOVERNED_AUTHORITY_INVALID_'+governance.reasonCode);
+  if(isReplay){
+    // Current authorization has now been re-evaluated in the same
+    // transaction as exact source/consent provenance.
+    return response(headId,cmd.get('eventId'),cmd.get('revision'),'APPROVED',true);
+  }
   const validUntil=Math.min(
     reviewer.validUntil as number,approver.validUntil as number,
     site.validUntil as number,now+TEN_MIN);

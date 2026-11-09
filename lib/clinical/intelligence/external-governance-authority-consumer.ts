@@ -7,6 +7,7 @@
  * All successful results are non-promoting engineering qualifications.
  */
 import type {DocumentReference,Transaction} from 'firebase-admin/firestore';
+import {verifyCurrentSignedAuthorityRecord} from './external-signed-authority-consumer';
 import {governanceEventHash,verifyGovernanceHead,
   type GovernanceEventPayload} from './external-authority-governance';
 
@@ -193,6 +194,26 @@ export async function verifyCurrentExternalGovernanceAuthority(args:Readonly<{
        !acceptableGrant(approver,tenantId,p.authorizedByActorId as string,
          p.facilityId,role,prefix+'ACTIVATE',now))
       return deny('CI_EXT19_HOSPITAL_GRANT_NOT_CURRENT');
+    // CI-EXT-21: structural heads and matching SHA256 governance events
+    // are not evidence of hospital-signed authority. Each of these
+    // artifacts needs a currently valid, independently pinned signature,
+    // immutable attestation, matching command journal and HELD outbox.
+    const signedProof=await verifyCurrentSignedAuthorityRecord({
+      tx,tenant,tenantId,facilityId:p.facilityId,
+      kind:p.kind,recordId:p.evidenceId,record:proof,now,
+    });
+    if(!signedProof.valid)return deny(signedProof.reasonCode);
+    for(const [grantId,grant] of [
+      [p.proposedByActorId,proposer],
+      [p.authorizedByActorId,approver],
+    ] as const){
+      const signedGrant=await verifyCurrentSignedAuthorityRecord({
+        tx,tenant,tenantId,facilityId:p.facilityId,
+        kind:'GOVERNANCE_GRANT',recordId:grantId as string,
+        record:grant,now,
+      });
+      if(!signedGrant.valid)return deny(signedGrant.reasonCode);
+    }
   }
   return {valid:true,reasonCode:'CI_EXT19_EVENT_BACKED_AUTHORITY_NON_PROMOTING',
     clinicalUseAuthorized:false,aiDraftingEligible:false};

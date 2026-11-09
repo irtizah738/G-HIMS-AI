@@ -116,7 +116,7 @@ function requiredRole(action:GovernanceAction,kindValue:AuthorityKind):string{
 }
 async function authorize(tx:Transaction,tenant:DocumentReference,
   actor:FhirImportActor,tenantId:string,facilityId:string,
-  action:GovernanceAction,kindValue:AuthorityKind,now:number):Promise<void>{
+  action:GovernanceAction,kindValue:AuthorityKind,now:number):Promise<Row>{
   const perm=permission(action,kindValue),role=requiredRole(action,kindValue);
   if(actor.tenantId!==tenantId||!id(actor.actorId)||
     !Array.isArray(actor.facilityIds)||!actor.facilityIds.includes(facilityId)||
@@ -136,6 +136,7 @@ async function authorize(tx:Transaction,tenant:DocumentReference,
     now<grant.validFrom||now>=grant.validUntil||
     (grant.revokedAt!==null&&grant.revokedAt!==undefined))
     deny('CURRENT_GOVERNANCE_GRANT_REQUIRED');
+  return grant;
 }
 function evidenceValid(row:Row|undefined,tenantId:string,
   command:AuthorityProposalCommand,now:number):row is Row{
@@ -187,6 +188,10 @@ export function verifyGovernanceHead(head:Row,event:Row,eventIdValue:string):boo
     typeof event.eventHash!=='string'||!HEX.test(event.eventHash)||
     governanceEventHash(payload)!==event.eventHash)
     return false;
+  if(payload.action==='ACTIVATED'&&
+    ((payload.kind==='CLINICIAN'&&payload.status!=='VERIFIED')||
+     (payload.kind==='SITE'&&payload.status!=='APPROVED')))return false;
+  if(payload.action==='REVOKED'&&payload.status!=='REVOKED')return false;
   const expected=derivedHead(payload,eventIdValue,event.eventHash as string);
   return Object.keys(expected).every(key=>canonical(head[key])===canonical(expected[key]));
 }
@@ -239,8 +244,10 @@ export async function proposeExternalClinicalAuthority(args:Readonly<{
   const hash=sha(['CI_EXT18_PROPOSAL_COMMAND_V1',tenantId,actor.actorId,
     {...command,idempotencyKey:command.idempotencyKey.toLowerCase()}]);
   return db.runTransaction(async tx=>{
-    await authorize(tx,tenant,actor,tenantId,command.facilityId,
+    const proposerGrant=await authorize(tx,tenant,actor,tenantId,command.facilityId,
       'PROPOSED',command.kind,now);
+    if(command.kind==='CLINICIAN'&&command.targetId===actor.actorId)
+      deny('SELF_PROPOSAL_FORBIDDEN');
     const [existing,evidenceSnap,existingHead]=await tx.getAll(
       tenant.collection('externalClinicalAuthorityCommands').doc(cid),
       tenant.collection('externalClinicalAuthorityEvidence').doc(command.evidenceId),
@@ -259,7 +266,7 @@ export async function proposeExternalClinicalAuthority(args:Readonly<{
     if(!evidenceValid(evidence,tenantId,command,now)||
       evidence!.verifiedByActorId===actor.actorId)
       deny('INDEPENDENT_EVIDENCE_REQUIRED');
-    const expiresAt=Math.min(now+PROPOSAL_TTL_MS,evidence!.validUntil as number);
+    const expiresAt=Math.min(now+PROPOSAL_TTL_MS,evidence!.validUntil as number,proposerGrant.validUntil as number);
     const payload:GovernanceEventPayload={
       schemaVersion:1,tenantId,kind:command.kind,targetId:command.targetId,
       facilityId:command.facilityId,proposalId:pid,
@@ -303,8 +310,8 @@ export async function activateExternalClinicalAuthority(args:Readonly<{
       p.proposalId!==command.proposalId||p.status!=='PENDING'||
       !ts(p.validUntil)||now>=p.validUntil)
       deny('PROPOSAL_EXPIRED_OR_INVALID');
-    await authorize(tx,tenant,actor,tenantId,p.facilityId as string,
-      'ACTIVATED',p.kind,now);
+    const approverGrant=await authorize(tx,tenant,actor,tenantId,
+      p.facilityId as string,'ACTIVATED',p.kind,now);
     if(actor.actorId===p.proposedByActorId||
       actor.actorId===p.verifiedByActorId||
       (p.kind==='CLINICIAN'&&actor.actorId===p.targetId))
@@ -338,10 +345,23 @@ export async function activateExternalClinicalAuthority(args:Readonly<{
       evidence!.verifiedByActorId!==p.verifiedByActorId)
       deny('EVIDENCE_REVISED_OR_EXPIRED');
     const proposalEvent=proposeEventSnap.exists?proposeEventSnap.data() as Row:undefined;
+    const original=proposalEvent?.payload as GovernanceEventPayload|undefined;
     if(!proposalEvent||proposalEvent.immutable!==true||
       proposalEvent.eventId!==p.proposalEventId||
-      governanceEventHash(proposalEvent.payload as GovernanceEventPayload)!==
-        proposalEvent.eventHash)
+      !original||original.action!=='PROPOSED'||
+      original.status!=='PENDING'||original.revision!==0||
+      original.tenantId!==tenantId||
+      original.proposalId!==p.proposalId||original.kind!==p.kind||
+      original.targetId!==p.targetId||
+      original.facilityId!==p.facilityId||
+      original.proposedByActorId!==p.proposedByActorId||
+      original.evidenceId!==p.evidenceId||
+      original.evidenceHash!==p.evidenceHash||
+      original.verifiedByActorId!==p.verifiedByActorId||
+      original.siteApprovalId!==p.siteApprovalId||
+      original.validFrom!==p.validFrom||
+      original.validUntil!==p.validUntil||
+      governanceEventHash(original)!==proposalEvent.eventHash)
       deny('PROPOSAL_EVENT_INVALID');
     const proposerGrant=proposerGrantSnap.exists?proposerGrantSnap.data() as Row:undefined;
     const proposerPerm=permission('PROPOSED',p.kind),proposerRole=requiredRole('PROPOSED',p.kind);
@@ -368,7 +388,8 @@ export async function activateExternalClinicalAuthority(args:Readonly<{
         deny('FHIR_SITE_SOURCE_NOT_CURRENT');
     }
     const validUntil=Math.min(now+POLICY_TTL_MS,
-      evidence!.validUntil as number,proposerGrant.validUntil as number);
+      evidence!.validUntil as number,proposerGrant.validUntil as number,
+      approverGrant.validUntil as number);
     if(validUntil<=now)deny('AUTHORITY_EXPIRY_INVALID');
     const action='ACTIVATED' as const;
     const payload:GovernanceEventPayload={

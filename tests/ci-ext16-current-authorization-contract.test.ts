@@ -70,6 +70,14 @@ function fixture(){
     put('externalClinicalAuthorityEvidence',x.evidenceId,x.evidence);
     put('externalClinicalGovernanceGrants',x.proposerId,x.proposerGrant);
     put('externalClinicalGovernanceGrants',x.approverId,x.approverGrant);
+    for(const signed of x.signedDocuments){
+      put('externalClinicalIssuerAttestations',
+        signed.attestationId,signed.attestation);
+      put('externalClinicalIssuerEnrollmentCommands',
+        signed.attestationId,signed.journal);
+      put('externalClinicalIssuerOutbox',
+        signed.attestationId,signed.outbox);
+    }
     return x;
   };
   put('externalClinicianEvidenceReviews',REVIEW_ID,{
@@ -239,6 +247,18 @@ describe('CI-EXT-16 current clinical authority preflight is non-promoting',()=>{
     h.mutate('externalClinicalAuthorityEvents',
       h.siteGovernance.proposalEventId,{eventHash:'0'.repeat(64)});
     expect((await h.assess()).reasonCode).toBe('CI_EXT19_PROPOSAL_CHAIN_INVALID');
+  });
+  test('CI-EXT-21 never accepts an unsigned current reviewer or source authority',async()=>{
+    const f=fixture();
+    f.mutate('externalClinicalAuthorityEvidence',
+      f.reviewerGovernance.evidenceId,{issuerAttestationId:undefined});
+    expect((await f.assess()).reasonCode)
+      .toBe('CI_EXT21_UNSIGNED_LEGACY_RECORD');
+    const g=fixture();
+    g.mutate('externalClinicalGovernanceGrants',
+      g.siteGovernance.approverId,{issuerAttestationId:undefined});
+    expect((await g.assess()).reasonCode)
+      .toBe('CI_EXT21_UNSIGNED_LEGACY_RECORD');
   });
   test('source enforces same-transaction integration and browser-deny rules',async()=>{
     const reader=await readFile(resolve(process.cwd(),

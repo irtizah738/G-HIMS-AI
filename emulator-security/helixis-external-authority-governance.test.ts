@@ -5,6 +5,8 @@
 import {expect,test} from 'bun:test';
 import {randomUUID} from 'node:crypto';
 import {getAdminFirestore} from '@/server/firebase/admin';
+import {syntheticSignedAuthorityRows} from
+  '@/tests/support/ci-ext21-signed-fixtures';
 import {
   proposeExternalClinicalAuthority,activateExternalClinicalAuthority,
   revokeExternalClinicalAuthority,verifyGovernanceHead,
@@ -42,32 +44,65 @@ async function fixture(){
   const safety=actor('clinical-safety-officer','CLINICAL_SAFETY_OFFICER',
     ['FHIR_AUTHORITY_REVOKE']);
   const others=[credentialProposer,credentialApprover,siteProposer,siteApprover,safety];
-  await Promise.all(others.map(a=>root.collection('externalClinicalGovernanceGrants')
-    .doc(a.actorId).set({
+  const signedGrantRows=others.map(a=>{
+    const grant={
       tenantId,actorId:a.actorId,facilityIds:['facility-a'],
       roles:a.roles,permissions:a.permissions,status:'ACTIVE',
       identityAssurance:'HOSPITAL_VERIFIED',mfaStatus:'VERIFIED',
       validFrom:now-60_000,validUntil:now+900_000,revokedAt:null,
-    })));
+    };
+    return syntheticSignedAuthorityRows({
+      tenantId,facilityId:'facility-a',
+      kind:'GOVERNANCE_GRANT',recordId:a.actorId,record:grant,now,
+    });
+  });
+  const signedWrites=(signed:ReturnType<typeof syntheticSignedAuthorityRows>)=>[
+    root.collection('externalClinicalIssuerAttestations')
+      .doc(signed.attestationId).set(signed.attestation),
+    root.collection('externalClinicalIssuerEnrollmentCommands')
+      .doc(signed.attestationId).set(signed.journal),
+    root.collection('externalClinicalIssuerOutbox')
+      .doc(signed.attestationId).set(signed.outbox),
+  ];
+  await Promise.all(signedGrantRows.flatMap((signed,i)=>[
+    root.collection('externalClinicalGovernanceGrants')
+      .doc(others[i].actorId).set(signed.record),
+    ...signedWrites(signed),
+  ]));
   const sourceId='synthetic-his-source';
   const clinicianId='synthetic-clinician';
-  await Promise.all([
-    root.collection('externalClinicalAuthorityEvidence').doc('evidence-clinician').set({
+  const clinicianEvidence=syntheticSignedAuthorityRows({
+    tenantId,facilityId:'facility-a',kind:'CLINICIAN',
+    recordId:'evidence-clinician',now,
+    record:{
       schemaVersion:1,tenantId,kind:'CLINICIAN',targetId:clinicianId,
       facilityId:'facility-a',evidenceId:'evidence-clinician',
       identityAssurance:'HOSPITAL_VERIFIED',status:'VERIFIED',
       licenseVerified:true,siteApprovalId:null,
       evidenceHash:'a'.repeat(64),verifiedByActorId:'evidence-validator',
-      verifiedAt:now-1000,validFrom:now-60_000,validUntil:now+900_000,
-    }),
-    root.collection('externalClinicalAuthorityEvidence').doc('evidence-site').set({
+      verifiedAt:now-1000,validFrom:now-60_000,
+      validUntil:now+900_000,revokedAt:null,
+    },
+  });
+  const siteEvidence=syntheticSignedAuthorityRows({
+    tenantId,facilityId:'facility-a',kind:'SITE',
+    recordId:'evidence-site',now,
+    record:{
       schemaVersion:1,tenantId,kind:'SITE',targetId:sourceId,
       facilityId:'facility-a',evidenceId:'evidence-site',
       identityAssurance:'HOSPITAL_VERIFIED',status:'VERIFIED',
       licenseVerified:false,siteApprovalId:'institution-approved-site',
       evidenceHash:'b'.repeat(64),verifiedByActorId:'evidence-validator',
-      verifiedAt:now-1000,validFrom:now-60_000,validUntil:now+900_000,
-    }),
+      verifiedAt:now-1000,validFrom:now-60_000,
+      validUntil:now+900_000,revokedAt:null,
+    },
+  });
+  await Promise.all([
+    root.collection('externalClinicalAuthorityEvidence')
+      .doc('evidence-clinician').set(clinicianEvidence.record),
+    root.collection('externalClinicalAuthorityEvidence')
+      .doc('evidence-site').set(siteEvidence.record),
+    ...signedWrites(clinicianEvidence),...signedWrites(siteEvidence),
     root.collection('fhirSources').doc(sourceId).set({
       tenantId,sourceId,facilityId:'facility-a',
       siteApprovalId:'institution-approved-site',status:'ACTIVE',
@@ -187,14 +222,27 @@ test('CI-EXT-18 cannot self-attest, use revised evidence, bypass grant or reopen
     await expect(proposeExternalClinicalAuthority({
       db:f.db,tenantId:f.tenantId,actor:forgedProposer,command,
     })).rejects.toThrow('CI_EXT18_CURRENT_GOVERNANCE_GRANT_REQUIRED');
-    await f.root.collection('externalClinicalGovernanceGrants')
-      .doc('evidence-validator').set({
+    const signedVerifierGrant=syntheticSignedAuthorityRows({
+      tenantId:f.tenantId,facilityId:'facility-a',
+      kind:'GOVERNANCE_GRANT',recordId:'evidence-validator',now:f.now,
+      record:{
         tenantId:f.tenantId,actorId:'evidence-validator',
         facilityIds:['facility-a'],roles:['HOSPITAL_CREDENTIAL_OFFICER'],
         permissions:['FHIR_CREDENTIAL_PROPOSE'],status:'ACTIVE',
         identityAssurance:'HOSPITAL_VERIFIED',mfaStatus:'VERIFIED',
         validFrom:f.now-60_000,validUntil:f.now+900_000,revokedAt:null,
-      });
+      },
+    });
+    await Promise.all([
+      f.root.collection('externalClinicalGovernanceGrants')
+        .doc('evidence-validator').set(signedVerifierGrant.record),
+      f.root.collection('externalClinicalIssuerAttestations')
+        .doc(signedVerifierGrant.attestationId).set(signedVerifierGrant.attestation),
+      f.root.collection('externalClinicalIssuerEnrollmentCommands')
+        .doc(signedVerifierGrant.attestationId).set(signedVerifierGrant.journal),
+      f.root.collection('externalClinicalIssuerOutbox')
+        .doc(signedVerifierGrant.attestationId).set(signedVerifierGrant.outbox),
+    ]);
     await expect(proposeExternalClinicalAuthority({
       db:f.db,tenantId:f.tenantId,actor:forgedProposer,command,
     })).rejects.toThrow('CI_EXT18_INDEPENDENT_EVIDENCE_REQUIRED');
